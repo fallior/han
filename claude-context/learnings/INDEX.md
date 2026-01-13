@@ -6,15 +6,20 @@
 
 | Topic | File | Tags | Date |
 |-------|------|------|------|
-| *No learnings yet* | — | — | — |
+| Accessing localhost from mobile on isolated networks | [localhost-remote-access.md](localhost-remote-access.md) | #networking #mobile #development | 2026-01-13 |
+| Claude Code hooks system integration | [claude-code-hooks.md](claude-code-hooks.md) | #claude-code #hooks #integration | 2026-01-13 |
+| tmux remote response injection | [tmux-response-injection.md](tmux-response-injection.md) | #tmux #terminal #security | 2026-01-13 |
 
 ## By Category
 
 ### Claude Code
-- *No learnings yet*
+- [claude-code-hooks.md](claude-code-hooks.md) — Detecting and responding to prompts via hooks
 
 ### tmux
-- *No learnings yet*
+- [tmux-response-injection.md](tmux-response-injection.md) — Safe keystroke injection patterns
+
+### Networking
+- [localhost-remote-access.md](localhost-remote-access.md) — Options for hotel/isolated WiFi
 
 ### ntfy.sh
 - *No learnings yet*
