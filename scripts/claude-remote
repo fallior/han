@@ -1,0 +1,223 @@
+#!/bin/bash
+# Claude Remote - CLI Launcher
+# Wraps Claude Code in a tmux session for remote response capability
+
+set -euo pipefail
+
+# Configuration
+CLAUDE_REMOTE_DIR="${CLAUDE_REMOTE_DIR:-$HOME/.claude-remote}"
+SESSION_PREFIX="claude-remote"
+
+# Colours
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No colour
+
+print_usage() {
+    cat << EOF
+Claude Remote - Run Claude Code with remote response capability
+
+Usage:
+    claude-remote [OPTIONS] [-- CLAUDE_ARGS...]
+
+Options:
+    --list, -l      List active Claude Remote sessions
+    --attach, -a    Attach to an existing session (prompts if multiple)
+    --status, -s    Show status of all sessions and pending prompts
+    --kill          Kill all Claude Remote sessions
+    --help, -h      Show this help message
+
+Examples:
+    claude-remote                    # Start new session
+    claude-remote --list             # List sessions
+    claude-remote --attach           # Attach to session
+    claude-remote -- --model opus    # Pass args to claude
+
+Environment:
+    NTFY_TOPIC          ntfy.sh topic for push notifications
+    CLAUDE_REMOTE_DIR   State directory (default: ~/.claude-remote)
+EOF
+}
+
+list_sessions() {
+    echo -e "${BLUE}Active Claude Remote sessions:${NC}"
+    local sessions
+    sessions=$(tmux list-sessions 2>/dev/null | grep "^${SESSION_PREFIX}" || true)
+
+    if [[ -z "$sessions" ]]; then
+        echo -e "${YELLOW}  No active sessions${NC}"
+        return 1
+    fi
+
+    echo "$sessions" | while read -r line; do
+        echo -e "  ${GREEN}$line${NC}"
+    done
+    return 0
+}
+
+show_status() {
+    echo -e "${BLUE}=== Claude Remote Status ===${NC}\n"
+
+    # Sessions
+    echo -e "${BLUE}Sessions:${NC}"
+    list_sessions || true
+    echo
+
+    # Pending prompts
+    echo -e "${BLUE}Pending prompts:${NC}"
+    local pending_dir="$CLAUDE_REMOTE_DIR/pending"
+    if [[ -d "$pending_dir" ]]; then
+        local count
+        count=$(find "$pending_dir" -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$count" -gt 0 ]]; then
+            echo -e "  ${YELLOW}$count pending prompt(s)${NC}"
+            find "$pending_dir" -name "*.json" -exec basename {} \; 2>/dev/null | while read -r f; do
+                echo -e "    - $f"
+            done
+        else
+            echo -e "  ${GREEN}No pending prompts${NC}"
+        fi
+    else
+        echo -e "  ${GREEN}No pending prompts${NC}"
+    fi
+}
+
+attach_session() {
+    local sessions
+    sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^${SESSION_PREFIX}" || true)
+
+    if [[ -z "$sessions" ]]; then
+        echo -e "${RED}No active Claude Remote sessions to attach to${NC}"
+        exit 1
+    fi
+
+    local count
+    count=$(echo "$sessions" | wc -l | tr -d ' ')
+
+    if [[ "$count" -eq 1 ]]; then
+        tmux attach-session -t "$sessions"
+    else
+        echo -e "${BLUE}Multiple sessions found. Select one:${NC}"
+        local i=1
+        echo "$sessions" | while read -r s; do
+            echo "  $i) $s"
+            ((i++))
+        done
+
+        read -rp "Enter number: " choice
+        local selected
+        selected=$(echo "$sessions" | sed -n "${choice}p")
+
+        if [[ -n "$selected" ]]; then
+            tmux attach-session -t "$selected"
+        else
+            echo -e "${RED}Invalid selection${NC}"
+            exit 1
+        fi
+    fi
+}
+
+kill_sessions() {
+    local sessions
+    sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^${SESSION_PREFIX}" || true)
+
+    if [[ -z "$sessions" ]]; then
+        echo -e "${YELLOW}No active Claude Remote sessions${NC}"
+        return 0
+    fi
+
+    echo "$sessions" | while read -r s; do
+        echo -e "Killing session: ${RED}$s${NC}"
+        tmux kill-session -t "$s" 2>/dev/null || true
+    done
+
+    echo -e "${GREEN}Done${NC}"
+}
+
+start_session() {
+    local claude_args=("$@")
+
+    # Generate unique session name
+    local session_name="${SESSION_PREFIX}-$$"
+
+    # Ensure state directories exist
+    mkdir -p "$CLAUDE_REMOTE_DIR/pending" "$CLAUDE_REMOTE_DIR/resolved"
+
+    # Check if tmux is available
+    if ! command -v tmux &> /dev/null; then
+        echo -e "${RED}Error: tmux is required but not installed${NC}"
+        echo "Install with: brew install tmux"
+        exit 1
+    fi
+
+    # Check if claude is available
+    if ! command -v claude &> /dev/null; then
+        echo -e "${RED}Error: claude CLI is required but not installed${NC}"
+        exit 1
+    fi
+
+    echo -e "${BLUE}Starting Claude Remote session: ${GREEN}$session_name${NC}"
+
+    # Export session name for the hook to use
+    export CLAUDE_REMOTE_SESSION="$session_name"
+
+    # Create tmux session and run claude
+    # The session stays alive after claude exits so you can review
+    tmux new-session -d -s "$session_name" -e "CLAUDE_REMOTE_SESSION=$session_name"
+
+    # Send the claude command to the session
+    if [[ ${#claude_args[@]} -gt 0 ]]; then
+        tmux send-keys -t "$session_name" "claude ${claude_args[*]}" Enter
+    else
+        tmux send-keys -t "$session_name" "claude" Enter
+    fi
+
+    echo -e "${GREEN}Session started${NC}"
+    echo -e "Attach with: ${YELLOW}claude-remote --attach${NC}"
+    echo -e "Or directly: ${YELLOW}tmux attach -t $session_name${NC}"
+    echo
+
+    # Attach to the session
+    tmux attach-session -t "$session_name"
+}
+
+# Parse arguments
+CLAUDE_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --list|-l)
+            list_sessions
+            exit $?
+            ;;
+        --attach|-a)
+            attach_session
+            exit $?
+            ;;
+        --status|-s)
+            show_status
+            exit 0
+            ;;
+        --kill)
+            kill_sessions
+            exit 0
+            ;;
+        --help|-h)
+            print_usage
+            exit 0
+            ;;
+        --)
+            shift
+            CLAUDE_ARGS=("$@")
+            break
+            ;;
+        *)
+            CLAUDE_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Start new session
+start_session "${CLAUDE_ARGS[@]}"

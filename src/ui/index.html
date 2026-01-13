@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0a0e14">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Claude Remote</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #0a0e14;
+            --bg-surface: #0d1117;
+            --bg-elevated: rgba(22, 27, 34, 0.85);
+            --border-subtle: rgba(48, 54, 61, 0.6);
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #484f58;
+            --accent-cyan: #39d0d8;
+            --accent-cyan-dim: rgba(57, 208, 216, 0.15);
+            --accent-green: #3fb950;
+            --accent-green-dim: rgba(63, 185, 80, 0.15);
+            --accent-amber: #d29922;
+            --accent-amber-dim: rgba(210, 153, 34, 0.15);
+            --accent-red: #f85149;
+            --accent-red-dim: rgba(248, 81, 73, 0.15);
+            --glow-cyan: 0 0 20px rgba(57, 208, 216, 0.4);
+            --glow-green: 0 0 20px rgba(63, 185, 80, 0.4);
+            --radius-sm: 6px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Space Grotesk', -apple-system, sans-serif;
+            background: var(--bg-deep);
+            color: var(--text-primary);
+            line-height: 1.5;
+            position: relative;
+        }
+
+        /* Scanline overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.03) 2px,
+                rgba(0, 0, 0, 0.03) 4px
+            );
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        /* Vignette */
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(
+                ellipse at center,
+                transparent 0%,
+                transparent 60%,
+                rgba(0, 0, 0, 0.4) 100%
+            );
+            pointer-events: none;
+            z-index: 999;
+        }
+
+        .app {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            max-width: 500px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        /* Header */
+        .header {
+            padding: 16px 20px;
+            background: linear-gradient(180deg, var(--bg-surface) 0%, transparent 100%);
+            position: relative;
+            z-index: 10;
+        }
+
+        .header-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-green) 100%);
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--bg-deep);
+            box-shadow: var(--glow-cyan);
+        }
+
+        .logo-text {
+            font-weight: 600;
+            font-size: 18px;
+            letter-spacing: -0.02em;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: var(--accent-green-dim);
+            border: 1px solid rgba(63, 185, 80, 0.3);
+            border-radius: 100px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--accent-green);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--accent-green);
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+        }
+
+        .refresh-bar {
+            height: 2px;
+            background: var(--border-subtle);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .refresh-progress {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green));
+            border-radius: 2px;
+            width: 0%;
+            transition: width 0.3s linear;
+        }
+
+        /* Main content */
+        .main {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 0 16px 100px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .main::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* Empty state */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 60vh;
+            text-align: center;
+            padding: 20px;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .empty-icon {
+            width: 80px;
+            height: 80px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            font-size: 32px;
+        }
+
+        .empty-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        .empty-desc {
+            font-size: 14px;
+            color: var(--text-secondary);
+            max-width: 260px;
+        }
+
+        /* Prompt cards */
+        .prompts {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding-top: 8px;
+        }
+
+        .prompt-card {
+            background: var(--bg-elevated);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            animation: slideIn 0.4s ease-out;
+            animation-fill-mode: both;
+        }
+
+        .prompt-card:nth-child(1) { animation-delay: 0ms; }
+        .prompt-card:nth-child(2) { animation-delay: 50ms; }
+        .prompt-card:nth-child(3) { animation-delay: 100ms; }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px) scale(0.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .prompt-card.permission {
+            border-color: rgba(57, 208, 216, 0.3);
+            box-shadow: 0 4px 24px rgba(57, 208, 216, 0.1);
+        }
+
+        .prompt-card.idle {
+            border-color: rgba(210, 153, 34, 0.3);
+        }
+
+        .prompt-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .prompt-type {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .prompt-type.permission {
+            color: var(--accent-cyan);
+        }
+
+        .prompt-type.idle {
+            color: var(--accent-amber);
+        }
+
+        .prompt-type-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .prompt-type.permission .prompt-type-dot {
+            background: var(--accent-cyan);
+            box-shadow: 0 0 8px var(--accent-cyan);
+        }
+
+        .prompt-type.idle .prompt-type-dot {
+            background: var(--accent-amber);
+        }
+
+        .prompt-session {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+            padding: 4px 8px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: var(--radius-sm);
+        }
+
+        .prompt-message {
+            padding: 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .prompt-message::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .prompt-message::-webkit-scrollbar-thumb {
+            background: var(--border-subtle);
+            border-radius: 2px;
+        }
+
+        .prompt-actions {
+            padding: 12px 16px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            border-top: 1px solid var(--border-subtle);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .btn {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 10px 16px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-width: 48px;
+        }
+
+        .btn:active {
+            transform: scale(0.96);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-cyan) 0%, #2cb5bc 100%);
+            border-color: var(--accent-cyan);
+            color: var(--bg-deep);
+            box-shadow: 0 2px 12px rgba(57, 208, 216, 0.3);
+        }
+
+        .btn-primary:active {
+            box-shadow: 0 1px 6px rgba(57, 208, 216, 0.4);
+        }
+
+        .btn-success {
+            background: var(--accent-green-dim);
+            border-color: rgba(63, 185, 80, 0.4);
+            color: var(--accent-green);
+        }
+
+        .btn-danger {
+            background: var(--accent-red-dim);
+            border-color: rgba(248, 81, 73, 0.4);
+            color: var(--accent-red);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            border-color: transparent;
+            color: var(--text-secondary);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Custom input */
+        .custom-input-row {
+            display: flex;
+            gap: 8px;
+            padding: 0 16px 12px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .custom-input {
+            flex: 1;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            padding: 10px 12px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            background: var(--bg-deep);
+            color: var(--text-primary);
+            outline: none;
+            transition: border-color 0.15s ease;
+        }
+
+        .custom-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .custom-input:focus {
+            border-color: var(--accent-cyan);
+        }
+
+        /* Toast notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }
+
+        .toast {
+            padding: 12px 20px;
+            background: var(--bg-elevated);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            animation: toastIn 0.3s ease-out;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        .toast.success {
+            border-color: rgba(63, 185, 80, 0.4);
+            color: var(--accent-green);
+        }
+
+        .toast.error {
+            border-color: rgba(248, 81, 73, 0.4);
+            color: var(--accent-red);
+        }
+
+        .toast.leaving {
+            animation: toastOut 0.3s ease-in forwards;
+        }
+
+        @keyframes toastIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px) scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        @keyframes toastOut {
+            from {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+            to {
+                opacity: 0;
+                transform: translateY(-10px) scale(0.9);
+            }
+        }
+
+        /* Loading spinner */
+        .spinner {
+            width: 14px;
+            height: 14px;
+            border: 2px solid transparent;
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Sending state */
+        .prompt-card.sending {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .prompt-card.sent {
+            animation: sentPulse 0.5s ease-out;
+        }
+
+        @keyframes sentPulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.4);
+            }
+            70% {
+                box-shadow: 0 0 0 10px rgba(63, 185, 80, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(63, 185, 80, 0);
+            }
+        }
+
+        /* Footer status */
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 12px 20px;
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
+            background: linear-gradient(0deg, var(--bg-deep) 0%, transparent 100%);
+            display: flex;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        .footer-content {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .footer-content .spinner {
+            width: 12px;
+            height: 12px;
+        }
+
+        /* Responsive adjustments */
+        @media (min-width: 500px) {
+            .prompt-actions {
+                justify-content: flex-start;
+            }
+
+            .btn {
+                min-width: 60px;
+            }
+        }
+
+        /* Safe area insets for notched phones */
+        @supports (padding: max(0px)) {
+            .header {
+                padding-top: max(16px, env(safe-area-inset-top));
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <div class="header-top">
+                <div class="logo">
+                    <div class="logo-icon">CR</div>
+                    <span class="logo-text">Claude Remote</span>
+                </div>
+                <div class="status-badge">
+                    <div class="status-dot"></div>
+                    <span>Live</span>
+                </div>
+            </div>
+            <div class="refresh-bar">
+                <div class="refresh-progress" id="refreshProgress"></div>
+            </div>
+        </header>
+
+        <main class="main" id="main">
+            <!-- Content loaded dynamically -->
+        </main>
+
+        <div class="toast-container" id="toastContainer"></div>
+
+        <footer class="footer">
+            <div class="footer-content" id="footerContent">
+                <span>Refreshing in <span id="countdown">15</span>s</span>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        const REFRESH_INTERVAL = 15000;
+        const API_BASE = '';
+
+        let prompts = [];
+        let refreshTimer = null;
+        let countdownValue = 15;
+        let isRefreshing = false;
+
+        // DOM elements
+        const main = document.getElementById('main');
+        const refreshProgress = document.getElementById('refreshProgress');
+        const countdown = document.getElementById('countdown');
+        const footerContent = document.getElementById('footerContent');
+        const toastContainer = document.getElementById('toastContainer');
+
+        // Fetch prompts from API
+        async function fetchPrompts() {
+            if (isRefreshing) return;
+            isRefreshing = true;
+
+            try {
+                const res = await fetch(`${API_BASE}/api/prompts`);
+                const data = await res.json();
+
+                if (data.success) {
+                    prompts = data.prompts;
+                    render();
+                }
+            } catch (err) {
+                console.error('Failed to fetch prompts:', err);
+                showToast('Connection error', 'error');
+            } finally {
+                isRefreshing = false;
+            }
+        }
+
+        // Send response to API
+        async function sendResponse(promptId, response) {
+            const card = document.querySelector(`[data-id="${CSS.escape(promptId)}"]`);
+            if (card) card.classList.add('sending');
+
+            try {
+                const res = await fetch(`${API_BASE}/api/respond`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: promptId, response })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    if (card) {
+                        card.classList.remove('sending');
+                        card.classList.add('sent');
+                    }
+                    showToast('Response sent', 'success');
+
+                    // Remove from local state and re-render
+                    prompts = prompts.filter(p => p.id !== promptId);
+                    setTimeout(() => render(), 300);
+                } else {
+                    throw new Error(data.error || 'Failed to send');
+                }
+            } catch (err) {
+                if (card) card.classList.remove('sending');
+                showToast(err.message, 'error');
+            }
+        }
+
+        // Show toast notification
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+
+            const icon = document.createElement('span');
+            icon.textContent = type === 'success' ? '✓' : '✕';
+            toast.appendChild(icon);
+
+            const text = document.createElement('span');
+            text.textContent = message;
+            toast.appendChild(text);
+
+            toastContainer.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.add('leaving');
+                setTimeout(() => toast.remove(), 300);
+            }, 2500);
+        }
+
+        // Create element helper (safe DOM construction)
+        function createElement(tag, attrs = {}, children = []) {
+            const el = document.createElement(tag);
+            for (const [key, value] of Object.entries(attrs)) {
+                if (key === 'className') {
+                    el.className = value;
+                } else if (key === 'textContent') {
+                    el.textContent = value;
+                } else if (key.startsWith('data-')) {
+                    el.setAttribute(key, value);
+                } else {
+                    el.setAttribute(key, value);
+                }
+            }
+            for (const child of children) {
+                if (typeof child === 'string') {
+                    el.appendChild(document.createTextNode(child));
+                } else if (child) {
+                    el.appendChild(child);
+                }
+            }
+            return el;
+        }
+
+        // Render empty state
+        function renderEmptyState() {
+            const container = createElement('div', { className: 'empty-state' }, [
+                createElement('div', { className: 'empty-icon', textContent: '◇' }),
+                createElement('h2', { className: 'empty-title', textContent: 'No pending prompts' }),
+                createElement('p', { className: 'empty-desc', textContent: 'Claude Code prompts will appear here when input is needed' })
+            ]);
+            return container;
+        }
+
+        // Render single prompt card (safe DOM construction)
+        function renderPromptCard(prompt) {
+            const isPermission = prompt.event === 'permission_prompt';
+            const typeClass = isPermission ? 'permission' : 'idle';
+            const typeLabel = isPermission ? 'Permission' : 'Idle';
+            const sessionShort = (prompt.tmux_session || '').replace('claude-remote-', '') || '—';
+
+            // Header
+            const header = createElement('div', { className: 'prompt-header' }, [
+                createElement('div', { className: `prompt-type ${typeClass}` }, [
+                    createElement('div', { className: 'prompt-type-dot' }),
+                    createElement('span', { textContent: typeLabel })
+                ]),
+                createElement('div', { className: 'prompt-session', textContent: `#${sessionShort}` })
+            ]);
+
+            // Message
+            const message = createElement('div', { className: 'prompt-message', textContent: prompt.message || 'No message' });
+
+            // Action buttons
+            const btnY = createElement('button', { className: 'btn btn-primary', 'data-action': 'Y', 'data-prompt-id': prompt.id, textContent: 'Y' });
+            const btnN = createElement('button', { className: 'btn btn-danger', 'data-action': 'n', 'data-prompt-id': prompt.id, textContent: 'n' });
+            const btnEnter = createElement('button', { className: 'btn', 'data-action': '', 'data-prompt-id': prompt.id, textContent: '↵ Enter' });
+            const btnSkip = createElement('button', { className: 'btn btn-ghost', 'data-action': 'skip', 'data-prompt-id': prompt.id, textContent: 'Skip' });
+
+            const actions = createElement('div', { className: 'prompt-actions' }, [btnY, btnN, btnEnter, btnSkip]);
+
+            // Custom input row
+            const customInput = createElement('input', {
+                type: 'text',
+                className: 'custom-input',
+                placeholder: 'Custom response...',
+                'data-prompt-id': prompt.id,
+                autocomplete: 'off',
+                autocorrect: 'off',
+                autocapitalize: 'off',
+                spellcheck: 'false'
+            });
+
+            const sendBtn = createElement('button', { className: 'btn btn-success', 'data-send-custom': prompt.id, textContent: 'Send' });
+            const inputRow = createElement('div', { className: 'custom-input-row' }, [customInput, sendBtn]);
+
+            // Card container
+            const card = createElement('div', { className: `prompt-card ${typeClass}`, 'data-id': prompt.id }, [
+                header, message, actions, inputRow
+            ]);
+
+            // Attach event listeners
+            [btnY, btnN, btnEnter, btnSkip].forEach(btn => {
+                btn.addEventListener('click', handleAction);
+            });
+
+            customInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const value = customInput.value.trim();
+                    if (value) sendResponse(prompt.id, value);
+                }
+            });
+
+            sendBtn.addEventListener('click', () => {
+                const value = customInput.value.trim();
+                if (value) sendResponse(prompt.id, value);
+            });
+
+            return card;
+        }
+
+        // Render prompts
+        function render() {
+            // Clear main content
+            main.replaceChildren();
+
+            if (prompts.length === 0) {
+                main.appendChild(renderEmptyState());
+                return;
+            }
+
+            const container = createElement('div', { className: 'prompts' });
+            prompts.forEach(prompt => {
+                container.appendChild(renderPromptCard(prompt));
+            });
+            main.appendChild(container);
+        }
+
+        // Handle action button clicks
+        function handleAction(e) {
+            const action = e.currentTarget.getAttribute('data-action');
+            const promptId = e.currentTarget.getAttribute('data-prompt-id');
+
+            if (action === 'skip') {
+                // Dismiss without responding
+                prompts = prompts.filter(p => p.id !== promptId);
+                render();
+                return;
+            }
+
+            sendResponse(promptId, action);
+        }
+
+        // Update refresh progress bar
+        function updateProgress() {
+            const elapsed = REFRESH_INTERVAL - (countdownValue * 1000);
+            const percent = (elapsed / REFRESH_INTERVAL) * 100;
+            refreshProgress.style.width = `${percent}%`;
+            countdown.textContent = countdownValue;
+        }
+
+        // Start countdown timer
+        function startCountdown() {
+            countdownValue = Math.floor(REFRESH_INTERVAL / 1000);
+            updateProgress();
+
+            if (refreshTimer) clearInterval(refreshTimer);
+
+            refreshTimer = setInterval(() => {
+                countdownValue--;
+                updateProgress();
+
+                if (countdownValue <= 0) {
+                    countdownValue = Math.floor(REFRESH_INTERVAL / 1000);
+                    fetchPrompts();
+                }
+            }, 1000);
+        }
+
+        // Initialize
+        function init() {
+            fetchPrompts();
+            startCountdown();
+
+            // Refresh when page becomes visible
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    fetchPrompts();
+                    startCountdown();
+                }
+            });
+        }
+
+        init();
+    </script>
+</body>
+</html>
