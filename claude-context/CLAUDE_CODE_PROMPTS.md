@@ -22,29 +22,86 @@ Then let me know what you see and ask what I want to focus on today.
 
 ## Session End
 
+> Trigger: user says "session end". Executes full Update Docs workflow.
+
 ```
-We're wrapping up this session. Please help me:
+## Session End
 
-1. Generate a session note for claude-context/session-notes/
-   - Use format: YYYY-MM-DD-darron-[topic].md
-   - Include: summary, key decisions, code changes, next steps
+We're wrapping up this session. Execute the complete Update Docs workflow to ensure all documentation is current.
 
-2. Update claude-context/CURRENT_STATUS.md
-   - Add today's changes to "Recent Changes"
-   - Update "Next Actions" based on what we discussed
-   - Add any new issues or blockers
+### Run the Full Update Docs Workflow
 
-3. If we made any significant decisions, draft an entry for DECISIONS.md
+Work through each section systematically:
 
-4. Update PROJECT_INSTRUCTIONS.md if:
-   - Level changed
-   - Tech stack changed
-   - Project structure changed significantly
+#### 1. CURRENT_STATUS.md
+Update claude-context/CURRENT_STATUS.md:
+- Add new items to "Recent Changes" with today's date
+- Update "Current Stage" if progress was made
+- Update "Next Actions":
+  - Mark completed items with [x] (don't remove them — they get hidden in Dashboard)
+  - Add new discovered actions to appropriate section (Immediate/Short Term/etc.)
+- Add any new blockers or issues
 
-Please generate the content for each file that needs updating.
+#### 2. Learnings
+Check if any concepts were explained or discovered that should be documented:
+- New technical patterns or solutions
+- Non-obvious fixes or workarounds
+- Technology comparisons or trade-offs
+
+If yes, create a new file in `claude-context/learnings/`:
+- Use kebab-case naming: `topic-name.md`
+- Follow the template in `claude-context/learnings/README.md`
+- Update INDEX.md (if it exists) or create one
+
+Ask: "I identified [X] as a potential learning. Should I add it to learnings?"
+
+#### 3. Ideas
+If any new feature ideas or improvements were discussed:
+- Check if they should be added to IDEAS.md (in claude-context/ or project root)
+- Ask: "We discussed [idea]. Worth adding to IDEAS.md?"
+
+#### 4. Decisions
+If significant decisions were made:
+- Add entry to claude-context/DECISIONS.md
+- Use format: DEC-XXX with date, context, options, decision, consequences
+
+#### 5. PROJECT_INSTRUCTIONS.md
+Update the root PROJECT_INSTRUCTIONS.md if:
+- Current stage changed
+- Tech stack was added/modified
+- Project structure significantly changed
+- New core features were implemented
+
+#### 6. Architecture
+Update claude-context/ARCHITECTURE.md if:
+- New components or services were added
+- Data flows changed
+- System boundaries shifted
+
+#### 7. Session Log (MANDATORY)
+Create or update the session log in `_logs/`:
+- Format: `session_YYYY-MM-DD_HH-MM-SS.md`
+- Include: working time, all exchanges (summarised), tasks completed, files changed, commits made
+- This is MANDATORY for every session — captures the complete working process
+- See `_logs/README.md` for full format
+
+#### 8. Session Note (Optional)
+If this was a significant session with architecture/decision changes, offer to create a session note:
+- Format: YYYY-MM-DD-darron-[topic].md in `claude-context/session-notes/`
+- Include: summary, decisions, changes, next steps
+- These are for high-level documentation, not process capture
+
+### Output
+Provide a summary of what was updated:
+- ✅ Files updated
+- ⏭️ Files skipped (no changes needed)
+- ❓ Items needing your input
+
+Use British English throughout.
 ```
 
 ---
+
 
 ## Context Refresh
 
@@ -213,3 +270,80 @@ Report any discrepancies so I can resolve them before diving in.
 ---
 
 *Keep this file handy for quick copy-paste during sessions.*
+
+## Update Docs
+
+> Trigger: user says "update docs"
+
+```
+## Update Documentation
+
+Review the current session and update all relevant documentation. Work through each section systematically.
+
+### 1. CURRENT_STATUS.md
+Update claude-context/CURRENT_STATUS.md:
+- Add new items to "Recent Changes" with today's date
+- Update "Current Stage" if progress was made
+- Refresh "Next Actions" based on what was completed/discovered
+- Add any new blockers or issues
+
+### 2. Learnings
+Check if any concepts were explained or discovered that should be documented:
+- New technical patterns or solutions
+- Non-obvious fixes or workarounds
+- Technology comparisons or trade-offs
+
+If yes, create a new file in `claude-context/learnings/`:
+- Use kebab-case naming: `topic-name.md`
+- Follow the template in `claude-context/learnings/README.md`
+- Update INDEX.md (if it exists) or create one
+
+Ask: "I identified [X] as a potential learning. Should I add it to learnings?"
+
+### 3. Ideas
+If any new feature ideas or improvements were discussed:
+- Check if they should be added to IDEAS.md (in claude-context/ or project root)
+- Ask: "We discussed [idea]. Worth adding to IDEAS.md?"
+
+### 4. Decisions
+If significant decisions were made:
+- Add entry to claude-context/DECISIONS.md
+- Use format: DEC-XXX with date, context, options, decision, consequences
+
+### 5. PROJECT_INSTRUCTIONS.md
+Update the root PROJECT_INSTRUCTIONS.md if:
+- Current stage changed
+- Tech stack was added/modified
+- Project structure significantly changed
+- New core features were implemented
+
+### 6. Architecture
+Update claude-context/ARCHITECTURE.md if:
+- New components or services were added
+- Data flows changed
+- System boundaries shifted
+
+### 7. Session Log (MANDATORY)
+Create or update the session log in `_logs/`:
+- Format: `session_YYYY-MM-DD_HH-MM-SS.md`
+- Include: working time, all exchanges (summarised), tasks completed, files changed, commits made
+- This is MANDATORY for every session — captures the complete working process
+- See `_logs/README.md` for full format
+
+### 8. Session Note (Optional)
+If this was a significant session with architecture/decision changes, offer to create a session note:
+- Format: YYYY-MM-DD-darron-[topic].md in `claude-context/session-notes/`
+- Include: summary, decisions, changes, next steps
+- These are for high-level documentation, not process capture
+
+### Output
+Provide a summary of what was updated:
+- ✅ Files updated
+- ⏭️ Files skipped (no changes needed)
+- ❓ Items needing your input
+
+Use British English throughout.
+```
+
+---
+
