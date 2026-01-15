@@ -2,6 +2,18 @@
 
 > Unblock your Claude Code sessions from anywhere
 
+
+## Command Triggers
+
+When the user types these phrases, execute the corresponding workflow from `claude-context/CLAUDE_CODE_PROMPTS.md`:
+
+| User Says | Execute |
+|-----------|---------|
+| `update docs` | **Update Docs** — Update all documentation with session changes |
+| `session end` | **Session End** — Create session note and update status |
+| `session start` | **Session Start** — Check status and get briefed |
+
+
 ## Quick Context
 
 - **Stage**: Level 1 Prototype Complete
@@ -83,6 +95,23 @@ Check `claude-context/CURRENT_STATUS.md` for:
 | `ARCHITECTURE.md` | System design |
 | `DECISIONS.md` | Decision log |
 | `LEVELS.md` | Level breakdown |
+
+## Infrastructure Registry
+
+This project is registered in the central infrastructure service registry at `~/Projects/infrastructure/`.
+
+```bash
+# Check all service status
+~/Projects/infrastructure/scripts/status
+
+# View this project's port allocation
+~/Projects/infrastructure/scripts/lifecycle clauderemote ports
+
+# Start this project's services
+~/Projects/infrastructure/scripts/start clauderemote
+```
+
+Port allocations are managed centrally. See `~/Projects/infrastructure/registry/services.toml` for details.
 
 ## Author
 
