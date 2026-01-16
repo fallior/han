@@ -91,13 +91,6 @@ If this was a significant session with architecture/decision changes, offer to c
 - Include: summary, decisions, changes, next steps
 - These are for high-level documentation, not process capture
 
-#### 9. Running Services
-If development services were started during this session (Supabase, Redis, dev servers, etc.):
-- Ask: "Services are running. Leave them running or shut down?"
-- If shutdown requested: run `./scripts/stop.sh` or equivalent
-- If leaving running: note which services remain active in the session summary
-- Default assumption: leave running (user runs a 24/7 home server)
-
 ### Output
 Provide a summary of what was updated:
 - ✅ Files updated
@@ -342,13 +335,6 @@ If this was a significant session with architecture/decision changes, offer to c
 - Format: YYYY-MM-DD-darron-[topic].md in `claude-context/session-notes/`
 - Include: summary, decisions, changes, next steps
 - These are for high-level documentation, not process capture
-
-### 9. Running Services
-If development services were started during this session (Supabase, Redis, dev servers, etc.):
-- Ask: "Services are running. Leave them running or shut down?"
-- If shutdown requested: run `./scripts/stop.sh` or equivalent
-- If leaving running: note which services remain active in the session summary
-- Default assumption: leave running (user runs a 24/7 home server)
 
 ### Output
 Provide a summary of what was updated:
