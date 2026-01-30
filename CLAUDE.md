@@ -2,6 +2,32 @@
 
 > Unblock your Claude Code sessions from anywhere
 
+## Session Protocol
+
+**IMPORTANT:** When `session start` is triggered, Claude MUST:
+1. Run `pwd` to verify the current working directory
+2. Confirm this is `/Users/darron/Projects/clauderemote`
+3. Load THIS project's `claude-context/CURRENT_STATUS.md`
+4. IGNORE conversation history from other projects
+
+The working directory is the source of truth — not conversation history.
+
+
+## Activity Timestamp Protocol
+
+**CRITICAL for accurate time tracking:** Claude MUST log timestamps throughout the session.
+
+### Required Actions
+1. **Session Start**: Run `date -Iseconds`, create session log in `_logs/` with Start timestamp
+2. **Each Exchange**: Log timestamp before processing user input, log timestamp after response
+3. **Session End**: Run `date -Iseconds`, calculate Duration and Active Time (excluding gaps > 5 min)
+
+### Why This Matters
+- Idle gaps (> 5 min between response and next input) are excluded from Active Time
+- Dashboard analytics use these timestamps for accurate time tracking
+- Without timestamps, session duration is guessed from file metadata (inaccurate)
+
+See `_logs/README.md` for full timestamp protocol and format.
 
 ## Command Triggers
 
@@ -13,6 +39,15 @@ When the user types these phrases, execute the corresponding workflow from `clau
 | `session end` | **Session End** — Create session note and update status |
 | `session start` | **Session Start** — Check status and get briefed |
 
+## Critical Learnings
+
+Review these cross-project learnings when relevant:
+
+| ID | Learning | Why It Matters |
+|----|----------|----------------|
+| L008 | [javascript/date-timezone-gotchas.md](~/Projects/_learnings/javascript/date-timezone-gotchas.md) | Avoid UTC conversion bugs with `toISOString()`. Use local date components. |
+
+See `~/Projects/_learnings/INDEX.md` for full index.
 
 ## Quick Context
 
@@ -115,7 +150,7 @@ Port allocations are managed centrally. See `~/Projects/infrastructure/registry/
 
 ## Author
 
-**Darron** — Perth, Australia
+**Darron** — Mackay, Queensland, Australia (UTC+10)
 
 ---
 
