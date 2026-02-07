@@ -7,15 +7,116 @@
 ## Session Start
 
 ```
-I'm starting a new work session on Claude Remote.
+I'm starting a new work session on [PROJECT_NAME].
 
-Before we begin, please:
+**FIRST**: Create a session log with activity timestamps:
+1. Run `date -Iseconds` to get the session start timestamp
+2. Run `date +%Y-%m-%d_%H-%M-%S` to get the filename timestamp
+3. Create `_logs/session_[FILENAME_TIMESTAMP].md` with header:
+   ```
+   # Session: [DATE] [TIME]
+   Project: [PROJECT_NAME]
+   Start: [ISO_TIMESTAMP]
+   End: (pending)
+   Duration: (pending)
+   Active Time: (pending)
+
+   ---
+
+   ## Activity Log
+
+   ### [ISO_TIMESTAMP] User
+   Session start
+   ```
+
+**THEN**: Get oriented:
 1. Check claude-context/CURRENT_STATUS.md for where we left off
 2. Note any recent session-notes/ I should be aware of
-3. Confirm the current level and focus
+3. Confirm the current stage
 4. List any open blockers or questions
 
-Then let me know what you see and ask what I want to focus on today.
+Let me know what you see and ask what I want to focus on today.
+```
+
+---
+
+## Update Docs
+
+> Trigger: user says "update docs"
+
+```
+## Update Documentation
+
+**FIRST**: Log this exchange with timestamp:
+1. Run `date -Iseconds` to get current timestamp
+2. Add to session log: `### [TIMESTAMP] User\nupdate docs`
+
+Review the current session and update all relevant documentation. Work through each section systematically.
+
+### 1. CURRENT_STATUS.md
+Update claude-context/CURRENT_STATUS.md:
+- Add new items to "Recent Changes" with today's date
+- Update "Current Stage" if progress was made
+- Refresh "Next Actions" based on what was completed/discovered
+- Add any new blockers or issues
+
+### 2. Learnings
+Check if any concepts were explained or discovered that should be documented:
+- New technical patterns or solutions
+- Non-obvious fixes or workarounds
+- Technology comparisons or trade-offs
+
+If yes, create a new file in `claude-context/learnings/`:
+- Use kebab-case naming: `topic-name.md`
+- Follow the template in `claude-context/learnings/README.md`
+- Update INDEX.md (if it exists) or create one
+
+Ask: "I identified [X] as a potential learning. Should I add it to learnings?"
+
+### 3. Ideas
+If any new feature ideas or improvements were discussed:
+- Check if they should be added to IDEAS.md (in claude-context/ or project root)
+- Ask: "We discussed [idea]. Worth adding to IDEAS.md?"
+
+### 4. Decisions
+If significant decisions were made:
+- Add entry to claude-context/DECISIONS.md
+- Use format: DEC-XXX with date, context, options, decision, consequences
+
+### 5. PROJECT_INSTRUCTIONS.md
+Update the root PROJECT_INSTRUCTIONS.md if:
+- Current stage changed
+- Tech stack was added/modified
+- Project structure significantly changed
+- New core features were implemented
+
+### 6. Architecture
+Update claude-context/ARCHITECTURE.md if:
+- New components or services were added
+- Data flows changed
+- System boundaries shifted
+
+### 7. Session Log (MANDATORY)
+Create or update the session log in `_logs/`:
+- Format: `session_YYYY-MM-DD_HH-MM-SS.md`
+- **CRITICAL**: Include ISO timestamps for EVERY exchange (use `date -Iseconds`)
+- Include: Start/End timestamps, activity log with timestamps, tasks completed, files changed, commits made
+- Calculate **Active Time** by summing exchange durations (excluding gaps > 5 minutes)
+- See `_logs/README.md` for full timestamp protocol
+
+### 8. Session Note (Optional)
+If this was a significant session with architecture/decision changes, offer to create a session note:
+- Format: YYYY-MM-DD-darron-[topic].md in `claude-context/session-notes/`
+- Include: summary, decisions, changes, next steps
+- These are for high-level documentation, not process capture
+
+### Output
+Provide a summary of what was updated:
+- ✅ Files updated
+- ⏭️ Files skipped (no changes needed)
+- ❓ Items needing your input
+
+Use British English throughout.
 ```
 
 ---
@@ -27,7 +128,17 @@ Then let me know what you see and ask what I want to focus on today.
 ```
 ## Session End
 
-We're wrapping up this session. Execute the complete Update Docs workflow to ensure all documentation is current.
+We're wrapping up this session.
+
+**FIRST**: Finalize session timestamps:
+1. Run `date -Iseconds` to get the session end timestamp
+2. Update the session log header:
+   - Set `End: [END_TIMESTAMP]`
+   - Calculate `Duration` (End - Start)
+   - Calculate `Active Time` by parsing activity log timestamps and excluding gaps > 5 minutes
+3. Add final activity log entry: `### [TIMESTAMP] User\nsession end`
+
+**THEN**: Execute the complete Update Docs workflow to ensure all documentation is current.
 
 ### Run the Full Update Docs Workflow
 
@@ -81,9 +192,10 @@ Update claude-context/ARCHITECTURE.md if:
 #### 7. Session Log (MANDATORY)
 Create or update the session log in `_logs/`:
 - Format: `session_YYYY-MM-DD_HH-MM-SS.md`
-- Include: working time, all exchanges (summarised), tasks completed, files changed, commits made
-- This is MANDATORY for every session — captures the complete working process
-- See `_logs/README.md` for full format
+- **CRITICAL**: Include ISO timestamps for EVERY exchange (use `date -Iseconds`)
+- Include: Start/End timestamps, activity log with timestamps, tasks completed, files changed, commits made
+- Calculate **Active Time** by summing exchange durations (excluding gaps > 5 minutes)
+- See `_logs/README.md` for full timestamp protocol
 
 #### 8. Session Note (Optional)
 If this was a significant session with architecture/decision changes, offer to create a session note:
@@ -102,17 +214,16 @@ Use British English throughout.
 
 ---
 
-
 ## Context Refresh
 
 ```
-It's been a few days since I worked on Claude Remote. Please help me get back up to speed:
+It's been a few days since I worked on this project. Please help me get back up to speed:
 
 1. Read claude-context/PROJECT_BRIEF.md for the overall context
 2. Read claude-context/CURRENT_STATUS.md for where we are
 3. Read the last 3 session notes in claude-context/session-notes/
-4. Summarise:
-   - Current level and focus
+4. Summarize:
+   - Current stage and focus
    - Recent progress
    - Open issues or blockers
    - Suggested next steps
@@ -168,40 +279,6 @@ Include:
 
 ---
 
-## Level Transition
-
-```
-We're moving from Level [X] to Level [X+1].
-
-Please help me:
-1. Update CURRENT_STATUS.md to mark Level [X] as complete
-2. Update LEVELS.md status indicators
-3. Create a session note documenting Level [X] completion
-4. Identify the first tasks for Level [X+1]
-5. Note any technical debt or cleanup from Level [X]
-```
-
----
-
-## Testing Session
-
-```
-Let's test the Level [X] implementation end-to-end.
-
-Test plan:
-1. Run the installation script
-2. Start the server
-3. Start Claude Code via claude-remote
-4. Trigger a prompt
-5. Verify notification received
-6. Respond via web UI
-7. Confirm response injected
-
-Please guide me through each step and help troubleshoot any issues.
-```
-
----
-
 ## Create Learning
 
 ```
@@ -236,6 +313,22 @@ Report any issues and suggest fixes.
 
 ---
 
+## Onboard New Contributor
+
+```
+I need to brief someone new on this project. Please generate a summary that includes:
+
+1. What the project does (from PROJECT_BRIEF.md)
+2. Current stage and focus (from CURRENT_STATUS.md)
+3. Tech stack and architecture overview (from ARCHITECTURE.md)
+4. Key decisions and why they were made (from DECISIONS.md)
+5. How to get started developing
+
+Format it as a single document they can read in 10 minutes.
+```
+
+---
+
 ## Sync Check
 
 ```
@@ -247,6 +340,137 @@ Before I start working, let me verify our context is in sync:
 4. Confirm CURRENT_STATUS.md matches the latest commit
 
 Report any discrepancies so I can resolve them before diving in.
+```
+
+---
+
+## Generate PROJECT_INSTRUCTIONS.md
+
+```
+Scan this project's documentation and create/update PROJECT_INSTRUCTIONS.md — a condensed context file optimised for Claude Projects.
+
+Source from:
+1. claude-context/PROJECT_BRIEF.md
+2. claude-context/CURRENT_STATUS.md
+3. claude-context/ARCHITECTURE.md
+4. CLAUDE.md
+5. package.json or similar
+
+Keep under 150 lines. Include:
+- Title & tagline
+- What we're building (condensed)
+- Tech stack table
+- Current stage
+- Project structure
+- Key context files
+- Conventions
+- Author
+
+Save to ./PROJECT_INSTRUCTIONS.md
+```
+
+---
+
+## Incorporate Notes
+
+> Trigger: user says "incorporate notes". Requires Projects Dashboard to be running.
+
+```
+## Incorporate Notes
+
+Review Dashboard notes/todos and help incorporate them into IDEAS.md or CURRENT_STATUS.md.
+
+### Workflow
+
+1. **Fetch candidates** from Dashboard API:
+   GET /api/incorporate/project/{slug}/candidates
+
+2. **Classify each note**:
+   - **→ Idea**: Feature concepts, "could we...", long-term improvements
+   - **→ Next Action**: Starts with verb, specific, completable in a session
+   - **→ Neither**: Reference info, questions, context
+
+3. **Offer three content options** for each:
+   [1] Original — as written
+   [2] Refined — distilled, actionable version
+   [3] Custom — let user modify
+
+   If user chooses Custom, repeat with their version as new Original.
+
+4. **Execute via API**:
+   - Ideas: POST /api/incorporate/to-idea/{noteId}
+   - Next Actions: POST /api/incorporate/to-next-action/{noteId} with section
+
+5. **Report results** — notes incorporated, originals archived
+
+### Refinement Guidelines
+
+- **Ideas**: Remove hesitation ("maybe", "could"), make aspirational but clear
+- **Next Actions**: Strong verb, specific location, obvious completion criteria
+
+### Section Selection for Next Actions
+
+| Section | When to Use |
+|---------|-------------|
+| Immediate | Blocking issues, urgent bugs |
+| Short Term | Next 1-3 sessions |
+| Medium Term | When time permits |
+| Wishlist | Future consideration |
+```
+
+---
+
+## Create Dev Environment Scripts
+
+> Trigger: user says "create init scripts" or needs development environment setup
+
+```
+## Create Development Environment Scripts
+
+Generate scripts/init.sh and scripts/stop.sh for this project's development services.
+
+### Check Infrastructure Registry
+
+First, check if this project is registered:
+```bash
+~/Projects/infrastructure/scripts/lifecycle [PROJECT_NAME] ports
+```
+
+If registered, use the port allocations from the registry. If not, ask the user if they want to register it first.
+
+### scripts/init.sh Template
+
+Create a script that:
+1. Checks/starts Docker Desktop (if services need it)
+2. Starts Supabase (if enabled) — check port from registry
+3. Starts Redis (if enabled) — check port from registry
+4. Validates .env file
+5. Prints summary with connection strings
+
+Include in the header:
+```bash
+# Port Allocations (from Infrastructure Registry):
+#   Supabase DB: [PORT]    Studio: [PORT]
+#   Redis: [PORT]          App: [PORT]
+#
+# Source of truth: ~/Projects/infrastructure/registry/services.toml
+# View ports: ~/Projects/infrastructure/scripts/lifecycle [PROJECT_NAME] ports
+```
+
+### scripts/stop.sh Template
+
+Create a script that:
+1. Stops Supabase (if running)
+2. Stops Redis (if running)
+3. Prints confirmation
+
+### Standards
+
+- Use `set -euo pipefail`
+- Include colour-coded output (GREEN/YELLOW/RED)
+- Check if services are already running before starting
+- Reference infrastructure registry as source of truth
+- Make scripts executable: chmod +x scripts/*.sh
 ```
 
 ---
@@ -270,80 +494,3 @@ Report any discrepancies so I can resolve them before diving in.
 ---
 
 *Keep this file handy for quick copy-paste during sessions.*
-
-## Update Docs
-
-> Trigger: user says "update docs"
-
-```
-## Update Documentation
-
-Review the current session and update all relevant documentation. Work through each section systematically.
-
-### 1. CURRENT_STATUS.md
-Update claude-context/CURRENT_STATUS.md:
-- Add new items to "Recent Changes" with today's date
-- Update "Current Stage" if progress was made
-- Refresh "Next Actions" based on what was completed/discovered
-- Add any new blockers or issues
-
-### 2. Learnings
-Check if any concepts were explained or discovered that should be documented:
-- New technical patterns or solutions
-- Non-obvious fixes or workarounds
-- Technology comparisons or trade-offs
-
-If yes, create a new file in `claude-context/learnings/`:
-- Use kebab-case naming: `topic-name.md`
-- Follow the template in `claude-context/learnings/README.md`
-- Update INDEX.md (if it exists) or create one
-
-Ask: "I identified [X] as a potential learning. Should I add it to learnings?"
-
-### 3. Ideas
-If any new feature ideas or improvements were discussed:
-- Check if they should be added to IDEAS.md (in claude-context/ or project root)
-- Ask: "We discussed [idea]. Worth adding to IDEAS.md?"
-
-### 4. Decisions
-If significant decisions were made:
-- Add entry to claude-context/DECISIONS.md
-- Use format: DEC-XXX with date, context, options, decision, consequences
-
-### 5. PROJECT_INSTRUCTIONS.md
-Update the root PROJECT_INSTRUCTIONS.md if:
-- Current stage changed
-- Tech stack was added/modified
-- Project structure significantly changed
-- New core features were implemented
-
-### 6. Architecture
-Update claude-context/ARCHITECTURE.md if:
-- New components or services were added
-- Data flows changed
-- System boundaries shifted
-
-### 7. Session Log (MANDATORY)
-Create or update the session log in `_logs/`:
-- Format: `session_YYYY-MM-DD_HH-MM-SS.md`
-- Include: working time, all exchanges (summarised), tasks completed, files changed, commits made
-- This is MANDATORY for every session — captures the complete working process
-- See `_logs/README.md` for full format
-
-### 8. Session Note (Optional)
-If this was a significant session with architecture/decision changes, offer to create a session note:
-- Format: YYYY-MM-DD-darron-[topic].md in `claude-context/session-notes/`
-- Include: summary, decisions, changes, next steps
-- These are for high-level documentation, not process capture
-
-### Output
-Provide a summary of what was updated:
-- ✅ Files updated
-- ⏭️ Files skipped (no changes needed)
-- ❓ Items needing your input
-
-Use British English throughout.
-```
-
----
-

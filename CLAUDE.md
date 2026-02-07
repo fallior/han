@@ -35,9 +35,20 @@ When the user types these phrases, execute the corresponding workflow from `clau
 
 | User Says | Execute |
 |-----------|---------|
+| `session start` | **Session Start** — Create session log with timestamp, verify `pwd`, check status |
+| `session end` | **Session End** — Finalise timestamps, calculate active time, update docs |
 | `update docs` | **Update Docs** — Update all documentation with session changes |
-| `session end` | **Session End** — Create session note and update status |
-| `session start` | **Session Start** — Check status and get briefed |
+| `incorporate notes` | **Incorporate Notes** — Review notes/todos for incorporation into IDEAS.md or CURRENT_STATUS.md |
+| `create init scripts` | **Create Dev Scripts** — Generate init.sh/stop.sh with infrastructure registry ports |
+| `context refresh` | **Context Refresh** — Get briefed after time away from project |
+| `record decision` | **Decision Recording** — Draft a decision record for DECISIONS.md |
+| `update architecture` | **Architecture Update** — Update ARCHITECTURE.md with system changes |
+| `create learning` | **Create Learning** — Document a solved problem in learnings/ |
+| `health check` | **Project Health Check** — Verify docs are accurate and in sync |
+| `sync check` | **Sync Check** — Verify git and context are in sync before working |
+| `generate instructions` | **Generate PROJECT_INSTRUCTIONS.md** — Create condensed context for Claude Projects |
+| `onboard contributor` | **Onboard New Contributor** — Generate 10-minute project briefing |
+
 
 ## Critical Learnings
 
@@ -115,6 +126,8 @@ Check `claude-context/CURRENT_STATUS.md` for:
 | 5 | Interactive Terminal | ⚪ Not Started |
 | 6 | Claude Bridge | ⚪ Not Started |
 
+**Extended Vision (Levels 7-11):** See [`ROADMAP.md`](ROADMAP.md) for the full progression from remote prompt responder to autonomous development platform, including Claude Agent SDK integration and hybrid orchestration architecture.
+
 ## Conventions
 
 - **British English** spelling
@@ -125,6 +138,7 @@ Check `claude-context/CURRENT_STATUS.md` for:
 
 | File | Purpose |
 |------|---------|
+| `ROADMAP.md` | Extended vision (Levels 1-11) and future direction |
 | `PROJECT_BRIEF.md` | Full vision and goals |
 | `CURRENT_STATUS.md` | Progress tracking |
 | `ARCHITECTURE.md` | System design |
