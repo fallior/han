@@ -9,7 +9,11 @@
 ```
 I'm starting a new work session on [PROJECT_NAME].
 
-**FIRST**: Create a session log with activity timestamps:
+**FIRST**: Pull latest changes from remote:
+1. Run `git pull` to sync any changes from other machines
+2. If there are conflicts, stop and notify me before proceeding
+
+**SECOND**: Create a session log with activity timestamps:
 1. Run `date -Iseconds` to get the session start timestamp
 2. Run `date +%Y-%m-%d_%H-%M-%S` to get the filename timestamp
 3. Create `_logs/session_[FILENAME_TIMESTAMP].md` with header:
