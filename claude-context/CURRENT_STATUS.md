@@ -1,12 +1,12 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-08 (Session 3) by Darron (via Claude)
+> Last updated: 2026-02-08 (Session 4) by Darron (via Claude)
 
 ## Current Stage
 
-**Level 2**: Push Alerts — Complete. WebSocket real-time updates also implemented.
+**Level 5**: Mobile Keyboard — Complete. xterm.js terminal emulation and quick-action bar implemented.
 
-Terminal mirror UI live-tested on iPhone. Push notifications with action buttons working. WebSocket replacing polling.
+Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons (y/n/1/2/3/Enter/Esc/^C/Tab/arrows). Push notifications, WebSocket, and all prior levels working.
 
 ## Progress Summary
 
@@ -18,12 +18,31 @@ Terminal mirror UI live-tested on iPhone. Push notifications with action buttons
 | Level 1 Testing | 🟢 Complete | Simulated + live E2E passed |
 | Level 2: Push Alerts | 🟢 Complete | ntfy.sh action buttons, config, history |
 | WebSocket (from Level 4) | 🟢 Complete | Real-time push, polling fallback |
+| Level 4: xterm.js Terminal | 🟢 Complete | ANSI colours, proper terminal emulation |
+| Level 5: Mobile Keyboard | 🟢 Complete | Quick-action bar with common keys |
 | Level 3: Context Window | ⚪ Not Started | Partially covered by terminal mirror |
-| Level 4-6 | ⚪ Not Started | — |
+| Level 6 | ⚪ Not Started | — |
 
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-08 — Darron (via Claude) — Session 4
+- **xterm.js integration** (Level 4):
+  - xterm.js v5.3.0 + FitAddon + WebLinksAddon from CDN (no build step)
+  - Replaced plain-text `textContent` rendering with proper terminal emulation
+  - ANSI colour codes now render correctly (added `-e` flag to `tmux capture-pane`)
+  - Removed hidden textarea — xterm.js manages its own input via `onData`
+  - Content diffing prevents flicker on re-renders
+  - Lazy initialisation — xterm only created when first prompt arrives
+  - GitHub-dark theme matching existing CSS variables
+- **Mobile quick-action keyboard bar** (Level 5):
+  - Two-row button bar: `y` `n` `1` `2` `3` / `Enter` `Esc` `^C` `Tab` `↑` `↓`
+  - 44px minimum touch targets (iOS HIG compliant)
+  - Buttons call `sendKey()` directly — bypass xterm focus requirement
+  - Bar appears only when prompt active, hides in empty/history states
+  - Sending state greys out buttons to prevent double-sends
+  - xterm.js auto-refits when bar appears/disappears
 
 ### 2026-02-08 — Darron (via Claude) — Session 3
 - **Level 2: Push Alerts** — Full implementation:
@@ -80,6 +99,8 @@ Terminal mirror UI live-tested on iPhone. Push notifications with action buttons
 - ✅ Automatic fallback to HTTP polling if WebSocket drops
 - ✅ Notification history in web UI
 - ✅ tmux session management via `claude-remote` CLI
+- ✅ xterm.js terminal emulation with ANSI colour rendering
+- ✅ Mobile quick-action keyboard bar (y/n/1-3/Enter/Esc/^C/Tab/arrows)
 
 ## Next Actions
 
@@ -90,8 +111,7 @@ Terminal mirror UI live-tested on iPhone. Push notifications with action buttons
 
 ### Short-term
 - [ ] Level 3: Context Window — scrollable history, search, syntax highlighting
-- [ ] Level 4: xterm.js for proper terminal rendering
-- [ ] Level 5: Mobile keyboard with special keys (Ctrl+C, Tab, etc.)
+- [ ] Level 6: Claude Bridge — direct API integration, multi-line input
 
 ## Known Issues
 
@@ -115,6 +135,7 @@ Terminal mirror UI live-tested on iPhone. Push notifications with action buttons
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-08_02-48-24.md](../_logs/session_2026-02-08_02-48-24.md) — xterm.js + Mobile keyboard
 - [session_2026-02-08_00-00-00.md](../_logs/session_2026-02-08_00-00-00.md) — Level 2 + WebSocket
 - [session_2026-02-07_21-20-25.md](../_logs/session_2026-02-07_21-20-25.md) — E2E testing
 - [2026-01-13-darron-level1-implementation.md](session-notes/2026-01-13-darron-level1-implementation.md) — Level 1 MVP implementation

@@ -10,6 +10,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
     <style>
         :root {
             --bg-term: #0a0e14;
@@ -98,16 +102,9 @@
         .terminal {
             flex: 1;
             background: var(--bg-term);
-            padding: 12px 16px;
-            overflow-y: auto;
-            overflow-x: hidden;
-            -webkit-overflow-scrolling: touch;
-            cursor: text;
+            overflow: hidden;
             position: relative;
         }
-
-        .terminal::-webkit-scrollbar { width: 6px; }
-        .terminal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
         .terminal-content {
             font-size: 13px;
@@ -115,22 +112,20 @@
             white-space: pre-wrap;
             word-break: break-word;
             color: var(--text);
-            min-height: 100%;
+            height: 100%;
+            padding: 12px 16px;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
-        .terminal-content .cursor {
-            display: inline-block;
-            width: 8px;
-            height: 16px;
-            background: var(--text);
-            animation: blink 1s step-end infinite;
-            vertical-align: text-bottom;
-            margin-left: 2px;
-        }
+        .terminal-content::-webkit-scrollbar { width: 6px; }
+        .terminal-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-        @keyframes blink {
-            50% { opacity: 0; }
-        }
+        /* xterm.js focus indicator */
+        .xterm.xterm-focus { outline: 1px solid var(--cyan); outline-offset: -1px; }
+
+        /* Prevent iOS zoom on xterm hidden input */
+        .xterm-helper-textarea { font-size: 16px !important; }
 
         /* Empty state */
         .empty {
@@ -148,32 +143,10 @@
         .empty-title { font-size: 14px; }
         .empty-hint { font-size: 12px; color: var(--text-muted); }
 
-        /* Hidden input for capturing keystrokes */
-        .key-input {
-            position: absolute;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            opacity: 0;
-            font-size: 16px; /* Prevents iOS zoom */
-            border: none;
-            background: transparent;
-            color: transparent;
-            caret-color: transparent;
-            outline: none;
-            resize: none;
-            z-index: 1;
-        }
-
-        /* Focus indicator */
-        .terminal.focused {
-            outline: 1px solid var(--cyan);
-            outline-offset: -1px;
-        }
-
         /* Toast */
         .toast-wrap {
             position: fixed;
-            bottom: 60px;
+            bottom: 160px;
             left: 50%; transform: translateX(-50%);
             z-index: 100;
             pointer-events: none;
@@ -285,6 +258,81 @@
             font-size: 13px;
         }
 
+        /* Quick-action keyboard bar */
+        .quickbar {
+            display: none;
+            flex-shrink: 0;
+            background: var(--bg-titlebar);
+            border-top: 1px solid var(--border);
+            padding: 6px 8px;
+        }
+
+        .quickbar.visible {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .quickbar-row {
+            display: flex;
+            gap: 4px;
+            justify-content: center;
+        }
+
+        .qbtn {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            min-width: 44px;
+            min-height: 44px;
+            padding: 0 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-dim);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            flex: 1;
+            max-width: 72px;
+            transition: background 0.1s ease, border-color 0.1s ease;
+        }
+
+        .qbtn:active {
+            background: rgba(57, 208, 216, 0.15);
+            border-color: var(--cyan);
+            color: var(--text);
+        }
+
+        .qbtn-primary {
+            color: var(--green);
+            border-color: rgba(63, 185, 80, 0.3);
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .qbtn-primary:active {
+            background: rgba(63, 185, 80, 0.2);
+            border-color: var(--green);
+        }
+
+        .qbtn-dim { color: var(--text-muted); }
+
+        .qbtn-special { font-size: 11px; }
+
+        .qbtn-arrow {
+            font-size: 16px;
+            max-width: 44px;
+            color: var(--text-muted);
+        }
+
+        .quickbar.sending .qbtn {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
         @supports (padding: max(0px)) {
             .titlebar { padding-top: max(8px, env(safe-area-inset-top)); }
         }
@@ -308,8 +356,26 @@
         </div>
 
         <div class="terminal" id="terminal">
-            <textarea class="key-input" id="keyInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+            <div id="xtermContainer" style="display:none; width:100%; height:100%;"></div>
             <div class="terminal-content" id="termContent"></div>
+        </div>
+
+        <div class="quickbar" id="quickbar">
+            <div class="quickbar-row">
+                <button class="qbtn qbtn-primary" data-key="y">y</button>
+                <button class="qbtn qbtn-primary" data-key="n">n</button>
+                <button class="qbtn qbtn-dim" data-key="1">1</button>
+                <button class="qbtn qbtn-dim" data-key="2">2</button>
+                <button class="qbtn qbtn-dim" data-key="3">3</button>
+            </div>
+            <div class="quickbar-row">
+                <button class="qbtn qbtn-special" data-key="Enter">Enter</button>
+                <button class="qbtn qbtn-special" data-key="Escape">Esc</button>
+                <button class="qbtn qbtn-special" data-key="C-c">^C</button>
+                <button class="qbtn qbtn-special" data-key="Tab">Tab</button>
+                <button class="qbtn qbtn-arrow" data-key="Up">&uarr;</button>
+                <button class="qbtn qbtn-arrow" data-key="Down">&darr;</button>
+            </div>
         </div>
 
         <div class="toast-wrap" id="toastWrap"></div>
@@ -329,22 +395,96 @@
         let currentPrompt = null;
         let pollTimer = null;
         let isSending = false;
-        let userHasTapped = false; // Only send keys after explicit user tap
+        let userHasTapped = false;
         let showingHistory = false;
         let ws = null;
         let wsReconnectDelay = WS_RECONNECT_BASE;
         let wsReconnectTimer = null;
         let usingWebSocket = false;
 
+        // xterm.js state
+        let term = null;
+        let fitAddon = null;
+        let lastWrittenContent = '';
+
         const terminal = document.getElementById('terminal');
         const termContent = document.getElementById('termContent');
-        const keyInput = document.getElementById('keyInput');
+        const xtermContainer = document.getElementById('xtermContainer');
         const titleText = document.getElementById('titleText');
         const statusText = document.getElementById('statusText');
         const footerLeft = document.getElementById('footerLeft');
         const footerHint = document.getElementById('footerHint');
         const toastWrap = document.getElementById('toastWrap');
+        const quickbar = document.getElementById('quickbar');
         const statusDot = statusText.parentElement.querySelector('.status-dot');
+
+        // ── xterm.js ──────────────────────────────────────────
+
+        function initXterm() {
+            if (term) return;
+
+            term = new Terminal({
+                theme: {
+                    background: '#0a0e14',
+                    foreground: '#e6edf3',
+                    cursor: '#e6edf3',
+                    cursorAccent: '#0a0e14',
+                    selectionBackground: 'rgba(57, 208, 216, 0.3)',
+                    black: '#484f58',
+                    red: '#f85149',
+                    green: '#3fb950',
+                    yellow: '#d29922',
+                    blue: '#58a6ff',
+                    magenta: '#bc8cff',
+                    cyan: '#39d0d8',
+                    white: '#e6edf3',
+                    brightBlack: '#6e7681',
+                    brightRed: '#ffa198',
+                    brightGreen: '#56d364',
+                    brightYellow: '#e3b341',
+                    brightBlue: '#79c0ff',
+                    brightMagenta: '#d2a8ff',
+                    brightCyan: '#56d4dd',
+                    brightWhite: '#ffffff'
+                },
+                convertEol: true,
+                fontSize: 13,
+                fontFamily: "'JetBrains Mono', monospace",
+                scrollback: 1000,
+                cursorBlink: true
+            });
+
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.loadAddon(new WebLinksAddon.WebLinksAddon());
+
+            term.open(xtermContainer);
+            fitAddon.fit();
+
+            // Route keystrokes to sendKey()
+            term.onData((data) => {
+                if (!currentPrompt || !userHasTapped) return;
+
+                if (data === '\r') {
+                    sendKey('Enter');
+                } else if (data === '\x1b') {
+                    sendKey('Escape');
+                } else if (data === '\x03') {
+                    sendKey('C-c');
+                } else {
+                    sendKey(data);
+                }
+            });
+
+            // Resize handler
+            window.addEventListener('resize', () => {
+                if (fitAddon && xtermContainer.style.display !== 'none') {
+                    fitAddon.fit();
+                }
+            });
+        }
+
+        // ── Prompt handling ───────────────────────────────────
 
         // Shared prompt update handler (used by both WS and HTTP)
         function handlePromptsUpdate(prompts) {
@@ -353,9 +493,9 @@
                 if (!currentPrompt || currentPrompt.id !== prompt.id) {
                     currentPrompt = prompt;
                     userHasTapped = false;
+                    lastWrittenContent = '';
                     if (!showingHistory) renderTerminal();
                 } else {
-                    // Same prompt — terminal content may have updated
                     currentPrompt = prompt;
                     if (!showingHistory) renderTerminal();
                 }
@@ -369,7 +509,8 @@
             statusDot.style.background = 'var(--green)';
         }
 
-        // WebSocket connection
+        // ── WebSocket ─────────────────────────────────────────
+
         function connectWebSocket() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${location.host}/ws`;
@@ -415,7 +556,8 @@
             ws.onerror = () => {};
         }
 
-        // HTTP polling (fallback)
+        // ── HTTP polling (fallback) ──────────────────────────
+
         async function poll() {
             if (usingWebSocket) return;
 
@@ -442,34 +584,41 @@
             }
         }
 
-        // Render terminal content
+        // ── Rendering ─────────────────────────────────────────
+
         function renderTerminal() {
             const p = currentPrompt;
             const content = (p.terminal || p.terminal_content || '').trim();
-            const display = content || p.message || 'Waiting for input...';
 
-            termContent.textContent = '';
-            termContent.appendChild(document.createTextNode(display));
+            // Show xterm, hide plain text
+            xtermContainer.style.display = '';
+            termContent.style.display = 'none';
 
-            // Add blinking cursor
-            const cursor = document.createElement('span');
-            cursor.className = 'cursor';
-            termContent.appendChild(cursor);
+            // Lazy init
+            initXterm();
+
+            // Only rewrite if content changed (prevents flicker)
+            if (content !== lastWrittenContent) {
+                term.reset();
+                term.write(content || p.message || 'Waiting for input...');
+                lastWrittenContent = content;
+            }
+
+            fitAddon.fit();
 
             // Update chrome
             const session = p.tmux_session || 'claude-remote';
             titleText.textContent = session;
             footerLeft.textContent = p.event === 'permission_prompt' ? 'Permission required' : 'Waiting for input';
             footerHint.textContent = 'tap to type \u00b7 keys sent to session';
-
-            // Scroll to bottom
-            terminal.scrollTop = terminal.scrollHeight;
-
-            // Don't auto-focus — wait for user to tap terminal
+            updateQuickbar();
         }
 
-        // Render empty state
         function renderEmpty() {
+            xtermContainer.style.display = 'none';
+            termContent.style.display = '';
+            lastWrittenContent = '';
+
             termContent.innerHTML = '';
             const empty = document.createElement('div');
             empty.className = 'empty';
@@ -481,12 +630,15 @@
             titleText.textContent = 'claude-remote';
             footerLeft.textContent = 'No pending prompts';
             footerHint.textContent = 'history';
+            updateQuickbar();
         }
 
-        // Send a key/response to tmux
+        // ── Input ─────────────────────────────────────────────
+
         async function sendKey(key) {
             if (!currentPrompt || isSending) return;
             isSending = true;
+            quickbar.classList.add('sending');
 
             try {
                 const res = await fetch(`${API_BASE}/api/respond`, {
@@ -504,7 +656,6 @@
                     showToast('Sent: ' + (key || 'Enter'));
                     currentPrompt = null;
                     if (!showingHistory) renderEmpty();
-                    // If not on WebSocket, poll to catch next prompt
                     if (!usingWebSocket) setTimeout(poll, 1000);
                 } else {
                     showToast(data.error || 'Failed', true);
@@ -513,50 +664,45 @@
                 showToast('Connection error', true);
             } finally {
                 isSending = false;
-                keyInput.value = '';
+                quickbar.classList.remove('sending');
             }
         }
 
-        // Handle keyboard input — only after user has tapped the terminal
-        keyInput.addEventListener('input', (e) => {
-            if (!userHasTapped || !currentPrompt) {
-                keyInput.value = '';
-                return;
-            }
-            const val = keyInput.value;
-            if (val) {
-                sendKey(val);
-                keyInput.value = '';
-            }
-        });
-
-        keyInput.addEventListener('keydown', (e) => {
-            if (!userHasTapped || !currentPrompt) return;
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                sendKey('Enter');
-            }
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                sendKey('Escape');
-            }
-        });
-
-        // Focus management — require explicit tap before accepting input
+        // Focus management — require explicit tap
         terminal.addEventListener('click', () => {
             userHasTapped = true;
-            keyInput.focus();
+            if (term) term.focus();
         });
 
-        keyInput.addEventListener('focus', () => {
-            terminal.classList.add('focused');
+        // ── Quick-action bar ──────────────────────────────────
+
+        quickbar.addEventListener('click', (e) => {
+            const btn = e.target.closest('.qbtn');
+            if (!btn || !currentPrompt || isSending) return;
+            const key = btn.dataset.key;
+            if (!key) return;
+            sendKey(key);
         });
 
-        keyInput.addEventListener('blur', () => {
-            terminal.classList.remove('focused');
-        });
+        function updateQuickbar() {
+            if (currentPrompt && !showingHistory) {
+                quickbar.classList.add('visible');
+                requestAnimationFrame(() => {
+                    if (fitAddon && xtermContainer.style.display !== 'none') fitAddon.fit();
+                });
+            } else {
+                const wasVisible = quickbar.classList.contains('visible');
+                quickbar.classList.remove('visible');
+                if (wasVisible) {
+                    requestAnimationFrame(() => {
+                        if (fitAddon && xtermContainer.style.display !== 'none') fitAddon.fit();
+                    });
+                }
+            }
+        }
 
-        // Toast
+        // ── Toast ─────────────────────────────────────────────
+
         function showToast(msg, isError = false) {
             const t = document.createElement('div');
             t.className = 'toast' + (isError ? ' error' : '');
@@ -565,7 +711,8 @@
             setTimeout(() => t.remove(), 2000);
         }
 
-        // History view
+        // ── History ───────────────────────────────────────────
+
         function timeAgo(isoStr) {
             const diff = Date.now() - new Date(isoStr).getTime();
             const mins = Math.floor(diff / 60000);
@@ -578,7 +725,9 @@
 
         async function showHistory() {
             showingHistory = true;
-            keyInput.style.display = 'none';
+            updateQuickbar();
+            xtermContainer.style.display = 'none';
+            termContent.style.display = '';
             footerHint.textContent = 'back to live';
 
             try {
@@ -641,7 +790,7 @@
                 }
 
                 termContent.appendChild(list);
-                terminal.scrollTop = 0;
+                termContent.scrollTop = 0;
             } catch {
                 termContent.textContent = '';
                 const err = document.createElement('div');
@@ -653,7 +802,6 @@
 
         function hideHistory() {
             showingHistory = false;
-            keyInput.style.display = '';
             if (currentPrompt) {
                 renderTerminal();
             } else {
@@ -671,19 +819,18 @@
             }
         });
 
-        // Start — WebSocket first, polling as fallback
+        // ── Start ─────────────────────────────────────────────
+
         function start() {
             connectWebSocket();
 
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'visible') {
-                    // Reconnect WebSocket if it dropped (iOS Safari background)
                     if (!ws || ws.readyState !== WebSocket.OPEN) {
                         clearTimeout(wsReconnectTimer);
                         wsReconnectDelay = WS_RECONNECT_BASE;
                         connectWebSocket();
                     }
-                    // One-shot poll to catch up immediately
                     poll();
                 }
             });

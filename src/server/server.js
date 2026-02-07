@@ -62,7 +62,7 @@ function readPendingPrompts() {
             if (prompt.tmux_session) {
                 try {
                     const paneContent = execFileSync('tmux', [
-                        'capture-pane', '-t', prompt.tmux_session, '-p'
+                        'capture-pane', '-t', prompt.tmux_session, '-p', '-e'
                     ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
                     prompt.terminal_content = paneContent;
                 } catch {
