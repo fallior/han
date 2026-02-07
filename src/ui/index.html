@@ -9,884 +9,687 @@
     <title>Claude Remote</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-deep: #0a0e14;
-            --bg-surface: #0d1117;
-            --bg-elevated: rgba(22, 27, 34, 0.85);
-            --border-subtle: rgba(48, 54, 61, 0.6);
-            --text-primary: #e6edf3;
-            --text-secondary: #8b949e;
+            --bg-term: #0a0e14;
+            --bg-titlebar: #161b22;
+            --border: rgba(48, 54, 61, 0.6);
+            --text: #e6edf3;
+            --text-dim: #8b949e;
             --text-muted: #484f58;
-            --accent-cyan: #39d0d8;
-            --accent-cyan-dim: rgba(57, 208, 216, 0.15);
-            --accent-green: #3fb950;
-            --accent-green-dim: rgba(63, 185, 80, 0.15);
-            --accent-amber: #d29922;
-            --accent-amber-dim: rgba(210, 153, 34, 0.15);
-            --accent-red: #f85149;
-            --accent-red-dim: rgba(248, 81, 73, 0.15);
-            --glow-cyan: 0 0 20px rgba(57, 208, 216, 0.4);
-            --glow-green: 0 0 20px rgba(63, 185, 80, 0.4);
-            --radius-sm: 6px;
-            --radius-md: 12px;
-            --radius-lg: 16px;
+            --green: #3fb950;
+            --cyan: #39d0d8;
+            --amber: #d29922;
+            --red: #f85149;
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        html, body {
-            height: 100%;
-            overflow: hidden;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body { height: 100%; overflow: hidden; }
 
         body {
-            font-family: 'Space Grotesk', -apple-system, sans-serif;
-            background: var(--bg-deep);
-            color: var(--text-primary);
-            line-height: 1.5;
-            position: relative;
-        }
-
-        /* Scanline overlay */
-        body::before {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background: repeating-linear-gradient(
-                0deg,
-                transparent,
-                transparent 2px,
-                rgba(0, 0, 0, 0.03) 2px,
-                rgba(0, 0, 0, 0.03) 4px
-            );
-            pointer-events: none;
-            z-index: 1000;
-        }
-
-        /* Vignette */
-        body::after {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background: radial-gradient(
-                ellipse at center,
-                transparent 0%,
-                transparent 60%,
-                rgba(0, 0, 0, 0.4) 100%
-            );
-            pointer-events: none;
-            z-index: 999;
+            font-family: 'JetBrains Mono', monospace;
+            background: #000;
+            color: var(--text);
         }
 
         .app {
             height: 100%;
             display: flex;
             flex-direction: column;
-            max-width: 500px;
+            max-width: 700px;
             margin: 0 auto;
-            position: relative;
         }
 
-        /* Header */
-        .header {
-            padding: 16px 20px;
-            background: linear-gradient(180deg, var(--bg-surface) 0%, transparent 100%);
-            position: relative;
-            z-index: 10;
-        }
-
-        .header-top {
+        /* Title bar */
+        .titlebar {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 8px;
+            padding: 8px 16px;
+            background: var(--bg-titlebar);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
         }
 
-        .logo {
+        .titlebar-left {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }
 
-        .logo-icon {
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-green) 100%);
-            border-radius: var(--radius-sm);
+        .titlebar-dots {
             display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: 'JetBrains Mono', monospace;
-            font-weight: 600;
-            font-size: 14px;
-            color: var(--bg-deep);
-            box-shadow: var(--glow-cyan);
-        }
-
-        .logo-text {
-            font-weight: 600;
-            font-size: 18px;
-            letter-spacing: -0.02em;
-        }
-
-        .status-badge {
-            display: flex;
-            align-items: center;
             gap: 6px;
-            padding: 4px 10px;
-            background: var(--accent-green-dim);
-            border: 1px solid rgba(63, 185, 80, 0.3);
-            border-radius: 100px;
+        }
+
+        .dot { width: 10px; height: 10px; border-radius: 50%; }
+        .dot-red { background: var(--red); }
+        .dot-amber { background: var(--amber); }
+        .dot-green { background: var(--green); }
+
+        .titlebar-title {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-left: 8px;
+        }
+
+        .titlebar-status {
             font-size: 11px;
-            font-weight: 500;
-            color: var(--accent-green);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
+            color: var(--green);
+            display: flex;
+            align-items: center;
+            gap: 5px;
         }
 
         .status-dot {
-            width: 6px;
-            height: 6px;
-            background: var(--accent-green);
+            width: 6px; height: 6px;
+            background: var(--green);
             border-radius: 50%;
             animation: pulse 2s ease-in-out infinite;
         }
 
         @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.5; transform: scale(0.9); }
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
         }
 
-        .refresh-bar {
-            height: 2px;
-            background: var(--border-subtle);
-            border-radius: 2px;
-            overflow: hidden;
-        }
-
-        .refresh-progress {
-            height: 100%;
-            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green));
-            border-radius: 2px;
-            width: 0%;
-            transition: width 0.3s linear;
-        }
-
-        /* Main content */
-        .main {
+        /* Terminal pane */
+        .terminal {
             flex: 1;
+            background: var(--bg-term);
+            padding: 12px 16px;
             overflow-y: auto;
             overflow-x: hidden;
-            padding: 0 16px 100px;
             -webkit-overflow-scrolling: touch;
+            cursor: text;
+            position: relative;
         }
 
-        .main::-webkit-scrollbar {
-            display: none;
+        .terminal::-webkit-scrollbar { width: 6px; }
+        .terminal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        .terminal-content {
+            font-size: 13px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text);
+            min-height: 100%;
+        }
+
+        .terminal-content .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 16px;
+            background: var(--text);
+            animation: blink 1s step-end infinite;
+            vertical-align: text-bottom;
+            margin-left: 2px;
+        }
+
+        @keyframes blink {
+            50% { opacity: 0; }
         }
 
         /* Empty state */
-        .empty-state {
+        .empty {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 60vh;
+            height: 100%;
+            color: var(--text-muted);
             text-align: center;
-            padding: 20px;
-            animation: fadeIn 0.5s ease-out;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .empty-icon {
-            width: 80px;
-            height: 80px;
-            background: var(--bg-elevated);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-lg);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 20px;
-            font-size: 32px;
-        }
-
-        .empty-title {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: var(--text-primary);
-        }
-
-        .empty-desc {
-            font-size: 14px;
-            color: var(--text-secondary);
-            max-width: 260px;
-        }
-
-        /* Prompt cards */
-        .prompts {
-            display: flex;
-            flex-direction: column;
             gap: 12px;
-            padding-top: 8px;
         }
 
-        .prompt-card {
-            background: var(--bg-elevated);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-lg);
-            overflow: hidden;
-            animation: slideIn 0.4s ease-out;
-            animation-fill-mode: both;
-        }
+        .empty-icon { font-size: 32px; opacity: 0.4; }
+        .empty-title { font-size: 14px; }
+        .empty-hint { font-size: 12px; color: var(--text-muted); }
 
-        .prompt-card:nth-child(1) { animation-delay: 0ms; }
-        .prompt-card:nth-child(2) { animation-delay: 50ms; }
-        .prompt-card:nth-child(3) { animation-delay: 100ms; }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px) scale(0.98);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-            }
-        }
-
-        .prompt-card.permission {
-            border-color: rgba(57, 208, 216, 0.3);
-            box-shadow: 0 4px 24px rgba(57, 208, 216, 0.1);
-        }
-
-        .prompt-card.idle {
-            border-color: rgba(210, 153, 34, 0.3);
-        }
-
-        .prompt-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .prompt-type {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 12px;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .prompt-type.permission {
-            color: var(--accent-cyan);
-        }
-
-        .prompt-type.idle {
-            color: var(--accent-amber);
-        }
-
-        .prompt-type-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-        }
-
-        .prompt-type.permission .prompt-type-dot {
-            background: var(--accent-cyan);
-            box-shadow: 0 0 8px var(--accent-cyan);
-        }
-
-        .prompt-type.idle .prompt-type-dot {
-            background: var(--accent-amber);
-        }
-
-        .prompt-session {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 11px;
-            color: var(--text-muted);
-            padding: 4px 8px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: var(--radius-sm);
-        }
-
-        .prompt-message {
-            padding: 16px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 13px;
-            line-height: 1.6;
-            color: var(--text-primary);
-            white-space: pre-wrap;
-            word-break: break-word;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
-        .prompt-message::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        .prompt-message::-webkit-scrollbar-thumb {
-            background: var(--border-subtle);
-            border-radius: 2px;
-        }
-
-        .prompt-actions {
-            padding: 12px 16px;
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            border-top: 1px solid var(--border-subtle);
-            background: rgba(0, 0, 0, 0.2);
-        }
-
-        .btn {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 13px;
-            font-weight: 500;
-            padding: 10px 16px;
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-sm);
-            background: var(--bg-surface);
-            color: var(--text-primary);
-            cursor: pointer;
-            transition: all 0.15s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            min-width: 48px;
-        }
-
-        .btn:active {
-            transform: scale(0.96);
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, var(--accent-cyan) 0%, #2cb5bc 100%);
-            border-color: var(--accent-cyan);
-            color: var(--bg-deep);
-            box-shadow: 0 2px 12px rgba(57, 208, 216, 0.3);
-        }
-
-        .btn-primary:active {
-            box-shadow: 0 1px 6px rgba(57, 208, 216, 0.4);
-        }
-
-        .btn-success {
-            background: var(--accent-green-dim);
-            border-color: rgba(63, 185, 80, 0.4);
-            color: var(--accent-green);
-        }
-
-        .btn-danger {
-            background: var(--accent-red-dim);
-            border-color: rgba(248, 81, 73, 0.4);
-            color: var(--accent-red);
-        }
-
-        .btn-ghost {
+        /* Hidden input for capturing keystrokes */
+        .key-input {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            opacity: 0;
+            font-size: 16px; /* Prevents iOS zoom */
+            border: none;
             background: transparent;
-            border-color: transparent;
-            color: var(--text-secondary);
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        /* Custom input */
-        .custom-input-row {
-            display: flex;
-            gap: 8px;
-            padding: 0 16px 12px;
-            background: rgba(0, 0, 0, 0.2);
-        }
-
-        .custom-input {
-            flex: 1;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 13px;
-            padding: 10px 12px;
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-sm);
-            background: var(--bg-deep);
-            color: var(--text-primary);
+            color: transparent;
+            caret-color: transparent;
             outline: none;
-            transition: border-color 0.15s ease;
+            resize: none;
+            z-index: 1;
         }
 
-        .custom-input::placeholder {
-            color: var(--text-muted);
+        /* Focus indicator */
+        .terminal.focused {
+            outline: 1px solid var(--cyan);
+            outline-offset: -1px;
         }
 
-        .custom-input:focus {
-            border-color: var(--accent-cyan);
-        }
-
-        /* Toast notifications */
-        .toast-container {
+        /* Toast */
+        .toast-wrap {
             position: fixed;
-            bottom: 80px;
-            left: 50%;
-            transform: translateX(-50%);
+            bottom: 60px;
+            left: 50%; transform: translateX(-50%);
             z-index: 100;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
             pointer-events: none;
         }
 
         .toast {
-            padding: 12px 20px;
-            background: var(--bg-elevated);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            font-size: 13px;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            animation: toastIn 0.3s ease-out;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-        }
-
-        .toast.success {
-            border-color: rgba(63, 185, 80, 0.4);
-            color: var(--accent-green);
-        }
-
-        .toast.error {
-            border-color: rgba(248, 81, 73, 0.4);
-            color: var(--accent-red);
-        }
-
-        .toast.leaving {
-            animation: toastOut 0.3s ease-in forwards;
-        }
-
-        @keyframes toastIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px) scale(0.9);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-            }
-        }
-
-        @keyframes toastOut {
-            from {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-            }
-            to {
-                opacity: 0;
-                transform: translateY(-10px) scale(0.9);
-            }
-        }
-
-        /* Loading spinner */
-        .spinner {
-            width: 14px;
-            height: 14px;
-            border: 2px solid transparent;
-            border-top-color: currentColor;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* Sending state */
-        .prompt-card.sending {
-            opacity: 0.6;
-            pointer-events: none;
-        }
-
-        .prompt-card.sent {
-            animation: sentPulse 0.5s ease-out;
-        }
-
-        @keyframes sentPulse {
-            0% {
-                box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.4);
-            }
-            70% {
-                box-shadow: 0 0 0 10px rgba(63, 185, 80, 0);
-            }
-            100% {
-                box-shadow: 0 0 0 0 rgba(63, 185, 80, 0);
-            }
-        }
-
-        /* Footer status */
-        .footer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 12px 20px;
-            padding-bottom: max(12px, env(safe-area-inset-bottom));
-            background: linear-gradient(0deg, var(--bg-deep) 0%, transparent 100%);
-            display: flex;
-            justify-content: center;
-            z-index: 10;
-        }
-
-        .footer-content {
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-titlebar);
+            border: 1px solid var(--border);
+            border-radius: 6px;
             font-size: 12px;
+            color: var(--green);
+            animation: fadeIn 0.2s ease-out;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+        }
+
+        .toast.error { color: var(--red); border-color: rgba(248,81,73,0.3); }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Footer */
+        .footer {
+            padding: 6px 16px;
+            padding-bottom: max(6px, env(safe-area-inset-bottom));
+            background: var(--bg-titlebar);
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .footer-hint { color: var(--text-dim); cursor: pointer; }
+        .footer-hint:active { color: var(--cyan); }
+
+        /* History view */
+        .history-list {
+            padding: 8px 0;
+        }
+
+        .history-item {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .history-item:last-child { border-bottom: none; }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .history-event {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .history-event.permission { color: var(--amber); }
+        .history-event.idle { color: var(--text-dim); }
+
+        .history-time {
+            font-size: 10px;
             color: var(--text-muted);
         }
 
-        .footer-content .spinner {
-            width: 12px;
-            height: 12px;
+        .history-message {
+            font-size: 12px;
+            color: var(--text-dim);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
         }
 
-        /* Responsive adjustments */
-        @media (min-width: 500px) {
-            .prompt-actions {
-                justify-content: flex-start;
-            }
-
-            .btn {
-                min-width: 60px;
-            }
+        .history-response {
+            font-size: 11px;
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--green);
         }
 
-        /* Safe area insets for notched phones */
+        .history-response.dismissed {
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--amber);
+        }
+
+        .history-back {
+            text-align: center;
+            padding: 12px;
+            color: var(--cyan);
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .history-back:active { opacity: 0.6; }
+
+        .history-empty {
+            text-align: center;
+            padding: 40px 0;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
         @supports (padding: max(0px)) {
-            .header {
-                padding-top: max(16px, env(safe-area-inset-top));
-            }
+            .titlebar { padding-top: max(8px, env(safe-area-inset-top)); }
         }
     </style>
 </head>
 <body>
     <div class="app">
-        <header class="header">
-            <div class="header-top">
-                <div class="logo">
-                    <div class="logo-icon">CR</div>
-                    <span class="logo-text">Claude Remote</span>
+        <div class="titlebar">
+            <div class="titlebar-left">
+                <div class="titlebar-dots">
+                    <div class="dot dot-red"></div>
+                    <div class="dot dot-amber"></div>
+                    <div class="dot dot-green"></div>
                 </div>
-                <div class="status-badge">
-                    <div class="status-dot"></div>
-                    <span>Live</span>
-                </div>
+                <span class="titlebar-title" id="titleText">claude-remote</span>
             </div>
-            <div class="refresh-bar">
-                <div class="refresh-progress" id="refreshProgress"></div>
+            <div class="titlebar-status">
+                <div class="status-dot"></div>
+                <span id="statusText">connected</span>
             </div>
-        </header>
+        </div>
 
-        <main class="main" id="main">
-            <!-- Content loaded dynamically -->
-        </main>
+        <div class="terminal" id="terminal">
+            <textarea class="key-input" id="keyInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+            <div class="terminal-content" id="termContent"></div>
+        </div>
 
-        <div class="toast-container" id="toastContainer"></div>
+        <div class="toast-wrap" id="toastWrap"></div>
 
-        <footer class="footer">
-            <div class="footer-content" id="footerContent">
-                <span>Refreshing in <span id="countdown">15</span>s</span>
-            </div>
-        </footer>
+        <div class="footer">
+            <span id="footerLeft">No pending prompts</span>
+            <span class="footer-hint" id="footerHint">tap terminal to type</span>
+        </div>
     </div>
 
     <script>
-        const REFRESH_INTERVAL = 15000;
+        const POLL_INTERVAL = 3000;
+        const WS_RECONNECT_BASE = 1000;
+        const WS_RECONNECT_MAX = 30000;
         const API_BASE = '';
 
-        let prompts = [];
-        let refreshTimer = null;
-        let countdownValue = 15;
-        let isRefreshing = false;
+        let currentPrompt = null;
+        let pollTimer = null;
+        let isSending = false;
+        let userHasTapped = false; // Only send keys after explicit user tap
+        let showingHistory = false;
+        let ws = null;
+        let wsReconnectDelay = WS_RECONNECT_BASE;
+        let wsReconnectTimer = null;
+        let usingWebSocket = false;
 
-        // DOM elements
-        const main = document.getElementById('main');
-        const refreshProgress = document.getElementById('refreshProgress');
-        const countdown = document.getElementById('countdown');
-        const footerContent = document.getElementById('footerContent');
-        const toastContainer = document.getElementById('toastContainer');
+        const terminal = document.getElementById('terminal');
+        const termContent = document.getElementById('termContent');
+        const keyInput = document.getElementById('keyInput');
+        const titleText = document.getElementById('titleText');
+        const statusText = document.getElementById('statusText');
+        const footerLeft = document.getElementById('footerLeft');
+        const footerHint = document.getElementById('footerHint');
+        const toastWrap = document.getElementById('toastWrap');
+        const statusDot = statusText.parentElement.querySelector('.status-dot');
 
-        // Fetch prompts from API
-        async function fetchPrompts() {
-            if (isRefreshing) return;
-            isRefreshing = true;
+        // Shared prompt update handler (used by both WS and HTTP)
+        function handlePromptsUpdate(prompts) {
+            if (prompts.length > 0) {
+                const prompt = prompts[0];
+                if (!currentPrompt || currentPrompt.id !== prompt.id) {
+                    currentPrompt = prompt;
+                    userHasTapped = false;
+                    if (!showingHistory) renderTerminal();
+                } else {
+                    // Same prompt — terminal content may have updated
+                    currentPrompt = prompt;
+                    if (!showingHistory) renderTerminal();
+                }
+            } else if (currentPrompt) {
+                currentPrompt = null;
+                if (!showingHistory) renderEmpty();
+            } else {
+                if (!showingHistory) renderEmpty();
+            }
+
+            statusDot.style.background = 'var(--green)';
+        }
+
+        // WebSocket connection
+        function connectWebSocket() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${location.host}/ws`;
+
+            try {
+                ws = new WebSocket(wsUrl);
+            } catch (e) {
+                startPolling();
+                return;
+            }
+
+            ws.onopen = () => {
+                usingWebSocket = true;
+                wsReconnectDelay = WS_RECONNECT_BASE;
+                stopPolling();
+                statusText.textContent = 'live';
+                statusDot.style.background = 'var(--green)';
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'prompts') {
+                        handlePromptsUpdate(data.prompts);
+                    }
+                } catch (e) {
+                    console.error('WS parse error:', e);
+                }
+            };
+
+            ws.onclose = () => {
+                usingWebSocket = false;
+                ws = null;
+                statusText.textContent = 'polling';
+                startPolling();
+
+                wsReconnectTimer = setTimeout(() => {
+                    wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_RECONNECT_MAX);
+                    connectWebSocket();
+                }, wsReconnectDelay);
+            };
+
+            ws.onerror = () => {};
+        }
+
+        // HTTP polling (fallback)
+        async function poll() {
+            if (usingWebSocket) return;
 
             try {
                 const res = await fetch(`${API_BASE}/api/prompts`);
                 const data = await res.json();
-
-                if (data.success) {
-                    prompts = data.prompts;
-                    render();
-                }
-            } catch (err) {
-                console.error('Failed to fetch prompts:', err);
-                showToast('Connection error', 'error');
-            } finally {
-                isRefreshing = false;
+                if (data.success) handlePromptsUpdate(data.prompts);
+            } catch {
+                statusText.textContent = 'disconnected';
+                statusDot.style.background = 'var(--red)';
             }
         }
 
-        // Send response to API
-        async function sendResponse(promptId, response) {
-            const card = document.querySelector(`[data-id="${CSS.escape(promptId)}"]`);
-            if (card) card.classList.add('sending');
+        function startPolling() {
+            if (pollTimer) return;
+            poll();
+            pollTimer = setInterval(poll, POLL_INTERVAL);
+        }
+
+        function stopPolling() {
+            if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
+        }
+
+        // Render terminal content
+        function renderTerminal() {
+            const p = currentPrompt;
+            const content = (p.terminal || p.terminal_content || '').trim();
+            const display = content || p.message || 'Waiting for input...';
+
+            termContent.textContent = '';
+            termContent.appendChild(document.createTextNode(display));
+
+            // Add blinking cursor
+            const cursor = document.createElement('span');
+            cursor.className = 'cursor';
+            termContent.appendChild(cursor);
+
+            // Update chrome
+            const session = p.tmux_session || 'claude-remote';
+            titleText.textContent = session;
+            footerLeft.textContent = p.event === 'permission_prompt' ? 'Permission required' : 'Waiting for input';
+            footerHint.textContent = 'tap to type \u00b7 keys sent to session';
+
+            // Scroll to bottom
+            terminal.scrollTop = terminal.scrollHeight;
+
+            // Don't auto-focus — wait for user to tap terminal
+        }
+
+        // Render empty state
+        function renderEmpty() {
+            termContent.innerHTML = '';
+            const empty = document.createElement('div');
+            empty.className = 'empty';
+            empty.innerHTML = '<div class="empty-icon">\u25c7</div>'
+                + '<div class="empty-title">No pending prompts</div>'
+                + '<div class="empty-hint">Claude Code prompts will appear here</div>';
+            termContent.appendChild(empty);
+
+            titleText.textContent = 'claude-remote';
+            footerLeft.textContent = 'No pending prompts';
+            footerHint.textContent = 'history';
+        }
+
+        // Send a key/response to tmux
+        async function sendKey(key) {
+            if (!currentPrompt || isSending) return;
+            isSending = true;
 
             try {
                 const res = await fetch(`${API_BASE}/api/respond`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: promptId, response })
+                    body: JSON.stringify({
+                        id: currentPrompt.id,
+                        response: key,
+                        noEnter: true
+                    })
                 });
 
                 const data = await res.json();
-
                 if (data.success) {
-                    if (card) {
-                        card.classList.remove('sending');
-                        card.classList.add('sent');
-                    }
-                    showToast('Response sent', 'success');
-
-                    // Remove from local state and re-render
-                    prompts = prompts.filter(p => p.id !== promptId);
-                    setTimeout(() => render(), 300);
+                    showToast('Sent: ' + (key || 'Enter'));
+                    currentPrompt = null;
+                    if (!showingHistory) renderEmpty();
+                    // If not on WebSocket, poll to catch next prompt
+                    if (!usingWebSocket) setTimeout(poll, 1000);
                 } else {
-                    throw new Error(data.error || 'Failed to send');
+                    showToast(data.error || 'Failed', true);
                 }
             } catch (err) {
-                if (card) card.classList.remove('sending');
-                showToast(err.message, 'error');
+                showToast('Connection error', true);
+            } finally {
+                isSending = false;
+                keyInput.value = '';
             }
         }
 
-        // Show toast notification
-        function showToast(message, type = 'success') {
-            const toast = document.createElement('div');
-            toast.className = `toast ${type}`;
-
-            const icon = document.createElement('span');
-            icon.textContent = type === 'success' ? '✓' : '✕';
-            toast.appendChild(icon);
-
-            const text = document.createElement('span');
-            text.textContent = message;
-            toast.appendChild(text);
-
-            toastContainer.appendChild(toast);
-
-            setTimeout(() => {
-                toast.classList.add('leaving');
-                setTimeout(() => toast.remove(), 300);
-            }, 2500);
-        }
-
-        // Create element helper (safe DOM construction)
-        function createElement(tag, attrs = {}, children = []) {
-            const el = document.createElement(tag);
-            for (const [key, value] of Object.entries(attrs)) {
-                if (key === 'className') {
-                    el.className = value;
-                } else if (key === 'textContent') {
-                    el.textContent = value;
-                } else if (key.startsWith('data-')) {
-                    el.setAttribute(key, value);
-                } else {
-                    el.setAttribute(key, value);
-                }
-            }
-            for (const child of children) {
-                if (typeof child === 'string') {
-                    el.appendChild(document.createTextNode(child));
-                } else if (child) {
-                    el.appendChild(child);
-                }
-            }
-            return el;
-        }
-
-        // Render empty state
-        function renderEmptyState() {
-            const container = createElement('div', { className: 'empty-state' }, [
-                createElement('div', { className: 'empty-icon', textContent: '◇' }),
-                createElement('h2', { className: 'empty-title', textContent: 'No pending prompts' }),
-                createElement('p', { className: 'empty-desc', textContent: 'Claude Code prompts will appear here when input is needed' })
-            ]);
-            return container;
-        }
-
-        // Render single prompt card (safe DOM construction)
-        function renderPromptCard(prompt) {
-            const isPermission = prompt.event === 'permission_prompt';
-            const typeClass = isPermission ? 'permission' : 'idle';
-            const typeLabel = isPermission ? 'Permission' : 'Idle';
-            const sessionShort = (prompt.tmux_session || '').replace('claude-remote-', '') || '—';
-
-            // Header
-            const header = createElement('div', { className: 'prompt-header' }, [
-                createElement('div', { className: `prompt-type ${typeClass}` }, [
-                    createElement('div', { className: 'prompt-type-dot' }),
-                    createElement('span', { textContent: typeLabel })
-                ]),
-                createElement('div', { className: 'prompt-session', textContent: `#${sessionShort}` })
-            ]);
-
-            // Message
-            const message = createElement('div', { className: 'prompt-message', textContent: prompt.message || 'No message' });
-
-            // Action buttons
-            const btnY = createElement('button', { className: 'btn btn-primary', 'data-action': 'Y', 'data-prompt-id': prompt.id, textContent: 'Y' });
-            const btnN = createElement('button', { className: 'btn btn-danger', 'data-action': 'n', 'data-prompt-id': prompt.id, textContent: 'n' });
-            const btnEnter = createElement('button', { className: 'btn', 'data-action': '', 'data-prompt-id': prompt.id, textContent: '↵ Enter' });
-            const btnSkip = createElement('button', { className: 'btn btn-ghost', 'data-action': 'skip', 'data-prompt-id': prompt.id, textContent: 'Skip' });
-
-            const actions = createElement('div', { className: 'prompt-actions' }, [btnY, btnN, btnEnter, btnSkip]);
-
-            // Custom input row
-            const customInput = createElement('input', {
-                type: 'text',
-                className: 'custom-input',
-                placeholder: 'Custom response...',
-                'data-prompt-id': prompt.id,
-                autocomplete: 'off',
-                autocorrect: 'off',
-                autocapitalize: 'off',
-                spellcheck: 'false'
-            });
-
-            const sendBtn = createElement('button', { className: 'btn btn-success', 'data-send-custom': prompt.id, textContent: 'Send' });
-            const inputRow = createElement('div', { className: 'custom-input-row' }, [customInput, sendBtn]);
-
-            // Card container
-            const card = createElement('div', { className: `prompt-card ${typeClass}`, 'data-id': prompt.id }, [
-                header, message, actions, inputRow
-            ]);
-
-            // Attach event listeners
-            [btnY, btnN, btnEnter, btnSkip].forEach(btn => {
-                btn.addEventListener('click', handleAction);
-            });
-
-            customInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    const value = customInput.value.trim();
-                    if (value) sendResponse(prompt.id, value);
-                }
-            });
-
-            sendBtn.addEventListener('click', () => {
-                const value = customInput.value.trim();
-                if (value) sendResponse(prompt.id, value);
-            });
-
-            return card;
-        }
-
-        // Render prompts
-        function render() {
-            // Clear main content
-            main.replaceChildren();
-
-            if (prompts.length === 0) {
-                main.appendChild(renderEmptyState());
+        // Handle keyboard input — only after user has tapped the terminal
+        keyInput.addEventListener('input', (e) => {
+            if (!userHasTapped || !currentPrompt) {
+                keyInput.value = '';
                 return;
             }
-
-            const container = createElement('div', { className: 'prompts' });
-            prompts.forEach(prompt => {
-                container.appendChild(renderPromptCard(prompt));
-            });
-            main.appendChild(container);
-        }
-
-        // Handle action button clicks
-        function handleAction(e) {
-            const action = e.currentTarget.getAttribute('data-action');
-            const promptId = e.currentTarget.getAttribute('data-prompt-id');
-
-            if (action === 'skip') {
-                // Dismiss without responding
-                prompts = prompts.filter(p => p.id !== promptId);
-                render();
-                return;
+            const val = keyInput.value;
+            if (val) {
+                sendKey(val);
+                keyInput.value = '';
             }
+        });
 
-            sendResponse(promptId, action);
+        keyInput.addEventListener('keydown', (e) => {
+            if (!userHasTapped || !currentPrompt) return;
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendKey('Enter');
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                sendKey('Escape');
+            }
+        });
+
+        // Focus management — require explicit tap before accepting input
+        terminal.addEventListener('click', () => {
+            userHasTapped = true;
+            keyInput.focus();
+        });
+
+        keyInput.addEventListener('focus', () => {
+            terminal.classList.add('focused');
+        });
+
+        keyInput.addEventListener('blur', () => {
+            terminal.classList.remove('focused');
+        });
+
+        // Toast
+        function showToast(msg, isError = false) {
+            const t = document.createElement('div');
+            t.className = 'toast' + (isError ? ' error' : '');
+            t.textContent = msg;
+            toastWrap.appendChild(t);
+            setTimeout(() => t.remove(), 2000);
         }
 
-        // Update refresh progress bar
-        function updateProgress() {
-            const elapsed = REFRESH_INTERVAL - (countdownValue * 1000);
-            const percent = (elapsed / REFRESH_INTERVAL) * 100;
-            refreshProgress.style.width = `${percent}%`;
-            countdown.textContent = countdownValue;
+        // History view
+        function timeAgo(isoStr) {
+            const diff = Date.now() - new Date(isoStr).getTime();
+            const mins = Math.floor(diff / 60000);
+            if (mins < 1) return 'just now';
+            if (mins < 60) return mins + 'm ago';
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return hrs + 'h ago';
+            return Math.floor(hrs / 24) + 'd ago';
         }
 
-        // Start countdown timer
-        function startCountdown() {
-            countdownValue = Math.floor(REFRESH_INTERVAL / 1000);
-            updateProgress();
+        async function showHistory() {
+            showingHistory = true;
+            keyInput.style.display = 'none';
+            footerHint.textContent = 'back to live';
 
-            if (refreshTimer) clearInterval(refreshTimer);
+            try {
+                const res = await fetch(`${API_BASE}/api/history?limit=20`);
+                const data = await res.json();
 
-            refreshTimer = setInterval(() => {
-                countdownValue--;
-                updateProgress();
+                termContent.textContent = '';
+                titleText.textContent = 'history';
+                footerLeft.textContent = data.count + ' resolved';
 
-                if (countdownValue <= 0) {
-                    countdownValue = Math.floor(REFRESH_INTERVAL / 1000);
-                    fetchPrompts();
+                if (!data.success || data.history.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'history-empty';
+                    empty.textContent = 'No history yet';
+                    termContent.appendChild(empty);
+                    return;
                 }
-            }, 1000);
+
+                const list = document.createElement('div');
+                list.className = 'history-list';
+
+                for (const item of data.history) {
+                    const el = document.createElement('div');
+                    el.className = 'history-item';
+
+                    const header = document.createElement('div');
+                    header.className = 'history-header';
+
+                    const event = document.createElement('span');
+                    event.className = 'history-event ' + (item.event === 'permission_prompt' ? 'permission' : 'idle');
+                    event.textContent = item.event === 'permission_prompt' ? 'permission' : 'idle';
+
+                    const time = document.createElement('span');
+                    time.className = 'history-time';
+                    time.textContent = item.resolved_at ? timeAgo(item.resolved_at) : '';
+
+                    header.appendChild(event);
+                    header.appendChild(time);
+
+                    const msg = document.createElement('div');
+                    msg.className = 'history-message';
+                    msg.textContent = (item.message || '').substring(0, 100);
+
+                    el.appendChild(header);
+                    el.appendChild(msg);
+
+                    if (item.dismissed) {
+                        const badge = document.createElement('span');
+                        badge.className = 'history-response dismissed';
+                        badge.textContent = 'dismissed';
+                        el.appendChild(badge);
+                    } else if (item.response) {
+                        const badge = document.createElement('span');
+                        badge.className = 'history-response';
+                        badge.textContent = item.response;
+                        el.appendChild(badge);
+                    }
+
+                    list.appendChild(el);
+                }
+
+                termContent.appendChild(list);
+                terminal.scrollTop = 0;
+            } catch {
+                termContent.textContent = '';
+                const err = document.createElement('div');
+                err.className = 'history-empty';
+                err.textContent = 'Failed to load history';
+                termContent.appendChild(err);
+            }
         }
 
-        // Initialize
-        function init() {
-            fetchPrompts();
-            startCountdown();
+        function hideHistory() {
+            showingHistory = false;
+            keyInput.style.display = '';
+            if (currentPrompt) {
+                renderTerminal();
+            } else {
+                renderEmpty();
+            }
+        }
 
-            // Refresh when page becomes visible
+        // Footer hint toggles history
+        footerHint.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (showingHistory) {
+                hideHistory();
+            } else {
+                showHistory();
+            }
+        });
+
+        // Start — WebSocket first, polling as fallback
+        function start() {
+            connectWebSocket();
+
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'visible') {
-                    fetchPrompts();
-                    startCountdown();
+                    // Reconnect WebSocket if it dropped (iOS Safari background)
+                    if (!ws || ws.readyState !== WebSocket.OPEN) {
+                        clearTimeout(wsReconnectTimer);
+                        wsReconnectDelay = WS_RECONNECT_BASE;
+                        connectWebSocket();
+                    }
+                    // One-shot poll to catch up immediately
+                    poll();
                 }
             });
         }
 
-        init();
+        start();
     </script>
 </body>
 </html>

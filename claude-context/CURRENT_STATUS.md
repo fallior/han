@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-07 by Darron (via Claude)
+> Last updated: 2026-02-07 (Session 2) by Darron (via Claude)
 
 ## Current Stage
 
@@ -15,7 +15,7 @@ Implementation complete. Code pushed to GitHub. Ready for real-world testing on 
 | Discovery & Research | 🟢 Complete | Found Claude Code hooks system |
 | Architecture Design | 🟢 Complete | All 6 levels documented |
 | Level 1 Implementation | 🟢 Complete | 8 files, ~1,800 lines |
-| Level 1 Testing | 🟡 In Progress | Needs end-to-end verification |
+| Level 1 Testing | 🟡 In Progress | Simulated E2E passed; live test pending |
 | Level 2: Push Alerts | ⚪ Not Started | — |
 | Level 3: Context Window | ⚪ Not Started | — |
 | Level 4-6 | ⚪ Not Started | — |
@@ -24,7 +24,15 @@ Implementation complete. Code pushed to GitHub. Ready for real-world testing on 
 
 ## Recent Changes
 
-### 2026-02-07 — Darron (via Claude)
+### 2026-02-07 — Darron (via Claude) — Session 2
+- Ran full simulated end-to-end test — all 10 steps passed
+- Updated `notify.sh` for new Claude Code hook JSON format (`notification_type` field)
+- Created `~/.claude/settings.json` with Notification hooks configuration
+- Installed server npm dependencies
+- Attempted live test — blocked by Opus concurrency limit (one session at a time)
+- Hook config format changed: now uses `Notification` event with `matcher` patterns
+
+### 2026-02-07 — Darron (via Claude) — Session 1
 - Integrated extended roadmap (Levels 7-11) into project:
   - Level 7: Autonomous Task Runner (`autopilot`)
   - Level 8: Intelligent Orchestrator (`conductor`)
@@ -66,10 +74,11 @@ Implementation complete. Code pushed to GitHub. Ready for real-world testing on 
 
 ## Next Actions
 
-### Immediate (This Session)
+### Immediate (Next Session)
 - [ ] Test installation script on real Mac
-- [ ] Verify hook fires correctly from Claude Code
-- [ ] Test end-to-end flow: prompt → notification → response
+- [ ] Verify hook fires correctly from live Claude Code session
+- [x] Test end-to-end flow: prompt → notification → response (simulated — passed)
+- [ ] Live test: run Claude Code in tmux, verify hook creates state files, respond via web UI
 
 ### Short-term (This Week)
 - [ ] Set up ntfy.sh topic and test push notifications
@@ -86,7 +95,9 @@ Implementation complete. Code pushed to GitHub. Ready for real-world testing on 
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
+| Hook format changed | High | Claude Code now uses `Notification` event with `notification_type` — `notify.sh` updated, `install.sh` still uses old format |
 | `idle_prompt` 60s delay | Medium | Built into Claude Code; can't be reduced |
+| Opus concurrency limit | Medium | Can't run two Claude Code Opus sessions simultaneously on same account |
 | VSCode extension hooks broken | Low | Known issue (GitHub #16114); terminal works |
 | iOS instant notifications need upstream | Low | Requires ntfy.sh upstream config |
 
