@@ -1,12 +1,12 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-07 (Session 2) by Darron (via Claude)
+> Last updated: 2026-02-08 (Session 3) by Darron (via Claude)
 
 ## Current Stage
 
-**Level 1**: Prompt Responder (MVP)
+**Level 2**: Push Alerts — Complete. WebSocket real-time updates also implemented.
 
-Implementation complete. Code pushed to GitHub. Ready for real-world testing on Mac + iPhone.
+Terminal mirror UI live-tested on iPhone. Push notifications with action buttons working. WebSocket replacing polling.
 
 ## Progress Summary
 
@@ -15,14 +15,36 @@ Implementation complete. Code pushed to GitHub. Ready for real-world testing on 
 | Discovery & Research | 🟢 Complete | Found Claude Code hooks system |
 | Architecture Design | 🟢 Complete | All 6 levels documented |
 | Level 1 Implementation | 🟢 Complete | 8 files, ~1,800 lines |
-| Level 1 Testing | 🟡 In Progress | Simulated E2E passed; live test pending |
-| Level 2: Push Alerts | ⚪ Not Started | — |
-| Level 3: Context Window | ⚪ Not Started | — |
+| Level 1 Testing | 🟢 Complete | Simulated + live E2E passed |
+| Level 2: Push Alerts | 🟢 Complete | ntfy.sh action buttons, config, history |
+| WebSocket (from Level 4) | 🟢 Complete | Real-time push, polling fallback |
+| Level 3: Context Window | ⚪ Not Started | Partially covered by terminal mirror |
 | Level 4-6 | ⚪ Not Started | — |
 
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-08 — Darron (via Claude) — Session 3
+- **Level 2: Push Alerts** — Full implementation:
+  - Config file support (`~/.claude-remote/config.json`) for ntfy_topic, remote_url, quiet hours
+  - Rich ntfy.sh notifications: urgent priority, action buttons (Approve, Open UI), dedup via X-Id
+  - Quick-response endpoint (`GET /quick`) for one-tap responses from notification
+  - Notification history endpoint (`GET /api/history`) and UI history view
+  - idle_prompt notifications (configurable), quiet hours support
+  - Notification tracking (`notified` field) in state files
+- **WebSocket real-time updates**:
+  - `ws` npm package, WebSocketServer on `/ws` path
+  - `fs.watch` on pending directory with 100ms debounce
+  - Automatic fallback to HTTP polling if WebSocket disconnects
+  - Exponential backoff reconnection, iOS Safari visibility handling
+  - Status indicator: "live" (WebSocket) or "polling" (HTTP fallback)
+- **Testing**:
+  - Push notifications verified on iPhone (ntfy.sh topic + action buttons)
+  - Fixed firewall (`ufw allow 3847/tcp`) for phone access
+  - WebSocket instant updates verified (create/delete test files)
+  - Improved quick-response page with visual feedback
+- Committed and pushed to GitHub (e36c9f8)
 
 ### 2026-02-07 — Darron (via Claude) — Session 2
 - Ran full simulated end-to-end test — all 10 steps passed
@@ -33,29 +55,11 @@ Implementation complete. Code pushed to GitHub. Ready for real-world testing on 
 - Hook config format changed: now uses `Notification` event with `matcher` patterns
 
 ### 2026-02-07 — Darron (via Claude) — Session 1
-- Integrated extended roadmap (Levels 7-11) into project:
-  - Level 7: Autonomous Task Runner (`autopilot`)
-  - Level 8: Intelligent Orchestrator (`conductor`)
-  - Level 9: Multi-Project Autonomy (`empire`)
-  - Level 10: Self-Improving System (`singularity`)
-  - Level 11: Autonomous Product Factory (`genesis`)
+- Integrated extended roadmap (Levels 7-11) into project
 - Created `ROADMAP.md` with full vision document (1098 lines)
-- Updated `CLAUDE.md` with roadmap references
-- Includes Claude Agent SDK integration patterns and hybrid orchestration architecture
 
 ### 2026-01-13 — Darron (via Claude) — Session 2
-- Implemented complete Level 1 MVP (8 files, ~1,800 lines):
-  - `src/hooks/notify.sh` — Hook script with ntfy.sh integration
-  - `scripts/claude-remote` — CLI launcher with tmux session management
-  - `src/server/server.js` — Express API with safe execFile usage
-  - `src/ui/index.html` — Dark theme mobile UI with glassmorphism
-  - `scripts/install.sh` — Full setup with hook configuration
-  - `scripts/start-server.sh` — Server wrapper
-  - `README.md` — Usage documentation
-- Created 3 learnings:
-  - `localhost-remote-access.md` — Network options for isolated WiFi
-  - `claude-code-hooks.md` — Hook system integration
-  - `tmux-response-injection.md` — Safe keystroke injection
+- Implemented complete Level 1 MVP (8 files, ~1,800 lines)
 - Pushed to GitHub: https://github.com/fallior/clauderemote
 
 ### 2026-01-13 — Darron (via Claude) — Session 1
@@ -66,40 +70,37 @@ Implementation complete. Code pushed to GitHub. Ready for real-world testing on 
 
 - ✅ Hook script receives notification data from Claude Code
 - ✅ State files created for pending prompts
-- ✅ Push notifications sent via ntfy.sh (if topic configured)
-- ✅ Express server serves web UI and API
-- ✅ Web UI displays prompts with quick action buttons
-- ✅ Response sent to Claude Code via `tmux send-keys`
+- ✅ Rich push notifications via ntfy.sh with action buttons
+- ✅ One-tap response from notification (quick-response page)
+- ✅ Config file for persistent settings (ntfy topic, remote URL, quiet hours)
+- ✅ Express server serves web UI, API, and WebSocket
+- ✅ Terminal mirror UI shows live tmux pane content
+- ✅ Keystroke forwarding to Claude Code via tmux
+- ✅ WebSocket real-time push (instant prompt updates)
+- ✅ Automatic fallback to HTTP polling if WebSocket drops
+- ✅ Notification history in web UI
 - ✅ tmux session management via `claude-remote` CLI
 
 ## Next Actions
 
 ### Immediate (Next Session)
-- [ ] Test installation script on real Mac
-- [ ] Verify hook fires correctly from live Claude Code session
-- [x] Test end-to-end flow: prompt → notification → response (simulated — passed)
-- [ ] Live test: run Claude Code in tmux, verify hook creates state files, respond via web UI
+- [ ] Update `install.sh` to use new hook format (still uses old format)
+- [ ] Test with Tailscale for true remote access
+- [ ] Refine UI based on continued mobile usage
 
-### Short-term (This Week)
-- [ ] Set up ntfy.sh topic and test push notifications
-- [ ] Install Tailscale and test remote access
-- [ ] Refine web UI based on actual mobile usage
-- [ ] Fix any bugs found during testing
-
-### Medium-term (Level 2)
-- [ ] Improve notification timing (immediate on permission_prompt)
-- [ ] Add notification actions for iOS/Android
-- [ ] Richer notification content with prompt preview
+### Short-term
+- [ ] Level 3: Context Window — scrollable history, search, syntax highlighting
+- [ ] Level 4: xterm.js for proper terminal rendering
+- [ ] Level 5: Mobile keyboard with special keys (Ctrl+C, Tab, etc.)
 
 ## Known Issues
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
-| Hook format changed | High | Claude Code now uses `Notification` event with `notification_type` — `notify.sh` updated, `install.sh` still uses old format |
+| `install.sh` uses old hook format | Medium | Needs updating to use `Notification` event with `matcher` patterns |
 | `idle_prompt` 60s delay | Medium | Built into Claude Code; can't be reduced |
-| Opus concurrency limit | Medium | Can't run two Claude Code Opus sessions simultaneously on same account |
-| VSCode extension hooks broken | Low | Known issue (GitHub #16114); terminal works |
-| iOS instant notifications need upstream | Low | Requires ntfy.sh upstream config |
+| iOS Safari drops WebSocket in background | Low | Handled by visibilitychange reconnect + polling fallback |
+| Opus concurrency limit | Low | Can't run two Claude Code Opus sessions simultaneously |
 
 ## Blockers
 
@@ -108,12 +109,14 @@ Implementation complete. Code pushed to GitHub. Ready for real-world testing on 
 ## Questions to Resolve
 
 - [x] Best way to handle multiple simultaneous Claude Code sessions? → `claude-remote-$$` naming
-- [x] Should web UI auto-refresh or use WebSocket? → Polling for Level 1, WebSocket in Level 4
-- [x] Is 15-second polling acceptable for Level 1? → Yes, push notification handles urgency
+- [x] Should web UI auto-refresh or use WebSocket? → WebSocket with polling fallback
+- [x] How to handle ntfy.sh action buttons on private networks? → Use `view` actions (opens on phone browser, which is on LAN)
 
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-08_00-00-00.md](../_logs/session_2026-02-08_00-00-00.md) — Level 2 + WebSocket
+- [session_2026-02-07_21-20-25.md](../_logs/session_2026-02-07_21-20-25.md) — E2E testing
 - [2026-01-13-darron-level1-implementation.md](session-notes/2026-01-13-darron-level1-implementation.md) — Level 1 MVP implementation
 - [2026-01-13-darron-kickoff.md](session-notes/2026-01-13-darron-kickoff.md) — Context structure setup
 
@@ -133,12 +136,16 @@ Recent sessions (latest first):
 3. Add any new issues or blockers
 4. Create a session note if significant work was done
 
-**To test the prototype:**
+**To start the server:**
 ```bash
-cd claude-remote
-./scripts/install.sh
-export NTFY_TOPIC="your-secret-topic"
-./scripts/start-server.sh  # Terminal 1
-claude-remote              # Terminal 2
-# Open http://localhost:3847 on phone
+cd src/server && node server.js
+```
+
+**To configure push notifications:**
+```json
+// ~/.claude-remote/config.json
+{
+  "ntfy_topic": "your-secret-topic",
+  "remote_url": "http://your-ip:3847"
+}
 ```
