@@ -203,6 +203,14 @@ If this was a significant session with architecture/decision changes, offer to c
 - Include: summary, decisions, changes, next steps
 - These are for high-level documentation, not process capture
 
+
+#### 9. Log Deduplication
+Run the log deduplication script to clean up Terminal UI noise from session logs:
+```bash
+~/Projects/infrastructure/scripts/deduplicate-logs
+```
+This removes duplicate lines caused by Terminal status bar redraws.
+
 ### Output
 Provide a summary of what was updated:
 - ✅ Files updated
