@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-08 (Session 4) by Darron (via Claude)
+> Last updated: 2026-02-08 (Session 5) by Darron (via Claude)
 
 ## Current Stage
 
@@ -26,6 +26,12 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-08 — Darron (via Claude) — Session 5
+- **Updated `install.sh`** to new Notification hook format:
+  - Changed from `hooks.permission_prompt` / `hooks.idle_prompt` (old deprecated format)
+  - Now uses `hooks.Notification[{matcher: "permission_prompt|idle_prompt", ...}]`
+  - Updated push notification instructions to use config file approach
 
 ### 2026-02-08 — Darron (via Claude) — Session 4
 - **xterm.js integration** (Level 4):
@@ -134,6 +140,7 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-08_22-14-13.md](../_logs/session_2026-02-08_22-14-13.md) — install.sh hook format update
 - [session_2026-02-08_02-48-24.md](../_logs/session_2026-02-08_02-48-24.md) — xterm.js + Mobile keyboard
 - [session_2026-02-08_00-00-00.md](../_logs/session_2026-02-08_00-00-00.md) — Level 2 + WebSocket
 - [session_2026-02-07_21-20-25.md](../_logs/session_2026-02-07_21-20-25.md) — E2E testing

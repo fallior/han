@@ -62,8 +62,8 @@ See `~/Projects/_learnings/INDEX.md` for full index.
 
 ## Quick Context
 
-- **Stage**: Level 1 Prototype Complete
-- **Stack**: Node.js + Express + tmux + ntfy.sh
+- **Stage**: Level 5 Complete (Mobile Keyboard)
+- **Stack**: Node.js + Express + xterm.js + tmux + ntfy.sh + WebSocket
 - **Status**: Active development
 
 ## What This Is
@@ -119,11 +119,11 @@ Check `claude-context/CURRENT_STATUS.md` for:
 
 | Level | Focus | Status |
 |-------|-------|--------|
-| 1 | Prompt Responder (MVP) | 🟡 Prototype |
-| 2 | Push Alerts | ⚪ Not Started |
+| 1 | Prompt Responder (MVP) | 🟢 Complete |
+| 2 | Push Alerts | 🟢 Complete |
 | 3 | Context Window | ⚪ Not Started |
-| 4 | Terminal Mirror | ⚪ Not Started |
-| 5 | Interactive Terminal | ⚪ Not Started |
+| 4 | Terminal Mirror (xterm.js) | 🟢 Complete |
+| 5 | Mobile Keyboard | 🟢 Complete |
 | 6 | Claude Bridge | ⚪ Not Started |
 
 **Extended Vision (Levels 7-11):** See [`ROADMAP.md`](ROADMAP.md) for the full progression from remote prompt responder to autonomous development platform, including Claude Agent SDK integration and hybrid orchestration architecture.
