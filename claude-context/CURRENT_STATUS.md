@@ -105,7 +105,7 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 ## Next Actions
 
 ### Immediate (Next Session)
-- [ ] Update `install.sh` to use new hook format (still uses old format)
+- [x] Update `install.sh` to use new hook format — Done (2026-02-08)
 - [ ] Test with Tailscale for true remote access
 - [ ] Refine UI based on continued mobile usage
 
@@ -117,7 +117,6 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
-| `install.sh` uses old hook format | Medium | Needs updating to use `Notification` event with `matcher` patterns |
 | `idle_prompt` 60s delay | Medium | Built into Claude Code; can't be reduced |
 | iOS Safari drops WebSocket in background | Low | Handled by visibilitychange reconnect + polling fallback |
 | Opus concurrency limit | Low | Can't run two Claude Code Opus sessions simultaneously |

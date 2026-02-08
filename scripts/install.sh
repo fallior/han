@@ -70,43 +70,63 @@ HOOK_PATH="$SCRIPT_DIR/src/hooks/notify.sh"
 # Ensure Claude config directory exists
 mkdir -p "$CLAUDE_CONFIG_DIR"
 
+# Build the new Notification hook structure
+# Format: hooks.Notification[] with matcher patterns
+HOOK_ENTRY=$(jq -n --arg cmd "$HOOK_PATH" '{
+    matcher: "permission_prompt|idle_prompt",
+    hooks: [{
+        type: "command",
+        command: $cmd
+    }]
+}')
+
 # Create or update settings.json
 if [[ -f "$CLAUDE_SETTINGS" ]]; then
-    # Check if hooks already configured
-    if jq -e '.hooks' "$CLAUDE_SETTINGS" > /dev/null 2>&1; then
-        # Update existing hooks
-        TMP_FILE=$(mktemp)
-        jq --arg hook "$HOOK_PATH" '
-            .hooks.permission_prompt = [$hook] |
-            .hooks.idle_prompt = [$hook]
-        ' "$CLAUDE_SETTINGS" > "$TMP_FILE"
-        mv "$TMP_FILE" "$CLAUDE_SETTINGS"
-        echo -e "  ${GREEN}✓${NC} Updated existing hooks configuration"
+    TMP_FILE=$(mktemp)
+
+    # Check if Notification hooks already exist
+    if jq -e '.hooks.Notification' "$CLAUDE_SETTINGS" > /dev/null 2>&1; then
+        # Check if our matcher already exists
+        if jq -e '.hooks.Notification[] | select(.matcher == "permission_prompt|idle_prompt")' "$CLAUDE_SETTINGS" > /dev/null 2>&1; then
+            # Update existing matcher entry
+            jq --arg cmd "$HOOK_PATH" '
+                .hooks.Notification = [.hooks.Notification[] |
+                    if .matcher == "permission_prompt|idle_prompt" then
+                        .hooks = [{type: "command", command: $cmd}]
+                    else . end
+                ]
+            ' "$CLAUDE_SETTINGS" > "$TMP_FILE"
+            echo -e "  ${GREEN}✓${NC} Updated existing Notification hook"
+        else
+            # Add new matcher entry to existing Notification array
+            jq --argjson entry "$HOOK_ENTRY" '
+                .hooks.Notification += [$entry]
+            ' "$CLAUDE_SETTINGS" > "$TMP_FILE"
+            echo -e "  ${GREEN}✓${NC} Added Notification hook to existing hooks"
+        fi
     else
-        # Add hooks to existing settings
-        TMP_FILE=$(mktemp)
-        jq --arg hook "$HOOK_PATH" '
-            . + {
-                hooks: {
-                    permission_prompt: [$hook],
-                    idle_prompt: [$hook]
-                }
-            }
+        # Add Notification hooks to existing settings (may have other hooks)
+        jq --argjson entry "$HOOK_ENTRY" '
+            .hooks = (.hooks // {}) + {Notification: [$entry]}
         ' "$CLAUDE_SETTINGS" > "$TMP_FILE"
-        mv "$TMP_FILE" "$CLAUDE_SETTINGS"
-        echo -e "  ${GREEN}✓${NC} Added hooks to existing settings"
+        echo -e "  ${GREEN}✓${NC} Added Notification hooks to settings"
     fi
+
+    mv "$TMP_FILE" "$CLAUDE_SETTINGS"
 else
-    # Create new settings file
-    cat > "$CLAUDE_SETTINGS" << EOF
-{
-    "hooks": {
-        "permission_prompt": ["$HOOK_PATH"],
-        "idle_prompt": ["$HOOK_PATH"]
-    }
-}
-EOF
-    echo -e "  ${GREEN}✓${NC} Created new settings with hooks"
+    # Create new settings file with Notification hook
+    jq -n --arg cmd "$HOOK_PATH" '{
+        hooks: {
+            Notification: [{
+                matcher: "permission_prompt|idle_prompt",
+                hooks: [{
+                    type: "command",
+                    command: $cmd
+                }]
+            }]
+        }
+    }' > "$CLAUDE_SETTINGS"
+    echo -e "  ${GREEN}✓${NC} Created new settings with Notification hooks"
 fi
 
 # Create symlink for CLI
@@ -147,8 +167,13 @@ echo ""
 echo -e "${BLUE}Optional - Push notifications:${NC}"
 echo -e "  1. Install ntfy app on your phone"
 echo -e "  2. Subscribe to a secret topic (e.g., 'my-claude-abc123')"
-echo -e "  3. Set environment variable:"
-echo -e "     ${YELLOW}export NTFY_TOPIC=\"my-claude-abc123\"${NC}"
+echo -e "  3. Create config file:"
+echo -e "     ${YELLOW}cat > ~/.claude-remote/config.json << 'EOF'"
+echo -e "     {"
+echo -e "       \"ntfy_topic\": \"my-claude-abc123\","
+echo -e "       \"remote_url\": \"http://$(hostname -s).local:3847\""
+echo -e "     }"
+echo -e "     EOF${NC}"
 echo ""
 echo -e "${BLUE}Need help?${NC}"
 echo -e "  ${YELLOW}claude-remote --help${NC}"
