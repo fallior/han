@@ -152,9 +152,9 @@ start_session() {
         exit 1
     fi
 
-    # Check if claude is available
-    if ! command -v claude &> /dev/null; then
-        echo -e "${RED}Error: claude CLI is required but not installed${NC}"
+    # Check if claude-logged is available
+    if ! command -v claude-logged &> /dev/null; then
+        echo -e "${RED}Error: claude-logged is required but not installed${NC}"
         exit 1
     fi
 
@@ -169,9 +169,9 @@ start_session() {
 
     # Send the claude command to the session
     if [[ ${#claude_args[@]} -gt 0 ]]; then
-        tmux send-keys -t "$session_name" "claude ${claude_args[*]}" Enter
+        tmux send-keys -t "$session_name" "claude-logged ${claude_args[*]}" Enter
     else
-        tmux send-keys -t "$session_name" "claude" Enter
+        tmux send-keys -t "$session_name" "claude-logged" Enter
     fi
 
     echo -e "${GREEN}Session started${NC}"
