@@ -55,8 +55,14 @@ fi
 TIMESTAMP=$(date +%s%3N)
 PROMPT_ID="${TIMESTAMP}-${SESSION_ID:-unknown}"
 
-# Get tmux session name from environment or use default
-TMUX_SESSION="${CLAUDE_REMOTE_SESSION:-claude-remote}"
+# Auto-detect tmux session name, with env override and fallback
+if [[ -n "${CLAUDE_REMOTE_SESSION:-}" ]]; then
+    TMUX_SESSION="$CLAUDE_REMOTE_SESSION"
+elif [[ -n "${TMUX:-}" ]] && command -v tmux &> /dev/null; then
+    TMUX_SESSION=$(tmux display-message -p '#{session_name}' 2>/dev/null || echo "claude-remote")
+else
+    TMUX_SESSION="claude-remote"
+fi
 
 # Capture terminal content to show actual prompt options
 # Small delay to let the TUI render the options

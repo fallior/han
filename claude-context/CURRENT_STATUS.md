@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-08 (Session 5) by Darron (via Claude)
+> Last updated: 2026-02-10 (Session 6) by Darron (via Claude)
 
 ## Current Stage
 
@@ -26,6 +26,18 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-10 — Darron (via Claude) — Session 6
+- **Always-on terminal mirror** — server + UI overhaul:
+  - Server-side 1-second terminal capture broadcast via WebSocket (with content diffing)
+  - New helper functions: `listActiveSessions()`, `getActiveSession()`, `captureTerminal()`
+  - New `POST /api/keys` endpoint for direct keystroke injection (no prompt required)
+  - Terminal state sent to clients on WS connect
+  - UI now has three states: No Session / Watching / Prompt Active
+  - xterm.js always visible when a tmux session exists (not just during prompts)
+  - `sendKeyDirect()` routes keystrokes via `/api/keys` when watching (no prompt)
+  - Quickbar visible in both watching and prompt states
+  - Renamed `renderTerminal()` → `renderPromptOverlay()`, `renderEmpty()` → `renderNoSession()`
 
 ### 2026-02-08 — Darron (via Claude) — Session 5
 - **Updated `install.sh`** to new Notification hook format:
@@ -107,6 +119,8 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 - ✅ tmux session management via `claude-remote` CLI
 - ✅ xterm.js terminal emulation with ANSI colour rendering
 - ✅ Mobile quick-action keyboard bar (y/n/1-3/Enter/Esc/^C/Tab/arrows)
+- ✅ Always-on terminal mirror (live tmux content via 1s WebSocket broadcast)
+- ✅ Direct keystroke injection to tmux session (no prompt required)
 
 ## Next Actions
 
@@ -141,6 +155,7 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-10_05-28-03.md](../_logs/session_2026-02-10_05-28-03.md) — Always-on terminal mirror
 - [session_2026-02-08_22-14-13.md](../_logs/session_2026-02-08_22-14-13.md) — install.sh hook format update
 - [session_2026-02-08_02-48-24.md](../_logs/session_2026-02-08_02-48-24.md) — xterm.js + Mobile keyboard
 - [session_2026-02-08_00-00-00.md](../_logs/session_2026-02-08_00-00-00.md) — Level 2 + WebSocket

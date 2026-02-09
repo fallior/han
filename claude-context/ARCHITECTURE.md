@@ -104,6 +104,22 @@ claude-remote/
 9. **Prompt cleared**:
    - State file moved to `~/.claude-remote/resolved/`
 
+### Terminal Broadcast (Always-On Mirror)
+
+1. **1-second interval** on server captures tmux pane content via `tmux capture-pane -p -e`
+2. **Content diffing** — only broadcasts when content has changed
+3. **WebSocket push** — `{ type: 'terminal', content, session }` sent to all connected clients
+4. **No-session detection** — broadcasts `{ type: 'terminal', content: null }` when no tmux session exists
+5. **Direct keystroke injection** — `POST /api/keys` sends keys to active session independent of prompts
+
+### UI States
+
+| State | Terminal | Quickbar | Footer |
+|-------|---------|----------|--------|
+| No Session | Empty placeholder | Hidden | "No active session" / "history" |
+| Watching | Live terminal (xterm.js) | Visible | "Watching session" / "history" |
+| Prompt Active | Live terminal (xterm.js) | Visible | "Permission required" / "keys sent to session" |
+
 ## Key Patterns
 
 ### State File Format
@@ -141,7 +157,11 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 |--------|------|-------------|
 | GET | /api/prompts | List pending prompts |
 | POST | /api/respond | Send response to prompt |
+| POST | /api/keys | Send keystrokes directly to active session |
+| GET | /api/history | Notification history |
 | GET | /api/status | Server health check |
+| GET | /quick | Quick response (ntfy action buttons) |
+| WS | /ws | WebSocket push (prompts + terminal) |
 | GET | / | Serve web UI |
 
 ### Request/Response Examples
@@ -230,4 +250,4 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 
 ---
 
-*Last updated: 2026-01-13*
+*Last updated: 2026-02-10*

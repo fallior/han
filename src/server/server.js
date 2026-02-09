@@ -42,6 +42,83 @@ app.get('/', (req, res) => {
 });
 
 /**
+ * List active claude-remote tmux sessions
+ */
+function listActiveSessions() {
+    try {
+        const output = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'ignore']
+        });
+        return output.trim().split('\n')
+            .filter(s => s.startsWith('claude-remote'))
+            .filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Get the first active claude-remote session (or null)
+ */
+function getActiveSession() {
+    const sessions = listActiveSessions();
+    return sessions.length > 0 ? sessions[0] : null;
+}
+
+/**
+ * Capture terminal content from a tmux session
+ */
+function captureTerminal(session) {
+    try {
+        const content = execFileSync('tmux', [
+            'capture-pane', '-t', session, '-p', '-e'
+        ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+        return { content, session };
+    } catch {
+        return null;
+    }
+}
+
+// Track last broadcast content for diffing
+let lastBroadcastContent = '';
+
+/**
+ * Broadcast terminal content to all WS clients (called on interval)
+ */
+function broadcastTerminal() {
+    if (wss.clients.size === 0) return;
+
+    const session = getActiveSession();
+    if (!session) {
+        if (lastBroadcastContent !== null) {
+            lastBroadcastContent = null;
+            const message = JSON.stringify({ type: 'terminal', content: null, session: null });
+            wss.clients.forEach((client) => {
+                if (client.readyState === 1) client.send(message);
+            });
+        }
+        return;
+    }
+
+    const result = captureTerminal(session);
+    if (!result) return;
+
+    if (result.content === lastBroadcastContent) return;
+    lastBroadcastContent = result.content;
+
+    const message = JSON.stringify({
+        type: 'terminal',
+        content: result.content,
+        session: result.session
+    });
+
+    wss.clients.forEach((client) => {
+        if (client.readyState === 1) client.send(message);
+    });
+}
+
+/**
  * Read all pending prompts with live terminal content
  */
 function readPendingPrompts() {
@@ -189,19 +266,7 @@ app.get('/api/status', (req, res) => {
         pendingCount = fs.readdirSync(PENDING_DIR).filter(f => f.endsWith('.json')).length;
     }
 
-    // List tmux sessions (using execFileSync for safety)
-    let sessions = [];
-    try {
-        const output = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], {
-            encoding: 'utf8',
-            stdio: ['pipe', 'pipe', 'ignore']
-        });
-        sessions = output.trim().split('\n')
-            .filter(s => s.startsWith('claude-remote'))
-            .filter(Boolean);
-    } catch {
-        // No sessions or tmux not running
-    }
+    const sessions = listActiveSessions();
 
     res.json({
         success: true,
@@ -325,6 +390,41 @@ app.get('/api/history', (req, res) => {
 });
 
 /**
+ * Send keystrokes directly to the active tmux session (no prompt required)
+ */
+const SPECIAL_KEYS = new Set(['Enter', 'Escape', 'Tab', 'Up', 'Down', 'Left', 'Right', 'C-c', 'C-d', 'C-z', 'C-l', 'BSpace']);
+
+app.post('/api/keys', (req, res) => {
+    try {
+        const { key } = req.body;
+
+        if (!key) {
+            return res.status(400).json({ success: false, error: 'Missing key' });
+        }
+
+        const session = getActiveSession();
+        if (!session) {
+            return res.status(400).json({ success: false, error: 'No active tmux session' });
+        }
+
+        // Special keys are sent as bare key names, literal text uses -l flag
+        const args = SPECIAL_KEYS.has(key)
+            ? ['send-keys', '-t', session, key]
+            : ['send-keys', '-t', session, '-l', key];
+
+        execFile('tmux', args, (err) => {
+            if (err) {
+                console.error('Error sending key:', err);
+                return res.status(500).json({ success: false, error: 'Failed to send key' });
+            }
+            res.json({ success: true });
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * Clear a prompt without responding (dismiss)
  */
 app.delete('/api/prompts/:id', (req, res) => {
@@ -390,13 +490,28 @@ function broadcastPrompts() {
 wss.on('connection', (ws) => {
     console.log('WebSocket client connected');
 
-    // Send current state immediately
+    // Send current prompts immediately
     const prompts = readPendingPrompts();
     ws.send(JSON.stringify({
         type: 'prompts',
         prompts,
         count: prompts.length
     }));
+
+    // Send current terminal state immediately
+    const session = getActiveSession();
+    if (session) {
+        const result = captureTerminal(session);
+        if (result) {
+            ws.send(JSON.stringify({
+                type: 'terminal',
+                content: result.content,
+                session: result.session
+            }));
+        }
+    } else {
+        ws.send(JSON.stringify({ type: 'terminal', content: null, session: null }));
+    }
 
     // Heartbeat
     ws.isAlive = true;
@@ -418,7 +533,11 @@ const heartbeatInterval = setInterval(() => {
 
 wss.on('close', () => {
     clearInterval(heartbeatInterval);
+    clearInterval(terminalBroadcastInterval);
 });
+
+// Terminal broadcast — 1-second capture loop
+const terminalBroadcastInterval = setInterval(broadcastTerminal, 1000);
 
 // ── File system watcher ──────────────────────────────────
 
@@ -449,6 +568,7 @@ server.listen(PORT, '0.0.0.0', () => {
 ║    GET  /api/prompts    - List pending prompts             ║
 ║    POST /api/respond    - Send response to Claude          ║
 ║    GET  /api/history    - Notification history             ║
+║    POST /api/keys      - Send keystrokes to session        ║
 ║    GET  /api/status     - Server status                    ║
 ║    GET  /quick          - Quick response (ntfy actions)    ║
 ║    WS   /ws             - WebSocket push                   ║
@@ -458,6 +578,7 @@ server.listen(PORT, '0.0.0.0', () => {
 
 process.on('SIGTERM', () => {
     clearInterval(heartbeatInterval);
+    clearInterval(terminalBroadcastInterval);
     wss.close();
     server.close();
 });

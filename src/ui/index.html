@@ -401,6 +401,8 @@
         let wsReconnectDelay = WS_RECONNECT_BASE;
         let wsReconnectTimer = null;
         let usingWebSocket = false;
+        let terminalLive = false;
+        let terminalSession = null;
 
         // xterm.js state
         let term = null;
@@ -461,18 +463,20 @@
             term.open(xtermContainer);
             fitAddon.fit();
 
-            // Route keystrokes to sendKey()
+            // Route keystrokes to sendKey (prompt) or sendKeyDirect (watching)
             term.onData((data) => {
-                if (!currentPrompt || !userHasTapped) return;
+                if (!userHasTapped) return;
 
-                if (data === '\r') {
-                    sendKey('Enter');
-                } else if (data === '\x1b') {
-                    sendKey('Escape');
-                } else if (data === '\x03') {
-                    sendKey('C-c');
-                } else {
-                    sendKey(data);
+                let key;
+                if (data === '\r') key = 'Enter';
+                else if (data === '\x1b') key = 'Escape';
+                else if (data === '\x03') key = 'C-c';
+                else key = data;
+
+                if (currentPrompt) {
+                    sendKey(key);
+                } else if (terminalLive) {
+                    sendKeyDirect(key);
                 }
             });
 
@@ -493,17 +497,23 @@
                 if (!currentPrompt || currentPrompt.id !== prompt.id) {
                     currentPrompt = prompt;
                     userHasTapped = false;
-                    lastWrittenContent = '';
-                    if (!showingHistory) renderTerminal();
+                    if (!showingHistory) renderPromptOverlay();
                 } else {
                     currentPrompt = prompt;
-                    if (!showingHistory) renderTerminal();
+                    if (!showingHistory) renderPromptOverlay();
                 }
             } else if (currentPrompt) {
                 currentPrompt = null;
-                if (!showingHistory) renderEmpty();
-            } else {
-                if (!showingHistory) renderEmpty();
+                if (!showingHistory) {
+                    if (terminalLive) {
+                        // Return to watching state — update chrome only
+                        footerLeft.textContent = 'Watching session';
+                        footerHint.textContent = 'history';
+                        updateQuickbar();
+                    } else {
+                        renderNoSession();
+                    }
+                }
             }
 
             statusDot.style.background = 'var(--green)';
@@ -535,6 +545,8 @@
                     const data = JSON.parse(event.data);
                     if (data.type === 'prompts') {
                         handlePromptsUpdate(data.prompts);
+                    } else if (data.type === 'terminal') {
+                        handleTerminalUpdate(data.content, data.session);
                     }
                 } catch (e) {
                     console.error('WS parse error:', e);
@@ -584,37 +596,73 @@
             }
         }
 
-        // ── Rendering ─────────────────────────────────────────
+        // ── Terminal broadcast handling ────────────────────────
 
-        function renderTerminal() {
-            const p = currentPrompt;
-            const content = (p.terminal || p.terminal_content || '').trim();
+        function handleTerminalUpdate(content, session) {
+            if (content === null) {
+                // No active session
+                terminalLive = false;
+                terminalSession = null;
+                if (!showingHistory && !currentPrompt) renderNoSession();
+                return;
+            }
 
-            // Show xterm, hide plain text
+            terminalLive = true;
+            terminalSession = session;
+
+            if (showingHistory) return;
+
+            // Show xterm container
             xtermContainer.style.display = '';
             termContent.style.display = 'none';
-
-            // Lazy init
             initXterm();
 
-            // Only rewrite if content changed (prevents flicker)
+            // Only rewrite if content changed
             if (content !== lastWrittenContent) {
                 term.reset();
-                term.write(content || p.message || 'Waiting for input...');
+                term.write(content);
                 lastWrittenContent = content;
             }
 
             fitAddon.fit();
 
-            // Update chrome
-            const session = p.tmux_session || 'claude-remote';
+            // Update chrome based on state
+            titleText.textContent = session || 'claude-remote';
+            if (!currentPrompt) {
+                footerLeft.textContent = 'Watching session';
+                footerHint.textContent = 'history';
+                updateQuickbar();
+            }
+        }
+
+        // ── Rendering ─────────────────────────────────────────
+
+        function renderPromptOverlay() {
+            const p = currentPrompt;
+
+            // If terminal broadcast hasn't started yet, show prompt's terminal content
+            if (!terminalLive) {
+                const content = (p.terminal || p.terminal_content || '').trim();
+                xtermContainer.style.display = '';
+                termContent.style.display = 'none';
+                initXterm();
+                if (content && content !== lastWrittenContent) {
+                    term.reset();
+                    term.write(content);
+                    lastWrittenContent = content;
+                }
+                fitAddon.fit();
+            }
+
+            // Update chrome for prompt state
+            const session = p.tmux_session || terminalSession || 'claude-remote';
             titleText.textContent = session;
             footerLeft.textContent = p.event === 'permission_prompt' ? 'Permission required' : 'Waiting for input';
             footerHint.textContent = 'tap to type \u00b7 keys sent to session';
             updateQuickbar();
         }
 
-        function renderEmpty() {
+        function renderNoSession() {
             xtermContainer.style.display = 'none';
             termContent.style.display = '';
             lastWrittenContent = '';
@@ -623,12 +671,12 @@
             const empty = document.createElement('div');
             empty.className = 'empty';
             empty.innerHTML = '<div class="empty-icon">\u25c7</div>'
-                + '<div class="empty-title">No pending prompts</div>'
-                + '<div class="empty-hint">Claude Code prompts will appear here</div>';
+                + '<div class="empty-title">No active session</div>'
+                + '<div class="empty-hint">Start a claude-remote session to begin</div>';
             termContent.appendChild(empty);
 
             titleText.textContent = 'claude-remote';
-            footerLeft.textContent = 'No pending prompts';
+            footerLeft.textContent = 'No active session';
             footerHint.textContent = 'history';
             updateQuickbar();
         }
@@ -655,7 +703,15 @@
                 if (data.success) {
                     showToast('Sent: ' + (key || 'Enter'));
                     currentPrompt = null;
-                    if (!showingHistory) renderEmpty();
+                    if (!showingHistory) {
+                        if (terminalLive) {
+                            footerLeft.textContent = 'Watching session';
+                            footerHint.textContent = 'history';
+                            updateQuickbar();
+                        } else {
+                            renderNoSession();
+                        }
+                    }
                     if (!usingWebSocket) setTimeout(poll, 1000);
                 } else {
                     showToast(data.error || 'Failed', true);
@@ -665,6 +721,27 @@
             } finally {
                 isSending = false;
                 quickbar.classList.remove('sending');
+            }
+        }
+
+        async function sendKeyDirect(key) {
+            if (!terminalLive || isSending) return;
+            isSending = true;
+
+            try {
+                const res = await fetch(`${API_BASE}/api/keys`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key })
+                });
+                const data = await res.json();
+                if (!data.success) {
+                    showToast(data.error || 'Failed', true);
+                }
+            } catch {
+                showToast('Connection error', true);
+            } finally {
+                isSending = false;
             }
         }
 
@@ -678,14 +755,19 @@
 
         quickbar.addEventListener('click', (e) => {
             const btn = e.target.closest('.qbtn');
-            if (!btn || !currentPrompt || isSending) return;
+            if (!btn || isSending) return;
             const key = btn.dataset.key;
             if (!key) return;
-            sendKey(key);
+
+            if (currentPrompt) {
+                sendKey(key);
+            } else if (terminalLive) {
+                sendKeyDirect(key);
+            }
         });
 
         function updateQuickbar() {
-            if (currentPrompt && !showingHistory) {
+            if ((currentPrompt || terminalLive) && !showingHistory) {
                 quickbar.classList.add('visible');
                 requestAnimationFrame(() => {
                     if (fitAddon && xtermContainer.style.display !== 'none') fitAddon.fit();
@@ -803,9 +885,19 @@
         function hideHistory() {
             showingHistory = false;
             if (currentPrompt) {
-                renderTerminal();
+                renderPromptOverlay();
+            } else if (terminalLive) {
+                // Restore watching state — show xterm, update chrome
+                xtermContainer.style.display = '';
+                termContent.style.display = 'none';
+                initXterm();
+                titleText.textContent = terminalSession || 'claude-remote';
+                footerLeft.textContent = 'Watching session';
+                footerHint.textContent = 'history';
+                updateQuickbar();
+                if (fitAddon) fitAddon.fit();
             } else {
-                renderEmpty();
+                renderNoSession();
             }
         }
 
@@ -822,6 +914,9 @@
         // ── Start ─────────────────────────────────────────────
 
         function start() {
+            // Show initial state
+            renderNoSession();
+
             connectWebSocket();
 
             document.addEventListener('visibilitychange', () => {
