@@ -112,8 +112,8 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 
 ### Immediate (Next Session)
 - [x] Update `install.sh` to use new hook format — Done (2026-02-08)
-- [x] Set up Tailscale — Done (2026-02-09), IP: 100.82.63.83
-- [ ] Test Tailscale from iPhone (install app, test on mobile data)
+- [x] Set up Tailscale — Done (2026-02-09), Linux IP: 100.67.213.28
+- [x] Test Tailscale from iPhone — Done (2026-02-09), phone connected and UI accessible
 - [ ] Refine UI based on continued mobile usage
 
 ### Short-term
