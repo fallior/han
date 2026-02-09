@@ -152,12 +152,6 @@ start_session() {
         exit 1
     fi
 
-    # Check if claude-logged is available
-    if ! command -v claude-logged &> /dev/null; then
-        echo -e "${RED}Error: claude-logged is required but not installed${NC}"
-        exit 1
-    fi
-
     echo -e "${BLUE}Starting Claude Remote session: ${GREEN}$session_name${NC}"
 
     # Export session name for the hook to use
