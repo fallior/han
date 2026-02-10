@@ -617,14 +617,17 @@
             termContent.style.display = 'none';
             initXterm();
 
-            // Only rewrite if content changed
-            if (content !== lastWrittenContent) {
-                term.reset();
-                term.write(content);
-                lastWrittenContent = content;
-            }
+            // Fit before writing to ensure proper dimensions (with RAF for mobile layout)
+            requestAnimationFrame(() => {
+                fitAddon.fit();
 
-            fitAddon.fit();
+                // Only rewrite if content changed
+                if (content !== lastWrittenContent) {
+                    term.clear();
+                    term.write(content);
+                    lastWrittenContent = content;
+                }
+            });
 
             // Update chrome based on state
             titleText.textContent = session || 'claude-remote';

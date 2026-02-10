@@ -214,4 +214,4 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Start new session
-start_session "${CLAUDE_ARGS[@]}"
+start_session "${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}"
