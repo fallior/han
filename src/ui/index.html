@@ -14,6 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js"></script>
     <style>
         :root {
             --bg-term: #0a0e14;
@@ -333,6 +334,93 @@
             pointer-events: none;
         }
 
+        /* Search bar */
+        .searchbar {
+            display: none;
+            background: var(--bg-titlebar);
+            border-bottom: 1px solid var(--border);
+            padding: 8px 12px;
+            gap: 8px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .searchbar.visible { display: flex; }
+
+        .search-input {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            color: var(--text);
+            outline: none;
+        }
+
+        .search-input:focus {
+            border-color: var(--cyan);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text-dim);
+            font-size: 14px;
+            cursor: pointer;
+            min-width: 40px;
+        }
+
+        .search-btn:active {
+            background: rgba(57, 208, 216, 0.15);
+            border-color: var(--cyan);
+        }
+
+        .search-btn:disabled {
+            opacity: 0.3;
+            pointer-events: none;
+        }
+
+        .search-count {
+            font-size: 11px;
+            color: var(--text-muted);
+            min-width: 50px;
+            text-align: center;
+        }
+
+        /* Toolbar buttons in titlebar */
+        .titlebar-tools {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .tool-btn {
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            font-size: 14px;
+            padding: 4px 8px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .tool-btn:active {
+            background: rgba(57, 208, 216, 0.15);
+            color: var(--cyan);
+        }
+
+        .tool-btn.active {
+            color: var(--cyan);
+        }
+
         @supports (padding: max(0px)) {
             .titlebar { padding-top: max(8px, env(safe-area-inset-top)); }
         }
@@ -349,10 +437,22 @@
                 </div>
                 <span class="titlebar-title" id="titleText">claude-remote</span>
             </div>
+            <div class="titlebar-tools">
+                <button class="tool-btn" id="searchToggle" title="Search">🔍</button>
+                <button class="tool-btn" id="copyBtn" title="Copy">📋</button>
+            </div>
             <div class="titlebar-status">
                 <div class="status-dot"></div>
                 <span id="statusText">connected</span>
             </div>
+        </div>
+
+        <div class="searchbar" id="searchbar">
+            <input type="text" class="search-input" id="searchInput" placeholder="Search..." autocomplete="off" autocorrect="off" autocapitalize="off">
+            <span class="search-count" id="searchCount"></span>
+            <button class="search-btn" id="searchPrev">↑</button>
+            <button class="search-btn" id="searchNext">↓</button>
+            <button class="search-btn" id="searchClose">✕</button>
         </div>
 
         <div class="terminal" id="terminal">
@@ -410,7 +510,10 @@
         // xterm.js state
         let term = null;
         let fitAddon = null;
+        let searchAddon = null;
         let lastWrittenContent = '';
+        let searchResultCount = 0;
+        let searchResultIndex = -1;
 
         const terminal = document.getElementById('terminal');
         const termContent = document.getElementById('termContent');
@@ -423,6 +526,16 @@
         const toastWrap = document.getElementById('toastWrap');
         const quickbar = document.getElementById('quickbar');
         const statusDot = statusText.parentElement.querySelector('.status-dot');
+
+        // Search elements
+        const searchToggle = document.getElementById('searchToggle');
+        const searchbar = document.getElementById('searchbar');
+        const searchInput = document.getElementById('searchInput');
+        const searchCount = document.getElementById('searchCount');
+        const searchPrev = document.getElementById('searchPrev');
+        const searchNext = document.getElementById('searchNext');
+        const searchClose = document.getElementById('searchClose');
+        const copyBtn = document.getElementById('copyBtn');
 
         // ── xterm.js ──────────────────────────────────────────
 
@@ -461,8 +574,10 @@
             });
 
             fitAddon = new FitAddon.FitAddon();
+            searchAddon = new SearchAddon.SearchAddon();
             term.loadAddon(fitAddon);
             term.loadAddon(new WebLinksAddon.WebLinksAddon());
+            term.loadAddon(searchAddon);
 
             term.open(xtermContainer);
             fitAddon.fit();
@@ -962,6 +1077,121 @@
                 showHistory();
             }
         });
+
+        // ── Search ───────────────────────────────────────────────
+
+        function toggleSearch() {
+            const isVisible = searchbar.classList.contains('visible');
+            if (isVisible) {
+                closeSearch();
+            } else {
+                searchbar.classList.add('visible');
+                searchToggle.classList.add('active');
+                searchInput.focus();
+                if (fitAddon && xtermContainer.style.display !== 'none') {
+                    requestAnimationFrame(() => fitAddon.fit());
+                }
+            }
+        }
+
+        function closeSearch() {
+            searchbar.classList.remove('visible');
+            searchToggle.classList.remove('active');
+            searchInput.value = '';
+            searchCount.textContent = '';
+            searchResultCount = 0;
+            searchResultIndex = -1;
+            if (searchAddon) searchAddon.clearDecorations();
+            if (fitAddon && xtermContainer.style.display !== 'none') {
+                requestAnimationFrame(() => fitAddon.fit());
+            }
+        }
+
+        function doSearch(direction = 'next') {
+            if (!searchAddon || !term) return;
+
+            const query = searchInput.value;
+            if (!query) {
+                searchCount.textContent = '';
+                searchAddon.clearDecorations();
+                return;
+            }
+
+            let found;
+            if (direction === 'prev') {
+                found = searchAddon.findPrevious(query, { caseSensitive: false, decorations: { activeMatchColorOverviewRuler: '#ffcc00' } });
+            } else {
+                found = searchAddon.findNext(query, { caseSensitive: false, decorations: { activeMatchColorOverviewRuler: '#ffcc00' } });
+            }
+
+            // Update count display
+            if (found) {
+                searchCount.textContent = 'Found';
+                searchCount.style.color = 'var(--green)';
+            } else {
+                searchCount.textContent = 'No match';
+                searchCount.style.color = 'var(--text-muted)';
+            }
+        }
+
+        searchToggle.addEventListener('click', toggleSearch);
+        searchClose.addEventListener('click', closeSearch);
+
+        searchInput.addEventListener('input', () => doSearch('next'));
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                doSearch(e.shiftKey ? 'prev' : 'next');
+            } else if (e.key === 'Escape') {
+                closeSearch();
+            }
+        });
+
+        searchPrev.addEventListener('click', () => doSearch('prev'));
+        searchNext.addEventListener('click', () => doSearch('next'));
+
+        // ── Copy ─────────────────────────────────────────────────
+
+        async function copyTerminalContent() {
+            if (!term) {
+                showToast('No terminal content', true);
+                return;
+            }
+
+            try {
+                // Get selection or all visible content
+                let text = term.getSelection();
+                if (!text) {
+                    // No selection — copy last written content (cleaned)
+                    text = lastWrittenContent.replace(/\x1b\[[0-9;]*m/g, ''); // Strip ANSI
+                }
+
+                if (!text) {
+                    showToast('Nothing to copy', true);
+                    return;
+                }
+
+                await navigator.clipboard.writeText(text);
+                showToast('Copied to clipboard');
+            } catch (err) {
+                // Fallback for older browsers / iOS quirks
+                try {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    textarea.style.position = 'fixed';
+                    textarea.style.opacity = '0';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                    showToast('Copied to clipboard');
+                } catch {
+                    showToast('Copy failed', true);
+                }
+            }
+        }
+
+        copyBtn.addEventListener('click', copyTerminalContent);
 
         // ── Start ─────────────────────────────────────────────
 
