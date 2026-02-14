@@ -192,6 +192,59 @@ function logBridgeEvent(type, label, metadata = {}) {
 // Track last broadcast content for diffing
 let lastBroadcastContent = '';
 
+// Append-only terminal log with timestamps
+const TERMINAL_LOG = path.join(CLAUDE_REMOTE_DIR, 'terminal-log.txt');
+let lastLoggedLines = [];
+let lastTimestamp = 0;
+const TIMESTAMP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+function appendToLog(content) {
+    try {
+        const lines = content.split('\n');
+        const now = Date.now();
+
+        // Find new lines by matching the tail of lastLoggedLines against lines
+        let newStart = 0;
+        if (lastLoggedLines.length > 0) {
+            // Find where lastLoggedLines ends within current content
+            const lastFew = lastLoggedLines.slice(-20);
+            for (let i = lines.length - 1; i >= 0; i--) {
+                if (lines[i] === lastFew[lastFew.length - 1]) {
+                    // Check if the preceding lines match too
+                    let match = true;
+                    for (let j = 1; j < lastFew.length && i - j >= 0; j++) {
+                        if (lines[i - j] !== lastFew[lastFew.length - 1 - j]) {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match) {
+                        newStart = i + 1;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (newStart >= lines.length && lastLoggedLines.length > 0) return; // nothing new
+
+        const newLines = lastLoggedLines.length === 0 ? lines : lines.slice(newStart);
+        if (newLines.length === 0) return;
+
+        let output = '';
+
+        // Add timestamp every 5 minutes
+        if (now - lastTimestamp >= TIMESTAMP_INTERVAL) {
+            output += `\n--- ${new Date().toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' })} ---\n`;
+            lastTimestamp = now;
+        }
+
+        output += newLines.join('\n') + '\n';
+        fs.appendFileSync(TERMINAL_LOG, output);
+        lastLoggedLines = lines;
+    } catch { /* best effort */ }
+}
+
 /**
  * Broadcast terminal content to all WS clients (called on interval)
  */
@@ -216,10 +269,13 @@ function broadcastTerminal() {
     if (result.content === lastBroadcastContent) return;
     lastBroadcastContent = result.content;
 
-    // Persist to file so content survives context compaction
+    // Persist snapshot for UI startup
     try {
         fs.writeFileSync(path.join(CLAUDE_REMOTE_DIR, 'terminal.txt'), result.content);
     } catch { /* best effort */ }
+
+    // Append new lines to persistent log
+    appendToLog(result.content);
 
     const message = JSON.stringify({
         type: 'terminal',
