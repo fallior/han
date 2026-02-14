@@ -17,13 +17,16 @@ const PORT = process.env.PORT || 3847;
 const CLAUDE_REMOTE_DIR = process.env.CLAUDE_REMOTE_DIR || path.join(process.env.HOME, '.claude-remote');
 const PENDING_DIR = path.join(CLAUDE_REMOTE_DIR, 'pending');
 const RESOLVED_DIR = path.join(CLAUDE_REMOTE_DIR, 'resolved');
+const BRIDGE_DIR = path.join(CLAUDE_REMOTE_DIR, 'bridge');
+const CONTEXTS_DIR = path.join(BRIDGE_DIR, 'contexts');
+const BRIDGE_HISTORY = path.join(BRIDGE_DIR, 'history.json');
 const UI_PATH = path.join(__dirname, '..', 'ui', 'index.html');
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
 // Ensure directories exist
-[PENDING_DIR, RESOLVED_DIR].forEach(dir => {
+[PENDING_DIR, RESOLVED_DIR, CONTEXTS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -78,6 +81,92 @@ function captureTerminal(session) {
     } catch {
         return null;
     }
+}
+
+/**
+ * Strip ANSI escape codes from text
+ */
+function stripAnsi(text) {
+    return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+               .replace(/\x1b\][^\x07]*\x07/g, '')
+               .replace(/\x1b\[[\?]?[0-9;]*[a-zA-Z]/g, '');
+}
+
+/**
+ * Capture full scrollback from a tmux session (up to 1000 lines)
+ */
+function captureFullScrollback(session) {
+    try {
+        const content = execFileSync('tmux', [
+            'capture-pane', '-t', session, '-p', '-S', '-1000'
+        ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+        return content;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Format session content as markdown for export
+ */
+function formatExport(content, session, format) {
+    const timestamp = new Date().toISOString();
+    const clean = stripAnsi(content).replace(/\s+$/, '');
+
+    if (format === 'full') {
+        return `# Claude Code Session Export\n\n` +
+               `**Session**: ${session}\n` +
+               `**Exported**: ${timestamp}\n\n` +
+               `---\n\n` +
+               '```\n' + clean + '\n```\n';
+    }
+
+    if (format === 'handoff') {
+        // Extract the last ~50 lines for concise handoff
+        const lines = clean.split('\n');
+        const recent = lines.slice(-50).join('\n');
+        return `# Handoff from Claude Code\n\n` +
+               `**Session**: ${session}\n` +
+               `**Time**: ${timestamp}\n\n` +
+               `## Recent Terminal Output\n\n` +
+               '```\n' + recent + '\n```\n\n' +
+               `## Context\n\n` +
+               `_Add context about what was being worked on..._\n`;
+    }
+
+    // Default: summary — last 30 lines
+    const lines = clean.split('\n');
+    const recent = lines.slice(-30).join('\n');
+    return `# Session Summary\n\n` +
+           `**Session**: ${session} | **Exported**: ${timestamp}\n\n` +
+           '```\n' + recent + '\n```\n';
+}
+
+/**
+ * Log a bridge event to history
+ */
+function logBridgeEvent(type, label, metadata = {}) {
+    let history = [];
+    try {
+        if (fs.existsSync(BRIDGE_HISTORY)) {
+            history = JSON.parse(fs.readFileSync(BRIDGE_HISTORY, 'utf8'));
+        }
+    } catch { /* start fresh */ }
+
+    const id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+    const entry = {
+        id,
+        type,
+        label: label || type,
+        timestamp: new Date().toISOString(),
+        ...metadata
+    };
+
+    history.unshift(entry);
+    // Keep last 200 entries
+    if (history.length > 200) history = history.slice(0, 200);
+    fs.writeFileSync(BRIDGE_HISTORY, JSON.stringify(history, null, 2));
+    return entry;
 }
 
 // Track last broadcast content for diffing
@@ -462,6 +551,201 @@ app.delete('/api/prompts/:id', (req, res) => {
     }
 });
 
+// ── Bridge endpoints ─────────────────────────────────
+
+/**
+ * Export current session as formatted markdown
+ */
+app.get('/api/bridge/export', (req, res) => {
+    try {
+        const format = req.query.format || 'summary';
+        if (!['summary', 'full', 'handoff'].includes(format)) {
+            return res.status(400).json({ success: false, error: 'Invalid format. Use: summary, full, handoff' });
+        }
+
+        const session = getActiveSession();
+        if (!session) {
+            return res.status(400).json({ success: false, error: 'No active tmux session' });
+        }
+
+        const content = captureFullScrollback(session);
+        if (!content) {
+            return res.status(500).json({ success: false, error: 'Failed to capture terminal' });
+        }
+
+        const markdown = formatExport(content, session, format);
+
+        logBridgeEvent('export', `Export (${format})`, { format, session });
+
+        res.json({ success: true, content: markdown, format, session });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * Import context from phone (paste from claude.ai etc)
+ */
+app.post('/api/bridge/import', (req, res) => {
+    try {
+        const { content, label, inject } = req.body;
+
+        if (!content) {
+            return res.status(400).json({ success: false, error: 'Missing content' });
+        }
+
+        // Save context file
+        const id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+        const filename = `${id}.md`;
+        const filepath = path.join(CONTEXTS_DIR, filename);
+        fs.writeFileSync(filepath, content);
+
+        const entry = logBridgeEvent('import', label || 'Imported context', { filename });
+
+        // Optionally inject a read command into Claude Code
+        if (inject) {
+            const session = getActiveSession();
+            if (session) {
+                const cmd = `Read this context file and follow the instructions: ${filepath}`;
+                execFile('tmux', ['send-keys', '-t', session, '-l', cmd], (err) => {
+                    if (!err) {
+                        execFile('tmux', ['send-keys', '-t', session, 'Enter']);
+                    }
+                });
+            }
+        }
+
+        res.json({ success: true, id: entry.id, filename, path: filepath });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * List saved context files
+ */
+app.get('/api/bridge/contexts', (req, res) => {
+    try {
+        if (!fs.existsSync(CONTEXTS_DIR)) {
+            return res.json({ success: true, contexts: [] });
+        }
+
+        const files = fs.readdirSync(CONTEXTS_DIR)
+            .filter(f => f.endsWith('.md'))
+            .sort((a, b) => b.localeCompare(a));
+
+        const contexts = files.map(f => {
+            const filepath = path.join(CONTEXTS_DIR, f);
+            const stat = fs.statSync(filepath);
+            const content = fs.readFileSync(filepath, 'utf8');
+            return {
+                filename: f,
+                size: stat.size,
+                created: stat.birthtime.toISOString(),
+                preview: content.substring(0, 200)
+            };
+        });
+
+        res.json({ success: true, contexts });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * Get a specific context file
+ */
+app.get('/api/bridge/contexts/:filename', (req, res) => {
+    try {
+        const filepath = path.join(CONTEXTS_DIR, path.basename(req.params.filename));
+        if (!fs.existsSync(filepath)) {
+            return res.status(404).json({ success: false, error: 'Context not found' });
+        }
+        const content = fs.readFileSync(filepath, 'utf8');
+        res.json({ success: true, content, filename: req.params.filename });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * Delete a context file
+ */
+app.delete('/api/bridge/contexts/:filename', (req, res) => {
+    try {
+        const filepath = path.join(CONTEXTS_DIR, path.basename(req.params.filename));
+        if (!fs.existsSync(filepath)) {
+            return res.status(404).json({ success: false, error: 'Context not found' });
+        }
+        fs.unlinkSync(filepath);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * Structured handoff — combine task + context + inject
+ */
+app.post('/api/bridge/handoff', (req, res) => {
+    try {
+        const { task, context, workingDir } = req.body;
+
+        if (!task) {
+            return res.status(400).json({ success: false, error: 'Missing task description' });
+        }
+
+        // Build handoff prompt
+        let prompt = task;
+        if (context) {
+            prompt += '\n\n## Context\n\n' + context;
+        }
+        if (workingDir) {
+            prompt += '\n\nWorking directory: ' + workingDir;
+        }
+
+        // Save as context file
+        const id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+        const filename = `handoff-${id}.md`;
+        const filepath = path.join(CONTEXTS_DIR, filename);
+        fs.writeFileSync(filepath, prompt);
+
+        logBridgeEvent('handoff', 'Handoff: ' + task.substring(0, 50), { filename });
+
+        // Inject into Claude Code
+        const session = getActiveSession();
+        if (session) {
+            const cmd = `Read this context file and follow the instructions: ${filepath}`;
+            execFile('tmux', ['send-keys', '-t', session, '-l', cmd], (err) => {
+                if (!err) {
+                    execFile('tmux', ['send-keys', '-t', session, 'Enter']);
+                }
+            });
+            res.json({ success: true, filename, injected: true });
+        } else {
+            res.json({ success: true, filename, injected: false, note: 'No active session — context saved for later' });
+        }
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * Bridge history — all import/export events
+ */
+app.get('/api/bridge/history', (req, res) => {
+    try {
+        if (!fs.existsSync(BRIDGE_HISTORY)) {
+            return res.json({ success: true, history: [] });
+        }
+        const history = JSON.parse(fs.readFileSync(BRIDGE_HISTORY, 'utf8'));
+        const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+        res.json({ success: true, history: history.slice(0, limit) });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ── WebSocket server ──────────────────────────────────────
 
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -571,6 +855,7 @@ server.listen(PORT, '0.0.0.0', () => {
 ║    POST /api/keys      - Send keystrokes to session        ║
 ║    GET  /api/status     - Server status                    ║
 ║    GET  /quick          - Quick response (ntfy actions)    ║
+║    GET  /api/bridge/*   - Context bridge (export/import)   ║
 ║    WS   /ws             - WebSocket push                   ║
 ╚═══════════════════════════════════════════════════════════╝
 `);

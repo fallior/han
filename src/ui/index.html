@@ -421,6 +421,226 @@
             color: var(--cyan);
         }
 
+        /* Bridge panel overlay */
+        .bridge-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 200;
+            background: rgba(0, 0, 0, 0.92);
+            flex-direction: column;
+        }
+
+        .bridge-overlay.visible {
+            display: flex;
+        }
+
+        .bridge-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .bridge-tabs {
+            display: flex;
+            gap: 4px;
+        }
+
+        .bridge-tab {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-dim);
+            font-family: inherit;
+            font-size: 12px;
+            padding: 6px 12px;
+            cursor: pointer;
+        }
+
+        .bridge-tab.active {
+            color: var(--cyan);
+            border-color: var(--cyan);
+            background: rgba(57, 208, 216, 0.1);
+        }
+
+        .bridge-tab:active { opacity: 0.7; }
+
+        .bridge-close {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-dim);
+            font-family: inherit;
+            font-size: 13px;
+            padding: 6px 12px;
+            cursor: pointer;
+        }
+
+        .bridge-close:active { opacity: 0.7; }
+
+        .bridge-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .bridge-section {
+            display: none;
+        }
+
+        .bridge-section.active {
+            display: block;
+        }
+
+        .bridge-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .bridge-select {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px 12px;
+            font-family: inherit;
+            font-size: 14px;
+            color: var(--text);
+            margin-bottom: 12px;
+            -webkit-appearance: none;
+        }
+
+        .bridge-textarea {
+            width: 100%;
+            min-height: 200px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--text);
+            resize: vertical;
+            margin-bottom: 12px;
+        }
+
+        .bridge-textarea:focus {
+            border-color: var(--cyan);
+            outline: none;
+        }
+
+        .bridge-textarea::placeholder {
+            color: var(--text-muted);
+        }
+
+        .bridge-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px 12px;
+            font-family: inherit;
+            font-size: 14px;
+            color: var(--text);
+            margin-bottom: 12px;
+        }
+
+        .bridge-input:focus {
+            border-color: var(--cyan);
+            outline: none;
+        }
+
+        .bridge-input::placeholder { color: var(--text-muted); }
+
+        .bridge-btn {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--cyan);
+            border-radius: 8px;
+            background: rgba(57, 208, 216, 0.1);
+            color: var(--cyan);
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 8px;
+        }
+
+        .bridge-btn:active { opacity: 0.7; }
+        .bridge-btn:disabled { opacity: 0.4; pointer-events: none; }
+
+        .bridge-btn-secondary {
+            border-color: var(--border);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-dim);
+        }
+
+        .bridge-preview {
+            background: var(--bg-term);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--text-dim);
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-bottom: 12px;
+        }
+
+        .bridge-history-item {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .bridge-history-item:last-child { border-bottom: none; }
+
+        .bridge-history-type {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-bottom: 4px;
+        }
+
+        .bridge-history-type.export {
+            background: rgba(57, 208, 216, 0.15);
+            color: var(--cyan);
+        }
+
+        .bridge-history-type.import {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--green);
+        }
+
+        .bridge-history-type.handoff {
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--amber);
+        }
+
+        .bridge-history-label {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-bottom: 2px;
+        }
+
+        .bridge-history-time {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
         @supports (padding: max(0px)) {
             .titlebar { padding-top: max(8px, env(safe-area-inset-top)); }
         }
@@ -440,6 +660,7 @@
             <div class="titlebar-tools">
                 <button class="tool-btn" id="searchToggle" title="Search">🔍</button>
                 <button class="tool-btn" id="copyBtn" title="Copy">📋</button>
+                <button class="tool-btn" id="bridgeBtn" title="Bridge">🔗</button>
             </div>
             <div class="titlebar-status">
                 <div class="status-dot"></div>
@@ -486,6 +707,58 @@
         <div class="footer">
             <span id="footerLeft">No pending prompts</span>
             <span class="footer-hint" id="footerHint">tap terminal to type</span>
+        </div>
+    </div>
+
+    <!-- Bridge overlay -->
+    <div class="bridge-overlay" id="bridgeOverlay">
+        <div class="bridge-header">
+            <div class="bridge-tabs">
+                <button class="bridge-tab active" data-tab="export">Export</button>
+                <button class="bridge-tab" data-tab="import">Import</button>
+                <button class="bridge-tab" data-tab="handoff">Handoff</button>
+                <button class="bridge-tab" data-tab="history">History</button>
+            </div>
+            <button class="bridge-close" id="bridgeClose">✕</button>
+        </div>
+        <div class="bridge-body">
+            <!-- Export tab -->
+            <div class="bridge-section active" id="bridgeExport">
+                <div class="bridge-label">Format</div>
+                <select class="bridge-select" id="exportFormat">
+                    <option value="summary">Summary (last 30 lines)</option>
+                    <option value="full">Full scrollback</option>
+                    <option value="handoff">Handoff template</option>
+                </select>
+                <button class="bridge-btn" id="exportBtn">Export Session</button>
+                <div class="bridge-preview" id="exportPreview" style="display:none;"></div>
+                <button class="bridge-btn bridge-btn-secondary" id="exportShare" style="display:none;">Share / Copy</button>
+            </div>
+
+            <!-- Import tab -->
+            <div class="bridge-section" id="bridgeImport">
+                <div class="bridge-label">Paste context from claude.ai or elsewhere</div>
+                <textarea class="bridge-textarea" id="importContent" placeholder="Paste conversation, instructions, or context here..."></textarea>
+                <input class="bridge-input" id="importLabel" placeholder="Label (optional)">
+                <button class="bridge-btn" id="importSaveBtn">Save Context</button>
+                <button class="bridge-btn bridge-btn-secondary" id="importInjectBtn">Save & Send to Claude Code</button>
+            </div>
+
+            <!-- Handoff tab -->
+            <div class="bridge-section" id="bridgeHandoff">
+                <div class="bridge-label">What should Claude Code do?</div>
+                <textarea class="bridge-textarea" id="handoffTask" placeholder="Describe the task..." style="min-height:120px;"></textarea>
+                <div class="bridge-label">Additional context (optional)</div>
+                <textarea class="bridge-textarea" id="handoffContext" placeholder="Paste relevant context..." style="min-height:100px;"></textarea>
+                <div class="bridge-label">Working directory (optional)</div>
+                <input class="bridge-input" id="handoffDir" placeholder="e.g. ~/Projects/myapp">
+                <button class="bridge-btn" id="handoffBtn">Hand Off to Claude Code</button>
+            </div>
+
+            <!-- History tab -->
+            <div class="bridge-section" id="bridgeHistory">
+                <div id="bridgeHistoryList"></div>
+            </div>
         </div>
     </div>
 
@@ -1238,6 +1511,215 @@
         }
 
         copyBtn.addEventListener('click', copyTerminalContent);
+
+        // ── Bridge ────────────────────────────────────────────
+
+        const bridgeBtn = document.getElementById('bridgeBtn');
+        const bridgeOverlay = document.getElementById('bridgeOverlay');
+        const bridgeClose = document.getElementById('bridgeClose');
+        const exportFormat = document.getElementById('exportFormat');
+        const exportBtn = document.getElementById('exportBtn');
+        const exportPreview = document.getElementById('exportPreview');
+        const exportShare = document.getElementById('exportShare');
+        const importContent = document.getElementById('importContent');
+        const importLabel = document.getElementById('importLabel');
+        const importSaveBtn = document.getElementById('importSaveBtn');
+        const importInjectBtn = document.getElementById('importInjectBtn');
+        const handoffTask = document.getElementById('handoffTask');
+        const handoffContext = document.getElementById('handoffContext');
+        const handoffDir = document.getElementById('handoffDir');
+        const handoffBtn = document.getElementById('handoffBtn');
+        const bridgeHistoryList = document.getElementById('bridgeHistoryList');
+
+        let lastExportContent = '';
+
+        function openBridge() {
+            bridgeOverlay.classList.add('visible');
+            bridgeBtn.classList.add('active');
+        }
+
+        function closeBridge() {
+            bridgeOverlay.classList.remove('visible');
+            bridgeBtn.classList.remove('active');
+        }
+
+        function switchBridgeTab(tab) {
+            bridgeOverlay.querySelectorAll('.bridge-tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.tab === tab);
+            });
+            bridgeOverlay.querySelectorAll('.bridge-section').forEach(s => {
+                s.classList.remove('active');
+            });
+            document.getElementById('bridge' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+
+            if (tab === 'history') loadBridgeHistory();
+        }
+
+        bridgeBtn.addEventListener('click', () => {
+            if (bridgeOverlay.classList.contains('visible')) {
+                closeBridge();
+            } else {
+                openBridge();
+            }
+        });
+
+        bridgeClose.addEventListener('click', closeBridge);
+
+        bridgeOverlay.querySelector('.bridge-tabs').addEventListener('click', (e) => {
+            const tab = e.target.closest('.bridge-tab');
+            if (tab) switchBridgeTab(tab.dataset.tab);
+        });
+
+        // Export
+        exportBtn.addEventListener('click', async () => {
+            exportBtn.disabled = true;
+            exportBtn.textContent = 'Exporting...';
+            try {
+                const res = await fetch(`${API_BASE}/api/bridge/export?format=${exportFormat.value}`);
+                const data = await res.json();
+                if (data.success) {
+                    lastExportContent = data.content;
+                    exportPreview.textContent = data.content;
+                    exportPreview.style.display = '';
+                    exportShare.style.display = '';
+                    showToast('Exported');
+                } else {
+                    showToast(data.error || 'Export failed', true);
+                }
+            } catch {
+                showToast('Connection error', true);
+            } finally {
+                exportBtn.disabled = false;
+                exportBtn.textContent = 'Export Session';
+            }
+        });
+
+        exportShare.addEventListener('click', () => {
+            if (!lastExportContent) return;
+            if (navigator.share) {
+                navigator.share({ text: lastExportContent }).catch(() => {});
+            } else {
+                showCopyOverlay(lastExportContent);
+            }
+        });
+
+        // Import
+        async function doImport(inject) {
+            const content = importContent.value.trim();
+            if (!content) {
+                showToast('Paste some content first', true);
+                return;
+            }
+
+            const btn = inject ? importInjectBtn : importSaveBtn;
+            btn.disabled = true;
+            btn.textContent = inject ? 'Sending...' : 'Saving...';
+
+            try {
+                const res = await fetch(`${API_BASE}/api/bridge/import`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content,
+                        label: importLabel.value.trim() || undefined,
+                        inject
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(inject ? 'Sent to Claude Code' : 'Context saved');
+                    importContent.value = '';
+                    importLabel.value = '';
+                } else {
+                    showToast(data.error || 'Failed', true);
+                }
+            } catch {
+                showToast('Connection error', true);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = inject ? 'Save & Send to Claude Code' : 'Save Context';
+            }
+        }
+
+        importSaveBtn.addEventListener('click', () => doImport(false));
+        importInjectBtn.addEventListener('click', () => doImport(true));
+
+        // Handoff
+        handoffBtn.addEventListener('click', async () => {
+            const task = handoffTask.value.trim();
+            if (!task) {
+                showToast('Describe the task first', true);
+                return;
+            }
+
+            handoffBtn.disabled = true;
+            handoffBtn.textContent = 'Handing off...';
+
+            try {
+                const res = await fetch(`${API_BASE}/api/bridge/handoff`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        task,
+                        context: handoffContext.value.trim() || undefined,
+                        workingDir: handoffDir.value.trim() || undefined
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.injected ? 'Handed off to Claude Code' : 'Saved (no active session)');
+                    handoffTask.value = '';
+                    handoffContext.value = '';
+                    handoffDir.value = '';
+                } else {
+                    showToast(data.error || 'Failed', true);
+                }
+            } catch {
+                showToast('Connection error', true);
+            } finally {
+                handoffBtn.disabled = false;
+                handoffBtn.textContent = 'Hand Off to Claude Code';
+            }
+        });
+
+        // Bridge history
+        async function loadBridgeHistory() {
+            bridgeHistoryList.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">Loading...</div>';
+            try {
+                const res = await fetch(`${API_BASE}/api/bridge/history?limit=30`);
+                const data = await res.json();
+
+                if (!data.success || data.history.length === 0) {
+                    bridgeHistoryList.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;">No bridge activity yet</div>';
+                    return;
+                }
+
+                bridgeHistoryList.innerHTML = '';
+                for (const item of data.history) {
+                    const el = document.createElement('div');
+                    el.className = 'bridge-history-item';
+
+                    const badge = document.createElement('span');
+                    badge.className = 'bridge-history-type ' + (item.type || 'export');
+                    badge.textContent = item.type || 'event';
+
+                    const label = document.createElement('div');
+                    label.className = 'bridge-history-label';
+                    label.textContent = item.label || '';
+
+                    const time = document.createElement('div');
+                    time.className = 'bridge-history-time';
+                    time.textContent = item.timestamp ? timeAgo(item.timestamp) : '';
+
+                    el.appendChild(badge);
+                    el.appendChild(label);
+                    el.appendChild(time);
+                    bridgeHistoryList.appendChild(el);
+                }
+            } catch {
+                bridgeHistoryList.innerHTML = '<div style="text-align:center;color:var(--red);padding:20px;">Failed to load</div>';
+            }
+        }
 
         // ── Start ─────────────────────────────────────────────
 
