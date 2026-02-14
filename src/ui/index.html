@@ -724,15 +724,13 @@
         <div class="bridge-body">
             <!-- Export tab -->
             <div class="bridge-section active" id="bridgeExport">
-                <div class="bridge-label">Format</div>
-                <select class="bridge-select" id="exportFormat">
-                    <option value="summary">Summary (last 30 lines)</option>
-                    <option value="full">Full scrollback</option>
-                    <option value="handoff">Handoff template</option>
-                </select>
-                <button class="bridge-btn" id="exportBtn">Export Session</button>
-                <div class="bridge-preview" id="exportPreview" style="display:none;"></div>
-                <button class="bridge-btn bridge-btn-secondary" id="exportShare" style="display:none;">Share / Copy</button>
+                <div class="bridge-label">Captures full scrollback and auto-saves</div>
+                <button class="bridge-btn" id="exportSendBtn">Export & Send to Claude Code</button>
+                <button class="bridge-btn bridge-btn-secondary" id="exportSaveBtn">Export & Save Only</button>
+                <button class="bridge-btn bridge-btn-secondary" id="exportShareBtn" style="display:none;">Share Last Export</button>
+                <div id="exportResult" style="display:none; margin-top:12px;">
+                    <div class="bridge-label" id="exportResultLabel"></div>
+                </div>
             </div>
 
             <!-- Import tab -->
@@ -1517,10 +1515,11 @@
         const bridgeBtn = document.getElementById('bridgeBtn');
         const bridgeOverlay = document.getElementById('bridgeOverlay');
         const bridgeClose = document.getElementById('bridgeClose');
-        const exportFormat = document.getElementById('exportFormat');
-        const exportBtn = document.getElementById('exportBtn');
-        const exportPreview = document.getElementById('exportPreview');
-        const exportShare = document.getElementById('exportShare');
+        const exportSendBtn = document.getElementById('exportSendBtn');
+        const exportSaveBtn = document.getElementById('exportSaveBtn');
+        const exportShareBtn = document.getElementById('exportShareBtn');
+        const exportResult = document.getElementById('exportResult');
+        const exportResultLabel = document.getElementById('exportResultLabel');
         const importContent = document.getElementById('importContent');
         const importLabel = document.getElementById('importLabel');
         const importSaveBtn = document.getElementById('importSaveBtn');
@@ -1571,30 +1570,37 @@
         });
 
         // Export
-        exportBtn.addEventListener('click', async () => {
-            exportBtn.disabled = true;
-            exportBtn.textContent = 'Exporting...';
+        async function doExport(inject) {
+            const btn = inject ? exportSendBtn : exportSaveBtn;
+            const origText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = inject ? 'Exporting & sending...' : 'Exporting...';
+
             try {
-                const res = await fetch(`${API_BASE}/api/bridge/export?format=${exportFormat.value}`);
+                const url = `${API_BASE}/api/bridge/export` + (inject ? '?inject=true' : '');
+                const res = await fetch(url);
                 const data = await res.json();
                 if (data.success) {
                     lastExportContent = data.content;
-                    exportPreview.textContent = data.content;
-                    exportPreview.style.display = '';
-                    exportShare.style.display = '';
-                    showToast('Exported');
+                    exportResult.style.display = '';
+                    exportResultLabel.textContent = `Saved: ${data.filename} (${data.lineCount} lines)` + (data.injected ? ' — sent to Claude Code' : '');
+                    exportShareBtn.style.display = '';
+                    showToast(inject ? `Exported & sent (${data.lineCount} lines)` : `Exported (${data.lineCount} lines)`);
                 } else {
                     showToast(data.error || 'Export failed', true);
                 }
             } catch {
                 showToast('Connection error', true);
             } finally {
-                exportBtn.disabled = false;
-                exportBtn.textContent = 'Export Session';
+                btn.disabled = false;
+                btn.textContent = origText;
             }
-        });
+        }
 
-        exportShare.addEventListener('click', () => {
+        exportSendBtn.addEventListener('click', () => doExport(true));
+        exportSaveBtn.addEventListener('click', () => doExport(false));
+
+        exportShareBtn.addEventListener('click', () => {
             if (!lastExportContent) return;
             if (navigator.share) {
                 navigator.share({ text: lastExportContent }).catch(() => {});

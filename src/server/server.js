@@ -93,13 +93,13 @@ function stripAnsi(text) {
 }
 
 /**
- * Capture full scrollback from a tmux session (up to 1000 lines)
+ * Capture full scrollback from a tmux session (entire history)
  */
 function captureFullScrollback(session) {
     try {
         const content = execFileSync('tmux', [
-            'capture-pane', '-t', session, '-p', '-S', '-1000'
-        ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+            'capture-pane', '-t', session, '-p', '-S', '-'
+        ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 50 * 1024 * 1024 });
         return content;
     } catch {
         return null;
@@ -109,37 +109,15 @@ function captureFullScrollback(session) {
 /**
  * Format session content as markdown for export
  */
-function formatExport(content, session, format) {
+function formatExport(content, session) {
     const timestamp = new Date().toISOString();
     const clean = stripAnsi(content).replace(/\s+$/, '');
 
-    if (format === 'full') {
-        return `# Claude Code Session Export\n\n` +
-               `**Session**: ${session}\n` +
-               `**Exported**: ${timestamp}\n\n` +
-               `---\n\n` +
-               '```\n' + clean + '\n```\n';
-    }
-
-    if (format === 'handoff') {
-        // Extract the last ~50 lines for concise handoff
-        const lines = clean.split('\n');
-        const recent = lines.slice(-50).join('\n');
-        return `# Handoff from Claude Code\n\n` +
-               `**Session**: ${session}\n` +
-               `**Time**: ${timestamp}\n\n` +
-               `## Recent Terminal Output\n\n` +
-               '```\n' + recent + '\n```\n\n' +
-               `## Context\n\n` +
-               `_Add context about what was being worked on..._\n`;
-    }
-
-    // Default: summary — last 30 lines
-    const lines = clean.split('\n');
-    const recent = lines.slice(-30).join('\n');
-    return `# Session Summary\n\n` +
-           `**Session**: ${session} | **Exported**: ${timestamp}\n\n` +
-           '```\n' + recent + '\n```\n';
+    return `# Claude Code Session Export\n\n` +
+           `**Session**: ${session}\n` +
+           `**Exported**: ${timestamp}\n\n` +
+           `---\n\n` +
+           '```\n' + clean + '\n```\n';
 }
 
 /**
@@ -558,11 +536,6 @@ app.delete('/api/prompts/:id', (req, res) => {
  */
 app.get('/api/bridge/export', (req, res) => {
     try {
-        const format = req.query.format || 'summary';
-        if (!['summary', 'full', 'handoff'].includes(format)) {
-            return res.status(400).json({ success: false, error: 'Invalid format. Use: summary, full, handoff' });
-        }
-
         const session = getActiveSession();
         if (!session) {
             return res.status(400).json({ success: false, error: 'No active tmux session' });
@@ -573,11 +546,30 @@ app.get('/api/bridge/export', (req, res) => {
             return res.status(500).json({ success: false, error: 'Failed to capture terminal' });
         }
 
-        const markdown = formatExport(content, session, format);
+        const markdown = formatExport(content, session);
 
-        logBridgeEvent('export', `Export (${format})`, { format, session });
+        // Auto-save to file
+        const id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+        const filename = `export-${id}.md`;
+        const filepath = path.join(CONTEXTS_DIR, filename);
+        fs.writeFileSync(filepath, markdown);
 
-        res.json({ success: true, content: markdown, format, session });
+        const inject = req.query.inject === 'true';
+        if (inject) {
+            const cmd = `Read this context file — it contains the exported session: ${filepath}`;
+            execFile('tmux', ['send-keys', '-t', session, '-l', cmd], (err) => {
+                if (!err) {
+                    execFile('tmux', ['send-keys', '-t', session, 'Enter']);
+                }
+            });
+        }
+
+        const clean = stripAnsi(content).replace(/\s+$/, '');
+        const lineCount = clean.split('\n').length;
+
+        logBridgeEvent('export', `Export (${lineCount} lines)`, { filename, session, lineCount });
+
+        res.json({ success: true, filename, path: filepath, lineCount, injected: inject, content: markdown });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
