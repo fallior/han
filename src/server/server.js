@@ -216,6 +216,11 @@ function broadcastTerminal() {
     if (result.content === lastBroadcastContent) return;
     lastBroadcastContent = result.content;
 
+    // Persist to file so content survives context compaction
+    try {
+        fs.writeFileSync(path.join(CLAUDE_REMOTE_DIR, 'terminal.txt'), result.content);
+    } catch { /* best effort */ }
+
     const message = JSON.stringify({
         type: 'terminal',
         content: result.content,
@@ -384,6 +389,17 @@ app.get('/api/status', (req, res) => {
         active_sessions: sessions,
         uptime: process.uptime()
     });
+});
+
+const TERMINAL_FILE = path.join(CLAUDE_REMOTE_DIR, 'terminal.txt');
+
+app.get('/api/terminal', (req, res) => {
+    try {
+        const content = fs.readFileSync(TERMINAL_FILE, 'utf8');
+        res.json({ success: true, content });
+    } catch {
+        res.json({ success: true, content: '' });
+    }
 });
 
 /**

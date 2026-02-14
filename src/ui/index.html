@@ -7,14 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Claude Remote</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js"></script>
+    <!-- System monospace font — no CDN load needed -->
     <style>
         :root {
             --bg-term: #0a0e14;
@@ -33,7 +26,7 @@
         html, body { height: 100%; overflow: hidden; }
 
         body {
-            font-family: 'JetBrains Mono', monospace;
+            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
             background: #000;
             color: var(--text);
         }
@@ -121,12 +114,6 @@
 
         .terminal-content::-webkit-scrollbar { width: 6px; }
         .terminal-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-        /* xterm.js focus indicator */
-        .xterm.xterm-focus { outline: 1px solid var(--cyan); outline-offset: -1px; }
-
-        /* Prevent iOS zoom on xterm hidden input */
-        .xterm-helper-textarea { font-size: 16px !important; }
 
         /* Empty state */
         .empty {
@@ -281,7 +268,7 @@
         }
 
         .qbtn {
-            font-family: 'JetBrains Mono', monospace;
+            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
             font-size: 13px;
             font-weight: 500;
             min-width: 44px;
@@ -353,7 +340,7 @@
             border: 1px solid var(--border);
             border-radius: 6px;
             padding: 8px 12px;
-            font-family: 'JetBrains Mono', monospace;
+            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
             font-size: 14px;
             color: var(--text);
             outline: none;
@@ -524,7 +511,7 @@
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 12px;
-            font-family: 'JetBrains Mono', monospace;
+            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
             font-size: 12px;
             line-height: 1.5;
             color: var(--text);
@@ -677,7 +664,6 @@
         </div>
 
         <div class="terminal" id="terminal">
-            <div id="xtermContainer" style="display:none; width:100%; height:100%;"></div>
             <div class="terminal-content" id="termContent"></div>
             <!-- Hidden input for iOS soft keyboard -->
             <input type="text" id="mobileInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
@@ -780,18 +766,11 @@
         let terminalLive = false;
         let terminalSession = null;
 
-        // xterm.js state
-        let term = null;
-        let fitAddon = null;
-        let searchAddon = null;
         let lastWrittenContent = '';
-        let searchResultCount = 0;
-        let searchResultIndex = -1;
-        let localLineCount = 0;  // Track line count for display
+        let localLineCount = 0;
 
         const terminal = document.getElementById('terminal');
         const termContent = document.getElementById('termContent');
-        const xtermContainer = document.getElementById('xtermContainer');
         const mobileInput = document.getElementById('mobileInput');
         const titleText = document.getElementById('titleText');
         const statusText = document.getElementById('statusText');
@@ -810,77 +789,6 @@
         const searchNext = document.getElementById('searchNext');
         const searchClose = document.getElementById('searchClose');
         const copyBtn = document.getElementById('copyBtn');
-
-        // ── xterm.js ──────────────────────────────────────────
-
-        function initXterm() {
-            if (term) return;
-
-            term = new Terminal({
-                allowProposedApi: true,
-                theme: {
-                    background: '#0a0e14',
-                    foreground: '#e6edf3',
-                    cursor: '#e6edf3',
-                    cursorAccent: '#0a0e14',
-                    selectionBackground: 'rgba(57, 208, 216, 0.3)',
-                    black: '#484f58',
-                    red: '#f85149',
-                    green: '#3fb950',
-                    yellow: '#d29922',
-                    blue: '#58a6ff',
-                    magenta: '#bc8cff',
-                    cyan: '#39d0d8',
-                    white: '#e6edf3',
-                    brightBlack: '#6e7681',
-                    brightRed: '#ffa198',
-                    brightGreen: '#56d364',
-                    brightYellow: '#e3b341',
-                    brightBlue: '#79c0ff',
-                    brightMagenta: '#d2a8ff',
-                    brightCyan: '#56d4dd',
-                    brightWhite: '#ffffff'
-                },
-                convertEol: true,
-                fontSize: 13,
-                fontFamily: "'JetBrains Mono', monospace",
-                scrollback: 1000,
-                cursorBlink: true
-            });
-
-            fitAddon = new FitAddon.FitAddon();
-            searchAddon = new SearchAddon.SearchAddon();
-            term.loadAddon(fitAddon);
-            term.loadAddon(new WebLinksAddon.WebLinksAddon());
-            term.loadAddon(searchAddon);
-
-            term.open(xtermContainer);
-            fitAddon.fit();
-
-            // Route keystrokes to sendKey (prompt) or sendKeyDirect (watching)
-            term.onData((data) => {
-                if (!userHasTapped) return;
-
-                let key;
-                if (data === '\r') key = 'Enter';
-                else if (data === '\x1b') key = 'Escape';
-                else if (data === '\x03') key = 'C-c';
-                else key = data;
-
-                if (currentPrompt) {
-                    sendKey(key);
-                } else if (terminalLive) {
-                    sendKeyDirect(key);
-                }
-            });
-
-            // Resize handler
-            window.addEventListener('resize', () => {
-                if (fitAddon && xtermContainer.style.display !== 'none') {
-                    fitAddon.fit();
-                }
-            });
-        }
 
         // ── Prompt handling ───────────────────────────────────
 
@@ -1007,7 +915,6 @@
             if (showingHistory) return;
 
             // Use plain text div — native scrolling works on mobile
-            xtermContainer.style.display = 'none';
             termContent.style.display = '';
 
             // Only update DOM if content actually changed
@@ -1043,7 +950,6 @@
             // If terminal broadcast hasn't started yet, show prompt's terminal content
             if (!terminalLive) {
                 const content = (p.terminal || p.terminal_content || '').trim();
-                xtermContainer.style.display = 'none';
                 termContent.style.display = '';
                 if (content && content !== lastWrittenContent) {
                     termContent.textContent = content;
@@ -1061,7 +967,6 @@
         }
 
         function renderNoSession() {
-            xtermContainer.style.display = 'none';
             termContent.style.display = '';
             lastWrittenContent = '';
 
@@ -1252,7 +1157,6 @@
         async function showHistory() {
             showingHistory = true;
             updateQuickbar();
-            xtermContainer.style.display = 'none';
             termContent.style.display = '';
             footerHint.textContent = 'back to live';
 
@@ -1332,7 +1236,6 @@
                 renderPromptOverlay();
             } else if (terminalLive) {
                 // Restore watching state — show plain text terminal
-                xtermContainer.style.display = 'none';
                 termContent.style.display = '';
                 if (lastWrittenContent) {
                     termContent.textContent = lastWrittenContent;
@@ -1481,7 +1384,7 @@
             const textarea = document.createElement('textarea');
             textarea.value = text;
             textarea.readOnly = true;
-            textarea.style.cssText = 'flex:1;background:var(--bg-term);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:"JetBrains Mono",monospace;font-size:12px;line-height:1.5;resize:none;-webkit-user-select:text;user-select:text;';
+            textarea.style.cssText = 'flex:1;background:var(--bg-term);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:12px;line-height:1.5;resize:none;-webkit-user-select:text;user-select:text;';
 
             overlay.appendChild(header);
             overlay.appendChild(textarea);
@@ -1713,9 +1616,19 @@
 
         // ── Start ─────────────────────────────────────────────
 
+        async function loadPersistedTerminal() {
+            try {
+                const res = await fetch(`${API_BASE}/api/terminal`);
+                const data = await res.json();
+                if (data.success && data.content) {
+                    handleTerminalUpdate(data.content, 'claude-remote');
+                }
+            } catch { /* WebSocket will pick up shortly */ }
+        }
+
         function start() {
-            // Show initial state
-            renderNoSession();
+            // Load persisted terminal content immediately (before WebSocket connects)
+            loadPersistedTerminal();
 
             connectWebSocket();
 
