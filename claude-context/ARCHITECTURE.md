@@ -189,7 +189,11 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 | GET | /api/tasks/:id | Get task details |
 | POST | /api/tasks/:id/cancel | Cancel running/pending task |
 | DELETE | /api/tasks/:id | Delete a task |
-| WS | /ws | WebSocket push (prompts + terminal + tasks) |
+| GET | /api/approvals | List pending approvals |
+| GET | /api/approvals/:id | Get approval details |
+| POST | /api/approvals/:id/approve | Approve operation |
+| POST | /api/approvals/:id/deny | Deny operation |
+| WS | /ws | WebSocket push (prompts + terminal + tasks + approvals) |
 | GET | / | Serve web UI |
 
 ### Request/Response Examples
@@ -261,17 +265,37 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 ### Level 7: Autonomous Task Runner (Complete)
 
 - **SQLite task queue**: `~/.claude-remote/tasks.db` with `better-sqlite3` (WAL mode)
-- Task schema: id, title, description, project_path, status, priority, model, max_turns, cost, tokens, turns
+- Task schema: id, title, description, project_path, status, priority, model, max_turns, cost, tokens, turns, checkpoint_ref, checkpoint_type, gate_mode, allowed_tools
 - Status workflow: `pending` → `running` → `done`/`failed`/`cancelled`
 - **Orchestrator loop**: 5-second interval picks next pending task (highest priority, oldest first)
 - **Agent SDK integration**: `query()` with streaming `SDKMessage` types
   - Clean env (removes `CLAUDECODE`) to avoid nested session detection
-  - `bypassPermissions` mode for headless execution
+  - Configurable permission mode based on gate_mode
   - `AbortController` for cancel support
+  - `canUseTool` callback for approval gates
+  - `allowedTools` array for tool scoping
+- **Git checkpoint system**:
+  - Automatic checkpoint before task execution (branch for clean repos, stash for dirty)
+  - Rollback on task failure or cancellation
+  - Cleanup on successful completion
+  - Stored in database: checkpoint_ref, checkpoint_type, checkpoint_created_at
+- **Approval gates**:
+  - Three modes: `bypass` (fully autonomous), `edits_only` (approve dangerous tools), `approve_all` (approve every tool)
+  - Dangerous tools: Bash, Write, Edit, NotebookEdit
+  - Approval requests broadcast via WebSocket (`approval_request` message)
+  - Pending approvals stored in Map with 5-minute timeout
+  - Phone UI approval popup with approve/deny buttons
+- **Tool scoping**:
+  - Optional `allowed_tools` array stored as JSON in database
+  - Parsed and passed to Agent SDK to restrict available tools
 - **WebSocket messages**:
   - `task_update` — task status changed (created, started, completed, failed)
   - `task_progress` — streaming SDK messages (assistant text, tool uses, results)
+  - `approval_request` — approval needed (approvalId, taskId, toolName, input, timestamp)
 - **Task board UI**: overlay panel with Tasks/Create/Progress tabs, accessed via 🤖 button
+  - Gate mode dropdown (bypass/edits_only/approve_all)
+  - Allowed tools input (comma-separated)
+  - Approval popup for gate-controlled operations
 
 ## Security Considerations
 

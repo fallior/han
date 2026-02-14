@@ -4,9 +4,9 @@
 
 ## Current Stage
 
-**Levels 1-6 Complete, Level 7 MVP**. All core levels plus autonomous task runner (MVP). Prompt responder, push alerts, context window (search + copy), terminal mirror, mobile keyboard, always-on terminal broadcast, context bridge, and now autonomous task execution via the Claude Agent SDK.
+**Levels 1-7 Complete**. All core levels plus full autonomous task runner with safety features. Prompt responder, push alerts, context window (search + copy), terminal mirror, mobile keyboard, always-on terminal broadcast, context bridge, and autonomous task execution via the Claude Agent SDK with git checkpoints, approval gates, and tool scoping.
 
-Create tasks from your phone, Claude Code executes them headlessly. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working.
+Create tasks from your phone, Claude Code executes them headlessly with safety features: automatic git checkpoints before execution (rollback on failure), configurable approval gates (bypass/edits_only/approve_all), and tool scoping. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working.
 
 ## Progress Summary
 
@@ -23,14 +23,34 @@ Create tasks from your phone, Claude Code executes them headlessly. SQLite task 
 | Always-on Terminal Mirror | 🟢 Complete | 1s server broadcast via WebSocket |
 | Level 3: Context Window | 🟢 Complete | Search (xterm-addon-search) + copy |
 | Level 6: Claude Bridge | 🟢 Complete | Export, import, handoff, history |
-| Level 7: Task Runner | 🟡 MVP Complete | Agent SDK, SQLite queue, task board UI. Missing: git checkpoints, approval gates, tool scoping |
+| Level 7: Task Runner | 🟢 Complete | Agent SDK, SQLite queue, task board UI, git checkpoints, approval gates, tool scoping |
 
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
 
+### 2026-02-15 — Darron (via Claude) — Session 16
+- **Level 7: Completion** (git checkpoints, approval gates, tool scoping):
+  - **Git checkpoint system**: Auto-creates checkpoints before task execution
+    - Clean repos: creates branch `claude-remote/checkpoint-{taskId}`
+    - Dirty repos: creates stash with message `claude-remote checkpoint {taskId}`
+    - Automatic rollback on task failure or cancellation
+    - Cleanup on successful completion
+  - **Configurable approval gates**: Phone-based approval for dangerous operations
+    - Three modes: `bypass` (fully autonomous), `edits_only` (approve Bash/Write/Edit), `approve_all` (approve every tool)
+    - Approval popup UI with approve/deny buttons
+    - WebSocket broadcast of approval requests (`approval_request` message type)
+    - API endpoints: `GET /api/approvals`, `GET/POST /api/approvals/:id/(approve|deny)`
+    - canUseTool callback integration with 5-minute timeout
+  - **Tool scoping**: Restrict tasks to specific tools via `allowed_tools` array
+    - Stored as JSON in SQLite, parsed and passed to Agent SDK
+    - UI input field for comma-separated tool names
+  - Database migrations: added `checkpoint_ref`, `checkpoint_created_at`, `checkpoint_type`, `gate_mode`, `allowed_tools` columns
+  - Updated task creation UI with gate mode dropdown and allowed tools input
+  - Level 7 now fully complete as per ROADMAP.md
+
 ### 2026-02-15 — Darron (via Claude) — Session 15
-- **Level 7: Autonomous Task Runner** (`6475b79`):
+- **Level 7: Autonomous Task Runner MVP** (`6475b79`):
   - SQLite task queue (`better-sqlite3`) at `~/.claude-remote/tasks.db`
   - Orchestrator loop: 5-second polling, picks up pending tasks, executes via Agent SDK
   - Claude Agent SDK integration (`@anthropic-ai/claude-agent-sdk`): `query()` with streaming
@@ -206,17 +226,23 @@ Create tasks from your phone, Claude Code executes them headlessly. SQLite task 
 - ✅ Task board UI with create/list/progress views
 - ✅ Real-time task progress streaming via WebSocket
 - ✅ Cost and token tracking per task
+- ✅ Git checkpoints with automatic rollback on failure
+- ✅ Configurable approval gates (bypass/edits_only/approve_all)
+- ✅ Tool scoping via allowed_tools
+- ✅ Approval popup UI with WebSocket notifications
 
 ## Next Actions
 
 ### Immediate (Next Session)
-- [ ] Test task board UI from phone
+- [ ] Test Level 7 features end-to-end from phone
+- [ ] Test git checkpoint rollback with failing task
+- [ ] Test approval gates with edits_only mode
 - [ ] Refine UI based on continued mobile usage
 
 ### Short-term
 - [ ] Consider extended levels (8-11) from ROADMAP.md
-- [ ] Add approval gates via `canUseTool` callback (Level 8)
-- [ ] Add git checkpoints before/after task execution
+- [ ] Add git checkpoint visualization in task detail view
+- [ ] Add approval history tracking
 
 ## Known Issues
 
@@ -226,7 +252,6 @@ Create tasks from your phone, Claude Code executes them headlessly. SQLite task 
 | iOS Safari drops WebSocket in background | Low | Handled by visibilitychange reconnect + polling fallback |
 | Opus concurrency limit | Low | Can't run two Claude Code Opus sessions simultaneously |
 | Agent SDK nested session | Low | Must remove `CLAUDECODE` env var — handled in code (see L012) |
-| Tasks run with bypass permissions | Medium | No approval gates yet — tasks can do anything |
 
 ## Blockers
 

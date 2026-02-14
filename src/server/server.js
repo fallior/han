@@ -102,6 +102,18 @@ db.exec(`CREATE TABLE IF NOT EXISTS tasks (
     turns INTEGER DEFAULT 0
 )`);
 
+// Migrate existing databases to add new columns
+const columns = db.pragma("table_info('tasks')").map(col => col.name);
+if (!columns.includes('checkpoint_ref')) {
+    console.log('[DB] Adding Level 7 completion columns...');
+    db.exec(`ALTER TABLE tasks ADD COLUMN checkpoint_ref TEXT`);
+    db.exec(`ALTER TABLE tasks ADD COLUMN checkpoint_created_at TEXT`);
+    db.exec(`ALTER TABLE tasks ADD COLUMN checkpoint_type TEXT`);
+    db.exec(`ALTER TABLE tasks ADD COLUMN gate_mode TEXT DEFAULT 'bypass'`);
+    db.exec(`ALTER TABLE tasks ADD COLUMN allowed_tools TEXT`);
+    console.log('[DB] Migration complete');
+}
+
 /**
  * Serve the mobile web UI
  */
@@ -188,6 +200,166 @@ function formatExport(content, session) {
            `**Exported**: ${timestamp}\n\n` +
            `---\n\n` +
            '```\n' + clean + '\n```\n';
+}
+
+// ── Git checkpoint helpers ───────────────────────────────────
+
+/**
+ * Check if a directory is a git repository
+ */
+function isGitRepo(projectPath) {
+    try {
+        execFileSync('git', ['rev-parse', '--git-dir'], {
+            cwd: projectPath,
+            stdio: 'ignore'
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Check if there are uncommitted changes in the working tree
+ */
+function hasUncommittedChanges(projectPath) {
+    try {
+        const output = execFileSync('git', ['status', '--porcelain'], {
+            cwd: projectPath,
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'ignore']
+        });
+        return output.trim().length > 0;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Create a git checkpoint before task execution
+ * Returns { ref, type } where type is 'branch', 'stash', or 'none'
+ */
+function createCheckpoint(projectPath, taskId) {
+    const isDirty = hasUncommittedChanges(projectPath);
+
+    if (isDirty) {
+        // Dirty working tree — create stash
+        const stashMessage = `claude-remote checkpoint ${taskId}`;
+        try {
+            execFileSync('git', ['stash', 'push', '-u', '-m', stashMessage], {
+                cwd: projectPath,
+                stdio: 'ignore'
+            });
+            console.log(`[Git] Created stash checkpoint for task ${taskId}`);
+            return { ref: stashMessage, type: 'stash' };
+        } catch (err) {
+            console.error(`[Git] Failed to create stash:`, err.message);
+            return { ref: null, type: 'none' };
+        }
+    } else {
+        // Clean working tree — create branch
+        const branchName = `claude-remote/checkpoint-${taskId}`;
+        try {
+            execFileSync('git', ['branch', branchName], {
+                cwd: projectPath,
+                stdio: 'ignore'
+            });
+            console.log(`[Git] Created branch checkpoint: ${branchName}`);
+            return { ref: branchName, type: 'branch' };
+        } catch (err) {
+            console.error(`[Git] Failed to create branch:`, err.message);
+            return { ref: null, type: 'none' };
+        }
+    }
+}
+
+/**
+ * Rollback to a git checkpoint after task failure
+ */
+function rollbackCheckpoint(projectPath, checkpointRef, checkpointType) {
+    if (!checkpointRef || checkpointType === 'none') return;
+
+    try {
+        if (checkpointType === 'stash') {
+            // Find the stash by message and pop it
+            const stashList = execFileSync('git', ['stash', 'list'], {
+                cwd: projectPath,
+                encoding: 'utf8',
+                stdio: ['pipe', 'pipe', 'ignore']
+            });
+
+            const lines = stashList.trim().split('\n');
+            for (const line of lines) {
+                if (line.includes(checkpointRef)) {
+                    const match = line.match(/^(stash@\{\d+\})/);
+                    if (match) {
+                        // Reset working tree and apply stash
+                        execFileSync('git', ['reset', '--hard'], {
+                            cwd: projectPath,
+                            stdio: 'ignore'
+                        });
+                        execFileSync('git', ['stash', 'pop', match[1]], {
+                            cwd: projectPath,
+                            stdio: 'ignore'
+                        });
+                        console.log(`[Git] Rolled back to stash: ${checkpointRef}`);
+                        return;
+                    }
+                }
+            }
+        } else if (checkpointType === 'branch') {
+            // Reset to the branch
+            execFileSync('git', ['reset', '--hard', checkpointRef], {
+                cwd: projectPath,
+                stdio: 'ignore'
+            });
+            console.log(`[Git] Rolled back to branch: ${checkpointRef}`);
+        }
+    } catch (err) {
+        console.error(`[Git] Rollback failed:`, err.message);
+    }
+}
+
+/**
+ * Clean up a git checkpoint after successful task completion
+ */
+function cleanupCheckpoint(projectPath, checkpointRef, checkpointType) {
+    if (!checkpointRef || checkpointType === 'none') return;
+
+    try {
+        if (checkpointType === 'branch') {
+            // Delete the checkpoint branch
+            execFileSync('git', ['branch', '-D', checkpointRef], {
+                cwd: projectPath,
+                stdio: 'ignore'
+            });
+            console.log(`[Git] Cleaned up checkpoint branch: ${checkpointRef}`);
+        } else if (checkpointType === 'stash') {
+            // Drop the stash
+            const stashList = execFileSync('git', ['stash', 'list'], {
+                cwd: projectPath,
+                encoding: 'utf8',
+                stdio: ['pipe', 'pipe', 'ignore']
+            });
+
+            const lines = stashList.trim().split('\n');
+            for (const line of lines) {
+                if (line.includes(checkpointRef)) {
+                    const match = line.match(/^(stash@\{\d+\})/);
+                    if (match) {
+                        execFileSync('git', ['stash', 'drop', match[1]], {
+                            cwd: projectPath,
+                            stdio: 'ignore'
+                        });
+                        console.log(`[Git] Cleaned up checkpoint stash: ${checkpointRef}`);
+                        return;
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        console.error(`[Git] Cleanup failed:`, err.message);
+    }
 }
 
 /**
@@ -886,8 +1058,9 @@ const taskStmts = {
     list: db.prepare('SELECT * FROM tasks ORDER BY CASE status WHEN \'running\' THEN 0 WHEN \'pending\' THEN 1 ELSE 2 END, priority DESC, created_at DESC'),
     listByStatus: db.prepare('SELECT * FROM tasks WHERE status = ? ORDER BY priority DESC, created_at DESC'),
     get: db.prepare('SELECT * FROM tasks WHERE id = ?'),
-    insert: db.prepare('INSERT INTO tasks (id, title, description, project_path, priority, model, max_turns, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+    insert: db.prepare('INSERT INTO tasks (id, title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     updateStatus: db.prepare('UPDATE tasks SET status = ?, started_at = ? WHERE id = ?'),
+    updateCheckpoint: db.prepare('UPDATE tasks SET checkpoint_ref = ?, checkpoint_type = ?, checkpoint_created_at = ? WHERE id = ?'),
     complete: db.prepare('UPDATE tasks SET status = ?, completed_at = ?, result = ?, cost_usd = ?, tokens_in = ?, tokens_out = ?, turns = ? WHERE id = ?'),
     fail: db.prepare('UPDATE tasks SET status = ?, completed_at = ?, error = ? WHERE id = ?'),
     cancel: db.prepare('UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?'),
@@ -914,17 +1087,37 @@ app.get('/api/tasks', (req, res) => {
  */
 app.post('/api/tasks', (req, res) => {
     try {
-        const { title, description, project_path, priority, model, max_turns } = req.body;
+        const { title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools } = req.body;
 
         if (!title || !description || !project_path) {
             return res.status(400).json({ success: false, error: 'Missing title, description, or project_path' });
+        }
+
+        // Validate gate_mode
+        const validGateModes = ['bypass', 'edits_only', 'approve_all'];
+        const finalGateMode = gate_mode && validGateModes.includes(gate_mode) ? gate_mode : 'bypass';
+
+        // Validate and serialize allowed_tools
+        let allowedToolsJson = null;
+        if (allowed_tools) {
+            if (Array.isArray(allowed_tools) && allowed_tools.length > 0) {
+                allowedToolsJson = JSON.stringify(allowed_tools);
+            } else if (typeof allowed_tools === 'string') {
+                // Already JSON string
+                try {
+                    JSON.parse(allowed_tools); // Validate
+                    allowedToolsJson = allowed_tools;
+                } catch {
+                    return res.status(400).json({ success: false, error: 'Invalid allowed_tools JSON' });
+                }
+            }
         }
 
         const id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
         const now = new Date().toISOString();
 
         taskStmts.insert.run(id, title, description, project_path,
-            priority || 0, model || 'sonnet', max_turns || 100, now);
+            priority || 0, model || 'sonnet', max_turns || 100, finalGateMode, allowedToolsJson, now);
 
         const task = taskStmts.get.get(id);
         broadcastTaskUpdate(task);
@@ -989,6 +1182,134 @@ app.delete('/api/tasks/:id', (req, res) => {
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
+});
+
+// ── Approval gates ────────────────────────────────────────
+
+const pendingApprovals = new Map(); // toolUseID -> { taskId, toolName, input, resolve, reject, timestamp }
+
+/**
+ * Broadcast approval request to phone
+ */
+function broadcastApprovalRequest(approval) {
+    if (wss.clients.size === 0) return;
+    const message = JSON.stringify({ type: 'approval_request', ...approval });
+    wss.clients.forEach((client) => {
+        if (client.readyState === 1) client.send(message);
+    });
+}
+
+/**
+ * Create a canUseTool callback for approval gates
+ */
+async function createCanUseToolCallback(taskId, gateMode) {
+    return async (toolName, input, options) => {
+        if (gateMode === 'bypass') {
+            return { behavior: 'allow' };
+        }
+
+        const isDangerous = ['Bash', 'Write', 'Edit', 'NotebookEdit'].includes(toolName);
+        const shouldGate = (gateMode === 'approve_all') ||
+                          (gateMode === 'edits_only' && isDangerous);
+
+        if (!shouldGate) {
+            return { behavior: 'allow' };
+        }
+
+        // Route to phone for approval
+        const approvalPromise = new Promise((resolve, reject) => {
+            const approvalId = options.toolUseID || `${taskId}-${Date.now()}`;
+            pendingApprovals.set(approvalId, {
+                taskId,
+                toolName,
+                input,
+                resolve,
+                reject,
+                timestamp: new Date().toISOString()
+            });
+
+            // Broadcast to phone
+            broadcastApprovalRequest({
+                approvalId,
+                taskId,
+                toolName,
+                input,
+                timestamp: new Date().toISOString()
+            });
+
+            // Timeout after 5 minutes
+            setTimeout(() => {
+                if (pendingApprovals.has(approvalId)) {
+                    pendingApprovals.delete(approvalId);
+                    reject(new Error('Approval timeout'));
+                }
+            }, 5 * 60 * 1000);
+        });
+
+        try {
+            const decision = await approvalPromise;
+            return decision; // { behavior: 'allow' } or { behavior: 'deny', message: '...' }
+        } catch (err) {
+            return { behavior: 'deny', message: err.message };
+        }
+    };
+}
+
+/**
+ * List pending approvals
+ */
+app.get('/api/approvals', (req, res) => {
+    const approvals = Array.from(pendingApprovals.entries()).map(([id, data]) => ({
+        approvalId: id,
+        taskId: data.taskId,
+        toolName: data.toolName,
+        timestamp: data.timestamp
+    }));
+    res.json({ success: true, approvals });
+});
+
+/**
+ * Get specific approval details
+ */
+app.get('/api/approvals/:id', (req, res) => {
+    const approval = pendingApprovals.get(req.params.id);
+    if (!approval) return res.status(404).json({ success: false, error: 'Not found' });
+    res.json({
+        success: true,
+        approvalId: req.params.id,
+        taskId: approval.taskId,
+        toolName: approval.toolName,
+        input: approval.input,
+        timestamp: approval.timestamp
+    });
+});
+
+/**
+ * Approve an operation
+ */
+app.post('/api/approvals/:id/approve', (req, res) => {
+    const approval = pendingApprovals.get(req.params.id);
+    if (!approval) return res.status(404).json({ success: false, error: 'Not found' });
+
+    pendingApprovals.delete(req.params.id);
+    approval.resolve({ behavior: 'allow' });
+    res.json({ success: true });
+});
+
+/**
+ * Deny an operation
+ */
+app.post('/api/approvals/:id/deny', (req, res) => {
+    const approval = pendingApprovals.get(req.params.id);
+    if (!approval) return res.status(404).json({ success: false, error: 'Not found' });
+
+    const { message } = req.body;
+    pendingApprovals.delete(req.params.id);
+    approval.resolve({
+        behavior: 'deny',
+        message: message || 'Denied by user'
+    });
+    res.json({ success: true });
 });
 
 // ── Task orchestrator ─────────────────────────────────────
@@ -1061,6 +1382,19 @@ async function runNextTask() {
 
     console.log(`[Task] Starting: ${task.title} (${task.id})`);
 
+    // Create git checkpoint if project is a git repo
+    let checkpointRef = null;
+    let checkpointType = 'none';
+
+    if (isGitRepo(task.project_path)) {
+        const result = createCheckpoint(task.project_path, task.id);
+        checkpointRef = result.ref;
+        checkpointType = result.type;
+        if (checkpointRef) {
+            taskStmts.updateCheckpoint.run(checkpointRef, checkpointType, new Date().toISOString(), task.id);
+        }
+    }
+
     try {
         // Build clean env without CLAUDECODE (prevents nested session detection)
         const cleanEnv = { ...process.env };
@@ -1069,17 +1403,36 @@ async function runNextTask() {
         // Prepend instructions to avoid plan mode stalling (no human to approve)
         const taskPrompt = 'IMPORTANT: Do not use plan mode (EnterPlanMode). Implement directly — you are running autonomously with no human in the loop. Just do the work.\n\n' + task.description;
 
+        // Build agentQuery options
+        const permissionMode = task.gate_mode === 'bypass' ? 'bypassPermissions' : 'default';
+        const allowDangerous = task.gate_mode === 'bypass';
+
+        const options = {
+            model: task.model,
+            maxTurns: task.max_turns,
+            cwd: task.project_path,
+            permissionMode: permissionMode,
+            allowDangerouslySkipPermissions: allowDangerous,
+            abortController: abort,
+            env: cleanEnv,
+            canUseTool: await createCanUseToolCallback(task.id, task.gate_mode || 'bypass')
+        };
+
+        // Add allowedTools if specified
+        if (task.allowed_tools) {
+            try {
+                const toolsList = JSON.parse(task.allowed_tools);
+                if (Array.isArray(toolsList) && toolsList.length > 0) {
+                    options.allowedTools = toolsList;
+                }
+            } catch (err) {
+                console.error(`[Task] Invalid allowed_tools JSON: ${task.allowed_tools}`);
+            }
+        }
+
         const q = agentQuery({
             prompt: taskPrompt,
-            options: {
-                model: task.model,
-                maxTurns: task.max_turns,
-                cwd: task.project_path,
-                permissionMode: 'bypassPermissions',
-                allowDangerouslySkipPermissions: true,
-                abortController: abort,
-                env: cleanEnv,
-            }
+            options
         });
 
         let totalCost = 0;
@@ -1118,6 +1471,11 @@ async function runNextTask() {
                 );
 
                 console.log(`[Task] ${isSuccess ? 'Completed' : 'Failed'}: ${task.title} ($${totalCost.toFixed(4)}, ${numTurns} turns)`);
+
+                // Clean up checkpoint on success
+                if (isSuccess && checkpointRef && checkpointType !== 'none') {
+                    cleanupCheckpoint(task.project_path, checkpointRef, checkpointType);
+                }
             }
         }
 
@@ -1128,6 +1486,10 @@ async function runNextTask() {
                 taskStmts.cancel.run('cancelled', new Date().toISOString(), task.id);
                 console.log(`[Task] Cancelled: ${task.title}`);
             }
+            // Rollback on cancellation
+            if (checkpointRef && checkpointType !== 'none') {
+                rollbackCheckpoint(task.project_path, checkpointRef, checkpointType);
+            }
         }
     } catch (err) {
         const errDetail = err.stack || err.message || String(err);
@@ -1135,6 +1497,15 @@ async function runNextTask() {
         const current = taskStmts.get.get(task.id);
         if (current && (current.status === 'running' || current.status === 'pending')) {
             taskStmts.fail.run('failed', new Date().toISOString(), err.message, task.id);
+        }
+        // Rollback on error
+        if (checkpointRef && checkpointType !== 'none') {
+            try {
+                rollbackCheckpoint(task.project_path, checkpointRef, checkpointType);
+                console.log(`[Task] Rolled back to checkpoint: ${checkpointRef}`);
+            } catch (rollbackErr) {
+                console.error(`[Task] Rollback failed:`, rollbackErr.message);
+            }
         }
     } finally {
         runningTaskId = null;

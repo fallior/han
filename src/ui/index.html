@@ -865,6 +865,36 @@
         </div>
     </div>
 
+    <!-- Approval popup -->
+    <div class="task-overlay" id="approvalOverlay" style="display:none;">
+        <div class="bridge-header">
+            <div style="flex:1;">
+                <div style="font-size:14px;color:var(--amber);">⚠️ Approval Required</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Task needs permission</div>
+            </div>
+        </div>
+        <div class="bridge-body">
+            <div class="task-summary">
+                <div class="task-summary-row">
+                    <span class="task-summary-label">Task ID:</span>
+                    <span class="task-summary-value" id="approvalTaskId"></span>
+                </div>
+                <div class="task-summary-row">
+                    <span class="task-summary-label">Tool:</span>
+                    <span class="task-summary-value" id="approvalToolName"></span>
+                </div>
+                <div class="task-summary-row">
+                    <span class="task-summary-label">Time:</span>
+                    <span class="task-summary-value" id="approvalTime"></span>
+                </div>
+            </div>
+            <div class="bridge-label">Tool input:</div>
+            <div class="bridge-preview" id="approvalInput"></div>
+            <button class="bridge-btn" id="approvalApproveBtn">✅ Approve</button>
+            <button class="bridge-btn bridge-btn-secondary" id="approvalDenyBtn">❌ Deny</button>
+        </div>
+    </div>
+
     <!-- Task board overlay -->
     <div class="task-overlay" id="taskOverlay">
         <div class="bridge-header">
@@ -903,6 +933,14 @@
                         <input class="bridge-input" id="taskMaxTurns" type="number" value="100" min="1" max="1000" style="margin-bottom:0">
                     </div>
                 </div>
+                <div class="bridge-label">Approval gate</div>
+                <select class="bridge-select" id="taskGateMode">
+                    <option value="bypass">Bypass (no approvals — fully autonomous)</option>
+                    <option value="edits_only">Edits only (approve Bash/Write/Edit)</option>
+                    <option value="approve_all">Approve all (approve every tool)</option>
+                </select>
+                <div class="bridge-label">Allowed tools (leave empty for all tools)</div>
+                <input class="bridge-input" id="taskAllowedTools" placeholder="e.g. Read,Grep,Glob,Bash (optional)">
                 <button class="bridge-btn" id="taskCreateBtn">Create Task</button>
             </div>
 
@@ -1020,6 +1058,8 @@
                         handleTaskUpdate(data.task);
                     } else if (data.type === 'task_progress') {
                         handleTaskProgressMessage(data);
+                    } else if (data.type === 'approval_request') {
+                        handleApprovalRequest(data);
                     }
                 } catch (e) {
                     console.error('WS parse error:', e);
@@ -2082,10 +2122,18 @@
             const project_path = document.getElementById('taskPath').value.trim();
             const model = document.getElementById('taskModel').value;
             const max_turns = parseInt(document.getElementById('taskMaxTurns').value) || 100;
+            const gate_mode = document.getElementById('taskGateMode').value;
+            const allowed_tools_str = document.getElementById('taskAllowedTools').value.trim();
 
             if (!title || !description || !project_path) {
                 showToast('Fill in title, description, and project path', true);
                 return;
+            }
+
+            // Parse allowed_tools if provided
+            let allowed_tools = null;
+            if (allowed_tools_str) {
+                allowed_tools = allowed_tools_str.split(',').map(t => t.trim()).filter(Boolean);
             }
 
             const btn = document.getElementById('taskCreateBtn');
@@ -2096,13 +2144,14 @@
                 const res = await fetch(`${API_BASE}/api/tasks`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title, description, project_path, model, max_turns })
+                    body: JSON.stringify({ title, description, project_path, model, max_turns, gate_mode, allowed_tools })
                 });
                 const data = await res.json();
                 if (data.success) {
                     showToast('Task created');
                     document.getElementById('taskTitle').value = '';
                     document.getElementById('taskDesc').value = '';
+                    document.getElementById('taskAllowedTools').value = '';
                     switchTaskTab('list');
                 } else {
                     showToast(data.error || 'Failed', true);
@@ -2144,6 +2193,74 @@
                 showToast('Connection error', true);
             }
         }
+
+        // ── Approval gates ─────────────────────────────────────
+
+        let currentApproval = null;
+
+        function handleApprovalRequest(data) {
+            currentApproval = data;
+            const overlay = document.getElementById('approvalOverlay');
+            document.getElementById('approvalTaskId').textContent = data.taskId || 'Unknown';
+            document.getElementById('approvalToolName').textContent = data.toolName || 'Unknown';
+            document.getElementById('approvalTime').textContent = new Date(data.timestamp).toLocaleTimeString();
+            document.getElementById('approvalInput').textContent = JSON.stringify(data.input, null, 2);
+            overlay.style.display = 'flex';
+            showToast('⚠️ Approval required');
+        }
+
+        document.getElementById('approvalApproveBtn').addEventListener('click', async () => {
+            if (!currentApproval) return;
+            const btn = document.getElementById('approvalApproveBtn');
+            btn.disabled = true;
+            btn.textContent = 'Approving...';
+            try {
+                const res = await fetch(`${API_BASE}/api/approvals/${currentApproval.approvalId}/approve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('✅ Approved');
+                    document.getElementById('approvalOverlay').style.display = 'none';
+                    currentApproval = null;
+                } else {
+                    showToast(data.error || 'Failed', true);
+                }
+            } catch {
+                showToast('Connection error', true);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '✅ Approve';
+            }
+        });
+
+        document.getElementById('approvalDenyBtn').addEventListener('click', async () => {
+            if (!currentApproval) return;
+            const btn = document.getElementById('approvalDenyBtn');
+            btn.disabled = true;
+            btn.textContent = 'Denying...';
+            try {
+                const res = await fetch(`${API_BASE}/api/approvals/${currentApproval.approvalId}/deny`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: 'Denied by user via phone' })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('❌ Denied');
+                    document.getElementById('approvalOverlay').style.display = 'none';
+                    currentApproval = null;
+                } else {
+                    showToast(data.error || 'Failed', true);
+                }
+            } catch {
+                showToast('Connection error', true);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '❌ Deny';
+            }
+        });
 
         // ── Start ─────────────────────────────────────────────
 

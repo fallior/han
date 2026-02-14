@@ -33,6 +33,9 @@ When you make a significant technical or design decision:
 | DEC-007 | Task Execution — Claude Agent SDK | Accepted | 2026-02-15 |
 | DEC-008 | Task Queue — SQLite with better-sqlite3 | Accepted | 2026-02-15 |
 | DEC-009 | Task Permissions — Bypass Mode | Accepted | 2026-02-15 |
+| DEC-010 | Git Checkpoint Strategy (branch vs stash) | Accepted | 2026-02-15 |
+| DEC-011 | Approval Gate Implementation (canUseTool) | Accepted | 2026-02-15 |
+| DEC-012 | Tool Scoping Storage (JSON in SQLite) | Accepted | 2026-02-15 |
 
 ---
 
@@ -437,6 +440,166 @@ We chose **`bypassPermissions`** for the MVP because autonomous tasks need to ru
 - Tasks run with full permissions — user must trust the task description
 - Future: add `canUseTool` callback to route dangerous operations to phone for approval
 - Future: add git checkpoints before/after task execution for rollback
+
+---
+
+### DEC-010: Git Checkpoint Strategy (branch vs stash)
+
+**Date**: 2026-02-15
+**Author**: Darron
+**Status**: Accepted
+
+#### Context
+
+Level 7 tasks need rollback capability in case of failure. Need to create git checkpoints before task execution to enable restoring the repository state if things go wrong.
+
+#### Options Considered
+
+1. **Always use branches**
+   - ✅ Clean, easy to understand
+   - ✅ Named references (claude-remote/checkpoint-{taskId})
+   - ❌ Fails if working tree has uncommitted changes
+   - ❌ Can't create branch on dirty repo
+
+2. **Always use stashes**
+   - ✅ Works with dirty working tree
+   - ❌ Hard to find specific stash later (stash@{N} numbers change)
+   - ❌ Less obvious what they're for
+
+3. **Hybrid: branch for clean, stash for dirty**
+   - ✅ Works in all scenarios (clean or dirty repo)
+   - ✅ Uses the cleaner option (branch) when possible
+   - ✅ Falls back to stash when necessary
+   - ✅ Both can be identified by message/name
+   - ❌ Slightly more complex logic
+
+4. **Commit to temporary branch**
+   - ✅ Works with dirty repos
+   - ❌ Creates commits in git history
+   - ❌ Harder to clean up completely
+
+#### Decision
+
+We chose the **hybrid approach**: create branches for clean working trees, stashes for dirty ones. This handles all scenarios gracefully while preferring the cleaner branch approach when possible.
+
+For clean repos: create branch `claude-remote/checkpoint-{taskId}`
+For dirty repos: create stash with message `claude-remote checkpoint {taskId}`
+
+Store checkpoint_ref (branch name or stash message), checkpoint_type ('branch'/'stash'/'none'), and checkpoint_created_at in the database.
+
+#### Consequences
+
+- Handles both clean and dirty repositories automatically
+- Rollback logic must check checkpoint_type to know how to restore
+- Cleanup logic must check checkpoint_type to know what to delete
+- If task succeeds on clean repo, checkpoint branch is deleted
+- If task succeeds on dirty repo, checkpoint stash is dropped
+
+---
+
+### DEC-011: Approval Gate Implementation (canUseTool callback)
+
+**Date**: 2026-02-15
+**Author**: Darron
+**Status**: Accepted
+
+#### Context
+
+While bypass mode (DEC-009) is good for fully autonomous tasks, users need a way to control dangerous operations. Need to add approval gates that route dangerous operations to the phone for user approval.
+
+#### Options Considered
+
+1. **canUseTool callback with phone approval**
+   - ✅ Fine-grained control per tool invocation
+   - ✅ Agent SDK provides callback hook
+   - ✅ Can route to phone via WebSocket
+   - ✅ Supports multiple gate modes (bypass/edits_only/approve_all)
+   - ❌ Requires phone to be available
+   - ❌ Tasks stall if approval times out
+
+2. **Pre-approved tool list**
+   - ✅ No stalling — approvals done upfront
+   - ❌ Can't see actual inputs before approving
+   - ❌ Less control (can't approve some Bash commands but deny others)
+
+3. **Dry-run mode with confirmation**
+   - ✅ User sees full execution plan
+   - ❌ Requires two-pass execution (expensive)
+   - ❌ May not catch dynamic tool uses
+
+#### Decision
+
+We chose **canUseTool callback with phone approval** because it provides the best balance of control and flexibility. The callback sees the actual tool name and input, enabling informed approval decisions.
+
+Three gate modes:
+- `bypass`: no approvals (original behaviour, fully autonomous)
+- `edits_only`: approve dangerous tools (Bash, Write, Edit, NotebookEdit)
+- `approve_all`: approve every tool
+
+Approval requests broadcast via WebSocket with 5-minute timeout. Phone UI shows approval popup with tool name, input, approve/deny buttons.
+
+#### Consequences
+
+- Tasks with non-bypass gate modes require phone to be available
+- 5-minute timeout prevents indefinite stalling
+- Approval requests stored in Map (lost on server restart — acceptable tradeoff)
+- Future: could add approval history tracking
+- Future: could add auto-approval rules based on input patterns
+
+---
+
+### DEC-012: Tool Scoping Storage (JSON in SQLite)
+
+**Date**: 2026-02-15
+**Author**: Darron
+**Status**: Accepted
+
+#### Context
+
+Level 7 tasks should support restricting which tools they can use (e.g., "read-only task" with just Read/Grep/Glob). Need to store tool restrictions in the database.
+
+#### Options Considered
+
+1. **JSON string in SQLite**
+   - ✅ Flexible — array of strings
+   - ✅ SQLite has good JSON support
+   - ✅ Easy to parse (`JSON.parse()`)
+   - ✅ NULL for "all tools allowed"
+   - ❌ Can't query "tasks using tool X" efficiently
+
+2. **Comma-separated string**
+   - ✅ Simple
+   - ❌ Requires splitting and trimming
+   - ❌ No standard format
+   - ❌ Harder to validate
+
+3. **Separate tools table with many-to-many**
+   - ✅ Proper relational model
+   - ✅ Easy to query "tasks using tool X"
+   - ❌ Massive overkill for this use case
+   - ❌ More complex schema
+
+4. **Bitmask/enum**
+   - ✅ Compact storage
+   - ❌ Fixed set of tools (can't add new tools without migration)
+   - ❌ Harder to understand
+
+#### Decision
+
+We chose **JSON string in SQLite** because it's flexible, standard, and matches how the Agent SDK expects tool restrictions (as an array).
+
+Store as: `'["Bash","Read","Edit","Glob","Grep"]'` or `NULL` for all tools.
+Parse with `JSON.parse(task.allowed_tools)` and pass to Agent SDK as `allowedTools` option.
+
+UI provides comma-separated input for ease of typing on mobile, which gets converted to JSON array before sending to API.
+
+#### Consequences
+
+- Simple to implement and understand
+- Flexible — can add new tools without schema changes
+- Can't efficiently query "all tasks using tool X" (acceptable — not a needed query)
+- Must validate JSON on parse (handle malformed data gracefully)
+- Future: could add tool presets in UI (e.g., "Read Only", "Safe Tools", "Development")
 
 ---
 
