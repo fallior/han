@@ -4,7 +4,7 @@
 
 ## Current Stage
 
-**Levels 1-7 Complete**. All core levels plus autonomous task runner. Prompt responder, push alerts, context window (search + copy), terminal mirror, mobile keyboard, always-on terminal broadcast, context bridge, and now autonomous task execution via the Claude Agent SDK.
+**Levels 1-6 Complete, Level 7 MVP**. All core levels plus autonomous task runner (MVP). Prompt responder, push alerts, context window (search + copy), terminal mirror, mobile keyboard, always-on terminal broadcast, context bridge, and now autonomous task execution via the Claude Agent SDK.
 
 Create tasks from your phone, Claude Code executes them headlessly. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working.
 
@@ -23,7 +23,7 @@ Create tasks from your phone, Claude Code executes them headlessly. SQLite task 
 | Always-on Terminal Mirror | 🟢 Complete | 1s server broadcast via WebSocket |
 | Level 3: Context Window | 🟢 Complete | Search (xterm-addon-search) + copy |
 | Level 6: Claude Bridge | 🟢 Complete | Export, import, handoff, history |
-| Level 7: Task Runner | 🟢 Complete | Agent SDK, SQLite queue, task board UI |
+| Level 7: Task Runner | 🟡 MVP Complete | Agent SDK, SQLite queue, task board UI. Missing: git checkpoints, approval gates, tool scoping |
 
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 

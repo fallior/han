@@ -63,7 +63,7 @@ See `~/Projects/_learnings/INDEX.md` for full index.
 
 ## Quick Context
 
-- **Stage**: Levels 1-7 Complete
+- **Stage**: Levels 1-6 Complete, Level 7 MVP
 - **Stack**: Node.js + Express + SQLite + Agent SDK + tmux + ntfy.sh + WebSocket
 - **Status**: Active development
 
@@ -126,7 +126,7 @@ Check `claude-context/CURRENT_STATUS.md` for:
 | 4 | Terminal Mirror (xterm.js) | 🟢 Complete |
 | 5 | Mobile Keyboard | 🟢 Complete |
 | 6 | Claude Bridge | 🟢 Complete |
-| 7 | Autonomous Task Runner | 🟢 Complete |
+| 7 | Autonomous Task Runner | 🟡 MVP Complete |
 
 **Extended Vision (Levels 8-11):** See [`ROADMAP.md`](ROADMAP.md) for the full progression from autonomous task runner to development platform, including approval gates, cost dashboards, and hybrid orchestration architecture.
 
