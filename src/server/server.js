@@ -13,6 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 const { query: agentQuery } = require('@anthropic-ai/claude-agent-sdk');
+const orchestrator = require('./orchestrator');
 
 const app = express();
 
@@ -117,6 +118,50 @@ if (!columns.includes('log_file')) {
     db.exec(`ALTER TABLE tasks ADD COLUMN log_file TEXT`);
     console.log('[DB] Added log_file column');
 }
+
+// Level 8 migrations: orchestrator columns
+if (!columns.includes('goal_id')) {
+    console.log('[DB] Adding Level 8 orchestrator columns...');
+    db.exec(`ALTER TABLE tasks ADD COLUMN goal_id TEXT`);
+    db.exec(`ALTER TABLE tasks ADD COLUMN complexity TEXT`);
+    db.exec(`ALTER TABLE tasks ADD COLUMN retry_count INTEGER DEFAULT 0`);
+    db.exec(`ALTER TABLE tasks ADD COLUMN max_retries INTEGER DEFAULT 3`);
+    db.exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT`);
+    db.exec(`ALTER TABLE tasks ADD COLUMN depends_on TEXT`);
+    db.exec(`ALTER TABLE tasks ADD COLUMN auto_model INTEGER DEFAULT 0`);
+    console.log('[DB] Level 8 task columns added');
+}
+
+// Create goals table
+db.exec(`CREATE TABLE IF NOT EXISTS goals (
+    id TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    project_path TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT,
+    decomposition TEXT,
+    task_count INTEGER DEFAULT 0,
+    tasks_completed INTEGER DEFAULT 0,
+    tasks_failed INTEGER DEFAULT 0,
+    total_cost_usd REAL DEFAULT 0,
+    orchestrator_backend TEXT,
+    orchestrator_model TEXT
+)`);
+
+// Create project_memory table
+db.exec(`CREATE TABLE IF NOT EXISTS project_memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_path TEXT NOT NULL,
+    task_type TEXT,
+    model_used TEXT,
+    success INTEGER,
+    cost_usd REAL,
+    turns INTEGER,
+    duration_seconds REAL,
+    error_summary TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+)`);
 
 /**
  * Serve the mobile web UI
@@ -1056,6 +1101,414 @@ app.get('/api/bridge/history', (req, res) => {
     }
 });
 
+// ── Goal orchestration endpoints ──────────────────────────
+
+/**
+ * POST /api/goals — Submit a high-level goal for decomposition
+ */
+app.post('/api/goals', async (req, res) => {
+    try {
+        const { description, project_path, auto_execute = true } = req.body;
+
+        if (!description || !project_path) {
+            return res.status(400).json({ success: false, error: 'Missing description or project_path' });
+        }
+
+        // Validate project path exists
+        if (!fs.existsSync(project_path)) {
+            return res.status(400).json({ success: false, error: 'Project path does not exist' });
+        }
+
+        const goalId = generateId();
+        const now = new Date().toISOString();
+
+        // Get orchestrator status
+        const orchStatus = orchestrator.getStatus();
+
+        // Create goal record
+        goalStmts.insert.run(
+            goalId,
+            description,
+            project_path,
+            'decomposing',
+            now,
+            orchStatus.backend,
+            orchStatus.backend === 'ollama' ? orchStatus.ollamaModel : 'claude-haiku-4-5-20251001'
+        );
+
+        // Broadcast goal created
+        broadcastGoalUpdate(goalId);
+
+        // Start decomposition asynchronously
+        (async () => {
+            try {
+                // Read project context
+                const projectContext = readProjectContext(project_path);
+
+                // Decompose goal
+                console.log(`[Goal ${goalId}] Decomposing: ${description}`);
+                const decomposition = await orchestrator.decomposeGoal(description, projectContext);
+
+                const subtasks = decomposition.subtasks || [];
+                const taskIds = [];
+
+                // Create dependency map (task title -> task ID)
+                const titleToId = {};
+
+                // Create tasks in order
+                for (const subtask of subtasks) {
+                    const taskId = generateId();
+                    titleToId[subtask.title] = taskId;
+
+                    // Resolve dependencies to IDs
+                    const dependsOnIds = (subtask.dependsOn || [])
+                        .map(title => titleToId[title])
+                        .filter(Boolean);
+
+                    const dependsOnJson = dependsOnIds.length > 0 ? JSON.stringify(dependsOnIds) : null;
+
+                    taskStmts.insertWithGoal.run(
+                        taskId,
+                        subtask.title,
+                        subtask.description,
+                        project_path,
+                        subtask.priority || 5,
+                        subtask.model || 'sonnet',
+                        100, // max_turns
+                        'bypass', // gate_mode
+                        null, // allowed_tools
+                        now,
+                        goalId,
+                        null, // complexity (will be classified later if needed)
+                        dependsOnJson,
+                        1 // auto_model
+                    );
+
+                    taskIds.push(taskId);
+                    broadcastTaskUpdate(taskStmts.get.get(taskId));
+                }
+
+                // Update goal with decomposition
+                goalStmts.updateDecomposition.run(
+                    JSON.stringify(decomposition),
+                    subtasks.length,
+                    auto_execute ? 'active' : 'pending',
+                    goalId
+                );
+
+                console.log(`[Goal ${goalId}] Decomposed into ${subtasks.length} tasks`);
+
+                // Broadcast decomposition complete
+                const goal = goalStmts.get.get(goalId);
+                const tasks = taskStmts.getByGoal.all(goalId);
+
+                if (wss.clients.size > 0) {
+                    const message = JSON.stringify({
+                        type: 'goal_decomposed',
+                        goal,
+                        tasks
+                    });
+                    wss.clients.forEach((client) => {
+                        if (client.readyState === 1) client.send(message);
+                    });
+                }
+            } catch (err) {
+                console.error(`[Goal ${goalId}] Decomposition failed:`, err.message);
+                goalStmts.updateStatus.run('failed', goalId);
+                broadcastGoalUpdate(goalId);
+            }
+        })();
+
+        res.json({
+            success: true,
+            goal: goalStmts.get.get(goalId),
+            message: 'Goal created, decomposition in progress'
+        });
+    } catch (err) {
+        console.error('[Goals] Error creating goal:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * GET /api/goals — List all goals
+ */
+app.get('/api/goals', (req, res) => {
+    try {
+        const goals = goalStmts.list.all();
+        res.json({ success: true, goals });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * GET /api/goals/:id — Get goal detail with tasks
+ */
+app.get('/api/goals/:id', (req, res) => {
+    try {
+        const goal = goalStmts.get.get(req.params.id);
+        if (!goal) {
+            return res.status(404).json({ success: false, error: 'Goal not found' });
+        }
+
+        const tasks = taskStmts.getByGoal.all(goal.id);
+        res.json({ success: true, goal, tasks });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /api/goals/:id/retry — Retry a failed goal
+ */
+app.post('/api/goals/:id/retry', async (req, res) => {
+    try {
+        const goal = goalStmts.get.get(req.params.id);
+        if (!goal) {
+            return res.status(404).json({ success: false, error: 'Goal not found' });
+        }
+
+        if (goal.status !== 'failed') {
+            return res.status(400).json({ success: false, error: 'Goal is not in failed state' });
+        }
+
+        const tasks = taskStmts.getByGoal.all(goal.id);
+        const failedTasks = tasks.filter(t => t.status === 'failed');
+
+        // Reset failed tasks to pending
+        for (const task of failedTasks) {
+            taskStmts.updateStatus.run('pending', null, task.id);
+            broadcastTaskUpdate(taskStmts.get.get(task.id));
+        }
+
+        // Update goal status
+        goalStmts.updateStatus.run('active', goal.id);
+        broadcastGoalUpdate(goal.id);
+
+        res.json({
+            success: true,
+            message: `Retrying ${failedTasks.length} failed tasks`,
+            retriedTasks: failedTasks.length
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * DELETE /api/goals/:id — Delete a goal and its tasks
+ */
+app.delete('/api/goals/:id', (req, res) => {
+    try {
+        const goal = goalStmts.get.get(req.params.id);
+        if (!goal) {
+            return res.status(404).json({ success: false, error: 'Goal not found' });
+        }
+
+        if (goal.status === 'decomposing' || goal.status === 'active') {
+            return res.status(400).json({ success: false, error: 'Cannot delete active goal' });
+        }
+
+        // Delete associated tasks
+        const tasks = taskStmts.getByGoal.all(goal.id);
+        for (const task of tasks) {
+            if (task.status === 'running') {
+                return res.status(400).json({ success: false, error: 'Cannot delete goal with running tasks' });
+            }
+            taskStmts.del.run(task.id);
+        }
+
+        goalStmts.del.run(goal.id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * GET /api/orchestrator/status — Get orchestrator backend info
+ */
+app.get('/api/orchestrator/status', (req, res) => {
+    try {
+        const status = orchestrator.getStatus();
+        res.json({ success: true, ...status });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * GET /api/orchestrator/memory/:project — Get project memory (outcome history)
+ */
+app.get('/api/orchestrator/memory/:project', (req, res) => {
+    try {
+        const projectPath = decodeURIComponent(req.params.project);
+        const records = memoryStmts.getByProject.all(projectPath);
+
+        // Calculate success rates by model
+        const byModel = {};
+        for (const record of records) {
+            if (!byModel[record.model_used]) {
+                byModel[record.model_used] = { total: 0, successes: 0, failures: 0, totalCost: 0 };
+            }
+            byModel[record.model_used].total++;
+            if (record.success) {
+                byModel[record.model_used].successes++;
+            } else {
+                byModel[record.model_used].failures++;
+            }
+            byModel[record.model_used].totalCost += record.cost_usd || 0;
+        }
+
+        // Calculate failure rates
+        for (const model in byModel) {
+            const stats = byModel[model];
+            stats.failureRate = stats.total > 0 ? stats.failures / stats.total : 0;
+            stats.successRate = stats.total > 0 ? stats.successes / stats.total : 0;
+        }
+
+        res.json({
+            success: true,
+            projectPath,
+            recordCount: records.length,
+            byModel,
+            recentRecords: records.slice(0, 20)
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /api/orchestrator/setup — Pull Ollama model
+ */
+app.post('/api/orchestrator/setup', async (req, res) => {
+    try {
+        const status = orchestrator.getStatus();
+        const modelName = req.body.model || status.ollamaModel;
+
+        // Start pulling model (async, can take a while)
+        res.json({
+            success: true,
+            message: `Starting pull of ${modelName}`,
+            note: 'This endpoint is a placeholder. Use "ollama pull" command directly for now.'
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ── Goal orchestration helpers ────────────────────────────
+
+/**
+ * Generate a unique ID for goals/tasks
+ */
+function generateId() {
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+/**
+ * Update goal progress based on its tasks
+ */
+function updateGoalProgress(goalId) {
+    if (!goalId) return;
+
+    const tasks = taskStmts.getByGoal.all(goalId);
+    const completed = tasks.filter(t => t.status === 'done').length;
+    const failed = tasks.filter(t => t.status === 'failed').length;
+    const totalCost = tasks.reduce((sum, t) => sum + (t.cost_usd || 0), 0);
+    const allDone = tasks.every(t => ['done', 'cancelled', 'failed'].includes(t.status));
+    const anyFailed = tasks.some(t => t.status === 'failed');
+
+    const status = allDone ? (anyFailed ? 'failed' : 'done') : 'active';
+    const completedAt = allDone ? new Date().toISOString() : null;
+
+    goalStmts.updateProgress.run(completed, failed, totalCost, status, completedAt, goalId);
+
+    // Record outcomes in project memory
+    for (const task of tasks) {
+        if (['done', 'failed'].includes(task.status) && task.completed_at) {
+            recordTaskOutcome(task);
+        }
+    }
+
+    // Broadcast goal update
+    broadcastGoalUpdate(goalId);
+}
+
+/**
+ * Record task outcome in project memory
+ */
+function recordTaskOutcome(task) {
+    if (!task.completed_at) return;
+
+    const success = task.status === 'done' ? 1 : 0;
+    const durationSeconds = task.started_at && task.completed_at
+        ? (new Date(task.completed_at) - new Date(task.started_at)) / 1000
+        : null;
+
+    try {
+        memoryStmts.insert.run(
+            task.project_path,
+            task.complexity || 'unknown',
+            task.model,
+            success,
+            task.cost_usd || 0,
+            task.turns || 0,
+            durationSeconds,
+            task.error || null,
+            task.completed_at
+        );
+    } catch (err) {
+        console.error('[Memory] Failed to record outcome:', err.message);
+    }
+}
+
+/**
+ * Broadcast goal update to WebSocket clients
+ */
+function broadcastGoalUpdate(goalId) {
+    if (wss.clients.size === 0) return;
+
+    const goal = goalStmts.get.get(goalId);
+    if (!goal) return;
+
+    const tasks = taskStmts.getByGoal.all(goalId);
+
+    const message = JSON.stringify({
+        type: 'goal_update',
+        goal,
+        tasks
+    });
+
+    wss.clients.forEach((client) => {
+        if (client.readyState === 1) client.send(message);
+    });
+}
+
+/**
+ * Read project context files (CLAUDE.md, CURRENT_STATUS.md, README.md)
+ */
+function readProjectContext(projectPath) {
+    const files = ['CLAUDE.md', 'CURRENT_STATUS.md', 'README.md'];
+    let context = '';
+
+    for (const file of files) {
+        const filepath = path.join(projectPath, file);
+        if (fs.existsSync(filepath)) {
+            try {
+                const content = fs.readFileSync(filepath, 'utf8');
+                context += `\n## ${file}\n\n${content.slice(0, 5000)}\n`;
+            } catch {
+                // Skip unreadable files
+            }
+        }
+    }
+
+    return context || 'No project context files found.';
+}
+
 // ── Task queue endpoints ──────────────────────────────────
 
 const taskStmts = {
@@ -1063,6 +1516,7 @@ const taskStmts = {
     listByStatus: db.prepare('SELECT * FROM tasks WHERE status = ? ORDER BY priority DESC, created_at DESC'),
     get: db.prepare('SELECT * FROM tasks WHERE id = ?'),
     insert: db.prepare('INSERT INTO tasks (id, title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    insertWithGoal: db.prepare('INSERT INTO tasks (id, title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools, created_at, goal_id, complexity, depends_on, auto_model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     updateStatus: db.prepare('UPDATE tasks SET status = ?, started_at = ? WHERE id = ?'),
     updateCheckpoint: db.prepare('UPDATE tasks SET checkpoint_ref = ?, checkpoint_type = ?, checkpoint_created_at = ? WHERE id = ?'),
     updateLogFile: db.prepare('UPDATE tasks SET log_file = ? WHERE id = ?'),
@@ -1071,6 +1525,22 @@ const taskStmts = {
     cancel: db.prepare('UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?'),
     del: db.prepare('DELETE FROM tasks WHERE id = ?'),
     nextPending: db.prepare('SELECT * FROM tasks WHERE status = \'pending\' ORDER BY priority DESC, created_at ASC LIMIT 1'),
+    getByGoal: db.prepare('SELECT * FROM tasks WHERE goal_id = ? ORDER BY priority DESC, created_at ASC'),
+};
+
+const goalStmts = {
+    list: db.prepare('SELECT * FROM goals ORDER BY created_at DESC'),
+    get: db.prepare('SELECT * FROM goals WHERE id = ?'),
+    insert: db.prepare('INSERT INTO goals (id, description, project_path, status, created_at, orchestrator_backend, orchestrator_model) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+    updateStatus: db.prepare('UPDATE goals SET status = ? WHERE id = ?'),
+    updateProgress: db.prepare('UPDATE goals SET tasks_completed = ?, tasks_failed = ?, total_cost_usd = ?, status = ?, completed_at = ? WHERE id = ?'),
+    updateDecomposition: db.prepare('UPDATE goals SET decomposition = ?, task_count = ?, status = ? WHERE id = ?'),
+    del: db.prepare('DELETE FROM goals WHERE id = ?'),
+};
+
+const memoryStmts = {
+    insert: db.prepare('INSERT INTO project_memory (project_path, task_type, model_used, success, cost_usd, turns, duration_seconds, error_summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    getByProject: db.prepare('SELECT * FROM project_memory WHERE project_path = ? ORDER BY created_at DESC LIMIT 100'),
 };
 
 /**
@@ -1487,12 +1957,52 @@ function broadcastTaskProgress(taskId, sdkMessage) {
 }
 
 /**
+ * Get next pending task with dependency-aware ordering
+ */
+function getNextPendingTask() {
+    // Get all pending tasks
+    const pending = taskStmts.listByStatus.all('pending');
+    if (pending.length === 0) return null;
+
+    // Filter out tasks with unsatisfied dependencies
+    const ready = pending.filter(task => {
+        if (!task.depends_on) return true;
+
+        try {
+            const dependencyIds = JSON.parse(task.depends_on);
+            if (!Array.isArray(dependencyIds) || dependencyIds.length === 0) return true;
+
+            // Check if all dependencies are done
+            for (const depId of dependencyIds) {
+                const depTask = taskStmts.get.get(depId);
+                if (!depTask || depTask.status !== 'done') {
+                    return false; // Dependency not satisfied
+                }
+            }
+            return true;
+        } catch {
+            return true; // Invalid JSON, treat as no dependencies
+        }
+    });
+
+    if (ready.length === 0) return null;
+
+    // Sort by priority DESC, created_at ASC
+    ready.sort((a, b) => {
+        if (a.priority !== b.priority) return b.priority - a.priority;
+        return a.created_at.localeCompare(b.created_at);
+    });
+
+    return ready[0];
+}
+
+/**
  * Run the next pending task from the queue
  */
 async function runNextTask() {
     if (runningTaskId) return; // Already running a task
 
-    const task = taskStmts.nextPending.get();
+    const task = getNextPendingTask();
     if (!task) return;
 
     runningTaskId = task.id;
@@ -1602,6 +2112,11 @@ async function runNextTask() {
                 console.log(`[Task] ${isSuccess ? 'Completed' : 'Failed'}: ${task.title} ($${totalCost.toFixed(4)}, ${numTurns} turns)`);
                 taskLog.finish(isSuccess ? 'done' : 'failed');
 
+                // Update goal progress
+                if (task.goal_id) {
+                    updateGoalProgress(task.goal_id);
+                }
+
                 // Clean up checkpoint on success
                 if (isSuccess && checkpointRef && checkpointType !== 'none') {
                     cleanupCheckpoint(task.project_path, checkpointRef, checkpointType);
@@ -1630,6 +2145,59 @@ async function runNextTask() {
             taskStmts.fail.run('failed', new Date().toISOString(), err.message, task.id);
         }
         taskLog.finish('failed', err.message);
+
+        // Update goal progress
+        if (task.goal_id) {
+            updateGoalProgress(task.goal_id);
+        }
+
+        // Orchestrator retry logic
+        const retryCount = task.retry_count || 0;
+        const maxRetries = task.max_retries || 3;
+
+        if (retryCount < maxRetries && task.goal_id) {
+            console.log(`[Orchestrator] Analysing failure for retry (attempt ${retryCount + 1}/${maxRetries})...`);
+
+            try {
+                const recovery = await orchestrator.analyseFailure(task, err.message, retryCount + 1);
+
+                if (recovery.shouldRetry) {
+                    const retryId = generateId();
+                    const now = new Date().toISOString();
+                    const retryTitle = `${task.title} (retry ${retryCount + 1})`;
+                    const retryDescription = recovery.adjustedDescription || task.description;
+                    const retryModel = recovery.adjustedModel || task.model;
+
+                    // Create retry task
+                    taskStmts.insertWithGoal.run(
+                        retryId,
+                        retryTitle,
+                        retryDescription,
+                        task.project_path,
+                        task.priority + 1, // Bump priority
+                        retryModel,
+                        task.max_turns,
+                        task.gate_mode,
+                        task.allowed_tools,
+                        now,
+                        task.goal_id,
+                        task.complexity,
+                        task.depends_on,
+                        task.auto_model
+                    );
+
+                    // Update retry metadata
+                    db.prepare('UPDATE tasks SET retry_count = ?, parent_task_id = ? WHERE id = ?')
+                        .run(retryCount + 1, task.id, retryId);
+
+                    console.log(`[Orchestrator] Created retry task: ${retryTitle} (${recovery.reasoning})`);
+                    broadcastTaskUpdate(taskStmts.get.get(retryId));
+                }
+            } catch (retryErr) {
+                console.error(`[Orchestrator] Retry analysis failed:`, retryErr.message);
+            }
+        }
+
         // Rollback on error
         if (checkpointRef && checkpointType !== 'none') {
             try {
@@ -1643,6 +2211,11 @@ async function runNextTask() {
         runningTaskId = null;
         runningAbort = null;
         broadcastTaskUpdate(taskStmts.get.get(task.id));
+
+        // Update goal progress on completion
+        if (task.goal_id) {
+            updateGoalProgress(task.goal_id);
+        }
     }
 }
 
@@ -1743,6 +2316,13 @@ fs.watch(PENDING_DIR, (eventType, filename) => {
 });
 
 // ── Start server ─────────────────────────────────────────
+
+// Initialize orchestrator
+orchestrator.initialize().then(status => {
+    console.log('[Orchestrator] Initialized:', status);
+}).catch(err => {
+    console.error('[Orchestrator] Initialization failed:', err);
+});
 
 server.listen(PORT, '0.0.0.0', () => {
     const proto = useHttps ? 'https' : 'http';

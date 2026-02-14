@@ -771,6 +771,10 @@
                 <div class="status-dot"></div>
                 <span id="statusText">connected</span>
             </div>
+            <div class="titlebar-status" id="orchestratorStatus" style="margin-left:8px;display:none;">
+                <span style="font-size:11px;opacity:0.7;">🧠</span>
+                <span id="orchestratorText" style="font-size:11px;"></span>
+            </div>
         </div>
 
         <div class="searchbar" id="searchbar">
@@ -901,6 +905,7 @@
         <div class="bridge-header">
             <div class="bridge-tabs">
                 <button class="bridge-tab active" data-task-tab="list">Tasks</button>
+                <button class="bridge-tab" data-task-tab="goals">Goals</button>
                 <button class="bridge-tab" data-task-tab="create">Create</button>
                 <button class="bridge-tab" data-task-tab="detail" id="taskDetailTab" style="display:none">Progress</button>
             </div>
@@ -910,6 +915,28 @@
             <!-- Task list -->
             <div class="bridge-section active" id="taskList">
                 <div id="taskListContent"></div>
+            </div>
+
+            <!-- Goals section -->
+            <div class="bridge-section" id="taskGoals">
+                <div class="bridge-label">📋 High-level Goals</div>
+                <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px;">
+                    Goals are decomposed into tasks automatically by the orchestrator.
+                </p>
+                <div id="goalListContent"></div>
+
+                <div class="bridge-label" style="margin-top:24px">Create New Goal</div>
+                <div class="bridge-label" style="margin-top:8px">Goal description</div>
+                <textarea class="bridge-textarea" id="goalDescription" placeholder="e.g. Add dark mode toggle to the application" style="min-height:100px;"></textarea>
+                <div class="bridge-label">Project path</div>
+                <input class="bridge-input" id="goalProjectPath" placeholder="e.g. /home/darron/Projects/myapp">
+                <div style="margin:12px 0;">
+                    <label style="display:flex;align-items:center;gap:8px;color:var(--text);">
+                        <input type="checkbox" id="goalAutoExecute" checked>
+                        <span>Auto-execute tasks after decomposition</span>
+                    </label>
+                </div>
+                <button class="bridge-btn" id="goalCreateBtn">🧠 Decompose & Create Goal</button>
             </div>
 
             <!-- Create task -->
@@ -950,6 +977,13 @@
                 <div id="taskDetailSummary"></div>
                 <div class="task-progress-log" id="taskProgressLog"></div>
                 <div id="taskDetailActions" style="margin-top:12px;"></div>
+            </div>
+
+            <!-- Goal detail -->
+            <div class="bridge-section" id="goalDetail">
+                <div id="goalDetailSummary"></div>
+                <div id="goalDetailTasks" style="margin-top:16px;"></div>
+                <div id="goalDetailActions" style="margin-top:12px;"></div>
             </div>
         </div>
     </div>
@@ -1059,6 +1093,10 @@
                         handleTaskUpdate(data.task);
                     } else if (data.type === 'task_progress') {
                         handleTaskProgressMessage(data);
+                    } else if (data.type === 'goal_update') {
+                        handleGoalUpdate(data);
+                    } else if (data.type === 'goal_decomposed') {
+                        handleGoalDecomposed(data);
                     } else if (data.type === 'approval_request') {
                         handleApprovalRequest(data);
                     }
@@ -2066,10 +2104,13 @@
             });
             taskOverlay.querySelectorAll('.bridge-section').forEach(s => s.classList.remove('active'));
             if (tab === 'list') document.getElementById('taskList').classList.add('active');
+            else if (tab === 'goals') document.getElementById('taskGoals').classList.add('active');
             else if (tab === 'create') document.getElementById('taskCreate').classList.add('active');
             else if (tab === 'detail') document.getElementById('taskDetail').classList.add('active');
+            else if (tab === 'goalDetail') document.getElementById('goalDetail').classList.add('active');
 
             if (tab === 'list') loadTasks();
+            else if (tab === 'goals') loadGoals();
         }
 
         tasksBtn.addEventListener('click', () => {
@@ -2360,6 +2401,282 @@
                 showToast('Connection error', true);
             }
         }
+
+        // ── Goals ──────────────────────────────────────────────
+
+        const goalListContent = document.getElementById('goalListContent');
+        const goalDescription = document.getElementById('goalDescription');
+        const goalProjectPath = document.getElementById('goalProjectPath');
+        const goalAutoExecute = document.getElementById('goalAutoExecute');
+        const goalCreateBtn = document.getElementById('goalCreateBtn');
+        const goalDetailSummary = document.getElementById('goalDetailSummary');
+        const goalDetailTasks = document.getElementById('goalDetailTasks');
+        const goalDetailActions = document.getElementById('goalDetailActions');
+
+        let allGoals = [];
+        let viewingGoalId = null;
+
+        async function loadGoals() {
+            goalListContent.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">Loading...</div>';
+            try {
+                const res = await fetch(`${API_BASE}/api/goals`);
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                allGoals = data.goals;
+                renderGoalList();
+            } catch (err) {
+                goalListContent.innerHTML = `<div style="text-align:center;color:var(--red);padding:20px;">${err.message}</div>`;
+            }
+        }
+
+        function renderGoalList() {
+            if (allGoals.length === 0) {
+                goalListContent.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;">No goals yet<br><span style="font-size:11px;">Create a goal below to get started</span></div>';
+                return;
+            }
+
+            goalListContent.innerHTML = '';
+            for (const goal of allGoals) {
+                const el = document.createElement('div');
+                el.className = 'task-item'; // Reuse task-item styles
+                el.style.cursor = 'pointer';
+
+                const header = document.createElement('div');
+                header.className = 'task-item-header';
+
+                const title = document.createElement('span');
+                title.className = 'task-item-title';
+                title.textContent = goal.description.length > 60
+                    ? goal.description.substring(0, 60) + '...'
+                    : goal.description;
+
+                const badge = document.createElement('span');
+                badge.className = 'task-status-badge ' + goal.status;
+                badge.textContent = goal.status;
+
+                header.appendChild(title);
+                header.appendChild(badge);
+
+                const meta = document.createElement('div');
+                meta.className = 'task-item-meta';
+                meta.style.fontSize = '11px';
+                meta.style.color = 'var(--text-dim)';
+
+                const progress = `${goal.tasks_completed || 0}/${goal.task_count || 0} tasks`;
+                const cost = goal.total_cost_usd > 0 ? ` • $${goal.total_cost_usd.toFixed(4)}` : '';
+                const backend = goal.orchestrator_backend ? ` • ${goal.orchestrator_backend}` : '';
+                meta.textContent = progress + cost + backend;
+
+                el.appendChild(header);
+                el.appendChild(meta);
+
+                // Progress bar
+                if (goal.task_count > 0) {
+                    const progressBar = document.createElement('div');
+                    progressBar.style.width = '100%';
+                    progressBar.style.height = '3px';
+                    progressBar.style.background = 'var(--border)';
+                    progressBar.style.marginTop = '8px';
+                    progressBar.style.borderRadius = '2px';
+                    progressBar.style.overflow = 'hidden';
+
+                    const progressFill = document.createElement('div');
+                    const pct = (goal.tasks_completed / goal.task_count) * 100;
+                    progressFill.style.width = pct + '%';
+                    progressFill.style.height = '100%';
+                    progressFill.style.background = goal.status === 'done' ? 'var(--green)'
+                        : goal.status === 'failed' ? 'var(--red)' : 'var(--cyan)';
+                    progressFill.style.transition = 'width 0.3s';
+                    progressBar.appendChild(progressFill);
+                    el.appendChild(progressBar);
+                }
+
+                el.addEventListener('click', () => viewGoal(goal.id));
+                goalListContent.appendChild(el);
+            }
+        }
+
+        async function viewGoal(goalId) {
+            viewingGoalId = goalId;
+            taskDetailTab.style.display = 'block';
+            taskDetailTab.textContent = 'Goal Detail';
+            taskDetailTab.dataset.taskTab = 'goalDetail';
+            switchTaskTab('goalDetail');
+
+            goalDetailSummary.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">Loading...</div>';
+            goalDetailTasks.innerHTML = '';
+            goalDetailActions.innerHTML = '';
+
+            try {
+                const res = await fetch(`${API_BASE}/api/goals/${goalId}`);
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+
+                const goal = data.goal;
+                const tasks = data.tasks;
+
+                // Summary
+                const statusClass = goal.status === 'done' ? 'var(--green)'
+                    : goal.status === 'failed' ? 'var(--red)'
+                    : goal.status === 'decomposing' ? 'var(--amber)' : 'var(--cyan)';
+
+                goalDetailSummary.innerHTML = `
+                    <div style="font-size:14px;font-weight:600;margin-bottom:8px;">${goal.description}</div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px;">
+                        Status: <span style="color:${statusClass}">${goal.status}</span> •
+                        ${goal.tasks_completed || 0}/${goal.task_count || 0} done •
+                        ${goal.tasks_failed || 0} failed •
+                        $${(goal.total_cost_usd || 0).toFixed(4)} cost
+                    </div>
+                    <div style="font-size:11px;color:var(--text-dim);">
+                        Backend: ${goal.orchestrator_backend || 'unknown'} (${goal.orchestrator_model || 'unknown'})<br>
+                        Project: ${goal.project_path}<br>
+                        Created: ${new Date(goal.created_at).toLocaleString()}
+                    </div>
+                `;
+
+                // Tasks
+                if (tasks.length === 0) {
+                    goalDetailTasks.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">No tasks yet (decomposing...)</div>';
+                } else {
+                    goalDetailTasks.innerHTML = '<div style="font-size:12px;font-weight:600;margin-bottom:8px;">Tasks:</div>';
+                    for (const task of tasks) {
+                        const taskEl = document.createElement('div');
+                        taskEl.style.padding = '8px';
+                        taskEl.style.marginBottom = '6px';
+                        taskEl.style.background = 'rgba(255,255,255,0.03)';
+                        taskEl.style.borderRadius = '4px';
+                        taskEl.style.fontSize = '11px';
+
+                        const statusColor = task.status === 'done' ? 'var(--green)'
+                            : task.status === 'failed' ? 'var(--red)'
+                            : task.status === 'running' ? 'var(--amber)' : 'var(--text-dim)';
+
+                        taskEl.innerHTML = `
+                            <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                                <span style="font-weight:600;">${task.title}</span>
+                                <span style="color:${statusColor};">${task.status}</span>
+                            </div>
+                            <div style="color:var(--text-dim);font-size:10px;">
+                                Model: ${task.model} • Priority: ${task.priority}
+                                ${task.cost_usd ? ` • $${task.cost_usd.toFixed(4)}` : ''}
+                            </div>
+                        `;
+                        taskEl.style.cursor = 'pointer';
+                        taskEl.addEventListener('click', () => {
+                            viewTask(task.id);
+                        });
+                        goalDetailTasks.appendChild(taskEl);
+                    }
+                }
+
+                // Actions
+                if (goal.status === 'failed') {
+                    const retryBtn = document.createElement('button');
+                    retryBtn.className = 'bridge-btn';
+                    retryBtn.textContent = '🔄 Retry Failed Tasks';
+                    retryBtn.addEventListener('click', async () => {
+                        try {
+                            const res = await fetch(`${API_BASE}/api/goals/${goalId}/retry`, { method: 'POST' });
+                            const data = await res.json();
+                            if (data.success) {
+                                showToast('Retrying failed tasks');
+                                setTimeout(() => viewGoal(goalId), 500);
+                            } else {
+                                showToast('Failed: ' + data.error, true);
+                            }
+                        } catch (err) {
+                            showToast('Error: ' + err.message, true);
+                        }
+                    });
+                    goalDetailActions.appendChild(retryBtn);
+                }
+
+                const backBtn = document.createElement('button');
+                backBtn.className = 'bridge-btn bridge-btn-secondary';
+                backBtn.textContent = '← Back to Goals';
+                backBtn.style.marginLeft = '8px';
+                backBtn.addEventListener('click', () => {
+                    taskDetailTab.style.display = 'none';
+                    switchTaskTab('goals');
+                });
+                goalDetailActions.appendChild(backBtn);
+
+            } catch (err) {
+                goalDetailSummary.innerHTML = `<div style="text-align:center;color:var(--red);padding:20px;">${err.message}</div>`;
+            }
+        }
+
+        goalCreateBtn.addEventListener('click', async () => {
+            const description = goalDescription.value.trim();
+            const projectPath = goalProjectPath.value.trim();
+            const autoExecute = goalAutoExecute.checked;
+
+            if (!description || !projectPath) {
+                showToast('Please fill in description and project path', true);
+                return;
+            }
+
+            goalCreateBtn.disabled = true;
+            goalCreateBtn.textContent = '🧠 Decomposing...';
+
+            try {
+                const res = await fetch(`${API_BASE}/api/goals`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ description, project_path: projectPath, auto_execute: autoExecute })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+
+                showToast('Goal created, decomposing...');
+                goalDescription.value = '';
+                setTimeout(() => loadGoals(), 1000);
+            } catch (err) {
+                showToast('Error: ' + err.message, true);
+            } finally {
+                goalCreateBtn.disabled = false;
+                goalCreateBtn.textContent = '🧠 Decompose & Create Goal';
+            }
+        });
+
+        function handleGoalUpdate(data) {
+            // Update goal in list if we're viewing goals
+            loadGoals();
+
+            // If viewing this specific goal, refresh detail
+            if (viewingGoalId === data.goal?.id) {
+                viewGoal(viewingGoalId);
+            }
+        }
+
+        function handleGoalDecomposed(data) {
+            showToast(`Goal decomposed into ${data.tasks?.length || 0} tasks`);
+            loadGoals();
+        }
+
+        // Load orchestrator status
+        async function loadOrchestratorStatus() {
+            try {
+                const res = await fetch(`${API_BASE}/api/orchestrator/status`);
+                const data = await res.json();
+                if (data.success) {
+                    const orchStatus = document.getElementById('orchestratorStatus');
+                    const orchText = document.getElementById('orchestratorText');
+                    if (data.ollamaAvailable) {
+                        orchText.textContent = data.ollamaModel.split(':')[0];
+                        orchStatus.style.display = 'flex';
+                    } else if (data.hasApiKey) {
+                        orchText.textContent = 'API';
+                        orchStatus.style.display = 'flex';
+                    }
+                }
+            } catch (err) {
+                // Silently fail
+            }
+        }
+
+        loadOrchestratorStatus();
 
         // ── Approval gates ─────────────────────────────────────
 
