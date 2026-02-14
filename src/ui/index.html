@@ -787,8 +787,7 @@
         let lastWrittenContent = '';
         let searchResultCount = 0;
         let searchResultIndex = -1;
-        let userScrolledUp = false;
-        let touchPauseTimer = null;
+        let localLineCount = 0;  // Track line count for display
 
         const terminal = document.getElementById('terminal');
         const termContent = document.getElementById('termContent');
@@ -1007,21 +1006,21 @@
 
             if (showingHistory) return;
 
-            // Use plain text div (not xterm.js) — native scrolling works on mobile
+            // Use plain text div — native scrolling works on mobile
             xtermContainer.style.display = 'none';
             termContent.style.display = '';
 
-            // Only update if content actually changed
+            // Only update DOM if content actually changed
             if (content !== lastWrittenContent) {
                 lastWrittenContent = content;
+                localLineCount = content.split('\n').length;
 
-                // Check if user is scrolled up (not at bottom)
+                // Preserve scroll position — only auto-scroll if already at bottom
                 const el = termContent;
                 const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
 
                 el.textContent = content;
 
-                // Auto-scroll to bottom only if user was already at bottom
                 if (wasAtBottom) {
                     el.scrollTop = el.scrollHeight;
                 }
@@ -1030,7 +1029,7 @@
             // Update chrome based on state
             titleText.textContent = session || 'claude-remote';
             if (!currentPrompt) {
-                footerLeft.textContent = 'Watching session';
+                footerLeft.textContent = `Watching (${localLineCount} lines)`;
                 footerHint.textContent = 'history';
                 updateQuickbar();
             }

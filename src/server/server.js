@@ -70,13 +70,13 @@ function getActiveSession() {
 }
 
 /**
- * Capture terminal content from a tmux session (plain text, no ANSI, with scrollback)
+ * Capture terminal content from a tmux session (plain text, no ANSI, full scrollback)
  */
 function captureTerminal(session) {
     try {
         const content = execFileSync('tmux', [
-            'capture-pane', '-t', session, '-p', '-S', '-200'
-        ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+            'capture-pane', '-t', session, '-p', '-S', '-'
+        ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 50 * 1024 * 1024 });
         return { content, session };
     } catch {
         return null;
