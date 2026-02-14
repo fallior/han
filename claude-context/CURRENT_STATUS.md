@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-14 (Session 12, extended) by Darron (via Claude)
+> Last updated: 2026-02-14 (Session 13) by Darron (via Claude)
 
 ## Current Stage
 
@@ -27,6 +27,19 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-14 — Darron (via Claude) — Session 13
+- **HTTPS via Tailscale TLS** (`39a0858`): auto-detects certs, removes Safari "not secure" warning
+- **Removed all xterm.js dead code** (`68ffbe6`):
+  - Removed 5 CDN loads (xterm.js + Google Fonts) — fixed 10-second page load delay
+  - Removed initXterm(), state variables, xtermContainer element, xterm CSS (106 lines removed)
+  - Replaced JetBrains Mono with system monospace fonts
+  - UI is now fully self-contained — zero external requests
+- **Terminal persistence** (`68ffbe6`, `82cfc77`):
+  - Server writes terminal content to `~/.claude-remote/terminal.txt` on every change
+  - `GET /api/terminal` endpoint serves persisted content
+  - UI loads persisted content on startup for instant scrollback
+  - Append-only `terminal-log.txt` with 5-minute timestamps — complete history across all sessions
 
 ### 2026-02-14 — Darron (via Claude) — Session 12
 - **Level 6: Claude Bridge** implemented (`a59561f`):
@@ -164,12 +177,15 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 - ✅ Plain text terminal view (native iOS scrolling, no xterm.js)
 - ✅ Full tmux scrollback capture (50k lines)
 - ✅ PID file lock (single server instance)
+- ✅ HTTPS via Tailscale TLS (auto-detected)
+- ✅ Terminal persistence to disk (`terminal.txt`) with instant startup load
+- ✅ Append-only terminal log (`terminal-log.txt`) with 5-minute timestamps
+- ✅ Zero CDN dependencies (fully self-contained UI)
 
 ## Next Actions
 
 ### Immediate (Next Session)
 - [ ] Refine UI based on continued mobile usage
-- [ ] Add HTTPS via Tailscale certs (remove Safari "not secure" warning)
 
 ### Short-term
 - [ ] Consider extended levels (7-11) from ROADMAP.md
@@ -195,6 +211,7 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-14_17-29-25.md](../_logs/session_2026-02-14_17-29-25.md) — HTTPS + xterm cleanup + terminal persistence
 - [session_2026-02-14_10-20-08.md](../_logs/session_2026-02-14_10-20-08.md) — Level 6 + plain text terminal + PID lock (8 commits)
 - [session_2026-02-13_21-39-54.md](../_logs/session_2026-02-13_21-39-54.md) — Level 3 iPhone testing
 - [session_2026-02-11_22-44-16.md](../_logs/session_2026-02-11_22-44-16.md) — Level 3 implementation
