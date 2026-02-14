@@ -202,22 +202,23 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 - File-based state
 - Simple HTTP API
 
-### Level 3: Context Window
+### Level 3: Context Window (Complete)
 
-- Add terminal history capture
-- Ring buffer for last N lines
-- Include context in prompt response
+- xterm-addon-search for in-terminal search with prev/next navigation
+- Copy via Web Share API (iOS) with selectable overlay fallback
+- Text search fallback when addon can't match (strips ANSI codes)
 
-### Level 4: Terminal Mirror
+### Level 4: Terminal Mirror (Complete)
 
-- WebSocket for real-time sync
-- xterm.js for rendering
-- Full session history in SQLite
+- WebSocket for real-time sync (1-second server broadcast)
+- xterm.js for rendering with ANSI colour support
+- Always-on: terminal visible whenever a tmux session exists
 
-### Level 5: Interactive Terminal
+### Level 5: Interactive Terminal (Complete)
 
-- Bidirectional WebSocket
-- Mobile keyboard handling
+- Quick-action bar (y/n/1-3/Enter/Esc/^C/Tab/arrows)
+- iOS soft keyboard via hidden input element
+- Direct keystroke injection via `/api/keys` (no prompt required)
 - Signal passthrough (Ctrl+C, etc.)
 
 ### Level 6: Claude Bridge

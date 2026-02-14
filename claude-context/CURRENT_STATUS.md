@@ -1,12 +1,12 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-10 (Session 6) by Darron (via Claude)
+> Last updated: 2026-02-14 (Session 11) by Darron (via Claude)
 
 ## Current Stage
 
-**Level 5**: Mobile Keyboard — Complete. xterm.js terminal emulation and quick-action bar implemented.
+**Levels 1-5 Complete**. All core functionality working: prompt responder, push alerts, context window (search + copy), terminal mirror (xterm.js), mobile keyboard (quickbar + iOS soft keyboard), always-on terminal broadcast.
 
-Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons (y/n/1/2/3/Enter/Esc/^C/Tab/arrows). Push notifications, WebSocket, and all prior levels working.
+Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons (y/n/1/2/3/Enter/Esc/^C/Tab/arrows). iOS soft keyboard for free-form typing. Search and copy. Push notifications, WebSocket, always-on terminal mirror, and Tailscale remote access all working.
 
 ## Progress Summary
 
@@ -19,13 +19,34 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 | Level 2: Push Alerts | 🟢 Complete | ntfy.sh action buttons, config, history |
 | WebSocket (from Level 4) | 🟢 Complete | Real-time push, polling fallback |
 | Level 4: xterm.js Terminal | 🟢 Complete | ANSI colours, proper terminal emulation |
-| Level 5: Mobile Keyboard | 🟢 Complete | Quick-action bar with common keys |
-| Level 3: Context Window | ⚪ Not Started | Partially covered by terminal mirror |
+| Level 5: Mobile Keyboard | 🟢 Complete | Quick-action bar + iOS soft keyboard |
+| Always-on Terminal Mirror | 🟢 Complete | 1s server broadcast via WebSocket |
+| Level 3: Context Window | 🟢 Complete | Search (xterm-addon-search) + copy |
 | Level 6 | ⚪ Not Started | — |
 
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-13 — Darron (via Claude) — Sessions 9-10
+- **Level 3: Search + Copy** tested on iPhone and confirmed working
+- Search: xterm-addon-search with prev/next navigation
+- Copy: Web Share API (iOS) with selectable overlay fallback
+- Improved search and copy for mobile (commit `09b051b`)
+
+### 2026-02-11 — Darron (via Claude) — Session 8
+- **Level 3: Context Window** implemented:
+  - Added xterm-addon-search from CDN
+  - Search bar UI: toggle button, input, prev/next, close
+  - Copy button in titlebar (selection or full visible content)
+  - Search fallback for raw text when addon can't find matches
+
+### 2026-02-10–11 — Darron (via Claude) — Session 7
+- **Tailscale remote access** tested and confirmed working from iPhone via 5G
+- **iOS soft keyboard** support: hidden input triggers keyboard on terminal tap
+- Fixed `claude-remote` script: unbound `CLAUDE_ARGS` array with `set -u`
+- Fixed mobile terminal rendering: `term.clear()` + `requestAnimationFrame` for layout
+- Added claude-remote scripts to PATH
 
 ### 2026-02-10 — Darron (via Claude) — Session 6
 - **Always-on terminal mirror** — server + UI overhaul:
@@ -121,6 +142,10 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 - ✅ Mobile quick-action keyboard bar (y/n/1-3/Enter/Esc/^C/Tab/arrows)
 - ✅ Always-on terminal mirror (live tmux content via 1s WebSocket broadcast)
 - ✅ Direct keystroke injection to tmux session (no prompt required)
+- ✅ iOS soft keyboard support (hidden input, tap terminal to type)
+- ✅ Search bar (xterm-addon-search with prev/next navigation)
+- ✅ Copy (Web Share API on iOS, selectable overlay fallback)
+- ✅ Tailscale remote access from iPhone (tested via 5G)
 
 ## Next Actions
 
@@ -128,10 +153,10 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 - [x] Update `install.sh` to use new hook format — Done (2026-02-08)
 - [x] Set up Tailscale — Done (2026-02-09), Mac IP: 100.82.63.83, Linux: 100.67.213.28
 - [x] Test Tailscale from iPhone — Done (2026-02-10), confirmed working via 5G on Mac
+- [x] Level 3: Context Window — Done (2026-02-13), search + copy working on mobile
 - [ ] Refine UI based on continued mobile usage
 
 ### Short-term
-- [ ] Level 3: Context Window — scrollable history, search, syntax highlighting
 - [ ] Level 6: Claude Bridge — direct API integration, multi-line input
 
 ## Known Issues
@@ -155,6 +180,10 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-14_10-20-08.md](../_logs/session_2026-02-14_10-20-08.md) — Docs update session
+- [session_2026-02-13_21-39-54.md](../_logs/session_2026-02-13_21-39-54.md) — Level 3 iPhone testing
+- [session_2026-02-11_22-44-16.md](../_logs/session_2026-02-11_22-44-16.md) — Level 3 implementation
+- [session_2026-02-10_19-13-57.md](../_logs/session_2026-02-10_19-13-57.md) — Tailscale testing + iOS keyboard
 - [session_2026-02-10_05-28-03.md](../_logs/session_2026-02-10_05-28-03.md) — Always-on terminal mirror
 - [session_2026-02-08_22-14-13.md](../_logs/session_2026-02-08_22-14-13.md) — install.sh hook format update
 - [session_2026-02-08_02-48-24.md](../_logs/session_2026-02-08_02-48-24.md) — xterm.js + Mobile keyboard

@@ -62,7 +62,7 @@ See `~/Projects/_learnings/INDEX.md` for full index.
 
 ## Quick Context
 
-- **Stage**: Level 5 Complete (Mobile Keyboard)
+- **Stage**: Levels 1-5 Complete
 - **Stack**: Node.js + Express + xterm.js + tmux + ntfy.sh + WebSocket
 - **Status**: Active development
 
@@ -121,7 +121,7 @@ Check `claude-context/CURRENT_STATUS.md` for:
 |-------|-------|--------|
 | 1 | Prompt Responder (MVP) | 🟢 Complete |
 | 2 | Push Alerts | 🟢 Complete |
-| 3 | Context Window | ⚪ Not Started |
+| 3 | Context Window | 🟢 Complete |
 | 4 | Terminal Mirror (xterm.js) | 🟢 Complete |
 | 5 | Mobile Keyboard | 🟢 Complete |
 | 6 | Claude Bridge | ⚪ Not Started |
