@@ -788,6 +788,7 @@
         let searchResultCount = 0;
         let searchResultIndex = -1;
         let userScrolledUp = false;
+        let touchPauseTimer = null;
 
         const terminal = document.getElementById('terminal');
         const termContent = document.getElementById('termContent');
@@ -856,19 +857,6 @@
 
             term.open(xtermContainer);
             fitAddon.fit();
-
-            // Detect scroll position — pause updates when scrolled up
-            term.onScroll(() => {
-                const viewport = term.buffer.active;
-                const atBottom = viewport.baseY <= viewport.viewportY;
-                if (userScrolledUp && atBottom) {
-                    userScrolledUp = false;
-                    footerLeft.textContent = terminalLive ? 'Watching session' : footerLeft.textContent;
-                } else if (!atBottom) {
-                    userScrolledUp = true;
-                    footerLeft.textContent = 'Scrolled — tap ↓↓ to resume';
-                }
-            });
 
             // Route keystrokes to sendKey (prompt) or sendKeyDirect (watching)
             term.onData((data) => {
@@ -1019,30 +1007,25 @@
 
             if (showingHistory) return;
 
-            // Show xterm container
-            xtermContainer.style.display = '';
-            termContent.style.display = 'none';
-            initXterm();
+            // Use plain text div (not xterm.js) — native scrolling works on mobile
+            xtermContainer.style.display = 'none';
+            termContent.style.display = '';
 
-            // Fit before writing to ensure proper dimensions (with RAF for mobile layout)
-            requestAnimationFrame(() => {
-                fitAddon.fit();
+            // Only update if content actually changed
+            if (content !== lastWrittenContent) {
+                lastWrittenContent = content;
 
-                // Skip rewrite if user is scrolled up (don't snap back)
-                if (userScrolledUp) return;
+                // Check if user is scrolled up (not at bottom)
+                const el = termContent;
+                const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
 
-                // Only rewrite if content changed
-                if (content !== lastWrittenContent) {
-                    term.clear();
-                    term.write(content);
-                    lastWrittenContent = content;
+                el.textContent = content;
 
-                    // Re-apply active search after content update
-                    if (searchbar.classList.contains('visible') && searchInput.value) {
-                        setTimeout(() => doSearch('next'), 50);
-                    }
+                // Auto-scroll to bottom only if user was already at bottom
+                if (wasAtBottom) {
+                    el.scrollTop = el.scrollHeight;
                 }
-            });
+            }
 
             // Update chrome based on state
             titleText.textContent = session || 'claude-remote';
@@ -1061,15 +1044,13 @@
             // If terminal broadcast hasn't started yet, show prompt's terminal content
             if (!terminalLive) {
                 const content = (p.terminal || p.terminal_content || '').trim();
-                xtermContainer.style.display = '';
-                termContent.style.display = 'none';
-                initXterm();
+                xtermContainer.style.display = 'none';
+                termContent.style.display = '';
                 if (content && content !== lastWrittenContent) {
-                    term.reset();
-                    term.write(content);
+                    termContent.textContent = content;
                     lastWrittenContent = content;
+                    termContent.scrollTop = termContent.scrollHeight;
                 }
-                fitAddon.fit();
             }
 
             // Update chrome for prompt state
@@ -1220,23 +1201,17 @@
             const btn = e.target.closest('.qbtn');
             if (!btn) return;
 
-            // Handle scroll buttons (local xterm scroll, not sent to tmux)
+            // Handle scroll buttons (scroll the plain text div)
             const scroll = btn.dataset.scroll;
-            if (scroll && term) {
-                term.scrollPages(parseInt(scroll));
+            if (scroll) {
+                const pages = parseInt(scroll);
+                termContent.scrollTop += pages * termContent.clientHeight;
                 return;
             }
 
             if (isSending) return;
             const key = btn.dataset.key;
             if (!key) return;
-
-            // If scrolled up and user taps ↓↓, resume live view
-            if (userScrolledUp) {
-                userScrolledUp = false;
-                term.scrollToBottom();
-                footerLeft.textContent = 'Watching session';
-            }
 
             if (currentPrompt) {
                 sendKey(key);
@@ -1248,17 +1223,8 @@
         function updateQuickbar() {
             if ((currentPrompt || terminalLive) && !showingHistory) {
                 quickbar.classList.add('visible');
-                requestAnimationFrame(() => {
-                    if (fitAddon && xtermContainer.style.display !== 'none') fitAddon.fit();
-                });
             } else {
-                const wasVisible = quickbar.classList.contains('visible');
                 quickbar.classList.remove('visible');
-                if (wasVisible) {
-                    requestAnimationFrame(() => {
-                        if (fitAddon && xtermContainer.style.display !== 'none') fitAddon.fit();
-                    });
-                }
             }
         }
 
@@ -1366,15 +1332,17 @@
             if (currentPrompt) {
                 renderPromptOverlay();
             } else if (terminalLive) {
-                // Restore watching state — show xterm, update chrome
-                xtermContainer.style.display = '';
-                termContent.style.display = 'none';
-                initXterm();
+                // Restore watching state — show plain text terminal
+                xtermContainer.style.display = 'none';
+                termContent.style.display = '';
+                if (lastWrittenContent) {
+                    termContent.textContent = lastWrittenContent;
+                    termContent.scrollTop = termContent.scrollHeight;
+                }
                 titleText.textContent = terminalSession || 'claude-remote';
                 footerLeft.textContent = 'Watching session';
                 footerHint.textContent = 'history';
                 updateQuickbar();
-                if (fitAddon) fitAddon.fit();
             } else {
                 renderNoSession();
             }
@@ -1400,9 +1368,6 @@
                 searchbar.classList.add('visible');
                 searchToggle.classList.add('active');
                 searchInput.focus();
-                if (fitAddon && xtermContainer.style.display !== 'none') {
-                    requestAnimationFrame(() => fitAddon.fit());
-                }
             }
         }
 
@@ -1411,59 +1376,54 @@
             searchToggle.classList.remove('active');
             searchInput.value = '';
             searchCount.textContent = '';
-            searchResultCount = 0;
-            searchResultIndex = -1;
-            if (searchAddon) searchAddon.clearDecorations();
-            if (fitAddon && xtermContainer.style.display !== 'none') {
-                requestAnimationFrame(() => fitAddon.fit());
-            }
+            searchMatches = [];
+            searchMatchIdx = -1;
         }
 
-        function doSearch(direction = 'next') {
-            if (!term) return;
+        let searchMatches = [];
+        let searchMatchIdx = -1;
 
-            const query = searchInput.value;
-            if (!query) {
+        function doSearch(direction = 'next') {
+            const query = searchInput.value.toLowerCase();
+            if (!query || !lastWrittenContent) {
                 searchCount.textContent = '';
-                if (searchAddon) searchAddon.clearDecorations();
+                searchMatches = [];
+                searchMatchIdx = -1;
                 return;
             }
 
-            // Try addon-based search first
-            if (searchAddon) {
-                let found;
-                try {
-                    if (direction === 'prev') {
-                        found = searchAddon.findPrevious(query, { caseSensitive: false });
-                    } else {
-                        found = searchAddon.findNext(query, { caseSensitive: false });
-                    }
-                } catch (e) {
-                    found = false;
-                }
+            const text = lastWrittenContent.toLowerCase();
 
-                if (found) {
-                    searchCount.textContent = 'Found';
-                    searchCount.style.color = 'var(--green)';
-                    return;
-                }
+            // Find all match positions
+            searchMatches = [];
+            let pos = 0;
+            while ((pos = text.indexOf(query, pos)) !== -1) {
+                searchMatches.push(pos);
+                pos += query.length;
             }
 
-            // Fallback: text search through raw content
-            if (lastWrittenContent) {
-                const clean = lastWrittenContent.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-                const idx = clean.toLowerCase().indexOf(query.toLowerCase());
-                if (idx >= 0) {
-                    searchCount.textContent = 'Found (text)';
-                    searchCount.style.color = 'var(--green)';
-                } else {
-                    searchCount.textContent = 'No match';
-                    searchCount.style.color = 'var(--text-muted)';
-                }
-            } else {
+            if (searchMatches.length === 0) {
                 searchCount.textContent = 'No match';
                 searchCount.style.color = 'var(--text-muted)';
+                searchMatchIdx = -1;
+                return;
             }
+
+            // Navigate
+            if (direction === 'next') {
+                searchMatchIdx = (searchMatchIdx + 1) % searchMatches.length;
+            } else {
+                searchMatchIdx = searchMatchIdx <= 0 ? searchMatches.length - 1 : searchMatchIdx - 1;
+            }
+
+            searchCount.textContent = `${searchMatchIdx + 1}/${searchMatches.length}`;
+            searchCount.style.color = 'var(--green)';
+
+            // Scroll to match — find the line number and scroll to it
+            const beforeMatch = lastWrittenContent.substring(0, searchMatches[searchMatchIdx]);
+            const lineNum = beforeMatch.split('\n').length - 1;
+            const lineHeight = parseFloat(getComputedStyle(termContent).lineHeight) || 20;
+            termContent.scrollTop = lineNum * lineHeight - termContent.clientHeight / 2;
         }
 
         searchToggle.addEventListener('click', toggleSearch);
@@ -1485,17 +1445,7 @@
         // ── Copy ─────────────────────────────────────────────────
 
         function copyTerminalContent() {
-            if (!term) {
-                showToast('No terminal content', true);
-                return;
-            }
-
-            // Get selection or all visible content
-            let text = term.getSelection();
-            if (!text) {
-                text = lastWrittenContent.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-            }
-
+            const text = lastWrittenContent || '';
             if (!text) {
                 showToast('Nothing to copy', true);
                 return;

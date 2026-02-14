@@ -70,12 +70,12 @@ function getActiveSession() {
 }
 
 /**
- * Capture terminal content from a tmux session
+ * Capture terminal content from a tmux session (plain text, no ANSI, with scrollback)
  */
 function captureTerminal(session) {
     try {
         const content = execFileSync('tmux', [
-            'capture-pane', '-t', session, '-p', '-e'
+            'capture-pane', '-t', session, '-p', '-S', '-200'
         ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
         return { content, session };
     } catch {
