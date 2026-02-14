@@ -21,6 +21,38 @@ const BRIDGE_DIR = path.join(CLAUDE_REMOTE_DIR, 'bridge');
 const CONTEXTS_DIR = path.join(BRIDGE_DIR, 'contexts');
 const BRIDGE_HISTORY = path.join(BRIDGE_DIR, 'history.json');
 const UI_PATH = path.join(__dirname, '..', 'ui', 'index.html');
+const PID_FILE = path.join(CLAUDE_REMOTE_DIR, 'server.pid');
+
+// ── Single instance lock ─────────────────────────────────
+(function ensureSingleInstance() {
+    if (fs.existsSync(PID_FILE)) {
+        const oldPid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10);
+        if (oldPid) {
+            try {
+                process.kill(oldPid, 0); // Check if running
+                // Still running — kill it
+                console.log(`Killing previous server (PID ${oldPid})`);
+                process.kill(oldPid, 'SIGTERM');
+                // Brief wait for port release
+                const start = Date.now();
+                while (Date.now() - start < 1000) { /* spin */ }
+            } catch {
+                // Not running — stale PID file
+            }
+        }
+    }
+    if (!fs.existsSync(CLAUDE_REMOTE_DIR)) {
+        fs.mkdirSync(CLAUDE_REMOTE_DIR, { recursive: true });
+    }
+    fs.writeFileSync(PID_FILE, String(process.pid));
+})();
+
+// Clean up PID file on exit
+function cleanPid() {
+    try { if (fs.readFileSync(PID_FILE, 'utf8').trim() === String(process.pid)) fs.unlinkSync(PID_FILE); } catch {}
+}
+process.on('exit', cleanPid);
+process.on('SIGINT', () => { cleanPid(); process.exit(0); });
 
 // Middleware
 app.use(express.json({ limit: '1mb' }));
@@ -854,8 +886,10 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 
 process.on('SIGTERM', () => {
+    cleanPid();
     clearInterval(heartbeatInterval);
     clearInterval(terminalBroadcastInterval);
     wss.close();
     server.close();
+    process.exit(0);
 });
