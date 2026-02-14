@@ -161,6 +161,11 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 | GET | /api/history | Notification history |
 | GET | /api/status | Server health check |
 | GET | /quick | Quick response (ntfy action buttons) |
+| GET | /api/bridge/export | Export session as markdown |
+| POST | /api/bridge/import | Import context from phone |
+| GET | /api/bridge/contexts | List saved context files |
+| POST | /api/bridge/handoff | Structured task handoff |
+| GET | /api/bridge/history | Bridge event timeline |
 | WS | /ws | WebSocket push (prompts + terminal) |
 | GET | / | Serve web UI |
 
@@ -221,11 +226,14 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 - Direct keystroke injection via `/api/keys` (no prompt required)
 - Signal passthrough (Ctrl+C, etc.)
 
-### Level 6: Claude Bridge
+### Level 6: Claude Bridge (Complete)
 
-- Browser extension component
-- Message format translation
-- Session export/import
+- Explicit context export/import (no browser extension — iPhone primary client)
+- Session export as markdown (summary/full/handoff formats) via full scrollback capture
+- Context import: paste from claude.ai, save to file, optionally inject into Claude Code
+- Structured handoff form: task + context + working directory, injected via tmux
+- Bridge event history with timeline UI
+- Context files stored at `~/.claude-remote/bridge/contexts/`
 
 ## Security Considerations
 
@@ -251,4 +259,4 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 
 ---
 
-*Last updated: 2026-02-10*
+*Last updated: 2026-02-14*

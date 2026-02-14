@@ -1,12 +1,12 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-14 (Session 11) by Darron (via Claude)
+> Last updated: 2026-02-14 (Session 12) by Darron (via Claude)
 
 ## Current Stage
 
-**Levels 1-5 Complete**. All core functionality working: prompt responder, push alerts, context window (search + copy), terminal mirror (xterm.js), mobile keyboard (quickbar + iOS soft keyboard), always-on terminal broadcast.
+**Levels 1-6 Complete**. All core levels implemented: prompt responder, push alerts, context window (search + copy), terminal mirror (xterm.js), mobile keyboard (quickbar + iOS soft keyboard), always-on terminal broadcast, and context bridge (export/import/handoff between phone and workstation).
 
-Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons (y/n/1/2/3/Enter/Esc/^C/Tab/arrows). iOS soft keyboard for free-form typing. Search and copy. Push notifications, WebSocket, always-on terminal mirror, and Tailscale remote access all working.
+Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons (y/n/1/2/3/Enter/Esc/^C/Tab/arrows). iOS soft keyboard for free-form typing. Search and copy. Push notifications, WebSocket, always-on terminal mirror, Tailscale remote access, and context bridge all working.
 
 ## Progress Summary
 
@@ -22,11 +22,22 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 | Level 5: Mobile Keyboard | 🟢 Complete | Quick-action bar + iOS soft keyboard |
 | Always-on Terminal Mirror | 🟢 Complete | 1s server broadcast via WebSocket |
 | Level 3: Context Window | 🟢 Complete | Search (xterm-addon-search) + copy |
-| Level 6 | ⚪ Not Started | — |
+| Level 6: Claude Bridge | 🟢 Complete | Export, import, handoff, history |
 
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-14 — Darron (via Claude) — Session 12
+- **Level 6: Claude Bridge** implemented (commit `a59561f`):
+  - Session export as markdown (summary/full/handoff formats) via `GET /api/bridge/export`
+  - Context import from phone with optional Claude Code injection via `POST /api/bridge/import`
+  - Structured handoff form (task + context + working dir) via `POST /api/bridge/handoff`
+  - Bridge event history tracking via `GET /api/bridge/history`
+  - Context file CRUD (`GET/DELETE /api/bridge/contexts/:filename`)
+  - UI: Bridge button (🔗) in titlebar, overlay panel with 4 tabs (Export/Import/Handoff/History)
+  - No browser extension — explicit copy-paste transfer (iPhone primary client)
+  - No new files or dependencies, ~769 new lines across server.js and index.html
 
 ### 2026-02-13 — Darron (via Claude) — Sessions 9-10
 - **Level 3: Search + Copy** tested on iPhone and confirmed working
@@ -146,18 +157,17 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 - ✅ Search bar (xterm-addon-search with prev/next navigation)
 - ✅ Copy (Web Share API on iOS, selectable overlay fallback)
 - ✅ Tailscale remote access from iPhone (tested via 5G)
+- ✅ Context bridge: export sessions, import context, structured handoff
+- ✅ Bridge history tracking with timeline UI
 
 ## Next Actions
 
 ### Immediate (Next Session)
-- [x] Update `install.sh` to use new hook format — Done (2026-02-08)
-- [x] Set up Tailscale — Done (2026-02-09), Mac IP: 100.82.63.83, Linux: 100.67.213.28
-- [x] Test Tailscale from iPhone — Done (2026-02-10), confirmed working via 5G on Mac
-- [x] Level 3: Context Window — Done (2026-02-13), search + copy working on mobile
+- [ ] Test Level 6 bridge on iPhone via Tailscale
 - [ ] Refine UI based on continued mobile usage
 
 ### Short-term
-- [ ] Level 6: Claude Bridge — direct API integration, multi-line input
+- [ ] Consider extended levels (7-11) from ROADMAP.md
 
 ## Known Issues
 
@@ -180,7 +190,7 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 ## Session Notes
 
 Recent sessions (latest first):
-- [session_2026-02-14_10-20-08.md](../_logs/session_2026-02-14_10-20-08.md) — Docs update session
+- [session_2026-02-14_10-20-08.md](../_logs/session_2026-02-14_10-20-08.md) — Level 6 implementation + docs
 - [session_2026-02-13_21-39-54.md](../_logs/session_2026-02-13_21-39-54.md) — Level 3 iPhone testing
 - [session_2026-02-11_22-44-16.md](../_logs/session_2026-02-11_22-44-16.md) — Level 3 implementation
 - [session_2026-02-10_19-13-57.md](../_logs/session_2026-02-10_19-13-57.md) — Tailscale testing + iOS keyboard
