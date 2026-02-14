@@ -1,12 +1,12 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-14 (Session 13) by Darron (via Claude)
+> Last updated: 2026-02-15 (Session 15) by Darron (via Claude)
 
 ## Current Stage
 
-**Levels 1-6 Complete**. All core levels implemented: prompt responder, push alerts, context window (search + copy), terminal mirror (xterm.js), mobile keyboard (quickbar + iOS soft keyboard), always-on terminal broadcast, and context bridge (export/import/handoff between phone and workstation).
+**Levels 1-7 Complete**. All core levels plus autonomous task runner. Prompt responder, push alerts, context window (search + copy), terminal mirror, mobile keyboard, always-on terminal broadcast, context bridge, and now autonomous task execution via the Claude Agent SDK.
 
-Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons (y/n/1/2/3/Enter/Esc/^C/Tab/arrows). iOS soft keyboard for free-form typing. Search and copy. Push notifications, WebSocket, always-on terminal mirror, Tailscale remote access, and context bridge all working.
+Create tasks from your phone, Claude Code executes them headlessly. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working.
 
 ## Progress Summary
 
@@ -23,10 +23,24 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 | Always-on Terminal Mirror | 🟢 Complete | 1s server broadcast via WebSocket |
 | Level 3: Context Window | 🟢 Complete | Search (xterm-addon-search) + copy |
 | Level 6: Claude Bridge | 🟢 Complete | Export, import, handoff, history |
+| Level 7: Task Runner | 🟢 Complete | Agent SDK, SQLite queue, task board UI |
 
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-15 — Darron (via Claude) — Session 15
+- **Level 7: Autonomous Task Runner** (`6475b79`):
+  - SQLite task queue (`better-sqlite3`) at `~/.claude-remote/tasks.db`
+  - Orchestrator loop: 5-second polling, picks up pending tasks, executes via Agent SDK
+  - Claude Agent SDK integration (`@anthropic-ai/claude-agent-sdk`): `query()` with streaming
+  - Task CRUD API: `GET/POST /api/tasks`, `GET /api/tasks/:id`, `POST /api/tasks/:id/cancel`, `DELETE /api/tasks/:id`
+  - Task board UI: 🤖 button, overlay with Tasks/Create/Progress tabs
+  - Real-time WebSocket progress streaming (`task_update`, `task_progress` messages)
+  - Cost and token tracking per task
+  - Cancel support via AbortController
+  - Clean env (removes `CLAUDECODE`) to avoid nested session detection
+  - Tested end-to-end: Haiku created file autonomously ($0.006, 2 turns)
 
 ### 2026-02-14 — Darron (via Claude) — Session 14
 - **Diff-based terminal renderer** (`6f7b662`):
@@ -187,10 +201,16 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 - ✅ Terminal persistence to disk (`terminal.txt`) with instant startup load
 - ✅ Append-only terminal log (`terminal-log.txt`) with 5-minute timestamps
 - ✅ Zero CDN dependencies (fully self-contained UI)
+- ✅ Autonomous task execution via Claude Agent SDK
+- ✅ SQLite task queue with priority ordering
+- ✅ Task board UI with create/list/progress views
+- ✅ Real-time task progress streaming via WebSocket
+- ✅ Cost and token tracking per task
 
 ## Next Actions
 
 ### Immediate (Next Session)
+- [ ] Test task board UI from phone
 - [ ] Refine UI based on continued mobile usage
 
 ### Short-term
@@ -217,6 +237,7 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-14_22-23-02.md](../_logs/session_2026-02-14_22-23-02.md) — Level 7 autonomous task runner (Agent SDK + SQLite)
 - [session_2026-02-14_19-23-51.md](../_logs/session_2026-02-14_19-23-51.md) — Diff renderer + local echo + typing UX exploration
 - [session_2026-02-14_17-29-25.md](../_logs/session_2026-02-14_17-29-25.md) — HTTPS + xterm cleanup + terminal persistence
 - [session_2026-02-14_10-20-08.md](../_logs/session_2026-02-14_10-20-08.md) — Level 6 + plain text terminal + PID lock (8 commits)
