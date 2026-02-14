@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-15 (Session 15) by Darron (via Claude)
+> Last updated: 2026-02-15 (Session 17) by Darron (via Claude)
 
 ## Current Stage
 
@@ -28,6 +28,10 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-15 — Darron (via Claude) — Session 17
+- **Task execution logging**: Each headless task writes a timestamped markdown log to `{project}/_logs/task_*.md` — assistant responses, tool uses, results, cost summary. Log path stored in SQLite, viewable via `GET /api/tasks/:id/log` and UI "View Log" button.
+- **Append-only terminal buffer**: Terminal view now accumulates lines instead of replacing on every broadcast. Historical content survives compaction (separator inserted). Auto-trims at 5000 lines, manual ✂️ trim button keeps last 500. History view stashes/restores buffer.
 
 ### 2026-02-15 — Darron (via Claude) — Session 16
 - **Level 7: Completion** (git checkpoints, approval gates, tool scoping):
@@ -230,6 +234,8 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Configurable approval gates (bypass/edits_only/approve_all)
 - ✅ Tool scoping via allowed_tools
 - ✅ Approval popup UI with WebSocket notifications
+- ✅ Task execution logging (per-task markdown logs with timestamps)
+- ✅ Append-only terminal buffer (survives compaction, manual trim)
 
 ## Next Actions
 
@@ -266,6 +272,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-15_02-30-00.md](../_logs/session_2026-02-15_02-30-00.md) — Task logging + append-only terminal buffer
 - [session_2026-02-14_22-23-02.md](../_logs/session_2026-02-14_22-23-02.md) — Level 7 autonomous task runner (Agent SDK + SQLite)
 - [session_2026-02-14_19-23-51.md](../_logs/session_2026-02-14_19-23-51.md) — Diff renderer + local echo + typing UX exploration
 - [session_2026-02-14_17-29-25.md](../_logs/session_2026-02-14_17-29-25.md) — HTTPS + xterm cleanup + terminal persistence
