@@ -11,6 +11,8 @@ const { WebSocketServer } = require('ws');
 const { execFileSync, execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const Database = require('better-sqlite3');
+const { query: agentQuery } = require('@anthropic-ai/claude-agent-sdk');
 
 const app = express();
 
@@ -73,6 +75,32 @@ app.use(express.json({ limit: '1mb' }));
         fs.mkdirSync(dir, { recursive: true });
     }
 });
+
+// ── SQLite task queue ────────────────────────────────────
+const TASKS_DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
+const db = new Database(TASKS_DB_PATH);
+db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
+
+db.exec(`CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    project_path TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    priority INTEGER DEFAULT 0,
+    model TEXT DEFAULT 'sonnet',
+    max_turns INTEGER DEFAULT 100,
+    created_at TEXT DEFAULT (datetime('now')),
+    started_at TEXT,
+    completed_at TEXT,
+    result TEXT,
+    error TEXT,
+    cost_usd REAL DEFAULT 0,
+    tokens_in INTEGER DEFAULT 0,
+    tokens_out INTEGER DEFAULT 0,
+    turns INTEGER DEFAULT 0
+)`);
 
 /**
  * Serve the mobile web UI
@@ -852,6 +880,269 @@ app.get('/api/bridge/history', (req, res) => {
     }
 });
 
+// ── Task queue endpoints ──────────────────────────────────
+
+const taskStmts = {
+    list: db.prepare('SELECT * FROM tasks ORDER BY CASE status WHEN \'running\' THEN 0 WHEN \'pending\' THEN 1 ELSE 2 END, priority DESC, created_at DESC'),
+    listByStatus: db.prepare('SELECT * FROM tasks WHERE status = ? ORDER BY priority DESC, created_at DESC'),
+    get: db.prepare('SELECT * FROM tasks WHERE id = ?'),
+    insert: db.prepare('INSERT INTO tasks (id, title, description, project_path, priority, model, max_turns, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+    updateStatus: db.prepare('UPDATE tasks SET status = ?, started_at = ? WHERE id = ?'),
+    complete: db.prepare('UPDATE tasks SET status = ?, completed_at = ?, result = ?, cost_usd = ?, tokens_in = ?, tokens_out = ?, turns = ? WHERE id = ?'),
+    fail: db.prepare('UPDATE tasks SET status = ?, completed_at = ?, error = ? WHERE id = ?'),
+    cancel: db.prepare('UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?'),
+    del: db.prepare('DELETE FROM tasks WHERE id = ?'),
+    nextPending: db.prepare('SELECT * FROM tasks WHERE status = \'pending\' ORDER BY priority DESC, created_at ASC LIMIT 1'),
+};
+
+/**
+ * List tasks (optionally filtered by status)
+ */
+app.get('/api/tasks', (req, res) => {
+    try {
+        const tasks = req.query.status
+            ? taskStmts.listByStatus.all(req.query.status)
+            : taskStmts.list.all();
+        res.json({ success: true, tasks });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * Create a new task
+ */
+app.post('/api/tasks', (req, res) => {
+    try {
+        const { title, description, project_path, priority, model, max_turns } = req.body;
+
+        if (!title || !description || !project_path) {
+            return res.status(400).json({ success: false, error: 'Missing title, description, or project_path' });
+        }
+
+        const id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+        const now = new Date().toISOString();
+
+        taskStmts.insert.run(id, title, description, project_path,
+            priority || 0, model || 'sonnet', max_turns || 100, now);
+
+        const task = taskStmts.get.get(id);
+        broadcastTaskUpdate(task);
+
+        res.json({ success: true, task });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * Get a single task
+ */
+app.get('/api/tasks/:id', (req, res) => {
+    try {
+        const task = taskStmts.get.get(req.params.id);
+        if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+        res.json({ success: true, task });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * Cancel a running or pending task
+ */
+app.post('/api/tasks/:id/cancel', (req, res) => {
+    try {
+        const task = taskStmts.get.get(req.params.id);
+        if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+        if (task.status !== 'pending' && task.status !== 'running') {
+            return res.status(400).json({ success: false, error: 'Task is not pending or running' });
+        }
+
+        // If running, abort the agent
+        if (task.status === 'running' && runningAbort) {
+            runningAbort.abort();
+        }
+
+        taskStmts.cancel.run('cancelled', new Date().toISOString(), task.id);
+        const updated = taskStmts.get.get(task.id);
+        broadcastTaskUpdate(updated);
+        res.json({ success: true, task: updated });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * Delete a task
+ */
+app.delete('/api/tasks/:id', (req, res) => {
+    try {
+        const task = taskStmts.get.get(req.params.id);
+        if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+        if (task.status === 'running') {
+            return res.status(400).json({ success: false, error: 'Cannot delete a running task — cancel it first' });
+        }
+        taskStmts.del.run(task.id);
+        broadcastTaskUpdate({ ...task, status: 'deleted' });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ── Task orchestrator ─────────────────────────────────────
+
+let runningTaskId = null;
+let runningAbort = null;
+
+/**
+ * Broadcast task status update to all WS clients
+ */
+function broadcastTaskUpdate(task) {
+    if (wss.clients.size === 0) return;
+    const message = JSON.stringify({ type: 'task_update', task });
+    wss.clients.forEach((client) => {
+        if (client.readyState === 1) client.send(message);
+    });
+}
+
+/**
+ * Broadcast task progress (streaming SDK message) to all WS clients
+ */
+function broadcastTaskProgress(taskId, sdkMessage) {
+    if (wss.clients.size === 0) return;
+
+    // Extract the useful bits from the SDK message
+    let progress = { taskId, messageType: sdkMessage.type };
+
+    if (sdkMessage.type === 'assistant') {
+        // Full assistant message — extract text content
+        const textBlocks = (sdkMessage.message?.content || [])
+            .filter(b => b.type === 'text')
+            .map(b => b.text);
+        progress.text = textBlocks.join('\n');
+        progress.role = 'assistant';
+    } else if (sdkMessage.type === 'tool_use_summary') {
+        progress.tool = sdkMessage.tool_name;
+        progress.input = sdkMessage.tool_input_summary;
+    } else if (sdkMessage.type === 'result') {
+        progress.subtype = sdkMessage.subtype;
+        progress.result = sdkMessage.result;
+        progress.cost_usd = sdkMessage.total_cost_usd;
+        progress.duration_ms = sdkMessage.duration_ms;
+        progress.num_turns = sdkMessage.num_turns;
+    } else if (sdkMessage.type === 'system') {
+        progress.subtype = sdkMessage.subtype;
+    }
+
+    const message = JSON.stringify({ type: 'task_progress', ...progress });
+    wss.clients.forEach((client) => {
+        if (client.readyState === 1) client.send(message);
+    });
+}
+
+/**
+ * Run the next pending task from the queue
+ */
+async function runNextTask() {
+    if (runningTaskId) return; // Already running a task
+
+    const task = taskStmts.nextPending.get();
+    if (!task) return;
+
+    runningTaskId = task.id;
+    const abort = new AbortController();
+    runningAbort = abort;
+
+    // Mark as running
+    taskStmts.updateStatus.run('running', new Date().toISOString(), task.id);
+    broadcastTaskUpdate(taskStmts.get.get(task.id));
+
+    console.log(`[Task] Starting: ${task.title} (${task.id})`);
+
+    try {
+        // Build clean env without CLAUDECODE (prevents nested session detection)
+        const cleanEnv = { ...process.env };
+        delete cleanEnv.CLAUDECODE;
+
+        const q = agentQuery({
+            prompt: task.description,
+            options: {
+                model: task.model,
+                maxTurns: task.max_turns,
+                cwd: task.project_path,
+                permissionMode: 'bypassPermissions',
+                allowDangerouslySkipPermissions: true,
+                abortController: abort,
+                env: cleanEnv,
+            }
+        });
+
+        let totalCost = 0;
+        let totalTokensIn = 0;
+        let totalTokensOut = 0;
+        let numTurns = 0;
+        let resultText = '';
+
+        for await (const message of q) {
+            // Check if cancelled
+            if (abort.signal.aborted) break;
+
+            broadcastTaskProgress(task.id, message);
+
+            if (message.type === 'result') {
+                const isSuccess = message.subtype === 'success';
+                totalCost = message.total_cost_usd || 0;
+                numTurns = message.num_turns || 0;
+                resultText = message.result || '';
+
+                // Try to extract token counts from usage
+                if (message.usage) {
+                    totalTokensIn = message.usage.input_tokens || 0;
+                    totalTokensOut = message.usage.output_tokens || 0;
+                }
+
+                taskStmts.complete.run(
+                    isSuccess ? 'done' : 'failed',
+                    new Date().toISOString(),
+                    resultText,
+                    totalCost,
+                    totalTokensIn,
+                    totalTokensOut,
+                    numTurns,
+                    task.id
+                );
+
+                console.log(`[Task] ${isSuccess ? 'Completed' : 'Failed'}: ${task.title} ($${totalCost.toFixed(4)}, ${numTurns} turns)`);
+            }
+        }
+
+        // If aborted (cancelled), the loop exits without a result message
+        if (abort.signal.aborted) {
+            const current = taskStmts.get.get(task.id);
+            if (current && current.status === 'running') {
+                taskStmts.cancel.run('cancelled', new Date().toISOString(), task.id);
+                console.log(`[Task] Cancelled: ${task.title}`);
+            }
+        }
+    } catch (err) {
+        const errDetail = err.stack || err.message || String(err);
+        console.error(`[Task] Error: ${task.title}:`, errDetail);
+        const current = taskStmts.get.get(task.id);
+        if (current && (current.status === 'running' || current.status === 'pending')) {
+            taskStmts.fail.run('failed', new Date().toISOString(), err.message, task.id);
+        }
+    } finally {
+        runningTaskId = null;
+        runningAbort = null;
+        broadcastTaskUpdate(taskStmts.get.get(task.id));
+    }
+}
+
+// Check for pending tasks every 5 seconds
+const orchestratorInterval = setInterval(runNextTask, 5000);
+
 // ── WebSocket server ──────────────────────────────────────
 
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -924,6 +1215,7 @@ const heartbeatInterval = setInterval(() => {
 wss.on('close', () => {
     clearInterval(heartbeatInterval);
     clearInterval(terminalBroadcastInterval);
+    clearInterval(orchestratorInterval);
 });
 
 // Terminal broadcast — 1-second capture loop
@@ -964,6 +1256,8 @@ server.listen(PORT, '0.0.0.0', () => {
 ║    GET  /api/status     - Server status                    ║
 ║    GET  /quick          - Quick response (ntfy actions)    ║
 ║    GET  /api/bridge/*   - Context bridge (export/import)   ║
+║    GET  /api/tasks      - Task queue (Level 7)             ║
+║    POST /api/tasks      - Create autonomous task           ║
 ║    WS   /ws             - WebSocket push                   ║
 ╚═══════════════════════════════════════════════════════════╝
 `);
@@ -973,6 +1267,9 @@ process.on('SIGTERM', () => {
     cleanPid();
     clearInterval(heartbeatInterval);
     clearInterval(terminalBroadcastInterval);
+    clearInterval(orchestratorInterval);
+    if (runningAbort) runningAbort.abort();
+    try { db.close(); } catch {}
     wss.close();
     server.close();
     process.exit(0);
