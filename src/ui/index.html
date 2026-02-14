@@ -900,6 +900,46 @@
 
         // ── Terminal broadcast handling ────────────────────────
 
+        let renderedLines = []; // current line elements in the DOM
+
+        function diffUpdateTerminal(newContent) {
+            const newLines = newContent.split('\n');
+            const el = termContent;
+            const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+
+            // Update changed lines, add new lines, remove excess lines
+            for (let i = 0; i < newLines.length; i++) {
+                if (i < renderedLines.length) {
+                    // Existing line — only update if changed
+                    if (renderedLines[i]._text !== newLines[i]) {
+                        renderedLines[i].textContent = newLines[i];
+                        renderedLines[i]._text = newLines[i];
+                    }
+                } else {
+                    // New line — append
+                    const div = document.createElement('div');
+                    div.textContent = newLines[i];
+                    div._text = newLines[i];
+                    el.appendChild(div);
+                    renderedLines.push(div);
+                }
+            }
+
+            // Remove excess lines from the end
+            while (renderedLines.length > newLines.length) {
+                el.removeChild(renderedLines.pop());
+            }
+
+            if (wasAtBottom) {
+                el.scrollTop = el.scrollHeight;
+            }
+        }
+
+        function clearRenderedLines() {
+            renderedLines = [];
+            termContent.innerHTML = '';
+        }
+
         function handleTerminalUpdate(content, session) {
             if (content === null) {
                 // No active session
@@ -922,15 +962,8 @@
                 lastWrittenContent = content;
                 localLineCount = content.split('\n').length;
 
-                // Preserve scroll position — only auto-scroll if already at bottom
-                const el = termContent;
-                const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-
-                el.textContent = content;
-
-                if (wasAtBottom) {
-                    el.scrollTop = el.scrollHeight;
-                }
+                // Diff-based update — only touches changed lines
+                diffUpdateTerminal(content);
             }
 
             // Update chrome based on state
@@ -952,9 +985,8 @@
                 const content = (p.terminal || p.terminal_content || '').trim();
                 termContent.style.display = '';
                 if (content && content !== lastWrittenContent) {
-                    termContent.textContent = content;
                     lastWrittenContent = content;
-                    termContent.scrollTop = termContent.scrollHeight;
+                    diffUpdateTerminal(content);
                 }
             }
 
@@ -970,7 +1002,7 @@
             termContent.style.display = '';
             lastWrittenContent = '';
 
-            termContent.innerHTML = '';
+            clearRenderedLines();
             const empty = document.createElement('div');
             empty.className = 'empty';
             empty.innerHTML = '<div class="empty-icon">\u25c7</div>'
@@ -1057,33 +1089,61 @@
             showToast('Keyboard active');
         });
 
+        // Client-side echo — show characters instantly, send to server in background
+        function localEcho(char) {
+            if (renderedLines.length === 0) return;
+            const lastDiv = renderedLines[renderedLines.length - 1];
+            lastDiv.textContent += char;
+            lastDiv._text = lastDiv.textContent;
+            termContent.scrollTop = termContent.scrollHeight;
+        }
+
+        function localEchoNewline() {
+            const div = document.createElement('div');
+            div.textContent = '';
+            div._text = '';
+            termContent.appendChild(div);
+            renderedLines.push(div);
+            termContent.scrollTop = termContent.scrollHeight;
+        }
+
+        function localEchoBackspace() {
+            if (renderedLines.length === 0) return;
+            const lastDiv = renderedLines[renderedLines.length - 1];
+            if (lastDiv._text.length > 0) {
+                lastDiv.textContent = lastDiv._text.slice(0, -1);
+                lastDiv._text = lastDiv.textContent;
+            }
+        }
+
         // Handle input from iOS soft keyboard
         mobileInput.addEventListener('input', (e) => {
             const value = e.target.value;
             if (!value) return;
-
-            // Clear input immediately to prepare for next input
             mobileInput.value = '';
 
-            // Send the typed text
+            // Show instantly on client
+            localEcho(value);
+
+            // Send to server in background
             if (currentPrompt) {
-                // For prompts, send the whole value
                 sendKey(value);
             } else if (terminalLive) {
-                // For watching mode, send directly
                 sendKeyDirect(value);
             }
         });
 
-        // Handle special keys (Enter, Backspace) via keydown
+        // Handle special keys
         mobileInput.addEventListener('keydown', (e) => {
             let key = null;
 
             if (e.key === 'Enter') {
                 key = 'Enter';
+                localEchoNewline();
                 e.preventDefault();
             } else if (e.key === 'Backspace') {
-                key = '\x7f'; // DEL character
+                key = '\x7f';
+                localEchoBackspace();
                 e.preventDefault();
             } else if (e.key === 'Escape') {
                 key = 'Escape';
@@ -1164,7 +1224,7 @@
                 const res = await fetch(`${API_BASE}/api/history?limit=20`);
                 const data = await res.json();
 
-                termContent.textContent = '';
+                clearRenderedLines();
                 titleText.textContent = 'history';
                 footerLeft.textContent = data.count + ' resolved';
 
@@ -1222,7 +1282,7 @@
                 termContent.appendChild(list);
                 termContent.scrollTop = 0;
             } catch {
-                termContent.textContent = '';
+                clearRenderedLines();
                 const err = document.createElement('div');
                 err.className = 'history-empty';
                 err.textContent = 'Failed to load history';
@@ -1235,11 +1295,11 @@
             if (currentPrompt) {
                 renderPromptOverlay();
             } else if (terminalLive) {
-                // Restore watching state — show plain text terminal
+                // Restore watching state — rebuild from last content
+                clearRenderedLines();
                 termContent.style.display = '';
                 if (lastWrittenContent) {
-                    termContent.textContent = lastWrittenContent;
-                    termContent.scrollTop = termContent.scrollHeight;
+                    diffUpdateTerminal(lastWrittenContent);
                 }
                 titleText.textContent = terminalSession || 'claude-remote';
                 footerLeft.textContent = 'Watching session';
