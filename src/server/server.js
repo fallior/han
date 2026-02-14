@@ -5,6 +5,7 @@
  */
 
 const http = require('http');
+const https = require('https');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const { execFileSync, execFile } = require('child_process');
@@ -12,7 +13,16 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const server = http.createServer(app);
+
+// Use HTTPS if Tailscale certs exist, otherwise HTTP
+const CLAUDE_REMOTE_DIR_EARLY = process.env.CLAUDE_REMOTE_DIR || path.join(process.env.HOME, '.claude-remote');
+const TLS_CERT = path.join(CLAUDE_REMOTE_DIR_EARLY, 'tls.crt');
+const TLS_KEY = path.join(CLAUDE_REMOTE_DIR_EARLY, 'tls.key');
+const useHttps = fs.existsSync(TLS_CERT) && fs.existsSync(TLS_KEY);
+
+const server = useHttps
+    ? https.createServer({ cert: fs.readFileSync(TLS_CERT), key: fs.readFileSync(TLS_KEY) }, app)
+    : http.createServer(app);
 const PORT = process.env.PORT || 3847;
 const CLAUDE_REMOTE_DIR = process.env.CLAUDE_REMOTE_DIR || path.join(process.env.HOME, '.claude-remote');
 const PENDING_DIR = path.join(CLAUDE_REMOTE_DIR, 'pending');
@@ -865,12 +875,14 @@ fs.watch(PENDING_DIR, (eventType, filename) => {
 // ── Start server ─────────────────────────────────────────
 
 server.listen(PORT, '0.0.0.0', () => {
+    const proto = useHttps ? 'https' : 'http';
     console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                    Claude Remote Server                    ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Local:    http://localhost:${PORT}                         ║
-║  Network:  http://<your-ip>:${PORT}                         ║
+║  Mode:     ${useHttps ? 'HTTPS (Tailscale TLS)' : 'HTTP (no TLS certs found)'}${useHttps ? '              ' : '         '}║
+║  Local:    ${proto}://localhost:${PORT}                        ║
+║  Network:  ${proto}://<your-ip>:${PORT}                        ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  API Endpoints:                                            ║
 ║    GET  /api/prompts    - List pending prompts             ║
