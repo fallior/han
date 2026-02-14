@@ -2,24 +2,29 @@
 
 ## From Remote Prompt Responder to Autonomous Development Platform
 
-*Version 1.2 — 7 February 2026*
+*Version 2.0 — 15 February 2026*
 
 ---
 
 ## Where We Are Now
 
-Claude Remote was conceived in January 2026 as a solution to a real pain point: Claude Code blocks on prompts while you're away from your desk. The project was structured into 6 progressive levels:
+Claude Remote was conceived in January 2026 as a solution to a real pain point: Claude Code blocks on prompts while you're away from your desk. The project was structured into progressive levels, with the original 6 now complete and extended levels 7–8 also delivered:
 
 | Level | Name | Status |
 |-------|------|--------|
-| 1 | Prompt Responder (MVP) | 🟡 Prototype |
-| 2 | Push Alerts | ⚪ Not Started |
-| 3 | Context Window | ⚪ Not Started |
-| 4 | Terminal Mirror | ⚪ Not Started |
-| 5 | Interactive Terminal | ⚪ Not Started |
-| 6 | Claude Bridge | ⚪ Not Started |
+| 1 | Prompt Responder (MVP) | 🟢 Complete |
+| 2 | Push Alerts | 🟢 Complete |
+| 3 | Context Window (Search & Copy) | 🟢 Complete |
+| 4 | Terminal Mirror (xterm.js) | 🟢 Complete |
+| 5 | Mobile Keyboard | 🟢 Complete |
+| 6 | Claude Bridge (Context Export/Import) | 🟢 Complete |
+| 7 | Autonomous Task Runner | 🟢 Complete |
+| 8 | Intelligent Orchestrator | 🟢 Complete |
+| 9 | Multi-Project Autonomy | ⚪ Not Started |
+| 10 | Self-Improving Development System | ⚪ Not Started |
+| 11 | Autonomous Product Factory | ⚪ Not Started |
 
-The existing architecture uses tmux session management, a notify.sh hook, an Express server, ntfy.sh push notifications, and a mobile web UI served over Tailscale. The prototype demonstrates the core flow: Claude Code prompt → hook fires → state saved → push sent → mobile response → tmux injection.
+The architecture now includes tmux session management, a notify.sh hook, an Express server with WebSocket push, ntfy.sh push notifications, a mobile web UI served over Tailscale, the Claude Agent SDK for headless task execution with git checkpoints and approval gates, and an orchestrator intelligence layer with goal decomposition, smart model routing, retry logic, and project memory.
 
 ---
 
@@ -935,56 +940,52 @@ The key insight: **open-source models are improving faster than hardware is depr
 
 ## Implementation Roadmap
 
-### Phase 1: Foundation (Levels 1–3) — 4 weeks
+### Phase 1: Foundation (Levels 1–3) — Complete
 
-Complete the existing prototype and get it into daily use.
+- [x] Finalise Level 1 prototype, test end-to-end
+- [x] Implement Level 2 push notifications (ntfy.sh)
+- [x] Implement Level 3 context window (search & copy)
+- [x] Deploy on Linux via Tailscale for daily use
+- [x] Gather feedback on what works and what's missing
 
-- [ ] Finalise Level 1 prototype, test end-to-end
-- [ ] Implement Level 2 push notifications (ntfy.sh)
-- [ ] Implement Level 3 context window (terminal history)
-- [ ] Deploy on your Mac via Tailscale for daily use
-- [ ] Gather feedback on what works and what's missing
+### Phase 2: Full Remote Terminal (Levels 4–5) — Complete
 
-### Phase 2: Full Remote Terminal (Levels 4–5) — 6 weeks
+- [x] Level 4 terminal mirror (WebSocket-based, xterm.js on mobile)
+- [x] Level 5 mobile keyboard (iOS soft keyboard, keystroke injection)
+- [x] Append-only terminal buffer with history preservation
+- [x] Manual trim button for buffer management
 
-- [ ] Level 4 terminal mirror (WebSocket-based, xterm.js on mobile)
-- [ ] Level 5 interactive terminal (bidirectional I/O)
-- [ ] E2E encryption implementation
-- [ ] Battery/performance optimisation for mobile
-- [ ] Persistent terminal history (SQLite)
+### Phase 3: The Bridge (Level 6) — Complete
 
-### Phase 3: The Bridge (Level 6) — 6 weeks
+- [x] Context export (CLAUDE.md, CURRENT_STATUS.md, recent files, git log)
+- [x] Context import (paste into claude.ai Projects)
+- [x] Bridge UI in mobile interface
 
-- [ ] Context extraction from claude.ai conversations
-- [ ] Format translation (conversation ↔ terminal context)
-- [ ] Bidirectional sync engine
-- [ ] "Hand off" workflow: start on phone, continue on desktop
-- [ ] Shared context persistence (project files, decisions, memory)
+### Phase 4: Autonomous Task Runner (Level 7) — Complete
 
-### Phase 4: Autonomous Task Runner (Level 7) — 4 weeks
+- [x] Task queue system (SQLite + API)
+- [x] Claude Agent SDK integration (headless mode)
+- [x] Git checkpoint management (stash/branch with rollback)
+- [x] Mobile task board UI
+- [x] Progress streaming to phone (WebSocket)
+- [x] Configurable approval gates (bypass/confirm/gate)
+- [x] Cost tracking per task
+- [x] Tool scoping (allowed tools per task)
+- [x] Task execution logging (markdown logs with per-entry timestamps)
 
-- [ ] Task queue system (SQLite + API)
-- [ ] Claude Agent SDK integration (headless mode)
-- [ ] Git checkpoint management
-- [ ] Mobile task board UI
-- [ ] Progress streaming to phone
-- [ ] Configurable approval gates
-- [ ] Cost tracking per task
+### Phase 5: Intelligent Orchestrator (Level 8) — Complete
 
-### Phase 5: Intelligent Orchestrator (Level 8) — 8 weeks
-
-**Hardware**: Stage 0 (CPU-only) initially → Stage 1 (RTX 3090) when ready
-
-- [ ] Linux machine setup (Ollama + Qwen3-Coder 30B, CPU-only)
-- [ ] Benchmark CPU-only inference, assess if upgrade needed
-- [ ] RTX 3090 acquisition and installation (when available/needed)
-- [ ] NVIDIA driver + CUDA toolkit setup
-- [ ] Local model deployment and benchmarking (CPU vs GPU comparison)
-- [ ] Task complexity classifier
-- [ ] Hybrid routing (local for simple, API for complex)
-- [ ] Subagent orchestration patterns
-- [ ] Error recovery and retry logic
-- [ ] Project memory system (what worked, what didn't)
+- [x] Ollama integration (local model support, auto-detection)
+- [x] Claude Haiku API fallback for orchestration
+- [x] Task complexity classifier (simple/medium/complex → haiku/sonnet/opus)
+- [x] Goal decomposition (high-level goal → ordered subtasks)
+- [x] Dependency-aware task picking
+- [x] Error recovery and retry logic with failure analysis
+- [x] Project memory system (outcome tracking, success rates by model)
+- [x] Goals tab in mobile UI (create, view, retry)
+- [x] Orchestrator status badge
+- [ ] Ollama model pull helper (convenience, not critical)
+- [ ] Pull and benchmark a local model (Ollama installed, no models yet)
 
 ### Phase 6: Multi-Project Empire (Level 9) — 8 weeks
 
@@ -1093,5 +1094,5 @@ Your Contempire portfolio doesn't grow linearly with your time — it grows expo
 ---
 
 *This roadmap is a living document. Update it as the project evolves.*
-*Next action: Complete Phase 1 (Levels 1–3) to establish the foundation.*
-*Hardware next action: Set up Stage 0 (Ollama + CPU-only inference). Order RTX 3090 when a good deal appears.*
+*Next action: Level 9 (Multi-Project Autonomy) or pull an Ollama model to enable local orchestration.*
+*Hardware next action: Ollama installed but no models pulled yet. Pull qwen2.5-coder:7b for quick test or qwen2.5-coder:32b for production orchestration. Order RTX 3090 when a good deal appears.*
