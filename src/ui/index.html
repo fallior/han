@@ -699,6 +699,8 @@
                 <button class="qbtn qbtn-special" data-key="Tab">Tab</button>
                 <button class="qbtn qbtn-arrow" data-key="Up">&uarr;</button>
                 <button class="qbtn qbtn-arrow" data-key="Down">&darr;</button>
+                <button class="qbtn qbtn-arrow" data-scroll="-5">&uarr;&uarr;</button>
+                <button class="qbtn qbtn-arrow" data-scroll="5">&darr;&darr;</button>
             </div>
         </div>
 
@@ -785,6 +787,7 @@
         let lastWrittenContent = '';
         let searchResultCount = 0;
         let searchResultIndex = -1;
+        let userScrolledUp = false;
 
         const terminal = document.getElementById('terminal');
         const termContent = document.getElementById('termContent');
@@ -853,6 +856,19 @@
 
             term.open(xtermContainer);
             fitAddon.fit();
+
+            // Detect scroll position — pause updates when scrolled up
+            term.onScroll(() => {
+                const viewport = term.buffer.active;
+                const atBottom = viewport.baseY <= viewport.viewportY;
+                if (userScrolledUp && atBottom) {
+                    userScrolledUp = false;
+                    footerLeft.textContent = terminalLive ? 'Watching session' : footerLeft.textContent;
+                } else if (!atBottom) {
+                    userScrolledUp = true;
+                    footerLeft.textContent = 'Scrolled — tap ↓↓ to resume';
+                }
+            });
 
             // Route keystrokes to sendKey (prompt) or sendKeyDirect (watching)
             term.onData((data) => {
@@ -1011,6 +1027,9 @@
             // Fit before writing to ensure proper dimensions (with RAF for mobile layout)
             requestAnimationFrame(() => {
                 fitAddon.fit();
+
+                // Skip rewrite if user is scrolled up (don't snap back)
+                if (userScrolledUp) return;
 
                 // Only rewrite if content changed
                 if (content !== lastWrittenContent) {
@@ -1199,9 +1218,25 @@
 
         quickbar.addEventListener('click', (e) => {
             const btn = e.target.closest('.qbtn');
-            if (!btn || isSending) return;
+            if (!btn) return;
+
+            // Handle scroll buttons (local xterm scroll, not sent to tmux)
+            const scroll = btn.dataset.scroll;
+            if (scroll && term) {
+                term.scrollPages(parseInt(scroll));
+                return;
+            }
+
+            if (isSending) return;
             const key = btn.dataset.key;
             if (!key) return;
+
+            // If scrolled up and user taps ↓↓, resume live view
+            if (userScrolledUp) {
+                userScrolledUp = false;
+                term.scrollToBottom();
+                footerLeft.textContent = 'Watching session';
+            }
 
             if (currentPrompt) {
                 sendKey(key);
