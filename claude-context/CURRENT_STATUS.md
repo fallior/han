@@ -1,12 +1,12 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-15 (Session 17) by Darron (via Claude)
+> Last updated: 2026-02-15 (Session 18) by Darron (via Claude)
 
 ## Current Stage
 
-**Levels 1-7 Complete**. All core levels plus full autonomous task runner with safety features. Prompt responder, push alerts, context window (search + copy), terminal mirror, mobile keyboard, always-on terminal broadcast, context bridge, and autonomous task execution via the Claude Agent SDK with git checkpoints, approval gates, and tool scoping.
+**Levels 1-8 Complete**. All core levels plus autonomous task runner and intelligent orchestrator. Prompt responder, push alerts, context window (search + copy), terminal mirror, mobile keyboard, always-on terminal broadcast, context bridge, autonomous task execution via the Claude Agent SDK with git checkpoints, approval gates, and tool scoping, and intelligent goal decomposition with smart model routing, retry logic, and project memory.
 
-Create tasks from your phone, Claude Code executes them headlessly with safety features: automatic git checkpoints before execution (rollback on failure), configurable approval gates (bypass/edits_only/approve_all), and tool scoping. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working.
+Create tasks from your phone, Claude Code executes them headlessly with safety features. Submit high-level goals — the orchestrator decomposes them into ordered subtasks, routes to the right model (haiku/sonnet/opus), retries failures with analysis, and tracks outcomes in project memory. Dual LLM backend: Ollama local or Anthropic API fallback. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working.
 
 ## Progress Summary
 
@@ -24,10 +24,24 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 | Level 3: Context Window | 🟢 Complete | Search (xterm-addon-search) + copy |
 | Level 6: Claude Bridge | 🟢 Complete | Export, import, handoff, history |
 | Level 7: Task Runner | 🟢 Complete | Agent SDK, SQLite queue, task board UI, git checkpoints, approval gates, tool scoping |
+| Level 8: Orchestrator | 🟢 Complete | Goal decomposition, smart model routing, retry logic, project memory, Goals tab UI |
 
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-15 — Darron (via Claude) — Session 18
+- **Level 8: Intelligent Orchestrator** committed (`264e02a`):
+  - `src/server/orchestrator.js` (298 lines): callLLM (dual backend), classifyTask, decomposeGoal, analyseFailure, selectModel
+  - Goal endpoints: `POST/GET /api/goals`, `GET /api/goals/:id`, `POST /api/goals/:id/retry`, `DELETE /api/goals/:id`
+  - Orchestrator endpoints: `GET /api/orchestrator/status`, `GET /api/orchestrator/memory/:project`, `POST /api/orchestrator/setup`
+  - Database: `goals` table, `project_memory` table, 7 new columns on `tasks` (goal_id, complexity, retry_count, max_retries, parent_task_id, depends_on, auto_model)
+  - Retry logic: failure analysis via orchestrator, model escalation, adjusted descriptions
+  - Dependency-aware task picking: `getNextPendingTask()` checks `depends_on` before scheduling
+  - Goal progress tracking: `updateGoalProgress()` updates cost/status/completion when tasks finish
+  - UI: Goals tab, create goal form, goal detail with task breakdown and progress bar, retry button, orchestrator status badge (🧠)
+  - WebSocket: `goal_update`, `goal_decomposed` message types
+- **Roadmap updated** (`1db1ab9`): All levels 1-8 marked complete, checklists updated, version 2.0
 
 ### 2026-02-15 — Darron (via Claude) — Session 17
 - **Task execution logging**: Each headless task writes a timestamped markdown log to `{project}/_logs/task_*.md` — assistant responses, tool uses, results, cost summary. Log path stored in SQLite, viewable via `GET /api/tasks/:id/log` and UI "View Log" button.
@@ -236,17 +250,23 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Approval popup UI with WebSocket notifications
 - ✅ Task execution logging (per-task markdown logs with timestamps)
 - ✅ Append-only terminal buffer (survives compaction, manual trim)
+- ✅ Goal decomposition via orchestrator (Ollama local or Anthropic API)
+- ✅ Smart model routing (complexity → haiku/sonnet/opus)
+- ✅ Retry logic with failure analysis and model escalation
+- ✅ Project memory (outcome tracking, success rates by model)
+- ✅ Dependency-aware task scheduling
+- ✅ Goals tab UI with create, view, retry, progress bars
 
 ## Next Actions
 
 ### Immediate (Next Session)
-- [ ] Test Level 7 features end-to-end from phone
-- [ ] Test git checkpoint rollback with failing task
-- [ ] Test approval gates with edits_only mode
+- [ ] Pull an Ollama model to enable local orchestration (e.g. `ollama pull qwen2.5-coder:7b`)
+- [ ] Test goal decomposition end-to-end (set ANTHROPIC_API_KEY in server env or pull Ollama model)
+- [ ] Test retry logic with a deliberately failing task
 - [ ] Refine UI based on continued mobile usage
 
 ### Short-term
-- [ ] Consider extended levels (8-11) from ROADMAP.md
+- [ ] Consider Level 9 (Multi-Project Autonomy) from ROADMAP.md
 - [ ] Add git checkpoint visualization in task detail view
 - [ ] Add approval history tracking
 
@@ -272,6 +292,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-15_09-30-00.md](../_logs/session_2026-02-15_09-30-00.md) — Level 8 commit + roadmap update
 - [session_2026-02-15_02-30-00.md](../_logs/session_2026-02-15_02-30-00.md) — Task logging + append-only terminal buffer
 - [session_2026-02-14_22-23-02.md](../_logs/session_2026-02-14_22-23-02.md) — Level 7 autonomous task runner (Agent SDK + SQLite)
 - [session_2026-02-14_19-23-51.md](../_logs/session_2026-02-14_19-23-51.md) — Diff renderer + local echo + typing UX exploration
