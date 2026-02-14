@@ -113,6 +113,10 @@ if (!columns.includes('checkpoint_ref')) {
     db.exec(`ALTER TABLE tasks ADD COLUMN allowed_tools TEXT`);
     console.log('[DB] Migration complete');
 }
+if (!columns.includes('log_file')) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN log_file TEXT`);
+    console.log('[DB] Added log_file column');
+}
 
 /**
  * Serve the mobile web UI
@@ -1061,6 +1065,7 @@ const taskStmts = {
     insert: db.prepare('INSERT INTO tasks (id, title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     updateStatus: db.prepare('UPDATE tasks SET status = ?, started_at = ? WHERE id = ?'),
     updateCheckpoint: db.prepare('UPDATE tasks SET checkpoint_ref = ?, checkpoint_type = ?, checkpoint_created_at = ? WHERE id = ?'),
+    updateLogFile: db.prepare('UPDATE tasks SET log_file = ? WHERE id = ?'),
     complete: db.prepare('UPDATE tasks SET status = ?, completed_at = ?, result = ?, cost_usd = ?, tokens_in = ?, tokens_out = ?, turns = ? WHERE id = ?'),
     fail: db.prepare('UPDATE tasks SET status = ?, completed_at = ?, error = ? WHERE id = ?'),
     cancel: db.prepare('UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?'),
@@ -1179,6 +1184,26 @@ app.delete('/api/tasks/:id', (req, res) => {
         taskStmts.del.run(task.id);
         broadcastTaskUpdate({ ...task, status: 'deleted' });
         res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * Get a task's execution log
+ */
+app.get('/api/tasks/:id/log', (req, res) => {
+    try {
+        const task = taskStmts.get.get(req.params.id);
+        if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+        if (!task.log_file) return res.status(404).json({ success: false, error: 'No log file for this task' });
+
+        if (!fs.existsSync(task.log_file)) {
+            return res.status(404).json({ success: false, error: 'Log file not found on disk' });
+        }
+
+        const content = fs.readFileSync(task.log_file, 'utf8');
+        res.json({ success: true, log: content, path: task.log_file });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -1312,6 +1337,104 @@ app.post('/api/approvals/:id/deny', (req, res) => {
     res.json({ success: true });
 });
 
+// ── Task execution logging ────────────────────────────────
+
+/**
+ * Create a log file for a task execution, mirroring claude-logged format.
+ * Logs SDK messages (assistant text, tool uses, results) to _logs/task_*.md
+ */
+function createTaskLogger(task) {
+    const logDir = path.join(task.project_path, '_logs');
+    try {
+        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    } catch { /* best effort */ }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const safeTitle = task.title.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-').slice(0, 50);
+    const logFile = path.join(logDir, `task_${timestamp}_${safeTitle}.md`);
+
+    // Write session header (matches claude-logged format)
+    const header = [
+        `# Task: ${task.title}`,
+        ``,
+        `- **Task ID**: ${task.id}`,
+        `- **Project**: ${path.basename(task.project_path)} (${task.project_path})`,
+        `- **Machine**: ${require('os').hostname()}`,
+        `- **Model**: ${task.model}`,
+        `- **Max Turns**: ${task.max_turns}`,
+        `- **Gate Mode**: ${task.gate_mode || 'bypass'}`,
+        `- **Allowed Tools**: ${task.allowed_tools || 'all'}`,
+        `- **Started**: ${new Date().toISOString()}`,
+        ``,
+        `---`,
+        ``,
+    ].join('\n');
+
+    try {
+        fs.writeFileSync(logFile, header);
+    } catch { /* best effort */ }
+
+    function ts() {
+        return new Date().toISOString().replace('T', ' ').slice(0, 19);
+    }
+
+    return {
+        file: logFile,
+        log(sdkMessage) {
+            try {
+                let entry = '';
+                const t = ts();
+
+                if (sdkMessage.type === 'assistant') {
+                    const textBlocks = (sdkMessage.message?.content || [])
+                        .filter(b => b.type === 'text')
+                        .map(b => b.text);
+                    const toolUses = (sdkMessage.message?.content || [])
+                        .filter(b => b.type === 'tool_use');
+
+                    if (textBlocks.length > 0) {
+                        entry += `## Assistant <sub>${t}</sub>\n\n${textBlocks.join('\n')}\n\n`;
+                    }
+                    for (const tool of toolUses) {
+                        entry += `### Tool Use: ${tool.name} <sub>${t}</sub>\n\n`;
+                        entry += '```json\n' + JSON.stringify(tool.input, null, 2).slice(0, 2000) + '\n```\n\n';
+                    }
+                } else if (sdkMessage.type === 'tool_use_summary') {
+                    entry += `**Tool**: ${sdkMessage.tool_name} — ${sdkMessage.tool_input_summary || ''} <sub>${t}</sub>\n\n`;
+                } else if (sdkMessage.type === 'tool_result') {
+                    const text = typeof sdkMessage.content === 'string'
+                        ? sdkMessage.content
+                        : JSON.stringify(sdkMessage.content);
+                    entry += `**Result** (${sdkMessage.is_error ? 'error' : 'ok'}): ${(text || '').slice(0, 1000)} <sub>${t}</sub>\n\n`;
+                } else if (sdkMessage.type === 'result') {
+                    entry += `---\n\n## Result: ${sdkMessage.subtype} <sub>${t}</sub>\n\n`;
+                    entry += `- **Cost**: $${(sdkMessage.total_cost_usd || 0).toFixed(4)}\n`;
+                    entry += `- **Turns**: ${sdkMessage.num_turns || 0}\n`;
+                    entry += `- **Duration**: ${sdkMessage.duration_ms ? (sdkMessage.duration_ms / 1000).toFixed(1) + 's' : 'unknown'}\n`;
+                    entry += `- **Completed**: ${new Date().toISOString()}\n\n`;
+                    if (sdkMessage.result) {
+                        entry += sdkMessage.result + '\n\n';
+                    }
+                } else if (sdkMessage.type === 'system') {
+                    entry += `*[system: ${sdkMessage.subtype || sdkMessage.type}]* <sub>${t}</sub>\n\n`;
+                }
+
+                if (entry) {
+                    fs.appendFileSync(logFile, entry);
+                }
+            } catch { /* best effort — never block task execution */ }
+        },
+        finish(status, error) {
+            try {
+                let footer = `---\n\n**Final Status**: ${status}\n`;
+                if (error) footer += `**Error**: ${error}\n`;
+                footer += `**Log Closed**: ${new Date().toISOString()}\n`;
+                fs.appendFileSync(logFile, footer);
+            } catch { /* best effort */ }
+        }
+    };
+}
+
 // ── Task orchestrator ─────────────────────────────────────
 
 let runningTaskId = null;
@@ -1382,6 +1505,11 @@ async function runNextTask() {
 
     console.log(`[Task] Starting: ${task.title} (${task.id})`);
 
+    // Create task execution log (mirrors claude-logged format)
+    const taskLog = createTaskLogger(task);
+    taskStmts.updateLogFile.run(taskLog.file, task.id);
+    console.log(`[Task] Logging to: ${taskLog.file}`);
+
     // Create git checkpoint if project is a git repo
     let checkpointRef = null;
     let checkpointType = 'none';
@@ -1446,6 +1574,7 @@ async function runNextTask() {
             if (abort.signal.aborted) break;
 
             broadcastTaskProgress(task.id, message);
+            taskLog.log(message);
 
             if (message.type === 'result') {
                 const isSuccess = message.subtype === 'success';
@@ -1471,6 +1600,7 @@ async function runNextTask() {
                 );
 
                 console.log(`[Task] ${isSuccess ? 'Completed' : 'Failed'}: ${task.title} ($${totalCost.toFixed(4)}, ${numTurns} turns)`);
+                taskLog.finish(isSuccess ? 'done' : 'failed');
 
                 // Clean up checkpoint on success
                 if (isSuccess && checkpointRef && checkpointType !== 'none') {
@@ -1485,6 +1615,7 @@ async function runNextTask() {
             if (current && current.status === 'running') {
                 taskStmts.cancel.run('cancelled', new Date().toISOString(), task.id);
                 console.log(`[Task] Cancelled: ${task.title}`);
+                taskLog.finish('cancelled');
             }
             // Rollback on cancellation
             if (checkpointRef && checkpointType !== 'none') {
@@ -1498,6 +1629,7 @@ async function runNextTask() {
         if (current && (current.status === 'running' || current.status === 'pending')) {
             taskStmts.fail.run('failed', new Date().toISOString(), err.message, task.id);
         }
+        taskLog.finish('failed', err.message);
         // Rollback on error
         if (checkpointRef && checkpointType !== 'none') {
             try {

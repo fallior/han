@@ -763,6 +763,7 @@
             <div class="titlebar-tools">
                 <button class="tool-btn" id="searchToggle" title="Search">🔍</button>
                 <button class="tool-btn" id="copyBtn" title="Copy">📋</button>
+                <button class="tool-btn" id="trimBtn" title="Trim buffer">✂️</button>
                 <button class="tool-btn" id="tasksBtn" title="Tasks">🤖</button>
                 <button class="tool-btn" id="bridgeBtn" title="Bridge">🔗</button>
             </div>
@@ -1111,43 +1112,173 @@
 
         // ── Terminal broadcast handling ────────────────────────
 
-        let renderedLines = []; // current line elements in the DOM
+        let renderedLines = []; // DOM elements for accumulated lines
+        let prevTmuxLines = []; // previous tmux snapshot for diffing
+        const MAX_BUFFER_LINES = 5000; // auto-trim above this
+        const TRIM_KEEP_LINES = 2000; // keep this many when trimming
 
-        function diffUpdateTerminal(newContent) {
+        /**
+         * Append-only terminal update. Compares the new tmux snapshot
+         * against the previous one, finds genuinely new lines appended
+         * at the bottom, and adds them to the accumulated buffer.
+         * Historical lines are never removed (only via manual trim).
+         */
+        function appendTerminalUpdate(newContent) {
             const newLines = newContent.split('\n');
             const el = termContent;
             const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
 
-            // Update changed lines, add new lines, remove excess lines
-            for (let i = 0; i < newLines.length; i++) {
-                if (i < renderedLines.length) {
-                    // Existing line — only update if changed
-                    if (renderedLines[i]._text !== newLines[i]) {
-                        renderedLines[i].textContent = newLines[i];
-                        renderedLines[i]._text = newLines[i];
+            if (prevTmuxLines.length === 0) {
+                // First load — render all lines
+                for (const line of newLines) {
+                    const div = document.createElement('div');
+                    div.textContent = line;
+                    div._text = line;
+                    el.appendChild(div);
+                    renderedLines.push(div);
+                }
+                prevTmuxLines = newLines.slice();
+                autoTrimBuffer();
+                if (wasAtBottom) el.scrollTop = el.scrollHeight;
+                return;
+            }
+
+            // Find the overlap: how many lines from the end of prevTmuxLines
+            // match at the start of newLines (the stable region).
+            // The "active zone" is the last few lines of tmux output which
+            // get rewritten (e.g. spinner, status line). Lines above that
+            // are stable history. We find the longest suffix of prev that
+            // matches a prefix of new to identify what's unchanged.
+
+            // Strategy: find where new content diverges from prev.
+            // The tmux pane is a fixed-size window. When new output appears
+            // at the bottom, old lines scroll off the top. When compaction
+            // happens, the content changes dramatically.
+            //
+            // We match the tail of our accumulated buffer against the new
+            // snapshot to find the overlap, then append anything after it.
+
+            // Find longest common suffix between our buffer and new snapshot
+            let overlap = 0;
+            const maxCheck = Math.min(renderedLines.length, newLines.length);
+            // Check from the end of our buffer backwards
+            for (let tryLen = maxCheck; tryLen > 0; tryLen--) {
+                let match = true;
+                for (let j = 0; j < tryLen; j++) {
+                    const bufIdx = renderedLines.length - tryLen + j;
+                    if (renderedLines[bufIdx]._text !== newLines[j]) {
+                        match = false;
+                        break;
                     }
-                } else {
-                    // New line — append
+                }
+                if (match) {
+                    overlap = tryLen;
+                    break;
+                }
+            }
+
+            // Also check: does the tail of our buffer match the tail of new?
+            // (handles the case where tmux rewrites the last few active lines)
+            if (overlap === 0) {
+                for (let tryLen = maxCheck; tryLen > 0; tryLen--) {
+                    let match = true;
+                    for (let j = 0; j < tryLen; j++) {
+                        const bufIdx = renderedLines.length - tryLen + j;
+                        const newIdx = newLines.length - tryLen + j;
+                        if (renderedLines[bufIdx]._text !== newLines[newIdx]) {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match) {
+                        // The last tryLen lines are the same — any new lines
+                        // were inserted before them (unlikely) or there's
+                        // active line rewriting. Just update the active zone.
+                        // Update the last tryLen rendered lines to match
+                        const newStart = newLines.length - tryLen;
+                        // Append lines that come after the overlap in new
+                        // Actually this means no new lines, just rewrites
+                        // Update the tail of our buffer (active zone rewrite)
+                        for (let j = 0; j < tryLen; j++) {
+                            const bufIdx = renderedLines.length - tryLen + j;
+                            const newIdx = newLines.length - tryLen + j;
+                            if (renderedLines[bufIdx]._text !== newLines[newIdx]) {
+                                renderedLines[bufIdx].textContent = newLines[newIdx];
+                                renderedLines[bufIdx]._text = newLines[newIdx];
+                            }
+                        }
+                        prevTmuxLines = newLines.slice();
+                        if (wasAtBottom) el.scrollTop = el.scrollHeight;
+                        return;
+                    }
+                }
+            }
+
+            if (overlap > 0) {
+                // New lines are everything after the overlap
+                const appendFrom = overlap;
+                for (let i = appendFrom; i < newLines.length; i++) {
                     const div = document.createElement('div');
                     div.textContent = newLines[i];
                     div._text = newLines[i];
                     el.appendChild(div);
                     renderedLines.push(div);
                 }
+            } else {
+                // No overlap found (compaction or major rewrite).
+                // Insert a separator and append the entire new snapshot
+                // as fresh content, preserving everything above.
+                const sep = document.createElement('div');
+                sep.textContent = '─── context refreshed ───';
+                sep.style.color = 'var(--text-dim)';
+                sep.style.textAlign = 'center';
+                sep.style.padding = '4px 0';
+                sep._text = '__separator__';
+                el.appendChild(sep);
+                renderedLines.push(sep);
+
+                for (const line of newLines) {
+                    const div = document.createElement('div');
+                    div.textContent = line;
+                    div._text = line;
+                    el.appendChild(div);
+                    renderedLines.push(div);
+                }
             }
 
-            // Remove excess lines from the end
-            while (renderedLines.length > newLines.length) {
-                el.removeChild(renderedLines.pop());
-            }
+            prevTmuxLines = newLines.slice();
+            autoTrimBuffer();
+            if (wasAtBottom) el.scrollTop = el.scrollHeight;
+        }
 
-            if (wasAtBottom) {
-                el.scrollTop = el.scrollHeight;
+        /**
+         * Auto-trim buffer when it exceeds MAX_BUFFER_LINES
+         */
+        function autoTrimBuffer() {
+            if (renderedLines.length <= MAX_BUFFER_LINES) return;
+            const removeCount = renderedLines.length - TRIM_KEEP_LINES;
+            for (let i = 0; i < removeCount; i++) {
+                termContent.removeChild(renderedLines[i]);
             }
+            renderedLines = renderedLines.slice(removeCount);
+        }
+
+        /**
+         * Manual trim — keep last N lines
+         */
+        function trimTerminalBuffer(keepLines = 500) {
+            if (renderedLines.length <= keepLines) return;
+            const removeCount = renderedLines.length - keepLines;
+            for (let i = 0; i < removeCount; i++) {
+                termContent.removeChild(renderedLines[i]);
+            }
+            renderedLines = renderedLines.slice(removeCount);
+            showToast(`Trimmed to ${keepLines} lines`);
         }
 
         function clearRenderedLines() {
             renderedLines = [];
+            prevTmuxLines = [];
             termContent.innerHTML = '';
         }
 
@@ -1171,10 +1302,11 @@
             // Only update DOM if content actually changed
             if (content !== lastWrittenContent) {
                 lastWrittenContent = content;
-                localLineCount = content.split('\n').length;
+                localLineCount = renderedLines.length;
 
-                // Diff-based update — only touches changed lines
-                diffUpdateTerminal(content);
+                // Append-only update — never removes historical lines
+                appendTerminalUpdate(content);
+                localLineCount = renderedLines.length;
             }
 
             // Update chrome based on state
@@ -1197,7 +1329,7 @@
                 termContent.style.display = '';
                 if (content && content !== lastWrittenContent) {
                     lastWrittenContent = content;
-                    diffUpdateTerminal(content);
+                    appendTerminalUpdate(content);
                 }
             }
 
@@ -1425,17 +1557,22 @@
             return Math.floor(hrs / 24) + 'd ago';
         }
 
+        let savedTerminalNodes = null; // stash terminal DOM while showing history
+
         async function showHistory() {
             showingHistory = true;
             updateQuickbar();
             termContent.style.display = '';
             footerHint.textContent = 'back to live';
 
+            // Stash accumulated terminal nodes (don't destroy them)
+            savedTerminalNodes = Array.from(termContent.childNodes);
+            termContent.innerHTML = '';
+
             try {
                 const res = await fetch(`${API_BASE}/api/history?limit=20`);
                 const data = await res.json();
 
-                clearRenderedLines();
                 titleText.textContent = 'history';
                 footerLeft.textContent = data.count + ' resolved';
 
@@ -1503,17 +1640,25 @@
 
         function hideHistory() {
             showingHistory = false;
+
+            // Restore stashed terminal nodes
+            if (savedTerminalNodes) {
+                termContent.innerHTML = '';
+                for (const node of savedTerminalNodes) {
+                    termContent.appendChild(node);
+                }
+                savedTerminalNodes = null;
+            }
+
             if (currentPrompt) {
                 renderPromptOverlay();
             } else if (terminalLive) {
-                // Restore watching state — rebuild from last content
-                clearRenderedLines();
+                // Restore watching state — buffer is already accumulated
                 termContent.style.display = '';
-                if (lastWrittenContent) {
-                    diffUpdateTerminal(lastWrittenContent);
-                }
+                // Scroll to bottom to show latest
+                termContent.scrollTop = termContent.scrollHeight;
                 titleText.textContent = terminalSession || 'claude-remote';
-                footerLeft.textContent = 'Watching session';
+                footerLeft.textContent = `Watching (${renderedLines.length} lines)`;
                 footerHint.textContent = 'history';
                 updateQuickbar();
             } else {
@@ -1667,6 +1812,10 @@
         }
 
         copyBtn.addEventListener('click', copyTerminalContent);
+
+        // ── Trim button ──────────────────────────────────────
+        const trimBtn = document.getElementById('trimBtn');
+        trimBtn.addEventListener('click', () => trimTerminalBuffer(500));
 
         // ── Bridge ────────────────────────────────────────────
 
@@ -2033,6 +2182,9 @@
 
             // Actions
             let actionsHtml = '';
+            if (task.log_file) {
+                actionsHtml += `<button class="bridge-btn" onclick="viewTaskLog('${task.id}')">View Log</button>`;
+            }
             if (task.status === 'pending' || task.status === 'running') {
                 actionsHtml += `<button class="bridge-btn" style="border-color:var(--red);color:var(--red);background:rgba(248,81,73,0.1);" onclick="cancelTask('${task.id}')">Cancel Task</button>`;
             }
@@ -2188,6 +2340,21 @@
                     switchTaskTab('list');
                 } else {
                     showToast(data.error || 'Failed', true);
+                }
+            } catch {
+                showToast('Connection error', true);
+            }
+        }
+
+        async function viewTaskLog(id) {
+            try {
+                const res = await fetch(`${API_BASE}/api/tasks/${id}/log`);
+                const data = await res.json();
+                if (data.success) {
+                    taskProgressLog.innerHTML = `<pre style="white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.5;color:var(--fg);">${escHtml(data.log)}</pre>`;
+                    showToast('Log loaded');
+                } else {
+                    showToast(data.error || 'No log available', true);
                 }
             } catch {
                 showToast('Connection error', true);
