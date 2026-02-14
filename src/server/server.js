@@ -1066,8 +1066,11 @@ async function runNextTask() {
         const cleanEnv = { ...process.env };
         delete cleanEnv.CLAUDECODE;
 
+        // Prepend instructions to avoid plan mode stalling (no human to approve)
+        const taskPrompt = 'IMPORTANT: Do not use plan mode (EnterPlanMode). Implement directly — you are running autonomously with no human in the loop. Just do the work.\n\n' + task.description;
+
         const q = agentQuery({
-            prompt: task.description,
+            prompt: taskPrompt,
             options: {
                 model: task.model,
                 maxTurns: task.max_turns,
