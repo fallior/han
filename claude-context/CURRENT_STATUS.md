@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-14 (Session 12) by Darron (via Claude)
+> Last updated: 2026-02-14 (Session 12, extended) by Darron (via Claude)
 
 ## Current Stage
 
@@ -29,15 +29,17 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 ## Recent Changes
 
 ### 2026-02-14 — Darron (via Claude) — Session 12
-- **Level 6: Claude Bridge** implemented (commit `a59561f`):
-  - Session export as markdown (summary/full/handoff formats) via `GET /api/bridge/export`
-  - Context import from phone with optional Claude Code injection via `POST /api/bridge/import`
-  - Structured handoff form (task + context + working dir) via `POST /api/bridge/handoff`
-  - Bridge event history tracking via `GET /api/bridge/history`
-  - Context file CRUD (`GET/DELETE /api/bridge/contexts/:filename`)
-  - UI: Bridge button (🔗) in titlebar, overlay panel with 4 tabs (Export/Import/Handoff/History)
+- **Level 6: Claude Bridge** implemented (`a59561f`):
+  - Session export, context import, structured handoff, bridge history
+  - UI: Bridge button (🔗) in titlebar, overlay panel with 4 tabs
   - No browser extension — explicit copy-paste transfer (iPhone primary client)
-  - No new files or dependencies, ~769 new lines across server.js and index.html
+- **Streamlined bridge export** (`3d49fae`): full scrollback, one-tap, auto-save to file
+- **Replaced xterm.js with plain text** (`c2a3c89`):
+  - Dropped ANSI colours — plain text in native scrollable div
+  - Native iOS scrolling works perfectly (xterm.js was intercepting touch events)
+  - Scroll position preserved during 1-second content updates
+- **Full tmux scrollback** (`ab2dff0`): captures entire history (50k line tmux limit)
+- **PID file lock** (`3558ea9`): server auto-kills previous instance on startup
 
 ### 2026-02-13 — Darron (via Claude) — Sessions 9-10
 - **Level 3: Search + Copy** tested on iPhone and confirmed working
@@ -159,12 +161,15 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 - ✅ Tailscale remote access from iPhone (tested via 5G)
 - ✅ Context bridge: export sessions, import context, structured handoff
 - ✅ Bridge history tracking with timeline UI
+- ✅ Plain text terminal view (native iOS scrolling, no xterm.js)
+- ✅ Full tmux scrollback capture (50k lines)
+- ✅ PID file lock (single server instance)
 
 ## Next Actions
 
 ### Immediate (Next Session)
-- [ ] Test Level 6 bridge on iPhone via Tailscale
 - [ ] Refine UI based on continued mobile usage
+- [ ] Add HTTPS via Tailscale certs (remove Safari "not secure" warning)
 
 ### Short-term
 - [ ] Consider extended levels (7-11) from ROADMAP.md
@@ -190,7 +195,7 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 ## Session Notes
 
 Recent sessions (latest first):
-- [session_2026-02-14_10-20-08.md](../_logs/session_2026-02-14_10-20-08.md) — Level 6 implementation + docs
+- [session_2026-02-14_10-20-08.md](../_logs/session_2026-02-14_10-20-08.md) — Level 6 + plain text terminal + PID lock (8 commits)
 - [session_2026-02-13_21-39-54.md](../_logs/session_2026-02-13_21-39-54.md) — Level 3 iPhone testing
 - [session_2026-02-11_22-44-16.md](../_logs/session_2026-02-11_22-44-16.md) — Level 3 implementation
 - [session_2026-02-10_19-13-57.md](../_logs/session_2026-02-10_19-13-57.md) — Tailscale testing + iOS keyboard
