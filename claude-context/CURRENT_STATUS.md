@@ -28,6 +28,12 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 
 ## Recent Changes
 
+### 2026-02-14 — Darron (via Claude) — Session 14
+- **Diff-based terminal renderer** (`6f7b662`):
+  - Per-line diffing replaces full DOM rewrite (1,600+ lines/sec → 0-2 lines/sec)
+  - Each line is an individual `<div>` tracked for changes
+  - Client-side local echo functions (limited by iOS hidden input delays)
+
 ### 2026-02-14 — Darron (via Claude) — Session 13
 - **HTTPS via Tailscale TLS** (`39a0858`): auto-detects certs, removes Safari "not secure" warning
 - **Removed all xterm.js dead code** (`68ffbe6`):
@@ -211,6 +217,7 @@ Full terminal emulation with ANSI colours via xterm.js. One-tap response buttons
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-14_19-23-51.md](../_logs/session_2026-02-14_19-23-51.md) — Diff renderer + local echo + typing UX exploration
 - [session_2026-02-14_17-29-25.md](../_logs/session_2026-02-14_17-29-25.md) — HTTPS + xterm cleanup + terminal persistence
 - [session_2026-02-14_10-20-08.md](../_logs/session_2026-02-14_10-20-08.md) — Level 6 + plain text terminal + PID lock (8 commits)
 - [session_2026-02-13_21-39-54.md](../_logs/session_2026-02-13_21-39-54.md) — Level 3 iPhone testing
