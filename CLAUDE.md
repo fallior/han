@@ -57,13 +57,14 @@ Review these cross-project learnings when relevant:
 | ID | Learning | Why It Matters |
 |----|----------|----------------|
 | L008 | [javascript/date-timezone-gotchas.md](~/Projects/_learnings/javascript/date-timezone-gotchas.md) | Avoid UTC conversion bugs with `toISOString()`. Use local date components. |
+| L012 | [claude-agent-sdk/nested-session-env-var.md](~/Projects/_learnings/claude-agent-sdk/nested-session-env-var.md) | Agent SDK exit code 1 — remove `CLAUDECODE` env var for nested execution. |
 
 See `~/Projects/_learnings/INDEX.md` for full index.
 
 ## Quick Context
 
-- **Stage**: Levels 1-6 Complete
-- **Stack**: Node.js + Express + xterm.js + tmux + ntfy.sh + WebSocket
+- **Stage**: Levels 1-7 Complete
+- **Stack**: Node.js + Express + SQLite + Agent SDK + tmux + ntfy.sh + WebSocket
 - **Status**: Active development
 
 ## What This Is
@@ -125,8 +126,9 @@ Check `claude-context/CURRENT_STATUS.md` for:
 | 4 | Terminal Mirror (xterm.js) | 🟢 Complete |
 | 5 | Mobile Keyboard | 🟢 Complete |
 | 6 | Claude Bridge | 🟢 Complete |
+| 7 | Autonomous Task Runner | 🟢 Complete |
 
-**Extended Vision (Levels 7-11):** See [`ROADMAP.md`](ROADMAP.md) for the full progression from remote prompt responder to autonomous development platform, including Claude Agent SDK integration and hybrid orchestration architecture.
+**Extended Vision (Levels 8-11):** See [`ROADMAP.md`](ROADMAP.md) for the full progression from autonomous task runner to development platform, including approval gates, cost dashboards, and hybrid orchestration architecture.
 
 ## Conventions
 

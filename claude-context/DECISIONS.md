@@ -30,6 +30,9 @@ When you make a significant technical or design decision:
 | DEC-004 | Remote Access — Tailscale | Accepted | 2026-01-13 |
 | DEC-005 | Polling Interval — 15 seconds | Accepted | 2026-01-13 |
 | DEC-006 | Storage Format — SQLite + Plain Text | Accepted | 2026-01-13 |
+| DEC-007 | Task Execution — Claude Agent SDK | Accepted | 2026-02-15 |
+| DEC-008 | Task Queue — SQLite with better-sqlite3 | Accepted | 2026-02-15 |
+| DEC-009 | Task Permissions — Bypass Mode | Accepted | 2026-02-15 |
 
 ---
 
@@ -306,6 +309,134 @@ We chose **SQLite + Plain Text** hybrid. SQLite stores session metadata (timesta
 - Two storage locations to manage
 - Need to keep SQLite index and text files in sync
 - Enables powerful search over historical sessions
+
+---
+
+### DEC-007: Task Execution — Claude Agent SDK
+
+**Date**: 2026-02-15
+**Author**: Darron
+**Status**: Accepted
+
+#### Context
+
+Level 7 introduces autonomous task execution — creating tasks from your phone and having Claude Code execute them headlessly. Need to choose how to invoke Claude Code programmatically.
+
+#### Options Considered
+
+1. **Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`)**
+   - ✅ Official SDK with streaming message support
+   - ✅ Cost tracking (`total_cost_usd`), turn counting
+   - ✅ `canUseTool` hook for future approval gates
+   - ✅ `AbortController` for cancellation
+   - ✅ Model selection, max turns, permission modes
+   - ❌ Additional dependency (~40 packages)
+
+2. **`claude -p` (pipe mode)**
+   - ✅ No additional dependency
+   - ✅ Simple to invoke
+   - ❌ No streaming progress — only final result
+   - ❌ No cost tracking
+   - ❌ No cancellation support
+   - ❌ No future approval gate integration
+
+3. **Direct Anthropic API**
+   - ✅ Full control
+   - ❌ No tool execution (Read, Write, Bash, etc.)
+   - ❌ Would need to re-implement Claude Code's agent loop
+
+#### Decision
+
+We chose the **Claude Agent SDK** because it provides streaming messages, cost tracking, and `canUseTool` for future approval gates. The SDK is the official programmatic interface to Claude Code and supports all the features needed for autonomous execution.
+
+#### Consequences
+
+- Additional dependency (`@anthropic-ai/claude-agent-sdk`)
+- Must remove `CLAUDECODE` env var to avoid nested session detection (see learning)
+- Enables future levels: approval gates, cost dashboards, subagent orchestration
+
+---
+
+### DEC-008: Task Queue — SQLite with better-sqlite3
+
+**Date**: 2026-02-15
+**Author**: Darron
+**Status**: Accepted
+
+#### Context
+
+Level 7 needs a task queue with status tracking, priority ordering, timestamps, and cost/token recording. Need persistent storage for tasks.
+
+#### Options Considered
+
+1. **SQLite (`better-sqlite3`)**
+   - ✅ Synchronous API — simple, no callbacks
+   - ✅ Zero external dependencies (native addon only)
+   - ✅ WAL mode for concurrent reads during writes
+   - ✅ Prepared statements for performance
+   - ✅ Natural fit for status/priority/timestamp queries
+
+2. **JSON files (like pending/resolved prompts)**
+   - ✅ No additional dependency
+   - ❌ No query capability (filtering by status, ordering by priority)
+   - ❌ Race conditions with concurrent read/write
+   - ❌ Poor performance with many tasks
+
+3. **In-memory only**
+   - ✅ Simplest
+   - ❌ Lost on server restart
+   - ❌ No history
+
+#### Decision
+
+We chose **SQLite with `better-sqlite3`** because tasks need structured queries (filter by status, order by priority/date), and the synchronous API is simpler than async alternatives. WAL mode handles concurrent access from the Express server and orchestrator loop.
+
+#### Consequences
+
+- Native addon requires build tools (pre-built binaries available for most platforms)
+- Database file at `~/.claude-remote/tasks.db`
+- Enables future features: cost dashboards, task history, analytics
+
+---
+
+### DEC-009: Task Permissions — Bypass Mode
+
+**Date**: 2026-02-15
+**Author**: Darron
+**Status**: Accepted
+
+#### Context
+
+Autonomous tasks need to run without user interaction. Claude Code normally prompts for permission before dangerous operations (file writes, bash commands, etc.).
+
+#### Options Considered
+
+1. **`bypassPermissions` mode**
+   - ✅ Tasks run fully autonomously — no prompts
+   - ✅ Simplest for MVP
+   - ❌ No safety net — tasks can do anything
+   - ❌ Requires `allowDangerouslySkipPermissions: true`
+
+2. **`acceptEdits` mode**
+   - ✅ Auto-approves file edits
+   - ❌ Still prompts for bash commands
+   - ❌ Tasks would stall on permission prompts
+
+3. **`canUseTool` callback (approval gates)**
+   - ✅ Fine-grained control — approve/deny per tool
+   - ✅ Could route approvals to phone UI
+   - ❌ More complex to implement
+   - ❌ Defeats the purpose of autonomous execution for MVP
+
+#### Decision
+
+We chose **`bypassPermissions`** for the MVP because autonomous tasks need to run without stalling. Future levels will add approval gates via `canUseTool` for sensitive operations (e.g. git push, destructive commands).
+
+#### Consequences
+
+- Tasks run with full permissions — user must trust the task description
+- Future: add `canUseTool` callback to route dangerous operations to phone for approval
+- Future: add git checkpoints before/after task execution for rollback
 
 ---
 

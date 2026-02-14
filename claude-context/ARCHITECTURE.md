@@ -4,7 +4,7 @@
 
 ## Overview
 
-Claude Remote bridges your development machine and mobile device, enabling remote responses to Claude Code prompts. It hooks into Claude Code's notification system, saves state to disk, sends push notifications, and provides a web UI for responding — with responses injected back via tmux.
+Claude Remote bridges your development machine and mobile device, enabling remote responses to Claude Code prompts and autonomous task execution. It hooks into Claude Code's notification system, saves state to disk, sends push notifications, provides a web UI for responding, and can run tasks headlessly via the Claude Agent SDK.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -25,7 +25,20 @@ Claude Remote bridges your development machine and mobile device, enabling remot
 │   ┌─────┴────────┐             ┌──────────────┐            ┌──────────┐  │
 │   │    tmux      │◀────────────│ Express API  │◀───────────│  Phone   │  │
 │   │   session    │   inject    │   Server     │   respond  │  (PWA)   │  │
-│   └──────────────┘             └──────────────┘            └──────────┘  │
+│   └──────────────┘             └──────┬───────┘            └──────────┘  │
+│                                       │                          │        │
+│                                       │ orchestrator             │        │
+│                                       ▼                          │        │
+│                                ┌──────────────┐   create task    │        │
+│                                │  Agent SDK   │◀─────────────────┘        │
+│                                │  (headless)  │                           │
+│                                └──────┬───────┘                           │
+│                                       │                                    │
+│                                       ▼                                    │
+│                                ┌──────────────┐                           │
+│                                │  SQLite DB   │                           │
+│                                │ (tasks.db)   │                           │
+│                                └──────────────┘                           │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -49,9 +62,14 @@ Claude Remote bridges your development machine and mobile device, enabling remot
 - **Tailscale**: Zero-config WireGuard VPN — encrypted, no port forwarding needed
 - Server binds to 0.0.0.0 for Tailscale access
 
-### Storage (Level 4+)
-- **SQLite**: Session metadata and history indexing
-- **Plain text**: Terminal capture files (for grep/search)
+### Storage
+- **SQLite** (`better-sqlite3`): Task queue (`tasks.db`) with status, priority, cost, token tracking
+- **Plain text**: Terminal capture files (`terminal.txt`, `terminal-log.txt`)
+
+### Autonomous Execution (Level 7+)
+- **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`): Headless Claude Code execution via `query()`
+- Sequential task queue — one task at a time, 5-second polling interval
+- Streaming progress via WebSocket to all connected clients
 
 ## Directory Structure
 
@@ -166,7 +184,12 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 | GET | /api/bridge/contexts | List saved context files |
 | POST | /api/bridge/handoff | Structured task handoff |
 | GET | /api/bridge/history | Bridge event timeline |
-| WS | /ws | WebSocket push (prompts + terminal) |
+| GET | /api/tasks | List tasks (filterable by status) |
+| POST | /api/tasks | Create autonomous task |
+| GET | /api/tasks/:id | Get task details |
+| POST | /api/tasks/:id/cancel | Cancel running/pending task |
+| DELETE | /api/tasks/:id | Delete a task |
+| WS | /ws | WebSocket push (prompts + terminal + tasks) |
 | GET | / | Serve web UI |
 
 ### Request/Response Examples
@@ -235,6 +258,21 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 - Bridge event history with timeline UI
 - Context files stored at `~/.claude-remote/bridge/contexts/`
 
+### Level 7: Autonomous Task Runner (Complete)
+
+- **SQLite task queue**: `~/.claude-remote/tasks.db` with `better-sqlite3` (WAL mode)
+- Task schema: id, title, description, project_path, status, priority, model, max_turns, cost, tokens, turns
+- Status workflow: `pending` → `running` → `done`/`failed`/`cancelled`
+- **Orchestrator loop**: 5-second interval picks next pending task (highest priority, oldest first)
+- **Agent SDK integration**: `query()` with streaming `SDKMessage` types
+  - Clean env (removes `CLAUDECODE`) to avoid nested session detection
+  - `bypassPermissions` mode for headless execution
+  - `AbortController` for cancel support
+- **WebSocket messages**:
+  - `task_update` — task status changed (created, started, completed, failed)
+  - `task_progress` — streaming SDK messages (assistant text, tool uses, results)
+- **Task board UI**: overlay panel with Tasks/Create/Progress tabs, accessed via 🤖 button
+
 ## Security Considerations
 
 - **Tailscale encryption**: All traffic encrypted via WireGuard
@@ -259,4 +297,4 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 
 ---
 
-*Last updated: 2026-02-14*
+*Last updated: 2026-02-15*

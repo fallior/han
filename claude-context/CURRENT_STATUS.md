@@ -214,7 +214,9 @@ Create tasks from your phone, Claude Code executes them headlessly. SQLite task 
 - [ ] Refine UI based on continued mobile usage
 
 ### Short-term
-- [ ] Consider extended levels (7-11) from ROADMAP.md
+- [ ] Consider extended levels (8-11) from ROADMAP.md
+- [ ] Add approval gates via `canUseTool` callback (Level 8)
+- [ ] Add git checkpoints before/after task execution
 
 ## Known Issues
 
@@ -223,6 +225,8 @@ Create tasks from your phone, Claude Code executes them headlessly. SQLite task 
 | `idle_prompt` 60s delay | Medium | Built into Claude Code; can't be reduced |
 | iOS Safari drops WebSocket in background | Low | Handled by visibilitychange reconnect + polling fallback |
 | Opus concurrency limit | Low | Can't run two Claude Code Opus sessions simultaneously |
+| Agent SDK nested session | Low | Must remove `CLAUDECODE` env var — handled in code (see L012) |
+| Tasks run with bypass permissions | Medium | No approval gates yet — tasks can do anything |
 
 ## Blockers
 
