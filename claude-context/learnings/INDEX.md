@@ -10,6 +10,7 @@
 | Claude Code hooks system integration | [claude-code-hooks.md](claude-code-hooks.md) | #claude-code #hooks #integration | 2026-01-13 |
 | tmux remote response injection | [tmux-response-injection.md](tmux-response-injection.md) | #tmux #terminal #security | 2026-01-13 |
 | Agent SDK nested session detection | [agent-sdk-nested-sessions.md](agent-sdk-nested-sessions.md) | #agent-sdk #claude-code #environment | 2026-02-15 |
+| Browser compositor scroll race condition | [browser-compositor-scroll-race.md](browser-compositor-scroll-race.md) | #browser #scrolling #compositor #firefox | 2026-02-15 |
 
 ## By Category
 
@@ -31,6 +32,9 @@
 
 ### Express
 - *No learnings yet*
+
+### Browser/Rendering
+- [browser-compositor-scroll-race.md](browser-compositor-scroll-race.md) — Async compositor scroll vs DOM mutation race condition
 
 ### Mobile/PWA
 - *No learnings yet*
