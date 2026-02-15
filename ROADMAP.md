@@ -984,8 +984,9 @@ The key insight: **open-source models are improving faster than hardware is depr
 - [x] Project memory system (outcome tracking, success rates by model)
 - [x] Goals tab in mobile UI (create, view, retry)
 - [x] Orchestrator status badge
-- [ ] Ollama model pull helper (convenience, not critical)
-- [ ] Pull and benchmark a local model (Ollama installed, no models yet)
+- [x] Pull and test a local model — `qwen2.5-coder:7b` (4.7GB), goal decomposition tested end-to-end
+
+**Future improvement**: Ollama model pull helper — UI button to pull/switch models from phone (convenience, not critical)
 
 ### Phase 6: Multi-Project Empire (Level 9) — 8 weeks
 

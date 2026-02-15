@@ -935,6 +935,70 @@
         .task-summary-label { color: var(--text-muted); }
         .task-summary-value { color: var(--text); }
 
+        /* Portfolio cards */
+        .portfolio-card {
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+        }
+        .portfolio-card:active { opacity: 0.7; }
+        .portfolio-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .portfolio-card-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text);
+        }
+        .portfolio-card-desc {
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-bottom: 8px;
+        }
+        .portfolio-stats {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .portfolio-stat {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: var(--overlay-light);
+            color: var(--text-muted);
+        }
+        .portfolio-stat.has-value { color: var(--text); }
+        .portfolio-lifecycle {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--green);
+        }
+        .portfolio-priority-select {
+            background: var(--bg-secondary);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 11px;
+            padding: 2px 4px;
+        }
+        .portfolio-detail-back {
+            font-size: 12px;
+            color: var(--cyan);
+            cursor: pointer;
+            margin-bottom: 12px;
+            display: inline-block;
+        }
+        .portfolio-detail-back:active { opacity: 0.7; }
+
         @supports (padding: max(0px)) {
             .titlebar { padding-top: max(8px, env(safe-area-inset-top)); }
         }
@@ -1164,6 +1228,7 @@
             <div class="bridge-tabs">
                 <button class="bridge-tab active" data-task-tab="list">Tasks</button>
                 <button class="bridge-tab" data-task-tab="goals">Goals</button>
+                <button class="bridge-tab" data-task-tab="portfolio">Portfolio</button>
                 <button class="bridge-tab" data-task-tab="create">Create</button>
                 <button class="bridge-tab" data-task-tab="detail" id="taskDetailTab" style="display:none">Progress</button>
             </div>
@@ -1187,7 +1252,7 @@
                 <div class="bridge-label" style="margin-top:8px">Goal description</div>
                 <textarea class="bridge-textarea" id="goalDescription" placeholder="e.g. Add dark mode toggle to the application" style="min-height:100px;"></textarea>
                 <div class="bridge-label">Project path</div>
-                <input class="bridge-input" id="goalProjectPath" placeholder="e.g. /home/darron/Projects/myapp">
+                <input class="bridge-input" id="goalProjectPath" list="projectPaths" placeholder="e.g. /home/darron/Projects/myapp">
                 <div style="margin:12px 0;">
                     <label style="display:flex;align-items:center;gap:8px;color:var(--text);">
                         <input type="checkbox" id="goalAutoExecute" checked>
@@ -1197,6 +1262,15 @@
                 <button class="bridge-btn" id="goalCreateBtn">🧠 Decompose & Create Goal</button>
             </div>
 
+            <!-- Portfolio section -->
+            <div class="bridge-section" id="taskPortfolio">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <div class="bridge-label" style="margin:0">Portfolio Overview</div>
+                    <button class="bridge-btn bridge-btn-secondary" id="portfolioSyncBtn" style="padding:4px 10px;font-size:11px;margin:0;">Sync</button>
+                </div>
+                <div id="portfolioContent"></div>
+            </div>
+
             <!-- Create task -->
             <div class="bridge-section" id="taskCreate">
                 <div class="bridge-label">Title</div>
@@ -1204,7 +1278,7 @@
                 <div class="bridge-label">Description</div>
                 <textarea class="bridge-textarea" id="taskDesc" placeholder="Describe what Claude should do..." style="min-height:140px;"></textarea>
                 <div class="bridge-label">Project path</div>
-                <input class="bridge-input" id="taskPath" placeholder="e.g. /home/darron/Projects/myapp">
+                <input class="bridge-input" id="taskPath" list="projectPaths" placeholder="e.g. /home/darron/Projects/myapp">
                 <div style="display:flex;gap:8px;margin-bottom:12px;">
                     <div style="flex:1">
                         <div class="bridge-label">Model</div>
@@ -1245,6 +1319,8 @@
             </div>
         </div>
     </div>
+
+    <datalist id="projectPaths"></datalist>
 
     <script>
         const POLL_INTERVAL = 3000;
@@ -2400,12 +2476,14 @@
             taskOverlay.querySelectorAll('.bridge-section').forEach(s => s.classList.remove('active'));
             if (tab === 'list') document.getElementById('taskList').classList.add('active');
             else if (tab === 'goals') document.getElementById('taskGoals').classList.add('active');
+            else if (tab === 'portfolio') document.getElementById('taskPortfolio').classList.add('active');
             else if (tab === 'create') document.getElementById('taskCreate').classList.add('active');
             else if (tab === 'detail') document.getElementById('taskDetail').classList.add('active');
             else if (tab === 'goalDetail') document.getElementById('goalDetail').classList.add('active');
 
             if (tab === 'list') loadTasks();
             else if (tab === 'goals') loadGoals();
+            else if (tab === 'portfolio') loadPortfolio();
         }
 
         tasksBtn.addEventListener('click', () => {
@@ -2949,6 +3027,154 @@
             showToast(`Goal decomposed into ${data.tasks?.length || 0} tasks`);
             loadGoals();
         }
+
+        // ── Portfolio (Level 9) ──────────────────────────────
+        let portfolioData = [];
+        let portfolioDetailView = null; // project name if in detail view
+
+        async function loadPortfolio() {
+            try {
+                const res = await fetch(`${API_BASE}/api/portfolio`);
+                const data = await res.json();
+                if (data.success) {
+                    portfolioData = data.projects;
+                    updateProjectPathsDatalist();
+                    if (portfolioDetailView) renderProjectDetail(portfolioDetailView);
+                    else renderPortfolio();
+                }
+            } catch (err) {
+                document.getElementById('portfolioContent').innerHTML =
+                    `<p style="color:var(--red);font-size:12px;">Failed to load portfolio</p>`;
+            }
+        }
+
+        function renderPortfolio() {
+            const container = document.getElementById('portfolioContent');
+            if (!portfolioData.length) {
+                container.innerHTML = '<p style="color:var(--text-dim);font-size:12px;">No projects found. Sync from registry.</p>';
+                return;
+            }
+            container.innerHTML = portfolioData.map(p => {
+                const s = p.stats;
+                const costStr = s.total_cost_usd > 0 ? `$${s.total_cost_usd.toFixed(2)}` : '';
+                const hasActivity = s.tasks_total > 0;
+                return `<div class="portfolio-card" data-project="${p.name}">
+                    <div class="portfolio-card-header">
+                        <span class="portfolio-card-name">${p.name}</span>
+                        <span class="portfolio-lifecycle">${p.lifecycle}</span>
+                    </div>
+                    <div class="portfolio-card-desc">${p.description || 'No description'}</div>
+                    <div class="portfolio-stats">
+                        ${s.tasks_total > 0 ? `<span class="portfolio-stat has-value">${s.tasks_completed}/${s.tasks_total} tasks</span>` : '<span class="portfolio-stat">0 tasks</span>'}
+                        ${s.tasks_running > 0 ? `<span class="portfolio-stat has-value" style="color:var(--cyan)">▶ ${s.tasks_running} running</span>` : ''}
+                        ${s.tasks_failed > 0 ? `<span class="portfolio-stat has-value" style="color:var(--red)">${s.tasks_failed} failed</span>` : ''}
+                        ${s.goals_total > 0 ? `<span class="portfolio-stat has-value">${s.goals_completed}/${s.goals_total} goals</span>` : ''}
+                        ${costStr ? `<span class="portfolio-stat has-value">${costStr}</span>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+
+            container.querySelectorAll('.portfolio-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    portfolioDetailView = card.dataset.project;
+                    renderProjectDetail(portfolioDetailView);
+                });
+            });
+        }
+
+        function renderProjectDetail(name) {
+            const container = document.getElementById('portfolioContent');
+            const project = portfolioData.find(p => p.name === name);
+            if (!project) {
+                portfolioDetailView = null;
+                renderPortfolio();
+                return;
+            }
+            const s = project.stats;
+            const costStr = s.total_cost_usd > 0 ? `$${s.total_cost_usd.toFixed(2)}` : '$0.00';
+
+            container.innerHTML = `
+                <div class="portfolio-detail-back" id="portfolioBack">← All Projects</div>
+                <div style="margin-bottom:12px;">
+                    <span class="portfolio-card-name" style="font-size:16px;">${project.name}</span>
+                    <span class="portfolio-lifecycle" style="margin-left:8px;">${project.lifecycle}</span>
+                </div>
+                <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">${project.description || ''}</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:16px;">${project.path}</div>
+                <div class="task-summary">
+                    <div class="task-summary-row">
+                        <span class="task-summary-label">Tasks</span>
+                        <span class="task-summary-value">${s.tasks_completed} done / ${s.tasks_pending || 0} pending / ${s.tasks_failed} failed</span>
+                    </div>
+                    <div class="task-summary-row">
+                        <span class="task-summary-label">Goals</span>
+                        <span class="task-summary-value">${s.goals_completed}/${s.goals_total}</span>
+                    </div>
+                    <div class="task-summary-row">
+                        <span class="task-summary-label">Total Cost</span>
+                        <span class="task-summary-value">${costStr}</span>
+                    </div>
+                    <div class="task-summary-row">
+                        <span class="task-summary-label">Priority</span>
+                        <span class="task-summary-value">
+                            <select class="portfolio-priority-select" data-project="${project.name}" value="${project.priority}">
+                                ${[0,1,2,3,4,5,6,7,8,9,10].map(v => `<option value="${v}" ${v === project.priority ? 'selected' : ''}>${v}</option>`).join('')}
+                            </select>
+                        </span>
+                    </div>
+                </div>
+                <button class="bridge-btn bridge-btn-secondary" id="portfolioCreateTask" style="font-size:12px;padding:8px 12px;">Create Task for ${project.name}</button>
+            `;
+
+            document.getElementById('portfolioBack').addEventListener('click', () => {
+                portfolioDetailView = null;
+                renderPortfolio();
+            });
+
+            container.querySelector('.portfolio-priority-select').addEventListener('change', async (e) => {
+                await updateProjectPriority(project.name, parseInt(e.target.value, 10));
+            });
+
+            document.getElementById('portfolioCreateTask').addEventListener('click', () => {
+                document.getElementById('taskPath').value = project.path;
+                switchTaskTab('create');
+            });
+        }
+
+        async function updateProjectPriority(name, priority) {
+            try {
+                await fetch(`${API_BASE}/api/portfolio/${encodeURIComponent(name)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ priority })
+                });
+            } catch (err) {
+                showToast('Failed to update priority', true);
+            }
+        }
+
+        function updateProjectPathsDatalist() {
+            const datalist = document.getElementById('projectPaths');
+            datalist.innerHTML = portfolioData.map(p =>
+                `<option value="${p.path}">${p.name}</option>`
+            ).join('');
+        }
+
+        document.getElementById('portfolioSyncBtn').addEventListener('click', async () => {
+            try {
+                const res = await fetch(`${API_BASE}/api/portfolio/sync`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`Synced ${data.synced} projects`);
+                    loadPortfolio();
+                }
+            } catch (err) {
+                showToast('Sync failed', true);
+            }
+        });
+
+        // Pre-load portfolio data for datalist autocomplete
+        loadPortfolio();
 
         // Load orchestrator status
         async function loadOrchestratorStatus() {

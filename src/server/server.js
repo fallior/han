@@ -149,6 +149,16 @@ db.exec(`CREATE TABLE IF NOT EXISTS goals (
     orchestrator_model TEXT
 )`);
 
+// Create projects table (Level 9 — portfolio manager)
+db.exec(`CREATE TABLE IF NOT EXISTS projects (
+    name TEXT PRIMARY KEY,
+    description TEXT,
+    path TEXT NOT NULL,
+    lifecycle TEXT DEFAULT 'active',
+    priority INTEGER DEFAULT 5,
+    last_synced_at TEXT
+)`);
+
 // Create project_memory table
 db.exec(`CREATE TABLE IF NOT EXISTS project_memory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,6 +172,136 @@ db.exec(`CREATE TABLE IF NOT EXISTS project_memory (
     error_summary TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 )`);
+
+// ── Registry sync (Level 9) ─────────────────────────────
+const REGISTRY_PATH = path.join(process.env.HOME, 'Projects', 'infrastructure', 'registry', 'services.toml');
+
+function parseRegistryToml(content) {
+    const projects = [];
+    let current = null;
+    for (const raw of content.split('\n')) {
+        const line = raw.trim();
+        // Top-level section: [name] (not [name.subsection])
+        const sectionMatch = line.match(/^\[([a-zA-Z0-9_-]+)\]$/);
+        if (sectionMatch) {
+            const name = sectionMatch[1];
+            if (name === 'meta') continue;
+            current = { name, description: '', path: '', lifecycle: 'active' };
+            projects.push(current);
+            continue;
+        }
+        // Sub-section like [name.supabase] — stop reading into current
+        if (line.match(/^\[.+\..+\]$/)) {
+            current = null;
+            continue;
+        }
+        if (!current) continue;
+        const kvMatch = line.match(/^(\w+)\s*=\s*"(.*)"/);
+        if (kvMatch) {
+            const [, key, value] = kvMatch;
+            if (key === 'description') current.description = value;
+            else if (key === 'path') current.path = value.replace(/^~/, process.env.HOME);
+            else if (key === 'lifecycle') current.lifecycle = value;
+        }
+    }
+    return projects.filter(p => p.path);
+}
+
+function syncRegistry() {
+    try {
+        if (!fs.existsSync(REGISTRY_PATH)) {
+            console.log('[Portfolio] Registry not found at', REGISTRY_PATH);
+            return 0;
+        }
+        const content = fs.readFileSync(REGISTRY_PATH, 'utf8');
+        const projects = parseRegistryToml(content);
+        const now = new Date().toISOString();
+        for (const p of projects) {
+            portfolioStmts.upsert.run(p.name, p.description, p.path, p.lifecycle, now);
+        }
+        console.log(`[Portfolio] Synced ${projects.length} projects from registry`);
+        return projects.length;
+    } catch (err) {
+        console.error('[Portfolio] Sync failed:', err.message);
+        return 0;
+    }
+}
+
+syncRegistry();
+
+// ── Portfolio aggregate queries ─────────────────────────
+function getProjectStats(projectPath) {
+    const taskRow = db.prepare(`
+        SELECT
+            COUNT(*) as tasks_total,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as tasks_completed,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as tasks_failed,
+            SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as tasks_running,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as tasks_pending,
+            COALESCE(SUM(cost_usd), 0) as total_cost_usd
+        FROM tasks WHERE project_path = ?
+    `).get(projectPath);
+
+    const goalRow = db.prepare(`
+        SELECT
+            COUNT(*) as goals_total,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as goals_completed
+        FROM goals WHERE project_path = ?
+    `).get(projectPath);
+
+    return {
+        tasks_total: taskRow.tasks_total,
+        tasks_completed: taskRow.tasks_completed,
+        tasks_failed: taskRow.tasks_failed,
+        tasks_running: taskRow.tasks_running,
+        tasks_pending: taskRow.tasks_pending,
+        total_cost_usd: taskRow.total_cost_usd,
+        goals_total: goalRow.goals_total,
+        goals_completed: goalRow.goals_completed,
+    };
+}
+
+function getAllProjectStats() {
+    const taskRows = db.prepare(`
+        SELECT project_path,
+            COUNT(*) as tasks_total,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as tasks_completed,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as tasks_failed,
+            SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as tasks_running,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as tasks_pending,
+            COALESCE(SUM(cost_usd), 0) as total_cost_usd
+        FROM tasks GROUP BY project_path
+    `).all();
+
+    const goalRows = db.prepare(`
+        SELECT project_path,
+            COUNT(*) as goals_total,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as goals_completed
+        FROM goals GROUP BY project_path
+    `).all();
+
+    const stats = {};
+    for (const r of taskRows) {
+        stats[r.project_path] = {
+            tasks_total: r.tasks_total, tasks_completed: r.tasks_completed,
+            tasks_failed: r.tasks_failed, tasks_running: r.tasks_running,
+            tasks_pending: r.tasks_pending, total_cost_usd: r.total_cost_usd,
+            goals_total: 0, goals_completed: 0,
+        };
+    }
+    for (const r of goalRows) {
+        if (!stats[r.project_path]) {
+            stats[r.project_path] = {
+                tasks_total: 0, tasks_completed: 0, tasks_failed: 0,
+                tasks_running: 0, tasks_pending: 0, total_cost_usd: 0,
+                goals_total: 0, goals_completed: 0,
+            };
+        }
+        stats[r.project_path].goals_total = r.goals_total;
+        stats[r.project_path].goals_completed = r.goals_completed;
+    }
+    return stats;
+}
 
 /**
  * Serve the mobile web UI
@@ -1337,6 +1477,61 @@ app.delete('/api/goals/:id', (req, res) => {
     }
 });
 
+// ── Portfolio endpoints (Level 9) ────────────────────────
+
+/**
+ * GET /api/portfolio — List all projects with stats
+ */
+app.get('/api/portfolio', (req, res) => {
+    try {
+        const projects = portfolioStmts.list.all();
+        const allStats = getAllProjectStats();
+        const enriched = projects.map(p => ({
+            ...p,
+            stats: allStats[p.path] || {
+                tasks_total: 0, tasks_completed: 0, tasks_failed: 0,
+                tasks_running: 0, tasks_pending: 0, total_cost_usd: 0,
+                goals_total: 0, goals_completed: 0,
+            }
+        }));
+        res.json({ success: true, projects: enriched });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * PUT /api/portfolio/:name — Update project priority
+ */
+app.put('/api/portfolio/:name', (req, res) => {
+    try {
+        const project = portfolioStmts.get.get(req.params.name);
+        if (!project) {
+            return res.status(404).json({ success: false, error: 'Project not found' });
+        }
+        const priority = parseInt(req.body.priority, 10);
+        if (isNaN(priority) || priority < 0 || priority > 10) {
+            return res.status(400).json({ success: false, error: 'Priority must be 0-10' });
+        }
+        portfolioStmts.updatePriority.run(priority, req.params.name);
+        res.json({ success: true, project: portfolioStmts.get.get(req.params.name) });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /api/portfolio/sync — Re-sync from infrastructure registry
+ */
+app.post('/api/portfolio/sync', (req, res) => {
+    try {
+        const count = syncRegistry();
+        res.json({ success: true, synced: count });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 /**
  * GET /api/orchestrator/status — Get orchestrator backend info
  */
@@ -1552,6 +1747,13 @@ const goalStmts = {
 const memoryStmts = {
     insert: db.prepare('INSERT INTO project_memory (project_path, task_type, model_used, success, cost_usd, turns, duration_seconds, error_summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     getByProject: db.prepare('SELECT * FROM project_memory WHERE project_path = ? ORDER BY created_at DESC LIMIT 100'),
+};
+
+const portfolioStmts = {
+    upsert: db.prepare('INSERT INTO projects (name, description, path, lifecycle, last_synced_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, path = excluded.path, lifecycle = excluded.lifecycle, last_synced_at = excluded.last_synced_at'),
+    list: db.prepare('SELECT * FROM projects ORDER BY priority DESC, name ASC'),
+    get: db.prepare('SELECT * FROM projects WHERE name = ?'),
+    updatePriority: db.prepare('UPDATE projects SET priority = ? WHERE name = ?'),
 };
 
 /**
