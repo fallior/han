@@ -489,6 +489,13 @@
 
         .qbtn-dim { color: var(--text-muted); }
 
+        .quickbar-row-slim { gap: 3px; }
+        .qbtn-slim {
+            min-height: 30px;
+            font-size: 11px;
+            padding: 0 6px;
+        }
+
         .qbtn-special { font-size: 11px; }
 
         .qbtn-arrow {
@@ -1006,6 +1013,7 @@
                 <button class="tool-btn" id="themeToggle" title="Toggle theme">🌙</button>
                 <button class="tool-btn" id="searchToggle" title="Search">🔍</button>
                 <button class="tool-btn" id="copyBtn" title="Copy">📋</button>
+                <button class="tool-btn" id="trimBtn" title="Trim buffer">✂️</button>
                 <button class="tool-btn" id="tasksBtn" title="Tasks">🤖</button>
                 <button class="tool-btn" id="bridgeBtn" title="Bridge">🔗</button>
             </div>
@@ -1038,16 +1046,17 @@
         </div>
 
         <div class="quickbar" id="quickbar">
-            <div class="quickbar-row">
-                <button class="qbtn qbtn-primary" data-key="y">y</button>
-                <button class="qbtn qbtn-primary" data-key="n">n</button>
-                <button class="qbtn qbtn-dim" data-key="1">1</button>
-                <button class="qbtn qbtn-dim" data-key="2">2</button>
-                <button class="qbtn qbtn-dim" data-key="3">3</button>
+            <div class="quickbar-row quickbar-row-slim">
+                <button class="qbtn qbtn-slim" data-key="Escape">Esc</button>
+                <button class="qbtn qbtn-slim" id="scrollEndBtn">End</button>
+                <button class="qbtn qbtn-slim qbtn-dim" data-key="1">1</button>
+                <button class="qbtn qbtn-slim qbtn-dim" data-key="2">2</button>
+                <button class="qbtn qbtn-slim qbtn-dim" data-key="3">3</button>
+                <button class="qbtn qbtn-slim qbtn-dim" data-key="4">4</button>
+                <button class="qbtn qbtn-slim qbtn-dim" data-key="5">5</button>
             </div>
             <div class="quickbar-row">
                 <button class="qbtn qbtn-special" data-key="Enter">Enter</button>
-                <button class="qbtn qbtn-special" data-key="Escape">Esc</button>
                 <button class="qbtn qbtn-special" data-key="BSpace">⌫</button>
                 <button class="qbtn qbtn-special" data-key="C-c">^C</button>
                 <button class="qbtn qbtn-special" data-key="Tab">Tab</button>
@@ -1476,8 +1485,10 @@
         // comparing consecutive snapshots, append new lines, and only
         // re-render the last 10 lines. Everything above that is frozen.
 
-        let renderedLines = []; // DOM elements — grows forever
+        let renderedLines = []; // DOM elements — append-only buffer
         let lastSnapshotLines = []; // previous server snapshot for overlap detection
+        const MAX_BUFFER_LINES = 5000; // auto-trim when exceeded
+        const TRIM_KEEP_LINES = 2000; // keep this many after auto-trim
 
         function appendLine(text) {
             const div = document.createElement('div');
@@ -1491,8 +1502,9 @@
             const newSnap = content.split('\n');
 
             if (renderedLines.length === 0) {
-                // First render — show the whole snapshot
+                // First render — show the whole snapshot, start at bottom
                 for (const line of newSnap) appendLine(line);
+                termContent.scrollTop = termContent.scrollHeight;
                 lastSnapshotLines = newSnap;
                 return;
             }
@@ -1532,11 +1544,32 @@
             }
 
             lastSnapshotLines = newSnap;
+
+            // Auto-trim if buffer too large
+            autoTrimBuffer();
         }
 
         function clearRenderedLines() {
             renderedLines = [];
             termContent.innerHTML = '';
+        }
+
+        function autoTrimBuffer() {
+            if (renderedLines.length <= MAX_BUFFER_LINES) return;
+            const removeCount = renderedLines.length - TRIM_KEEP_LINES;
+            for (let i = 0; i < removeCount; i++) {
+                termContent.removeChild(renderedLines[i]);
+            }
+            renderedLines.splice(0, removeCount);
+        }
+
+        function trimTerminalBuffer(keepLines = 500) {
+            if (renderedLines.length <= keepLines) return;
+            const removeCount = renderedLines.length - keepLines;
+            for (let i = 0; i < removeCount; i++) {
+                termContent.removeChild(renderedLines[i]);
+            }
+            renderedLines.splice(0, removeCount);
         }
 
         function handleTerminalUpdate(data) {
@@ -1562,8 +1595,9 @@
                 updateTerminalAppend(content);
             }
 
-            // Scroll to bottom (fixed pane view — always show latest)
-            termContent.scrollTop = termContent.scrollHeight;
+            // Auto-follow if user is already at the bottom (within 50px)
+            const nearBottom = termContent.scrollHeight - termContent.scrollTop - termContent.clientHeight < 50;
+            if (nearBottom) termContent.scrollTop = termContent.scrollHeight;
 
             // Update chrome
             titleText.textContent = session || 'claude-remote';
@@ -1785,6 +1819,12 @@
             if (scroll) {
                 const pages = parseInt(scroll);
                 termContent.scrollTop += pages * termContent.clientHeight;
+                return;
+            }
+
+            // Handle End button — jump to bottom
+            if (btn.id === 'scrollEndBtn') {
+                termContent.scrollTop = termContent.scrollHeight;
                 return;
             }
 
@@ -2088,6 +2128,14 @@
         }
 
         copyBtn.addEventListener('click', copyTerminalContent);
+
+        // ── Trim button ─────────────────────────────────────
+        document.getElementById('trimBtn').addEventListener('click', () => {
+            const before = renderedLines.length;
+            trimTerminalBuffer(500);
+            const after = renderedLines.length;
+            showToast(`Trimmed ${before - after} lines (kept last ${after})`);
+        });
 
         // ── Theme toggle ─────────────────────────────────────
         themeToggle.addEventListener('click', toggleTheme);

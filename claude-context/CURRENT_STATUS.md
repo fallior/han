@@ -30,6 +30,13 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-02-15 — Darron (via Claude) — Session 20
+- **Smart-scroll**: Removed forced scroll-to-bottom on every refresh. Auto-follows only if within 50px of bottom. Scroll to bottom on first render.
+- **Quickbar reorganisation**: Removed y/n buttons (never used). Slim top row: Esc, End, 1-5. Bottom row: Enter, ⌫, ^C, Tab, arrows. "End" button jumps to bottom.
+- **Trim feature restored**: Auto-trim at 5000 lines (keeps 2000). Manual ✂️ button (keeps 500).
+- **Append-only terminal rendering**: `updateTerminalAppend()` — overlap detection between consecutive snapshots, only last 10 lines re-rendered, everything above frozen.
+- **Textarea input**: Wrapping textarea with auto-resize, 11px font. Backspace quickbar button.
+
 ### 2026-02-15 — Darron (via Claude) — Session 19 (Autonomous)
 - **Dark Mode Implementation** committed (`c8ef2af`):
   - Comprehensive CSS variable system with 27 theme-aware variables
