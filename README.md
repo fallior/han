@@ -7,6 +7,7 @@ Claude Remote lets you respond to Claude Code permission prompts and questions f
 ## Features
 
 - **Mobile Web UI** — Responsive interface optimised for phones
+- **Dark Mode** — Automatic theme detection with manual toggle (light/dark themes)
 - **Quick Actions** — One-tap buttons for Y, n, Enter, and custom responses
 - **Push Notifications** — Optional alerts via ntfy.sh when Claude needs input
 - **Multiple Sessions** — Support for concurrent Claude Code instances
@@ -65,6 +66,22 @@ On your phone, navigate to:
 - Or `http://<hostname>.local:3847`
 
 When Claude asks a question or requests permission, it will appear in the UI.
+
+### 4. Dark Mode
+
+The UI automatically detects your system theme preference and applies the appropriate theme:
+
+- **Toggle Theme**: Click the theme button in the titlebar
+  - 🌙 = Dark mode active (click to switch to light)
+  - ☀️ = Light mode active (click to switch to dark)
+- **Auto-Detection**: Respects your device's `prefers-color-scheme` setting
+- **Persistence**: Your choice is saved and remembered across sessions
+
+**Themes:**
+- **Dark** (default): GitHub Dark theme with reduced eye strain for night viewing
+- **Light**: GitHub Light theme optimized for bright environments
+
+For detailed information about the theme system, see [`claude-context/DARK_MODE_GUIDE.md`](claude-context/DARK_MODE_GUIDE.md).
 
 ## CLI Options
 
@@ -144,6 +161,14 @@ claude-remote/
 | `NTFY_TOPIC` | — | ntfy.sh topic for push notifications |
 | `CLAUDE_REMOTE_DIR` | `~/.claude-remote` | State directory |
 
+## Browser Settings
+
+Claude Remote stores user preferences in the browser's localStorage:
+
+| Key | Values | Description |
+|-----|--------|-------------|
+| `theme` | `dark`, `light` | UI theme preference (overrides system default) |
+
 ## How It Works
 
 1. Claude Code enters a wait state (permission prompt or idle)
@@ -168,6 +193,11 @@ claude-remote/
 ### Response not injected
 - Verify tmux session exists: `tmux list-sessions`
 - Check server logs for errors
+
+### Theme not switching
+- Clear browser cache and reload the page
+- Check localStorage: Open browser console and run `localStorage.getItem('theme')`
+- Reset to system preference: Run `localStorage.removeItem('theme')` and reload
 
 ## Roadmap
 

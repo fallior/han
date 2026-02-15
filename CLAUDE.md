@@ -130,6 +130,19 @@ Check `claude-context/CURRENT_STATUS.md` for:
 
 **Extended Vision (Levels 8-11):** See [`ROADMAP.md`](ROADMAP.md) for the full progression from autonomous task runner to development platform, including approval gates, cost dashboards, and hybrid orchestration architecture.
 
+## Settled Decisions Protocol
+
+**CRITICAL:** Some decisions in `claude-context/DECISIONS.md` are marked with status **Settled**. These are choices that were deliberated over — often through trial, error, and user frustration — and must NOT be changed without explicit discussion.
+
+Before modifying any code related to a settled decision:
+1. Check `DECISIONS.md` for relevant settled entries
+2. If the change would alter a settled decision, **stop and ask the user first**
+3. Explain what you want to change and why, and get approval before proceeding
+
+Decisions marked **Needs Discussion** are open for reconsideration but still require a conversation before changing.
+
+This is not optional. Changing settled decisions without warning causes real stress and wasted time.
+
 ## Conventions
 
 - **British English** spelling

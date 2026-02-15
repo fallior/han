@@ -18,6 +18,12 @@ When you make a significant technical or design decision:
 - API design (endpoint structure, conventions)
 - Trade-offs (performance vs simplicity, etc.)
 
+**Decision Status Flags:**
+- **Accepted** — Standard decision, open to revisiting if needed
+- **Settled** — Deliberated and finalised. **Do NOT change without explicit user discussion.** These decisions were often reached through painful trial and error. Changing them unilaterally causes stress and wasted time.
+- **Needs Discussion** — Open for reconsideration, but still requires a conversation before changing
+- **Superseded** — Replaced by a later decision (link to replacement)
+
 ---
 
 ## Decision Index
@@ -36,6 +42,7 @@ When you make a significant technical or design decision:
 | DEC-010 | Git Checkpoint Strategy (branch vs stash) | Accepted | 2026-02-15 |
 | DEC-011 | Approval Gate Implementation (canUseTool) | Accepted | 2026-02-15 |
 | DEC-012 | Tool Scoping Storage (JSON in SQLite) | Accepted | 2026-02-15 |
+| DEC-013 | Terminal Rendering — Append-only buffer with client-side diff | **Settled** | 2026-02-15 |
 
 ---
 
@@ -600,6 +607,58 @@ UI provides comma-separated input for ease of typing on mobile, which gets conve
 - Can't efficiently query "all tasks using tool X" (acceptable — not a needed query)
 - Must validate JSON on parse (handle malformed data gracefully)
 - Future: could add tool presets in UI (e.g., "Read Only", "Safe Tools", "Development")
+
+---
+
+### DEC-013: Terminal Rendering — Append-only buffer with client-side diff
+
+**Date**: 2026-02-15
+**Author**: Darron
+**Status**: Settled
+
+#### Context
+
+The mobile UI mirrors the tmux terminal pane. The server captures the tmux pane every 1 second and broadcasts it via WebSocket. The question is how the client renders these updates.
+
+This decision was reached after multiple failed attempts at alternative approaches that caused visible degradation on mobile (missing text, broken scrolling, blank screens after returning from history view).
+
+#### Options Considered
+
+1. **Append-only buffer with client-side overlap detection (current)**
+   - ✅ Preserves scrollback history — user can scroll up
+   - ✅ Text appears reliably — no missing characters
+   - ✅ Auto-trim keeps DOM bounded (5000 lines max, trims to 2000)
+   - ✅ Manual trim button for user control
+   - ✅ History stash/restore preserves buffer during history view
+   - ❌ O(n²) overlap detection is theoretically slow
+   - ❌ DOM grows over time (mitigated by auto-trim)
+
+2. **Server-side diff with client applying changes**
+   - ✅ Minimal client work
+   - ❌ Sync issues after history view (client has empty renderedLines, server sends diff)
+   - ❌ Requires additional sync recovery logic
+   - ❌ More complex server state tracking
+
+3. **Fixed pane view — client only diffs last N lines**
+   - ✅ Simple, no growing buffer
+   - ❌ No scrollback history
+   - ❌ Text appeared garbled/missing on mobile ("mangy dog look")
+   - ❌ Worse user experience than the append-only approach
+
+#### Decision
+
+We chose the **append-only buffer with client-side overlap detection** because it reliably renders text on mobile without missing characters. The auto-trim at 5000 lines prevents unbounded DOM growth. The manual trim button gives the user control.
+
+**This is settled.** The alternatives were tried and produced a worse mobile experience. Do not change the terminal rendering approach without explicit user discussion.
+
+#### Consequences
+
+- Server sends full tmux snapshot every 1s (unchanged frames skipped)
+- Client accumulates lines in an append-only buffer
+- Overlap detection finds genuinely new lines and appends only those
+- Auto-trim at 5000 lines, keeps 2000
+- History view stashes/restores DOM nodes
+- If performance becomes an issue in future, optimise within this architecture rather than replacing it
 
 ---
 
