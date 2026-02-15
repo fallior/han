@@ -391,19 +391,25 @@
             align-items: center;
         }
         .input-bar.visible { display: flex; }
-        .input-bar input {
+        .input-bar textarea {
             flex: 1;
             font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-            font-size: 16px;
+            font-size: 11px;
             background: var(--bg-main);
             border: 1px solid var(--border);
             border-radius: 6px;
             color: var(--text);
             padding: 8px 12px;
             outline: none;
+            resize: none;
+            overflow: hidden;
+            min-height: 36px;
+            max-height: 120px;
+            line-height: 1.4;
+            word-wrap: break-word;
         }
-        .input-bar input::placeholder { color: var(--text-muted); }
-        .input-bar input:focus { border-color: var(--cyan); }
+        .input-bar textarea::placeholder { color: var(--text-muted); }
+        .input-bar textarea:focus { border-color: var(--cyan); }
         .input-send {
             min-width: 44px;
             min-height: 44px;
@@ -1026,8 +1032,8 @@
         </div>
 
         <div class="input-bar" id="inputBar">
-            <input type="text" id="mobileInput" placeholder="Type here..."
-                   autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <textarea id="mobileInput" rows="1" placeholder="Type here..."
+                      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
             <button class="input-send" id="inputSend">⏎</button>
         </div>
 
@@ -1042,6 +1048,7 @@
             <div class="quickbar-row">
                 <button class="qbtn qbtn-special" data-key="Enter">Enter</button>
                 <button class="qbtn qbtn-special" data-key="Escape">Esc</button>
+                <button class="qbtn qbtn-special" data-key="BSpace">⌫</button>
                 <button class="qbtn qbtn-special" data-key="C-c">^C</button>
                 <button class="qbtn qbtn-special" data-key="Tab">Tab</button>
                 <button class="qbtn qbtn-arrow" data-key="Up">&uarr;</button>
@@ -1462,59 +1469,69 @@
             }
         }
 
-        // ── Terminal rendering (server-side diff) ─────────────
+        // ── Terminal rendering (append-only log) ──────────────
+        //
+        // The terminal is an ever-growing text file. The server sends a
+        // fixed-size tmux snapshot every ~1s. We find what's new by
+        // comparing consecutive snapshots, append new lines, and only
+        // re-render the last 10 lines. Everything above that is frozen.
 
-        let renderedLines = []; // DOM elements matching tmux pane lines
+        let renderedLines = []; // DOM elements — grows forever
+        let lastSnapshotLines = []; // previous server snapshot for overlap detection
 
-        /**
-         * Full replace — set all lines from server snapshot.
-         * Reuses existing DOM elements where possible.
-         */
-        function updateTerminalFull(content) {
-            const el = termContent;
-            const newLines = content.split('\n');
-            const prevLen = renderedLines.length;
-            const newLen = newLines.length;
-            const minLen = Math.min(prevLen, newLen);
-
-            // Update existing lines in-place
-            for (let i = 0; i < minLen; i++) {
-                if (renderedLines[i]._text !== newLines[i]) {
-                    renderedLines[i].textContent = newLines[i];
-                    renderedLines[i]._text = newLines[i];
-                }
-            }
-
-            // Add new lines
-            if (newLen > prevLen) {
-                for (let i = prevLen; i < newLen; i++) {
-                    const div = document.createElement('div');
-                    div.textContent = newLines[i];
-                    div._text = newLines[i];
-                    el.appendChild(div);
-                    renderedLines.push(div);
-                }
-            }
-            // Remove excess lines
-            else if (newLen < prevLen) {
-                for (let i = prevLen - 1; i >= newLen; i--) {
-                    el.removeChild(renderedLines[i]);
-                }
-                renderedLines.length = newLen;
-            }
+        function appendLine(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            div._text = text;
+            termContent.appendChild(div);
+            renderedLines.push(div);
         }
 
-        /**
-         * Diff update — apply only changed lines from server.
-         * Each change is { i: lineIndex, t: newText }.
-         */
-        function updateTerminalDiff(changes) {
-            for (const { i, t } of changes) {
-                if (i < renderedLines.length) {
-                    renderedLines[i].textContent = t;
-                    renderedLines[i]._text = t;
+        function updateTerminalAppend(content) {
+            const newSnap = content.split('\n');
+
+            if (renderedLines.length === 0) {
+                // First render — show the whole snapshot
+                for (const line of newSnap) appendLine(line);
+                lastSnapshotLines = newSnap;
+                return;
+            }
+
+            // Find overlap: longest suffix of lastSnapshot that matches a prefix of newSnap
+            // This tells us what scrolled and what's new
+            const oldSnap = lastSnapshotLines;
+            const maxOverlap = Math.min(oldSnap.length, newSnap.length);
+            let overlap = 0;
+
+            for (let tryLen = maxOverlap; tryLen >= 1; tryLen--) {
+                let match = true;
+                for (let j = 0; j < tryLen; j++) {
+                    if (oldSnap[oldSnap.length - tryLen + j] !== newSnap[j]) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) { overlap = tryLen; break; }
+            }
+
+            // Append lines that are new (after the overlap)
+            for (let i = overlap; i < newSnap.length; i++) {
+                appendLine(newSnap[i]);
+            }
+
+            // Re-render last 10 rendered lines from the new snapshot tail
+            const TAIL = 10;
+            const reCount = Math.min(TAIL, renderedLines.length, newSnap.length);
+            for (let i = 0; i < reCount; i++) {
+                const ri = renderedLines.length - reCount + i;
+                const ni = newSnap.length - reCount + i;
+                if (renderedLines[ri]._text !== newSnap[ni]) {
+                    renderedLines[ri].textContent = newSnap[ni];
+                    renderedLines[ri]._text = newSnap[ni];
                 }
             }
+
+            lastSnapshotLines = newSnap;
         }
 
         function clearRenderedLines() {
@@ -1540,11 +1557,9 @@
 
             termContent.style.display = '';
 
-            if (mode === 'diff') {
-                updateTerminalDiff(changes);
-            } else if (content && content !== lastWrittenContent) {
+            if (content && content !== lastWrittenContent) {
                 lastWrittenContent = content;
-                updateTerminalFull(content);
+                updateTerminalAppend(content);
             }
 
             // Scroll to bottom (fixed pane view — always show latest)
@@ -1570,7 +1585,7 @@
                 termContent.style.display = '';
                 if (content && content !== lastWrittenContent) {
                     lastWrittenContent = content;
-                    updateTerminalFull(content);
+                    updateTerminalAppend(content);
                 }
             }
 
@@ -1673,9 +1688,17 @@
         // Line-buffered input — type locally, send full line on Enter
         const inputSend = document.getElementById('inputSend');
 
+        // Auto-resize textarea as content grows/shrinks
+        function autoResizeInput() {
+            mobileInput.style.height = 'auto';
+            mobileInput.style.height = Math.min(mobileInput.scrollHeight, 120) + 'px';
+        }
+        mobileInput.addEventListener('input', autoResizeInput);
+
         async function submitInputLine() {
             const text = mobileInput.value;
             mobileInput.value = '';
+            mobileInput.style.height = 'auto'; // reset height
             mobileInput.focus(); // keep keyboard open
 
             try {
