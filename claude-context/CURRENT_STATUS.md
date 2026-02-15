@@ -260,9 +260,10 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Next Actions
 
 ### Immediate (Next Session)
-- [ ] Pull an Ollama model to enable local orchestration (e.g. `ollama pull qwen2.5-coder:7b`)
-- [ ] Test goal decomposition end-to-end (set ANTHROPIC_API_KEY in server env or pull Ollama model)
+- [x] Pull an Ollama model to enable local orchestration — `qwen2.5-coder:7b` (4.7 GB)
+- [x] Test goal decomposition end-to-end — working via Ollama (6 subtasks with dependency chains)
 - [ ] Test retry logic with a deliberately failing task
+- [ ] Test goal decomposition from the phone UI (Goals tab)
 - [ ] Refine UI based on continued mobile usage
 
 ### Short-term
