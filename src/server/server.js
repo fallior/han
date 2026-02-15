@@ -227,8 +227,6 @@ function syncRegistry() {
     }
 }
 
-syncRegistry();
-
 // ── Portfolio aggregate queries ─────────────────────────
 function getProjectStats(projectPath) {
     const taskRow = db.prepare(`
@@ -1755,6 +1753,8 @@ const portfolioStmts = {
     get: db.prepare('SELECT * FROM projects WHERE name = ?'),
     updatePriority: db.prepare('UPDATE projects SET priority = ? WHERE name = ?'),
 };
+
+syncRegistry();
 
 /**
  * List tasks (optionally filtered by status)
