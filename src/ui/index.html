@@ -9,10 +9,15 @@
     <title>Claude Remote</title>
     <!-- System monospace font — no CDN load needed -->
     <style>
+        /* ─── Dark Mode Support: Light Theme ─── */
         :root {
+            color-scheme: light dark;
             --bg-term: #0a0e14;
             --bg-titlebar: #161b22;
+            --bg-secondary: #0d1117;
+            --bg-overlay: rgba(13, 17, 23, 0.92);
             --border: rgba(48, 54, 61, 0.6);
+            --border-secondary: rgba(48, 54, 61, 0.3);
             --text: #e6edf3;
             --text-dim: #8b949e;
             --text-muted: #484f58;
@@ -20,6 +25,98 @@
             --cyan: #39d0d8;
             --amber: #d29922;
             --red: #f85149;
+            --blue: #58a6ff;
+            --purple: #b392f0;
+            --pink: #f85167;
+            --shade: 0;
+        }
+
+        /* Light theme */
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg-term: #ffffff;
+                --bg-titlebar: #f6f8fa;
+                --bg-secondary: #f0f2f5;
+                --bg-overlay: rgba(255, 255, 255, 0.92);
+                --border: rgba(27, 31, 35, 0.15);
+                --border-secondary: rgba(27, 31, 35, 0.08);
+                --text: #24292f;
+                --text-dim: #57606a;
+                --text-muted: #79828b;
+                --green: #1f8934;
+                --cyan: #0969da;
+                --amber: #9e6a03;
+                --red: #d1242f;
+                --blue: #0969da;
+                --purple: #6639ba;
+                --pink: #bf3989;
+                --shade: 1;
+            }
+        }
+
+        /* Dark theme (GitHub dark) */
+        :root.dark-mode,
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-term: #0d1117;
+                --bg-titlebar: #161b22;
+                --bg-secondary: #0d1117;
+                --border: rgba(48, 54, 61, 0.6);
+                --border-secondary: rgba(48, 54, 61, 0.3);
+                --text: #e6edf3;
+                --text-dim: #8b949e;
+                --text-muted: #484f58;
+                --green: #3fb950;
+                --cyan: #39d0d8;
+                --amber: #d29922;
+                --red: #f85149;
+                --blue: #58a6ff;
+                --purple: #b392f0;
+                --pink: #f85167;
+                --shade: 0;
+            }
+        }
+
+        /* Explicit dark mode class */
+        :root.dark-mode {
+            --bg-term: #0d1117;
+            --bg-titlebar: #161b22;
+            --bg-secondary: #0d1117;
+            --bg-overlay: rgba(13, 17, 23, 0.92);
+            --border: rgba(48, 54, 61, 0.6);
+            --border-secondary: rgba(48, 54, 61, 0.3);
+            --text: #e6edf3;
+            --text-dim: #8b949e;
+            --text-muted: #484f58;
+            --green: #3fb950;
+            --cyan: #39d0d8;
+            --amber: #d29922;
+            --red: #f85149;
+            --blue: #58a6ff;
+            --purple: #b392f0;
+            --pink: #f85167;
+            --shade: 0;
+        }
+
+        /* Explicit light mode class */
+        :root.light-mode {
+            --bg-term: #ffffff;
+            --bg-titlebar: #f6f8fa;
+            --bg-secondary: #f0f2f5;
+            --bg-overlay: rgba(255, 255, 255, 0.92);
+            --border: rgba(27, 31, 35, 0.15);
+            --border-secondary: rgba(27, 31, 35, 0.08);
+            --text: #24292f;
+            --text-dim: #57606a;
+            --text-muted: #79828b;
+            --green: #1f8934;
+            --cyan: #0969da;
+            --amber: #9e6a03;
+            --red: #d1242f;
+            --blue: #0969da;
+            --purple: #6639ba;
+            --pink: #bf3989;
+            --shade: 1;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -27,8 +124,21 @@
 
         body {
             font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-            background: #000;
+            background: var(--bg-term);
             color: var(--text);
+            transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+        }
+
+        /* Smooth theme transitions */
+        * {
+            transition-property: background-color, border-color, color;
+            transition-duration: 0.15s;
+            transition-timing-function: ease-in-out;
+        }
+
+        /* Disable transitions during page load */
+        :root.instant * {
+            transition: none;
         }
 
         .app {
@@ -414,7 +524,7 @@
             position: fixed;
             inset: 0;
             z-index: 200;
-            background: rgba(0, 0, 0, 0.92);
+            background: var(--bg-overlay);
             flex-direction: column;
         }
 
@@ -634,7 +744,7 @@
             position: fixed;
             inset: 0;
             z-index: 200;
-            background: rgba(0, 0, 0, 0.92);
+            background: var(--bg-overlay);
             flex-direction: column;
         }
 
@@ -747,6 +857,67 @@
         @supports (padding: max(0px)) {
             .titlebar { padding-top: max(8px, env(safe-area-inset-top)); }
         }
+
+        /* Theme toggle button animations */
+        #themeToggle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #themeToggle.light-mode::before {
+            content: '☀️';
+            position: absolute;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        #themeToggle.light-mode:hover::before {
+            opacity: 1;
+        }
+
+        /* Smooth color transitions for dark mode toggle */
+        html {
+            scroll-behavior: smooth;
+        }
+
+        /* Dark mode specific overrides for better contrast */
+        :root.dark-mode {
+            --border: rgba(48, 54, 61, 0.6);
+        }
+
+        :root.light-mode {
+            --border: rgba(27, 31, 35, 0.15);
+        }
+
+        /* Accessibility: reduced motion support */
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                transition: none !important;
+                animation: none !important;
+            }
+        }
+
+        /* Enhanced focus states for accessibility */
+        .tool-btn:focus-visible {
+            outline: 2px solid var(--cyan);
+            outline-offset: 2px;
+        }
+
+        /* Dark mode background for body */
+        body {
+            background-color: var(--bg-term);
+        }
+
+        /* Ensure proper scrollbar colors in both themes */
+        .terminal-content::-webkit-scrollbar-thumb {
+            background: var(--border);
+        }
+
+        /* Override any hardcoded black backgrounds */
+        html, body {
+            background-color: var(--bg-term) !important;
+        }
     </style>
 </head>
 <body>
@@ -761,6 +932,7 @@
                 <span class="titlebar-title" id="titleText">claude-remote</span>
             </div>
             <div class="titlebar-tools">
+                <button class="tool-btn" id="themeToggle" title="Toggle theme">🌙</button>
                 <button class="tool-btn" id="searchToggle" title="Search">🔍</button>
                 <button class="tool-btn" id="copyBtn" title="Copy">📋</button>
                 <button class="tool-btn" id="trimBtn" title="Trim buffer">✂️</button>
@@ -1029,6 +1201,82 @@
         const searchNext = document.getElementById('searchNext');
         const searchClose = document.getElementById('searchClose');
         const copyBtn = document.getElementById('copyBtn');
+        const themeToggle = document.getElementById('themeToggle');
+
+        // ── Dark Mode Theme Management ─────────────────────────────────
+
+        function initTheme() {
+            const root = document.documentElement;
+
+            // Disable transitions during initialization
+            root.classList.add('instant');
+
+            // 1. Check localStorage for user preference
+            const savedTheme = localStorage.getItem('theme');
+
+            // 2. Check system preference
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+            // 3. Determine theme
+            let theme = savedTheme || (systemPrefersDark ? 'dark' : 'light');
+
+            // Apply theme
+            applyTheme(theme);
+
+            // Re-enable transitions after setting theme
+            setTimeout(() => {
+                root.classList.remove('instant');
+            }, 0);
+        }
+
+        function applyTheme(theme) {
+            const root = document.documentElement;
+
+            // Remove both classes first
+            root.classList.remove('dark-mode', 'light-mode');
+
+            // Add the appropriate class
+            if (theme === 'dark') {
+                root.classList.add('dark-mode');
+                themeToggle.textContent = '🌙';
+                themeToggle.title = 'Switch to light mode';
+            } else {
+                root.classList.add('light-mode');
+                themeToggle.textContent = '☀️';
+                themeToggle.title = 'Switch to dark mode';
+            }
+
+            // Save to localStorage
+            localStorage.setItem('theme', theme);
+
+            // Update document meta theme-color
+            const isDark = theme === 'dark';
+            const themeColor = isDark ? '#0d1117' : '#ffffff';
+            let metaTheme = document.querySelector('meta[name="theme-color"]');
+            if (!metaTheme) {
+                metaTheme = document.createElement('meta');
+                metaTheme.name = 'theme-color';
+                document.head.appendChild(metaTheme);
+            }
+            metaTheme.content = themeColor;
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.classList.contains('dark-mode') ? 'dark' : 'light';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            applyTheme(newTheme);
+        }
+
+        // Initialize theme on load
+        initTheme();
+
+        // Listen for system theme changes
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            // Only apply if user hasn't set a preference
+            if (!localStorage.getItem('theme')) {
+                applyTheme(e.matches ? 'dark' : 'light');
+            }
+        });
 
         // ── Prompt handling ───────────────────────────────────
 
@@ -1819,7 +2067,8 @@
 
         function showCopyOverlay(text) {
             const overlay = document.createElement('div');
-            overlay.style.cssText = 'position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.85);display:flex;flex-direction:column;padding:16px;';
+            const bgColor = getComputedStyle(document.documentElement).getPropertyValue('--bg-overlay').trim();
+            overlay.style.cssText = `position:fixed;inset:0;z-index:200;background:${bgColor};display:flex;flex-direction:column;padding:16px;`;
 
             const header = document.createElement('div');
             header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;';
@@ -1850,6 +2099,9 @@
         }
 
         copyBtn.addEventListener('click', copyTerminalContent);
+
+        // ── Theme toggle ─────────────────────────────────────
+        themeToggle.addEventListener('click', toggleTheme);
 
         // ── Trim button ──────────────────────────────────────
         const trimBtn = document.getElementById('trimBtn');
