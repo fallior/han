@@ -380,6 +380,47 @@
             font-size: 13px;
         }
 
+        /* Line-buffered input bar */
+        .input-bar {
+            display: none;
+            flex-shrink: 0;
+            background: var(--bg-titlebar);
+            border-top: 1px solid var(--border);
+            padding: 6px 8px;
+            gap: 6px;
+            align-items: center;
+        }
+        .input-bar.visible { display: flex; }
+        .input-bar input {
+            flex: 1;
+            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+            font-size: 16px;
+            background: var(--bg-main);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            padding: 8px 12px;
+            outline: none;
+        }
+        .input-bar input::placeholder { color: var(--text-muted); }
+        .input-bar input:focus { border-color: var(--cyan); }
+        .input-send {
+            min-width: 44px;
+            min-height: 44px;
+            border: 1px solid var(--cyan);
+            border-radius: 6px;
+            background: rgba(57, 208, 216, 0.1);
+            color: var(--cyan);
+            font-size: 18px;
+            font-family: inherit;
+            cursor: pointer;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .input-send:active {
+            background: rgba(57, 208, 216, 0.25);
+        }
+
         /* Quick-action keyboard bar */
         .quickbar {
             display: none;
@@ -982,9 +1023,12 @@
 
         <div class="terminal" id="terminal">
             <div class="terminal-content" id="termContent"></div>
-            <!-- Hidden input for iOS soft keyboard -->
-            <input type="text" id="mobileInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-                   style="position:absolute; bottom:10px; left:50%; width:1px; height:1px; opacity:0; font-size:16px; pointer-events:none;">
+        </div>
+
+        <div class="input-bar" id="inputBar">
+            <input type="text" id="mobileInput" placeholder="Type here..."
+                   autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <button class="input-send" id="inputSend">⏎</button>
         </div>
 
         <div class="quickbar" id="quickbar">
@@ -1534,7 +1578,7 @@
             const session = p.tmux_session || terminalSession || 'claude-remote';
             titleText.textContent = session;
             footerLeft.textContent = p.event === 'permission_prompt' ? 'Permission required' : 'Waiting for input';
-            footerHint.textContent = 'tap to type \u00b7 keys sent to session';
+            footerHint.textContent = 'type below \u00b7 Enter to send';
             updateQuickbar();
         }
 
@@ -1620,84 +1664,92 @@
             }
         }
 
-        // Focus management — require explicit tap
-        // Use hidden input for iOS soft keyboard
+        // Focus management — tap terminal to focus input bar
         terminal.addEventListener('click', () => {
             userHasTapped = true;
-            // Focus hidden input to trigger iOS keyboard
             mobileInput.focus();
-            showToast('Keyboard active');
         });
 
-        // Client-side echo — show characters instantly, send to server in background
-        function localEcho(char) {
-            if (renderedLines.length === 0) return;
-            const lastDiv = renderedLines[renderedLines.length - 1];
-            lastDiv.textContent += char;
-            lastDiv._text = lastDiv.textContent;
-            termContent.scrollTop = termContent.scrollHeight;
-        }
+        // Line-buffered input — type locally, send full line on Enter
+        const inputSend = document.getElementById('inputSend');
 
-        function localEchoNewline() {
-            const div = document.createElement('div');
-            div.textContent = '';
-            div._text = '';
-            termContent.appendChild(div);
-            renderedLines.push(div);
-            termContent.scrollTop = termContent.scrollHeight;
-        }
-
-        function localEchoBackspace() {
-            if (renderedLines.length === 0) return;
-            const lastDiv = renderedLines[renderedLines.length - 1];
-            if (lastDiv._text.length > 0) {
-                lastDiv.textContent = lastDiv._text.slice(0, -1);
-                lastDiv._text = lastDiv.textContent;
-            }
-        }
-
-        // Handle input from iOS soft keyboard
-        mobileInput.addEventListener('input', (e) => {
-            const value = e.target.value;
-            if (!value) return;
+        async function submitInputLine() {
+            const text = mobileInput.value;
             mobileInput.value = '';
+            mobileInput.focus(); // keep keyboard open
 
-            // Show instantly on client
-            localEcho(value);
-
-            // Send to server in background
-            if (currentPrompt) {
-                sendKey(value);
-            } else if (terminalLive) {
-                sendKeyDirect(value);
-            }
-        });
-
-        // Handle special keys
-        mobileInput.addEventListener('keydown', (e) => {
-            let key = null;
-
-            if (e.key === 'Enter') {
-                key = 'Enter';
-                localEchoNewline();
-                e.preventDefault();
-            } else if (e.key === 'Backspace') {
-                key = '\x7f';
-                localEchoBackspace();
-                e.preventDefault();
-            } else if (e.key === 'Escape') {
-                key = 'Escape';
-                e.preventDefault();
-            }
-
-            if (key) {
+            try {
                 if (currentPrompt) {
-                    sendKey(key);
+                    // Prompt mode: send full response via /api/respond
+                    const res = await fetch(`${API_BASE}/api/respond`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            id: currentPrompt.id,
+                            response: text || '',
+                            noEnter: false
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        showToast('Sent: ' + (text || 'Enter'));
+                        currentPrompt = null;
+                        if (terminalLive) {
+                            footerLeft.textContent = 'Watching session';
+                            footerHint.textContent = 'history';
+                            updateQuickbar();
+                        } else {
+                            renderNoSession();
+                        }
+                        if (!usingWebSocket) setTimeout(poll, 1000);
+                    } else {
+                        showToast(data.error || 'Failed', true);
+                    }
                 } else if (terminalLive) {
-                    sendKeyDirect(key);
+                    // Terminal mode: send text + Enter via /api/keys
+                    if (text) {
+                        await fetch(`${API_BASE}/api/keys`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ key: text, enter: true })
+                        });
+                    } else {
+                        await sendKeyDirect('Enter');
+                    }
+                }
+
+                // Force terminal refresh after short delay (let tmux process)
+                setTimeout(async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/api/terminal`);
+                        const data = await res.json();
+                        if (data.success && data.content) {
+                            handleTerminalUpdate(data.content, terminalSession || 'claude-remote');
+                        }
+                    } catch { /* next WS broadcast will catch up */ }
+                }, 300);
+            } catch {
+                showToast('Connection error', true);
+            }
+        }
+
+        mobileInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitInputLine();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                mobileInput.value = '';
+                if (currentPrompt) {
+                    sendKey('Escape');
+                } else if (terminalLive) {
+                    sendKeyDirect('Escape');
                 }
             }
+            // All other keys: browser handles natively
         });
+
+        inputSend.addEventListener('click', () => submitInputLine());
 
         // ── Quick-action bar ──────────────────────────────────
 
@@ -1725,10 +1777,13 @@
         });
 
         function updateQuickbar() {
+            const inputBar = document.getElementById('inputBar');
             if ((currentPrompt || terminalLive) && !showingHistory) {
                 quickbar.classList.add('visible');
+                inputBar.classList.add('visible');
             } else {
                 quickbar.classList.remove('visible');
+                inputBar.classList.remove('visible');
             }
         }
 

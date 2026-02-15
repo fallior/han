@@ -847,6 +847,17 @@ app.post('/api/keys', (req, res) => {
                 console.error('Error sending key:', err);
                 return res.status(500).json({ success: false, error: 'Failed to send key' });
             }
+            // If enter flag set, also send Enter after the literal text
+            if (req.body.enter && !SPECIAL_KEYS.has(key)) {
+                execFile('tmux', ['send-keys', '-t', session, 'Enter'], (err2) => {
+                    if (err2) {
+                        console.error('Error sending Enter:', err2);
+                        return res.status(500).json({ success: false, error: 'Failed to send Enter' });
+                    }
+                    res.json({ success: true });
+                });
+                return;
+            }
             res.json({ success: true });
         });
     } catch (err) {
