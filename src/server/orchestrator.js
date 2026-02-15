@@ -175,7 +175,7 @@ Respond with JSON only: {
     const userPrompt = `Goal: ${goal}\n\nProject context:\n${projectContext}`;
 
     try {
-        const result = await callLLM(systemPrompt, userPrompt, { timeout: 45000 });
+        const result = await callLLM(systemPrompt, userPrompt, { timeout: 120000 });
         return {
             subtasks: result.response.subtasks || [],
             backend: result.backend,
