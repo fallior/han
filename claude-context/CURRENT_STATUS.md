@@ -30,6 +30,21 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-02-15 — Darron (via Claude) — Session 19 (Autonomous)
+- **Dark Mode Implementation** committed (`c8ef2af`):
+  - Comprehensive CSS variable system with 27 theme-aware variables
+  - Light theme (GitHub Light) for bright environments
+  - Dark theme (GitHub Dark, default) for night viewing
+  - Auto-detection respects `prefers-color-scheme` media query
+  - localStorage persistence of user's theme choice
+  - Theme toggle button (🌙/☀️) in titlebar
+  - Smooth 150ms transitions for all theme-aware elements
+  - Support for `prefers-reduced-motion` (accessibility)
+  - All UI components updated: terminal, overlays, modals, buttons, text
+  - Meta theme-color updates browser address bar
+  - Created comprehensive DARK_MODE_GUIDE.md documentation
+  - No server changes required, pure client-side CSS + vanilla JS
+
 ### 2026-02-15 — Darron (via Claude) — Session 18
 - **Level 8: Intelligent Orchestrator** committed (`264e02a`):
   - `src/server/orchestrator.js` (298 lines): callLLM (dual backend), classifyTask, decomposeGoal, analyseFailure, selectModel
@@ -256,6 +271,12 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Project memory (outcome tracking, success rates by model)
 - ✅ Dependency-aware task scheduling
 - ✅ Goals tab UI with create, view, retry, progress bars
+- ✅ Dark mode with automatic theme detection (light + dark)
+- ✅ Theme toggle button in titlebar (🌙/☀️)
+- ✅ localStorage persistence of theme preference
+- ✅ prefers-color-scheme media query support
+- ✅ Smooth theme transitions (150ms)
+- ✅ WCAG AA color contrast in both themes
 
 ## Next Actions
 
