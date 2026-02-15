@@ -43,6 +43,7 @@ When you make a significant technical or design decision:
 | DEC-011 | Approval Gate Implementation (canUseTool) | Accepted | 2026-02-15 |
 | DEC-012 | Tool Scoping Storage (JSON in SQLite) | Accepted | 2026-02-15 |
 | DEC-013 | Terminal Rendering — Append-only buffer with client-side diff | **Settled** | 2026-02-15 |
+| DEC-014 | Scroll Behaviour — User controls scroll position | **Settled** | 2026-02-15 |
 
 ---
 
@@ -659,6 +660,40 @@ We chose the **append-only buffer with client-side overlap detection** because i
 - Auto-trim at 5000 lines, keeps 2000
 - History view stashes/restores DOM nodes
 - If performance becomes an issue in future, optimise within this architecture rather than replacing it
+
+---
+
+### DEC-014: Scroll Behaviour — User controls scroll position
+
+**Date**: 2026-02-15
+**Author**: Darron
+**Status**: Settled
+
+#### Context
+
+The mobile terminal view is a scrollable ever-growing text log. Previous implementations forced `scrollTop = scrollHeight` on every 1-second refresh, yanking the user to the bottom constantly. iOS momentum scrolling also allowed rubber-banding past the top and bottom edges, creating a disorienting wrap-around effect. Both behaviours made the UX frustrating — the user described them as "terrible" and "horrible".
+
+#### Rules (do NOT change without explicit user discussion)
+
+1. **Never force scroll position** — The user's scroll position is sacred. If they scroll up to read something, it stays there.
+2. **Smart-scroll (within 50px)** — If the user is already within 50px of the bottom, auto-follow new output. Otherwise leave scroll alone.
+3. **Scroll to bottom on first render only** — When the page first loads or terminal first connects, scroll to bottom to show the latest output.
+4. **Hard scroll boundaries** — `overscroll-behavior: contain` on `.terminal-content`. No rubber-banding, no wrap-around. Scroll stops at top and bottom edges.
+5. **"End" button in quickbar** — User taps End to jump to bottom when they want to. This is the only way to force-scroll besides being near the bottom.
+
+#### Decision
+
+The user controls their scroll position at all times. The system only auto-follows when the user is already at the bottom. Overscroll is contained. These are non-negotiable UX requirements.
+
+**This is settled.** The previous forced-scroll behaviour caused significant user frustration. Do not reintroduce forced scrolling, remove overscroll containment, or change scroll behaviour without explicit user discussion.
+
+#### Consequences
+
+- `handleTerminalUpdate()` checks `nearBottom` (< 50px) before scrolling
+- `updateTerminalAppend()` scrolls to bottom on first render only
+- `.terminal-content` has `overscroll-behavior: contain`
+- "End" quickbar button provides manual jump-to-bottom
+- Any future features must respect these scroll rules
 
 ---
 
