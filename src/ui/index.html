@@ -1502,6 +1502,11 @@
         function updateTerminalAppend(content) {
             const newSnap = content.split('\n');
 
+            // Strip trailing blank lines from tmux snapshot — they break overlap detection
+            while (newSnap.length > 1 && newSnap[newSnap.length - 1] === '') {
+                newSnap.pop();
+            }
+
             if (renderedLines.length === 0) {
                 // First render — show the whole snapshot, start at bottom
                 for (const line of newSnap) appendLine(line);
@@ -1591,13 +1596,15 @@
 
             termContent.style.display = '';
 
+            // Check scroll position BEFORE appending (DEC-014)
+            const nearBottom = termContent.scrollHeight - termContent.scrollTop - termContent.clientHeight < 50;
+
             if (content && content !== lastWrittenContent) {
                 lastWrittenContent = content;
                 updateTerminalAppend(content);
             }
 
-            // Auto-follow if user is already at the bottom (within 50px)
-            const nearBottom = termContent.scrollHeight - termContent.scrollTop - termContent.clientHeight < 50;
+            // Auto-follow only if we were already at the bottom
             if (nearBottom) termContent.scrollTop = termContent.scrollHeight;
 
             // Update chrome
