@@ -986,7 +986,9 @@ The key insight: **open-source models are improving faster than hardware is depr
 - [x] Orchestrator status badge
 - [x] Pull and test a local model — `qwen2.5-coder:7b` (4.7GB), goal decomposition tested end-to-end
 
-**Future improvement**: Ollama model pull helper — UI button to pull/switch models from phone (convenience, not critical)
+**Future improvements**:
+- Ollama model pull helper — UI button to pull/switch models from phone (convenience, not critical)
+- Auto-restart server on code changes — task automator detects `src/server/server.js` modifications and restarts the server post-build
 
 ### Phase 6: Multi-Project Empire (Level 9) — 8 weeks
 
