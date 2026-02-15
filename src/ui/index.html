@@ -29,6 +29,11 @@
             --purple: #b392f0;
             --pink: #f85167;
             --shade: 0;
+            /* Theme-aware overlay colors */
+            --overlay-light: rgba(48, 54, 61, 0.06);
+            --overlay-medium: rgba(48, 54, 61, 0.04);
+            --overlay-subtle: rgba(48, 54, 61, 0.03);
+            --shadow: rgba(0, 0, 0, 0.5);
         }
 
         /* Light theme */
@@ -51,11 +56,15 @@
                 --purple: #6639ba;
                 --pink: #bf3989;
                 --shade: 1;
+                /* Light theme overlay colors */
+                --overlay-light: rgba(27, 31, 35, 0.06);
+                --overlay-medium: rgba(27, 31, 35, 0.04);
+                --overlay-subtle: rgba(27, 31, 35, 0.03);
+                --shadow: rgba(0, 0, 0, 0.2);
             }
         }
 
         /* Dark theme (GitHub dark) */
-        :root.dark-mode,
         @media (prefers-color-scheme: dark) {
             :root {
                 --bg-term: #0d1117;
@@ -74,6 +83,11 @@
                 --purple: #b392f0;
                 --pink: #f85167;
                 --shade: 0;
+                /* Dark theme overlay colors */
+                --overlay-light: rgba(48, 54, 61, 0.06);
+                --overlay-medium: rgba(48, 54, 61, 0.04);
+                --overlay-subtle: rgba(48, 54, 61, 0.03);
+                --shadow: rgba(0, 0, 0, 0.5);
             }
         }
 
@@ -96,6 +110,11 @@
             --purple: #b392f0;
             --pink: #f85167;
             --shade: 0;
+            /* Dark theme overlay colors */
+            --overlay-light: rgba(48, 54, 61, 0.06);
+            --overlay-medium: rgba(48, 54, 61, 0.04);
+            --overlay-subtle: rgba(48, 54, 61, 0.03);
+            --shadow: rgba(0, 0, 0, 0.5);
         }
 
         /* Explicit light mode class */
@@ -117,6 +136,11 @@
             --purple: #6639ba;
             --pink: #bf3989;
             --shade: 1;
+            /* Light theme overlay colors */
+            --overlay-light: rgba(27, 31, 35, 0.06);
+            --overlay-medium: rgba(27, 31, 35, 0.04);
+            --overlay-subtle: rgba(27, 31, 35, 0.03);
+            --shadow: rgba(0, 0, 0, 0.2);
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -258,7 +282,7 @@
             font-size: 12px;
             color: var(--green);
             animation: fadeIn 0.2s ease-out;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+            box-shadow: 0 4px 16px var(--shadow);
         }
 
         .toast.error { color: var(--red); border-color: rgba(248,81,73,0.3); }
@@ -386,7 +410,7 @@
             padding: 0 10px;
             border: 1px solid var(--border);
             border-radius: 6px;
-            background: rgba(255, 255, 255, 0.04);
+            background: var(--overlay-medium);
             color: var(--text-dim);
             cursor: pointer;
             -webkit-tap-highlight-color: transparent;
@@ -446,7 +470,7 @@
 
         .search-input {
             flex: 1;
-            background: rgba(255, 255, 255, 0.06);
+            background: var(--overlay-light);
             border: 1px solid var(--border);
             border-radius: 6px;
             padding: 8px 12px;
@@ -465,7 +489,7 @@
         }
 
         .search-btn {
-            background: rgba(255, 255, 255, 0.04);
+            background: var(--overlay-medium);
             border: 1px solid var(--border);
             border-radius: 6px;
             padding: 8px 12px;
@@ -603,7 +627,7 @@
 
         .bridge-select {
             width: 100%;
-            background: rgba(255, 255, 255, 0.06);
+            background: var(--overlay-light);
             border: 1px solid var(--border);
             border-radius: 6px;
             padding: 10px 12px;
@@ -617,7 +641,7 @@
         .bridge-textarea {
             width: 100%;
             min-height: 200px;
-            background: rgba(255, 255, 255, 0.06);
+            background: var(--overlay-light);
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 12px;
@@ -640,7 +664,7 @@
 
         .bridge-input {
             width: 100%;
-            background: rgba(255, 255, 255, 0.06);
+            background: var(--overlay-light);
             border: 1px solid var(--border);
             border-radius: 6px;
             padding: 10px 12px;
@@ -676,7 +700,7 @@
 
         .bridge-btn-secondary {
             border-color: var(--border);
-            background: rgba(255, 255, 255, 0.04);
+            background: var(--overlay-medium);
             color: var(--text-dim);
         }
 
@@ -838,7 +862,7 @@
 
         .task-summary {
             padding: 12px;
-            background: rgba(255, 255, 255, 0.03);
+            background: var(--overlay-subtle);
             border: 1px solid var(--border);
             border-radius: 8px;
             margin-bottom: 12px;
@@ -935,7 +959,6 @@
                 <button class="tool-btn" id="themeToggle" title="Toggle theme">🌙</button>
                 <button class="tool-btn" id="searchToggle" title="Search">🔍</button>
                 <button class="tool-btn" id="copyBtn" title="Copy">📋</button>
-                <button class="tool-btn" id="trimBtn" title="Trim buffer">✂️</button>
                 <button class="tool-btn" id="tasksBtn" title="Tasks">🤖</button>
                 <button class="tool-btn" id="bridgeBtn" title="Bridge">🔗</button>
             </div>
@@ -1179,7 +1202,6 @@
         let terminalSession = null;
 
         let lastWrittenContent = '';
-        let localLineCount = 0;
 
         const terminal = document.getElementById('terminal');
         const termContent = document.getElementById('termContent');
@@ -1336,7 +1358,7 @@
                     if (data.type === 'prompts') {
                         handlePromptsUpdate(data.prompts);
                     } else if (data.type === 'terminal') {
-                        handleTerminalUpdate(data.content, data.session);
+                        handleTerminalUpdate(data);
                     } else if (data.type === 'task_update') {
                         handleTaskUpdate(data.task);
                     } else if (data.type === 'task_progress') {
@@ -1396,180 +1418,70 @@
             }
         }
 
-        // ── Terminal broadcast handling ────────────────────────
+        // ── Terminal rendering (server-side diff) ─────────────
 
-        let renderedLines = []; // DOM elements for accumulated lines
-        let prevTmuxLines = []; // previous tmux snapshot for diffing
-        const MAX_BUFFER_LINES = 5000; // auto-trim above this
-        const TRIM_KEEP_LINES = 2000; // keep this many when trimming
+        let renderedLines = []; // DOM elements matching tmux pane lines
 
         /**
-         * Append-only terminal update. Compares the new tmux snapshot
-         * against the previous one, finds genuinely new lines appended
-         * at the bottom, and adds them to the accumulated buffer.
-         * Historical lines are never removed (only via manual trim).
+         * Full replace — set all lines from server snapshot.
+         * Reuses existing DOM elements where possible.
          */
-        function appendTerminalUpdate(newContent) {
-            const newLines = newContent.split('\n');
+        function updateTerminalFull(content) {
             const el = termContent;
-            const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+            const newLines = content.split('\n');
+            const prevLen = renderedLines.length;
+            const newLen = newLines.length;
+            const minLen = Math.min(prevLen, newLen);
 
-            if (prevTmuxLines.length === 0) {
-                // First load — render all lines
-                for (const line of newLines) {
-                    const div = document.createElement('div');
-                    div.textContent = line;
-                    div._text = line;
-                    el.appendChild(div);
-                    renderedLines.push(div);
-                }
-                prevTmuxLines = newLines.slice();
-                autoTrimBuffer();
-                if (wasAtBottom) el.scrollTop = el.scrollHeight;
-                return;
-            }
-
-            // Find the overlap: how many lines from the end of prevTmuxLines
-            // match at the start of newLines (the stable region).
-            // The "active zone" is the last few lines of tmux output which
-            // get rewritten (e.g. spinner, status line). Lines above that
-            // are stable history. We find the longest suffix of prev that
-            // matches a prefix of new to identify what's unchanged.
-
-            // Strategy: find where new content diverges from prev.
-            // The tmux pane is a fixed-size window. When new output appears
-            // at the bottom, old lines scroll off the top. When compaction
-            // happens, the content changes dramatically.
-            //
-            // We match the tail of our accumulated buffer against the new
-            // snapshot to find the overlap, then append anything after it.
-
-            // Find longest common suffix between our buffer and new snapshot
-            let overlap = 0;
-            const maxCheck = Math.min(renderedLines.length, newLines.length);
-            // Check from the end of our buffer backwards
-            for (let tryLen = maxCheck; tryLen > 0; tryLen--) {
-                let match = true;
-                for (let j = 0; j < tryLen; j++) {
-                    const bufIdx = renderedLines.length - tryLen + j;
-                    if (renderedLines[bufIdx]._text !== newLines[j]) {
-                        match = false;
-                        break;
-                    }
-                }
-                if (match) {
-                    overlap = tryLen;
-                    break;
+            // Update existing lines in-place
+            for (let i = 0; i < minLen; i++) {
+                if (renderedLines[i]._text !== newLines[i]) {
+                    renderedLines[i].textContent = newLines[i];
+                    renderedLines[i]._text = newLines[i];
                 }
             }
 
-            // Also check: does the tail of our buffer match the tail of new?
-            // (handles the case where tmux rewrites the last few active lines)
-            if (overlap === 0) {
-                for (let tryLen = maxCheck; tryLen > 0; tryLen--) {
-                    let match = true;
-                    for (let j = 0; j < tryLen; j++) {
-                        const bufIdx = renderedLines.length - tryLen + j;
-                        const newIdx = newLines.length - tryLen + j;
-                        if (renderedLines[bufIdx]._text !== newLines[newIdx]) {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (match) {
-                        // The last tryLen lines are the same — any new lines
-                        // were inserted before them (unlikely) or there's
-                        // active line rewriting. Just update the active zone.
-                        // Update the last tryLen rendered lines to match
-                        const newStart = newLines.length - tryLen;
-                        // Append lines that come after the overlap in new
-                        // Actually this means no new lines, just rewrites
-                        // Update the tail of our buffer (active zone rewrite)
-                        for (let j = 0; j < tryLen; j++) {
-                            const bufIdx = renderedLines.length - tryLen + j;
-                            const newIdx = newLines.length - tryLen + j;
-                            if (renderedLines[bufIdx]._text !== newLines[newIdx]) {
-                                renderedLines[bufIdx].textContent = newLines[newIdx];
-                                renderedLines[bufIdx]._text = newLines[newIdx];
-                            }
-                        }
-                        prevTmuxLines = newLines.slice();
-                        if (wasAtBottom) el.scrollTop = el.scrollHeight;
-                        return;
-                    }
-                }
-            }
-
-            if (overlap > 0) {
-                // New lines are everything after the overlap
-                const appendFrom = overlap;
-                for (let i = appendFrom; i < newLines.length; i++) {
+            // Add new lines
+            if (newLen > prevLen) {
+                for (let i = prevLen; i < newLen; i++) {
                     const div = document.createElement('div');
                     div.textContent = newLines[i];
                     div._text = newLines[i];
                     el.appendChild(div);
                     renderedLines.push(div);
                 }
-            } else {
-                // No overlap found (compaction or major rewrite).
-                // Insert a separator and append the entire new snapshot
-                // as fresh content, preserving everything above.
-                const sep = document.createElement('div');
-                sep.textContent = '─── context refreshed ───';
-                sep.style.color = 'var(--text-dim)';
-                sep.style.textAlign = 'center';
-                sep.style.padding = '4px 0';
-                sep._text = '__separator__';
-                el.appendChild(sep);
-                renderedLines.push(sep);
+            }
+            // Remove excess lines
+            else if (newLen < prevLen) {
+                for (let i = prevLen - 1; i >= newLen; i--) {
+                    el.removeChild(renderedLines[i]);
+                }
+                renderedLines.length = newLen;
+            }
+        }
 
-                for (const line of newLines) {
-                    const div = document.createElement('div');
-                    div.textContent = line;
-                    div._text = line;
-                    el.appendChild(div);
-                    renderedLines.push(div);
+        /**
+         * Diff update — apply only changed lines from server.
+         * Each change is { i: lineIndex, t: newText }.
+         */
+        function updateTerminalDiff(changes) {
+            for (const { i, t } of changes) {
+                if (i < renderedLines.length) {
+                    renderedLines[i].textContent = t;
+                    renderedLines[i]._text = t;
                 }
             }
-
-            prevTmuxLines = newLines.slice();
-            autoTrimBuffer();
-            if (wasAtBottom) el.scrollTop = el.scrollHeight;
-        }
-
-        /**
-         * Auto-trim buffer when it exceeds MAX_BUFFER_LINES
-         */
-        function autoTrimBuffer() {
-            if (renderedLines.length <= MAX_BUFFER_LINES) return;
-            const removeCount = renderedLines.length - TRIM_KEEP_LINES;
-            for (let i = 0; i < removeCount; i++) {
-                termContent.removeChild(renderedLines[i]);
-            }
-            renderedLines = renderedLines.slice(removeCount);
-        }
-
-        /**
-         * Manual trim — keep last N lines
-         */
-        function trimTerminalBuffer(keepLines = 500) {
-            if (renderedLines.length <= keepLines) return;
-            const removeCount = renderedLines.length - keepLines;
-            for (let i = 0; i < removeCount; i++) {
-                termContent.removeChild(renderedLines[i]);
-            }
-            renderedLines = renderedLines.slice(removeCount);
-            showToast(`Trimmed to ${keepLines} lines`);
         }
 
         function clearRenderedLines() {
             renderedLines = [];
-            prevTmuxLines = [];
             termContent.innerHTML = '';
         }
 
-        function handleTerminalUpdate(content, session) {
-            if (content === null) {
+        function handleTerminalUpdate(data) {
+            const { mode, content, changes, session } = data;
+
+            if (content === null && !mode) {
                 // No active session
                 terminalLive = false;
                 terminalSession = null;
@@ -1582,23 +1494,22 @@
 
             if (showingHistory) return;
 
-            // Use plain text div — native scrolling works on mobile
             termContent.style.display = '';
 
-            // Only update DOM if content actually changed
-            if (content !== lastWrittenContent) {
+            if (mode === 'diff') {
+                updateTerminalDiff(changes);
+            } else if (content && content !== lastWrittenContent) {
                 lastWrittenContent = content;
-                localLineCount = renderedLines.length;
-
-                // Append-only update — never removes historical lines
-                appendTerminalUpdate(content);
-                localLineCount = renderedLines.length;
+                updateTerminalFull(content);
             }
 
-            // Update chrome based on state
+            // Scroll to bottom (fixed pane view — always show latest)
+            termContent.scrollTop = termContent.scrollHeight;
+
+            // Update chrome
             titleText.textContent = session || 'claude-remote';
             if (!currentPrompt) {
-                footerLeft.textContent = `Watching (${localLineCount} lines)`;
+                footerLeft.textContent = `Watching (${renderedLines.length} lines)`;
                 footerHint.textContent = 'history';
                 updateQuickbar();
             }
@@ -1615,7 +1526,7 @@
                 termContent.style.display = '';
                 if (content && content !== lastWrittenContent) {
                     lastWrittenContent = content;
-                    appendTerminalUpdate(content);
+                    updateTerminalFull(content);
                 }
             }
 
@@ -2102,10 +2013,6 @@
 
         // ── Theme toggle ─────────────────────────────────────
         themeToggle.addEventListener('click', toggleTheme);
-
-        // ── Trim button ──────────────────────────────────────
-        const trimBtn = document.getElementById('trimBtn');
-        trimBtn.addEventListener('click', () => trimTerminalBuffer(500));
 
         // ── Bridge ────────────────────────────────────────────
 
@@ -2644,7 +2551,7 @@
                 const res = await fetch(`${API_BASE}/api/tasks/${id}/log`);
                 const data = await res.json();
                 if (data.success) {
-                    taskProgressLog.innerHTML = `<pre style="white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.5;color:var(--fg);">${escHtml(data.log)}</pre>`;
+                    taskProgressLog.innerHTML = `<pre style="white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.5;color:var(--text);">${escHtml(data.log)}</pre>`;
                     showToast('Log loaded');
                 } else {
                     showToast(data.error || 'No log available', true);
@@ -2796,7 +2703,7 @@
                         const taskEl = document.createElement('div');
                         taskEl.style.padding = '8px';
                         taskEl.style.marginBottom = '6px';
-                        taskEl.style.background = 'rgba(255,255,255,0.03)';
+                        taskEl.style.background = 'var(--overlay-subtle)';
                         taskEl.style.borderRadius = '4px';
                         taskEl.style.fontSize = '11px';
 
