@@ -203,6 +203,12 @@ db.exec(`CREATE TABLE IF NOT EXISTS task_proposals (
     written_to TEXT
 )`);
 
+// Level 10D: ports column on projects
+const projCols10d = db.pragma("table_info('projects')").map(col => col.name);
+if (!projCols10d.includes('ports')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN ports TEXT`);
+}
+
 // Create project_memory table
 db.exec(`CREATE TABLE IF NOT EXISTS project_memory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -223,29 +229,46 @@ const REGISTRY_PATH = path.join(process.env.HOME, 'Projects', 'infrastructure', 
 function parseRegistryToml(content) {
     const projects = [];
     let current = null;
+    let subSection = null;
     for (const raw of content.split('\n')) {
         const line = raw.trim();
         // Top-level section: [name] (not [name.subsection])
         const sectionMatch = line.match(/^\[([a-zA-Z0-9_-]+)\]$/);
         if (sectionMatch) {
             const name = sectionMatch[1];
-            if (name === 'meta') continue;
-            current = { name, description: '', path: '', lifecycle: 'active' };
+            if (name === 'meta') { current = null; subSection = null; continue; }
+            current = { name, description: '', path: '', lifecycle: 'active', ports: {} };
+            subSection = null;
             projects.push(current);
             continue;
         }
-        // Sub-section like [name.supabase] — stop reading into current
-        if (line.match(/^\[.+\..+\]$/)) {
-            current = null;
+        // Sub-section like [name.supabase] — track for port extraction
+        const subMatch = line.match(/^\[([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+)\]$/);
+        if (subMatch) {
+            const parentName = subMatch[1];
+            current = projects.find(p => p.name === parentName) || null;
+            subSection = subMatch[2];
             continue;
         }
         if (!current) continue;
-        const kvMatch = line.match(/^(\w+)\s*=\s*"(.*)"/);
-        if (kvMatch) {
-            const [, key, value] = kvMatch;
-            if (key === 'description') current.description = value;
-            else if (key === 'path') current.path = value.replace(/^~/, process.env.HOME);
-            else if (key === 'lifecycle') current.lifecycle = value;
+        // String value
+        const strMatch = line.match(/^(\w+)\s*=\s*"(.*)"/);
+        if (strMatch) {
+            const [, key, value] = strMatch;
+            if (!subSection) {
+                if (key === 'description') current.description = value;
+                else if (key === 'path') current.path = value.replace(/^~/, process.env.HOME);
+                else if (key === 'lifecycle') current.lifecycle = value;
+            }
+            continue;
+        }
+        // Numeric value — extract ports from sub-sections
+        const numMatch = line.match(/^(\w+)\s*=\s*(\d+)/);
+        if (numMatch && subSection) {
+            const [, key, value] = numMatch;
+            if (key.includes('port')) {
+                current.ports[`${subSection}.${key}`] = parseInt(value, 10);
+            }
         }
     }
     return projects.filter(p => p.path);
@@ -261,7 +284,8 @@ function syncRegistry() {
         const projects = parseRegistryToml(content);
         const now = new Date().toISOString();
         for (const p of projects) {
-            portfolioStmts.upsert.run(p.name, p.description, p.path, p.lifecycle, now);
+            const portsJson = Object.keys(p.ports).length > 0 ? JSON.stringify(p.ports) : null;
+            portfolioStmts.upsert.run(p.name, p.description, p.path, p.lifecycle, portsJson, now);
         }
         console.log(`[Portfolio] Synced ${projects.length} projects from registry`);
         return projects.length;
@@ -276,7 +300,7 @@ function getProjectStats(projectPath) {
     const taskRow = db.prepare(`
         SELECT
             COUNT(*) as tasks_total,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as tasks_completed,
+            SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as tasks_completed,
             SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as tasks_failed,
             SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as tasks_running,
             SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as tasks_pending,
@@ -287,7 +311,7 @@ function getProjectStats(projectPath) {
     const goalRow = db.prepare(`
         SELECT
             COUNT(*) as goals_total,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as goals_completed
+            SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as goals_completed
         FROM goals WHERE project_path = ?
     `).get(projectPath);
 
@@ -307,7 +331,7 @@ function getAllProjectStats() {
     const taskRows = db.prepare(`
         SELECT project_path,
             COUNT(*) as tasks_total,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as tasks_completed,
+            SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as tasks_completed,
             SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as tasks_failed,
             SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as tasks_running,
             SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as tasks_pending,
@@ -318,7 +342,7 @@ function getAllProjectStats() {
     const goalRows = db.prepare(`
         SELECT project_path,
             COUNT(*) as goals_total,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as goals_completed
+            SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as goals_completed
         FROM goals GROUP BY project_path
     `).all();
 
@@ -1840,6 +1864,57 @@ app.post('/api/portfolio/:name/unthrottle', (req, res) => {
 });
 
 /**
+ * GET /api/ecosystem — Full ecosystem state with ports, stats, and budget data
+ */
+app.get('/api/ecosystem', (req, res) => {
+    try {
+        const projects = portfolioStmts.list.all();
+        const allStats = getAllProjectStats();
+        const ecosystem = projects.map(p => {
+            let ports = {};
+            if (p.ports) {
+                try { ports = typeof p.ports === 'string' ? JSON.parse(p.ports) : p.ports; } catch {}
+            }
+            const stats = allStats[p.path] || {
+                tasks_total: 0, tasks_completed: 0, tasks_failed: 0,
+                tasks_running: 0, tasks_pending: 0, total_cost_usd: 0,
+                goals_total: 0, goals_completed: 0,
+            };
+            return {
+                name: p.name,
+                description: p.description,
+                path: p.path,
+                lifecycle: p.lifecycle,
+                priority: p.priority,
+                ports,
+                tasks: {
+                    total: stats.tasks_total,
+                    completed: stats.tasks_completed,
+                    failed: stats.tasks_failed,
+                    running: stats.tasks_running,
+                    pending: stats.tasks_pending,
+                },
+                goals: {
+                    total: stats.goals_total,
+                    completed: stats.goals_completed,
+                },
+                budget: {
+                    daily_limit: p.cost_budget_daily,
+                    total_limit: p.cost_budget_total,
+                    spent_today: p.cost_spent_today,
+                    spent_total: p.cost_spent_total,
+                    throttled: !!p.throttled,
+                },
+            };
+        });
+        const summaryText = getEcosystemSummary();
+        res.json({ success: true, projects: ecosystem, summary: summaryText });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * GET /api/orchestrator/status — Get orchestrator backend info
  */
 app.get('/api/orchestrator/status', (req, res) => {
@@ -2287,11 +2362,36 @@ function getEcosystemSummary() {
     try {
         const projects = portfolioStmts.list.all();
         if (!projects.length) return '';
+        const allStats = getAllProjectStats();
         return projects.map(p => {
-            let line = `- ${p.name} (${p.lifecycle}): ${(p.description || '').slice(0, 60)}`;
-            if (p.throttled) line += ' [THROTTLED]';
-            if (p.priority !== 5) line += ` [priority: ${p.priority}]`;
-            return line;
+            // Port summary — show web/api ports only for brevity
+            let portTag = '';
+            if (p.ports) {
+                try {
+                    const ports = typeof p.ports === 'string' ? JSON.parse(p.ports) : p.ports;
+                    const portParts = [];
+                    for (const [key, val] of Object.entries(ports)) {
+                        const shortKey = key.replace(/.*\./, '').replace(/_port$/, '');
+                        if (['web', 'api', 'port'].includes(shortKey)) {
+                            portParts.push(`${shortKey}:${val}`);
+                        }
+                    }
+                    if (portParts.length) portTag = ` [${portParts.join(', ')}]`;
+                } catch {}
+            }
+            // Task queue state
+            const stats = allStats[p.path] || {};
+            const queueParts = [];
+            if (stats.tasks_running) queueParts.push(`${stats.tasks_running} running`);
+            if (stats.tasks_pending) queueParts.push(`${stats.tasks_pending} pending`);
+            if (stats.tasks_completed) queueParts.push(`${stats.tasks_completed} done`);
+            const queueTag = queueParts.length ? ` (${queueParts.join(', ')})` : '';
+            // Flags
+            let flags = '';
+            if (p.throttled) flags += ' [THROTTLED]';
+            if (p.priority !== 5) flags += ` [priority: ${p.priority}]`;
+            const desc = (p.description || '').slice(0, 60);
+            return `- **${p.name}** (${p.lifecycle})${portTag}${queueTag}: ${desc}${flags}`;
         }).join('\n');
     } catch { return ''; }
 }
@@ -2607,7 +2707,7 @@ You are an autonomous agent in Darron's development ecosystem.
     }
 
     const ecosystem = getEcosystemSummary();
-    if (ecosystem) parts.push(`\n## Development Ecosystem\n\nSister projects in this ecosystem:\n${ecosystem}`);
+    if (ecosystem) parts.push(`\n## Development Ecosystem\n\nSister projects in this ecosystem:\n${ecosystem}\n\nNote: Tasks can depend on task IDs from any project/goal via \`depends_on\`. Port numbers shown above are allocated centrally — avoid conflicts when configuring services.`);
 
     if (goalContext) parts.push(`\n## Goal Context\n\nThis task is part of a larger goal:\n${goalContext.slice(0, 1000)}`);
 
@@ -2675,7 +2775,7 @@ const memoryStmts = {
 };
 
 const portfolioStmts = {
-    upsert: db.prepare('INSERT INTO projects (name, description, path, lifecycle, last_synced_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, path = excluded.path, lifecycle = excluded.lifecycle, last_synced_at = excluded.last_synced_at'),
+    upsert: db.prepare('INSERT INTO projects (name, description, path, lifecycle, ports, last_synced_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, path = excluded.path, lifecycle = excluded.lifecycle, ports = excluded.ports, last_synced_at = excluded.last_synced_at'),
     list: db.prepare('SELECT * FROM projects ORDER BY priority DESC, name ASC'),
     get: db.prepare('SELECT * FROM projects WHERE name = ?'),
     getByPath: db.prepare('SELECT * FROM projects WHERE path = ?'),

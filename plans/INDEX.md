@@ -24,6 +24,7 @@
 | 10.A | Context Injection (Ecosystem-Aware Automator) | Implementation Spec | Complete | [level-10-phase-a-context-injection.md](level-10-phase-a-context-injection.md) |
 | 10.B | Protocol Compliance | Implementation Spec | Complete | [level-10-phase-b-protocol-compliance.md](level-10-phase-b-protocol-compliance.md) |
 | 10.C | Learning + Decisions Capture | Implementation Spec | Complete | [level-10-phase-c-learning-decisions.md](level-10-phase-c-learning-decisions.md) |
+| 10.D | Community Awareness | Implementation Spec | Complete | [level-10-phase-d-community-awareness.md](level-10-phase-d-community-awareness.md) |
 
 ## Plan Template
 
