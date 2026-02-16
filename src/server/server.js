@@ -263,6 +263,46 @@ db.exec(`CREATE TABLE IF NOT EXISTS weekly_reports (
     viewed_at TEXT
 )`);
 
+// Level 11: Product pipeline tables
+db.exec(`CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    seed TEXT NOT NULL,
+    project_path TEXT,
+    current_phase TEXT DEFAULT 'research',
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT,
+    total_cost_usd REAL DEFAULT 0,
+    phases_completed INTEGER DEFAULT 0,
+    config TEXT
+)`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS product_phases (
+    id TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    goal_id TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    cost_usd REAL DEFAULT 0,
+    artifacts TEXT,
+    gate_status TEXT DEFAULT 'none',
+    gate_approved_at TEXT,
+    notes TEXT
+)`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS product_knowledge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source_phase TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+)`);
+
 // ── Registry sync (Level 9) ─────────────────────────────
 const REGISTRY_PATH = path.join(process.env.HOME, 'Projects', 'infrastructure', 'registry', 'services.toml');
 
@@ -2170,6 +2210,117 @@ app.get('/api/weekly-report/history', (req, res) => {
     }
 });
 
+// ── Level 11: Product Pipeline API ───────────────────────
+
+app.post('/api/products', (req, res) => {
+    try {
+        const { name, seed, config } = req.body;
+        if (!name || !seed) return res.status(400).json({ success: false, error: 'name and seed are required' });
+        const productId = createProduct(name, seed, config || {});
+        const product = productStmts.get.get(productId);
+        const phases = phaseStmts.getByProduct.all(productId);
+        res.json({ success: true, product, phases });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/products', (req, res) => {
+    try {
+        const products = productStmts.list.all();
+        res.json({ success: true, products });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/products/:id', (req, res) => {
+    try {
+        const product = productStmts.get.get(req.params.id);
+        if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+        const phases = phaseStmts.getByProduct.all(req.params.id);
+        const knowledge = knowledgeStmts.getByProduct.all(req.params.id);
+        res.json({ success: true, product, phases, knowledge });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.delete('/api/products/:id', (req, res) => {
+    try {
+        const product = productStmts.get.get(req.params.id);
+        if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+        productStmts.updateStatus.run('cancelled', new Date().toISOString(), req.params.id);
+        res.json({ success: true, message: `Product "${product.name}" cancelled` });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/products/:id/phases/:phase/approve', (req, res) => {
+    try {
+        const { id, phase } = req.params;
+        const product = productStmts.get.get(id);
+        if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+        const phaseRecord = phaseStmts.get.get(id, phase);
+        if (!phaseRecord) return res.status(404).json({ success: false, error: 'Phase not found' });
+        if (phaseRecord.gate_status !== 'pending') return res.status(400).json({ success: false, error: `Gate is not pending (current: ${phaseRecord.gate_status})` });
+
+        phaseStmts.updateGate.run('approved', new Date().toISOString(), req.body.notes || null, id, phase);
+        const goalId = executePhase(id, phase);
+        res.json({ success: true, phase, goalId, message: `Phase "${phase}" approved and started` });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/products/:id/phases/:phase/reject', (req, res) => {
+    try {
+        const { id, phase } = req.params;
+        const product = productStmts.get.get(id);
+        if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+        const phaseRecord = phaseStmts.get.get(id, phase);
+        if (!phaseRecord) return res.status(404).json({ success: false, error: 'Phase not found' });
+
+        phaseStmts.updateGate.run('rejected', new Date().toISOString(), req.body.notes || 'Rejected', id, phase);
+        // Re-run the previous phase
+        const prevIndex = PIPELINE_PHASES.indexOf(phase) - 1;
+        if (prevIndex >= 0) {
+            const prevPhase = PIPELINE_PHASES[prevIndex];
+            phaseStmts.complete.run('pending', null, 0, null, id, prevPhase);
+            const goalId = executePhase(id, prevPhase);
+            res.json({ success: true, phase, message: `Phase "${phase}" rejected. Re-running "${prevPhase}".`, goalId });
+        } else {
+            res.json({ success: true, phase, message: `Phase "${phase}" rejected. No previous phase to re-run.` });
+        }
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/products/:id/knowledge', (req, res) => {
+    try {
+        const { category } = req.query;
+        const entries = category
+            ? knowledgeStmts.getByCategory.all(req.params.id, category)
+            : knowledgeStmts.getByProduct.all(req.params.id);
+        res.json({ success: true, entries });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/products/:id/knowledge', (req, res) => {
+    try {
+        const { category, title, content, source_phase } = req.body;
+        if (!category || !title || !content) return res.status(400).json({ success: false, error: 'category, title, and content are required' });
+        knowledgeStmts.insert.run(req.params.id, category, title, content, source_phase || 'manual', new Date().toISOString());
+        res.json({ success: true, message: 'Knowledge entry added' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 /**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
@@ -2319,6 +2470,22 @@ function updateGoalProgress(goalId) {
     if (allDone && completedAt) {
         try { generateGoalSummary(goalId); }
         catch (err) { console.error(`[Goal] Summary generation failed for ${goalId}:`, err.message); }
+
+        // Check if this goal belongs to a product pipeline phase
+        try {
+            const phase = db.prepare('SELECT * FROM product_phases WHERE goal_id = ?').get(goalId);
+            if (phase && phase.product_id) {
+                const goal = goalStmts.get.get(goalId);
+                advancePipeline(phase.product_id, phase.phase, {
+                    cost_usd: totalCost,
+                    result_summary: goal ? goal.summary : null,
+                    description: goal ? goal.description : null,
+                    artifacts: [],
+                });
+            }
+        } catch (err) {
+            console.error(`[Pipeline] Failed to check pipeline advancement for goal ${goalId}:`, err.message);
+        }
     }
 
     // Broadcast goal update
@@ -2842,6 +3009,204 @@ function generateWeeklyReport(weekStart) {
     } catch (err) {
         console.error('[WeeklyReport] Generation failed:', err.message);
         return null;
+    }
+}
+
+// ── Level 11: Product Pipeline Framework ─────────────────
+
+const PIPELINE_PHASES = ['research', 'design', 'architecture', 'build', 'test', 'document', 'deploy'];
+const GATED_PHASES = ['design', 'architecture', 'build', 'deploy'];
+
+/**
+ * Create a new product pipeline. Creates the product record, 7 phase records,
+ * a project directory, and kicks off the research phase.
+ */
+function createProduct(name, seed, config = {}) {
+    const productId = generateId();
+    const now = new Date().toISOString();
+    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+    const projectDir = path.join(os.homedir(), 'Projects', safeName);
+
+    // Create product record
+    productStmts.insert.run(productId, name, seed, projectDir, 'research', 'active', now, JSON.stringify(config));
+
+    // Create 7 phase records
+    for (const phase of PIPELINE_PHASES) {
+        phaseStmts.insert.run(generateId(), productId, phase, 'pending');
+    }
+
+    // Create project directory with basic structure
+    try {
+        if (!fs.existsSync(projectDir)) {
+            fs.mkdirSync(projectDir, { recursive: true });
+        }
+        const claudeMd = `# ${name}\n\n> Auto-generated by Claude Remote Product Pipeline\n\n## Seed\n\n${seed}\n`;
+        const readmeMd = `# ${name}\n\nGenerated by Claude Remote.\n`;
+        fs.writeFileSync(path.join(projectDir, 'CLAUDE.md'), claudeMd);
+        fs.writeFileSync(path.join(projectDir, 'README.md'), readmeMd);
+        productStmts.updatePath.run(projectDir, productId);
+    } catch (err) {
+        console.error(`[Pipeline] Failed to create project directory for ${name}:`, err.message);
+    }
+
+    // Register as a project in portfolio
+    try {
+        const existingProject = db.prepare('SELECT id FROM projects WHERE path = ?').get(projectDir);
+        if (!existingProject) {
+            portfolioStmts.insert.run(generateId(), safeName, projectDir, 'Product pipeline: ' + name, 'active', now);
+        }
+    } catch (err) {
+        console.error(`[Pipeline] Failed to register project:`, err.message);
+    }
+
+    // Broadcast pipeline creation
+    if (wss.clients.size > 0) {
+        const msg = JSON.stringify({ type: 'pipeline_created', productId, name, phases: PIPELINE_PHASES.length });
+        wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+    }
+
+    // Kick off research phase (not gated)
+    executePhase(productId, 'research');
+
+    console.log(`[Pipeline] Created product "${name}" (${productId}), research phase started`);
+    return productId;
+}
+
+/**
+ * Get a summary of accumulated knowledge for a product (capped at 2000 chars).
+ */
+function getKnowledgeSummary(productId) {
+    const entries = knowledgeStmts.getByProduct.all(productId);
+    if (entries.length === 0) return '';
+
+    let summary = 'Previous findings:\n';
+    for (const entry of entries) {
+        const line = `- [${entry.category}] ${entry.title}: ${entry.content}\n`;
+        if (summary.length + line.length > 2000) {
+            summary += '... (truncated)\n';
+            break;
+        }
+        summary += line;
+    }
+    return summary;
+}
+
+/**
+ * Execute a specific phase for a product by creating a goal.
+ */
+function executePhase(productId, phase) {
+    const product = productStmts.get.get(productId);
+    if (!product) return null;
+
+    const knowledgeSummary = getKnowledgeSummary(productId);
+    const descriptions = {
+        research: `Research phase for ${product.name}: analyse market, competitors, technical feasibility, regulatory requirements. Seed idea: ${product.seed}`,
+        design: `Design phase for ${product.name}: create user stories, data model, API specification. ${knowledgeSummary}`,
+        architecture: `Architecture phase for ${product.name}: select tech stack, design infrastructure, plan CI/CD. ${knowledgeSummary}`,
+        build: `Build phase for ${product.name}: implement all features per the architecture. ${knowledgeSummary}`,
+        test: `Test phase for ${product.name}: write and run unit tests, integration tests, verify all features. ${knowledgeSummary}`,
+        document: `Document phase for ${product.name}: generate README, API docs, deployment guide, CLAUDE.md. ${knowledgeSummary}`,
+        deploy: `Deploy phase for ${product.name}: containerise, set up CI/CD, configure infrastructure. ${knowledgeSummary}`,
+    };
+
+    const description = descriptions[phase] || `Phase "${phase}" for ${product.name}. ${knowledgeSummary}`;
+    const now = new Date().toISOString();
+
+    try {
+        const goalId = createGoal(description, product.project_path, true);
+
+        // Update phase record
+        phaseStmts.updateStatus.run('active', now, productId, phase);
+        phaseStmts.updateGoal.run(goalId, productId, phase);
+
+        // Update product current_phase
+        productStmts.updatePhase.run(phase, PIPELINE_PHASES.indexOf(phase), productId);
+
+        // Broadcast
+        if (wss.clients.size > 0) {
+            const msg = JSON.stringify({ type: 'pipeline_phase_started', productId, phase, goalId });
+            wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+        }
+
+        console.log(`[Pipeline] Phase "${phase}" started for "${product.name}" (goal: ${goalId})`);
+        return goalId;
+    } catch (err) {
+        console.error(`[Pipeline] Failed to execute phase "${phase}" for ${product.name}:`, err.message);
+        return null;
+    }
+}
+
+/**
+ * Advance the product pipeline after a phase completes.
+ * Called from updateGoalProgress() when a goal linked to a product phase completes.
+ */
+function advancePipeline(productId, completedPhase, goalResult) {
+    const product = productStmts.get.get(productId);
+    if (!product) return;
+
+    const now = new Date().toISOString();
+
+    // Mark phase as completed
+    const goal = goalResult || {};
+    phaseStmts.complete.run('completed', now, goal.cost_usd || 0, JSON.stringify(goal.artifacts || []), productId, completedPhase);
+
+    // Update product cost
+    const phases = phaseStmts.getByProduct.all(productId);
+    const totalCost = phases.reduce((sum, p) => sum + (p.cost_usd || 0), 0);
+    productStmts.updateCost.run(totalCost, productId);
+
+    // Extract knowledge from goal results
+    if (goal.result_summary || goal.description) {
+        try {
+            knowledgeStmts.insert.run(
+                productId, completedPhase,
+                `${completedPhase} phase results`,
+                goal.result_summary || `Completed: ${goal.description || completedPhase}`,
+                completedPhase, now
+            );
+        } catch (err) {
+            console.error(`[Pipeline] Failed to store knowledge:`, err.message);
+        }
+    }
+
+    // Find next phase
+    const currentIndex = PIPELINE_PHASES.indexOf(completedPhase);
+    if (currentIndex >= PIPELINE_PHASES.length - 1) {
+        // All phases complete
+        productStmts.updateStatus.run('completed', now, productId);
+        if (wss.clients.size > 0) {
+            const msg = JSON.stringify({ type: 'pipeline_completed', productId, name: product.name });
+            wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+        }
+        const config = loadConfig();
+        if (config.ntfy_topic) {
+            try {
+                execFileSync('curl', ['-s', '-d', `Product "${product.name}" pipeline completed!`, '-H', 'Title: Pipeline Complete', '-H', 'Priority: high', '-H', 'Tags: rocket', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
+            } catch {}
+        }
+        console.log(`[Pipeline] Product "${product.name}" completed all phases`);
+        return;
+    }
+
+    const nextPhase = PIPELINE_PHASES[currentIndex + 1];
+
+    if (GATED_PHASES.includes(nextPhase)) {
+        // Gate: wait for approval
+        phaseStmts.updateGate.run('pending', null, null, productId, nextPhase);
+        if (wss.clients.size > 0) {
+            const msg = JSON.stringify({ type: 'pipeline_gate_pending', productId, name: product.name, phase: nextPhase, completedPhase });
+            wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+        }
+        const config = loadConfig();
+        if (config.ntfy_topic) {
+            try {
+                execFileSync('curl', ['-s', '-d', `Phase "${completedPhase}" complete for ${product.name}. Approve "${nextPhase}" to continue.`, '-H', 'Title: Pipeline Gate', '-H', 'Priority: default', '-H', 'Tags: traffic_light', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
+            } catch {}
+        }
+        console.log(`[Pipeline] Gate pending for "${nextPhase}" on "${product.name}"`);
+    } else {
+        // No gate — auto-advance
+        executePhase(productId, nextPhase);
     }
 }
 
@@ -3473,6 +3838,33 @@ const weeklyReportStmts = {
     getById: db.prepare('SELECT * FROM weekly_reports WHERE id = ?'),
     list: db.prepare('SELECT id, generated_at, week_start, week_end, task_count, total_cost, viewed_at FROM weekly_reports ORDER BY generated_at DESC LIMIT 20'),
     markViewed: db.prepare('UPDATE weekly_reports SET viewed_at = ? WHERE id = ?'),
+};
+
+const productStmts = {
+    insert: db.prepare('INSERT INTO products (id, name, seed, project_path, current_phase, status, created_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+    list: db.prepare('SELECT * FROM products ORDER BY created_at DESC'),
+    get: db.prepare('SELECT * FROM products WHERE id = ?'),
+    updatePhase: db.prepare('UPDATE products SET current_phase = ?, phases_completed = ? WHERE id = ?'),
+    updateStatus: db.prepare('UPDATE products SET status = ?, completed_at = ? WHERE id = ?'),
+    updateCost: db.prepare('UPDATE products SET total_cost_usd = ? WHERE id = ?'),
+    updatePath: db.prepare('UPDATE products SET project_path = ? WHERE id = ?'),
+    del: db.prepare('DELETE FROM products WHERE id = ?'),
+};
+
+const phaseStmts = {
+    insert: db.prepare('INSERT INTO product_phases (id, product_id, phase, status) VALUES (?, ?, ?, ?)'),
+    getByProduct: db.prepare('SELECT * FROM product_phases WHERE product_id = ? ORDER BY CASE phase WHEN \'research\' THEN 0 WHEN \'design\' THEN 1 WHEN \'architecture\' THEN 2 WHEN \'build\' THEN 3 WHEN \'test\' THEN 4 WHEN \'document\' THEN 5 WHEN \'deploy\' THEN 6 END'),
+    get: db.prepare('SELECT * FROM product_phases WHERE product_id = ? AND phase = ?'),
+    updateStatus: db.prepare('UPDATE product_phases SET status = ?, started_at = ? WHERE product_id = ? AND phase = ?'),
+    updateGoal: db.prepare('UPDATE product_phases SET goal_id = ? WHERE product_id = ? AND phase = ?'),
+    complete: db.prepare('UPDATE product_phases SET status = ?, completed_at = ?, cost_usd = ?, artifacts = ? WHERE product_id = ? AND phase = ?'),
+    updateGate: db.prepare('UPDATE product_phases SET gate_status = ?, gate_approved_at = ?, notes = ? WHERE product_id = ? AND phase = ?'),
+};
+
+const knowledgeStmts = {
+    insert: db.prepare('INSERT INTO product_knowledge (product_id, category, title, content, source_phase, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
+    getByProduct: db.prepare('SELECT * FROM product_knowledge WHERE product_id = ? ORDER BY created_at ASC'),
+    getByCategory: db.prepare('SELECT * FROM product_knowledge WHERE product_id = ? AND category = ? ORDER BY created_at ASC'),
 };
 
 syncRegistry();

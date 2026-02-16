@@ -30,6 +30,7 @@
 | 10.D | Community Awareness | Implementation Spec | Complete | [level-10-phase-d-community-awareness.md](level-10-phase-d-community-awareness.md) |
 | 10.E | Feedback Loop | Implementation Spec | Complete | [level-10-phase-e-feedback-loop.md](level-10-phase-e-feedback-loop.md) |
 | 10.F | Error Pattern Pre-emption | Implementation Spec | Complete | [level-10-phase-f-error-preemption.md](level-10-phase-f-error-preemption.md) |
+| 11.A | Product Pipeline Framework | Implementation Spec | Complete | [level-11-phase-a-pipeline-framework.md](level-11-phase-a-pipeline-framework.md) |
 
 ## Plan Template
 
