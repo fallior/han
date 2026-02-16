@@ -23,6 +23,7 @@
 | 9.2 | Cost Budgets + Priority Engine | Implementation Spec | Complete | [level-09-phases-2-5-remainder.md](level-09-phases-2-5-remainder.md) |
 | 9.3 | Daily Digest | Implementation Spec | Complete | [level-09-phase-3-daily-digest.md](level-09-phase-3-daily-digest.md) |
 | 9.4 | Nightly Maintenance Automation | Implementation Spec | Complete | [level-09-phase-4-nightly-maintenance.md](level-09-phase-4-nightly-maintenance.md) |
+| 9.5 | Weekly Progress Reports | Implementation Spec | Complete | [level-09-phase-5-weekly-reports.md](level-09-phase-5-weekly-reports.md) |
 | 10.A | Context Injection (Ecosystem-Aware Automator) | Implementation Spec | Complete | [level-10-phase-a-context-injection.md](level-10-phase-a-context-injection.md) |
 | 10.B | Protocol Compliance | Implementation Spec | Complete | [level-10-phase-b-protocol-compliance.md](level-10-phase-b-protocol-compliance.md) |
 | 10.C | Learning + Decisions Capture | Implementation Spec | Complete | [level-10-phase-c-learning-decisions.md](level-10-phase-c-learning-decisions.md) |

@@ -251,6 +251,18 @@ db.exec(`CREATE TABLE IF NOT EXISTS maintenance_runs (
     summary TEXT
 )`);
 
+db.exec(`CREATE TABLE IF NOT EXISTS weekly_reports (
+    id TEXT PRIMARY KEY,
+    generated_at TEXT NOT NULL,
+    week_start TEXT NOT NULL,
+    week_end TEXT NOT NULL,
+    report_text TEXT NOT NULL,
+    report_json TEXT NOT NULL,
+    task_count INTEGER DEFAULT 0,
+    total_cost REAL DEFAULT 0,
+    viewed_at TEXT
+)`);
+
 // ── Registry sync (Level 9) ─────────────────────────────
 const REGISTRY_PATH = path.join(process.env.HOME, 'Projects', 'infrastructure', 'registry', 'services.toml');
 
@@ -2119,6 +2131,45 @@ app.post('/api/maintenance/:project/toggle', (req, res) => {
     }
 });
 
+// ── Weekly Report API (Level 9 Phase 5) ───────────────────
+
+app.get('/api/weekly-report/latest', (req, res) => {
+    try {
+        const report = weeklyReportStmts.getLatest.get();
+        if (!report) return res.json({ success: true, report: null });
+        if (!report.viewed_at) {
+            weeklyReportStmts.markViewed.run(new Date().toISOString(), report.id);
+            report.viewed_at = new Date().toISOString();
+        }
+        report.report_json = JSON.parse(report.report_json || '{}');
+        res.json({ success: true, report });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/weekly-report/generate', (req, res) => {
+    try {
+        const since = req.query.since
+            ? new Date(req.query.since)
+            : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const report = generateWeeklyReport(since);
+        if (!report) return res.json({ success: true, report: null, message: 'No activity in period' });
+        res.json({ success: true, report });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/weekly-report/history', (req, res) => {
+    try {
+        const reports = weeklyReportStmts.list.all();
+        res.json({ success: true, reports });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 /**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
@@ -2646,6 +2697,150 @@ function runNightlyMaintenance() {
         return { runId, goalIds };
     } catch (err) {
         console.error('[Maintenance] Run failed:', err.message);
+        return null;
+    }
+}
+
+/**
+ * Generate a weekly progress report aggregating 7 days of activity across all projects.
+ * Returns the report object or null if no activity in the period.
+ */
+function generateWeeklyReport(weekStart) {
+    try {
+        const periodStart = weekStart instanceof Date ? weekStart.toISOString() : weekStart;
+        const periodEnd = new Date().toISOString();
+
+        const projects = portfolioStmts.list.all();
+        const projectData = [];
+        let totalCompleted = 0;
+        let totalFailed = 0;
+        let totalCost = 0;
+        let totalCommits = 0;
+
+        // All tasks in the period (for daily breakdown)
+        const allTasks = [];
+
+        for (const proj of projects) {
+            const tasks = db.prepare(
+                'SELECT * FROM tasks WHERE project_path = ? AND completed_at > ? AND status IN (\'done\', \'failed\') ORDER BY completed_at ASC'
+            ).all(proj.path, periodStart);
+
+            if (tasks.length === 0) continue;
+
+            const done = tasks.filter(t => t.status === 'done');
+            const failed = tasks.filter(t => t.status === 'failed');
+            const cost = tasks.reduce((sum, t) => sum + (t.cost_usd || 0), 0);
+            const commits = tasks.filter(t => t.commit_sha).map(t => t.commit_sha.slice(0, 7));
+
+            // Goals completed for this project in the period
+            const goalsCompleted = db.prepare(
+                'SELECT COUNT(*) as count FROM goals WHERE project_path = ? AND completed_at > ? AND status = \'completed\''
+            ).get(proj.path, periodStart).count;
+
+            totalCompleted += done.length;
+            totalFailed += failed.length;
+            totalCost += cost;
+            totalCommits += commits.length;
+            allTasks.push(...tasks);
+
+            projectData.push({
+                name: proj.name,
+                tasks_completed: done.length,
+                tasks_failed: failed.length,
+                cost,
+                commits,
+                goals_completed: goalsCompleted,
+            });
+        }
+
+        if (totalCompleted === 0 && totalFailed === 0) return null;
+
+        // Daily breakdown (burndown data)
+        const dailyBreakdown = [];
+        const startDate = new Date(periodStart);
+        for (let i = 0; i < 7; i++) {
+            const date = new Date(startDate);
+            date.setDate(date.getDate() + i);
+            const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+            const completed = allTasks.filter(t => t.status === 'done' && t.completed_at && t.completed_at.startsWith(dateStr)).length;
+            const failed = allTasks.filter(t => t.status === 'failed' && t.completed_at && t.completed_at.startsWith(dateStr)).length;
+            dailyBreakdown.push({ date: dateStr, completed, failed });
+        }
+
+        // Goals completed in period
+        const totalGoalsCompleted = db.prepare(
+            'SELECT COUNT(*) as count FROM goals WHERE completed_at > ? AND status = \'completed\''
+        ).get(periodStart).count;
+
+        // Velocity: compare this week vs previous week
+        const prevWeekStart = new Date(new Date(periodStart).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const prevWeekCount = db.prepare(
+            'SELECT COUNT(*) as count FROM tasks WHERE completed_at > ? AND completed_at <= ? AND status = \'done\''
+        ).get(prevWeekStart, periodStart).count;
+        const trend = totalCompleted > prevWeekCount * 1.2 ? 'up' : totalCompleted < prevWeekCount * 0.8 ? 'down' : 'stable';
+
+        const reportJson = {
+            generated_at: periodEnd,
+            week_start: periodStart,
+            week_end: periodEnd,
+            summary: {
+                tasks_completed: totalCompleted,
+                tasks_failed: totalFailed,
+                goals_completed: totalGoalsCompleted,
+                total_cost: totalCost,
+                commits: totalCommits,
+                projects_active: projectData.length,
+            },
+            daily_breakdown: dailyBreakdown,
+            projects: projectData,
+            velocity: { this_week: totalCompleted, prev_week: prevWeekCount, trend },
+        };
+
+        // Build markdown text
+        const weekOfStr = new Date(periodStart).toLocaleDateString();
+        const lines = [
+            `Week of ${weekOfStr}: ${totalCompleted} tasks completed across ${projectData.length} projects ($${totalCost.toFixed(4)}).${totalGoalsCompleted > 0 ? ` ${totalGoalsCompleted} goals completed.` : ''}`,
+            ``,
+            `## Daily Breakdown`,
+            ``,
+            `| Day | Completed | Failed |`,
+            `|-----|-----------|--------|`,
+        ];
+
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        for (const d of dailyBreakdown) {
+            const dayName = dayNames[new Date(d.date + 'T12:00:00').getDay()];
+            lines.push(`| ${dayName} ${d.date} | ${d.completed} | ${d.failed} |`);
+        }
+
+        lines.push(``, `## Velocity`, ``);
+        lines.push(`- This week: ${totalCompleted} tasks (prev week: ${prevWeekCount}) — trend: ${trend}`);
+
+        lines.push(``, `## Projects`, ``);
+        for (const p of projectData) {
+            lines.push(`### ${p.name}`);
+            lines.push(`- ${p.tasks_completed} completed, ${p.tasks_failed} failed — $${p.cost.toFixed(4)}`);
+            if (p.commits.length > 0) lines.push(`- Commits: ${p.commits.join(', ')}`);
+            if (p.goals_completed > 0) lines.push(`- Goals completed: ${p.goals_completed}`);
+            lines.push(``);
+        }
+
+        const reportText = lines.join('\n');
+        const id = generateId();
+
+        weeklyReportStmts.insert.run(id, periodEnd, periodStart, periodEnd, reportText, JSON.stringify(reportJson), totalCompleted + totalFailed, totalCost);
+
+        // Broadcast via WebSocket
+        if (wss.clients.size > 0) {
+            const msg = JSON.stringify({ type: 'weekly_report_ready', reportId: id, task_count: totalCompleted + totalFailed, total_cost: totalCost });
+            wss.clients.forEach(client => {
+                if (client.readyState === 1) client.send(msg);
+            });
+        }
+
+        return { id, task_count: totalCompleted + totalFailed, total_cost: totalCost, report_text: reportText };
+    } catch (err) {
+        console.error('[WeeklyReport] Generation failed:', err.message);
         return null;
     }
 }
@@ -3270,6 +3465,14 @@ const maintenanceStmts = {
     getLatest: db.prepare('SELECT * FROM maintenance_runs ORDER BY started_at DESC LIMIT 1'),
     list: db.prepare('SELECT * FROM maintenance_runs ORDER BY started_at DESC LIMIT 30'),
     complete: db.prepare('UPDATE maintenance_runs SET completed_at = ?, status = ?, summary = ? WHERE id = ?'),
+};
+
+const weeklyReportStmts = {
+    insert: db.prepare('INSERT INTO weekly_reports (id, generated_at, week_start, week_end, report_text, report_json, task_count, total_cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+    getLatest: db.prepare('SELECT * FROM weekly_reports ORDER BY generated_at DESC LIMIT 1'),
+    getById: db.prepare('SELECT * FROM weekly_reports WHERE id = ?'),
+    list: db.prepare('SELECT id, generated_at, week_start, week_end, task_count, total_cost, viewed_at FROM weekly_reports ORDER BY generated_at DESC LIMIT 20'),
+    markViewed: db.prepare('UPDATE weekly_reports SET viewed_at = ? WHERE id = ?'),
 };
 
 syncRegistry();
@@ -4057,6 +4260,47 @@ const maintenanceInterval = setInterval(checkMaintenanceSchedule, 3600000);
 // Check on startup if today's maintenance is missing (after digest check)
 setTimeout(checkMaintenanceSchedule, 10000);
 
+// ── Weekly report scheduler ───────────────────────────────
+
+let lastWeeklyReportWeek = null;
+
+function getISOWeek(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return String(Math.ceil((((d - yearStart) / 86400000) + 1) / 7)).padStart(2, '0');
+}
+
+function checkWeeklyReportSchedule() {
+    const config = loadConfig();
+    const reportDay = parseInt((config.weekly_report_day || '0'), 10);  // 0=Sunday
+    const reportHour = parseInt((config.weekly_report_hour || '8'), 10);
+    const now = new Date();
+
+    const weekStr = `${now.getFullYear()}-W${getISOWeek(now)}`;
+    if (lastWeeklyReportWeek === weekStr) return;
+    if (now.getDay() !== reportDay) return;
+    if (now.getHours() < reportHour) return;
+
+    const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const report = generateWeeklyReport(weekStart);
+    if (report) {
+        lastWeeklyReportWeek = weekStr;
+        if (config.ntfy_topic) {
+            try {
+                execFileSync('curl', ['-s', '-d', report.report_text.split('\n')[0], '-H', 'Title: Claude Remote Weekly Report', '-H', 'Priority: default', '-H', 'Tags: bar_chart', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
+            } catch {}
+        }
+        console.log(`[WeeklyReport] Generated: ${report.task_count} tasks, $${report.total_cost.toFixed(4)}`);
+    }
+}
+
+const weeklyReportInterval = setInterval(checkWeeklyReportSchedule, 3600000);
+
+// Check on startup if this week's report is missing
+setTimeout(checkWeeklyReportSchedule, 15000);
+
 // ── WebSocket server ──────────────────────────────────────
 
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -4191,6 +4435,7 @@ process.on('SIGTERM', () => {
     clearInterval(orchestratorInterval);
     clearInterval(digestInterval);
     clearInterval(maintenanceInterval);
+    clearInterval(weeklyReportInterval);
     if (runningAbort) runningAbort.abort();
     try { db.close(); } catch {}
     wss.close();
