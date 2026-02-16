@@ -1,12 +1,12 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-16 (Session 21) by Darron (via Claude)
+> Last updated: 2026-02-16 (Session 22) by Darron (via Claude)
 
 ## Current Stage
 
-**Levels 1-8 Complete, Level 9 Phase 1-2 Complete, Level 10 Phase A Complete**. All core levels plus autonomous task runner, intelligent orchestrator, portfolio manager, cost budgets, priority engine, and ecosystem-aware context injection.
+**Levels 1-8 Complete, Level 9 Phase 1-2 Complete, Level 10 Phases A-F Complete**. All core levels plus autonomous task runner, intelligent orchestrator, portfolio manager, cost budgets, priority engine, and the full self-improving development system.
 
-Create tasks from your phone, Claude Code executes them headlessly with safety features. Submit high-level goals — the orchestrator decomposes them into ordered subtasks, routes to the right model (haiku/sonnet/opus), retries failures with analysis, and tracks outcomes in project memory. Dual LLM backend: Ollama local or Anthropic API fallback. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working.
+Create tasks from your phone, Claude Code executes them headlessly with safety features. Submit high-level goals — the orchestrator decomposes them into ordered subtasks, routes to the right model (haiku/sonnet/opus) with memory-based cost optimisation, retries failures with analysis, and tracks outcomes in project memory. Ecosystem-aware context injection includes settled decisions, cross-project learnings, port allocations, error pre-emption, and knowledge capture markers. Analytics API provides velocity tracking, per-model stats, and cost optimisation suggestions. Dual LLM backend: Ollama local or Anthropic API fallback. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working.
 
 ## Progress Summary
 
@@ -29,6 +29,36 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-16 — Darron (via Claude) — Session 22
+- **Level 10 Phase B: Protocol Compliance** (`0ab43a0`):
+  - Enhanced `commitTaskChanges()` returns `{ committed, sha, filesChanged }`
+  - `commit_sha`, `files_changed` columns on tasks; `summary_file` on goals
+  - `generateGoalSummary(goalId)` creates structured markdown when goals complete
+  - `GET /api/goals/:id/summary` endpoint with backfill
+  - Reordered `runNextTask()`: commit before `updateGoalProgress()` so summaries have SHAs
+- **Level 10 Phase C: Learning + Decisions Capture** (`c1ba5f9`):
+  - `[LEARNING]...[/LEARNING]` and `[DECISION]...[/DECISION]` markers in agent output
+  - `task_proposals` table with status lifecycle: pending → approved/rejected
+  - `extractAndStoreProposals()` scans task results, stores proposals
+  - Review API: `GET /api/proposals`, `POST approve/reject`
+  - `writeLearning()` creates file + updates INDEX.md; `writeDecision()` appends to DECISIONS.md
+- **Level 10 Phase D: Community Awareness** (`48e15e4`):
+  - `parseRegistryToml()` extracts port allocations from sub-sections
+  - `ports TEXT` column on projects, synced from infrastructure registry
+  - `getEcosystemSummary()` enriched with port tags, task queue counts
+  - `GET /api/ecosystem` returns structured per-project ports, stats, budget
+  - Fix: `getAllProjectStats()`/`getProjectStats()` used `'completed'` → `'done'`
+- **Level 10 Phase E: Feedback Loop** (`837b8f7`):
+  - Fix: `recordTaskOutcome()` moved from `updateGoalProgress()` into `runNextTask()` (was duplicating)
+  - `recommendModel()` in orchestrator.js: queries project_memory for cheapest model with acceptable success rate
+  - Goal decomposition wired to `recommendModel()`: auto-downgrades when history supports cheaper model
+  - `GET /api/analytics`: global stats, per-model/project, 7-day velocity, cost optimisation suggestions
+- **Level 10 Phase F: Error Pattern Pre-emption** (`cbdd85f`):
+  - `getRecentFailures()`: queries failed outcomes (30-day window), deduplicates by normalised error pattern
+  - "Known Pitfalls" section injected into task context warning about past failures
+  - `GET /api/errors/:project` returns error patterns with frequency and failure rate
+  - `extractAndStoreProposals()` now runs on failed tasks too (hoisted `resultText`)
 
 ### 2026-02-16 — Darron (via Claude) — Session 21
 - **Level 9 Phase 2: Cost Budgets + Priority Engine** (`0cd7a64`):
@@ -315,15 +345,29 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Sister project awareness via portfolio query
 - ✅ Semantic commit prefixes in commitTaskChanges()
 - ✅ Auto-commit after successful task completion
+- ✅ Goal completion summaries (structured markdown with commits, files, cost)
+- ✅ Commit SHA and files changed tracking per task
+- ✅ Knowledge capture via structured markers ([LEARNING]/[DECISION])
+- ✅ Proposals queue with review API (approve/reject)
+- ✅ Approved learnings written to ~/Projects/_learnings/ + INDEX.md
+- ✅ Approved decisions appended to DECISIONS.md
+- ✅ Port allocation extraction from infrastructure registry
+- ✅ Enhanced ecosystem summary with ports, task counts, flags
+- ✅ GET /api/ecosystem structured endpoint
+- ✅ Memory-based model routing (recommendModel — cheapest with proven success)
+- ✅ GET /api/analytics (global, per-model, per-project, velocity, suggestions)
+- ✅ Error pattern pre-emption (Known Pitfalls in task context)
+- ✅ GET /api/errors/:project (error patterns with frequency/rate)
+- ✅ Failed task learnings extraction (extractAndStoreProposals on failures)
+- ✅ Duplicate outcome recording fix (exactly once per task)
 
 ## Next Actions
 
 ### Immediate (Next Session)
-- [ ] Level 10 Phase B: Protocol Compliance (session logging, timestamp protocol for automated tasks)
-- [ ] Level 10 Phase C: Learning + Decisions (automated agents capture learnings and propose decisions)
-- [ ] Level 10 Phase D: Community Awareness (cross-project dependency awareness, resource contention detection)
+- [ ] Level 11 or Level 9 Phases 3-5 (user choice)
 - [ ] Test retry logic with a deliberately failing task
 - [ ] Test goal decomposition from the phone UI (Goals tab)
+- [ ] Test knowledge capture markers with a real task
 
 ### Short-term
 - [ ] Level 9 Phases 3-5: Daily Digest, Cross-Project Dependencies, Nightly Maintenance + Weekly Reports
@@ -353,6 +397,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-16_14-48-00.md](../_logs/session_2026-02-16_14-48-00.md) — Level 10 Phases B-F (complete)
 - [session_2026-02-16_04-30-00.md](../_logs/session_2026-02-16_04-30-00.md) — Level 9.2 + Level 10 Phase A + DEC-015
 - [session_2026-02-15_09-30-00.md](../_logs/session_2026-02-15_09-30-00.md) — Level 8 commit + roadmap update
 - [session_2026-02-15_02-30-00.md](../_logs/session_2026-02-15_02-30-00.md) — Task logging + append-only terminal buffer
