@@ -26,6 +26,7 @@
 | 10.C | Learning + Decisions Capture | Implementation Spec | Complete | [level-10-phase-c-learning-decisions.md](level-10-phase-c-learning-decisions.md) |
 | 10.D | Community Awareness | Implementation Spec | Complete | [level-10-phase-d-community-awareness.md](level-10-phase-d-community-awareness.md) |
 | 10.E | Feedback Loop | Implementation Spec | Complete | [level-10-phase-e-feedback-loop.md](level-10-phase-e-feedback-loop.md) |
+| 10.F | Error Pattern Pre-emption | Implementation Spec | Complete | [level-10-phase-f-error-preemption.md](level-10-phase-f-error-preemption.md) |
 
 ## Plan Template
 

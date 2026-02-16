@@ -2104,6 +2104,31 @@ app.get('/api/analytics', (req, res) => {
 });
 
 /**
+ * GET /api/errors/:project — Error patterns for a project from project memory
+ */
+app.get('/api/errors/:project', (req, res) => {
+    try {
+        const projectPath = decodeURIComponent(req.params.project);
+        const patterns = getRecentFailures(projectPath);
+
+        // Total failure stats
+        const totalRow = db.prepare(
+            'SELECT COUNT(*) as total, SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures FROM project_memory WHERE project_path = ?'
+        ).get(projectPath);
+
+        res.json({
+            success: true,
+            projectPath,
+            patterns,
+            totalFailures: totalRow.failures || 0,
+            failureRate: totalRow.total > 0 ? (totalRow.failures || 0) / totalRow.total : 0,
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
 app.post('/api/orchestrator/setup', async (req, res) => {
@@ -2486,6 +2511,39 @@ function getRelevantLearnings(techStack) {
     }).slice(0, 5);
 }
 
+/**
+ * Get recent failure patterns for a project from project_memory.
+ * Deduplicates by normalised error text, returns top 5 by frequency.
+ */
+function getRecentFailures(projectPath) {
+    try {
+        const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+        const failures = db.prepare(
+            'SELECT error_summary, model_used, task_type, created_at FROM project_memory WHERE project_path = ? AND success = 0 AND error_summary IS NOT NULL AND created_at > ? ORDER BY created_at DESC'
+        ).all(projectPath, cutoff);
+
+        if (!failures.length) return [];
+
+        const patterns = {};
+        for (const f of failures) {
+            const normalised = f.error_summary.slice(0, 100).toLowerCase()
+                .replace(/[0-9a-f]{6,}/g, '...')
+                .replace(/\d+/g, 'N')
+                .trim();
+            if (!patterns[normalised]) {
+                patterns[normalised] = { error: f.error_summary.slice(0, 200), count: 0, lastSeen: f.created_at, models: new Set() };
+            }
+            patterns[normalised].count++;
+            patterns[normalised].models.add(f.model_used);
+        }
+
+        return Object.values(patterns)
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 5)
+            .map(p => ({ ...p, models: [...p.models] }));
+    } catch { return []; }
+}
+
 function getEcosystemSummary() {
     try {
         const projects = portfolioStmts.list.all();
@@ -2832,6 +2890,15 @@ You are an autonomous agent in Darron's development ecosystem.
             }
         }
         parts.push(learningsText);
+    }
+
+    const failures = getRecentFailures(projectPath);
+    if (failures.length > 0) {
+        let pitfallsText = '\n## Known Pitfalls (Recent Failures)\n\nPrevious tasks on this project hit these errors. Avoid repeating them:\n';
+        for (const f of failures) {
+            pitfallsText += `- **${f.error.slice(0, 120)}** (${f.count}x, last: ${f.lastSeen.slice(0, 10)})\n`;
+        }
+        parts.push(pitfallsText);
     }
 
     const ecosystem = getEcosystemSummary();
@@ -3413,6 +3480,8 @@ async function runNextTask() {
         }
     }
 
+    let resultText = '';  // Hoisted for access in catch block (failure learnings extraction)
+
     try {
         // Build clean env without CLAUDECODE (prevents nested session detection)
         const cleanEnv = { ...process.env };
@@ -3470,7 +3539,7 @@ async function runNextTask() {
         let totalTokensIn = 0;
         let totalTokensOut = 0;
         let numTurns = 0;
-        let resultText = '';
+        resultText = '';
 
         for await (const message of q) {
             // Check if cancelled
@@ -3566,6 +3635,15 @@ async function runNextTask() {
 
         // Record outcome in project memory (once per task)
         recordTaskOutcome(taskStmts.get.get(task.id));
+
+        // Extract knowledge proposals from failed task results too (Phase F)
+        if (resultText) {
+            try {
+                extractAndStoreProposals(task.id, resultText, task.project_path);
+            } catch (propErr) {
+                console.error(`[Proposals] Extraction failed for task ${task.id}:`, propErr.message);
+            }
+        }
 
         // Update goal progress and recalculate costs
         if (task.goal_id) {
