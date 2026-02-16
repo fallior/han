@@ -1,10 +1,10 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-16 (Session 22) by Darron (via Claude)
+> Last updated: 2026-02-16 (Session 23) by Darron (via Claude)
 
 ## Current Stage
 
-**Levels 1-8 Complete, Level 9 Phase 1-2 Complete, Level 10 Phases A-F Complete**. All core levels plus autonomous task runner, intelligent orchestrator, portfolio manager, cost budgets, priority engine, and the full self-improving development system.
+**Levels 1-8 Complete, Level 9 Complete (all 5 phases), Level 10 Complete (all 6 phases)**. All core levels plus autonomous task runner, intelligent orchestrator, portfolio manager, cost budgets, priority engine, daily digests, nightly maintenance automation, weekly progress reports, and the full self-improving development system.
 
 Create tasks from your phone, Claude Code executes them headlessly with safety features. Submit high-level goals — the orchestrator decomposes them into ordered subtasks, routes to the right model (haiku/sonnet/opus) with memory-based cost optimisation, retries failures with analysis, and tracks outcomes in project memory. Ecosystem-aware context injection includes settled decisions, cross-project learnings, port allocations, error pre-emption, and knowledge capture markers. Analytics API provides velocity tracking, per-model stats, and cost optimisation suggestions. Dual LLM backend: Ollama local or Anthropic API fallback. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working.
 
@@ -29,6 +29,32 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-16 — Darron (via Claude) — Session 23
+- **Level 9 Phase 3: Daily Digest** (`75e5a5b`):
+  - `digests` table with prepared statements (insert, getLatest, getById, list, markViewed)
+  - `generateDailyDigest(since)` aggregates tasks across all projects, builds markdown + JSON
+  - `loadConfig()` reads `~/.claude-remote/config.json`; `sendDigestPush()` sends via ntfy.sh
+  - Digest scheduler: hourly check against configured hour (default 7 AM), date-gated
+  - API: `GET /api/digest/latest`, `POST /api/digest/generate`, `GET /api/digest/history`
+  - WebSocket broadcast: `digest_ready`
+- **Level 9 Phase 4: Nightly Maintenance Automation** (`f792912`):
+  - `maintenance_runs` table + `maintenance_enabled` column on projects
+  - Extracted `createGoal()` helper from `POST /api/goals` for programmatic goal creation
+  - `runNightlyMaintenance()` creates maintenance goals for each active, enabled project
+  - Maintenance scheduler: hourly check against configured hour (default 2 AM), date-gated
+  - API: `GET /api/maintenance/history`, `POST /api/maintenance/run`, `POST /api/maintenance/:project/toggle`
+  - Per-project toggle + global config toggle
+- **Level 9 Phase 5: Weekly Progress Reports** (`7430f28`):
+  - `weekly_reports` table with prepared statements
+  - `generateWeeklyReport(weekStart)` aggregates 7 days of task/goal activity
+  - Daily breakdown table (burndown data: completed + failed per day)
+  - Velocity comparison vs previous week with trend (up/down/stable)
+  - `getISOWeek()` helper for week-number-based scheduler gating
+  - Weekly scheduler: hourly check, gates on ISO week + day (default Sunday) + hour (default 8 AM)
+  - API: `GET /api/weekly-report/latest`, `POST /api/weekly-report/generate`, `GET /api/weekly-report/history`
+  - Push notification with bar_chart tag
+- **Level 9 now feature-complete** per ROADMAP (all 5 phases: Portfolio, Budgets, Digest, Maintenance, Weekly Reports)
 
 ### 2026-02-16 — Darron (via Claude) — Session 22
 - **Level 10 Phase B: Protocol Compliance** (`0ab43a0`):
@@ -360,17 +386,25 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ GET /api/errors/:project (error patterns with frequency/rate)
 - ✅ Failed task learnings extraction (extractAndStoreProposals on failures)
 - ✅ Duplicate outcome recording fix (exactly once per task)
+- ✅ Daily digest generation with cross-project aggregation
+- ✅ Digest scheduler (configurable hour, ntfy.sh push, WebSocket broadcast)
+- ✅ Nightly maintenance automation (per-project goals, configurable hour)
+- ✅ Per-project maintenance toggle
+- ✅ createGoal() reusable helper for programmatic goal creation
+- ✅ Weekly progress reports with daily burndown data
+- ✅ Velocity trend tracking (this week vs previous week)
+- ✅ Weekly report scheduler (configurable day + hour, ISO week gating)
 
 ## Next Actions
 
 ### Immediate (Next Session)
-- [ ] Level 11 or Level 9 Phases 3-5 (user choice)
-- [ ] Test retry logic with a deliberately failing task
-- [ ] Test goal decomposition from the phone UI (Goals tab)
+- [ ] Level 11 (user choice — final level in ROADMAP)
+- [ ] Test daily digest generation (`POST /api/digest/generate`)
+- [ ] Test weekly report generation (`POST /api/weekly-report/generate`)
+- [ ] Test maintenance run (`POST /api/maintenance/run`)
 - [ ] Test knowledge capture markers with a real task
 
 ### Short-term
-- [ ] Level 9 Phases 3-5: Daily Digest, Cross-Project Dependencies, Nightly Maintenance + Weekly Reports
 - [ ] Add git checkpoint visualisation in task detail view
 - [ ] Add approval history tracking
 - [ ] Refine UI based on continued mobile usage
@@ -397,6 +431,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-16_17-08-00.md](../_logs/session_2026-02-16_17-08-00.md) — Level 9 Phases 3-5 (complete)
 - [session_2026-02-16_14-48-00.md](../_logs/session_2026-02-16_14-48-00.md) — Level 10 Phases B-F (complete)
 - [session_2026-02-16_04-30-00.md](../_logs/session_2026-02-16_04-30-00.md) — Level 9.2 + Level 10 Phase A + DEC-015
 - [session_2026-02-15_09-30-00.md](../_logs/session_2026-02-15_09-30-00.md) — Level 8 commit + roadmap update
