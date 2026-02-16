@@ -2467,6 +2467,56 @@ app.get('/api/products/:id/architecture', (req, res) => {
 });
 
 /**
+ * GET /api/products/:id/build — Build phase status with subagent progress
+ */
+app.get('/api/products/:id/build', (req, res) => {
+    try {
+        const productId = req.params.id;
+        const product = productStmts.get.get(productId);
+        if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+
+        const phase = phaseStmts.get.get(productId, 'build');
+        if (!phase) return res.status(404).json({ success: false, error: 'Build phase not found' });
+
+        const parentGoal = phase.goal_id ? goalStmts.get.get(phase.goal_id) : null;
+        if (!parentGoal) {
+            return res.json({ success: true, status: 'not_started', phase, subagents: [] });
+        }
+
+        const children = goalStmts.getChildren.all(parentGoal.id);
+        const subagents = children.map(child => {
+            const tasks = taskStmts.getByGoal.all(child.id);
+            return {
+                goal_id: child.id,
+                area: child.description.split('.')[0].split(':')[0].trim(),
+                status: child.status,
+                progress: { tasks_total: child.task_count || 0, tasks_completed: child.tasks_completed || 0, tasks_failed: child.tasks_failed || 0 },
+                cost_usd: child.total_cost_usd || 0,
+                created_at: child.created_at,
+                completed_at: child.completed_at,
+                tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, cost_usd: t.cost_usd || 0 }))
+            };
+        });
+
+        const knowledge = knowledgeStmts.getByProduct.all(productId)
+            .filter(k => k.source_phase === 'build')
+            .map(k => ({ category: k.category, title: k.title, preview: k.content.slice(0, 200), created_at: k.created_at }));
+
+        res.json({
+            success: true,
+            status: parentGoal.status,
+            phase,
+            parent_goal: { id: parentGoal.id, status: parentGoal.status, total_cost_usd: parentGoal.total_cost_usd || 0, created_at: parentGoal.created_at, completed_at: parentGoal.completed_at },
+            subagents,
+            knowledge_count: knowledge.length,
+            knowledge_preview: knowledge.slice(0, 10)
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
 app.post('/api/orchestrator/setup', async (req, res) => {
@@ -2690,6 +2740,7 @@ function updateParentGoalProgress(parentGoalId) {
                 if (phaseRecord.phase === 'research') synthesizeResearchFindings(parentGoalId);
                 else if (phaseRecord.phase === 'design') synthesizeDesignArtifacts(parentGoalId);
                 else if (phaseRecord.phase === 'architecture') synthesizeArchitectureSpec(parentGoalId);
+                else if (phaseRecord.phase === 'build') synthesizeBuildResults(parentGoalId);
             }
         } catch (err) { console.error(`[Pipeline] Synthesis failed for ${parentGoalId}:`, err.message); }
 
@@ -2938,6 +2989,84 @@ function synthesizeArchitectureSpec(parentGoalId) {
         console.log(`[Pipeline] Architecture synthesis complete for "${product.name}" — ${allKnowledge.length} decisions, $${totalCost.toFixed(4)}`);
     } catch (err) {
         console.error(`[Pipeline] Architecture synthesis failed for parent ${parentGoalId}:`, err.message);
+    }
+}
+
+/**
+ * Synthesize build results from all build subagent knowledge into a Build Report.
+ */
+function synthesizeBuildResults(parentGoalId) {
+    try {
+        const parent = goalStmts.get.get(parentGoalId);
+        if (!parent) return;
+
+        const phaseRecord = db.prepare('SELECT product_id FROM product_phases WHERE goal_id = ?').get(parentGoalId);
+        if (!phaseRecord) return;
+
+        const product = productStmts.get.get(phaseRecord.product_id);
+        if (!product) return;
+
+        const allKnowledge = knowledgeStmts.getByProduct.all(product.id)
+            .filter(k => k.source_phase === 'build');
+
+        const children = goalStmts.getChildren.all(parentGoalId);
+        const totalCost = children.reduce((sum, c) => sum + (c.total_cost_usd || 0), 0);
+
+        const categoryNames = {
+            scaffold: 'Project Scaffold',
+            backend: 'Backend',
+            frontend: 'Frontend',
+            integration: 'Integration',
+            tooling: 'Tooling & DevOps',
+            docs: 'Documentation'
+        };
+
+        const grouped = {};
+        for (const k of allKnowledge) {
+            if (k.category === 'build_report') continue;
+            if (!grouped[k.category]) grouped[k.category] = [];
+            grouped[k.category].push(k);
+        }
+
+        let report = `# Build Report — ${product.name}\n\n`;
+        report += `> Generated ${new Date().toISOString()}\n\n`;
+
+        for (const [cat, displayName] of Object.entries(categoryNames)) {
+            report += `## ${displayName}\n\n`;
+            if (grouped[cat] && grouped[cat].length > 0) {
+                for (const k of grouped[cat]) {
+                    report += `### ${k.title}\n\n${k.content}\n\n`;
+                }
+            } else {
+                report += `*No knowledge entries recorded for this area.*\n\n`;
+            }
+        }
+
+        // Include any uncategorised build knowledge
+        for (const [cat, entries] of Object.entries(grouped)) {
+            if (!categoryNames[cat]) {
+                report += `## ${cat}\n\n`;
+                for (const k of entries) {
+                    report += `### ${k.title}\n\n${k.content}\n\n`;
+                }
+            }
+        }
+
+        report += `## Execution Summary\n\n`;
+        report += `| Subagent | Status | Tasks | Cost |\n`;
+        report += `|----------|--------|-------|------|\n`;
+        for (const child of children) {
+            const area = child.description.split('.')[0].split('—')[0].trim();
+            report += `| ${area} | ${child.status} | ${child.tasks_completed || 0}/${child.task_count || 0} | $${(child.total_cost_usd || 0).toFixed(4)} |\n`;
+        }
+        report += `\n**Total build cost:** $${totalCost.toFixed(4)}\n`;
+
+        const now = new Date().toISOString();
+        knowledgeStmts.insert.run(product.id, 'build_report', `Complete Build Report — ${product.name}`, report, 'build', now);
+
+        console.log(`[Pipeline] Build synthesis complete for "${product.name}" — ${allKnowledge.length} entries, $${totalCost.toFixed(4)}`);
+    } catch (err) {
+        console.error(`[Pipeline] Build synthesis failed for parent ${parentGoalId}:`, err.message);
     }
 }
 
@@ -3832,6 +3961,133 @@ Deliverables:
 }
 
 /**
+ * Get parallel build subagents for the build phase.
+ * Returns 6 focused construction prompts covering scaffold, backend, frontend, integration, tooling, and docs.
+ */
+function getBuildSubagents(productName, seed, knowledgeSummary) {
+    const ctx = knowledgeSummary ? `\n\nAccumulated knowledge from research, design, and architecture phases:\n${knowledgeSummary}` : '';
+
+    return [
+        {
+            area: 'scaffold',
+            title: `Project Scaffold — ${productName}`,
+            description: `You are a project scaffolding specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Create the project directory structure and foundational files per the architecture specification.
+
+Deliver:
+- Directory structure matching the architecture spec (src/, tests/, config/, docs/, etc.)
+- Package manifest (package.json, requirements.txt, Cargo.toml, etc.) with all dependencies and versions from the architecture spec
+- Configuration files (tsconfig, eslint, prettier, .env.example, .gitignore)
+- Build tool configuration (webpack, vite, esbuild, Makefile, etc.)
+- Initial entry points (main.js/ts, index.html, etc.) with minimal boilerplate
+- Database migration scripts or schema files if specified in architecture
+- Docker/container configuration files if specified
+
+Tag findings with [KNOWLEDGE category="scaffold" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'backend',
+            title: `Backend Implementation — ${productName}`,
+            description: `You are a backend implementation specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Implement the server-side code per the design and architecture specifications.
+
+Deliver:
+- Server setup and configuration (Express, FastAPI, Actix, etc.)
+- API endpoint implementations matching the design spec (routes, controllers, handlers)
+- Database models, schemas, and migration scripts per the data model design
+- Authentication and authorisation middleware per the security architecture
+- Business logic implementation for core features
+- Input validation and error handling
+- Database connection and query layer
+- Middleware chain (logging, CORS, rate limiting, etc.)
+
+Tag findings with [KNOWLEDGE category="backend" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'frontend',
+            title: `Frontend Implementation — ${productName}`,
+            description: `You are a frontend implementation specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Implement the user interface per the UX wireframes, interaction flows, and design specifications.
+
+Deliver:
+- Page/view components matching the page inventory from design
+- Component hierarchy per the design spec (atomic design or equivalent)
+- Routing and navigation implementation
+- State management setup and store definitions
+- Form implementations with validation per the interaction design
+- Responsive layouts matching the responsive strategy
+- Design system tokens (colours, typography, spacing) per the design spec
+- Loading, empty, and error states per the interaction design
+- Accessibility implementation (ARIA attributes, keyboard navigation, focus management)
+
+Tag findings with [KNOWLEDGE category="frontend" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'integration',
+            title: `Integration Wiring — ${productName}`,
+            description: `You are an integration specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Wire together frontend and backend, implement data flow, and ensure end-to-end functionality.
+
+Deliver:
+- API client/service layer connecting frontend to backend endpoints
+- Data fetching hooks/utilities (React Query, SWR, fetch wrappers, etc.)
+- Request/response type definitions matching API spec
+- Error handling and retry logic for network failures
+- Loading state management during API calls
+- Real-time update wiring (WebSocket, SSE) if specified in design
+- Authentication flow integration (login, token refresh, logout)
+- Environment-based API URL configuration
+- End-to-end data flow verification for critical user paths
+
+Tag findings with [KNOWLEDGE category="integration" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'tooling',
+            title: `Tooling & DevOps — ${productName}`,
+            description: `You are a tooling and DevOps specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Set up development tooling, testing framework, build scripts, and CI/CD configuration per the architecture spec.
+
+Deliver:
+- Linting configuration (ESLint, Pylint, Clippy, etc.) with project-appropriate rules
+- Code formatting (Prettier, Black, rustfmt) with configuration
+- Testing framework setup (Jest, Pytest, Cargo test) with example tests
+- Build scripts for development and production
+- CI/CD pipeline configuration (GitHub Actions, GitLab CI) per the CI/CD architecture
+- Environment configuration (.env handling, config modules)
+- Docker/container build files (Dockerfile, docker-compose.yml) if specified
+- Git hooks (pre-commit, pre-push) for code quality
+- Development server with hot reload configuration
+
+Tag findings with [KNOWLEDGE category="tooling" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'docs',
+            title: `Inline Documentation — ${productName}`,
+            description: `You are a documentation specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Create project documentation and inline code documentation for the built codebase.
+
+Deliver:
+- README.md with project overview, setup instructions, usage examples, and architecture summary
+- API documentation (endpoint reference, request/response examples, authentication guide)
+- Deployment guide (environment setup, configuration, build steps, hosting)
+- CLAUDE.md with project conventions, structure, and development workflow
+- CONTRIBUTING.md with code style, PR process, testing requirements
+- Inline code comments for complex business logic and non-obvious algorithms
+- Environment variable documentation (.env.example with descriptions)
+- Architecture decision records for key technical choices made during build
+
+Tag findings with [KNOWLEDGE category="docs" title="..."]...[/KNOWLEDGE]`
+        }
+    ];
+}
+
+/**
  * Execute a specific phase for a product by creating a goal.
  */
 function executePhase(productId, phase) {
@@ -3938,10 +4194,42 @@ function executePhase(productId, phase) {
         }
     }
 
+    // Build phase: spawn parallel build swarm
+    if (phase === 'build') {
+        try {
+            const knowledgeSummary = getKnowledgeSummary(productId);
+            const parentDesc = `Build phase for ${product.name} — orchestrate parallel build subagents constructing the product. Seed: ${product.seed}`;
+            const parentGoalId = createGoal(parentDesc, product.project_path, false, null, 'parent');
+
+            const areas = getBuildSubagents(product.name, product.seed, knowledgeSummary);
+            const childGoalIds = [];
+
+            for (const area of areas) {
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                childGoalIds.push(childGoalId);
+                console.log(`[Pipeline] Build subagent created: ${area.area} (${childGoalId})`);
+            }
+
+            phaseStmts.updateStatus.run('active', now, productId, phase);
+            phaseStmts.updateGoal.run(parentGoalId, productId, phase);
+            productStmts.updatePhase.run(phase, PIPELINE_PHASES.indexOf(phase), productId);
+
+            if (wss.clients.size > 0) {
+                const msg = JSON.stringify({ type: 'pipeline_phase_started', productId, phase, goalId: parentGoalId, childGoals: childGoalIds.length });
+                wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+            }
+
+            console.log(`[Pipeline] Build phase started for "${product.name}" — parent ${parentGoalId}, ${childGoalIds.length} children`);
+            return parentGoalId;
+        } catch (err) {
+            console.error(`[Pipeline] Failed to execute build phase for ${product.name}:`, err.message);
+            return null;
+        }
+    }
+
     // Other phases: single goal with knowledge context
     const knowledgeSummary = getKnowledgeSummary(productId);
     const descriptions = {
-        build: `Build phase for ${product.name}: implement all features per the architecture. ${knowledgeSummary}`,
         test: `Test phase for ${product.name}: write and run unit tests, integration tests, verify all features. ${knowledgeSummary}`,
         document: `Document phase for ${product.name}: generate README, API docs, deployment guide, CLAUDE.md. ${knowledgeSummary}`,
         deploy: `Deploy phase for ${product.name}: containerise, set up CI/CD, configure infrastructure. ${knowledgeSummary}`,
