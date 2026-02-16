@@ -697,6 +697,65 @@ The user controls their scroll position at all times. The system only auto-follo
 
 ---
 
+### DEC-015: Auto-commit on Task Success
+
+**Date**: 2026-02-16
+**Author**: Darron
+**Status**: Accepted
+
+#### Context
+
+The automator's git checkpoint system (DEC-010) creates a stash or branch before each task runs, then cleans up after success or rolls back on failure. When multiple sequential tasks in a goal modify the same project, the checkpoint cleanup was **losing intermediate changes** — each task started from a clean HEAD because the previous task's uncommitted work was stashed by the next checkpoint, then the stash was dropped on cleanup.
+
+We discovered this when 8 Phase 2 tasks all reported "done" but server.js had none of their changes. `git reflog` showed repeated `reset: moving to HEAD`. The issue resurfaced during Level 10 development when a test task's checkpoint stashed our own uncommitted edits.
+
+#### Options Considered
+
+1. **Auto-commit after every successful task**
+   - ✅ Each task's work persists in git history
+   - ✅ Sequential tasks build on each other's changes naturally
+   - ✅ Clean separation of work per task in git log
+   - ✅ Semantic commit messages with task metadata
+   - ❌ Creates many small commits (one per task)
+   - ❌ `git add -A` can capture unrelated uncommitted work if present
+
+2. **Disable checkpointing entirely**
+   - ✅ Simplest approach
+   - ❌ Loses rollback capability on failure
+   - ❌ Failed tasks leave dirty working trees
+
+3. **Amend the checkpoint to preserve intermediate changes**
+   - ✅ Fewer commits
+   - ❌ Complex stash management (pop, apply, re-stash)
+   - ❌ Fragile — stash conflicts cause data loss
+
+4. **Use git worktrees per task**
+   - ✅ Complete isolation between tasks
+   - ❌ Significant complexity increase
+   - ❌ Disk space overhead
+   - ❌ Doesn't integrate with existing checkpoint system
+
+#### Decision
+
+We chose **Option 1: Auto-commit after every successful task**. The `commitTaskChanges()` function runs after task success but before checkpoint cleanup:
+
+1. Checks `hasUncommittedChanges()` — skips if clean
+2. Stages all changes (`git add -A`)
+3. Commits with semantic prefix derived from task title (feat/fix/docs/refactor/test/chore)
+4. Includes task metadata (ID, model, cost, goal) and Co-Authored-By footer
+
+This preserves the checkpoint/rollback system for failures while ensuring successful work persists.
+
+#### Consequences
+
+- Every successful autonomous task creates a git commit
+- Sequential tasks in a goal build on each other's committed work
+- `git log` shows a clear trail of autonomous work with task metadata
+- Semantic prefixes make automator commits consistent with human conventions
+- **Known limitation:** If the automator runs a task in a project with pre-existing uncommitted work (from a human session), `git add -A` will capture that work in the task's commit. Mitigation: don't run automator tasks against projects you're actively editing.
+
+---
+
 ## Template
 
 Copy this for new decisions:
