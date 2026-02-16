@@ -2567,6 +2567,56 @@ app.get('/api/products/:id/test', (req, res) => {
 });
 
 /**
+ * GET /api/products/:id/document — Document phase status with subagent progress
+ */
+app.get('/api/products/:id/document', (req, res) => {
+    try {
+        const productId = req.params.id;
+        const product = productStmts.get.get(productId);
+        if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+
+        const phase = phaseStmts.get.get(productId, 'document');
+        if (!phase) return res.status(404).json({ success: false, error: 'Document phase not found' });
+
+        const parentGoal = phase.goal_id ? goalStmts.get.get(phase.goal_id) : null;
+        if (!parentGoal) {
+            return res.json({ success: true, status: 'not_started', phase, subagents: [] });
+        }
+
+        const children = goalStmts.getChildren.all(parentGoal.id);
+        const subagents = children.map(child => {
+            const tasks = taskStmts.getByGoal.all(child.id);
+            return {
+                goal_id: child.id,
+                area: child.description.split('.')[0].split(':')[0].trim(),
+                status: child.status,
+                progress: { tasks_total: child.task_count || 0, tasks_completed: child.tasks_completed || 0, tasks_failed: child.tasks_failed || 0 },
+                cost_usd: child.total_cost_usd || 0,
+                created_at: child.created_at,
+                completed_at: child.completed_at,
+                tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, cost_usd: t.cost_usd || 0 }))
+            };
+        });
+
+        const knowledge = knowledgeStmts.getByProduct.all(productId)
+            .filter(k => k.source_phase === 'document')
+            .map(k => ({ category: k.category, title: k.title, preview: k.content.slice(0, 200), created_at: k.created_at }));
+
+        res.json({
+            success: true,
+            status: parentGoal.status,
+            phase,
+            parent_goal: { id: parentGoal.id, status: parentGoal.status, total_cost_usd: parentGoal.total_cost_usd || 0, created_at: parentGoal.created_at, completed_at: parentGoal.completed_at },
+            subagents,
+            knowledge_count: knowledge.length,
+            knowledge_preview: knowledge.slice(0, 10)
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
 app.post('/api/orchestrator/setup', async (req, res) => {
@@ -2792,6 +2842,7 @@ function updateParentGoalProgress(parentGoalId) {
                 else if (phaseRecord.phase === 'architecture') synthesizeArchitectureSpec(parentGoalId);
                 else if (phaseRecord.phase === 'build') synthesizeBuildResults(parentGoalId);
                 else if (phaseRecord.phase === 'test') synthesizeTestResults(parentGoalId);
+                else if (phaseRecord.phase === 'document') synthesizeDocumentPackage(parentGoalId);
             }
         } catch (err) { console.error(`[Pipeline] Synthesis failed for ${parentGoalId}:`, err.message); }
 
@@ -3196,6 +3247,84 @@ function synthesizeTestResults(parentGoalId) {
         console.log(`[Pipeline] Test synthesis complete for "${product.name}" — ${allKnowledge.length} findings, $${totalCost.toFixed(4)}`);
     } catch (err) {
         console.error(`[Pipeline] Test synthesis failed for parent ${parentGoalId}:`, err.message);
+    }
+}
+
+/**
+ * Synthesize document results from all document subagent knowledge into a Documentation Package.
+ */
+function synthesizeDocumentPackage(parentGoalId) {
+    try {
+        const parent = goalStmts.get.get(parentGoalId);
+        if (!parent) return;
+
+        const phaseRecord = db.prepare('SELECT product_id FROM product_phases WHERE goal_id = ?').get(parentGoalId);
+        if (!phaseRecord) return;
+
+        const product = productStmts.get.get(phaseRecord.product_id);
+        if (!product) return;
+
+        const allKnowledge = knowledgeStmts.getByProduct.all(product.id)
+            .filter(k => k.source_phase === 'document');
+
+        const children = goalStmts.getChildren.all(parentGoalId);
+        const totalCost = children.reduce((sum, c) => sum + (c.total_cost_usd || 0), 0);
+
+        const categoryNames = {
+            readme: 'README & Contributing',
+            api: 'API Documentation',
+            deployment: 'Deployment Guide',
+            claude: 'CLAUDE.md & AI Context',
+            adr: 'Architecture Decision Records',
+            userguide: 'User Guide'
+        };
+
+        const grouped = {};
+        for (const k of allKnowledge) {
+            if (k.category === 'document_package') continue;
+            if (!grouped[k.category]) grouped[k.category] = [];
+            grouped[k.category].push(k);
+        }
+
+        let report = `# Documentation Package — ${product.name}\n\n`;
+        report += `> Generated ${new Date().toISOString()}\n\n`;
+
+        for (const [cat, displayName] of Object.entries(categoryNames)) {
+            report += `## ${displayName}\n\n`;
+            if (grouped[cat] && grouped[cat].length > 0) {
+                for (const k of grouped[cat]) {
+                    report += `### ${k.title}\n\n${k.content}\n\n`;
+                }
+            } else {
+                report += `*No documentation recorded for this area.*\n\n`;
+            }
+        }
+
+        // Include any uncategorised document knowledge
+        for (const [cat, entries] of Object.entries(grouped)) {
+            if (!categoryNames[cat]) {
+                report += `## ${cat}\n\n`;
+                for (const k of entries) {
+                    report += `### ${k.title}\n\n${k.content}\n\n`;
+                }
+            }
+        }
+
+        report += `## Execution Summary\n\n`;
+        report += `| Subagent | Status | Tasks | Cost |\n`;
+        report += `|----------|--------|-------|------|\n`;
+        for (const child of children) {
+            const area = child.description.split('.')[0].split('—')[0].trim();
+            report += `| ${area} | ${child.status} | ${child.tasks_completed || 0}/${child.task_count || 0} | $${(child.total_cost_usd || 0).toFixed(4)} |\n`;
+        }
+        report += `\n**Total documentation cost:** $${totalCost.toFixed(4)}\n`;
+
+        const now = new Date().toISOString();
+        knowledgeStmts.insert.run(product.id, 'document_package', `Complete Documentation Package — ${product.name}`, report, 'document', now);
+
+        console.log(`[Pipeline] Document synthesis complete for "${product.name}" — ${allKnowledge.length} entries, $${totalCost.toFixed(4)}`);
+    } catch (err) {
+        console.error(`[Pipeline] Document synthesis failed for parent ${parentGoalId}:`, err.message);
     }
 }
 
@@ -4342,6 +4471,155 @@ Tag findings with [KNOWLEDGE category="performance" title="..."]...[/KNOWLEDGE]`
 }
 
 /**
+ * Get parallel document subagents for the document phase.
+ * Returns 6 focused documentation prompts covering readme, api, deployment, claude, adr, and userguide.
+ */
+function getDocumentSubagents(productName, seed, knowledgeSummary) {
+    const ctx = knowledgeSummary ? `\n\nAccumulated knowledge from all prior phases:\n${knowledgeSummary}` : '';
+
+    return [
+        {
+            area: 'readme',
+            title: `README & Contributing — ${productName}`,
+            description: `You are a README and contributing guide specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Create comprehensive README.md and CONTRIBUTING.md files for the project.
+
+Deliver:
+- README.md with:
+  - Project name, badge placeholders, one-line description
+  - Features list with brief descriptions
+  - Prerequisites and installation instructions (step-by-step)
+  - Quick start guide (get running in under 2 minutes)
+  - Usage examples with code snippets for common operations
+  - Configuration reference (environment variables, config files)
+  - Project structure overview
+  - Licence section
+- CONTRIBUTING.md with:
+  - Development environment setup
+  - Code style and conventions
+  - Branch naming and PR process
+  - Testing requirements before submitting
+  - Issue reporting guidelines
+
+Tag findings with [KNOWLEDGE category="readme" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'api',
+            title: `API Documentation — ${productName}`,
+            description: `You are an API documentation specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Create comprehensive API documentation for all endpoints and interfaces.
+
+Deliver:
+- Endpoint reference: HTTP method, path, description, parameters, request body schema, response schema, status codes
+- Request/response examples (curl commands and JSON payloads) for every endpoint
+- Authentication guide: how to obtain tokens, header format, token refresh flow
+- Error code reference: all error codes with descriptions and resolution steps
+- Rate limiting documentation: limits, headers, retry strategies
+- Versioning strategy documentation
+- OpenAPI/Swagger specification file if applicable
+- WebSocket/real-time API documentation if applicable
+- Pagination patterns and query parameter conventions
+
+Tag findings with [KNOWLEDGE category="api" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'deployment',
+            title: `Deployment Guide — ${productName}`,
+            description: `You are a deployment documentation specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Create a comprehensive deployment guide covering all environments.
+
+Deliver:
+- Environment setup: development, staging, production configurations
+- Environment variables reference with descriptions, defaults, and required/optional status
+- Build steps: development build, production build, asset compilation
+- Hosting/infrastructure setup: server requirements, cloud provider instructions
+- Database setup: migrations, seed data, backup/restore procedures
+- SSL/TLS configuration
+- Scaling considerations: horizontal scaling, load balancing, caching layers
+- Monitoring and logging setup: health checks, log aggregation, alerting
+- Troubleshooting guide: common issues, error messages, diagnostic steps
+- Rollback procedures: how to revert to a previous version safely
+
+Tag findings with [KNOWLEDGE category="deployment" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'claude',
+            title: `CLAUDE.md & AI Context — ${productName}`,
+            description: `You are an AI collaboration context specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Create CLAUDE.md and supporting context files for future AI-assisted development.
+
+Deliver:
+- CLAUDE.md with:
+  - Project overview and purpose (2-3 sentences)
+  - Key commands (build, test, start, deploy)
+  - Project structure with file/directory descriptions
+  - Architecture summary (components, data flow, key patterns)
+  - Conventions (naming, code style, commit messages, British/American English)
+  - Current status and recent changes
+  - Infrastructure details (ports, services, dependencies)
+- claude-context/ folder contents:
+  - CURRENT_STATUS.md — progress tracking template
+  - ARCHITECTURE.md — system design document
+  - DECISIONS.md — decision log template
+- Development workflow documentation for AI pair programming
+
+Tag findings with [KNOWLEDGE category="claude" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'adr',
+            title: `Architecture Decision Records — ${productName}`,
+            description: `You are an architecture decision records specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Document all key technical decisions made during the design, architecture, and build phases.
+
+Deliver:
+- ADR for each major technical decision:
+  - Title (ADR-001: Choose X for Y)
+  - Status (Accepted/Proposed/Deprecated)
+  - Context: what prompted this decision
+  - Decision: what was chosen
+  - Alternatives considered with pros/cons
+  - Consequences: what this decision means going forward
+- Cover decisions including:
+  - Language/framework selection
+  - Database choice
+  - Authentication mechanism
+  - API design patterns
+  - Hosting/infrastructure platform
+  - Testing strategy
+  - State management approach
+- ADR index/table of contents
+
+Tag findings with [KNOWLEDGE category="adr" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'userguide',
+            title: `User Guide — ${productName}`,
+            description: `You are a user guide specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Create a comprehensive user-facing guide for the product.
+
+Deliver:
+- Getting started walkthrough: first-time user experience, account setup, initial configuration
+- Feature walkthrough: each major feature with step-by-step instructions
+- Screenshots/mockup descriptions: describe what each key screen looks like and its purpose
+- Common workflows: step-by-step guides for typical user tasks
+- FAQ: anticipated questions with clear answers
+- Tips and tricks: power user features, keyboard shortcuts, time-saving techniques
+- Accessibility features: screen reader support, keyboard navigation, high contrast options
+- Troubleshooting: common user-facing issues and self-service solutions
+- Glossary: product-specific terminology definitions
+
+Tag findings with [KNOWLEDGE category="userguide" title="..."]...[/KNOWLEDGE]`
+        }
+    ];
+}
+
+/**
  * Execute a specific phase for a product by creating a goal.
  */
 function executePhase(productId, phase) {
@@ -4514,10 +4792,42 @@ function executePhase(productId, phase) {
         }
     }
 
+    // Document phase: spawn parallel document swarm
+    if (phase === 'document') {
+        try {
+            const knowledgeSummary = getKnowledgeSummary(productId);
+            const parentDesc = `Document phase for ${product.name} — orchestrate parallel documentation subagents producing comprehensive project documentation. Seed: ${product.seed}`;
+            const parentGoalId = createGoal(parentDesc, product.project_path, false, null, 'parent');
+
+            const areas = getDocumentSubagents(product.name, product.seed, knowledgeSummary);
+            const childGoalIds = [];
+
+            for (const area of areas) {
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                childGoalIds.push(childGoalId);
+                console.log(`[Pipeline] Document subagent created: ${area.area} (${childGoalId})`);
+            }
+
+            phaseStmts.updateStatus.run('active', now, productId, phase);
+            phaseStmts.updateGoal.run(parentGoalId, productId, phase);
+            productStmts.updatePhase.run(phase, PIPELINE_PHASES.indexOf(phase), productId);
+
+            if (wss.clients.size > 0) {
+                const msg = JSON.stringify({ type: 'pipeline_phase_started', productId, phase, goalId: parentGoalId, childGoals: childGoalIds.length });
+                wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+            }
+
+            console.log(`[Pipeline] Document phase started for "${product.name}" — parent ${parentGoalId}, ${childGoalIds.length} children`);
+            return parentGoalId;
+        } catch (err) {
+            console.error(`[Pipeline] Failed to execute document phase for ${product.name}:`, err.message);
+            return null;
+        }
+    }
+
     // Other phases: single goal with knowledge context
     const knowledgeSummary = getKnowledgeSummary(productId);
     const descriptions = {
-        document: `Document phase for ${product.name}: generate README, API docs, deployment guide, CLAUDE.md. ${knowledgeSummary}`,
         deploy: `Deploy phase for ${product.name}: containerise, set up CI/CD, configure infrastructure. ${knowledgeSummary}`,
     };
 
