@@ -223,6 +223,18 @@ db.exec(`CREATE TABLE IF NOT EXISTS project_memory (
     created_at TEXT DEFAULT (datetime('now'))
 )`);
 
+db.exec(`CREATE TABLE IF NOT EXISTS digests (
+    id TEXT PRIMARY KEY,
+    generated_at TEXT NOT NULL,
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    digest_text TEXT NOT NULL,
+    digest_json TEXT NOT NULL,
+    task_count INTEGER DEFAULT 0,
+    total_cost REAL DEFAULT 0,
+    viewed_at TEXT
+)`);
+
 // ── Registry sync (Level 9) ─────────────────────────────
 const REGISTRY_PATH = path.join(process.env.HOME, 'Projects', 'infrastructure', 'registry', 'services.toml');
 
@@ -2128,6 +2140,46 @@ app.get('/api/errors/:project', (req, res) => {
     }
 });
 
+// ── Digest API (Level 9 Phase 3) ──────────────────────────
+
+app.get('/api/digest/latest', (req, res) => {
+    try {
+        const digest = digestStmts.getLatest.get();
+        if (!digest) return res.json({ success: true, digest: null });
+        if (!digest.viewed_at) {
+            digestStmts.markViewed.run(new Date().toISOString(), digest.id);
+            digest.viewed_at = new Date().toISOString();
+        }
+        digest.digest_json = JSON.parse(digest.digest_json || '{}');
+        res.json({ success: true, digest });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/digest/generate', (req, res) => {
+    try {
+        const since = req.query.since
+            ? new Date(req.query.since)
+            : new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const digest = generateDailyDigest(since);
+        if (!digest) return res.json({ success: true, digest: null, message: 'No activity in period' });
+        sendDigestPush(digest.digest_text.split('\n')[0]);
+        res.json({ success: true, digest });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/digest/history', (req, res) => {
+    try {
+        const digests = digestStmts.list.all();
+        res.json({ success: true, digests });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 /**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
@@ -2381,6 +2433,125 @@ function generateGoalSummary(goalId) {
     }
 
     return summaryFile;
+}
+
+/**
+ * Generate a daily digest aggregating task activity across all projects.
+ * Returns the digest object or null if no activity in the period.
+ */
+function generateDailyDigest(since) {
+    try {
+        const periodStart = since instanceof Date ? since.toISOString() : since;
+        const periodEnd = new Date().toISOString();
+
+        const projects = portfolioStmts.list.all();
+        const projectData = [];
+        let totalCompleted = 0;
+        let totalFailed = 0;
+        let totalCost = 0;
+        let totalCommits = 0;
+
+        for (const proj of projects) {
+            const tasks = db.prepare(
+                'SELECT * FROM tasks WHERE project_path = ? AND completed_at > ? AND status IN (\'done\', \'failed\') ORDER BY completed_at ASC'
+            ).all(proj.path, periodStart);
+
+            if (tasks.length === 0) continue;
+
+            const done = tasks.filter(t => t.status === 'done');
+            const failed = tasks.filter(t => t.status === 'failed');
+            const cost = tasks.reduce((sum, t) => sum + (t.cost_usd || 0), 0);
+            const commits = tasks.filter(t => t.commit_sha).map(t => t.commit_sha.slice(0, 7));
+
+            totalCompleted += done.length;
+            totalFailed += failed.length;
+            totalCost += cost;
+            totalCommits += commits.length;
+
+            projectData.push({
+                name: proj.name,
+                tasks_completed: done.length,
+                tasks_failed: failed.length,
+                cost,
+                commits,
+                failures: failed.map(t => ({ title: t.title, error: (t.error || '').slice(0, 200) })),
+            });
+        }
+
+        // Skip if no activity
+        if (totalCompleted === 0 && totalFailed === 0) return null;
+
+        const digestJson = {
+            generated_at: periodEnd,
+            period_start: periodStart,
+            period_end: periodEnd,
+            summary: {
+                tasks_completed: totalCompleted,
+                tasks_failed: totalFailed,
+                total_cost: totalCost,
+                commits: totalCommits,
+                projects_active: projectData.length,
+            },
+            projects: projectData,
+        };
+
+        // Build markdown text
+        const sinceStr = new Date(periodStart).toLocaleString();
+        const lines = [
+            `Since ${sinceStr}: ${totalCompleted} tasks completed across ${projectData.length} projects ($${totalCost.toFixed(4)}).${totalFailed > 0 ? ` ${totalFailed} failures awaiting review.` : ''}`,
+            ``,
+        ];
+
+        for (const p of projectData) {
+            lines.push(`### ${p.name}`);
+            lines.push(`- ${p.tasks_completed} completed, ${p.tasks_failed} failed — $${p.cost.toFixed(4)}`);
+            if (p.commits.length > 0) lines.push(`- Commits: ${p.commits.join(', ')}`);
+            if (p.failures.length > 0) {
+                for (const f of p.failures) {
+                    lines.push(`- FAILED: ${f.title}${f.error ? ` — ${f.error.slice(0, 100)}` : ''}`);
+                }
+            }
+            lines.push(``);
+        }
+
+        const digestText = lines.join('\n');
+        const id = generateId();
+
+        digestStmts.insert.run(id, periodEnd, periodStart, periodEnd, digestText, JSON.stringify(digestJson), totalCompleted + totalFailed, totalCost);
+
+        // Broadcast via WebSocket
+        if (wss.clients.size > 0) {
+            const msg = JSON.stringify({ type: 'digest_ready', digestId: id, task_count: totalCompleted + totalFailed, total_cost: totalCost });
+            wss.clients.forEach(client => {
+                if (client.readyState === 1) client.send(msg);
+            });
+        }
+
+        return { id, task_count: totalCompleted + totalFailed, total_cost: totalCost, digest_text: digestText };
+    } catch (err) {
+        console.error('[Digest] Generation failed:', err.message);
+        return null;
+    }
+}
+
+/**
+ * Load config from ~/.claude-remote/config.json
+ */
+function loadConfig() {
+    try {
+        return JSON.parse(fs.readFileSync(path.join(process.env.HOME, '.claude-remote', 'config.json'), 'utf8'));
+    } catch { return {}; }
+}
+
+/**
+ * Send digest summary as a push notification via ntfy.sh
+ */
+function sendDigestPush(summary) {
+    const config = loadConfig();
+    if (!config.ntfy_topic) return;
+    try {
+        execFileSync('curl', ['-s', '-d', summary, '-H', 'Title: Claude Remote Daily Digest', '-H', 'Priority: default', '-H', 'Tags: clipboard', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
+    } catch {}
 }
 
 /**
@@ -2988,6 +3159,14 @@ const proposalStmts = {
     get: db.prepare('SELECT * FROM task_proposals WHERE id = ?'),
     updateStatus: db.prepare('UPDATE task_proposals SET status = ?, reviewed_at = ?, written_to = ? WHERE id = ?'),
     getByTask: db.prepare('SELECT * FROM task_proposals WHERE task_id = ?'),
+};
+
+const digestStmts = {
+    insert: db.prepare('INSERT INTO digests (id, generated_at, period_start, period_end, digest_text, digest_json, task_count, total_cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+    getLatest: db.prepare('SELECT * FROM digests ORDER BY generated_at DESC LIMIT 1'),
+    getById: db.prepare('SELECT * FROM digests WHERE id = ?'),
+    list: db.prepare('SELECT id, generated_at, period_start, period_end, task_count, total_cost, viewed_at FROM digests ORDER BY generated_at DESC LIMIT 30'),
+    markViewed: db.prepare('UPDATE digests SET viewed_at = ? WHERE id = ?'),
 };
 
 syncRegistry();
@@ -3722,6 +3901,33 @@ async function runNextTask() {
 // Check for pending tasks every 5 seconds
 const orchestratorInterval = setInterval(runNextTask, 5000);
 
+// ── Daily digest scheduler ────────────────────────────────
+
+let lastDigestDate = null;
+
+function checkDigestSchedule() {
+    const config = loadConfig();
+    const digestHour = parseInt((config.digest_hour || '7'), 10);
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    if (lastDigestDate === todayStr) return;
+    if (now.getHours() < digestHour) return;
+
+    const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const digest = generateDailyDigest(since);
+    if (digest) {
+        lastDigestDate = todayStr;
+        sendDigestPush(digest.digest_text.split('\n')[0]);
+        console.log(`[Digest] Daily digest generated: ${digest.task_count} tasks, $${digest.total_cost.toFixed(4)}`);
+    }
+}
+
+const digestInterval = setInterval(checkDigestSchedule, 3600000);
+
+// Check on startup if today's digest is missing
+setTimeout(checkDigestSchedule, 5000);
+
 // ── WebSocket server ──────────────────────────────────────
 
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -3854,6 +4060,7 @@ process.on('SIGTERM', () => {
     clearInterval(heartbeatInterval);
     clearInterval(terminalBroadcastInterval);
     clearInterval(orchestratorInterval);
+    clearInterval(digestInterval);
     if (runningAbort) runningAbort.abort();
     try { db.close(); } catch {}
     wss.close();
