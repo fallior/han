@@ -235,6 +235,22 @@ db.exec(`CREATE TABLE IF NOT EXISTS digests (
     viewed_at TEXT
 )`);
 
+// Level 9 Phase 4: maintenance_enabled column on projects
+const projCols9p4 = db.pragma("table_info('projects')").map(col => col.name);
+if (!projCols9p4.includes('maintenance_enabled')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN maintenance_enabled INTEGER DEFAULT 1`);
+}
+
+db.exec(`CREATE TABLE IF NOT EXISTS maintenance_runs (
+    id TEXT PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    status TEXT DEFAULT 'running',
+    projects_count INTEGER DEFAULT 0,
+    goals_created TEXT,
+    summary TEXT
+)`);
+
 // ── Registry sync (Level 9) ─────────────────────────────
 const REGISTRY_PATH = path.join(process.env.HOME, 'Projects', 'infrastructure', 'registry', 'services.toml');
 
@@ -1457,121 +1473,11 @@ app.post('/api/goals', async (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing description or project_path' });
         }
 
-        // Validate project path exists
         if (!fs.existsSync(project_path)) {
             return res.status(400).json({ success: false, error: 'Project path does not exist' });
         }
 
-        const goalId = generateId();
-        const now = new Date().toISOString();
-
-        // Get orchestrator status
-        const orchStatus = orchestrator.getStatus();
-
-        // Create goal record
-        goalStmts.insert.run(
-            goalId,
-            description,
-            project_path,
-            'decomposing',
-            now,
-            orchStatus.backend,
-            orchStatus.backend === 'ollama' ? orchStatus.ollamaModel : 'claude-haiku-4-5-20251001'
-        );
-
-        // Broadcast goal created
-        broadcastGoalUpdate(goalId);
-
-        // Start decomposition asynchronously
-        (async () => {
-            try {
-                // Read project context
-                const projectContext = readProjectContext(project_path);
-
-                // Decompose goal
-                console.log(`[Goal ${goalId}] Decomposing: ${description}`);
-                const decomposition = await orchestrator.decomposeGoal(description, projectContext);
-
-                const subtasks = decomposition.subtasks || [];
-                const taskIds = [];
-
-                // Create dependency map (task title -> task ID)
-                const titleToId = {};
-
-                // Create tasks in order
-                for (const subtask of subtasks) {
-                    const taskId = generateId();
-                    titleToId[subtask.title] = taskId;
-
-                    // Resolve dependencies to IDs
-                    const dependsOnIds = (subtask.dependsOn || [])
-                        .map(title => titleToId[title])
-                        .filter(Boolean);
-
-                    const dependsOnJson = dependsOnIds.length > 0 ? JSON.stringify(dependsOnIds) : null;
-
-                    // Memory-based model recommendation (Phase E feedback loop)
-                    let finalModel = subtask.model || 'sonnet';
-                    const recommendation = orchestrator.recommendModel(db, project_path, 'unknown');
-                    if (recommendation.model && recommendation.confidence !== 'none') {
-                        const costRank = { haiku: 1, sonnet: 2, opus: 3 };
-                        if ((costRank[recommendation.model] || 99) <= (costRank[finalModel] || 99)) {
-                            console.log(`[Goal ${goalId}] Memory override: ${finalModel} → ${recommendation.model} for "${subtask.title}" (${recommendation.reason})`);
-                            finalModel = recommendation.model;
-                        }
-                    }
-
-                    taskStmts.insertWithGoal.run(
-                        taskId,
-                        subtask.title,
-                        subtask.description,
-                        project_path,
-                        subtask.priority || 5,
-                        finalModel,
-                        100, // max_turns
-                        'bypass', // gate_mode
-                        null, // allowed_tools
-                        now,
-                        goalId,
-                        null, // complexity (will be classified later if needed)
-                        dependsOnJson,
-                        1 // auto_model
-                    );
-
-                    taskIds.push(taskId);
-                    broadcastTaskUpdate(taskStmts.get.get(taskId));
-                }
-
-                // Update goal with decomposition
-                goalStmts.updateDecomposition.run(
-                    JSON.stringify(decomposition),
-                    subtasks.length,
-                    auto_execute ? 'active' : 'pending',
-                    goalId
-                );
-
-                console.log(`[Goal ${goalId}] Decomposed into ${subtasks.length} tasks`);
-
-                // Broadcast decomposition complete
-                const goal = goalStmts.get.get(goalId);
-                const tasks = taskStmts.getByGoal.all(goalId);
-
-                if (wss.clients.size > 0) {
-                    const message = JSON.stringify({
-                        type: 'goal_decomposed',
-                        goal,
-                        tasks
-                    });
-                    wss.clients.forEach((client) => {
-                        if (client.readyState === 1) client.send(message);
-                    });
-                }
-            } catch (err) {
-                console.error(`[Goal ${goalId}] Decomposition failed:`, err.message);
-                goalStmts.updateStatus.run('failed', goalId);
-                broadcastGoalUpdate(goalId);
-            }
-        })();
+        const goalId = createGoal(description, project_path, auto_execute);
 
         res.json({
             success: true,
@@ -2180,6 +2086,39 @@ app.get('/api/digest/history', (req, res) => {
     }
 });
 
+// ── Maintenance API (Level 9 Phase 4) ─────────────────────
+
+app.get('/api/maintenance/history', (req, res) => {
+    try {
+        const runs = maintenanceStmts.list.all();
+        res.json({ success: true, runs });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/maintenance/run', (req, res) => {
+    try {
+        const result = runNightlyMaintenance();
+        if (!result) return res.json({ success: true, result: null, message: 'No active projects with maintenance enabled' });
+        res.json({ success: true, result });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/api/maintenance/:project/toggle', (req, res) => {
+    try {
+        const project = portfolioStmts.get.get(req.params.project);
+        if (!project) return res.status(404).json({ success: false, error: 'Project not found' });
+        const newValue = project.maintenance_enabled ? 0 : 1;
+        db.prepare('UPDATE projects SET maintenance_enabled = ? WHERE name = ?').run(newValue, req.params.project);
+        res.json({ success: true, project: req.params.project, maintenance_enabled: !!newValue });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 /**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
@@ -2206,6 +2145,105 @@ app.post('/api/orchestrator/setup', async (req, res) => {
  */
 function generateId() {
     return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+/**
+ * Create a goal programmatically (used by API and maintenance scheduler).
+ * Returns goalId. Decomposition runs asynchronously.
+ */
+function createGoal(description, projectPath, autoExecute = true) {
+    const goalId = generateId();
+    const now = new Date().toISOString();
+    const orchStatus = orchestrator.getStatus();
+
+    goalStmts.insert.run(
+        goalId,
+        description,
+        projectPath,
+        'decomposing',
+        now,
+        orchStatus.backend,
+        orchStatus.backend === 'ollama' ? orchStatus.ollamaModel : 'claude-haiku-4-5-20251001'
+    );
+
+    broadcastGoalUpdate(goalId);
+
+    // Start decomposition asynchronously
+    (async () => {
+        try {
+            const projectContext = readProjectContext(projectPath);
+
+            console.log(`[Goal ${goalId}] Decomposing: ${description}`);
+            const decomposition = await orchestrator.decomposeGoal(description, projectContext);
+
+            const subtasks = decomposition.subtasks || [];
+            const titleToId = {};
+
+            for (const subtask of subtasks) {
+                const taskId = generateId();
+                titleToId[subtask.title] = taskId;
+
+                const dependsOnIds = (subtask.dependsOn || [])
+                    .map(title => titleToId[title])
+                    .filter(Boolean);
+                const dependsOnJson = dependsOnIds.length > 0 ? JSON.stringify(dependsOnIds) : null;
+
+                // Memory-based model recommendation (Phase E feedback loop)
+                let finalModel = subtask.model || 'sonnet';
+                const recommendation = orchestrator.recommendModel(db, projectPath, 'unknown');
+                if (recommendation.model && recommendation.confidence !== 'none') {
+                    const costRank = { haiku: 1, sonnet: 2, opus: 3 };
+                    if ((costRank[recommendation.model] || 99) <= (costRank[finalModel] || 99)) {
+                        console.log(`[Goal ${goalId}] Memory override: ${finalModel} → ${recommendation.model} for "${subtask.title}" (${recommendation.reason})`);
+                        finalModel = recommendation.model;
+                    }
+                }
+
+                taskStmts.insertWithGoal.run(
+                    taskId,
+                    subtask.title,
+                    subtask.description,
+                    projectPath,
+                    subtask.priority || 5,
+                    finalModel,
+                    100,
+                    'bypass',
+                    null,
+                    now,
+                    goalId,
+                    null,
+                    dependsOnJson,
+                    1
+                );
+
+                broadcastTaskUpdate(taskStmts.get.get(taskId));
+            }
+
+            goalStmts.updateDecomposition.run(
+                JSON.stringify(decomposition),
+                subtasks.length,
+                autoExecute ? 'active' : 'pending',
+                goalId
+            );
+
+            console.log(`[Goal ${goalId}] Decomposed into ${subtasks.length} tasks`);
+
+            if (wss.clients.size > 0) {
+                const goal = goalStmts.get.get(goalId);
+                const tasks = taskStmts.getByGoal.all(goalId);
+                const message = JSON.stringify({ type: 'goal_decomposed', goal, tasks });
+                wss.clients.forEach((client) => {
+                    if (client.readyState === 1) client.send(message);
+                });
+            }
+        } catch (err) {
+            console.error(`[Goal ${goalId}] Decomposition failed:`, err.message);
+            goalStmts.updateStatus.run('failed', goalId);
+            broadcastGoalUpdate(goalId);
+        }
+    })();
+
+    return goalId;
 }
 
 /**
@@ -2552,6 +2590,64 @@ function sendDigestPush(summary) {
     try {
         execFileSync('curl', ['-s', '-d', summary, '-H', 'Title: Claude Remote Daily Digest', '-H', 'Priority: default', '-H', 'Tags: clipboard', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
     } catch {}
+}
+
+/**
+ * Run nightly maintenance: create a maintenance goal for each active, enabled project.
+ */
+function runNightlyMaintenance() {
+    try {
+        const runId = generateId();
+        const now = new Date().toISOString();
+        const projects = portfolioStmts.list.all().filter(p =>
+            p.lifecycle === 'active' && p.maintenance_enabled !== 0
+        );
+
+        if (projects.length === 0) return null;
+
+        maintenanceStmts.insert.run(runId, now, null, 'running', projects.length, null, null);
+
+        const goalIds = [];
+        for (const proj of projects) {
+            if (!fs.existsSync(proj.path)) continue;
+            try {
+                const goalId = createGoal(
+                    `Nightly maintenance for ${proj.name}: run test suite, check for outdated dependencies, verify project health`,
+                    proj.path,
+                    true
+                );
+                if (goalId) goalIds.push(goalId);
+            } catch (err) {
+                console.error(`[Maintenance] Failed to create goal for ${proj.name}:`, err.message);
+            }
+        }
+
+        maintenanceStmts.complete.run(
+            goalIds.length === 0 ? now : null,
+            goalIds.length > 0 ? 'active' : 'skipped',
+            `Created ${goalIds.length} maintenance goals for ${projects.length} projects`,
+            runId
+        );
+
+        // Broadcast + push
+        if (wss.clients.size > 0) {
+            const msg = JSON.stringify({ type: 'maintenance_started', runId, projects: projects.length, goals: goalIds.length });
+            wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+        }
+
+        const config = loadConfig();
+        if (config.ntfy_topic) {
+            try {
+                execFileSync('curl', ['-s', '-d', `Nightly maintenance started: ${goalIds.length} goals across ${projects.length} projects`, '-H', 'Title: Claude Remote Maintenance', '-H', 'Priority: low', '-H', 'Tags: wrench', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
+            } catch {}
+        }
+
+        console.log(`[Maintenance] Run ${runId}: ${goalIds.length} goals created for ${projects.length} projects`);
+        return { runId, goalIds };
+    } catch (err) {
+        console.error('[Maintenance] Run failed:', err.message);
+        return null;
+    }
 }
 
 /**
@@ -3167,6 +3263,13 @@ const digestStmts = {
     getById: db.prepare('SELECT * FROM digests WHERE id = ?'),
     list: db.prepare('SELECT id, generated_at, period_start, period_end, task_count, total_cost, viewed_at FROM digests ORDER BY generated_at DESC LIMIT 30'),
     markViewed: db.prepare('UPDATE digests SET viewed_at = ? WHERE id = ?'),
+};
+
+const maintenanceStmts = {
+    insert: db.prepare('INSERT INTO maintenance_runs (id, started_at, completed_at, status, projects_count, goals_created, summary) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+    getLatest: db.prepare('SELECT * FROM maintenance_runs ORDER BY started_at DESC LIMIT 1'),
+    list: db.prepare('SELECT * FROM maintenance_runs ORDER BY started_at DESC LIMIT 30'),
+    complete: db.prepare('UPDATE maintenance_runs SET completed_at = ?, status = ?, summary = ? WHERE id = ?'),
 };
 
 syncRegistry();
@@ -3928,6 +4031,32 @@ const digestInterval = setInterval(checkDigestSchedule, 3600000);
 // Check on startup if today's digest is missing
 setTimeout(checkDigestSchedule, 5000);
 
+// ── Nightly maintenance scheduler ─────────────────────────
+
+let lastMaintenanceDate = null;
+
+function checkMaintenanceSchedule() {
+    const config = loadConfig();
+    if (config.maintenance_enabled === false) return;
+    const maintenanceHour = parseInt((config.maintenance_hour || '2'), 10);
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    if (lastMaintenanceDate === todayStr) return;
+    if (now.getHours() < maintenanceHour) return;
+
+    const result = runNightlyMaintenance();
+    if (result) {
+        lastMaintenanceDate = todayStr;
+        console.log(`[Maintenance] Nightly run: ${result.goalIds.length} goals created`);
+    }
+}
+
+const maintenanceInterval = setInterval(checkMaintenanceSchedule, 3600000);
+
+// Check on startup if today's maintenance is missing (after digest check)
+setTimeout(checkMaintenanceSchedule, 10000);
+
 // ── WebSocket server ──────────────────────────────────────
 
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -4061,6 +4190,7 @@ process.on('SIGTERM', () => {
     clearInterval(terminalBroadcastInterval);
     clearInterval(orchestratorInterval);
     clearInterval(digestInterval);
+    clearInterval(maintenanceInterval);
     if (runningAbort) runningAbort.abort();
     try { db.close(); } catch {}
     wss.close();
