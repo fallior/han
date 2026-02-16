@@ -6,7 +6,7 @@
 
 **IMPORTANT:** When `session start` is triggered, Claude MUST:
 1. Run `pwd` to verify the current working directory
-2. Confirm this is `/Users/darron/Projects/clauderemote`
+2. Confirm this is `~/Projects/clauderemote`
 3. Load THIS project's `claude-context/CURRENT_STATUS.md`
 4. IGNORE conversation history from other projects
 
