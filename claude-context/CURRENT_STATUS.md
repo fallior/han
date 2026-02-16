@@ -1,10 +1,10 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-15 (Session 18) by Darron (via Claude)
+> Last updated: 2026-02-16 (Session 21) by Darron (via Claude)
 
 ## Current Stage
 
-**Levels 1-8 Complete**. All core levels plus autonomous task runner and intelligent orchestrator. Prompt responder, push alerts, context window (search + copy), terminal mirror, mobile keyboard, always-on terminal broadcast, context bridge, autonomous task execution via the Claude Agent SDK with git checkpoints, approval gates, and tool scoping, and intelligent goal decomposition with smart model routing, retry logic, and project memory.
+**Levels 1-8 Complete, Level 9 Phase 1-2 Complete, Level 10 Phase A Complete**. All core levels plus autonomous task runner, intelligent orchestrator, portfolio manager, cost budgets, priority engine, and ecosystem-aware context injection.
 
 Create tasks from your phone, Claude Code executes them headlessly with safety features. Submit high-level goals — the orchestrator decomposes them into ordered subtasks, routes to the right model (haiku/sonnet/opus), retries failures with analysis, and tracks outcomes in project memory. Dual LLM backend: Ollama local or Anthropic API fallback. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working.
 
@@ -29,6 +29,26 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-16 — Darron (via Claude) — Session 21
+- **Level 9 Phase 2: Cost Budgets + Priority Engine** (`0cd7a64`):
+  - Per-project daily/total cost budgets with auto-throttle
+  - Priority engine: weighted scoring (task priority ×10, project priority ×5, deadline proximity bonus, budget headroom bonus)
+  - `getNextPendingTask()` filters throttled projects, scores with priority engine
+  - Budget API endpoints: `PUT/GET /api/portfolio/:name/budget`, `POST /api/portfolio/:name/unthrottle`
+  - UI: deadline date input, priority input, budget controls in portfolio detail, throttled badges on cards
+  - `recalcProjectCosts()` sums daily/total spend, sets throttled flag
+- **Level 10 Phase A: Ecosystem-Aware Context Injection** (`0cd7a64`):
+  - `buildTaskContext(projectPath)` assembles ~3500 token context for every task
+  - `detectProjectTechStack(projectPath)` reads package.json + CLAUDE.md for tech keywords
+  - `getRelevantLearnings(techStack)` filters `~/Projects/_learnings/INDEX.md` by tech + severity
+  - `getEcosystemSummary()` queries portfolio for sister project awareness
+  - `extractSettledDecisions(markdown)` parses DECISIONS.md for Settled entries
+  - Context injection via `systemPrompt: { type: 'preset', preset: 'claude_code', append }`
+  - Verified: test task correctly reported British English, settled decisions, L008/L009/L012 learnings, 13 ecosystem projects
+- **Automator fix: `commitTaskChanges()`** — commits with semantic prefixes + Co-Authored-By after successful task completion
+- **DEC-015: Auto-commit on Task Success** (`0e52775`): Documented decision with root cause analysis (checkpoint stashing pre-existing uncommitted work)
+- **Critical lesson**: Don't test the automator on the same project with uncommitted work — checkpoint stashes and drops pre-existing changes
 
 ### 2026-02-15 — Darron (via Claude) — Session 20
 - **Smart-scroll**: Removed forced scroll-to-bottom on every refresh. Auto-follows only if within 50px of bottom. Scroll to bottom on first render.
@@ -284,20 +304,32 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ prefers-color-scheme media query support
 - ✅ Smooth theme transitions (150ms)
 - ✅ WCAG AA color contrast in both themes
+- ✅ Portfolio manager with project registry sync
+- ✅ Per-project cost budgets with auto-throttle
+- ✅ Priority engine for task scheduling (weighted scoring)
+- ✅ Budget API endpoints and portfolio UI controls
+- ✅ Ecosystem-aware context injection (buildTaskContext)
+- ✅ Tech stack detection from package.json + CLAUDE.md
+- ✅ Cross-project learnings filtering by relevance
+- ✅ Settled decisions extraction for task context
+- ✅ Sister project awareness via portfolio query
+- ✅ Semantic commit prefixes in commitTaskChanges()
+- ✅ Auto-commit after successful task completion
 
 ## Next Actions
 
 ### Immediate (Next Session)
-- [x] Pull an Ollama model to enable local orchestration — `qwen2.5-coder:7b` (4.7 GB)
-- [x] Test goal decomposition end-to-end — working via Ollama (6 subtasks with dependency chains)
+- [ ] Level 10 Phase B: Protocol Compliance (session logging, timestamp protocol for automated tasks)
+- [ ] Level 10 Phase C: Learning + Decisions (automated agents capture learnings and propose decisions)
+- [ ] Level 10 Phase D: Community Awareness (cross-project dependency awareness, resource contention detection)
 - [ ] Test retry logic with a deliberately failing task
 - [ ] Test goal decomposition from the phone UI (Goals tab)
-- [ ] Refine UI based on continued mobile usage
 
 ### Short-term
-- [ ] Consider Level 9 (Multi-Project Autonomy) from ROADMAP.md
-- [ ] Add git checkpoint visualization in task detail view
+- [ ] Level 9 Phases 3-5: Daily Digest, Cross-Project Dependencies, Nightly Maintenance + Weekly Reports
+- [ ] Add git checkpoint visualisation in task detail view
 - [ ] Add approval history tracking
+- [ ] Refine UI based on continued mobile usage
 
 ## Known Issues
 
@@ -321,6 +353,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-16_04-30-00.md](../_logs/session_2026-02-16_04-30-00.md) — Level 9.2 + Level 10 Phase A + DEC-015
 - [session_2026-02-15_09-30-00.md](../_logs/session_2026-02-15_09-30-00.md) — Level 8 commit + roadmap update
 - [session_2026-02-15_02-30-00.md](../_logs/session_2026-02-15_02-30-00.md) — Task logging + append-only terminal buffer
 - [session_2026-02-14_22-23-02.md](../_logs/session_2026-02-14_22-23-02.md) — Level 7 autonomous task runner (Agent SDK + SQLite)
