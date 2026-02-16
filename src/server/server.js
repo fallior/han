@@ -2617,6 +2617,56 @@ app.get('/api/products/:id/document', (req, res) => {
 });
 
 /**
+ * GET /api/products/:id/deploy — Deploy phase status with subagent progress
+ */
+app.get('/api/products/:id/deploy', (req, res) => {
+    try {
+        const productId = req.params.id;
+        const product = productStmts.get.get(productId);
+        if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+
+        const phase = phaseStmts.get.get(productId, 'deploy');
+        if (!phase) return res.status(404).json({ success: false, error: 'Deploy phase not found' });
+
+        const parentGoal = phase.goal_id ? goalStmts.get.get(phase.goal_id) : null;
+        if (!parentGoal) {
+            return res.json({ success: true, status: 'not_started', phase, subagents: [] });
+        }
+
+        const children = goalStmts.getChildren.all(parentGoal.id);
+        const subagents = children.map(child => {
+            const tasks = taskStmts.getByGoal.all(child.id);
+            return {
+                goal_id: child.id,
+                area: child.description.split('.')[0].split(':')[0].trim(),
+                status: child.status,
+                progress: { tasks_total: child.task_count || 0, tasks_completed: child.tasks_completed || 0, tasks_failed: child.tasks_failed || 0 },
+                cost_usd: child.total_cost_usd || 0,
+                created_at: child.created_at,
+                completed_at: child.completed_at,
+                tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, cost_usd: t.cost_usd || 0 }))
+            };
+        });
+
+        const knowledge = knowledgeStmts.getByProduct.all(productId)
+            .filter(k => k.source_phase === 'deploy')
+            .map(k => ({ category: k.category, title: k.title, preview: k.content.slice(0, 200), created_at: k.created_at }));
+
+        res.json({
+            success: true,
+            status: parentGoal.status,
+            phase,
+            parent_goal: { id: parentGoal.id, status: parentGoal.status, total_cost_usd: parentGoal.total_cost_usd || 0, created_at: parentGoal.created_at, completed_at: parentGoal.completed_at },
+            subagents,
+            knowledge_count: knowledge.length,
+            knowledge_preview: knowledge.slice(0, 10)
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
 app.post('/api/orchestrator/setup', async (req, res) => {
@@ -2843,6 +2893,7 @@ function updateParentGoalProgress(parentGoalId) {
                 else if (phaseRecord.phase === 'build') synthesizeBuildResults(parentGoalId);
                 else if (phaseRecord.phase === 'test') synthesizeTestResults(parentGoalId);
                 else if (phaseRecord.phase === 'document') synthesizeDocumentPackage(parentGoalId);
+                else if (phaseRecord.phase === 'deploy') synthesizeDeployReport(parentGoalId);
             }
         } catch (err) { console.error(`[Pipeline] Synthesis failed for ${parentGoalId}:`, err.message); }
 
@@ -3325,6 +3376,84 @@ function synthesizeDocumentPackage(parentGoalId) {
         console.log(`[Pipeline] Document synthesis complete for "${product.name}" — ${allKnowledge.length} entries, $${totalCost.toFixed(4)}`);
     } catch (err) {
         console.error(`[Pipeline] Document synthesis failed for parent ${parentGoalId}:`, err.message);
+    }
+}
+
+/**
+ * Synthesize deploy results from all deploy subagent knowledge into a Deploy Report.
+ */
+function synthesizeDeployReport(parentGoalId) {
+    try {
+        const parent = goalStmts.get.get(parentGoalId);
+        if (!parent) return;
+
+        const phaseRecord = db.prepare('SELECT product_id FROM product_phases WHERE goal_id = ?').get(parentGoalId);
+        if (!phaseRecord) return;
+
+        const product = productStmts.get.get(phaseRecord.product_id);
+        if (!product) return;
+
+        const allKnowledge = knowledgeStmts.getByProduct.all(product.id)
+            .filter(k => k.source_phase === 'deploy');
+
+        const children = goalStmts.getChildren.all(parentGoalId);
+        const totalCost = children.reduce((sum, c) => sum + (c.total_cost_usd || 0), 0);
+
+        const categoryNames = {
+            container: 'Containerisation',
+            cicd: 'CI/CD Pipeline',
+            infrastructure: 'Infrastructure',
+            security: 'Security & SSL',
+            monitoring: 'Monitoring & Health',
+            rollback: 'Rollback & Recovery'
+        };
+
+        const grouped = {};
+        for (const k of allKnowledge) {
+            if (k.category === 'deploy_report') continue;
+            if (!grouped[k.category]) grouped[k.category] = [];
+            grouped[k.category].push(k);
+        }
+
+        let report = `# Deploy Report — ${product.name}\n\n`;
+        report += `> Generated ${new Date().toISOString()}\n\n`;
+
+        for (const [cat, displayName] of Object.entries(categoryNames)) {
+            report += `## ${displayName}\n\n`;
+            if (grouped[cat] && grouped[cat].length > 0) {
+                for (const k of grouped[cat]) {
+                    report += `### ${k.title}\n\n${k.content}\n\n`;
+                }
+            } else {
+                report += `*No configuration recorded for this area.*\n\n`;
+            }
+        }
+
+        // Include any uncategorised deploy knowledge
+        for (const [cat, entries] of Object.entries(grouped)) {
+            if (!categoryNames[cat]) {
+                report += `## ${cat}\n\n`;
+                for (const k of entries) {
+                    report += `### ${k.title}\n\n${k.content}\n\n`;
+                }
+            }
+        }
+
+        report += `## Execution Summary\n\n`;
+        report += `| Subagent | Status | Tasks | Cost |\n`;
+        report += `|----------|--------|-------|------|\n`;
+        for (const child of children) {
+            const area = child.description.split('.')[0].split('—')[0].trim();
+            report += `| ${area} | ${child.status} | ${child.tasks_completed || 0}/${child.task_count || 0} | $${(child.total_cost_usd || 0).toFixed(4)} |\n`;
+        }
+        report += `\n**Total deploy cost:** $${totalCost.toFixed(4)}\n`;
+
+        const now = new Date().toISOString();
+        knowledgeStmts.insert.run(product.id, 'deploy_report', `Complete Deploy Report — ${product.name}`, report, 'deploy', now);
+
+        console.log(`[Pipeline] Deploy synthesis complete for "${product.name}" — ${allKnowledge.length} entries, $${totalCost.toFixed(4)}`);
+    } catch (err) {
+        console.error(`[Pipeline] Deploy synthesis failed for parent ${parentGoalId}:`, err.message);
     }
 }
 
@@ -4620,6 +4749,144 @@ Tag findings with [KNOWLEDGE category="userguide" title="..."]...[/KNOWLEDGE]`
 }
 
 /**
+ * Get parallel deploy subagents for the deploy phase.
+ * Returns 6 focused deployment prompts covering container, cicd, infrastructure, security, monitoring, and rollback.
+ */
+function getDeploySubagents(productName, seed, knowledgeSummary) {
+    const ctx = knowledgeSummary ? `\n\nAccumulated knowledge from all prior phases:\n${knowledgeSummary}` : '';
+
+    return [
+        {
+            area: 'container',
+            title: `Containerisation — ${productName}`,
+            description: `You are a containerisation specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Create Docker containerisation configuration for the project.
+
+Deliver:
+- Dockerfile with multi-stage build (build stage + production stage) for minimal image size
+- docker-compose.yml for local development (app + database + any supporting services)
+- docker-compose.prod.yml for production deployment
+- .dockerignore file excluding node_modules, .git, tests, docs
+- Container health check endpoint integration
+- Environment-specific configuration (dev, staging, production) via environment variables
+- Container registry setup instructions (Docker Hub, GitHub Container Registry, or ECR)
+- Image tagging strategy (semantic versioning, git SHA, latest)
+- Volume mounts for persistent data (database, uploads, logs)
+- Container resource limits and recommendations (CPU, memory)
+
+Tag findings with [KNOWLEDGE category="container" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'cicd',
+            title: `CI/CD Pipeline — ${productName}`,
+            description: `You are a CI/CD pipeline specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Create CI/CD pipeline configuration for automated build, test, and deployment.
+
+Deliver:
+- GitHub Actions workflow files (or GitLab CI equivalent):
+  - CI pipeline: lint, type check, unit tests, integration tests on every push/PR
+  - CD pipeline: build, tag, push container image, deploy to staging/production
+- Branch strategy: main (production), staging, feature branches with PR requirements
+- Automated testing gates: PRs must pass all checks before merge
+- Deployment triggers: auto-deploy to staging on merge to main, manual approval for production
+- Artefact management: build outputs, test reports, coverage reports
+- Environment secrets management in CI/CD (GitHub Secrets, environment variables)
+- Cache strategies for faster builds (dependency caching, Docker layer caching)
+- Notification integration: Slack/email on build failures, deployment success
+- Rollback trigger: manual workflow dispatch for emergency rollbacks
+
+Tag findings with [KNOWLEDGE category="cicd" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'infrastructure',
+            title: `Infrastructure Provisioning — ${productName}`,
+            description: `You are an infrastructure provisioning specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Define and provision the hosting infrastructure for the project.
+
+Deliver:
+- Hosting platform setup per architecture spec (Cloudflare Workers, Vercel, AWS, DigitalOcean, etc.)
+- Compute configuration: instance type/tier, auto-scaling rules, region selection
+- Database provisioning: managed database setup, connection pooling, read replicas if needed
+- Storage configuration: object storage (S3/R2) for assets, CDN distribution
+- Networking: load balancer, reverse proxy (nginx/Caddy), domain routing
+- DNS configuration: domain setup, A/CNAME records, subdomain routing
+- Environment variable management: production secrets, configuration injection
+- CDN configuration: edge caching, cache invalidation strategy
+- Cost estimation: monthly infrastructure cost breakdown by service
+- Infrastructure as Code templates (Terraform, Pulumi, or platform-specific) if applicable
+
+Tag findings with [KNOWLEDGE category="infrastructure" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'security',
+            title: `Security & SSL — ${productName}`,
+            description: `You are a deployment security specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Configure SSL/TLS and harden the production deployment security.
+
+Deliver:
+- SSL/TLS certificate provisioning: Let's Encrypt, Cloudflare, or managed certificates
+- HTTPS enforcement: HTTP → HTTPS redirect, HSTS header configuration
+- Security headers: Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy
+- Secrets management: production secrets storage (environment variables, vault, sealed secrets)
+- Firewall rules: allowed ports, IP allowlisting if applicable, DDoS protection
+- Access control: SSH key management, deployment credentials, least-privilege IAM roles
+- Container security: non-root user, read-only filesystem where possible, security scanning
+- Rate limiting configuration for production traffic
+- CORS configuration for production domains
+- Security audit checklist for pre-deployment verification
+
+Tag findings with [KNOWLEDGE category="security" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'monitoring',
+            title: `Monitoring & Health — ${productName}`,
+            description: `You are a monitoring and observability specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Set up monitoring, health checks, and observability for the production deployment.
+
+Deliver:
+- Health check endpoints: /health (basic), /health/ready (dependencies), /health/live (liveness)
+- Uptime monitoring: external monitoring service configuration (UptimeRobot, Pingdom, or similar)
+- Application metrics: request rate, error rate, response latency (p50/p95/p99), active connections
+- Log aggregation: structured logging format, log shipping configuration, log retention policy
+- Alerting rules: downtime alerts, error rate thresholds, latency degradation, disk/memory warnings
+- Dashboard configuration: key metrics visualisation (Grafana, Datadog, or platform-native)
+- Performance baselines: expected response times, throughput, resource utilisation
+- Error tracking: exception monitoring integration (Sentry, Bugsnag, or similar)
+- Status page setup: public status page for users showing service health
+- On-call rotation recommendations and escalation paths
+
+Tag findings with [KNOWLEDGE category="monitoring" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'rollback',
+            title: `Rollback & Recovery — ${productName}`,
+            description: `You are a disaster recovery specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Define rollback procedures, backup strategy, and disaster recovery plan.
+
+Deliver:
+- Deployment strategy: blue-green, canary, or rolling update with specific configuration
+- Rollback procedures: step-by-step guide for reverting to previous version within minutes
+- Database backup strategy: automated backups, backup frequency, retention period, storage location
+- Database migration rollback: reverse migration scripts, data recovery procedures
+- Asset backup: user uploads, configuration files, static assets
+- Disaster recovery runbook: complete recovery procedure from total infrastructure failure
+- RTO (Recovery Time Objective) and RPO (Recovery Point Objective) targets with justification
+- Failover testing plan: scheduled chaos engineering or failover drill procedures
+- Incident response procedures: detection, triage, communication, resolution, post-mortem
+- Data export/portability: how to extract all data for migration or compliance
+
+Tag findings with [KNOWLEDGE category="rollback" title="..."]...[/KNOWLEDGE]`
+        }
+    ];
+}
+
+/**
  * Execute a specific phase for a product by creating a goal.
  */
 function executePhase(productId, phase) {
@@ -4825,32 +5092,42 @@ function executePhase(productId, phase) {
         }
     }
 
-    // Other phases: single goal with knowledge context
-    const knowledgeSummary = getKnowledgeSummary(productId);
-    const descriptions = {
-        deploy: `Deploy phase for ${product.name}: containerise, set up CI/CD, configure infrastructure. ${knowledgeSummary}`,
-    };
+    // Deploy phase: spawn parallel deploy swarm
+    if (phase === 'deploy') {
+        try {
+            const knowledgeSummary = getKnowledgeSummary(productId);
+            const parentDesc = `Deploy phase for ${product.name} — orchestrate parallel deploy subagents preparing production infrastructure and deployment. Seed: ${product.seed}`;
+            const parentGoalId = createGoal(parentDesc, product.project_path, false, null, 'parent');
 
-    const description = descriptions[phase] || `Phase "${phase}" for ${product.name}. ${knowledgeSummary}`;
+            const areas = getDeploySubagents(product.name, product.seed, knowledgeSummary);
+            const childGoalIds = [];
 
-    try {
-        const goalId = createGoal(description, product.project_path, true);
+            for (const area of areas) {
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                childGoalIds.push(childGoalId);
+                console.log(`[Pipeline] Deploy subagent created: ${area.area} (${childGoalId})`);
+            }
 
-        phaseStmts.updateStatus.run('active', now, productId, phase);
-        phaseStmts.updateGoal.run(goalId, productId, phase);
-        productStmts.updatePhase.run(phase, PIPELINE_PHASES.indexOf(phase), productId);
+            phaseStmts.updateStatus.run('active', now, productId, phase);
+            phaseStmts.updateGoal.run(parentGoalId, productId, phase);
+            productStmts.updatePhase.run(phase, PIPELINE_PHASES.indexOf(phase), productId);
 
-        if (wss.clients.size > 0) {
-            const msg = JSON.stringify({ type: 'pipeline_phase_started', productId, phase, goalId });
-            wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+            if (wss.clients.size > 0) {
+                const msg = JSON.stringify({ type: 'pipeline_phase_started', productId, phase, goalId: parentGoalId, childGoals: childGoalIds.length });
+                wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+            }
+
+            console.log(`[Pipeline] Deploy phase started for "${product.name}" — parent ${parentGoalId}, ${childGoalIds.length} children`);
+            return parentGoalId;
+        } catch (err) {
+            console.error(`[Pipeline] Failed to execute deploy phase for ${product.name}:`, err.message);
+            return null;
         }
-
-        console.log(`[Pipeline] Phase "${phase}" started for "${product.name}" (goal: ${goalId})`);
-        return goalId;
-    } catch (err) {
-        console.error(`[Pipeline] Failed to execute phase "${phase}" for ${product.name}:`, err.message);
-        return null;
     }
+
+    // Fallback for any unexpected phase
+    console.error(`[Pipeline] Unknown phase "${phase}" for ${product.name}`);
+    return null;
 }
 
 /**
