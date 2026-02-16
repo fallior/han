@@ -35,6 +35,7 @@
 | 11.C | Design Artifact Swarm | Implementation Spec | Complete | [level-11-phase-c-design-swarm.md](level-11-phase-c-design-swarm.md) |
 | 11.D | Architecture Swarm | Implementation Spec | Complete | [level-11-phase-d-architecture-swarm.md](level-11-phase-d-architecture-swarm.md) |
 | 11.E | Build Swarm | Implementation Spec | Complete | [level-11-phase-e-build-swarm.md](level-11-phase-e-build-swarm.md) |
+| 11.F | Test Swarm | Implementation Spec | Complete | [level-11-phase-f-test-swarm.md](level-11-phase-f-test-swarm.md) |
 
 ## Plan Template
 

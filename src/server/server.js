@@ -2517,6 +2517,56 @@ app.get('/api/products/:id/build', (req, res) => {
 });
 
 /**
+ * GET /api/products/:id/test — Test phase status with subagent progress
+ */
+app.get('/api/products/:id/test', (req, res) => {
+    try {
+        const productId = req.params.id;
+        const product = productStmts.get.get(productId);
+        if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+
+        const phase = phaseStmts.get.get(productId, 'test');
+        if (!phase) return res.status(404).json({ success: false, error: 'Test phase not found' });
+
+        const parentGoal = phase.goal_id ? goalStmts.get.get(phase.goal_id) : null;
+        if (!parentGoal) {
+            return res.json({ success: true, status: 'not_started', phase, subagents: [] });
+        }
+
+        const children = goalStmts.getChildren.all(parentGoal.id);
+        const subagents = children.map(child => {
+            const tasks = taskStmts.getByGoal.all(child.id);
+            return {
+                goal_id: child.id,
+                area: child.description.split('.')[0].split(':')[0].trim(),
+                status: child.status,
+                progress: { tasks_total: child.task_count || 0, tasks_completed: child.tasks_completed || 0, tasks_failed: child.tasks_failed || 0 },
+                cost_usd: child.total_cost_usd || 0,
+                created_at: child.created_at,
+                completed_at: child.completed_at,
+                tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, cost_usd: t.cost_usd || 0 }))
+            };
+        });
+
+        const knowledge = knowledgeStmts.getByProduct.all(productId)
+            .filter(k => k.source_phase === 'test')
+            .map(k => ({ category: k.category, title: k.title, preview: k.content.slice(0, 200), created_at: k.created_at }));
+
+        res.json({
+            success: true,
+            status: parentGoal.status,
+            phase,
+            parent_goal: { id: parentGoal.id, status: parentGoal.status, total_cost_usd: parentGoal.total_cost_usd || 0, created_at: parentGoal.created_at, completed_at: parentGoal.completed_at },
+            subagents,
+            knowledge_count: knowledge.length,
+            knowledge_preview: knowledge.slice(0, 10)
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
 app.post('/api/orchestrator/setup', async (req, res) => {
@@ -2741,6 +2791,7 @@ function updateParentGoalProgress(parentGoalId) {
                 else if (phaseRecord.phase === 'design') synthesizeDesignArtifacts(parentGoalId);
                 else if (phaseRecord.phase === 'architecture') synthesizeArchitectureSpec(parentGoalId);
                 else if (phaseRecord.phase === 'build') synthesizeBuildResults(parentGoalId);
+                else if (phaseRecord.phase === 'test') synthesizeTestResults(parentGoalId);
             }
         } catch (err) { console.error(`[Pipeline] Synthesis failed for ${parentGoalId}:`, err.message); }
 
@@ -3067,6 +3118,84 @@ function synthesizeBuildResults(parentGoalId) {
         console.log(`[Pipeline] Build synthesis complete for "${product.name}" — ${allKnowledge.length} entries, $${totalCost.toFixed(4)}`);
     } catch (err) {
         console.error(`[Pipeline] Build synthesis failed for parent ${parentGoalId}:`, err.message);
+    }
+}
+
+/**
+ * Synthesize test results from all test subagent knowledge into a Test Report.
+ */
+function synthesizeTestResults(parentGoalId) {
+    try {
+        const parent = goalStmts.get.get(parentGoalId);
+        if (!parent) return;
+
+        const phaseRecord = db.prepare('SELECT product_id FROM product_phases WHERE goal_id = ?').get(parentGoalId);
+        if (!phaseRecord) return;
+
+        const product = productStmts.get.get(phaseRecord.product_id);
+        if (!product) return;
+
+        const allKnowledge = knowledgeStmts.getByProduct.all(product.id)
+            .filter(k => k.source_phase === 'test');
+
+        const children = goalStmts.getChildren.all(parentGoalId);
+        const totalCost = children.reduce((sum, c) => sum + (c.total_cost_usd || 0), 0);
+
+        const categoryNames = {
+            unit: 'Unit Tests',
+            integration: 'Integration Tests',
+            e2e: 'End-to-End Tests',
+            lint: 'Lint & Type Checks',
+            security: 'Security Audit',
+            performance: 'Performance Tests'
+        };
+
+        const grouped = {};
+        for (const k of allKnowledge) {
+            if (k.category === 'test_report') continue;
+            if (!grouped[k.category]) grouped[k.category] = [];
+            grouped[k.category].push(k);
+        }
+
+        let report = `# Test Report — ${product.name}\n\n`;
+        report += `> Generated ${new Date().toISOString()}\n\n`;
+
+        for (const [cat, displayName] of Object.entries(categoryNames)) {
+            report += `## ${displayName}\n\n`;
+            if (grouped[cat] && grouped[cat].length > 0) {
+                for (const k of grouped[cat]) {
+                    report += `### ${k.title}\n\n${k.content}\n\n`;
+                }
+            } else {
+                report += `*No findings recorded for this area.*\n\n`;
+            }
+        }
+
+        // Include any uncategorised test knowledge
+        for (const [cat, entries] of Object.entries(grouped)) {
+            if (!categoryNames[cat]) {
+                report += `## ${cat}\n\n`;
+                for (const k of entries) {
+                    report += `### ${k.title}\n\n${k.content}\n\n`;
+                }
+            }
+        }
+
+        report += `## Execution Summary\n\n`;
+        report += `| Subagent | Status | Tasks | Cost |\n`;
+        report += `|----------|--------|-------|------|\n`;
+        for (const child of children) {
+            const area = child.description.split('.')[0].split('—')[0].trim();
+            report += `| ${area} | ${child.status} | ${child.tasks_completed || 0}/${child.task_count || 0} | $${(child.total_cost_usd || 0).toFixed(4)} |\n`;
+        }
+        report += `\n**Total test cost:** $${totalCost.toFixed(4)}\n`;
+
+        const now = new Date().toISOString();
+        knowledgeStmts.insert.run(product.id, 'test_report', `Complete Test Report — ${product.name}`, report, 'test', now);
+
+        console.log(`[Pipeline] Test synthesis complete for "${product.name}" — ${allKnowledge.length} findings, $${totalCost.toFixed(4)}`);
+    } catch (err) {
+        console.error(`[Pipeline] Test synthesis failed for parent ${parentGoalId}:`, err.message);
     }
 }
 
@@ -4088,6 +4217,131 @@ Tag findings with [KNOWLEDGE category="docs" title="..."]...[/KNOWLEDGE]`
 }
 
 /**
+ * Get parallel test subagents for the test phase.
+ * Returns 6 focused testing prompts covering unit, integration, e2e, lint, security, and performance.
+ */
+function getTestSubagents(productName, seed, knowledgeSummary) {
+    const ctx = knowledgeSummary ? `\n\nAccumulated knowledge from research, design, architecture, and build phases:\n${knowledgeSummary}` : '';
+
+    return [
+        {
+            area: 'unit',
+            title: `Unit Tests — ${productName}`,
+            description: `You are a unit testing specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Write and run comprehensive unit tests for individual functions, classes, and modules.
+
+Deliver:
+- Unit tests for all core business logic functions and methods
+- Edge case coverage: null inputs, empty arrays, boundary values, type coercion
+- Error handling tests: verify exceptions are thrown correctly, error messages are accurate
+- Mock/stub external dependencies (database, API calls, file system)
+- Test data factories or fixtures for consistent test setup
+- Coverage report identifying untested code paths
+- Aim for >80% line coverage on business logic modules
+
+Tag findings with [KNOWLEDGE category="unit" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'integration',
+            title: `Integration Tests — ${productName}`,
+            description: `You are an integration testing specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Write integration tests verifying that components work together correctly.
+
+Deliver:
+- API endpoint tests: HTTP method, route, request body, response status, response body
+- Database integration: verify CRUD operations, migrations, constraints, transactions
+- Middleware chain tests: authentication, authorisation, validation, error handling pipeline
+- Service layer tests: verify business logic orchestration across multiple modules
+- External service integration: mock external APIs, verify retry logic, timeout handling
+- Authentication flow tests: login, token refresh, permission checks, session management
+- Test database setup/teardown scripts for isolated test environments
+
+Tag findings with [KNOWLEDGE category="integration" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'e2e',
+            title: `End-to-End Tests — ${productName}`,
+            description: `You are an end-to-end testing specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Write E2E tests covering critical user journeys through the full application stack.
+
+Deliver:
+- Critical path tests: user registration, login, core feature usage, logout
+- Form submission flows: validation feedback, success states, error recovery
+- Navigation tests: routing, deep links, back/forward, breadcrumbs
+- Data persistence: verify data survives page refreshes, session changes
+- Multi-step workflows: complete business processes end-to-end
+- Cross-browser/device considerations documented
+- Test environment configuration (headless browser setup, test URLs, seed data)
+- Smoke test suite for quick deployment verification
+
+Tag findings with [KNOWLEDGE category="e2e" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'lint',
+            title: `Lint & Type Checks — ${productName}`,
+            description: `You are a code quality specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Run linting, type checking, and formatting verification across the entire codebase.
+
+Deliver:
+- Linting results (ESLint, Pylint, Clippy, etc.) with violation counts by severity
+- Type checking results (TypeScript strict mode, mypy, etc.) with error details
+- Code formatting verification (Prettier, Black, rustfmt) — list non-conforming files
+- Unused import/variable detection
+- Complexity metrics: cyclomatic complexity, function length, file size warnings
+- Naming convention violations (camelCase, snake_case consistency)
+- Fix recommendations prioritised by severity (error → warning → info)
+- Summary: total violations, files affected, estimated fix effort
+
+Tag findings with [KNOWLEDGE category="lint" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'security',
+            title: `Security Audit — ${productName}`,
+            description: `You are a security audit specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Perform a comprehensive security audit of the codebase.
+
+Deliver:
+- OWASP Top 10 checklist: injection, broken auth, sensitive data exposure, XXE, broken access control, misconfiguration, XSS, insecure deserialisation, known vulnerabilities, insufficient logging
+- Dependency vulnerability scan: check for known CVEs in all dependencies
+- Secrets detection: scan for hardcoded API keys, passwords, tokens, connection strings
+- Input validation audit: identify all user input points, verify sanitisation
+- Authentication/authorisation review: token handling, session management, permission checks
+- CORS and CSP configuration review
+- SQL injection / NoSQL injection risk assessment
+- File upload security (if applicable): type validation, size limits, storage location
+- Severity-rated findings: Critical, High, Medium, Low, Informational
+
+Tag findings with [KNOWLEDGE category="security" title="..."]...[/KNOWLEDGE]`
+        },
+        {
+            area: 'performance',
+            title: `Performance Tests — ${productName}`,
+            description: `You are a performance testing specialist for "${productName}". Seed idea: ${seed}${ctx}
+
+Your task: Evaluate application performance and identify optimisation opportunities.
+
+Deliver:
+- Response time benchmarks for key API endpoints (p50, p95, p99)
+- Database query analysis: identify slow queries, missing indices, N+1 problems
+- Bundle size analysis (frontend): total size, largest modules, tree-shaking opportunities
+- Memory usage profiling: identify leaks, excessive allocations, cache effectiveness
+- Startup time measurement: application boot, database connection, initial data load
+- Load testing recommendations: expected concurrent users, bottleneck predictions
+- Caching assessment: what should be cached, TTL recommendations, invalidation strategy
+- Asset optimisation: image compression, minification, lazy loading opportunities
+- Performance budget recommendations with specific thresholds
+
+Tag findings with [KNOWLEDGE category="performance" title="..."]...[/KNOWLEDGE]`
+        }
+    ];
+}
+
+/**
  * Execute a specific phase for a product by creating a goal.
  */
 function executePhase(productId, phase) {
@@ -4227,10 +4481,42 @@ function executePhase(productId, phase) {
         }
     }
 
+    // Test phase: spawn parallel test swarm
+    if (phase === 'test') {
+        try {
+            const knowledgeSummary = getKnowledgeSummary(productId);
+            const parentDesc = `Test phase for ${product.name} — orchestrate parallel test subagents verifying quality across all dimensions. Seed: ${product.seed}`;
+            const parentGoalId = createGoal(parentDesc, product.project_path, false, null, 'parent');
+
+            const areas = getTestSubagents(product.name, product.seed, knowledgeSummary);
+            const childGoalIds = [];
+
+            for (const area of areas) {
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                childGoalIds.push(childGoalId);
+                console.log(`[Pipeline] Test subagent created: ${area.area} (${childGoalId})`);
+            }
+
+            phaseStmts.updateStatus.run('active', now, productId, phase);
+            phaseStmts.updateGoal.run(parentGoalId, productId, phase);
+            productStmts.updatePhase.run(phase, PIPELINE_PHASES.indexOf(phase), productId);
+
+            if (wss.clients.size > 0) {
+                const msg = JSON.stringify({ type: 'pipeline_phase_started', productId, phase, goalId: parentGoalId, childGoals: childGoalIds.length });
+                wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+            }
+
+            console.log(`[Pipeline] Test phase started for "${product.name}" — parent ${parentGoalId}, ${childGoalIds.length} children`);
+            return parentGoalId;
+        } catch (err) {
+            console.error(`[Pipeline] Failed to execute test phase for ${product.name}:`, err.message);
+            return null;
+        }
+    }
+
     // Other phases: single goal with knowledge context
     const knowledgeSummary = getKnowledgeSummary(productId);
     const descriptions = {
-        test: `Test phase for ${product.name}: write and run unit tests, integration tests, verify all features. ${knowledgeSummary}`,
         document: `Document phase for ${product.name}: generate README, API docs, deployment guide, CLAUDE.md. ${knowledgeSummary}`,
         deploy: `Deploy phase for ${product.name}: containerise, set up CI/CD, configure infrastructure. ${knowledgeSummary}`,
     };
