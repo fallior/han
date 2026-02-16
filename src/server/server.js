@@ -2372,6 +2372,53 @@ app.get('/api/products/:id/research', (req, res) => {
     }
 });
 
+app.get('/api/products/:id/design', (req, res) => {
+    try {
+        const productId = req.params.id;
+        const product = productStmts.get.get(productId);
+        if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+
+        const phase = phaseStmts.get.get(productId, 'design');
+        if (!phase) return res.status(404).json({ success: false, error: 'Design phase not found' });
+
+        const parentGoal = phase.goal_id ? goalStmts.get.get(phase.goal_id) : null;
+        if (!parentGoal) {
+            return res.json({ success: true, status: 'not_started', phase, subagents: [] });
+        }
+
+        const children = goalStmts.getChildren.all(parentGoal.id);
+        const subagents = children.map(child => {
+            const tasks = taskStmts.getByGoal.all(child.id);
+            return {
+                goal_id: child.id,
+                area: child.description.split('.')[0].split(':')[0].trim(),
+                status: child.status,
+                progress: { tasks_total: child.task_count || 0, tasks_completed: child.tasks_completed || 0, tasks_failed: child.tasks_failed || 0 },
+                cost_usd: child.total_cost_usd || 0,
+                created_at: child.created_at,
+                completed_at: child.completed_at,
+                tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, cost_usd: t.cost_usd || 0 }))
+            };
+        });
+
+        const knowledge = knowledgeStmts.getByProduct.all(productId)
+            .filter(k => k.source_phase === 'design')
+            .map(k => ({ category: k.category, title: k.title, preview: k.content.slice(0, 200), created_at: k.created_at }));
+
+        res.json({
+            success: true,
+            status: parentGoal.status,
+            phase,
+            parent_goal: { id: parentGoal.id, status: parentGoal.status, total_cost_usd: parentGoal.total_cost_usd || 0, created_at: parentGoal.created_at, completed_at: parentGoal.completed_at },
+            subagents,
+            knowledge_count: knowledge.length,
+            knowledge_preview: knowledge.slice(0, 10)
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 /**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
@@ -2538,7 +2585,7 @@ function updateGoalProgress(goalId) {
 
         // Child goal completed: extract knowledge, then check parent
         if (goal.goal_type === 'child' && goal.parent_goal_id) {
-            try { extractResearchKnowledge(goalId, goal.parent_goal_id); }
+            try { extractChildGoalKnowledge(goalId, goal.parent_goal_id); }
             catch (err) { console.error(`[Knowledge] Extraction failed for child ${goalId}:`, err.message); }
             updateParentGoalProgress(goal.parent_goal_id);
         }
@@ -2589,9 +2636,14 @@ function updateParentGoalProgress(parentGoalId) {
     console.log(`[Goal] Parent ${parentGoalId} progress: ${completed}/${children.length} children complete`);
 
     if (allDone && completedAt) {
-        // Synthesise research findings into a Research Brief
-        try { synthesizeResearchFindings(parentGoalId); }
-        catch (err) { console.error(`[Pipeline] Research synthesis failed for ${parentGoalId}:`, err.message); }
+        // Phase-aware synthesis
+        try {
+            const phaseRecord = db.prepare('SELECT phase FROM product_phases WHERE goal_id = ?').get(parentGoalId);
+            if (phaseRecord) {
+                if (phaseRecord.phase === 'research') synthesizeResearchFindings(parentGoalId);
+                else if (phaseRecord.phase === 'design') synthesizeDesignArtifacts(parentGoalId);
+            }
+        } catch (err) { console.error(`[Pipeline] Synthesis failed for ${parentGoalId}:`, err.message); }
 
         try { generateGoalSummary(parentGoalId); }
         catch (err) { console.error(`[Goal] Summary failed for parent ${parentGoalId}:`, err.message); }
@@ -2618,15 +2670,16 @@ function updateParentGoalProgress(parentGoalId) {
  * Extract knowledge entries from a completed child research goal.
  * Looks for [KNOWLEDGE] markers in task results, falls back to goal summary.
  */
-function extractResearchKnowledge(childGoalId, parentGoalId) {
+function extractChildGoalKnowledge(childGoalId, parentGoalId) {
     try {
         const childGoal = goalStmts.get.get(childGoalId);
         if (!childGoal) return;
 
-        const phase = db.prepare('SELECT product_id FROM product_phases WHERE goal_id = ?').get(parentGoalId);
-        if (!phase) return;
+        const phaseRecord = db.prepare('SELECT product_id, phase FROM product_phases WHERE goal_id = ?').get(parentGoalId);
+        if (!phaseRecord) return;
 
-        const productId = phase.product_id;
+        const productId = phaseRecord.product_id;
+        const sourcePhase = phaseRecord.phase || 'unknown';
         const now = new Date().toISOString();
         let extracted = 0;
 
@@ -2638,7 +2691,7 @@ function extractResearchKnowledge(childGoalId, parentGoalId) {
             if (!task.result) continue;
             let match;
             while ((match = knowledgeRegex.exec(task.result)) !== null) {
-                knowledgeStmts.insert.run(productId, match[1].trim(), match[2].trim(), match[3].trim(), 'research', now);
+                knowledgeStmts.insert.run(productId, match[1].trim(), match[2].trim(), match[3].trim(), sourcePhase, now);
                 extracted++;
             }
         }
@@ -2650,7 +2703,7 @@ function extractResearchKnowledge(childGoalId, parentGoalId) {
                 let match;
                 const regex = /\[KNOWLEDGE\s+category="([^"]+)"\s+title="([^"]+)"\]([\s\S]*?)\[\/KNOWLEDGE\]/g;
                 while ((match = regex.exec(content)) !== null) {
-                    knowledgeStmts.insert.run(productId, match[1].trim(), match[2].trim(), match[3].trim(), 'research', now);
+                    knowledgeStmts.insert.run(productId, match[1].trim(), match[2].trim(), match[3].trim(), sourcePhase, now);
                     extracted++;
                 }
             } catch {}
@@ -2660,11 +2713,11 @@ function extractResearchKnowledge(childGoalId, parentGoalId) {
         if (extracted === 0) {
             const area = childGoal.description.split(':')[0].replace(/^.*?for\s+/i, '').trim() || 'general';
             const summary = childGoal.summary || `Completed: ${childGoal.description.slice(0, 500)}`;
-            knowledgeStmts.insert.run(productId, area.toLowerCase(), `${area} research findings`, summary, 'research', now);
+            knowledgeStmts.insert.run(productId, area.toLowerCase(), `${area} ${sourcePhase} findings`, summary, sourcePhase, now);
             extracted = 1;
         }
 
-        console.log(`[Knowledge] Extracted ${extracted} entries from child goal ${childGoalId}`);
+        console.log(`[Knowledge] Extracted ${extracted} entries from child goal ${childGoalId} (phase: ${sourcePhase})`);
     } catch (err) {
         console.error(`[Knowledge] Extraction failed for child goal ${childGoalId}:`, err.message);
     }
@@ -2725,6 +2778,62 @@ function synthesizeResearchFindings(parentGoalId) {
         console.log(`[Pipeline] Research synthesis complete for "${product.name}" — ${allKnowledge.length} findings, $${totalCost.toFixed(4)}`);
     } catch (err) {
         console.error(`[Pipeline] Research synthesis failed for parent ${parentGoalId}:`, err.message);
+    }
+}
+
+/**
+ * Synthesise design artifacts from all child design goals into a Design Package.
+ * Stores as a knowledge entry with category='design_package'.
+ */
+function synthesizeDesignArtifacts(parentGoalId) {
+    try {
+        const phaseRecord = db.prepare('SELECT product_id FROM product_phases WHERE goal_id = ?').get(parentGoalId);
+        if (!phaseRecord) return;
+
+        const productId = phaseRecord.product_id;
+        const product = productStmts.get.get(productId);
+        if (!product) return;
+
+        const children = goalStmts.getChildren.all(parentGoalId);
+        const allKnowledge = knowledgeStmts.getByProduct.all(productId).filter(k => k.source_phase === 'design' && k.category !== 'design_package');
+
+        let pkg = `# Design Package: ${product.name}\n\n`;
+        pkg += `**Seed Idea:** ${product.seed}\n\n`;
+        pkg += `**Completed:** ${new Date().toISOString().split('T')[0]}\n\n---\n\n`;
+
+        const byCategory = {};
+        for (const k of allKnowledge) {
+            if (!byCategory[k.category]) byCategory[k.category] = [];
+            byCategory[k.category].push(k);
+        }
+
+        const categoryNames = {
+            requirements: 'Requirements Specification', datamodel: 'Data Model',
+            api: 'API Specification', ux: 'UX & Wireframes',
+            interactions: 'Interaction Design', accessibility: 'Accessibility'
+        };
+
+        for (const [category, entries] of Object.entries(byCategory)) {
+            pkg += `## ${categoryNames[category] || category}\n\n`;
+            for (const entry of entries) {
+                pkg += `### ${entry.title}\n\n${entry.content}\n\n`;
+            }
+        }
+
+        pkg += `---\n\n## Execution Summary\n\n`;
+        for (const child of children) {
+            const area = child.description.split('.')[0].slice(0, 60);
+            pkg += `- **${area}**: ${child.status} (${child.tasks_completed || 0}/${child.task_count || 0} tasks, $${(child.total_cost_usd || 0).toFixed(4)})\n`;
+        }
+        const totalCost = children.reduce((sum, c) => sum + (c.total_cost_usd || 0), 0);
+        pkg += `\n**Total Design Cost:** $${totalCost.toFixed(4)}\n`;
+
+        const now = new Date().toISOString();
+        knowledgeStmts.insert.run(productId, 'design_package', `Complete Design Package — ${product.name}`, pkg, 'design', now);
+
+        console.log(`[Pipeline] Design synthesis complete for "${product.name}" — ${allKnowledge.length} artifacts, $${totalCost.toFixed(4)}`);
+    } catch (err) {
+        console.error(`[Pipeline] Design synthesis failed for parent ${parentGoalId}:`, err.message);
     }
 }
 
@@ -3426,6 +3535,99 @@ Deliverables: UI pattern library references, recommended design system or compon
 }
 
 /**
+ * Generate focused design subagent prompts for the 6 design artifact areas.
+ */
+function getDesignSubagents(productName, seed, knowledgeSummary) {
+    const ctx = knowledgeSummary ? `\n\nContext from research phase:\n${knowledgeSummary}` : '';
+    return [
+        {
+            area: 'requirements',
+            title: `Requirements: ${productName}`,
+            description: `Requirements specification for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- User stories in "As a [role], I want [feature], so that [benefit]" format (15-30 stories)
+- Acceptance criteria for each story (Given/When/Then)
+- Functional requirements grouped by feature area
+- Non-functional requirements (performance, scalability, security, availability)
+- Edge cases and error scenarios
+- Priority classification (must-have, should-have, nice-to-have)
+- Out-of-scope items explicitly listed`
+        },
+        {
+            area: 'datamodel',
+            title: `Data Model: ${productName}`,
+            description: `Data model design for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- Entity-relationship diagram description (entities, attributes, relationships)
+- Database schema (tables, columns, types, constraints, indices)
+- Data validation rules per field
+- Migration plan (initial schema creation SQL)
+- Seed data requirements
+- Data retention and archival policy
+- Estimated storage growth projections`
+        },
+        {
+            area: 'api',
+            title: `API Specification: ${productName}`,
+            description: `API contract specification for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- REST endpoint listing (method, path, description)
+- Request/response schemas for each endpoint (JSON examples)
+- Authentication and authorisation model (JWT, API keys, OAuth, etc.)
+- Error response format and standard error codes
+- Rate limiting and pagination strategy
+- Webhook/event specifications if applicable
+- API versioning strategy`
+        },
+        {
+            area: 'ux',
+            title: `UX Design: ${productName}`,
+            description: `UX and wireframe design for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- Page/screen inventory (list all views with purpose)
+- Wireframe descriptions for each page (layout, components, content areas)
+- Component hierarchy (reusable UI components)
+- Navigation structure and information architecture
+- Responsive breakpoints and mobile adaptation strategy
+- Design system recommendations (colours, typography, spacing)
+- Onboarding flow (first-time user experience)`
+        },
+        {
+            area: 'interactions',
+            title: `Interaction Design: ${productName}`,
+            description: `Interaction and state design for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- User flow diagrams (Mermaid format) for key journeys
+- State management patterns (what state lives where)
+- Form validation flows with error message specifications
+- Loading states, empty states, and error states for each view
+- Real-time update patterns (polling, WebSocket, SSE)
+- Optimistic UI patterns where applicable
+- Transition and animation specifications`
+        },
+        {
+            area: 'accessibility',
+            title: `Accessibility Design: ${productName}`,
+            description: `Accessibility and compliance design for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- WCAG 2.1 AA compliance checklist with implementation notes
+- Keyboard navigation map (tab order, shortcuts, focus management)
+- Screen reader annotations (ARIA roles, labels, live regions)
+- Colour contrast verification plan
+- Touch target sizing for mobile (minimum 44x44px)
+- Alternative text strategy for images and media
+- Reduced motion and preference-based adaptations`
+        }
+    ];
+}
+
+/**
  * Execute a specific phase for a product by creating a goal.
  */
 function executePhase(productId, phase) {
@@ -3466,10 +3668,42 @@ function executePhase(productId, phase) {
         }
     }
 
+    // Design phase: spawn parallel design artifact swarm
+    if (phase === 'design') {
+        try {
+            const knowledgeSummary = getKnowledgeSummary(productId);
+            const parentDesc = `Design phase for ${product.name} — orchestrate parallel design subagents producing structured artifacts. Seed: ${product.seed}`;
+            const parentGoalId = createGoal(parentDesc, product.project_path, false, null, 'parent');
+
+            const areas = getDesignSubagents(product.name, product.seed, knowledgeSummary);
+            const childGoalIds = [];
+
+            for (const area of areas) {
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                childGoalIds.push(childGoalId);
+                console.log(`[Pipeline] Design subagent created: ${area.area} (${childGoalId})`);
+            }
+
+            phaseStmts.updateStatus.run('active', now, productId, phase);
+            phaseStmts.updateGoal.run(parentGoalId, productId, phase);
+            productStmts.updatePhase.run(phase, PIPELINE_PHASES.indexOf(phase), productId);
+
+            if (wss.clients.size > 0) {
+                const msg = JSON.stringify({ type: 'pipeline_phase_started', productId, phase, goalId: parentGoalId, childGoals: childGoalIds.length });
+                wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+            }
+
+            console.log(`[Pipeline] Design phase started for "${product.name}" — parent ${parentGoalId}, ${childGoalIds.length} children`);
+            return parentGoalId;
+        } catch (err) {
+            console.error(`[Pipeline] Failed to execute design phase for ${product.name}:`, err.message);
+            return null;
+        }
+    }
+
     // Other phases: single goal with knowledge context
     const knowledgeSummary = getKnowledgeSummary(productId);
     const descriptions = {
-        design: `Design phase for ${product.name}: create user stories, data model, API specification. ${knowledgeSummary}`,
         architecture: `Architecture phase for ${product.name}: select tech stack, design infrastructure, plan CI/CD. ${knowledgeSummary}`,
         build: `Build phase for ${product.name}: implement all features per the architecture. ${knowledgeSummary}`,
         test: `Test phase for ${product.name}: write and run unit tests, integration tests, verify all features. ${knowledgeSummary}`,
