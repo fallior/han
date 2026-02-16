@@ -11,6 +11,7 @@ const { WebSocketServer } = require('ws');
 const { execFileSync, execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const Database = require('better-sqlite3');
 const { query: agentQuery } = require('@anthropic-ai/claude-agent-sdk');
 const orchestrator = require('./orchestrator');
@@ -158,6 +159,23 @@ db.exec(`CREATE TABLE IF NOT EXISTS projects (
     priority INTEGER DEFAULT 5,
     last_synced_at TEXT
 )`);
+
+// Phase 2: Budget columns on projects
+const projCols = db.pragma("table_info('projects')").map(col => col.name);
+if (!projCols.includes('cost_budget_daily')) {
+    db.exec(`ALTER TABLE projects ADD COLUMN cost_budget_daily REAL DEFAULT 0`);
+    db.exec(`ALTER TABLE projects ADD COLUMN cost_budget_total REAL DEFAULT 0`);
+    db.exec(`ALTER TABLE projects ADD COLUMN cost_spent_today REAL DEFAULT 0`);
+    db.exec(`ALTER TABLE projects ADD COLUMN cost_spent_total REAL DEFAULT 0`);
+    db.exec(`ALTER TABLE projects ADD COLUMN budget_reset_date TEXT`);
+    db.exec(`ALTER TABLE projects ADD COLUMN throttled INTEGER DEFAULT 0`);
+}
+
+// Phase 2: Deadline column on tasks
+const taskCols = db.pragma("table_info('tasks')").map(col => col.name);
+if (!taskCols.includes('deadline')) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN deadline TEXT`);
+}
 
 // Create project_memory table
 db.exec(`CREATE TABLE IF NOT EXISTS project_memory (
@@ -508,6 +526,47 @@ function rollbackCheckpoint(projectPath, checkpointRef, checkpointType) {
 }
 
 /**
+ * Commit task changes after successful completion.
+ * Ensures each task's work persists in git history so sequential
+ * tasks in a goal can build on each other's changes.
+ */
+function commitTaskChanges(projectPath, task) {
+    try {
+        if (!hasUncommittedChanges(projectPath)) {
+            console.log(`[Git] No changes to commit for task ${task.id}`);
+            return false;
+        }
+
+        // Stage all changes
+        execFileSync('git', ['add', '-A'], {
+            cwd: projectPath,
+            stdio: 'ignore'
+        });
+
+        // Detect semantic commit prefix from task title
+        const titleLower = task.title.toLowerCase();
+        let prefix = 'chore';
+        if (/\b(add|create|implement|build|new)\b/.test(titleLower)) prefix = 'feat';
+        else if (/\b(fix|repair|resolve|correct|bug)\b/.test(titleLower)) prefix = 'fix';
+        else if (/\b(update|improve|enhance|optimise|optimize|refactor)\b/.test(titleLower)) prefix = 'refactor';
+        else if (/\b(doc|comment|readme)\b/.test(titleLower)) prefix = 'docs';
+        else if (/\b(test|spec)\b/.test(titleLower)) prefix = 'test';
+
+        const message = `${prefix}: ${task.title}\n\nTask: ${task.id}\nModel: ${task.model}\nCost: $${(task.cost_usd || 0).toFixed(4)}${task.goal_id ? `\nGoal: ${task.goal_id}` : ''}\n\nCo-Authored-By: Claude <noreply@anthropic.com>`;
+        execFileSync('git', ['commit', '-m', message], {
+            cwd: projectPath,
+            stdio: 'ignore'
+        });
+
+        console.log(`[Git] Committed changes for task: ${task.title} (${task.id})`);
+        return true;
+    } catch (err) {
+        console.error(`[Git] Commit failed for task ${task.id}:`, err.message);
+        return false;
+    }
+}
+
+/**
  * Clean up a git checkpoint after successful task completion
  */
 function cleanupCheckpoint(projectPath, checkpointRef, checkpointType) {
@@ -547,6 +606,52 @@ function cleanupCheckpoint(projectPath, checkpointRef, checkpointType) {
     } catch (err) {
         console.error(`[Git] Cleanup failed:`, err.message);
     }
+}
+
+// ── Phase 2: Cost budget + priority engine ───────────────
+
+/**
+ * Recalculate project costs from task data and set throttle flag.
+ */
+function recalcProjectCosts(projectPath) {
+    const project = portfolioStmts.getByPath.get(projectPath);
+    if (!project) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const dailyRow = db.prepare(
+        `SELECT COALESCE(SUM(cost_usd), 0) as total FROM tasks WHERE project_path = ? AND status = 'done' AND date(completed_at) = ?`
+    ).get(projectPath, today);
+    const totalRow = db.prepare(
+        `SELECT COALESCE(SUM(cost_usd), 0) as total FROM tasks WHERE project_path = ?`
+    ).get(projectPath);
+    const dailySpend = dailyRow.total;
+    const totalSpend = totalRow.total;
+    const overDaily = project.cost_budget_daily > 0 && dailySpend >= project.cost_budget_daily;
+    const overTotal = project.cost_budget_total > 0 && totalSpend >= project.cost_budget_total;
+    const throttled = (overDaily || overTotal) ? 1 : 0;
+    portfolioStmts.updateCosts.run(dailySpend, totalSpend, today, throttled, project.name);
+    if (throttled) console.log(`[Portfolio] Project throttled: ${project.name}`);
+}
+
+/**
+ * Calculate priority score for task scheduling.
+ * Considers task priority, project priority, deadline proximity, and budget headroom.
+ */
+function calculatePriorityScore(task, project) {
+    let score = (task.priority || 0) * 10;
+    score += ((project?.priority || 5)) * 5;
+    if (task.deadline) {
+        const deadline = new Date(task.deadline);
+        const daysUntil = Math.ceil((deadline - Date.now()) / 86400000);
+        if (daysUntil <= 0) score += 50;
+        else if (daysUntil <= 3) score += 25;
+        else if (daysUntil <= 7) score += 10;
+    }
+    if (!project || project.cost_budget_daily === 0) {
+        score += 5;
+    } else if (project.cost_spent_today / project.cost_budget_daily <= 0.8) {
+        score += 5;
+    }
+    return score;
 }
 
 /**
@@ -1531,6 +1636,59 @@ app.post('/api/portfolio/sync', (req, res) => {
 });
 
 /**
+ * PUT /api/portfolio/:name/budget — Set project cost budgets
+ */
+app.put('/api/portfolio/:name/budget', (req, res) => {
+    try {
+        const project = portfolioStmts.get.get(req.params.name);
+        if (!project) return res.status(404).json({ success: false, error: 'Project not found' });
+        const daily = parseFloat(req.body.cost_budget_daily) || 0;
+        const total = parseFloat(req.body.cost_budget_total) || 0;
+        if (daily < 0 || total < 0) return res.status(400).json({ success: false, error: 'Budgets must be >= 0' });
+        portfolioStmts.updateBudget.run(daily, total, req.params.name);
+        res.json({ success: true, project: portfolioStmts.get.get(req.params.name) });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * GET /api/portfolio/:name/budget — Get project budget status
+ */
+app.get('/api/portfolio/:name/budget', (req, res) => {
+    try {
+        const project = portfolioStmts.get.get(req.params.name);
+        if (!project) return res.status(404).json({ success: false, error: 'Project not found' });
+        res.json({
+            success: true,
+            daily_budget: project.cost_budget_daily,
+            total_budget: project.cost_budget_total,
+            spent_today: project.cost_spent_today,
+            spent_total: project.cost_spent_total,
+            throttled: !!project.throttled,
+            budget_pct_daily: project.cost_budget_daily > 0 ? (project.cost_spent_today / project.cost_budget_daily * 100).toFixed(1) : 0,
+            budget_pct_total: project.cost_budget_total > 0 ? (project.cost_spent_total / project.cost_budget_total * 100).toFixed(1) : 0,
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /api/portfolio/:name/unthrottle — Manual budget override
+ */
+app.post('/api/portfolio/:name/unthrottle', (req, res) => {
+    try {
+        const project = portfolioStmts.get.get(req.params.name);
+        if (!project) return res.status(404).json({ success: false, error: 'Project not found' });
+        portfolioStmts.unthrottle.run(req.params.name);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * GET /api/orchestrator/status — Get orchestrator backend info
  */
 app.get('/api/orchestrator/status', (req, res) => {
@@ -1713,13 +1871,179 @@ function readProjectContext(projectPath) {
     return context || 'No project context files found.';
 }
 
+// ── Level 10: Context injection helpers ──────────────────
+
+function readFileOrEmpty(filepath, maxChars = 5000) {
+    try {
+        if (!fs.existsSync(filepath)) return '';
+        return fs.readFileSync(filepath, 'utf8').slice(0, maxChars);
+    } catch { return ''; }
+}
+
+function extractSettledDecisions(markdown) {
+    if (!markdown) return [];
+    const sections = markdown.split(/(?=### DEC-)/);
+    return sections.filter(s =>
+        /\*\*Status\*\*:\s*Settled/i.test(s)
+    ).map(s => s.trim());
+}
+
+function detectProjectTechStack(projectPath) {
+    const techSet = new Set();
+    const depMap = {
+        'express': ['Express', 'Node.js'],
+        'better-sqlite3': ['SQLite'],
+        'bun:sqlite': ['SQLite', 'Bun'],
+        '@anthropic-ai/claude-agent-sdk': ['Claude Agent SDK'],
+        'react': ['React'],
+        'react-dom': ['React'],
+        'drizzle-orm': ['Drizzle ORM'],
+        'ws': ['WebSocket'],
+        'hono': ['Bun'],
+        'elysia': ['Bun'],
+    };
+    const pkgPaths = [
+        path.join(projectPath, 'package.json'),
+        path.join(projectPath, 'src', 'server', 'package.json'),
+    ];
+    for (const pkgPath of pkgPaths) {
+        try {
+            if (!fs.existsSync(pkgPath)) continue;
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+            techSet.add('JavaScript');
+            for (const dep of Object.keys(allDeps)) {
+                if (depMap[dep]) depMap[dep].forEach(t => techSet.add(t));
+                if (dep.startsWith('@tanstack/')) techSet.add('TanStack');
+                if (dep.startsWith('@cloudflare/')) techSet.add('Cloudflare Workers');
+            }
+            if (pkg.engines?.bun) techSet.add('Bun');
+        } catch { /* skip */ }
+    }
+    const claudeMd = readFileOrEmpty(path.join(projectPath, 'CLAUDE.md'), 2000);
+    const stackMatch = claudeMd.match(/\*\*Stack\*\*:\s*(.+)/);
+    if (stackMatch) {
+        stackMatch[1].split(/\s*\+\s*/).forEach(t => techSet.add(t.trim()));
+    }
+    return [...techSet];
+}
+
+function getRelevantLearnings(techStack) {
+    if (!techStack.length) return [];
+    const indexPath = path.join(os.homedir(), 'Projects', '_learnings', 'INDEX.md');
+    const indexContent = readFileOrEmpty(indexPath, 10000);
+    if (!indexContent) return [];
+
+    const techSectionMatch = indexContent.match(/## Index by Tech Stack\s*\n([\s\S]*?)(?=\n## |$)/);
+    if (!techSectionMatch) return [];
+
+    const techSection = techSectionMatch[1];
+    const learnings = [];
+    const hasJs = techStack.some(t => /javascript|typescript|node|express|react|bun/i.test(t));
+    const categories = techSection.split(/(?=### )/);
+
+    for (const category of categories) {
+        const headerMatch = category.match(/^### (.+)/);
+        if (!headerMatch) continue;
+        const categoryName = headerMatch[1].trim();
+        const isMatch = techStack.some(tech =>
+            categoryName.toLowerCase().includes(tech.toLowerCase()) ||
+            tech.toLowerCase().includes(categoryName.toLowerCase().split(' / ')[0])
+        ) || (hasJs && /javascript|typescript/i.test(categoryName));
+        if (!isMatch) continue;
+
+        const entryRegex = /- \*\*(L\d+)\*\* \((\w+)\): (.+)/g;
+        let match;
+        while ((match = entryRegex.exec(category)) !== null) {
+            const [, id, severity, summary] = match;
+            if (severity === 'LOW') continue;
+            let content = null;
+            if (severity === 'HIGH') {
+                const idTableMatch = indexContent.match(new RegExp(`\\| ${id} \\| \\w+ \\| \\[.+?\\]\\((.+?)\\)`));
+                if (idTableMatch) {
+                    const learningPath = path.join(os.homedir(), 'Projects', '_learnings', idTableMatch[1]);
+                    content = readFileOrEmpty(learningPath, 500);
+                }
+            }
+            learnings.push({ id, severity, summary, content });
+        }
+    }
+
+    const seen = new Set();
+    return learnings.filter(l => {
+        if (seen.has(l.id)) return false;
+        seen.add(l.id);
+        return true;
+    }).slice(0, 5);
+}
+
+function getEcosystemSummary() {
+    try {
+        const projects = portfolioStmts.list.all();
+        if (!projects.length) return '';
+        return projects.map(p => {
+            let line = `- ${p.name} (${p.lifecycle}): ${(p.description || '').slice(0, 60)}`;
+            if (p.throttled) line += ' [THROTTLED]';
+            if (p.priority !== 5) line += ` [priority: ${p.priority}]`;
+            return line;
+        }).join('\n');
+    } catch { return ''; }
+}
+
+function buildTaskContext(projectPath, goalContext) {
+    const parts = [];
+
+    parts.push(`## Autonomous Agent Context
+
+You are an autonomous agent in Darron's development ecosystem.
+- **Author:** Darron — Mackay, Queensland, Australia (UTC+10)
+- **Conventions:** British English spelling, semantic commits (feat:, fix:, docs:, refactor:)
+- **Execution mode:** Running via Claude Agent SDK — no human in the loop
+- **Git:** Changes committed automatically on success, rolled back on failure
+- Do NOT use plan mode (EnterPlanMode) — implement directly`);
+
+    const claudeMd = readFileOrEmpty(path.join(projectPath, 'CLAUDE.md'), 3000);
+    if (claudeMd) parts.push(`\n## Project Instructions\n\n${claudeMd}`);
+
+    const status = readFileOrEmpty(path.join(projectPath, 'claude-context', 'CURRENT_STATUS.md'), 3000);
+    if (status) parts.push(`\n## Current Project Status\n\n${status}`);
+
+    const decisionsRaw = readFileOrEmpty(path.join(projectPath, 'claude-context', 'DECISIONS.md'), 8000);
+    const settled = extractSettledDecisions(decisionsRaw);
+    if (settled.length > 0) {
+        const decisionsText = settled.slice(0, 5).join('\n\n---\n\n').slice(0, 2000);
+        parts.push(`\n## Settled Architecture Decisions\n\nThese decisions are FINAL. Do NOT change without explicit user discussion.\n\n${decisionsText}`);
+    }
+
+    const techStack = detectProjectTechStack(projectPath);
+    const learnings = getRelevantLearnings(techStack);
+    if (learnings.length > 0) {
+        let learningsText = '\n## Critical Cross-Project Learnings\n\n';
+        for (const l of learnings) {
+            if (l.severity === 'HIGH' && l.content) {
+                learningsText += `### ${l.id} (HIGH): ${l.summary}\n\n${l.content}\n\n`;
+            } else {
+                learningsText += `- **${l.id}** (${l.severity}): ${l.summary}\n`;
+            }
+        }
+        parts.push(learningsText);
+    }
+
+    const ecosystem = getEcosystemSummary();
+    if (ecosystem) parts.push(`\n## Development Ecosystem\n\nSister projects in this ecosystem:\n${ecosystem}`);
+
+    if (goalContext) parts.push(`\n## Goal Context\n\nThis task is part of a larger goal:\n${goalContext.slice(0, 1000)}`);
+
+    return parts.join('\n');
+}
+
 // ── Task queue endpoints ──────────────────────────────────
 
 const taskStmts = {
     list: db.prepare('SELECT * FROM tasks ORDER BY CASE status WHEN \'running\' THEN 0 WHEN \'pending\' THEN 1 ELSE 2 END, priority DESC, created_at DESC'),
     listByStatus: db.prepare('SELECT * FROM tasks WHERE status = ? ORDER BY priority DESC, created_at DESC'),
     get: db.prepare('SELECT * FROM tasks WHERE id = ?'),
-    insert: db.prepare('INSERT INTO tasks (id, title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    insert: db.prepare('INSERT INTO tasks (id, title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools, created_at, deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     insertWithGoal: db.prepare('INSERT INTO tasks (id, title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools, created_at, goal_id, complexity, depends_on, auto_model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     updateStatus: db.prepare('UPDATE tasks SET status = ?, started_at = ? WHERE id = ?'),
     updateCheckpoint: db.prepare('UPDATE tasks SET checkpoint_ref = ?, checkpoint_type = ?, checkpoint_created_at = ? WHERE id = ?'),
@@ -1751,7 +2075,11 @@ const portfolioStmts = {
     upsert: db.prepare('INSERT INTO projects (name, description, path, lifecycle, last_synced_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET description = excluded.description, path = excluded.path, lifecycle = excluded.lifecycle, last_synced_at = excluded.last_synced_at'),
     list: db.prepare('SELECT * FROM projects ORDER BY priority DESC, name ASC'),
     get: db.prepare('SELECT * FROM projects WHERE name = ?'),
+    getByPath: db.prepare('SELECT * FROM projects WHERE path = ?'),
     updatePriority: db.prepare('UPDATE projects SET priority = ? WHERE name = ?'),
+    updateBudget: db.prepare('UPDATE projects SET cost_budget_daily = ?, cost_budget_total = ? WHERE name = ?'),
+    updateCosts: db.prepare('UPDATE projects SET cost_spent_today = ?, cost_spent_total = ?, budget_reset_date = ?, throttled = ? WHERE name = ?'),
+    unthrottle: db.prepare('UPDATE projects SET throttled = 0 WHERE name = ?'),
 };
 
 syncRegistry();
@@ -1775,7 +2103,7 @@ app.get('/api/tasks', (req, res) => {
  */
 app.post('/api/tasks', (req, res) => {
     try {
-        const { title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools } = req.body;
+        const { title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools, deadline } = req.body;
 
         if (!title || !description || !project_path) {
             return res.status(400).json({ success: false, error: 'Missing title, description, or project_path' });
@@ -1805,7 +2133,7 @@ app.post('/api/tasks', (req, res) => {
         const now = new Date().toISOString();
 
         taskStmts.insert.run(id, title, description, project_path,
-            priority || 0, model || 'sonnet', max_turns || 100, finalGateMode, allowedToolsJson, now);
+            priority || 0, model || 'sonnet', max_turns || 100, finalGateMode, allowedToolsJson, now, deadline || null);
 
         const task = taskStmts.get.get(id);
         broadcastTaskUpdate(task);
@@ -2173,40 +2501,38 @@ function broadcastTaskProgress(taskId, sdkMessage) {
  * Get next pending task with dependency-aware ordering
  */
 function getNextPendingTask() {
-    // Get all pending tasks
     const pending = taskStmts.listByStatus.all('pending');
     if (pending.length === 0) return null;
 
     // Filter out tasks with unsatisfied dependencies
     const ready = pending.filter(task => {
         if (!task.depends_on) return true;
-
         try {
-            const dependencyIds = JSON.parse(task.depends_on);
-            if (!Array.isArray(dependencyIds) || dependencyIds.length === 0) return true;
-
-            // Check if all dependencies are done
-            for (const depId of dependencyIds) {
-                const depTask = taskStmts.get.get(depId);
-                if (!depTask || depTask.status !== 'done') {
-                    return false; // Dependency not satisfied
-                }
-            }
-            return true;
-        } catch {
-            return true; // Invalid JSON, treat as no dependencies
-        }
+            const depIds = JSON.parse(task.depends_on);
+            if (!Array.isArray(depIds) || depIds.length === 0) return true;
+            return depIds.every(id => {
+                const dep = taskStmts.get.get(id);
+                return dep && dep.status === 'done';
+            });
+        } catch { return true; }
     });
 
     if (ready.length === 0) return null;
 
-    // Sort by priority DESC, created_at ASC
-    ready.sort((a, b) => {
-        if (a.priority !== b.priority) return b.priority - a.priority;
-        return a.created_at.localeCompare(b.created_at);
+    // Filter out tasks from throttled projects (Phase 2)
+    const unthrottled = ready.filter(task => {
+        const project = portfolioStmts.getByPath.get(task.project_path);
+        return !project || !project.throttled;
     });
 
-    return ready[0];
+    // Score and sort by priority engine
+    const scored = (unthrottled.length > 0 ? unthrottled : ready).map(task => {
+        const project = portfolioStmts.getByPath.get(task.project_path);
+        return { task, score: calculatePriorityScore(task, project) };
+    });
+    scored.sort((a, b) => b.score - a.score);
+
+    return scored[0]?.task || null;
 }
 
 /**
@@ -2251,8 +2577,16 @@ async function runNextTask() {
         const cleanEnv = { ...process.env };
         delete cleanEnv.CLAUDECODE;
 
-        // Prepend instructions to avoid plan mode stalling (no human to approve)
-        const taskPrompt = 'IMPORTANT: Do not use plan mode (EnterPlanMode). Implement directly — you are running autonomously with no human in the loop. Just do the work.\n\n' + task.description;
+        // Build ecosystem-aware context (Level 10)
+        let goalContext = null;
+        if (task.goal_id) {
+            const goal = goalStmts.get.get(task.goal_id);
+            if (goal) goalContext = `Goal: ${goal.description}`;
+        }
+        const taskContext = buildTaskContext(task.project_path, goalContext);
+        console.log(`[Task] Context injected: ${taskContext.length} chars (~${Math.ceil(taskContext.length / 4)} tokens)`);
+
+        const taskPrompt = task.description;
 
         // Build agentQuery options
         const permissionMode = task.gate_mode === 'bypass' ? 'bypassPermissions' : 'default';
@@ -2266,7 +2600,12 @@ async function runNextTask() {
             allowDangerouslySkipPermissions: allowDangerous,
             abortController: abort,
             env: cleanEnv,
-            canUseTool: await createCanUseToolCallback(task.id, task.gate_mode || 'bypass')
+            canUseTool: await createCanUseToolCallback(task.id, task.gate_mode || 'bypass'),
+            systemPrompt: {
+                type: 'preset',
+                preset: 'claude_code',
+                append: taskContext
+            }
         };
 
         // Add allowedTools if specified
@@ -2330,9 +2669,16 @@ async function runNextTask() {
                     updateGoalProgress(task.goal_id);
                 }
 
-                // Clean up checkpoint on success
-                if (isSuccess && checkpointRef && checkpointType !== 'none') {
-                    cleanupCheckpoint(task.project_path, checkpointRef, checkpointType);
+                // Recalculate project costs (Phase 2)
+                recalcProjectCosts(task.project_path);
+
+                // Commit changes and clean up checkpoint on success
+                if (isSuccess) {
+                    const updatedTask = taskStmts.get.get(task.id);
+                    commitTaskChanges(task.project_path, updatedTask || task);
+                    if (checkpointRef && checkpointType !== 'none') {
+                        cleanupCheckpoint(task.project_path, checkpointRef, checkpointType);
+                    }
                 }
             }
         }
@@ -2359,10 +2705,11 @@ async function runNextTask() {
         }
         taskLog.finish('failed', err.message);
 
-        // Update goal progress
+        // Update goal progress and recalculate costs
         if (task.goal_id) {
             updateGoalProgress(task.goal_id);
         }
+        recalcProjectCosts(task.project_path);
 
         // Orchestrator retry logic
         const retryCount = task.retry_count || 0;

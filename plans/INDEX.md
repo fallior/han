@@ -20,6 +20,8 @@
 | 7 | Autonomous Task Runner | Implementation Spec | Complete | [level-07-autonomous-task-runner.md](level-07-autonomous-task-runner.md) |
 | 8 | Intelligent Orchestrator | Implementation Spec | Complete | [level-08-intelligent-orchestrator.md](level-08-intelligent-orchestrator.md) |
 | 9.1 | Portfolio Manager & Project Registry | Implementation Spec | Complete | [level-09-phase-1-portfolio-registry.md](level-09-phase-1-portfolio-registry.md) |
+| 9.2 | Cost Budgets + Priority Engine | Implementation Spec | Complete | [level-09-phases-2-5-remainder.md](level-09-phases-2-5-remainder.md) |
+| 10.A | Context Injection (Ecosystem-Aware Automator) | Implementation Spec | Complete | [level-10-phase-a-context-injection.md](level-10-phase-a-context-injection.md) |
 
 ## Plan Template
 

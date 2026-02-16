@@ -998,6 +998,30 @@
             display: inline-block;
         }
         .portfolio-detail-back:active { opacity: 0.7; }
+        .portfolio-throttled-badge {
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: rgba(248, 81, 73, 0.2);
+            color: var(--red);
+            animation: throttle-pulse 2s ease-in-out infinite;
+        }
+        @keyframes throttle-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .budget-input {
+            background: var(--bg-secondary);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 11px;
+            padding: 4px 6px;
+            width: 80px;
+        }
 
         @supports (padding: max(0px)) {
             .titlebar { padding-top: max(8px, env(safe-area-inset-top)); }
@@ -1291,6 +1315,16 @@
                     <div style="flex:1">
                         <div class="bridge-label">Max turns</div>
                         <input class="bridge-input" id="taskMaxTurns" type="number" value="100" min="1" max="1000" style="margin-bottom:0">
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <div style="flex:1">
+                        <div class="bridge-label">Deadline (optional)</div>
+                        <input class="bridge-input" id="taskDeadline" type="date" style="margin-bottom:0">
+                    </div>
+                    <div style="flex:1">
+                        <div class="bridge-label">Priority (0-10)</div>
+                        <input class="bridge-input" id="taskPriority" type="number" value="0" min="0" max="10" style="margin-bottom:0">
                     </div>
                 </div>
                 <div class="bridge-label">Approval gate</div>
@@ -2690,6 +2724,8 @@
             const max_turns = parseInt(document.getElementById('taskMaxTurns').value) || 100;
             const gate_mode = document.getElementById('taskGateMode').value;
             const allowed_tools_str = document.getElementById('taskAllowedTools').value.trim();
+            const deadline = document.getElementById('taskDeadline').value || null;
+            const priority = parseInt(document.getElementById('taskPriority').value) || 0;
 
             if (!title || !description || !project_path) {
                 showToast('Fill in title, description, and project path', true);
@@ -2710,7 +2746,7 @@
                 const res = await fetch(`${API_BASE}/api/tasks`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title, description, project_path, model, max_turns, gate_mode, allowed_tools })
+                    body: JSON.stringify({ title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools, deadline })
                 });
                 const data = await res.json();
                 if (data.success) {
@@ -3061,6 +3097,7 @@
                 return `<div class="portfolio-card" data-project="${p.name}">
                     <div class="portfolio-card-header">
                         <span class="portfolio-card-name">${p.name}</span>
+                        ${p.throttled ? '<span class="portfolio-throttled-badge">THROTTLED</span>' : ''}
                         <span class="portfolio-lifecycle">${p.lifecycle}</span>
                     </div>
                     <div class="portfolio-card-desc">${p.description || 'No description'}</div>
@@ -3092,11 +3129,16 @@
             }
             const s = project.stats;
             const costStr = s.total_cost_usd > 0 ? `$${s.total_cost_usd.toFixed(2)}` : '$0.00';
+            const dailyBudgetStr = project.cost_budget_daily > 0 ? `$${project.cost_budget_daily.toFixed(2)}` : 'Unlimited';
+            const totalBudgetStr = project.cost_budget_total > 0 ? `$${project.cost_budget_total.toFixed(2)}` : 'Unlimited';
+            const spentTodayStr = `$${(project.cost_spent_today || 0).toFixed(2)}`;
+            const spentTotalStr = `$${(project.cost_spent_total || 0).toFixed(2)}`;
 
             container.innerHTML = `
                 <div class="portfolio-detail-back" id="portfolioBack">← All Projects</div>
                 <div style="margin-bottom:12px;">
                     <span class="portfolio-card-name" style="font-size:16px;">${project.name}</span>
+                    ${project.throttled ? '<span class="portfolio-throttled-badge" style="margin-left:8px;">THROTTLED</span>' : ''}
                     <span class="portfolio-lifecycle" style="margin-left:8px;">${project.lifecycle}</span>
                 </div>
                 <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">${project.description || ''}</div>
@@ -3123,7 +3165,37 @@
                         </span>
                     </div>
                 </div>
-                <button class="bridge-btn bridge-btn-secondary" id="portfolioCreateTask" style="font-size:12px;padding:8px 12px;">Create Task for ${project.name}</button>
+                <div class="task-summary" style="margin-top:12px;">
+                    <div class="task-summary-row" style="font-weight:600;color:var(--text-bright);">
+                        <span class="task-summary-label">Budget</span>
+                        <span class="task-summary-value"></span>
+                    </div>
+                    <div class="task-summary-row">
+                        <span class="task-summary-label">Spent today</span>
+                        <span class="task-summary-value">${spentTodayStr} / ${dailyBudgetStr}</span>
+                    </div>
+                    <div class="task-summary-row">
+                        <span class="task-summary-label">Spent total</span>
+                        <span class="task-summary-value">${spentTotalStr} / ${totalBudgetStr}</span>
+                    </div>
+                    <div class="task-summary-row">
+                        <span class="task-summary-label">Daily limit</span>
+                        <span class="task-summary-value">
+                            <input class="budget-input" id="budgetDaily" type="number" step="0.01" min="0" value="${project.cost_budget_daily || 0}" placeholder="0 = unlimited">
+                        </span>
+                    </div>
+                    <div class="task-summary-row">
+                        <span class="task-summary-label">Total limit</span>
+                        <span class="task-summary-value">
+                            <input class="budget-input" id="budgetTotal" type="number" step="0.01" min="0" value="${project.cost_budget_total || 0}" placeholder="0 = unlimited">
+                        </span>
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:12px;">
+                    <button class="bridge-btn bridge-btn-secondary" id="budgetSaveBtn" style="font-size:12px;padding:8px 12px;">Save Budget</button>
+                    ${project.throttled ? '<button class="bridge-btn" id="unthrottleBtn" style="font-size:12px;padding:8px 12px;background:var(--red);">Unthrottle</button>' : ''}
+                    <button class="bridge-btn bridge-btn-secondary" id="portfolioCreateTask" style="font-size:12px;padding:8px 12px;">Create Task</button>
+                </div>
             `;
 
             document.getElementById('portfolioBack').addEventListener('click', () => {
@@ -3139,6 +3211,45 @@
                 document.getElementById('taskPath').value = project.path;
                 switchTaskTab('create');
             });
+
+            document.getElementById('budgetSaveBtn').addEventListener('click', async () => {
+                const daily = parseFloat(document.getElementById('budgetDaily').value) || 0;
+                const total = parseFloat(document.getElementById('budgetTotal').value) || 0;
+                try {
+                    const res = await fetch(`${API_BASE}/api/portfolio/${encodeURIComponent(project.name)}/budget`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ cost_budget_daily: daily, cost_budget_total: total })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        showToast('Budget saved');
+                        await loadPortfolio();
+                        renderProjectDetail(name);
+                    } else {
+                        showToast(data.error || 'Failed', true);
+                    }
+                } catch { showToast('Connection error', true); }
+            });
+
+            const unthrottleBtn = document.getElementById('unthrottleBtn');
+            if (unthrottleBtn) {
+                unthrottleBtn.addEventListener('click', async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/api/portfolio/${encodeURIComponent(project.name)}/unthrottle`, {
+                            method: 'POST'
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            showToast('Project unthrottled');
+                            await loadPortfolio();
+                            renderProjectDetail(name);
+                        } else {
+                            showToast(data.error || 'Failed', true);
+                        }
+                    } catch { showToast('Connection error', true); }
+                });
+            }
         }
 
         async function updateProjectPriority(name, priority) {
