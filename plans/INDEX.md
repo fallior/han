@@ -31,6 +31,7 @@
 | 10.E | Feedback Loop | Implementation Spec | Complete | [level-10-phase-e-feedback-loop.md](level-10-phase-e-feedback-loop.md) |
 | 10.F | Error Pattern Pre-emption | Implementation Spec | Complete | [level-10-phase-f-error-preemption.md](level-10-phase-f-error-preemption.md) |
 | 11.A | Product Pipeline Framework | Implementation Spec | Complete | [level-11-phase-a-pipeline-framework.md](level-11-phase-a-pipeline-framework.md) |
+| 11.B | Research Swarm | Implementation Spec | Complete | [level-11-phase-b-research-swarm.md](level-11-phase-b-research-swarm.md) |
 
 ## Plan Template
 

@@ -187,6 +187,10 @@ const goalCols = db.pragma("table_info('goals')").map(col => col.name);
 if (!goalCols.includes('summary_file')) {
     db.exec(`ALTER TABLE goals ADD COLUMN summary_file TEXT`);
 }
+if (!goalCols.includes('parent_goal_id')) {
+    db.exec('ALTER TABLE goals ADD COLUMN parent_goal_id TEXT');
+    db.exec("ALTER TABLE goals ADD COLUMN goal_type TEXT DEFAULT 'standalone'");
+}
 
 // Level 10C: Knowledge proposals table
 db.exec(`CREATE TABLE IF NOT EXISTS task_proposals (
@@ -2321,6 +2325,53 @@ app.post('/api/products/:id/knowledge', (req, res) => {
     }
 });
 
+app.get('/api/products/:id/research', (req, res) => {
+    try {
+        const productId = req.params.id;
+        const product = productStmts.get.get(productId);
+        if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+
+        const phase = phaseStmts.get.get(productId, 'research');
+        if (!phase) return res.status(404).json({ success: false, error: 'Research phase not found' });
+
+        const parentGoal = phase.goal_id ? goalStmts.get.get(phase.goal_id) : null;
+        if (!parentGoal) {
+            return res.json({ success: true, status: 'not_started', phase, subagents: [] });
+        }
+
+        const children = goalStmts.getChildren.all(parentGoal.id);
+        const subagents = children.map(child => {
+            const tasks = taskStmts.getByGoal.all(child.id);
+            return {
+                goal_id: child.id,
+                area: child.description.split('.')[0].split(':')[0].trim(),
+                status: child.status,
+                progress: { tasks_total: child.task_count || 0, tasks_completed: child.tasks_completed || 0, tasks_failed: child.tasks_failed || 0 },
+                cost_usd: child.total_cost_usd || 0,
+                created_at: child.created_at,
+                completed_at: child.completed_at,
+                tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, cost_usd: t.cost_usd || 0 }))
+            };
+        });
+
+        const knowledge = knowledgeStmts.getByProduct.all(productId)
+            .filter(k => k.source_phase === 'research')
+            .map(k => ({ category: k.category, title: k.title, preview: k.content.slice(0, 200), created_at: k.created_at }));
+
+        res.json({
+            success: true,
+            status: parentGoal.status,
+            phase,
+            parent_goal: { id: parentGoal.id, status: parentGoal.status, total_cost_usd: parentGoal.total_cost_usd || 0, created_at: parentGoal.created_at, completed_at: parentGoal.completed_at },
+            subagents,
+            knowledge_count: knowledge.length,
+            knowledge_preview: knowledge.slice(0, 10)
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 /**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
@@ -2353,7 +2404,7 @@ function generateId() {
  * Create a goal programmatically (used by API and maintenance scheduler).
  * Returns goalId. Decomposition runs asynchronously.
  */
-function createGoal(description, projectPath, autoExecute = true) {
+function createGoal(description, projectPath, autoExecute = true, parentGoalId = null, goalType = 'standalone') {
     const goalId = generateId();
     const now = new Date().toISOString();
     const orchStatus = orchestrator.getStatus();
@@ -2362,13 +2413,21 @@ function createGoal(description, projectPath, autoExecute = true) {
         goalId,
         description,
         projectPath,
-        'decomposing',
+        goalType === 'parent' ? 'active' : 'decomposing',
         now,
         orchStatus.backend,
-        orchStatus.backend === 'ollama' ? orchStatus.ollamaModel : 'claude-haiku-4-5-20251001'
+        orchStatus.backend === 'ollama' ? orchStatus.ollamaModel : 'claude-haiku-4-5-20251001',
+        parentGoalId,
+        goalType
     );
 
     broadcastGoalUpdate(goalId);
+
+    // Parent goals don't decompose — they track children instead
+    if (goalType === 'parent') {
+        console.log(`[Goal ${goalId}] Parent goal created: ${description.slice(0, 80)}...`);
+        return goalId;
+    }
 
     // Start decomposition asynchronously
     (async () => {
@@ -2454,6 +2513,12 @@ function createGoal(description, projectPath, autoExecute = true) {
 function updateGoalProgress(goalId) {
     if (!goalId) return;
 
+    const goal = goalStmts.get.get(goalId);
+    if (!goal) return;
+
+    // Parent goals are updated via updateParentGoalProgress(), not here
+    if (goal.goal_type === 'parent') return;
+
     const tasks = taskStmts.getByGoal.all(goalId);
     const completed = tasks.filter(t => t.status === 'done').length;
     const failed = tasks.filter(t => t.status === 'failed').length;
@@ -2471,25 +2536,196 @@ function updateGoalProgress(goalId) {
         try { generateGoalSummary(goalId); }
         catch (err) { console.error(`[Goal] Summary generation failed for ${goalId}:`, err.message); }
 
-        // Check if this goal belongs to a product pipeline phase
-        try {
-            const phase = db.prepare('SELECT * FROM product_phases WHERE goal_id = ?').get(goalId);
-            if (phase && phase.product_id) {
-                const goal = goalStmts.get.get(goalId);
-                advancePipeline(phase.product_id, phase.phase, {
-                    cost_usd: totalCost,
-                    result_summary: goal ? goal.summary : null,
-                    description: goal ? goal.description : null,
-                    artifacts: [],
-                });
+        // Child goal completed: extract knowledge, then check parent
+        if (goal.goal_type === 'child' && goal.parent_goal_id) {
+            try { extractResearchKnowledge(goalId, goal.parent_goal_id); }
+            catch (err) { console.error(`[Knowledge] Extraction failed for child ${goalId}:`, err.message); }
+            updateParentGoalProgress(goal.parent_goal_id);
+        }
+
+        // Standalone goal: check if it belongs to a product pipeline phase
+        if (goal.goal_type === 'standalone' || !goal.goal_type) {
+            try {
+                const phase = db.prepare('SELECT * FROM product_phases WHERE goal_id = ?').get(goalId);
+                if (phase && phase.product_id) {
+                    const updatedGoal = goalStmts.get.get(goalId);
+                    advancePipeline(phase.product_id, phase.phase, {
+                        cost_usd: totalCost,
+                        result_summary: updatedGoal ? updatedGoal.summary : null,
+                        description: updatedGoal ? updatedGoal.description : null,
+                        artifacts: [],
+                    });
+                }
+            } catch (err) {
+                console.error(`[Pipeline] Failed to check pipeline advancement for goal ${goalId}:`, err.message);
             }
-        } catch (err) {
-            console.error(`[Pipeline] Failed to check pipeline advancement for goal ${goalId}:`, err.message);
         }
     }
 
     // Broadcast goal update
     broadcastGoalUpdate(goalId);
+}
+
+/**
+ * Update parent goal progress based on child goal completion.
+ * When all children complete, synthesise findings and trigger pipeline advancement.
+ */
+function updateParentGoalProgress(parentGoalId) {
+    const children = goalStmts.getChildren.all(parentGoalId);
+    if (children.length === 0) return;
+
+    const completed = children.filter(c => c.status === 'done').length;
+    const failed = children.filter(c => c.status === 'failed').length;
+    const totalCost = children.reduce((sum, c) => sum + (c.total_cost_usd || 0), 0);
+    const allDone = children.every(c => ['done', 'failed', 'cancelled'].includes(c.status));
+    const anyFailed = children.some(c => c.status === 'failed');
+
+    const status = allDone ? (anyFailed ? 'failed' : 'done') : 'active';
+    const completedAt = allDone ? new Date().toISOString() : null;
+
+    goalStmts.updateProgress.run(completed, failed, totalCost, status, completedAt, parentGoalId);
+    broadcastGoalUpdate(parentGoalId);
+
+    console.log(`[Goal] Parent ${parentGoalId} progress: ${completed}/${children.length} children complete`);
+
+    if (allDone && completedAt) {
+        // Synthesise research findings into a Research Brief
+        try { synthesizeResearchFindings(parentGoalId); }
+        catch (err) { console.error(`[Pipeline] Research synthesis failed for ${parentGoalId}:`, err.message); }
+
+        try { generateGoalSummary(parentGoalId); }
+        catch (err) { console.error(`[Goal] Summary failed for parent ${parentGoalId}:`, err.message); }
+
+        // Check if parent goal belongs to a product pipeline phase
+        try {
+            const phase = db.prepare('SELECT * FROM product_phases WHERE goal_id = ?').get(parentGoalId);
+            if (phase && phase.product_id) {
+                const parentGoal = goalStmts.get.get(parentGoalId);
+                advancePipeline(phase.product_id, phase.phase, {
+                    cost_usd: totalCost,
+                    result_summary: parentGoal ? parentGoal.summary : null,
+                    description: parentGoal ? parentGoal.description : null,
+                    artifacts: [],
+                });
+            }
+        } catch (err) {
+            console.error(`[Pipeline] Failed to advance pipeline for parent ${parentGoalId}:`, err.message);
+        }
+    }
+}
+
+/**
+ * Extract knowledge entries from a completed child research goal.
+ * Looks for [KNOWLEDGE] markers in task results, falls back to goal summary.
+ */
+function extractResearchKnowledge(childGoalId, parentGoalId) {
+    try {
+        const childGoal = goalStmts.get.get(childGoalId);
+        if (!childGoal) return;
+
+        const phase = db.prepare('SELECT product_id FROM product_phases WHERE goal_id = ?').get(parentGoalId);
+        if (!phase) return;
+
+        const productId = phase.product_id;
+        const now = new Date().toISOString();
+        let extracted = 0;
+
+        // Try to extract [KNOWLEDGE] markers from task results
+        const tasks = taskStmts.getByGoal.all(childGoalId);
+        const knowledgeRegex = /\[KNOWLEDGE\s+category="([^"]+)"\s+title="([^"]+)"\]([\s\S]*?)\[\/KNOWLEDGE\]/g;
+
+        for (const task of tasks) {
+            if (!task.result) continue;
+            let match;
+            while ((match = knowledgeRegex.exec(task.result)) !== null) {
+                knowledgeStmts.insert.run(productId, match[1].trim(), match[2].trim(), match[3].trim(), 'research', now);
+                extracted++;
+            }
+        }
+
+        // Also check goal summary file
+        if (childGoal.summary_file && fs.existsSync(childGoal.summary_file)) {
+            try {
+                const content = fs.readFileSync(childGoal.summary_file, 'utf8');
+                let match;
+                const regex = /\[KNOWLEDGE\s+category="([^"]+)"\s+title="([^"]+)"\]([\s\S]*?)\[\/KNOWLEDGE\]/g;
+                while ((match = regex.exec(content)) !== null) {
+                    knowledgeStmts.insert.run(productId, match[1].trim(), match[2].trim(), match[3].trim(), 'research', now);
+                    extracted++;
+                }
+            } catch {}
+        }
+
+        // Fallback: if no markers found, store the area description + summary as a knowledge entry
+        if (extracted === 0) {
+            const area = childGoal.description.split(':')[0].replace(/^.*?for\s+/i, '').trim() || 'general';
+            const summary = childGoal.summary || `Completed: ${childGoal.description.slice(0, 500)}`;
+            knowledgeStmts.insert.run(productId, area.toLowerCase(), `${area} research findings`, summary, 'research', now);
+            extracted = 1;
+        }
+
+        console.log(`[Knowledge] Extracted ${extracted} entries from child goal ${childGoalId}`);
+    } catch (err) {
+        console.error(`[Knowledge] Extraction failed for child goal ${childGoalId}:`, err.message);
+    }
+}
+
+/**
+ * Synthesise findings from all child research goals into a Research Brief.
+ * Stores as a knowledge entry with category='research_brief'.
+ */
+function synthesizeResearchFindings(parentGoalId) {
+    try {
+        const phase = db.prepare('SELECT product_id FROM product_phases WHERE goal_id = ?').get(parentGoalId);
+        if (!phase) return;
+
+        const productId = phase.product_id;
+        const product = productStmts.get.get(productId);
+        if (!product) return;
+
+        const children = goalStmts.getChildren.all(parentGoalId);
+        const allKnowledge = knowledgeStmts.getByProduct.all(productId).filter(k => k.source_phase === 'research' && k.category !== 'research_brief');
+
+        let brief = `# Research Brief: ${product.name}\n\n`;
+        brief += `**Seed Idea:** ${product.seed}\n\n`;
+        brief += `**Completed:** ${new Date().toISOString().split('T')[0]}\n\n---\n\n`;
+
+        // Group knowledge by category
+        const byCategory = {};
+        for (const k of allKnowledge) {
+            if (!byCategory[k.category]) byCategory[k.category] = [];
+            byCategory[k.category].push(k);
+        }
+
+        const categoryNames = {
+            market: 'Market Research', technical: 'Technical Feasibility',
+            competitive: 'Competitive Analysis', practices: 'Engineering Best Practices',
+            regulatory: 'Regulatory & Compliance', ux: 'UX Patterns & Design'
+        };
+
+        for (const [category, entries] of Object.entries(byCategory)) {
+            brief += `## ${categoryNames[category] || category}\n\n`;
+            for (const entry of entries) {
+                brief += `### ${entry.title}\n\n${entry.content}\n\n`;
+            }
+        }
+
+        // Execution summary
+        brief += `---\n\n## Execution Summary\n\n`;
+        for (const child of children) {
+            const area = child.description.split('.')[0].slice(0, 60);
+            brief += `- **${area}**: ${child.status} (${child.tasks_completed || 0}/${child.task_count || 0} tasks, $${(child.total_cost_usd || 0).toFixed(4)})\n`;
+        }
+        const totalCost = children.reduce((sum, c) => sum + (c.total_cost_usd || 0), 0);
+        brief += `\n**Total Research Cost:** $${totalCost.toFixed(4)}\n`;
+
+        const now = new Date().toISOString();
+        knowledgeStmts.insert.run(productId, 'research_brief', `Complete Research Brief — ${product.name}`, brief, 'research', now);
+
+        console.log(`[Pipeline] Research synthesis complete for "${product.name}" — ${allKnowledge.length} findings, $${totalCost.toFixed(4)}`);
+    } catch (err) {
+        console.error(`[Pipeline] Research synthesis failed for parent ${parentGoalId}:`, err.message);
+    }
 }
 
 /**
@@ -3092,15 +3328,147 @@ function getKnowledgeSummary(productId) {
 }
 
 /**
+ * Generate focused research subagent prompts for the 6 research areas.
+ */
+function getResearchSubagents(productName, seed) {
+    return [
+        {
+            area: 'market',
+            title: `Market Research: ${productName}`,
+            description: `Market research for ${productName}. Seed idea: ${seed}
+
+Research objectives:
+- Market size and growth trends (TAM/SAM/SOM estimates)
+- Target audience demographics and pain points
+- Customer willingness to pay and pricing expectations
+- Revenue model opportunities (freemium, subscription, one-time, usage-based)
+- Market entry barriers and timing considerations
+- Geographic considerations (AU/US/EU markets)
+
+Deliverables: market size estimates, 3-5 target customer personas, recommended revenue model with pricing ranges, go-to-market strategy recommendations.`
+        },
+        {
+            area: 'technical',
+            title: `Technical Feasibility: ${productName}`,
+            description: `Technical feasibility assessment for ${productName}. Seed idea: ${seed}
+
+Research objectives:
+- Required APIs, libraries, and frameworks (availability, licensing, maturity)
+- Implementation complexity per major component
+- Infrastructure requirements (hosting, storage, compute, networking)
+- Third-party service dependencies (payment, auth, notifications, analytics)
+- Technical risks and mitigation strategies
+- Development time estimates per component
+
+Deliverables: technology assessment matrix, implementation roadmap with estimates, risk register with mitigations, proof-of-concept recommendations.`
+        },
+        {
+            area: 'competitive',
+            title: `Competitive Analysis: ${productName}`,
+            description: `Competitive landscape analysis for ${productName}. Seed idea: ${seed}
+
+Research objectives:
+- Direct competitors (products solving the same problem)
+- Indirect competitors (alternative approaches customers use today)
+- Feature comparison matrix (what they offer, what they lack)
+- Pricing analysis (monetisation models, pricing tiers)
+- Market positioning (messaging, target audience, differentiators)
+- Gaps and opportunities (underserved needs, emerging trends)
+
+Deliverables: competitive matrix with 5-10 key competitors, feature gap analysis, pricing comparison, recommended positioning strategy.`
+        },
+        {
+            area: 'practices',
+            title: `Best Practices: ${productName}`,
+            description: `Engineering best practices research for ${productName}. Seed idea: ${seed}
+
+Research objectives:
+- Design patterns for this problem domain (architecture, data models)
+- Reference implementations and open-source examples
+- Documentation and API design standards
+- Performance optimisation techniques relevant to this domain
+- Security best practices (authentication, authorisation, data protection)
+- Testing strategies (unit, integration, E2E patterns)
+
+Deliverables: recommended design patterns with rationale, reference repositories, security checklist, testing strategy template.`
+        },
+        {
+            area: 'regulatory',
+            title: `Regulatory Requirements: ${productName}`,
+            description: `Regulatory and compliance research for ${productName}. Seed idea: ${seed}
+
+Research objectives:
+- Legal requirements by jurisdiction (AU, US, EU)
+- Industry standards and certifications (ISO, SOC2, etc.)
+- Data privacy laws (GDPR, CCPA, Australian Privacy Act)
+- Accessibility requirements (WCAG, ADA)
+- Terms of service and privacy policy considerations
+- Insurance and liability considerations
+
+Deliverables: compliance checklist by jurisdiction, required certifications with timeline, legal document requirements, risk assessment.`
+        },
+        {
+            area: 'ux',
+            title: `UX Pattern Research: ${productName}`,
+            description: `UX patterns and design research for ${productName}. Seed idea: ${seed}
+
+Research objectives:
+- UI patterns for this product category (dashboards, forms, navigation)
+- Design inspiration from best-in-class examples
+- Interaction patterns (mobile, desktop, touch, keyboard)
+- Accessibility patterns (screen readers, keyboard navigation)
+- Responsive design strategies and breakpoints
+- Onboarding flow examples and user activation patterns
+
+Deliverables: UI pattern library references, recommended design system or component library, interaction flow diagrams, onboarding checklist.`
+        }
+    ];
+}
+
+/**
  * Execute a specific phase for a product by creating a goal.
  */
 function executePhase(productId, phase) {
     const product = productStmts.get.get(productId);
     if (!product) return null;
 
+    const now = new Date().toISOString();
+
+    // Research phase: spawn parallel subagent swarm
+    if (phase === 'research') {
+        try {
+            const parentDesc = `Research phase for ${product.name} — orchestrate parallel research subagents and synthesise findings. Seed: ${product.seed}`;
+            const parentGoalId = createGoal(parentDesc, product.project_path, false, null, 'parent');
+
+            const areas = getResearchSubagents(product.name, product.seed);
+            const childGoalIds = [];
+
+            for (const area of areas) {
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                childGoalIds.push(childGoalId);
+                console.log(`[Pipeline] Research subagent created: ${area.area} (${childGoalId})`);
+            }
+
+            phaseStmts.updateStatus.run('active', now, productId, phase);
+            phaseStmts.updateGoal.run(parentGoalId, productId, phase);
+            productStmts.updatePhase.run(phase, PIPELINE_PHASES.indexOf(phase), productId);
+
+            if (wss.clients.size > 0) {
+                const msg = JSON.stringify({ type: 'pipeline_phase_started', productId, phase, goalId: parentGoalId, childGoals: childGoalIds.length });
+                wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+            }
+
+            console.log(`[Pipeline] Research phase started for "${product.name}" — parent ${parentGoalId}, ${childGoalIds.length} children`);
+            return parentGoalId;
+        } catch (err) {
+            console.error(`[Pipeline] Failed to execute research phase for ${product.name}:`, err.message);
+            return null;
+        }
+    }
+
+    // Other phases: single goal with knowledge context
     const knowledgeSummary = getKnowledgeSummary(productId);
     const descriptions = {
-        research: `Research phase for ${product.name}: analyse market, competitors, technical feasibility, regulatory requirements. Seed idea: ${product.seed}`,
         design: `Design phase for ${product.name}: create user stories, data model, API specification. ${knowledgeSummary}`,
         architecture: `Architecture phase for ${product.name}: select tech stack, design infrastructure, plan CI/CD. ${knowledgeSummary}`,
         build: `Build phase for ${product.name}: implement all features per the architecture. ${knowledgeSummary}`,
@@ -3110,19 +3478,14 @@ function executePhase(productId, phase) {
     };
 
     const description = descriptions[phase] || `Phase "${phase}" for ${product.name}. ${knowledgeSummary}`;
-    const now = new Date().toISOString();
 
     try {
         const goalId = createGoal(description, product.project_path, true);
 
-        // Update phase record
         phaseStmts.updateStatus.run('active', now, productId, phase);
         phaseStmts.updateGoal.run(goalId, productId, phase);
-
-        // Update product current_phase
         productStmts.updatePhase.run(phase, PIPELINE_PHASES.indexOf(phase), productId);
 
-        // Broadcast
         if (wss.clients.size > 0) {
             const msg = JSON.stringify({ type: 'pipeline_phase_started', productId, phase, goalId });
             wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
@@ -3783,12 +4146,13 @@ const taskStmts = {
 const goalStmts = {
     list: db.prepare('SELECT * FROM goals ORDER BY created_at DESC'),
     get: db.prepare('SELECT * FROM goals WHERE id = ?'),
-    insert: db.prepare('INSERT INTO goals (id, description, project_path, status, created_at, orchestrator_backend, orchestrator_model) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+    insert: db.prepare('INSERT INTO goals (id, description, project_path, status, created_at, orchestrator_backend, orchestrator_model, parent_goal_id, goal_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     updateStatus: db.prepare('UPDATE goals SET status = ? WHERE id = ?'),
     updateProgress: db.prepare('UPDATE goals SET tasks_completed = ?, tasks_failed = ?, total_cost_usd = ?, status = ?, completed_at = ? WHERE id = ?'),
     updateDecomposition: db.prepare('UPDATE goals SET decomposition = ?, task_count = ?, status = ? WHERE id = ?'),
     del: db.prepare('DELETE FROM goals WHERE id = ?'),
     updateSummaryFile: db.prepare('UPDATE goals SET summary_file = ? WHERE id = ?'),
+    getChildren: db.prepare('SELECT * FROM goals WHERE parent_goal_id = ? ORDER BY created_at ASC'),
 };
 
 const memoryStmts = {
@@ -4285,6 +4649,9 @@ function broadcastTaskProgress(taskId, sdkMessage) {
 /**
  * Get next pending task with dependency-aware ordering
  */
+// Track last child goal that executed a task (round-robin fairness for research swarm)
+const lastExecutedChildGoal = new Map();
+
 function getNextPendingTask() {
     const pending = taskStmts.listByStatus.all('pending');
     if (pending.length === 0) return null;
@@ -4310,8 +4677,56 @@ function getNextPendingTask() {
         return !project || !project.throttled;
     });
 
+    const candidates = unthrottled.length > 0 ? unthrottled : ready;
+
+    // Round-robin across child goals for research swarm fairness
+    try {
+        const childTasks = [];
+        for (const task of candidates) {
+            if (!task.goal_id) continue;
+            const goal = goalStmts.get.get(task.goal_id);
+            if (goal && goal.goal_type === 'child' && goal.parent_goal_id) {
+                childTasks.push({ task, childGoalId: goal.id, parentGoalId: goal.parent_goal_id });
+            }
+        }
+
+        if (childTasks.length > 0) {
+            // Group by parent
+            const byParent = {};
+            for (const ct of childTasks) {
+                if (!byParent[ct.parentGoalId]) byParent[ct.parentGoalId] = [];
+                byParent[ct.parentGoalId].push(ct);
+            }
+
+            for (const [parentId, tasks] of Object.entries(byParent)) {
+                if (tasks.length > 1) {
+                    // Multiple children have ready tasks — round-robin
+                    const uniqueChildren = [...new Set(tasks.map(t => t.childGoalId))];
+                    if (uniqueChildren.length > 1) {
+                        const lastChild = lastExecutedChildGoal.get(parentId);
+                        const sorted = uniqueChildren.sort();
+                        let nextIndex = 0;
+                        if (lastChild) {
+                            const lastIndex = sorted.indexOf(lastChild);
+                            if (lastIndex >= 0) nextIndex = (lastIndex + 1) % sorted.length;
+                        }
+                        const chosenChildId = sorted[nextIndex];
+                        lastExecutedChildGoal.set(parentId, chosenChildId);
+                        const chosen = tasks.find(t => t.childGoalId === chosenChildId);
+                        if (chosen) return chosen.task;
+                    }
+                }
+            }
+
+            // Single child or single parent — just return the first child task
+            return childTasks[0].task;
+        }
+    } catch (err) {
+        console.error('[Scheduler] Round-robin error:', err.message);
+    }
+
     // Score and sort by priority engine
-    const scored = (unthrottled.length > 0 ? unthrottled : ready).map(task => {
+    const scored = candidates.map(task => {
         const project = portfolioStmts.getByPath.get(task.project_path);
         return { task, score: calculatePriorityScore(task, project) };
     });
