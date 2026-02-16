@@ -2419,6 +2419,53 @@ app.get('/api/products/:id/design', (req, res) => {
     }
 });
 
+app.get('/api/products/:id/architecture', (req, res) => {
+    try {
+        const productId = req.params.id;
+        const product = productStmts.get.get(productId);
+        if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+
+        const phase = phaseStmts.get.get(productId, 'architecture');
+        if (!phase) return res.status(404).json({ success: false, error: 'Architecture phase not found' });
+
+        const parentGoal = phase.goal_id ? goalStmts.get.get(phase.goal_id) : null;
+        if (!parentGoal) {
+            return res.json({ success: true, status: 'not_started', phase, subagents: [] });
+        }
+
+        const children = goalStmts.getChildren.all(parentGoal.id);
+        const subagents = children.map(child => {
+            const tasks = taskStmts.getByGoal.all(child.id);
+            return {
+                goal_id: child.id,
+                area: child.description.split('.')[0].split(':')[0].trim(),
+                status: child.status,
+                progress: { tasks_total: child.task_count || 0, tasks_completed: child.tasks_completed || 0, tasks_failed: child.tasks_failed || 0 },
+                cost_usd: child.total_cost_usd || 0,
+                created_at: child.created_at,
+                completed_at: child.completed_at,
+                tasks: tasks.map(t => ({ id: t.id, title: t.title, status: t.status, cost_usd: t.cost_usd || 0 }))
+            };
+        });
+
+        const knowledge = knowledgeStmts.getByProduct.all(productId)
+            .filter(k => k.source_phase === 'architecture')
+            .map(k => ({ category: k.category, title: k.title, preview: k.content.slice(0, 200), created_at: k.created_at }));
+
+        res.json({
+            success: true,
+            status: parentGoal.status,
+            phase,
+            parent_goal: { id: parentGoal.id, status: parentGoal.status, total_cost_usd: parentGoal.total_cost_usd || 0, created_at: parentGoal.created_at, completed_at: parentGoal.completed_at },
+            subagents,
+            knowledge_count: knowledge.length,
+            knowledge_preview: knowledge.slice(0, 10)
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 /**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
@@ -2642,6 +2689,7 @@ function updateParentGoalProgress(parentGoalId) {
             if (phaseRecord) {
                 if (phaseRecord.phase === 'research') synthesizeResearchFindings(parentGoalId);
                 else if (phaseRecord.phase === 'design') synthesizeDesignArtifacts(parentGoalId);
+                else if (phaseRecord.phase === 'architecture') synthesizeArchitectureSpec(parentGoalId);
             }
         } catch (err) { console.error(`[Pipeline] Synthesis failed for ${parentGoalId}:`, err.message); }
 
@@ -2834,6 +2882,62 @@ function synthesizeDesignArtifacts(parentGoalId) {
         console.log(`[Pipeline] Design synthesis complete for "${product.name}" — ${allKnowledge.length} artifacts, $${totalCost.toFixed(4)}`);
     } catch (err) {
         console.error(`[Pipeline] Design synthesis failed for parent ${parentGoalId}:`, err.message);
+    }
+}
+
+/**
+ * Synthesise architecture decisions from all child architecture goals into an Architecture Specification.
+ * Stores as a knowledge entry with category='architecture_spec'.
+ */
+function synthesizeArchitectureSpec(parentGoalId) {
+    try {
+        const phaseRecord = db.prepare('SELECT product_id FROM product_phases WHERE goal_id = ?').get(parentGoalId);
+        if (!phaseRecord) return;
+
+        const productId = phaseRecord.product_id;
+        const product = productStmts.get.get(productId);
+        if (!product) return;
+
+        const children = goalStmts.getChildren.all(parentGoalId);
+        const allKnowledge = knowledgeStmts.getByProduct.all(productId).filter(k => k.source_phase === 'architecture' && k.category !== 'architecture_spec');
+
+        let spec = `# Architecture Specification: ${product.name}\n\n`;
+        spec += `**Seed Idea:** ${product.seed}\n\n`;
+        spec += `**Completed:** ${new Date().toISOString().split('T')[0]}\n\n---\n\n`;
+
+        const byCategory = {};
+        for (const k of allKnowledge) {
+            if (!byCategory[k.category]) byCategory[k.category] = [];
+            byCategory[k.category].push(k);
+        }
+
+        const categoryNames = {
+            stack: 'Technology Stack', structure: 'Project Structure',
+            dependencies: 'Dependencies', infrastructure: 'Infrastructure',
+            cicd: 'CI/CD Pipeline', security: 'Security Architecture'
+        };
+
+        for (const [category, entries] of Object.entries(byCategory)) {
+            spec += `## ${categoryNames[category] || category}\n\n`;
+            for (const entry of entries) {
+                spec += `### ${entry.title}\n\n${entry.content}\n\n`;
+            }
+        }
+
+        spec += `---\n\n## Execution Summary\n\n`;
+        for (const child of children) {
+            const area = child.description.split('.')[0].slice(0, 60);
+            spec += `- **${area}**: ${child.status} (${child.tasks_completed || 0}/${child.task_count || 0} tasks, $${(child.total_cost_usd || 0).toFixed(4)})\n`;
+        }
+        const totalCost = children.reduce((sum, c) => sum + (c.total_cost_usd || 0), 0);
+        spec += `\n**Total Architecture Cost:** $${totalCost.toFixed(4)}\n`;
+
+        const now = new Date().toISOString();
+        knowledgeStmts.insert.run(productId, 'architecture_spec', `Complete Architecture Specification — ${product.name}`, spec, 'architecture', now);
+
+        console.log(`[Pipeline] Architecture synthesis complete for "${product.name}" — ${allKnowledge.length} decisions, $${totalCost.toFixed(4)}`);
+    } catch (err) {
+        console.error(`[Pipeline] Architecture synthesis failed for parent ${parentGoalId}:`, err.message);
     }
 }
 
@@ -3628,6 +3732,106 @@ Deliverables:
 }
 
 /**
+ * Generate focused architecture subagent prompts for the 6 architecture areas.
+ */
+function getArchitectureSubagents(productName, seed, knowledgeSummary) {
+    const ctx = knowledgeSummary ? `\n\nContext from research and design phases:\n${knowledgeSummary}` : '';
+    return [
+        {
+            area: 'stack',
+            title: `Technology Stack: ${productName}`,
+            description: `Technology stack selection for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- Primary programming language(s) with rationale
+- Backend framework selection (Express, Fastify, Hono, etc.) with trade-offs
+- Frontend framework selection (React, Vue, Svelte, etc.) with trade-offs
+- Database selection (PostgreSQL, SQLite, MongoDB, etc.) with rationale
+- Runtime environment (Node.js, Deno, Bun, etc.)
+- Key libraries for common concerns (auth, validation, testing, logging)
+- Version requirements and compatibility matrix
+- Rationale document explaining why each choice was made`
+        },
+        {
+            area: 'structure',
+            title: `Project Structure: ${productName}`,
+            description: `Project structure design for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- Complete directory layout with purpose annotations
+- Module organisation strategy (feature-based, layer-based, domain-driven)
+- Monorepo vs multi-repo decision with rationale
+- File naming conventions (kebab-case, camelCase, etc.)
+- Configuration file locations (env, config, secrets)
+- Shared code and utility organisation
+- Entry point architecture (server, CLI, workers)
+- README template for each major directory`
+        },
+        {
+            area: 'dependencies',
+            title: `Dependency Mapping: ${productName}`,
+            description: `Dependency mapping for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- Internal module dependency graph (which modules depend on which)
+- External library inventory with versions, licences, and maintenance status
+- Version pinning strategy (exact, caret, tilde)
+- Licence audit (MIT, Apache, GPL compatibility)
+- Dependency update strategy (Dependabot, Renovate, manual)
+- Bundle size analysis for frontend dependencies
+- Security scanning approach (npm audit, Snyk, etc.)
+- Lock file strategy (package-lock.json, pnpm-lock.yaml)`
+        },
+        {
+            area: 'infrastructure',
+            title: `Infrastructure Design: ${productName}`,
+            description: `Infrastructure design for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- Hosting platform recommendation (Cloudflare, AWS, Vercel, Railway, etc.)
+- Compute requirements (serverless, containers, VMs) with rationale
+- Storage architecture (database hosting, file storage, CDN)
+- Networking design (DNS, load balancing, SSL/TLS)
+- Environment strategy (development, staging, production)
+- Scaling approach (horizontal, vertical, auto-scaling triggers)
+- Cost estimates per environment (monthly projected costs)
+- Disaster recovery and backup strategy`
+        },
+        {
+            area: 'cicd',
+            title: `CI/CD Pipeline: ${productName}`,
+            description: `CI/CD pipeline design for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- Pipeline stages (lint → build → test → deploy) with tools for each
+- Build configuration (bundler, transpiler, optimisation)
+- Test automation strategy (unit, integration, E2E in pipeline)
+- Deployment strategy (blue-green, canary, rolling, or direct)
+- Branch strategy (trunk-based, GitFlow, GitHub Flow)
+- Environment promotion flow (dev → staging → production)
+- Rollback procedure
+- Pipeline configuration file template (GitHub Actions, GitLab CI, etc.)`
+        },
+        {
+            area: 'security',
+            title: `Security Architecture: ${productName}`,
+            description: `Security architecture for ${productName}. Seed idea: ${seed}${ctx}
+
+Deliverables:
+- Authentication mechanism (JWT, session, OAuth2, passkeys) with rationale
+- Authorisation model (RBAC, ABAC, ACL) with role definitions
+- Data encryption strategy (at rest, in transit, field-level)
+- Secrets management approach (env vars, vault, cloud KMS)
+- Input validation and sanitisation strategy
+- OWASP Top 10 mitigation checklist
+- Rate limiting and abuse prevention
+- Security headers and CSP configuration
+- Audit logging requirements`
+        }
+    ];
+}
+
+/**
  * Execute a specific phase for a product by creating a goal.
  */
 function executePhase(productId, phase) {
@@ -3701,10 +3905,42 @@ function executePhase(productId, phase) {
         }
     }
 
+    // Architecture phase: spawn parallel architecture swarm
+    if (phase === 'architecture') {
+        try {
+            const knowledgeSummary = getKnowledgeSummary(productId);
+            const parentDesc = `Architecture phase for ${product.name} — orchestrate parallel architecture subagents producing technical specifications. Seed: ${product.seed}`;
+            const parentGoalId = createGoal(parentDesc, product.project_path, false, null, 'parent');
+
+            const areas = getArchitectureSubagents(product.name, product.seed, knowledgeSummary);
+            const childGoalIds = [];
+
+            for (const area of areas) {
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                childGoalIds.push(childGoalId);
+                console.log(`[Pipeline] Architecture subagent created: ${area.area} (${childGoalId})`);
+            }
+
+            phaseStmts.updateStatus.run('active', now, productId, phase);
+            phaseStmts.updateGoal.run(parentGoalId, productId, phase);
+            productStmts.updatePhase.run(phase, PIPELINE_PHASES.indexOf(phase), productId);
+
+            if (wss.clients.size > 0) {
+                const msg = JSON.stringify({ type: 'pipeline_phase_started', productId, phase, goalId: parentGoalId, childGoals: childGoalIds.length });
+                wss.clients.forEach(client => { if (client.readyState === 1) client.send(msg); });
+            }
+
+            console.log(`[Pipeline] Architecture phase started for "${product.name}" — parent ${parentGoalId}, ${childGoalIds.length} children`);
+            return parentGoalId;
+        } catch (err) {
+            console.error(`[Pipeline] Failed to execute architecture phase for ${product.name}:`, err.message);
+            return null;
+        }
+    }
+
     // Other phases: single goal with knowledge context
     const knowledgeSummary = getKnowledgeSummary(productId);
     const descriptions = {
-        architecture: `Architecture phase for ${product.name}: select tech stack, design infrastructure, plan CI/CD. ${knowledgeSummary}`,
         build: `Build phase for ${product.name}: implement all features per the architecture. ${knowledgeSummary}`,
         test: `Test phase for ${product.name}: write and run unit tests, integration tests, verify all features. ${knowledgeSummary}`,
         document: `Document phase for ${product.name}: generate README, API docs, deployment guide, CLAUDE.md. ${knowledgeSummary}`,

@@ -33,6 +33,7 @@
 | 11.A | Product Pipeline Framework | Implementation Spec | Complete | [level-11-phase-a-pipeline-framework.md](level-11-phase-a-pipeline-framework.md) |
 | 11.B | Research Swarm | Implementation Spec | Complete | [level-11-phase-b-research-swarm.md](level-11-phase-b-research-swarm.md) |
 | 11.C | Design Artifact Swarm | Implementation Spec | Complete | [level-11-phase-c-design-swarm.md](level-11-phase-c-design-swarm.md) |
+| 11.D | Architecture Swarm | Implementation Spec | Complete | [level-11-phase-d-architecture-swarm.md](level-11-phase-d-architecture-swarm.md) |
 
 ## Plan Template
 
