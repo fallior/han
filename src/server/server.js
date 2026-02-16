@@ -177,6 +177,17 @@ if (!taskCols.includes('deadline')) {
     db.exec(`ALTER TABLE tasks ADD COLUMN deadline TEXT`);
 }
 
+// Level 10B: Protocol compliance columns
+const taskCols10b = db.pragma("table_info('tasks')").map(col => col.name);
+if (!taskCols10b.includes('commit_sha')) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN commit_sha TEXT`);
+    db.exec(`ALTER TABLE tasks ADD COLUMN files_changed TEXT`);
+}
+const goalCols = db.pragma("table_info('goals')").map(col => col.name);
+if (!goalCols.includes('summary_file')) {
+    db.exec(`ALTER TABLE goals ADD COLUMN summary_file TEXT`);
+}
+
 // Create project_memory table
 db.exec(`CREATE TABLE IF NOT EXISTS project_memory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -534,7 +545,7 @@ function commitTaskChanges(projectPath, task) {
     try {
         if (!hasUncommittedChanges(projectPath)) {
             console.log(`[Git] No changes to commit for task ${task.id}`);
-            return false;
+            return { committed: false, sha: null, filesChanged: [] };
         }
 
         // Stage all changes
@@ -558,11 +569,38 @@ function commitTaskChanges(projectPath, task) {
             stdio: 'ignore'
         });
 
-        console.log(`[Git] Committed changes for task: ${task.title} (${task.id})`);
-        return true;
+        // Capture commit SHA
+        const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: projectPath,
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'ignore']
+        }).trim();
+
+        // Capture files changed in this commit
+        let filesChanged = [];
+        try {
+            const diffOutput = execFileSync('git', ['diff', '--name-only', 'HEAD~1', 'HEAD'], {
+                cwd: projectPath,
+                encoding: 'utf8',
+                stdio: ['pipe', 'pipe', 'ignore']
+            });
+            filesChanged = diffOutput.trim().split('\n').filter(Boolean);
+        } catch {
+            try {
+                const lsOutput = execFileSync('git', ['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'], {
+                    cwd: projectPath,
+                    encoding: 'utf8',
+                    stdio: ['pipe', 'pipe', 'ignore']
+                });
+                filesChanged = lsOutput.trim().split('\n').filter(Boolean);
+            } catch { /* best effort */ }
+        }
+
+        console.log(`[Git] Committed changes for task: ${task.title} (${task.id}) [${sha.slice(0, 7)}]`);
+        return { committed: true, sha, filesChanged };
     } catch (err) {
         console.error(`[Git] Commit failed for task ${task.id}:`, err.message);
-        return false;
+        return { committed: false, sha: null, filesChanged: [] };
     }
 }
 
@@ -1580,6 +1618,39 @@ app.delete('/api/goals/:id', (req, res) => {
     }
 });
 
+/**
+ * GET /api/goals/:id/summary — Get goal completion summary
+ */
+app.get('/api/goals/:id/summary', (req, res) => {
+    try {
+        const goal = goalStmts.get.get(req.params.id);
+        if (!goal) {
+            return res.status(404).json({ success: false, error: 'Goal not found' });
+        }
+
+        if (!goal.summary_file) {
+            if (!['done', 'failed'].includes(goal.status)) {
+                return res.status(400).json({ success: false, error: 'Goal has not completed yet' });
+            }
+            // Backfill: generate summary for completed goals that predate this feature
+            const summaryFile = generateGoalSummary(goal.id);
+            if (!summaryFile) {
+                return res.status(404).json({ success: false, error: 'Summary could not be generated' });
+            }
+        }
+
+        const updatedGoal = goalStmts.get.get(req.params.id);
+        if (!fs.existsSync(updatedGoal.summary_file)) {
+            return res.status(404).json({ success: false, error: 'Summary file not found on disk' });
+        }
+
+        const content = fs.readFileSync(updatedGoal.summary_file, 'utf8');
+        res.json({ success: true, summary_file: updatedGoal.summary_file, content });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ── Portfolio endpoints (Level 9) ────────────────────────
 
 /**
@@ -1788,6 +1859,12 @@ function updateGoalProgress(goalId) {
 
     goalStmts.updateProgress.run(completed, failed, totalCost, status, completedAt, goalId);
 
+    // Generate summary when goal reaches terminal state
+    if (allDone && completedAt) {
+        try { generateGoalSummary(goalId); }
+        catch (err) { console.error(`[Goal] Summary generation failed for ${goalId}:`, err.message); }
+    }
+
     // Record outcomes in project memory
     for (const task of tasks) {
         if (['done', 'failed'].includes(task.status) && task.completed_at) {
@@ -1847,6 +1924,155 @@ function broadcastGoalUpdate(goalId) {
     wss.clients.forEach((client) => {
         if (client.readyState === 1) client.send(message);
     });
+}
+
+/**
+ * Generate a structured summary log when a goal completes.
+ * Mirrors human session log format: What Was Done, Commits, Files Changed, Cost Summary.
+ */
+function generateGoalSummary(goalId) {
+    const goal = goalStmts.get.get(goalId);
+    if (!goal) return null;
+
+    const tasks = taskStmts.getByGoal.all(goalId);
+    if (tasks.length === 0) return null;
+
+    // Calculate duration from earliest task start to latest task completion
+    const startTimes = tasks.map(t => t.started_at).filter(Boolean).sort();
+    const endTimes = tasks.map(t => t.completed_at).filter(Boolean).sort();
+    const goalStart = startTimes[0] || goal.created_at;
+    const goalEnd = endTimes[endTimes.length - 1] || goal.completed_at || new Date().toISOString();
+    const durationMs = new Date(goalEnd) - new Date(goalStart);
+    const durationMin = Math.round(durationMs / 60000);
+    const durationStr = durationMin >= 60
+        ? `${Math.floor(durationMin / 60)}h ${durationMin % 60}m`
+        : `${durationMin}m`;
+
+    // Aggregate data
+    const totalCost = tasks.reduce((sum, t) => sum + (t.cost_usd || 0), 0);
+    const totalTokensIn = tasks.reduce((sum, t) => sum + (t.tokens_in || 0), 0);
+    const totalTokensOut = tasks.reduce((sum, t) => sum + (t.tokens_out || 0), 0);
+    const totalTurns = tasks.reduce((sum, t) => sum + (t.turns || 0), 0);
+    const doneTasks = tasks.filter(t => t.status === 'done');
+    const failedTasks = tasks.filter(t => t.status === 'failed');
+
+    // Collect commits and files
+    const commits = tasks.filter(t => t.commit_sha).map(t => ({ sha: t.commit_sha, title: t.title }));
+    const allFiles = new Set();
+    for (const t of tasks) {
+        if (t.files_changed) {
+            try { JSON.parse(t.files_changed).forEach(f => allFiles.add(f)); } catch {}
+        }
+    }
+
+    // Build markdown summary
+    const lines = [
+        `# Goal Summary: ${goal.description}`,
+        ``,
+        `- **Goal ID**: ${goal.id}`,
+        `- **Project**: ${path.basename(goal.project_path)} (${goal.project_path})`,
+        `- **Status**: ${goal.status}`,
+        `- **Start**: ${goalStart}`,
+        `- **End**: ${goalEnd}`,
+        `- **Duration**: ${durationStr}`,
+        `- **Tasks**: ${doneTasks.length} completed, ${failedTasks.length} failed, ${tasks.length} total`,
+        ``,
+        `---`,
+        ``,
+        `## What Was Done`,
+        ``,
+    ];
+
+    for (const t of doneTasks) {
+        lines.push(`- **${t.title}** (${t.model}, $${(t.cost_usd || 0).toFixed(4)}, ${t.turns || 0} turns)`);
+        if (t.result) {
+            const brief = t.result.replace(/\n/g, ' ').slice(0, 200);
+            lines.push(`  - ${brief}${t.result.length > 200 ? '...' : ''}`);
+        }
+    }
+
+    if (failedTasks.length > 0) {
+        lines.push(``, `### Failed Tasks`, ``);
+        for (const t of failedTasks) {
+            lines.push(`- **${t.title}** (${t.model})`);
+            if (t.error) lines.push(`  - Error: ${t.error.slice(0, 200)}`);
+        }
+    }
+
+    if (commits.length > 0) {
+        lines.push(``, `## Commits`, ``);
+        for (const c of commits) {
+            lines.push(`- \`${c.sha.slice(0, 7)}\` — ${c.title}`);
+        }
+    }
+
+    if (allFiles.size > 0) {
+        lines.push(``, `## Files Changed`, ``);
+        for (const f of [...allFiles].sort()) {
+            lines.push(`- ${f}`);
+        }
+    }
+
+    lines.push(
+        ``, `## Cost Summary`, ``,
+        `| Metric | Value |`,
+        `|--------|-------|`,
+        `| Total Cost | $${totalCost.toFixed(4)} |`,
+        `| Tokens In | ${totalTokensIn.toLocaleString()} |`,
+        `| Tokens Out | ${totalTokensOut.toLocaleString()} |`,
+        `| Total Turns | ${totalTurns} |`,
+        `| Duration | ${durationStr} |`,
+        ``
+    );
+
+    if (tasks.length > 1) {
+        lines.push(`## Per-Task Breakdown`, ``,
+            `| Task | Status | Model | Cost | Turns | Commit |`,
+            `|------|--------|-------|------|-------|--------|`);
+        for (const t of tasks) {
+            const sha = t.commit_sha ? `\`${t.commit_sha.slice(0, 7)}\`` : '-';
+            lines.push(`| ${t.title} | ${t.status} | ${t.model} | $${(t.cost_usd || 0).toFixed(4)} | ${t.turns || 0} | ${sha} |`);
+        }
+        lines.push(``);
+    }
+
+    lines.push(`---`, ``);
+
+    // Write summary file
+    const logDir = path.join(goal.project_path, '_logs');
+    try { if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true }); } catch {}
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const safeDesc = goal.description.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-').slice(0, 50);
+    const summaryFile = path.join(logDir, `goal_${timestamp}_${safeDesc}.md`);
+
+    try {
+        fs.writeFileSync(summaryFile, lines.join('\n'));
+        goalStmts.updateSummaryFile.run(summaryFile, goalId);
+        console.log(`[Goal] Summary written: ${summaryFile}`);
+    } catch (err) {
+        console.error(`[Goal] Failed to write summary:`, err.message);
+        return null;
+    }
+
+    // Broadcast goal completion
+    if (wss.clients.size > 0) {
+        const msg = JSON.stringify({
+            type: 'goal_completed',
+            goalId,
+            status: goal.status,
+            summary_file: summaryFile,
+            total_cost: totalCost,
+            duration: durationStr,
+            tasks_completed: doneTasks.length,
+            tasks_failed: failedTasks.length
+        });
+        wss.clients.forEach(client => {
+            if (client.readyState === 1) client.send(msg);
+        });
+    }
+
+    return summaryFile;
 }
 
 /**
@@ -2054,6 +2280,7 @@ const taskStmts = {
     del: db.prepare('DELETE FROM tasks WHERE id = ?'),
     nextPending: db.prepare('SELECT * FROM tasks WHERE status = \'pending\' ORDER BY priority DESC, created_at ASC LIMIT 1'),
     getByGoal: db.prepare('SELECT * FROM tasks WHERE goal_id = ? ORDER BY priority DESC, created_at ASC'),
+    updateCommitInfo: db.prepare('UPDATE tasks SET commit_sha = ?, files_changed = ? WHERE id = ?'),
 };
 
 const goalStmts = {
@@ -2064,6 +2291,7 @@ const goalStmts = {
     updateProgress: db.prepare('UPDATE goals SET tasks_completed = ?, tasks_failed = ?, total_cost_usd = ?, status = ?, completed_at = ? WHERE id = ?'),
     updateDecomposition: db.prepare('UPDATE goals SET decomposition = ?, task_count = ?, status = ? WHERE id = ?'),
     del: db.prepare('DELETE FROM goals WHERE id = ?'),
+    updateSummaryFile: db.prepare('UPDATE goals SET summary_file = ? WHERE id = ?'),
 };
 
 const memoryStmts = {
@@ -2664,21 +2892,29 @@ async function runNextTask() {
                 console.log(`[Task] ${isSuccess ? 'Completed' : 'Failed'}: ${task.title} ($${totalCost.toFixed(4)}, ${numTurns} turns)`);
                 taskLog.finish(isSuccess ? 'done' : 'failed');
 
-                // Update goal progress
-                if (task.goal_id) {
-                    updateGoalProgress(task.goal_id);
+                // Commit changes and clean up checkpoint on success
+                // (Must run before updateGoalProgress so summary has commit SHAs)
+                if (isSuccess) {
+                    const updatedTask = taskStmts.get.get(task.id);
+                    const commitResult = commitTaskChanges(task.project_path, updatedTask || task);
+                    if (commitResult.committed && commitResult.sha) {
+                        taskStmts.updateCommitInfo.run(
+                            commitResult.sha,
+                            JSON.stringify(commitResult.filesChanged),
+                            task.id
+                        );
+                    }
+                    if (checkpointRef && checkpointType !== 'none') {
+                        cleanupCheckpoint(task.project_path, checkpointRef, checkpointType);
+                    }
                 }
 
                 // Recalculate project costs (Phase 2)
                 recalcProjectCosts(task.project_path);
 
-                // Commit changes and clean up checkpoint on success
-                if (isSuccess) {
-                    const updatedTask = taskStmts.get.get(task.id);
-                    commitTaskChanges(task.project_path, updatedTask || task);
-                    if (checkpointRef && checkpointType !== 'none') {
-                        cleanupCheckpoint(task.project_path, checkpointRef, checkpointType);
-                    }
+                // Update goal progress (may trigger summary generation)
+                if (task.goal_id) {
+                    updateGoalProgress(task.goal_id);
                 }
             }
         }
