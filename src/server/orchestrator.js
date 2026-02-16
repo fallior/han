@@ -286,6 +286,75 @@ async function initialize() {
     return getStatus();
 }
 
+/**
+ * Recommend cheapest model with acceptable success rate from project memory.
+ * Pure function — no LLM call, queries SQLite directly.
+ */
+function recommendModel(db, projectPath, taskType, options = {}) {
+    const minSampleSize = options.minSampleSize || 5;
+    const minSuccessRate = options.minSuccessRate || 0.7;
+
+    try {
+        // First try task-type-specific records
+        let records = db.prepare(
+            'SELECT model_used, success, cost_usd FROM project_memory WHERE project_path = ? AND task_type = ?'
+        ).all(projectPath, taskType);
+
+        let scope = 'task_type';
+
+        // Fall back to project-wide if insufficient task-type data
+        if (records.length < minSampleSize) {
+            records = db.prepare(
+                'SELECT model_used, success, cost_usd FROM project_memory WHERE project_path = ?'
+            ).all(projectPath);
+            scope = 'project';
+        }
+
+        if (records.length < minSampleSize) {
+            return { model: null, confidence: 'none', reason: `Insufficient data (${records.length} records)`, stats: {} };
+        }
+
+        // Group by model
+        const byModel = {};
+        for (const r of records) {
+            const m = r.model_used || 'unknown';
+            if (!byModel[m]) byModel[m] = { count: 0, successes: 0, totalCost: 0 };
+            byModel[m].count++;
+            if (r.success) byModel[m].successes++;
+            byModel[m].totalCost += r.cost_usd || 0;
+        }
+
+        // Compute rates and filter
+        const candidates = [];
+        for (const [model, stats] of Object.entries(byModel)) {
+            if (model === 'unknown') continue;
+            const successRate = stats.count > 0 ? stats.successes / stats.count : 0;
+            const avgCost = stats.count > 0 ? stats.totalCost / stats.count : 0;
+            if (stats.count >= minSampleSize && successRate >= minSuccessRate) {
+                candidates.push({ model, successRate, avgCost, count: stats.count });
+            }
+        }
+
+        if (candidates.length === 0) {
+            return { model: null, confidence: 'none', reason: 'No model meets threshold', stats: byModel };
+        }
+
+        // Sort by avg cost ascending (cheapest first)
+        candidates.sort((a, b) => a.avgCost - b.avgCost);
+        const best = candidates[0];
+        const confidence = best.count >= 10 ? 'high' : 'low';
+
+        return {
+            model: best.model,
+            confidence,
+            reason: `${best.model} has ${(best.successRate * 100).toFixed(0)}% success rate over ${best.count} tasks (${scope} scope, avg $${best.avgCost.toFixed(4)})`,
+            stats: byModel
+        };
+    } catch (err) {
+        return { model: null, confidence: 'none', reason: `Error: ${err.message}`, stats: {} };
+    }
+}
+
 module.exports = {
     initialize,
     callLLM,
@@ -293,6 +362,7 @@ module.exports = {
     decomposeGoal,
     analyseFailure,
     selectModel,
+    recommendModel,
     getStatus,
     checkOllamaStatus
 };

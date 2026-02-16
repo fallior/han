@@ -1498,13 +1498,24 @@ app.post('/api/goals', async (req, res) => {
 
                     const dependsOnJson = dependsOnIds.length > 0 ? JSON.stringify(dependsOnIds) : null;
 
+                    // Memory-based model recommendation (Phase E feedback loop)
+                    let finalModel = subtask.model || 'sonnet';
+                    const recommendation = orchestrator.recommendModel(db, project_path, 'unknown');
+                    if (recommendation.model && recommendation.confidence !== 'none') {
+                        const costRank = { haiku: 1, sonnet: 2, opus: 3 };
+                        if ((costRank[recommendation.model] || 99) <= (costRank[finalModel] || 99)) {
+                            console.log(`[Goal ${goalId}] Memory override: ${finalModel} → ${recommendation.model} for "${subtask.title}" (${recommendation.reason})`);
+                            finalModel = recommendation.model;
+                        }
+                    }
+
                     taskStmts.insertWithGoal.run(
                         taskId,
                         subtask.title,
                         subtask.description,
                         project_path,
                         subtask.priority || 5,
-                        subtask.model || 'sonnet',
+                        finalModel,
                         100, // max_turns
                         'bypass', // gate_mode
                         null, // allowed_tools
@@ -1969,6 +1980,130 @@ app.get('/api/orchestrator/memory/:project', (req, res) => {
 });
 
 /**
+ * GET /api/analytics — Aggregated performance analytics from project memory
+ */
+app.get('/api/analytics', (req, res) => {
+    try {
+        const records = memoryStmts.getAll.all();
+
+        // Global stats
+        const totalTasks = records.length;
+        const successes = records.filter(r => r.success).length;
+        const totalCost = records.reduce((sum, r) => sum + (r.cost_usd || 0), 0);
+        const global = {
+            totalTasks,
+            successRate: totalTasks > 0 ? successes / totalTasks : 0,
+            totalCost,
+            avgCostPerTask: totalTasks > 0 ? totalCost / totalTasks : 0,
+        };
+
+        // Per-model stats
+        const byModel = {};
+        for (const r of records) {
+            const m = r.model_used || 'unknown';
+            if (!byModel[m]) byModel[m] = { count: 0, successes: 0, totalCost: 0, totalTurns: 0, totalDuration: 0, withTurns: 0, withDuration: 0 };
+            byModel[m].count++;
+            if (r.success) byModel[m].successes++;
+            byModel[m].totalCost += r.cost_usd || 0;
+            if (r.turns) { byModel[m].totalTurns += r.turns; byModel[m].withTurns++; }
+            if (r.duration_seconds) { byModel[m].totalDuration += r.duration_seconds; byModel[m].withDuration++; }
+        }
+        const byModelOut = {};
+        for (const [model, s] of Object.entries(byModel)) {
+            byModelOut[model] = {
+                count: s.count,
+                successRate: s.count > 0 ? s.successes / s.count : 0,
+                avgCost: s.count > 0 ? s.totalCost / s.count : 0,
+                avgTurns: s.withTurns > 0 ? s.totalTurns / s.withTurns : 0,
+                avgDuration: s.withDuration > 0 ? s.totalDuration / s.withDuration : 0,
+            };
+        }
+
+        // Per-project stats
+        const byProject = {};
+        for (const r of records) {
+            const p = r.project_path;
+            if (!byProject[p]) byProject[p] = { count: 0, successes: 0, totalCost: 0 };
+            byProject[p].count++;
+            if (r.success) byProject[p].successes++;
+            byProject[p].totalCost += r.cost_usd || 0;
+        }
+        for (const p of Object.keys(byProject)) {
+            byProject[p].successRate = byProject[p].count > 0 ? byProject[p].successes / byProject[p].count : 0;
+            delete byProject[p].successes;
+        }
+
+        // Velocity: tasks per day (last 7 days)
+        const now = new Date();
+        const dailyCounts = [];
+        for (let i = 0; i < 7; i++) {
+            const date = new Date(now);
+            date.setDate(date.getDate() - i);
+            const dateStr = date.toISOString().split('T')[0];
+            const count = records.filter(r => r.created_at && r.created_at.startsWith(dateStr)).length;
+            dailyCounts.push({ date: dateStr, count });
+        }
+        const last3 = dailyCounts.slice(0, 3).reduce((s, d) => s + d.count, 0) / 3;
+        const prev4 = dailyCounts.slice(3, 7).reduce((s, d) => s + d.count, 0) / 4;
+        const trend = last3 > prev4 * 1.2 ? 'up' : last3 < prev4 * 0.8 ? 'down' : 'stable';
+
+        // Cost optimisation suggestions
+        const suggestions = [];
+        const costRank = { haiku: 1, sonnet: 2, opus: 3 };
+        // Group by (project, task_type, model)
+        const groups = {};
+        for (const r of records) {
+            const key = `${r.project_path}|||${r.task_type || 'unknown'}`;
+            if (!groups[key]) groups[key] = {};
+            const m = r.model_used || 'unknown';
+            if (!groups[key][m]) groups[key][m] = { count: 0, successes: 0, totalCost: 0 };
+            groups[key][m].count++;
+            if (r.success) groups[key][m].successes++;
+            groups[key][m].totalCost += r.cost_usd || 0;
+        }
+        for (const [key, models] of Object.entries(groups)) {
+            const [projectPath, taskType] = key.split('|||');
+            // Check for downgrade opportunities: opus→sonnet, sonnet→haiku
+            const downgrades = [['opus', 'sonnet'], ['sonnet', 'haiku']];
+            for (const [expensive, cheap] of downgrades) {
+                const expStats = models[expensive];
+                const cheapStats = models[cheap];
+                if (!expStats || expStats.count < 5) continue;
+                if (!cheapStats || cheapStats.count < 5) continue;
+                const cheapRate = cheapStats.successes / cheapStats.count;
+                if (cheapRate < 0.7) continue;
+                const expAvg = expStats.totalCost / expStats.count;
+                const cheapAvg = cheapStats.totalCost / cheapStats.count;
+                if (cheapAvg >= expAvg) continue;
+                suggestions.push({
+                    type: 'model_downgrade',
+                    project: projectPath,
+                    taskType,
+                    currentModel: expensive,
+                    suggestedModel: cheap,
+                    currentAvgCost: expAvg,
+                    suggestedAvgCost: cheapAvg,
+                    savingsPerTask: expAvg - cheapAvg,
+                    cheapSuccessRate: cheapRate,
+                    sampleSize: cheapStats.count,
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            global,
+            byModel: byModelOut,
+            byProject,
+            velocity: { dailyCounts, trend, avgLast3Days: last3, avgPrev4Days: prev4 },
+            suggestions,
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * POST /api/orchestrator/setup — Pull Ollama model
  */
 app.post('/api/orchestrator/setup', async (req, res) => {
@@ -2018,13 +2153,6 @@ function updateGoalProgress(goalId) {
     if (allDone && completedAt) {
         try { generateGoalSummary(goalId); }
         catch (err) { console.error(`[Goal] Summary generation failed for ${goalId}:`, err.message); }
-    }
-
-    // Record outcomes in project memory
-    for (const task of tasks) {
-        if (['done', 'failed'].includes(task.status) && task.completed_at) {
-            recordTaskOutcome(task);
-        }
     }
 
     // Broadcast goal update
@@ -2772,6 +2900,7 @@ const goalStmts = {
 const memoryStmts = {
     insert: db.prepare('INSERT INTO project_memory (project_path, task_type, model_used, success, cost_usd, turns, duration_seconds, error_summary, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     getByProject: db.prepare('SELECT * FROM project_memory WHERE project_path = ? ORDER BY created_at DESC LIMIT 100'),
+    getAll: db.prepare('SELECT * FROM project_memory ORDER BY created_at DESC'),
 };
 
 const portfolioStmts = {
@@ -3376,6 +3505,9 @@ async function runNextTask() {
                 console.log(`[Task] ${isSuccess ? 'Completed' : 'Failed'}: ${task.title} ($${totalCost.toFixed(4)}, ${numTurns} turns)`);
                 taskLog.finish(isSuccess ? 'done' : 'failed');
 
+                // Record outcome in project memory (once per task)
+                recordTaskOutcome(taskStmts.get.get(task.id));
+
                 // Commit changes and clean up checkpoint on success
                 // (Must run before updateGoalProgress so summary has commit SHAs)
                 if (isSuccess) {
@@ -3431,6 +3563,9 @@ async function runNextTask() {
             taskStmts.fail.run('failed', new Date().toISOString(), err.message, task.id);
         }
         taskLog.finish('failed', err.message);
+
+        // Record outcome in project memory (once per task)
+        recordTaskOutcome(taskStmts.get.get(task.id));
 
         // Update goal progress and recalculate costs
         if (task.goal_id) {
