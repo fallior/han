@@ -1023,6 +1023,145 @@
             width: 80px;
         }
 
+        /* Dashboard */
+        .dash-stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .dash-stat-card {
+            padding: 12px;
+            background: var(--overlay-subtle);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            text-align: center;
+        }
+        .dash-stat-value {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1.2;
+        }
+        .dash-stat-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+        .dash-model-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 16px;
+            font-size: 12px;
+        }
+        .dash-model-table th {
+            text-align: left;
+            color: var(--text-muted);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--border);
+        }
+        .dash-model-table td {
+            padding: 8px;
+            color: var(--text);
+            border-bottom: 1px solid var(--border-secondary);
+        }
+        .dash-velocity-chart {
+            display: flex;
+            align-items: flex-end;
+            gap: 4px;
+            height: 60px;
+            margin-bottom: 8px;
+        }
+        .dash-velocity-bar {
+            flex: 1;
+            background: var(--cyan);
+            border-radius: 3px 3px 0 0;
+            min-height: 2px;
+            opacity: 0.8;
+        }
+        .dash-velocity-labels {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 16px;
+        }
+        .dash-velocity-labels span {
+            flex: 1;
+            text-align: center;
+            font-size: 9px;
+            color: var(--text-muted);
+        }
+        .dash-suggestion {
+            padding: 10px 12px;
+            background: var(--overlay-light);
+            border: 1px solid var(--border-secondary);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: var(--text);
+        }
+        .dash-digest-content {
+            white-space: pre-wrap;
+            font-size: 12px;
+            color: var(--text);
+            line-height: 1.6;
+            padding: 12px;
+            background: var(--overlay-subtle);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        .dash-history-item {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-secondary);
+            cursor: pointer;
+        }
+        .dash-history-item:active { opacity: 0.7; }
+        .dash-history-item:last-child { border-bottom: none; }
+        .dash-project-card {
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .dash-project-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .dash-project-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text);
+        }
+        .dash-project-stats {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .dash-proposal-card {
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .dash-proposal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .dash-proposal-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
         @supports (padding: max(0px)) {
             .titlebar { padding-top: max(8px, env(safe-area-inset-top)); }
         }
@@ -1106,6 +1245,7 @@
                 <button class="tool-btn" id="copyBtn" title="Copy">📋</button>
                 <button class="tool-btn" id="trimBtn" title="Trim buffer">✂️</button>
                 <button class="tool-btn" id="tasksBtn" title="Tasks">🤖</button>
+                <button class="tool-btn" id="dashBtn" title="Dashboard">📊</button>
                 <button class="tool-btn" id="bridgeBtn" title="Bridge">🔗</button>
             </div>
             <div class="titlebar-status">
@@ -1354,6 +1494,37 @@
         </div>
     </div>
 
+    <!-- Dashboard overlay -->
+    <div class="bridge-overlay" id="dashOverlay">
+        <div class="bridge-header">
+            <div class="bridge-tabs">
+                <button class="bridge-tab active" data-dash-tab="analytics">Analytics</button>
+                <button class="bridge-tab" data-dash-tab="digests">Digests</button>
+                <button class="bridge-tab" data-dash-tab="reports">Reports</button>
+                <button class="bridge-tab" data-dash-tab="health">Health</button>
+            </div>
+            <button class="bridge-close" id="dashClose">✕</button>
+        </div>
+        <div class="bridge-body">
+            <!-- Analytics -->
+            <div class="bridge-section active" id="dashAnalytics">
+                <div id="dashAnalyticsContent"><p style="color:var(--text-dim);font-size:12px;">Loading analytics...</p></div>
+            </div>
+            <!-- Digests -->
+            <div class="bridge-section" id="dashDigests">
+                <div id="dashDigestsContent"><p style="color:var(--text-dim);font-size:12px;">Loading digests...</p></div>
+            </div>
+            <!-- Reports -->
+            <div class="bridge-section" id="dashReports">
+                <div id="dashReportsContent"><p style="color:var(--text-dim);font-size:12px;">Loading reports...</p></div>
+            </div>
+            <!-- Health -->
+            <div class="bridge-section" id="dashHealth">
+                <div id="dashHealthContent"><p style="color:var(--text-dim);font-size:12px;">Loading health...</p></div>
+            </div>
+        </div>
+    </div>
+
     <datalist id="projectPaths"></datalist>
 
     <script>
@@ -1542,6 +1713,12 @@
                         handleGoalDecomposed(data);
                     } else if (data.type === 'approval_request') {
                         handleApprovalRequest(data);
+                    } else if (data.type === 'digest_ready') {
+                        if (dashOverlay.classList.contains('visible') && document.getElementById('dashDigests').classList.contains('active')) loadDigests();
+                    }
+                    // Refresh dashboard analytics on task/goal updates if visible
+                    if ((data.type === 'task_update' || data.type === 'goal_update') && dashOverlay.classList.contains('visible') && document.getElementById('dashAnalytics').classList.contains('active')) {
+                        loadAnalytics();
                     }
                 } catch (e) {
                     console.error('WS parse error:', e);
@@ -3377,6 +3554,339 @@
                 btn.textContent = '❌ Deny';
             }
         });
+
+        // ── Dashboard ─────────────────────────────────────────
+
+        const dashOverlay = document.getElementById('dashOverlay');
+        const dashBtn = document.getElementById('dashBtn');
+        let dashData = { analytics: null, digests: null, reports: null, ecosystem: null, proposals: null };
+
+        function openDash() {
+            dashOverlay.classList.add('visible');
+            dashBtn.classList.add('active');
+            loadAnalytics();
+        }
+
+        function closeDash() {
+            dashOverlay.classList.remove('visible');
+            dashBtn.classList.remove('active');
+        }
+
+        function switchDashTab(tab) {
+            dashOverlay.querySelectorAll('[data-dash-tab]').forEach(t => {
+                t.classList.toggle('active', t.dataset.dashTab === tab);
+            });
+            dashOverlay.querySelectorAll('.bridge-section').forEach(s => s.classList.remove('active'));
+            if (tab === 'analytics') { document.getElementById('dashAnalytics').classList.add('active'); loadAnalytics(); }
+            else if (tab === 'digests') { document.getElementById('dashDigests').classList.add('active'); loadDigests(); }
+            else if (tab === 'reports') { document.getElementById('dashReports').classList.add('active'); loadReports(); }
+            else if (tab === 'health') { document.getElementById('dashHealth').classList.add('active'); loadHealth(); }
+        }
+
+        dashBtn.addEventListener('click', () => {
+            if (dashOverlay.classList.contains('visible')) closeDash();
+            else openDash();
+        });
+        document.getElementById('dashClose').addEventListener('click', closeDash);
+        dashOverlay.querySelector('.bridge-tabs').addEventListener('click', (e) => {
+            const tab = e.target.closest('[data-dash-tab]');
+            if (tab) switchDashTab(tab.dataset.dashTab);
+        });
+
+        async function loadAnalytics() {
+            const el = document.getElementById('dashAnalyticsContent');
+            try {
+                const res = await fetch(`${API_BASE}/api/analytics`);
+                const data = await res.json();
+                if (data.success) { dashData.analytics = data; renderAnalytics(data); }
+                else el.innerHTML = `<p style="color:var(--red);font-size:12px;">Failed to load analytics</p>`;
+            } catch { el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error</p>`; }
+        }
+
+        function renderAnalytics(data) {
+            const el = document.getElementById('dashAnalyticsContent');
+            const g = data.global;
+
+            // Stat cards
+            let html = `<div class="dash-stat-grid">
+                <div class="dash-stat-card"><div class="dash-stat-value">${g.totalTasks}</div><div class="dash-stat-label">Total Tasks</div></div>
+                <div class="dash-stat-card"><div class="dash-stat-value" style="color:var(--green)">${(g.successRate * 100).toFixed(0)}%</div><div class="dash-stat-label">Success Rate</div></div>
+                <div class="dash-stat-card"><div class="dash-stat-value">$${g.totalCost.toFixed(2)}</div><div class="dash-stat-label">Total Cost</div></div>
+                <div class="dash-stat-card"><div class="dash-stat-value">$${g.avgCostPerTask.toFixed(3)}</div><div class="dash-stat-label">Avg Cost/Task</div></div>
+            </div>`;
+
+            // Model breakdown
+            const models = Object.entries(data.byModel);
+            if (models.length) {
+                html += `<div class="bridge-label">Model Breakdown</div>
+                <table class="dash-model-table"><thead><tr><th>Model</th><th>Count</th><th>Success</th><th>Avg Cost</th><th>Avg Turns</th></tr></thead><tbody>`;
+                for (const [model, s] of models) {
+                    html += `<tr><td style="font-weight:600">${model}</td><td>${s.count}</td><td style="color:var(--green)">${(s.successRate * 100).toFixed(0)}%</td><td>$${s.avgCost.toFixed(3)}</td><td>${s.avgTurns.toFixed(1)}</td></tr>`;
+                }
+                html += `</tbody></table>`;
+            }
+
+            // Velocity chart
+            const v = data.velocity;
+            if (v && v.dailyCounts.length) {
+                const maxCount = Math.max(...v.dailyCounts.map(d => d.count), 1);
+                const bars = [...v.dailyCounts].reverse();
+                html += `<div class="bridge-label">7-Day Velocity <span style="text-transform:none;font-size:10px;color:${v.trend === 'up' ? 'var(--green)' : v.trend === 'down' ? 'var(--red)' : 'var(--text-muted)'}">${v.trend === 'up' ? '▲ trending up' : v.trend === 'down' ? '▼ trending down' : '● stable'}</span></div>`;
+                html += `<div class="dash-velocity-chart">`;
+                for (const d of bars) {
+                    const pct = maxCount > 0 ? (d.count / maxCount * 100) : 0;
+                    html += `<div class="dash-velocity-bar" style="height:${Math.max(pct, 3)}%" title="${d.date}: ${d.count} tasks"></div>`;
+                }
+                html += `</div><div class="dash-velocity-labels">`;
+                for (const d of bars) {
+                    html += `<span>${d.date.slice(5)}</span>`;
+                }
+                html += `</div>`;
+            }
+
+            // Suggestions
+            if (data.suggestions.length) {
+                html += `<div class="bridge-label">Optimisation Suggestions</div>`;
+                for (const s of data.suggestions) {
+                    html += `<div class="dash-suggestion">💡 <strong>${s.taskType}</strong> in ${s.project.split('/').pop()}: switch ${s.currentModel} → ${s.suggestedModel} (save $${s.savingsPerTask.toFixed(3)}/task, ${(s.cheapSuccessRate * 100).toFixed(0)}% success rate on ${s.sampleSize} samples)</div>`;
+                }
+            }
+
+            // Per-project
+            const projects = Object.entries(data.byProject);
+            if (projects.length) {
+                html += `<div class="bridge-label" style="margin-top:16px">By Project</div>`;
+                for (const [path, s] of projects.sort((a, b) => b[1].totalCost - a[1].totalCost)) {
+                    html += `<div class="dash-project-card"><div class="dash-project-header"><span class="dash-project-name">${path.split('/').pop()}</span><span style="font-size:11px;color:var(--text-dim)">$${s.totalCost.toFixed(2)}</span></div><div class="dash-project-stats">
+                        <span class="portfolio-stat has-value">${s.count} tasks</span>
+                        <span class="portfolio-stat has-value" style="color:var(--green)">${(s.successRate * 100).toFixed(0)}% success</span>
+                    </div></div>`;
+                }
+            }
+
+            el.innerHTML = html;
+        }
+
+        async function loadDigests() {
+            const el = document.getElementById('dashDigestsContent');
+            try {
+                const res = await fetch(`${API_BASE}/api/digest/latest`);
+                const data = await res.json();
+                if (data.success) { renderDigestTab(data.digest); }
+                else el.innerHTML = `<p style="color:var(--red);font-size:12px;">Failed to load digests</p>`;
+            } catch { el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error</p>`; }
+        }
+
+        function renderDigestTab(digest) {
+            const el = document.getElementById('dashDigestsContent');
+            if (!digest) {
+                el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;">No digests yet. They are generated daily.</p>';
+                return;
+            }
+            const d = digest.digest_json || {};
+            let html = `<div class="task-summary" style="margin-bottom:12px;">
+                <div class="task-summary-row"><span class="task-summary-label">Date</span><span class="task-summary-value">${digest.period_start ? digest.period_start.split('T')[0] : 'Unknown'}</span></div>
+                <div class="task-summary-row"><span class="task-summary-label">Tasks</span><span class="task-summary-value">${d.tasks_completed || 0} completed</span></div>
+                <div class="task-summary-row"><span class="task-summary-label">Cost</span><span class="task-summary-value">$${(d.total_cost || 0).toFixed(2)}</span></div>
+            </div>`;
+            html += `<div class="dash-digest-content">${digest.digest_text || 'No content'}</div>`;
+            html += `<button class="bridge-btn" style="margin-top:12px" onclick="loadDigestHistory()">View History</button>`;
+            el.innerHTML = html;
+        }
+
+        async function loadDigestHistory() {
+            const el = document.getElementById('dashDigestsContent');
+            try {
+                const res = await fetch(`${API_BASE}/api/digest/history`);
+                const data = await res.json();
+                if (!data.success || !data.digests.length) {
+                    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;">No digest history.</p>';
+                    return;
+                }
+                let html = `<div class="bridge-label">Digest History</div>`;
+                for (const d of data.digests) {
+                    const date = d.period_start ? d.period_start.split('T')[0] : 'Unknown';
+                    const preview = (d.digest_text || '').split('\n')[0].slice(0, 80);
+                    html += `<div class="dash-history-item" onclick="loadDigestById(${d.id})">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-size:13px;color:var(--text);font-weight:500">${date}</span>
+                            ${d.viewed_at ? '' : '<span class="task-status-badge running">New</span>'}
+                        </div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">${preview}</div>
+                    </div>`;
+                }
+                el.innerHTML = html;
+            } catch { el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error</p>`; }
+        }
+
+        async function loadDigestById(id) {
+            const el = document.getElementById('dashDigestsContent');
+            try {
+                const res = await fetch(`${API_BASE}/api/digest/history`);
+                const data = await res.json();
+                const digest = data.digests.find(d => d.id === id);
+                if (digest) {
+                    digest.digest_json = JSON.parse(digest.digest_json || '{}');
+                    renderDigestTab(digest);
+                }
+            } catch {}
+        }
+
+        async function loadReports() {
+            const el = document.getElementById('dashReportsContent');
+            try {
+                const res = await fetch(`${API_BASE}/api/weekly-report/latest`);
+                const data = await res.json();
+                if (data.success) { renderReportTab(data.report); }
+                else el.innerHTML = `<p style="color:var(--red);font-size:12px;">Failed to load reports</p>`;
+            } catch { el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error</p>`; }
+        }
+
+        function renderReportTab(report) {
+            const el = document.getElementById('dashReportsContent');
+            if (!report) {
+                el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;">No weekly reports yet.</p>';
+                return;
+            }
+            const r = report.report_json || {};
+            let html = `<div class="task-summary" style="margin-bottom:12px;">
+                <div class="task-summary-row"><span class="task-summary-label">Period</span><span class="task-summary-value">${report.period_start ? report.period_start.split('T')[0] : '?'} — ${report.period_end ? report.period_end.split('T')[0] : '?'}</span></div>
+                <div class="task-summary-row"><span class="task-summary-label">Tasks</span><span class="task-summary-value">${r.tasks_completed || 0} completed</span></div>
+                <div class="task-summary-row"><span class="task-summary-label">Cost</span><span class="task-summary-value">$${(r.total_cost || 0).toFixed(2)}</span></div>
+                ${r.velocity_trend ? `<div class="task-summary-row"><span class="task-summary-label">Trend</span><span class="task-summary-value">${r.velocity_trend}</span></div>` : ''}
+            </div>`;
+            html += `<div class="dash-digest-content">${report.report_text || 'No content'}</div>`;
+            html += `<button class="bridge-btn" style="margin-top:12px" onclick="loadReportHistory()">View History</button>`;
+            el.innerHTML = html;
+        }
+
+        async function loadReportHistory() {
+            const el = document.getElementById('dashReportsContent');
+            try {
+                const res = await fetch(`${API_BASE}/api/weekly-report/history`);
+                const data = await res.json();
+                if (!data.success || !data.reports.length) {
+                    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;">No report history.</p>';
+                    return;
+                }
+                let html = `<div class="bridge-label">Report History</div>`;
+                for (const r of data.reports) {
+                    const start = r.period_start ? r.period_start.split('T')[0] : '?';
+                    const end = r.period_end ? r.period_end.split('T')[0] : '?';
+                    const preview = (r.report_text || '').split('\n')[0].slice(0, 80);
+                    html += `<div class="dash-history-item" onclick="loadReportById(${r.id})">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-size:13px;color:var(--text);font-weight:500">${start} — ${end}</span>
+                            ${r.viewed_at ? '' : '<span class="task-status-badge running">New</span>'}
+                        </div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">${preview}</div>
+                    </div>`;
+                }
+                el.innerHTML = html;
+            } catch { el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error</p>`; }
+        }
+
+        async function loadReportById(id) {
+            const el = document.getElementById('dashReportsContent');
+            try {
+                const res = await fetch(`${API_BASE}/api/weekly-report/history`);
+                const data = await res.json();
+                const report = data.reports.find(r => r.id === id);
+                if (report) {
+                    report.report_json = JSON.parse(report.report_json || '{}');
+                    renderReportTab(report);
+                }
+            } catch {}
+        }
+
+        async function loadHealth() {
+            const el = document.getElementById('dashHealthContent');
+            try {
+                const [ecoRes, propRes] = await Promise.all([
+                    fetch(`${API_BASE}/api/ecosystem`),
+                    fetch(`${API_BASE}/api/proposals`)
+                ]);
+                const ecoData = await ecoRes.json();
+                const propData = await propRes.json();
+                if (ecoData.success) {
+                    dashData.ecosystem = ecoData.projects;
+                    dashData.proposals = propData.success ? propData.proposals : [];
+                    renderHealth(ecoData.projects, dashData.proposals);
+                } else {
+                    el.innerHTML = `<p style="color:var(--red);font-size:12px;">Failed to load ecosystem</p>`;
+                }
+            } catch { el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error</p>`; }
+        }
+
+        function renderHealth(projects, proposals) {
+            const el = document.getElementById('dashHealthContent');
+            let html = '';
+
+            // Pending proposals
+            const pending = proposals.filter(p => p.status === 'pending');
+            if (pending.length) {
+                html += `<div class="bridge-label">Pending Proposals (${pending.length})</div>`;
+                for (const p of pending) {
+                    const d = p.parsed_data || {};
+                    html += `<div class="dash-proposal-card">
+                        <div class="dash-proposal-header">
+                            <span style="font-size:13px;color:var(--text);font-weight:500">${d.title || p.type}</span>
+                            <span class="task-status-badge pending">${p.type}</span>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-dim);">${d.summary || d.description || ''}</div>
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Project: ${(p.project_path || '').split('/').pop()}</div>
+                        <div class="dash-proposal-actions">
+                            <button class="bridge-btn" style="flex:1;padding:6px;font-size:11px;" onclick="approveProposal(${p.id})">Approve</button>
+                            <button class="bridge-btn bridge-btn-secondary" style="flex:1;padding:6px;font-size:11px;" onclick="rejectProposal(${p.id})">Reject</button>
+                        </div>
+                    </div>`;
+                }
+            }
+
+            // Ecosystem grid
+            html += `<div class="bridge-label" style="${pending.length ? 'margin-top:16px' : ''}">Ecosystem (${projects.length} projects)</div>`;
+            for (const p of projects) {
+                const t = p.tasks;
+                const b = p.budget;
+                html += `<div class="dash-project-card">
+                    <div class="dash-project-header">
+                        <span class="dash-project-name">${p.name}</span>
+                        <div style="display:flex;gap:4px;align-items:center;">
+                            ${b.throttled ? '<span class="portfolio-throttled-badge">THROTTLED</span>' : ''}
+                            <span class="portfolio-lifecycle">${p.lifecycle}</span>
+                        </div>
+                    </div>
+                    <div class="dash-project-stats">
+                        ${t.total > 0 ? `<span class="portfolio-stat has-value">${t.completed}/${t.total} tasks</span>` : '<span class="portfolio-stat">0 tasks</span>'}
+                        ${t.running > 0 ? `<span class="portfolio-stat has-value" style="color:var(--cyan)">▶ ${t.running} running</span>` : ''}
+                        ${t.failed > 0 ? `<span class="portfolio-stat has-value" style="color:var(--red)">${t.failed} failed</span>` : ''}
+                        ${p.goals.total > 0 ? `<span class="portfolio-stat has-value">${p.goals.completed}/${p.goals.total} goals</span>` : ''}
+                        ${b.spent_total > 0 ? `<span class="portfolio-stat has-value">$${b.spent_total.toFixed(2)}</span>` : ''}
+                        ${b.daily_limit ? `<span class="portfolio-stat">${b.spent_today.toFixed(2)}/${b.daily_limit} daily</span>` : ''}
+                    </div>
+                </div>`;
+            }
+
+            el.innerHTML = html;
+        }
+
+        async function approveProposal(id) {
+            try {
+                const res = await fetch(`${API_BASE}/api/proposals/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                const data = await res.json();
+                if (data.success) { showToast('Proposal approved'); loadHealth(); }
+                else showToast(data.error || 'Failed', true);
+            } catch { showToast('Connection error', true); }
+        }
+
+        async function rejectProposal(id) {
+            try {
+                const res = await fetch(`${API_BASE}/api/proposals/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                const data = await res.json();
+                if (data.success) { showToast('Proposal rejected'); loadHealth(); }
+                else showToast(data.error || 'Failed', true);
+            } catch { showToast('Connection error', true); }
+        }
 
         // ── Start ─────────────────────────────────────────────
 
