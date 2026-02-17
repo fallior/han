@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
-import { taskStmts, goalStmts } from '../db';
+import { db, taskStmts, goalStmts } from '../db';
 import {
     generateId,
     createGoal,
@@ -199,8 +199,13 @@ ${logTail}
             taskStmts.insert.run(diagId, diagTitle, diagDescription, task.project_path,
                 task.priority || 0, 'sonnet', 50, 'bypass', null, now, null);
 
-            // Set the original task to depend on the diagnostic task
+            // Set the original task to pending, blocked until diagnostic completes
             taskStmts.cancel.run('pending', null, task.id);
+            // Merge diagnostic ID into existing depends_on
+            let existingDeps: string[] = [];
+            try { existingDeps = task.depends_on ? JSON.parse(task.depends_on) : []; } catch {}
+            existingDeps.push(diagId);
+            db.prepare('UPDATE tasks SET depends_on = ? WHERE id = ?').run(JSON.stringify(existingDeps), task.id);
             const updatedOriginal = taskStmts.get.get(task.id);
 
             const diagTask = taskStmts.get.get(diagId);
