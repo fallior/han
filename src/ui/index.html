@@ -3828,13 +3828,30 @@
                 html += `<div class="bridge-label">Pending Proposals (${pending.length})</div>`;
                 for (const p of pending) {
                     const d = p.parsed_data || {};
+                    let detail = '';
+                    if (p.type === 'learning') {
+                        detail = `<div style="margin-top:8px;font-size:12px;line-height:1.5;">
+                            ${d.severity ? `<div><span style="color:var(--text-muted)">Severity:</span> <span style="color:${d.severity === 'HIGH' ? 'var(--red)' : d.severity === 'MEDIUM' ? 'var(--amber)' : 'var(--text)'}">${d.severity}</span></div>` : ''}
+                            ${d.tech ? `<div><span style="color:var(--text-muted)">Tech:</span> ${d.tech}</div>` : ''}
+                            <div style="margin-top:6px;"><span style="color:var(--text-muted)">Problem:</span><div style="color:var(--text);margin-top:2px;">${d.problem || ''}</div></div>
+                            ${d.root_cause ? `<div style="margin-top:6px;"><span style="color:var(--text-muted)">Root cause:</span><div style="color:var(--text);margin-top:2px;">${d.root_cause}</div></div>` : ''}
+                            <div style="margin-top:6px;"><span style="color:var(--text-muted)">Solution:</span><div style="color:var(--text);margin-top:2px;">${d.solution || ''}</div></div>
+                        </div>`;
+                    } else if (p.type === 'decision') {
+                        detail = `<div style="margin-top:8px;font-size:12px;line-height:1.5;">
+                            ${d.context ? `<div><span style="color:var(--text-muted)">Context:</span><div style="color:var(--text);margin-top:2px;">${d.context}</div></div>` : ''}
+                            ${d.options ? `<div style="margin-top:6px;"><span style="color:var(--text-muted)">Options:</span><div style="color:var(--text);margin-top:2px;">${d.options}</div></div>` : ''}
+                            <div style="margin-top:6px;"><span style="color:var(--text-muted)">Decision:</span><div style="color:var(--text);margin-top:2px;">${d.decision || ''}</div></div>
+                            ${d.consequences ? `<div style="margin-top:6px;"><span style="color:var(--text-muted)">Consequences:</span><div style="color:var(--text);margin-top:2px;">${d.consequences}</div></div>` : ''}
+                        </div>`;
+                    }
                     html += `<div class="dash-proposal-card">
                         <div class="dash-proposal-header">
-                            <span style="font-size:13px;color:var(--text);font-weight:500">${d.title || p.type}</span>
+                            <span style="font-size:13px;color:var(--text);font-weight:500">${d.title || d.problem || p.type}</span>
                             <span class="task-status-badge pending">${p.type}</span>
                         </div>
-                        <div style="font-size:11px;color:var(--text-dim);">${d.summary || d.description || ''}</div>
-                        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Project: ${(p.project_path || '').split('/').pop()}</div>
+                        <div style="font-size:10px;color:var(--text-muted);">Project: ${(p.project_path || '').split('/').pop()}</div>
+                        ${detail}
                         <div class="dash-proposal-actions">
                             <button class="bridge-btn" style="flex:1;padding:6px;font-size:11px;" onclick="approveProposal(${p.id})">Approve</button>
                             <button class="bridge-btn bridge-btn-secondary" style="flex:1;padding:6px;font-size:11px;" onclick="rejectProposal(${p.id})">Reject</button>
