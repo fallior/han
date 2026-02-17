@@ -2928,7 +2928,7 @@ function createGoal(description, projectPath, autoExecute = true, parentGoalId =
                     }
                 }
 
-                const maxTurns = subtask.estimated_turns || 100;
+                const maxTurns = Math.max((subtask.estimated_turns || 10) * 3, 20);
 
                 taskStmts.insertWithGoal.run(
                     taskId,
