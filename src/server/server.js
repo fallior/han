@@ -2705,6 +2705,33 @@ function generateId() {
     return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 }
 
+// ── Planning concurrency control ─────────────────────────
+// Prevents spawning too many Agent SDK sessions at once (e.g., 12 maintenance goals on startup).
+const PLANNING_CONCURRENCY = parseInt(process.env.PLANNING_CONCURRENCY) || 2;
+let activePlanningCount = 0;
+const planningQueue = [];
+
+function enqueuePlanning(fn) {
+    return new Promise((resolve, reject) => {
+        planningQueue.push({ fn, resolve, reject });
+        drainPlanningQueue();
+    });
+}
+
+function drainPlanningQueue() {
+    while (activePlanningCount < PLANNING_CONCURRENCY && planningQueue.length > 0) {
+        const { fn, resolve, reject } = planningQueue.shift();
+        activePlanningCount++;
+        fn().then(resolve, reject).finally(() => {
+            activePlanningCount--;
+            drainPlanningQueue();
+        });
+    }
+    if (planningQueue.length > 0) {
+        console.log(`[Planner] ${activePlanningCount}/${PLANNING_CONCURRENCY} active, ${planningQueue.length} queued`);
+    }
+}
+
 /**
  * Plan goal decomposition using Agent SDK with Claude.
  * The planner explores the project with read-only tools and returns a structured plan.
@@ -2866,8 +2893,8 @@ function createGoal(description, projectPath, autoExecute = true, parentGoalId =
             ].join('\n');
             try { fs.writeFileSync(planLogFile, planLogHeader); } catch {}
 
-            // Run Agent SDK planning session
-            const planResult = await planGoal(description, projectPath, {
+            // Run Agent SDK planning session (concurrency-limited)
+            const planResult = await enqueuePlanning(() => planGoal(description, projectPath, {
                 model: effectiveModel,
                 maxTurns: 30,
                 onMessage: (msg) => {
@@ -2903,7 +2930,7 @@ function createGoal(description, projectPath, autoExecute = true, parentGoalId =
                         });
                     }
                 }
-            });
+            }));
 
             const subtasks = planResult.subtasks || [];
             const titleToId = {};
