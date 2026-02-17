@@ -4,7 +4,8 @@
   "description": "Claude Remote API server for mobile prompt response",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/smoke.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.42",
