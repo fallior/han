@@ -25,7 +25,7 @@ import {
 } from './services/planning';
 import { checkDigestSchedule } from './services/digest';
 import { checkWeeklyReportSchedule } from './services/reports';
-import { checkMaintenanceSchedule } from './services/maintenance';
+// Maintenance removed — autonomous agents with unrestricted shell access are too dangerous
 import { advancePipeline, setCreateGoalFn, setBroadcastFn as setProductsBroadcastFn, setLoadConfigFn } from './services/products';
 
 // Route modules
@@ -186,11 +186,6 @@ const digestInterval = setInterval(() => {
     checkDigestSchedule(config);
 }, 3600000);
 
-const maintenanceInterval = setInterval(() => {
-    const config = loadConfig();
-    checkMaintenanceSchedule(config, createGoal as any);
-}, 3600000);
-
 const weeklyReportInterval = setInterval(() => {
     const config = loadConfig();
     checkWeeklyReportSchedule(config);
@@ -198,8 +193,7 @@ const weeklyReportInterval = setInterval(() => {
 
 // Startup checks (staggered)
 setTimeout(() => { const c = loadConfig(); checkDigestSchedule(c); }, 5000);
-setTimeout(() => { const c = loadConfig(); checkMaintenanceSchedule(c, createGoal as any); }, 10000);
-setTimeout(() => { const c = loadConfig(); checkWeeklyReportSchedule(c); }, 15000);
+setTimeout(() => { const c = loadConfig(); checkWeeklyReportSchedule(c); }, 10000);
 
 // ── File system watcher ──────────────────────────────────
 
@@ -244,7 +238,6 @@ process.on('SIGTERM', () => {
     clearInterval(terminalBroadcastInterval);
     clearInterval(orchestratorInterval);
     clearInterval(digestInterval);
-    clearInterval(maintenanceInterval);
     clearInterval(weeklyReportInterval);
     const abort = getRunningAbort();
     if (abort) abort.abort();
