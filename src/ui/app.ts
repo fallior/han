@@ -1282,6 +1282,10 @@
             if (task.log_file) {
                 actionsHtml += `<button class="bridge-btn" onclick="viewTaskLog('${task.id}')">View Log</button>`;
             }
+            if (task.status === 'failed') {
+                actionsHtml += `<button class="bridge-btn" style="border-color:var(--green);color:var(--green);background:rgba(63,185,80,0.1);" onclick="retryTask('${task.id}', true)">Smart Retry</button>`;
+                actionsHtml += `<button class="bridge-btn bridge-btn-secondary" onclick="retryTask('${task.id}', false)">Simple Retry</button>`;
+            }
             if (task.status === 'pending' || task.status === 'running') {
                 actionsHtml += `<button class="bridge-btn" style="border-color:var(--red);color:var(--red);background:rgba(248,81,73,0.1);" onclick="cancelTask('${task.id}')">Cancel Task</button>`;
             }
@@ -1422,6 +1426,25 @@
                 const data = await res.json();
                 if (data.success) showToast('Task cancelled');
                 else showToast(data.error || 'Failed', true);
+            } catch {
+                showToast('Connection error', true);
+            }
+        }
+
+        // Retry failed task
+        async function retryTask(id, smart) {
+            try {
+                const res = await fetch(`${API_BASE}/api/tasks/${id}/retry`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ smart })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(smart ? 'Smart retry: diagnosing failure...' : 'Task reset to pending');
+                } else {
+                    showToast(data.error || 'Retry failed', true);
+                }
             } catch {
                 showToast('Connection error', true);
             }

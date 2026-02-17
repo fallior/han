@@ -150,7 +150,12 @@ router.get('/api/tasks/:id/log', (req: Request<{ id: string }>, res: Response) =
 });
 
 /**
- * POST /api/tasks/:id/retry -- Reset a failed task to pending so it runs again
+ * POST /api/tasks/:id/retry -- Retry a failed task
+ *
+ * Body: { smart?: boolean }
+ * - simple retry (default): resets the task to pending
+ * - smart retry: spawns a diagnostic agent to inspect the failure log,
+ *   fix the underlying issue, then resets the original task to pending
  */
 router.post('/api/tasks/:id/retry', (req: Request<{ id: string }>, res: Response) => {
     try {
@@ -160,10 +165,62 @@ router.post('/api/tasks/:id/retry', (req: Request<{ id: string }>, res: Response
             return res.status(400).json({ success: false, error: 'Only failed tasks can be retried' });
         }
 
-        taskStmts.cancel.run('pending', null, task.id);
-        const updated = taskStmts.get.get(task.id);
-        broadcastTaskUpdate(updated);
-        res.json({ success: true, task: updated });
+        const smart = req.body?.smart === true;
+
+        if (smart && task.log_file && fs.existsSync(task.log_file)) {
+            // Smart retry: create a diagnostic task that runs first
+            const logContent = fs.readFileSync(task.log_file, 'utf8');
+            // Truncate log to last 3000 chars to keep prompt reasonable
+            const logTail = logContent.length > 3000 ? '...\n' + logContent.slice(-3000) : logContent;
+
+            const diagId = generateId();
+            const now = new Date().toISOString();
+            const diagTitle = `Diagnose and fix: ${task.title}`;
+            const diagDescription = `A task failed and needs diagnosis and remediation before retry.
+
+## Failed Task
+**Title:** ${task.title}
+**Description:** ${task.description}
+
+## Failure Log (tail)
+\`\`\`
+${logTail}
+\`\`\`
+
+## Instructions
+1. Read the failure log above carefully to understand what went wrong
+2. Inspect the project state — check relevant files, configs, dependencies
+3. Take corrective action: fix broken files, install missing deps, resolve config issues
+4. Verify your fix by running the relevant commands (build, lint, test, etc.)
+5. Do NOT attempt to complete the original task — only fix the blocker
+
+**Constraint:** Only fix what caused the failure. Do not refactor, add features, or make unrelated changes.`;
+
+            taskStmts.insert.run(diagId, diagTitle, diagDescription, task.project_path,
+                task.priority || 0, 'sonnet', 50, 'bypass', null, now, null);
+
+            // Set the original task to depend on the diagnostic task
+            taskStmts.cancel.run('pending', null, task.id);
+            const updatedOriginal = taskStmts.get.get(task.id);
+
+            const diagTask = taskStmts.get.get(diagId);
+            broadcastTaskUpdate(diagTask);
+            broadcastTaskUpdate(updatedOriginal);
+
+            res.json({
+                success: true,
+                mode: 'smart',
+                diagnostic_task: diagTask,
+                original_task: updatedOriginal,
+                message: 'Diagnostic task created to fix the failure, original task reset to pending'
+            });
+        } else {
+            // Simple retry: just reset to pending
+            taskStmts.cancel.run('pending', null, task.id);
+            const updated = taskStmts.get.get(task.id);
+            broadcastTaskUpdate(updated);
+            res.json({ success: true, mode: 'simple', task: updated });
+        }
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
     }
