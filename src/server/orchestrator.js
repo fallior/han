@@ -115,7 +115,7 @@ async function callLLM(systemPrompt, userPrompt, options = {}) {
 }
 
 /**
- * Classify task complexity and suggest model
+ * @deprecated Opus planner assigns models directly in the plan. Use planGoal() in server.js instead.
  */
 async function classifyTask(description, projectPath) {
     const systemPrompt = `You are a task complexity classifier for code projects. Classify tasks as:
@@ -149,7 +149,7 @@ Respond with JSON only: { "complexity": "simple|medium|complex", "suggestedModel
 }
 
 /**
- * Decompose a high-level goal into ordered subtasks
+ * @deprecated Replaced by planGoal() in server.js which uses Agent SDK with Opus for higher quality plans.
  */
 async function decomposeGoal(goal, projectContext) {
     const systemPrompt = `You are a software project task decomposer. Break down high-level goals into concrete, ordered subtasks.
@@ -357,12 +357,12 @@ function recommendModel(db, projectPath, taskType, options = {}) {
 
 module.exports = {
     initialize,
-    callLLM,
-    classifyTask,
-    decomposeGoal,
-    analyseFailure,
-    selectModel,
-    recommendModel,
+    callLLM,              // Used by analyseFailure — Ollama/Haiku for quick calls
+    classifyTask,         // DEPRECATED — Opus planner assigns models
+    decomposeGoal,        // DEPRECATED — replaced by planGoal() in server.js
+    analyseFailure,       // Retry logic — quick LLM calls, fine with small models
+    selectModel,          // Fallback model mapping
+    recommendModel,       // Memory-based cost optimisation (pure function, no LLM)
     getStatus,
     checkOllamaStatus
 };

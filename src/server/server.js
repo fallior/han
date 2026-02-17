@@ -191,6 +191,10 @@ if (!goalCols.includes('parent_goal_id')) {
     db.exec('ALTER TABLE goals ADD COLUMN parent_goal_id TEXT');
     db.exec("ALTER TABLE goals ADD COLUMN goal_type TEXT DEFAULT 'standalone'");
 }
+if (!goalCols.includes('planning_cost_usd')) {
+    db.exec('ALTER TABLE goals ADD COLUMN planning_cost_usd REAL DEFAULT 0');
+    db.exec('ALTER TABLE goals ADD COLUMN planning_log_file TEXT');
+}
 
 // Level 10C: Knowledge proposals table
 db.exec(`CREATE TABLE IF NOT EXISTS task_proposals (
@@ -1523,7 +1527,7 @@ app.get('/api/bridge/history', (req, res) => {
  */
 app.post('/api/goals', async (req, res) => {
     try {
-        const { description, project_path, auto_execute = true } = req.body;
+        const { description, project_path, auto_execute = true, planning_model } = req.body;
 
         if (!description || !project_path) {
             return res.status(400).json({ success: false, error: 'Missing description or project_path' });
@@ -1533,12 +1537,12 @@ app.post('/api/goals', async (req, res) => {
             return res.status(400).json({ success: false, error: 'Project path does not exist' });
         }
 
-        const goalId = createGoal(description, project_path, auto_execute);
+        const goalId = createGoal(description, project_path, auto_execute, null, 'standalone', planning_model);
 
         res.json({
             success: true,
             goal: goalStmts.get.get(goalId),
-            message: 'Goal created, decomposition in progress'
+            message: 'Goal created, planning in progress'
         });
     } catch (err) {
         console.error('[Goals] Error creating goal:', err);
@@ -1905,7 +1909,14 @@ app.get('/api/ecosystem', (req, res) => {
 app.get('/api/orchestrator/status', (req, res) => {
     try {
         const status = orchestrator.getStatus();
-        res.json({ success: true, ...status });
+        res.json({
+            success: true,
+            ...status,
+            planningBackend: 'agent_sdk',
+            planningModel: process.env.PLANNING_MODEL || 'opus',
+            executionModels: ['haiku', 'sonnet', 'opus'],
+            failureAnalysisBackend: status.backend
+        });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -2695,13 +2706,121 @@ function generateId() {
 }
 
 /**
+ * Plan goal decomposition using Agent SDK with Claude.
+ * The planner explores the project with read-only tools and returns a structured plan.
+ *
+ * @param {string} description - The goal description
+ * @param {string} projectPath - Absolute path to the project
+ * @param {object} options - Planning options
+ * @param {string} options.model - Planning model (default: 'opus')
+ * @param {number} options.maxTurns - Max planning turns (default: 30)
+ * @param {Function} options.onMessage - Callback for SDK messages (for logging/progress)
+ * @returns {Promise<{ subtasks: Array, reasoning: string, cost_usd: number, duration_ms: number }>}
+ */
+async function planGoal(description, projectPath, options = {}) {
+    const model = options.model || process.env.PLANNING_MODEL || 'opus';
+    const maxTurns = options.maxTurns || 30;
+    const onMessage = options.onMessage || (() => {});
+
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+
+    const planSchema = {
+        type: 'object',
+        properties: {
+            subtasks: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        title: { type: 'string', description: 'Brief task title (max 80 chars)' },
+                        description: { type: 'string', description: 'Detailed task description with acceptance criteria and files to modify' },
+                        priority: { type: 'integer', minimum: 1, maximum: 10, description: 'Priority (1-10, higher = more urgent)' },
+                        model: { type: 'string', enum: ['haiku', 'sonnet', 'opus'], description: 'Cheapest model that can handle this task' },
+                        estimated_turns: { type: 'integer', minimum: 1, maximum: 200, description: 'Estimated agent turns needed' },
+                        depends_on: { type: 'array', items: { type: 'string' }, description: 'Task titles this depends on (empty if independent)' }
+                    },
+                    required: ['title', 'description', 'priority', 'model', 'depends_on']
+                }
+            },
+            reasoning: { type: 'string', description: 'Brief explanation of the decomposition strategy' }
+        },
+        required: ['subtasks', 'reasoning']
+    };
+
+    const planningPrompt = `## Goal\n\n${description}\n\n## Instructions\n\nYou are a planning agent. Your job is to explore this project and create a detailed execution plan.\n\n1. **Explore the project** — Read CLAUDE.md, relevant source files, check the git log, understand the project structure and current state. Use the Read, Glob, Grep, and Bash (read-only commands only) tools.\n\n2. **Analyse the goal** — Understand what needs to change, which files are involved, what dependencies exist.\n\n3. **Create subtasks** — Break the goal into concrete, ordered subtasks. Each subtask should be:\n   - Self-contained and executable by a coding agent\n   - Specific enough that a developer could implement it\n   - Include the exact files to modify and expected changes\n   - Include acceptance criteria\n\n4. **Assign models** — Choose the cheapest model that can handle each task:\n   - haiku: single-file changes, docs, config, simple fixes\n   - sonnet: multi-file features, moderate refactoring, API changes\n   - opus: only for complex architecture changes requiring deep reasoning\n\n5. **Set dependencies** — If task B needs task A's output, put A's title in B's depends_on array.\n\n6. **Order by priority** — Higher priority = done first (10 = most urgent).\n\n**IMPORTANT**: Do NOT execute any changes. Read-only exploration only.\n**IMPORTANT**: Do NOT use write/edit tools. Only explore and plan.\n\nProject path: ${projectPath}`;
+
+    const planningContext = `\n## Planning Agent Role\n\nYou are an autonomous planning agent in Darron's development ecosystem.\n- **Author:** Darron — Mackay, Queensland, Australia (UTC+10)\n- **Convention:** British English spelling\n- **Mode:** Planning only — explore the project and output a structured plan\n- **Tools:** Read, Glob, Grep, Bash (read-only commands like ls, git log, git diff)\n- Do NOT modify any files\n- Do NOT create commits\n- Do NOT use plan mode (EnterPlanMode) — explore with tools directly\n\nYour final response MUST be valid JSON matching the required schema.`;
+
+    const q = agentQuery({
+        prompt: planningPrompt,
+        options: {
+            model,
+            maxTurns,
+            cwd: projectPath,
+            permissionMode: 'bypassPermissions',
+            allowDangerouslySkipPermissions: true,
+            env: cleanEnv,
+            persistSession: false,
+            canUseTool: async () => ({ behavior: 'allow' }),
+            tools: ['Read', 'Glob', 'Grep', 'Bash'],
+            systemPrompt: {
+                type: 'preset',
+                preset: 'claude_code',
+                append: planningContext
+            },
+            outputFormat: {
+                type: 'json_schema',
+                schema: planSchema
+            }
+        }
+    });
+
+    let result = null;
+    for await (const message of q) {
+        onMessage(message);
+        if (message.type === 'result') {
+            result = message;
+        }
+    }
+
+    if (!result) {
+        throw new Error('Planning session produced no result');
+    }
+
+    if (result.subtype !== 'success') {
+        const errors = result.errors || [];
+        throw new Error(`Planning failed: ${result.subtype} — ${errors.join(', ') || 'unknown error'}`);
+    }
+
+    // structured_output contains parsed JSON matching planSchema
+    let plan = result.structured_output;
+    if (!plan || !plan.subtasks) {
+        // Fallback: try parsing result text as JSON
+        try {
+            plan = JSON.parse(result.result);
+        } catch {
+            throw new Error('Planning session produced no structured output');
+        }
+    }
+
+    return {
+        subtasks: plan.subtasks || [],
+        reasoning: plan.reasoning || '',
+        cost_usd: result.total_cost_usd || 0,
+        usage: result.usage || {},
+        duration_ms: result.duration_ms || 0
+    };
+}
+
+/**
  * Create a goal programmatically (used by API and maintenance scheduler).
  * Returns goalId. Decomposition runs asynchronously.
  */
-function createGoal(description, projectPath, autoExecute = true, parentGoalId = null, goalType = 'standalone') {
+function createGoal(description, projectPath, autoExecute = true, parentGoalId = null, goalType = 'standalone', planningModel = null) {
     const goalId = generateId();
     const now = new Date().toISOString();
-    const orchStatus = orchestrator.getStatus();
+    const effectiveModel = planningModel || process.env.PLANNING_MODEL || 'opus';
 
     goalStmts.insert.run(
         goalId,
@@ -2709,8 +2828,8 @@ function createGoal(description, projectPath, autoExecute = true, parentGoalId =
         projectPath,
         goalType === 'parent' ? 'active' : 'decomposing',
         now,
-        orchStatus.backend,
-        orchStatus.backend === 'ollama' ? orchStatus.ollamaModel : 'claude-haiku-4-5-20251001',
+        'agent_sdk',
+        effectiveModel,
         parentGoalId,
         goalType
     );
@@ -2723,22 +2842,77 @@ function createGoal(description, projectPath, autoExecute = true, parentGoalId =
         return goalId;
     }
 
-    // Start decomposition asynchronously
+    // Plan with Agent SDK (replaces old LLM decomposition)
     (async () => {
         try {
-            const projectContext = readProjectContext(projectPath);
+            console.log(`[Goal ${goalId}] Planning with ${effectiveModel}: ${description}`);
 
-            console.log(`[Goal ${goalId}] Decomposing: ${description}`);
-            const decomposition = await orchestrator.decomposeGoal(description, projectContext);
+            // Create planning log
+            const planLogDir = path.join(projectPath, '_logs');
+            try { if (!fs.existsSync(planLogDir)) fs.mkdirSync(planLogDir, { recursive: true }); } catch {}
+            const planTimestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const planLogFile = path.join(planLogDir, `planning_${planTimestamp}_${goalId.slice(0, 8)}.md`);
 
-            const subtasks = decomposition.subtasks || [];
+            const planLogHeader = [
+                `# Planning Session: ${description.slice(0, 80)}`,
+                ``,
+                `- **Goal ID**: ${goalId}`,
+                `- **Project**: ${path.basename(projectPath)} (${projectPath})`,
+                `- **Model**: ${effectiveModel}`,
+                `- **Started**: ${new Date().toISOString()}`,
+                ``,
+                `---`,
+                ``
+            ].join('\n');
+            try { fs.writeFileSync(planLogFile, planLogHeader); } catch {}
+
+            // Run Agent SDK planning session
+            const planResult = await planGoal(description, projectPath, {
+                model: effectiveModel,
+                maxTurns: 30,
+                onMessage: (msg) => {
+                    // Log planning messages to file
+                    try {
+                        let entry = '';
+                        const t = new Date().toISOString().replace('T', ' ').slice(0, 19);
+                        if (msg.type === 'assistant') {
+                            const texts = (msg.message?.content || [])
+                                .filter(b => b.type === 'text').map(b => b.text);
+                            const tools = (msg.message?.content || [])
+                                .filter(b => b.type === 'tool_use');
+                            if (texts.length) entry += `## Planner <sub>${t}</sub>\n\n${texts.join('\n')}\n\n`;
+                            for (const tool of tools) {
+                                entry += `### Tool: ${tool.name} <sub>${t}</sub>\n\n`;
+                                entry += '```json\n' + JSON.stringify(tool.input, null, 2).slice(0, 2000) + '\n```\n\n';
+                            }
+                        } else if (msg.type === 'result') {
+                            entry += `## Result <sub>${t}</sub>\n\nCost: $${(msg.total_cost_usd || 0).toFixed(4)} | Turns: ${msg.num_turns || 0}\n\n`;
+                        }
+                        if (entry) fs.appendFileSync(planLogFile, entry);
+                    } catch {}
+
+                    // Broadcast planning progress via WebSocket
+                    if (wss.clients.size > 0) {
+                        const progressMsg = JSON.stringify({
+                            type: 'goal_planning_progress',
+                            goalId,
+                            messageType: msg.type
+                        });
+                        wss.clients.forEach(client => {
+                            if (client.readyState === 1) client.send(progressMsg);
+                        });
+                    }
+                }
+            });
+
+            const subtasks = planResult.subtasks || [];
             const titleToId = {};
 
             for (const subtask of subtasks) {
                 const taskId = generateId();
                 titleToId[subtask.title] = taskId;
 
-                const dependsOnIds = (subtask.dependsOn || [])
+                const dependsOnIds = (subtask.depends_on || [])
                     .map(title => titleToId[title])
                     .filter(Boolean);
                 const dependsOnJson = dependsOnIds.length > 0 ? JSON.stringify(dependsOnIds) : null;
@@ -2754,6 +2928,8 @@ function createGoal(description, projectPath, autoExecute = true, parentGoalId =
                     }
                 }
 
+                const maxTurns = subtask.estimated_turns || 100;
+
                 taskStmts.insertWithGoal.run(
                     taskId,
                     subtask.title,
@@ -2761,7 +2937,7 @@ function createGoal(description, projectPath, autoExecute = true, parentGoalId =
                     projectPath,
                     subtask.priority || 5,
                     finalModel,
-                    100,
+                    maxTurns,
                     'bypass',
                     null,
                     now,
@@ -2774,6 +2950,15 @@ function createGoal(description, projectPath, autoExecute = true, parentGoalId =
                 broadcastTaskUpdate(taskStmts.get.get(taskId));
             }
 
+            const decomposition = {
+                subtasks: planResult.subtasks,
+                reasoning: planResult.reasoning,
+                planner: effectiveModel,
+                method: 'agent_sdk',
+                cost_usd: planResult.cost_usd,
+                duration_ms: planResult.duration_ms
+            };
+
             goalStmts.updateDecomposition.run(
                 JSON.stringify(decomposition),
                 subtasks.length,
@@ -2781,7 +2966,15 @@ function createGoal(description, projectPath, autoExecute = true, parentGoalId =
                 goalId
             );
 
-            console.log(`[Goal ${goalId}] Decomposed into ${subtasks.length} tasks`);
+            // Store planning cost and log file
+            goalStmts.updatePlanningCost.run(
+                planResult.cost_usd || 0,
+                planLogFile,
+                effectiveModel,
+                goalId
+            );
+
+            console.log(`[Goal ${goalId}] Planned ${subtasks.length} tasks ($${(planResult.cost_usd || 0).toFixed(4)}, ${planResult.duration_ms}ms)`);
 
             if (wss.clients.size > 0) {
                 const goal = goalStmts.get.get(goalId);
@@ -2792,7 +2985,7 @@ function createGoal(description, projectPath, autoExecute = true, parentGoalId =
                 });
             }
         } catch (err) {
-            console.error(`[Goal ${goalId}] Decomposition failed:`, err.message);
+            console.error(`[Goal ${goalId}] Planning failed:`, err.message);
             goalStmts.updateStatus.run('failed', goalId);
             broadcastGoalUpdate(goalId);
         }
@@ -3797,7 +3990,10 @@ function runNightlyMaintenance() {
                 const goalId = createGoal(
                     `Nightly maintenance for ${proj.name}: run test suite, check for outdated dependencies, verify project health`,
                     proj.path,
-                    true
+                    true,
+                    null,
+                    'standalone',
+                    'sonnet'
                 );
                 if (goalId) goalIds.push(goalId);
             } catch (err) {
@@ -4905,7 +5101,7 @@ function executePhase(productId, phase) {
             const childGoalIds = [];
 
             for (const area of areas) {
-                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child', 'sonnet');
                 childGoalIds.push(childGoalId);
                 console.log(`[Pipeline] Research subagent created: ${area.area} (${childGoalId})`);
             }
@@ -4938,7 +5134,7 @@ function executePhase(productId, phase) {
             const childGoalIds = [];
 
             for (const area of areas) {
-                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child', 'sonnet');
                 childGoalIds.push(childGoalId);
                 console.log(`[Pipeline] Design subagent created: ${area.area} (${childGoalId})`);
             }
@@ -4971,7 +5167,7 @@ function executePhase(productId, phase) {
             const childGoalIds = [];
 
             for (const area of areas) {
-                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child', 'sonnet');
                 childGoalIds.push(childGoalId);
                 console.log(`[Pipeline] Architecture subagent created: ${area.area} (${childGoalId})`);
             }
@@ -5004,7 +5200,7 @@ function executePhase(productId, phase) {
             const childGoalIds = [];
 
             for (const area of areas) {
-                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child', 'sonnet');
                 childGoalIds.push(childGoalId);
                 console.log(`[Pipeline] Build subagent created: ${area.area} (${childGoalId})`);
             }
@@ -5037,7 +5233,7 @@ function executePhase(productId, phase) {
             const childGoalIds = [];
 
             for (const area of areas) {
-                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child', 'sonnet');
                 childGoalIds.push(childGoalId);
                 console.log(`[Pipeline] Test subagent created: ${area.area} (${childGoalId})`);
             }
@@ -5070,7 +5266,7 @@ function executePhase(productId, phase) {
             const childGoalIds = [];
 
             for (const area of areas) {
-                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child', 'sonnet');
                 childGoalIds.push(childGoalId);
                 console.log(`[Pipeline] Document subagent created: ${area.area} (${childGoalId})`);
             }
@@ -5103,7 +5299,7 @@ function executePhase(productId, phase) {
             const childGoalIds = [];
 
             for (const area of areas) {
-                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child');
+                const childGoalId = createGoal(area.description, product.project_path, true, parentGoalId, 'child', 'sonnet');
                 childGoalIds.push(childGoalId);
                 console.log(`[Pipeline] Deploy subagent created: ${area.area} (${childGoalId})`);
             }
@@ -5784,6 +5980,7 @@ const goalStmts = {
     del: db.prepare('DELETE FROM goals WHERE id = ?'),
     updateSummaryFile: db.prepare('UPDATE goals SET summary_file = ? WHERE id = ?'),
     getChildren: db.prepare('SELECT * FROM goals WHERE parent_goal_id = ? ORDER BY created_at ASC'),
+    updatePlanningCost: db.prepare('UPDATE goals SET planning_cost_usd = ?, planning_log_file = ?, orchestrator_model = ? WHERE id = ?'),
 };
 
 const memoryStmts = {
