@@ -17,4 +17,4 @@ fi
 
 # Start server
 cd "$SERVER_DIR"
-exec node server.js
+exec npx tsx server.ts
