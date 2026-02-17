@@ -149,6 +149,26 @@ router.get('/api/tasks/:id/log', (req: Request<{ id: string }>, res: Response) =
     }
 });
 
+/**
+ * POST /api/tasks/:id/retry -- Reset a failed task to pending so it runs again
+ */
+router.post('/api/tasks/:id/retry', (req: Request<{ id: string }>, res: Response) => {
+    try {
+        const task = taskStmts.get.get(req.params.id);
+        if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+        if (task.status !== 'failed') {
+            return res.status(400).json({ success: false, error: 'Only failed tasks can be retried' });
+        }
+
+        taskStmts.cancel.run('pending', null, task.id);
+        const updated = taskStmts.get.get(task.id);
+        broadcastTaskUpdate(updated);
+        res.json({ success: true, task: updated });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ── Approval gates ────────────────────────────────────────
 
 /**
