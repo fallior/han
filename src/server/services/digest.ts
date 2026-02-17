@@ -102,24 +102,26 @@ export function generateDailyDigest(since: Date): { id: string; task_count: numb
     }
 }
 
-let lastDigestDate: string | null = null;
-
 /**
  * Check whether today's daily digest should be generated based on the configured
- * digest_hour. Tracks last generation date to avoid duplicates.
+ * digest_hour. Checks the database for today's digests to survive server restarts.
  */
 export function checkDigestSchedule(config: any): { id: string; task_count: number; total_cost: number; digest_text: string } | null {
     const digestHour = parseInt((config.digest_hour || '7'), 10);
     const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-    if (lastDigestDate === todayStr) return null;
     if (now.getHours() < digestHour) return null;
+
+    // Check DB for today's digests — survives server restarts
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const latest = digestStmts.getLatest.get() as any;
+    if (latest && latest.generated_at && latest.generated_at.startsWith(todayStr)) {
+        return null;
+    }
 
     const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const digest = generateDailyDigest(since);
     if (digest) {
-        lastDigestDate = todayStr;
         console.log(`[Digest] Daily digest generated: ${digest.task_count} tasks, $${digest.total_cost.toFixed(4)}`);
     }
     return digest;

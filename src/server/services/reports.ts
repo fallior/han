@@ -159,27 +159,31 @@ export function generateWeeklyReport(weekStart: Date): { id: string; task_count:
     }
 }
 
-let lastWeeklyReportWeek: string | null = null;
-
 /**
  * Check whether this week's report should be generated based on the configured
  * weekly_report_day (0=Sunday) and weekly_report_hour. Sends a push notification
- * via ntfy.sh if configured. Tracks last generation week to avoid duplicates.
+ * via ntfy.sh if configured. Checks the database to survive server restarts.
  */
 export function checkWeeklyReportSchedule(config: any): { id: string; task_count: number; total_cost: number; report_text: string } | null {
     const reportDay = parseInt((config.weekly_report_day || '0'), 10);  // 0=Sunday
     const reportHour = parseInt((config.weekly_report_hour || '8'), 10);
     const now = new Date();
 
-    const weekStr = `${now.getFullYear()}-W${getISOWeek(now)}`;
-    if (lastWeeklyReportWeek === weekStr) return null;
     if (now.getDay() !== reportDay) return null;
     if (now.getHours() < reportHour) return null;
+
+    // Check DB for this week's reports — survives server restarts
+    const weekStr = `${now.getFullYear()}-W${getISOWeek(now)}`;
+    const latest = weeklyReportStmts.getLatest.get() as any;
+    if (latest && latest.generated_at) {
+        const latestDate = new Date(latest.generated_at);
+        const latestWeekStr = `${latestDate.getFullYear()}-W${getISOWeek(latestDate)}`;
+        if (latestWeekStr === weekStr) return null;
+    }
 
     const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const report = generateWeeklyReport(weekStart);
     if (report) {
-        lastWeeklyReportWeek = weekStr;
         if (config.ntfy_topic) {
             try {
                 execFileSync('curl', ['-s', '-d', report.report_text.split('\n')[0], '-H', 'Title: Claude Remote Weekly Report', '-H', 'Priority: default', '-H', 'Tags: bar_chart', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });

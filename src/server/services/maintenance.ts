@@ -89,11 +89,10 @@ export function runNightlyMaintenance(
     }
 }
 
-let lastMaintenanceDate: string | null = null;
-
 /**
  * Check whether today's nightly maintenance should run based on the configured
- * maintenance_hour and maintenance_enabled flag. Tracks last run date to avoid duplicates.
+ * maintenance_hour and maintenance_enabled flag. Checks the database for today's
+ * runs to survive server restarts (not just in-memory state).
  */
 export function checkMaintenanceSchedule(
     config: any,
@@ -102,14 +101,18 @@ export function checkMaintenanceSchedule(
     if (config.maintenance_enabled === false) return null;
     const maintenanceHour = parseInt((config.maintenance_hour || '2'), 10);
     const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-    if (lastMaintenanceDate === todayStr) return null;
     if (now.getHours() < maintenanceHour) return null;
+
+    // Check DB for today's runs — survives server restarts
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const latest = maintenanceStmts.getLatest.get() as any;
+    if (latest && latest.started_at && latest.started_at.startsWith(todayStr)) {
+        return null;
+    }
 
     const result = runNightlyMaintenance(createGoalFn);
     if (result) {
-        lastMaintenanceDate = todayStr;
         console.log(`[Maintenance] Nightly run: ${result.goalIds.length} goals created`);
     }
     return result;
