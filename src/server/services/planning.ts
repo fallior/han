@@ -1374,66 +1374,78 @@ const AUTO_RETRY_DELAY_MS = 30_000; // 30 seconds before retry
 /**
  * Schedule an automatic retry for a failed task.
  *
- * Escalation strategy:
- * - retry_count 0 (first failure):  simple reset to pending after delay
- * - retry_count 1 (second failure): smart retry — diagnostic agent fixes the
- *   issue first, then original task re-runs (blocked by depends_on)
- * - retry_count 2+ (third+ failure): give up, leave failed for human
+ * Escalation ladder (one pass through, then defer to human):
+ * 1. retry_count 0 → simple reset to pending after 30s delay
+ * 2. retry_count 1 → smart retry with Sonnet diagnostic agent
+ * 3. retry_count 2 → smart retry with Opus diagnostic agent
+ * 4. retry_count 3+ → give up, notify human with full failure context
  */
 function scheduleAutoRetry(task: any, errorMessage: string): void {
     const retryCount = task.retry_count || 0;
-    const maxRetries = task.max_retries ?? 3;
 
-    if (retryCount >= maxRetries) {
-        console.log(`[AutoRetry] ${task.title} — exhausted ${maxRetries} retries, leaving failed`);
+    if (retryCount >= 3) {
+        // Exhausted all automated retries — notify human
+        notifyHumanOfFailure(task, errorMessage, retryCount);
         return;
     }
 
     const attempt = retryCount + 1;
+    const label = attempt === 1 ? 'simple reset'
+        : attempt === 2 ? 'Sonnet diagnostic'
+        : 'Opus diagnostic';
 
-    if (attempt <= 1) {
-        // First failure: simple reset after delay
-        console.log(`[AutoRetry] ${task.title} — scheduling simple retry in ${AUTO_RETRY_DELAY_MS / 1000}s (attempt ${attempt}/${maxRetries})`);
-        setTimeout(() => {
-            try {
-                const current = taskStmts.get.get(task.id) as any;
-                if (!current || current.status !== 'failed') return; // Already retried or cancelled
+    console.log(`[AutoRetry] ${task.title} — scheduling ${label} in ${AUTO_RETRY_DELAY_MS / 1000}s (attempt ${attempt}/3)`);
 
+    setTimeout(() => {
+        try {
+            const current = taskStmts.get.get(task.id) as any;
+            if (!current || current.status !== 'failed') return; // Already retried or cancelled
+
+            if (attempt === 1) {
+                // Step 1: simple reset
                 db.prepare('UPDATE tasks SET status = ?, started_at = NULL, completed_at = NULL, error = NULL, retry_count = ? WHERE id = ?')
                     .run('pending', attempt, task.id);
                 console.log(`[AutoRetry] ${task.title} — reset to pending (attempt ${attempt})`);
                 broadcastTaskUpdate(taskStmts.get.get(task.id));
-            } catch (err: any) {
-                console.error(`[AutoRetry] Simple retry failed:`, err.message);
+            } else {
+                // Steps 2-3: smart retry with escalating model
+                const model = attempt === 2 ? 'sonnet' : 'opus';
+                spawnDiagnosticTask(current, task, errorMessage, attempt, model);
             }
-        }, AUTO_RETRY_DELAY_MS);
-    } else {
-        // Second+ failure: smart retry — spawn diagnostic agent
-        console.log(`[AutoRetry] ${task.title} — scheduling smart retry in ${AUTO_RETRY_DELAY_MS / 1000}s (attempt ${attempt}/${maxRetries})`);
-        setTimeout(() => {
-            try {
-                const current = taskStmts.get.get(task.id) as any;
-                if (!current || current.status !== 'failed') return;
+        } catch (err: any) {
+            console.error(`[AutoRetry] ${label} failed:`, err.message);
+        }
+    }, AUTO_RETRY_DELAY_MS);
+}
 
-                // Read failure log for diagnostic context
-                let logTail = 'No log file available';
-                if (current.log_file) {
-                    try {
-                        const logContent = fs.readFileSync(current.log_file, 'utf8');
-                        logTail = logContent.length > 3000 ? '...\n' + logContent.slice(-3000) : logContent;
-                    } catch {}
-                }
+/**
+ * Create a diagnostic agent task to inspect and fix the failure,
+ * then block the original task on it via depends_on.
+ */
+function spawnDiagnosticTask(
+    current: any, originalTask: any, errorMessage: string,
+    attempt: number, model: 'sonnet' | 'opus'
+): void {
+    // Read failure log for diagnostic context
+    let logTail = 'No log file available';
+    if (current.log_file) {
+        try {
+            const logContent = fs.readFileSync(current.log_file, 'utf8');
+            logTail = logContent.length > 3000 ? '...\n' + logContent.slice(-3000) : logContent;
+        } catch {}
+    }
 
-                // Create diagnostic task
-                const diagId = generateId();
-                const now = new Date().toISOString();
-                const diagTitle = `Diagnose and fix: ${task.title}`;
-                const diagDescription = `A task has failed ${attempt} times and needs diagnosis before retry.
+    const diagId = generateId();
+    const now = new Date().toISOString();
+    const modelLabel = model.charAt(0).toUpperCase() + model.slice(1);
+    const diagTitle = `[${modelLabel}] Diagnose and fix: ${originalTask.title}`;
+    const diagDescription = `A task has failed ${attempt} time(s) and needs diagnosis before retry.
 
 ## Failed Task
-**Title:** ${task.title}
-**Description:** ${task.description}
+**Title:** ${originalTask.title}
+**Description:** ${originalTask.description}
 **Error:** ${errorMessage || 'unknown'}
+**Retry attempt:** ${attempt}/3
 
 ## Failure Log (tail)
 \`\`\`
@@ -1449,35 +1461,76 @@ ${logTail}
 
 **Constraint:** Only fix what caused the failure. Do not refactor, add features, or make unrelated changes.`;
 
-                taskStmts.insert.run(diagId, diagTitle, diagDescription, task.project_path,
-                    (task.priority || 0) + 1, 'sonnet', 50, 'bypass', null, now, null);
+    taskStmts.insert.run(diagId, diagTitle, diagDescription, originalTask.project_path,
+        (originalTask.priority || 0) + 1, model, 50, 'bypass', null, now, null);
 
-                // If the original task belongs to a goal, link the diagnostic too
-                if (task.goal_id) {
-                    db.prepare('UPDATE tasks SET goal_id = ? WHERE id = ?').run(task.goal_id, diagId);
-                }
-
-                // Reset original task to pending, blocked on the diagnostic
-                let existingDeps: string[] = [];
-                try { existingDeps = current.depends_on ? JSON.parse(current.depends_on) : []; } catch {}
-                existingDeps.push(diagId);
-
-                db.prepare('UPDATE tasks SET status = ?, started_at = NULL, completed_at = NULL, error = NULL, retry_count = ?, depends_on = ? WHERE id = ?')
-                    .run('pending', attempt, JSON.stringify(existingDeps), task.id);
-
-                console.log(`[AutoRetry] ${task.title} — diagnostic task ${diagId} created, original blocked until fix completes`);
-                broadcastTaskUpdate(taskStmts.get.get(diagId));
-                broadcastTaskUpdate(taskStmts.get.get(task.id));
-
-                // Update goal progress to reflect new task
-                if (task.goal_id) {
-                    updateGoalProgress(task.goal_id);
-                }
-            } catch (err: any) {
-                console.error(`[AutoRetry] Smart retry failed:`, err.message);
-            }
-        }, AUTO_RETRY_DELAY_MS);
+    // If the original task belongs to a goal, link the diagnostic too
+    if (originalTask.goal_id) {
+        db.prepare('UPDATE tasks SET goal_id = ? WHERE id = ?').run(originalTask.goal_id, diagId);
     }
+
+    // Reset original task to pending, blocked on the diagnostic
+    let existingDeps: string[] = [];
+    try { existingDeps = current.depends_on ? JSON.parse(current.depends_on) : []; } catch {}
+    existingDeps.push(diagId);
+
+    db.prepare('UPDATE tasks SET status = ?, started_at = NULL, completed_at = NULL, error = NULL, retry_count = ?, depends_on = ? WHERE id = ?')
+        .run('pending', attempt, JSON.stringify(existingDeps), originalTask.id);
+
+    console.log(`[AutoRetry] ${originalTask.title} — ${modelLabel} diagnostic task ${diagId} created, original blocked until fix completes`);
+    broadcastTaskUpdate(taskStmts.get.get(diagId));
+    broadcastTaskUpdate(taskStmts.get.get(originalTask.id));
+
+    // Update goal progress to reflect new task
+    if (originalTask.goal_id) {
+        updateGoalProgress(originalTask.goal_id);
+    }
+}
+
+/**
+ * All automated retries exhausted — notify the human via WebSocket
+ * and ntfy push notification with a summary of what failed and why.
+ */
+function notifyHumanOfFailure(task: any, errorMessage: string, retryCount: number): void {
+    console.log(`[AutoRetry] ${task.title} — all ${retryCount} retries exhausted, deferring to human`);
+
+    // Read failure log for context
+    let logTail = '';
+    if (task.log_file) {
+        try {
+            const logContent = fs.readFileSync(task.log_file, 'utf8');
+            logTail = logContent.length > 1500 ? '...\n' + logContent.slice(-1500) : logContent;
+        } catch {}
+    }
+
+    const summary = [
+        `Task "${task.title}" has failed ${retryCount} times and exhausted all automated retries.`,
+        ``,
+        `Error: ${errorMessage || 'unknown'}`,
+        logTail ? `\nLast log output:\n${logTail}` : '',
+        ``,
+        `The task tried: simple reset → Sonnet diagnostic → Opus diagnostic.`,
+        `Human intervention is needed. Consider opening an interactive Opus session`,
+        `to investigate the root cause and find a fix or acceptable workaround.`,
+    ].join('\n');
+
+    // Broadcast to connected UI clients
+    broadcastFn?.({ type: 'human_escalation', taskId: task.id, title: task.title, summary });
+
+    // Push notification via ntfy
+    try {
+        const config = loadConfig();
+        if (config.ntfy_topic) {
+            const shortMsg = `Task "${task.title}" failed ${retryCount}x — needs human intervention. ${errorMessage || ''}`.slice(0, 500);
+            execFileSync('curl', [
+                '-s', '-d', shortMsg,
+                '-H', 'Title: Task Needs Human Help',
+                '-H', 'Priority: high',
+                '-H', 'Tags: warning,rotating_light',
+                `https://ntfy.sh/${config.ntfy_topic}`
+            ], { timeout: 10000, stdio: 'ignore' });
+        }
+    } catch {}
 }
 
 export async function runNextTask(): Promise<void> {
