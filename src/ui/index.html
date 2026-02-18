@@ -1502,6 +1502,7 @@
                 <button class="bridge-tab" data-dash-tab="digests">Digests</button>
                 <button class="bridge-tab" data-dash-tab="reports">Reports</button>
                 <button class="bridge-tab" data-dash-tab="health">Health</button>
+                <button class="bridge-tab" data-dash-tab="supervisor">Supervisor</button>
             </div>
             <button class="bridge-close" id="dashClose">✕</button>
         </div>
@@ -1522,11 +1523,15 @@
             <div class="bridge-section" id="dashHealth">
                 <div id="dashHealthContent"><p style="color:var(--text-dim);font-size:12px;">Loading health...</p></div>
             </div>
+            <!-- Supervisor -->
+            <div class="bridge-section" id="dashSupervisor">
+                <div id="dashSupervisorContent"><p style="color:var(--text-dim);font-size:12px;">Loading supervisor...</p></div>
+            </div>
         </div>
     </div>
 
     <datalist id="projectPaths"></datalist>
 
-    <script src="app.js?v=2"></script>
+    <script src="app.js?v=3"></script>
 </body>
 </html>

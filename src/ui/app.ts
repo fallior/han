@@ -187,6 +187,8 @@
                         handleApprovalRequest(data);
                     } else if (data.type === 'digest_ready') {
                         if (dashOverlay.classList.contains('visible') && document.getElementById('dashDigests').classList.contains('active')) loadDigests();
+                    } else if (data.type === 'supervisor_cycle' || data.type === 'supervisor_action') {
+                        if (dashOverlay.classList.contains('visible') && document.getElementById('dashSupervisor').classList.contains('active')) loadSupervisor();
                     }
                     // Refresh dashboard analytics on task/goal updates if visible
                     if ((data.type === 'task_update' || data.type === 'goal_update') && dashOverlay.classList.contains('visible') && document.getElementById('dashAnalytics').classList.contains('active')) {
@@ -2131,7 +2133,7 @@
 
         const dashOverlay = document.getElementById('dashOverlay');
         const dashBtn = document.getElementById('dashBtn');
-        let dashData = { analytics: null, digests: null, reports: null, ecosystem: null, proposals: null };
+        let dashData = { analytics: null, digests: null, reports: null, ecosystem: null, proposals: null, supervisor: null as any };
 
         function openDash() {
             dashOverlay.classList.add('visible');
@@ -2153,6 +2155,7 @@
             else if (tab === 'digests') { document.getElementById('dashDigests').classList.add('active'); loadDigests(); }
             else if (tab === 'reports') { document.getElementById('dashReports').classList.add('active'); loadReports(); }
             else if (tab === 'health') { document.getElementById('dashHealth').classList.add('active'); loadHealth(); }
+            else if (tab === 'supervisor') { document.getElementById('dashSupervisor').classList.add('active'); loadSupervisor(); }
         }
 
         dashBtn.addEventListener('click', () => {
@@ -2476,6 +2479,180 @@
                 else showToast(data.error || 'Failed', true);
             } catch { showToast('Connection error', true); }
         }
+
+        // ── Supervisor tab ────────────────────────────────────
+
+        async function loadSupervisor() {
+            const el = document.getElementById('dashSupervisorContent');
+            try {
+                const [statusRes, cyclesRes] = await Promise.all([
+                    fetch(`${API_BASE}/api/supervisor/status`),
+                    fetch(`${API_BASE}/api/supervisor/cycles?limit=10`)
+                ]);
+                const status = await statusRes.json();
+                const cycles = await cyclesRes.json();
+
+                if (status.success) {
+                    dashData.supervisor = { status: status, cycles: cycles.cycles || [] };
+                    renderSupervisor(status, cycles.cycles || []);
+                } else {
+                    el.innerHTML = `<p style="color:var(--red);font-size:12px;">Failed to load supervisor</p>`;
+                }
+            } catch {
+                el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error</p>`;
+            }
+        }
+
+        function renderSupervisor(status, cycles) {
+            const el = document.getElementById('dashSupervisorContent');
+            let html = '';
+
+            // Status cards
+            const statusLabel = !status.enabled ? 'Disabled' : status.paused ? 'Paused' : 'Active';
+            const statusColour = !status.enabled ? 'var(--red)' : status.paused ? 'var(--amber)' : 'var(--green)';
+            html += `<div class="dash-stat-grid">
+                <div class="dash-stat-card">
+                    <div class="dash-stat-value" style="color:${statusColour}">${statusLabel}</div>
+                    <div class="dash-stat-label">Supervisor</div>
+                </div>
+                <div class="dash-stat-card">
+                    <div class="dash-stat-value">${status.last_cycle ? '#' + status.last_cycle.cycle_number : '—'}</div>
+                    <div class="dash-stat-label">Last Cycle</div>
+                </div>
+            </div>`;
+
+            // Last cycle detail
+            if (status.last_cycle) {
+                const lc = status.last_cycle;
+                const timeAgo = lc.completed_at ? timeSince(new Date(lc.completed_at)) : '?';
+                html += `<div class="bridge-label">Latest Cycle</div>`;
+                html += `<div class="dash-project-card">
+                    <div class="dash-project-header">
+                        <span class="dash-project-name">Cycle #${lc.cycle_number}</span>
+                        <span style="font-size:11px;color:var(--text-dim);">${timeAgo} ago</span>
+                    </div>
+                    <div class="dash-project-stats">
+                        <span class="portfolio-stat has-value">${lc.num_turns} turns</span>
+                        <span class="portfolio-stat has-value">$${(lc.cost_usd || 0).toFixed(3)}</span>
+                        <span class="portfolio-stat has-value">${(lc.observations || []).length} obs</span>
+                        <span class="portfolio-stat has-value">${(lc.actions || []).length} actions</span>
+                    </div>`;
+                if (lc.observations && lc.observations.length) {
+                    html += `<div style="margin-top:8px;font-size:11px;color:var(--text-dim);line-height:1.5;">`;
+                    for (const obs of lc.observations.slice(0, 3)) {
+                        html += `<div style="margin-bottom:2px;">• ${escapeHtml(obs)}</div>`;
+                    }
+                    html += `</div>`;
+                }
+                if (lc.actions && lc.actions.length) {
+                    html += `<div style="margin-top:6px;font-size:11px;">`;
+                    for (const act of lc.actions) {
+                        html += `<div style="color:var(--cyan);margin-bottom:2px;">→ ${escapeHtml(act)}</div>`;
+                    }
+                    html += `</div>`;
+                }
+                if (lc.error) {
+                    html += `<div style="margin-top:6px;font-size:11px;color:var(--red);">Error: ${escapeHtml(lc.error)}</div>`;
+                }
+                html += `</div>`;
+            }
+
+            // Recent cycles table
+            if (cycles && cycles.length > 0) {
+                html += `<div class="bridge-label" style="margin-top:16px;">Recent Cycles</div>`;
+                html += `<table class="dash-model-table"><thead><tr><th>#</th><th>Time</th><th>Turns</th><th>Cost</th><th>Actions</th></tr></thead><tbody>`;
+                for (const c of cycles.slice(0, 8)) {
+                    const time = c.started_at ? new Date(c.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '?';
+                    const errIcon = c.error ? ' <span style="color:var(--red)">✗</span>' : '';
+                    html += `<tr>
+                        <td>${c.cycle_number}${errIcon}</td>
+                        <td>${time}</td>
+                        <td>${c.num_turns || 0}</td>
+                        <td>$${(c.cost_usd || 0).toFixed(3)}</td>
+                        <td>${(c.actions || []).length}</td>
+                    </tr>`;
+                }
+                html += `</tbody></table>`;
+            }
+
+            // Memory banks
+            if (status.memory_files && Object.keys(status.memory_files).length) {
+                html += `<div class="bridge-label" style="margin-top:16px;">Memory Banks</div>`;
+                for (const [file, size] of Object.entries(status.memory_files)) {
+                    const kb = ((size as number) / 1024).toFixed(1);
+                    const tokens = Math.ceil((size as number) / 4);
+                    html += `<div class="dash-project-card" style="padding:8px 12px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="viewMemoryFile('${escapeHtml(file)}')">
+                        <span style="font-size:12px;color:var(--text);">${file}</span>
+                        <span style="font-size:10px;color:var(--text-muted);">~${tokens} tokens (${kb} KB)</span>
+                    </div>`;
+                }
+            }
+
+            // Action buttons
+            html += `<div style="margin-top:16px;">
+                <button class="bridge-btn" style="margin-bottom:8px;" onclick="triggerSupervisorCycle()">▶ Trigger Cycle</button>
+                <button class="bridge-btn bridge-btn-secondary" onclick="toggleSupervisorPause()">${status.paused ? '▶ Resume' : '⏸ Pause'}</button>
+            </div>`;
+
+            el.innerHTML = html;
+        }
+
+        function timeSince(date) {
+            const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+            if (seconds < 60) return seconds + 's';
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return minutes + 'm';
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return hours + 'h';
+            return Math.floor(hours / 24) + 'd';
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        (window as any).triggerSupervisorCycle = async function() {
+            try {
+                const res = await fetch(`${API_BASE}/api/supervisor/trigger`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) { showToast('Cycle triggered'); setTimeout(loadSupervisor, 2000); }
+                else showToast(data.message || data.error || 'Skipped', true);
+            } catch { showToast('Connection error', true); }
+        };
+
+        (window as any).toggleSupervisorPause = async function() {
+            const paused = dashData.supervisor?.status?.paused || false;
+            try {
+                const res = await fetch(`${API_BASE}/api/supervisor/pause`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paused: !paused })
+                });
+                const data = await res.json();
+                if (data.success) { showToast(data.paused ? 'Supervisor paused' : 'Supervisor resumed'); loadSupervisor(); }
+                else showToast(data.error || 'Failed', true);
+            } catch { showToast('Connection error', true); }
+        };
+
+        (window as any).viewMemoryFile = async function(file) {
+            try {
+                const parts = file.split('/');
+                let url = `${API_BASE}/api/supervisor/memory/${parts[parts.length - 1]}`;
+                if (parts.length > 1) url += `?subdir=${parts.slice(0, -1).join('/')}`;
+                const res = await fetch(url);
+                const data = await res.json();
+                if (data.success && data.content) {
+                    const el = document.getElementById('dashSupervisorContent');
+                    el.innerHTML = `<div style="margin-bottom:12px;">
+                        <button class="bridge-btn bridge-btn-secondary" style="padding:6px 12px;font-size:11px;width:auto;" onclick="loadSupervisor()">← Back</button>
+                        <span style="font-size:13px;font-weight:600;color:var(--text);margin-left:8px;">${escapeHtml(file)}</span>
+                    </div>
+                    <pre style="white-space:pre-wrap;font-size:11px;color:var(--text-dim);line-height:1.6;background:var(--overlay-subtle);padding:12px;border-radius:8px;border:1px solid var(--border);overflow-x:auto;">${escapeHtml(data.content)}</pre>`;
+                } else {
+                    showToast('File not found', true);
+                }
+            } catch { showToast('Connection error', true); }
+        };
 
         // ── Start ─────────────────────────────────────────────
 
