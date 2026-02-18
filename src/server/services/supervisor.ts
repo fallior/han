@@ -817,24 +817,12 @@ export async function runSupervisorCycle(): Promise<{
         });
 
         // Consume the stream
-        let resultText = '';
-        let totalCost = 0;
-        let totalTokensIn = 0;
-        let totalTokensOut = 0;
-        let numTurns = 0;
+        let result: any = null;
 
         for await (const message of q) {
             if (abort.signal.aborted) break;
-
-            const msg = message as any;
-            if (msg.type === 'result') {
-                totalCost = msg.total_cost_usd || 0;
-                numTurns = msg.num_turns || 0;
-                if (msg.usage) {
-                    totalTokensIn = msg.usage.input_tokens || 0;
-                    totalTokensOut = msg.usage.output_tokens || 0;
-                }
-                resultText = msg.result || '';
+            if (message.type === 'result') {
+                result = message;
             }
         }
 
@@ -843,19 +831,35 @@ export async function runSupervisorCycle(): Promise<{
             return null;
         }
 
-        // Parse structured output
+        if (!result) {
+            throw new Error('Supervisor cycle produced no result');
+        }
+
+        if (result.subtype !== 'success') {
+            const errors = result.errors || [];
+            throw new Error(`Supervisor cycle failed: ${result.subtype} — ${errors.join(', ') || 'unknown error'}`);
+        }
+
+        const totalCost = result.total_cost_usd || 0;
+        const numTurns = result.num_turns || 0;
+        const totalTokensIn = result.usage?.input_tokens || 0;
+        const totalTokensOut = result.usage?.output_tokens || 0;
+
+        // Parse structured output (prefer structured_output, fallback to result text)
         let output: SupervisorOutput;
-        try {
-            // Try structured_output first (from outputFormat), then parse result text
-            const parsed = JSON.parse(resultText);
-            output = parsed as SupervisorOutput;
-        } catch {
-            // Try stripping markdown code blocks
-            const cleaned = resultText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+        if (result.structured_output) {
+            output = result.structured_output as SupervisorOutput;
+        } else {
+            const resultText = result.result || '';
             try {
-                output = JSON.parse(cleaned) as SupervisorOutput;
+                output = JSON.parse(resultText) as SupervisorOutput;
             } catch {
-                throw new Error(`Failed to parse supervisor output: ${resultText.slice(0, 200)}`);
+                const cleaned = resultText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+                try {
+                    output = JSON.parse(cleaned) as SupervisorOutput;
+                } catch {
+                    throw new Error(`Failed to parse supervisor output: ${resultText.slice(0, 200)}`);
+                }
             }
         }
 
