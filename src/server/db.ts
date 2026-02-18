@@ -256,6 +256,22 @@ if (!taskColsPipeline.includes('is_remediation')) {
     db.exec(`ALTER TABLE tasks ADD COLUMN is_remediation INTEGER DEFAULT 0`);
 }
 
+// Supervisor cycles table
+db.exec(`CREATE TABLE IF NOT EXISTS supervisor_cycles (
+    id TEXT PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    cost_usd REAL DEFAULT 0,
+    tokens_in INTEGER DEFAULT 0,
+    tokens_out INTEGER DEFAULT 0,
+    num_turns INTEGER DEFAULT 0,
+    actions_taken TEXT,
+    observations TEXT,
+    reasoning TEXT,
+    error TEXT,
+    cycle_number INTEGER
+)`);
+
 // Level 9 Phase 4 maintenance_enabled column on projects
 const projCols9p4 = (db.pragma("table_info('projects')") as any[]).map((col: any) => col.name);
 if (!projCols9p4.includes('maintenance_enabled')) {
@@ -369,6 +385,16 @@ export const knowledgeStmts = {
     insert: db.prepare('INSERT INTO product_knowledge (product_id, category, title, content, source_phase, created_at) VALUES (?, ?, ?, ?, ?, ?)') as any,
     getByProduct: db.prepare('SELECT * FROM product_knowledge WHERE product_id = ? ORDER BY created_at ASC') as any,
     getByCategory: db.prepare('SELECT * FROM product_knowledge WHERE product_id = ? AND category = ? ORDER BY created_at ASC') as any,
+};
+
+export const supervisorStmts = {
+    insertCycle: db.prepare('INSERT INTO supervisor_cycles (id, started_at, cycle_number) VALUES (?, ?, ?)') as any,
+    completeCycle: db.prepare('UPDATE supervisor_cycles SET completed_at = ?, cost_usd = ?, tokens_in = ?, tokens_out = ?, num_turns = ?, actions_taken = ?, observations = ?, reasoning = ? WHERE id = ?') as any,
+    failCycle: db.prepare('UPDATE supervisor_cycles SET completed_at = ?, error = ? WHERE id = ?') as any,
+    getLatest: db.prepare('SELECT * FROM supervisor_cycles ORDER BY started_at DESC LIMIT 1') as any,
+    getRecent: db.prepare('SELECT * FROM supervisor_cycles ORDER BY started_at DESC LIMIT ?') as any,
+    getCostSince: db.prepare('SELECT COALESCE(SUM(cost_usd), 0) as total FROM supervisor_cycles WHERE started_at > ?') as any,
+    getNextCycleNumber: db.prepare('SELECT COALESCE(MAX(cycle_number), 0) + 1 as next FROM supervisor_cycles') as any,
 };
 
 // ── Helper functions ────────────────────────────────────────

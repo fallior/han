@@ -27,6 +27,7 @@ import { checkDigestSchedule } from './services/digest';
 import { checkWeeklyReportSchedule } from './services/reports';
 // Maintenance removed — autonomous agents with unrestricted shell access are too dangerous
 import { advancePipeline, setCreateGoalFn, setBroadcastFn as setProductsBroadcastFn, setLoadConfigFn } from './services/products';
+import { initSupervisor, scheduleSupervisorCycle, stopSupervisor, setSupervisorBroadcastFn } from './services/supervisor';
 
 // Route modules
 import promptsRouter from './routes/prompts';
@@ -37,6 +38,7 @@ import portfolioRouter from './routes/portfolio';
 import bridgeRouter from './routes/bridge';
 import analyticsRouter from './routes/analytics';
 import proposalsRouter from './routes/proposals';
+import supervisorRouter from './routes/supervisor';
 
 // ── Single instance lock ─────────────────────────────────
 
@@ -102,6 +104,7 @@ setAdvancePipelineFn(advancePipeline);
 setCreateGoalFn(createGoal as any);
 setProductsBroadcastFn(broadcast);
 setLoadConfigFn(loadConfig);
+setSupervisorBroadcastFn(broadcast);
 
 // ── Mount routes ─────────────────────────────────────────
 
@@ -111,6 +114,7 @@ app.use(tasksRouter);
 app.use(bridgeRouter);
 app.use(analyticsRouter);
 app.use(proposalsRouter);
+app.use('/api/supervisor', supervisorRouter);
 
 // Prefix-mounted routers (use relative paths internally)
 app.use('/api/goals', goalsRouter);
@@ -217,6 +221,12 @@ orchestrator.initialize().then(status => {
     console.error('[Orchestrator] Initialization failed:', err);
 });
 
+// ── Supervisor ───────────────────────────────────────────────
+
+initSupervisor();
+// Start first supervisor cycle after 30s (let other systems stabilise)
+setTimeout(scheduleSupervisorCycle, 30000);
+
 // ── Start server ─────────────────────────────────────────
 
 server.listen(Number(PORT), '0.0.0.0', () => {
@@ -234,6 +244,7 @@ server.listen(Number(PORT), '0.0.0.0', () => {
 
 process.on('SIGTERM', () => {
     cleanPid();
+    stopSupervisor();
     stopHeartbeat();
     clearInterval(terminalBroadcastInterval);
     clearInterval(orchestratorInterval);
