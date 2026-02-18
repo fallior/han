@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-16 (Session 24) by Darron (via Claude)
+> Last updated: 2026-02-18 (Session 28) by Darron (via Claude)
 
 ## Current Stage
 
@@ -29,6 +29,45 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-18 — Darron (via Claude) — Session 28
+- **Escalating retry ladder** (`441d2fc`):
+  - 3-step automatic escalation for failed tasks: simple reset → Sonnet diagnostic agent → Opus diagnostic agent → human notification
+  - `scheduleAutoRetry()` dispatcher with `spawnDiagnosticTask()` and `notifyHumanOfFailure()`
+  - Diagnostic tasks marked `is_remediation=1`, block original task via `depends_on`
+  - Human escalation: WebSocket `human_escalation` message + ntfy push with full failure context
+- **3 concurrent pipelines** (`29a006c`):
+  - Replaced single `runningTaskId`/`runningAbort` with `Map<string, RunningSlot>` supporting 3 concurrent agents
+  - 2 normal task slots + 1 dedicated remediation slot for failed task diagnostics
+  - `getNextPendingTask(remediation?)` filters by pipeline type, excludes already-running tasks
+  - `runNextTask()` fills available slots across both pipelines
+  - New exports: `getAbortForTask()`, `getRunningTaskIds()`, `abortAllTasks()`
+  - Pipeline info in `/api/status`: `active_slots`, `max_slots`, `running_tasks`
+- **Opus defaults** (`29a006c`):
+  - Default model changed from 'sonnet' to 'opus' for all task execution
+  - `max_turns` minimum raised from 20 to 100 (anything hitting 100 is genuinely stuck)
+  - Planner prompt updated: prefer opus for reasoning, multi-file changes, debugging, architecture
+- **Goal view filtering** (`f52aa66`):
+  - `?view=active` (default) — only active/decomposing/planning goals
+  - `?view=archived` — done/failed grouped by project with collapsible sections
+  - `?view=all` — everything
+  - Fixed mobile loading issue caused by 163 goals overwhelming the browser
+  - Cleaned up 85 stuck maintenance goals + 23 orphaned tasks
+- **Retry endpoint** (`5152945`, `bc64c50`, `b302f31`):
+  - `POST /api/tasks/:id/retry` — manual retry with optional diagnostic agent
+  - Smart retry spawns diagnostic agent that analyses failure and creates fix task
+- **Realadlessbrowser goal completed** — 18/18 tasks done autonomously:
+  - Auto-retry escalation proven: "Run linting" exercised full ladder (reset → Sonnet → Opus → success)
+
+### 2026-02-17 — Darron (via Claude) — Sessions 25-27
+- **TypeScript migration** (`5df5755`, `8f53c7b`):
+  - Full migration from 7,106-line `server.js` monolith to modular TypeScript
+  - 14 modules: types.ts, db.ts, ws.ts, orchestrator.ts, server.ts, 5 services, 7 route modules
+  - Strict typing throughout, all imports/exports verified
+  - Old JS files removed, entry point switched to `tsx server.ts`
+- **Maintenance disabled** (`2195693`): Removed autonomous nightly maintenance (was creating zombie goals)
+- **Dashboard UI** (`7c52aae`): 📊 overlay with Analytics, Digests, Reports, Health tabs
+- **Proposal detail expansion** (`94ac0b4`): Full content shown in Health tab before approve/reject
 
 ### 2026-02-16 — Darron (via Claude) — Session 24
 - **Level 11: Autonomous Product Factory — Complete** (8 phases, A-H):
@@ -417,6 +456,13 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Phase status APIs for all 7 phases (GET /api/products/:id/{phase})
 - ✅ Pipeline completion with push notification
 - ✅ Product CRUD + knowledge graph APIs
+- ✅ TypeScript migration — modular server architecture (14 modules from 7,106-line monolith)
+- ✅ 3 concurrent task pipelines (2 normal + 1 remediation)
+- ✅ Escalating retry ladder (reset → Sonnet diagnostic → Opus diagnostic → human)
+- ✅ Opus default model with max_turns minimum of 100
+- ✅ Goal view filtering (active/archived/all) with project grouping
+- ✅ Dashboard UI (analytics, digests, reports, health tabs)
+- ✅ Manual retry endpoint with optional diagnostic agent
 
 ## Next Actions
 
@@ -454,6 +500,10 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [session_2026-02-18_08-30-00.md](../_logs/session_2026-02-18_08-30-00.md) — Escalating retries, 3 pipelines, opus defaults, goal filtering
+- [session_2026-02-17_20-37-25.md](../_logs/session_2026-02-17_20-37-25.md) — Dashboard UI
+- [session_2026-02-17_16-03-47.md](../_logs/session_2026-02-17_16-03-47.md) — TypeScript migration + cleanup
+- [session_2026-02-16_23-46-39.md](../_logs/session_2026-02-16_23-46-39.md) — Level 11 completion
 - [session_2026-02-16_17-08-00.md](../_logs/session_2026-02-16_17-08-00.md) — Level 9 Phases 3-5 (complete)
 - [session_2026-02-16_14-48-00.md](../_logs/session_2026-02-16_14-48-00.md) — Level 10 Phases B-F (complete)
 - [session_2026-02-16_04-30-00.md](../_logs/session_2026-02-16_04-30-00.md) — Level 9.2 + Level 10 Phase A + DEC-015
@@ -492,7 +542,7 @@ Recent sessions (latest first):
 
 **To start the server:**
 ```bash
-cd src/server && node server.js
+cd src/server && npx tsx server.ts
 ```
 
 **To configure push notifications:**
