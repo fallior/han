@@ -39,8 +39,18 @@ const planningQueue: Array<{
     reject: (reason: any) => void;
 }> = [];
 
-let runningTaskId: string | null = null;
-let runningAbort: AbortController | null = null;
+// ── Concurrent pipeline slots ────────────────────────────────
+// 2 normal task slots + 1 dedicated remediation slot = 3 concurrent agents
+const MAX_NORMAL_SLOTS = 2;
+const MAX_REMEDIATION_SLOTS = 1;
+
+interface RunningSlot {
+    taskId: string;
+    abort: AbortController;
+    isRemediation: boolean;
+}
+
+const runningSlots: Map<string, RunningSlot> = new Map(); // taskId → slot
 
 const pendingApprovals = new Map<string, {
     taskId: string;
@@ -240,7 +250,7 @@ export async function planGoal(description: string, projectPath: string, options
                         title: { type: 'string', description: 'Brief task title (max 80 chars)' },
                         description: { type: 'string', description: 'Detailed task description with acceptance criteria and files to modify' },
                         priority: { type: 'integer', minimum: 1, maximum: 10, description: 'Priority (1-10, higher = more urgent)' },
-                        model: { type: 'string', enum: ['haiku', 'sonnet', 'opus'], description: 'Cheapest model that can handle this task' },
+                        model: { type: 'string', enum: ['haiku', 'sonnet', 'opus'], description: 'Best model for the task. Default to opus for anything involving reasoning, multi-file changes, debugging, or architecture. Use sonnet for straightforward single-file changes. Use haiku only for trivial tasks like creating config files or running a single command.' },
                         estimated_turns: { type: 'integer', minimum: 1, maximum: 200, description: 'Estimated agent turns needed' },
                         depends_on: { type: 'array', items: { type: 'string' }, description: 'Task titles this depends on (empty if independent)' }
                     },
@@ -427,8 +437,8 @@ export function createGoal(
                     .filter(Boolean);
                 const dependsOnJson = dependsOnIds.length > 0 ? JSON.stringify(dependsOnIds) : null;
 
-                // Memory-based model recommendation (Phase E feedback loop)
-                let finalModel = subtask.model || 'sonnet';
+                // Default to opus unless planner specifically chose a lighter model
+                let finalModel = subtask.model || 'opus';
                 if (orchestrator) {
                     const recommendation = orchestrator.recommendModel(db, projectPath, 'unknown');
                     if (recommendation.model && recommendation.confidence !== 'none') {
@@ -440,7 +450,7 @@ export function createGoal(
                     }
                 }
 
-                const maxTurns = Math.max((subtask.estimated_turns || 10) * 3, 20);
+                const maxTurns = Math.max((subtask.estimated_turns || 30) * 3, 100);
 
                 taskStmts.insertWithGoal.run(
                     taskId,
@@ -1277,14 +1287,26 @@ export function createTaskLogger(task: any): {
 // ── Task scheduling ──────────────────────────────────────────
 
 /**
- * Get next pending task with dependency-aware ordering
+ * Get next pending task with dependency-aware ordering.
+ * @param remediation — if true, only return remediation tasks; if false, only normal tasks
  */
-export function getNextPendingTask(): any | null {
+export function getNextPendingTask(remediation?: boolean): any | null {
     const pending = taskStmts.listByStatus.all('pending') as any[];
     if (pending.length === 0) return null;
 
+    // Filter out tasks already running in another slot
+    const notRunning = pending.filter(task => !runningSlots.has(task.id));
+
+    // Filter by pipeline type
+    const typed = notRunning.filter(task => {
+        const isRem = !!(task.is_remediation);
+        if (remediation === true) return isRem;
+        if (remediation === false) return !isRem;
+        return true; // no filter
+    });
+
     // Filter out tasks with unsatisfied dependencies
-    const ready = pending.filter(task => {
+    const ready = typed.filter(task => {
         if (!task.depends_on) return true;
         try {
             const depIds = JSON.parse(task.depends_on);
@@ -1464,6 +1486,9 @@ ${logTail}
     taskStmts.insert.run(diagId, diagTitle, diagDescription, originalTask.project_path,
         (originalTask.priority || 0) + 1, model, 50, 'bypass', null, now, null);
 
+    // Mark as remediation task so it runs in the dedicated remediation pipeline
+    db.prepare('UPDATE tasks SET is_remediation = 1 WHERE id = ?').run(diagId);
+
     // If the original task belongs to a goal, link the diagnostic too
     if (originalTask.goal_id) {
         db.prepare('UPDATE tasks SET goal_id = ? WHERE id = ?').run(originalTask.goal_id, diagId);
@@ -1533,21 +1558,47 @@ function notifyHumanOfFailure(task: any, errorMessage: string, retryCount: numbe
     } catch {}
 }
 
+/**
+ * Main scheduler entry point — called on interval.
+ * Fills available pipeline slots: 2 normal + 1 remediation.
+ */
 export async function runNextTask(): Promise<void> {
-    if (runningTaskId) return; // Already running a task
+    // Count current slot usage
+    const normalRunning = [...runningSlots.values()].filter(s => !s.isRemediation).length;
+    const remediationRunning = [...runningSlots.values()].filter(s => s.isRemediation).length;
 
-    const task = getNextPendingTask();
-    if (!task) return;
+    // Try to fill remediation slot
+    if (remediationRunning < MAX_REMEDIATION_SLOTS) {
+        const remTask = getNextPendingTask(true);
+        if (remTask) {
+            executeTask(remTask, true); // fire-and-forget
+        }
+    }
 
-    runningTaskId = task.id;
+    // Try to fill normal slots
+    const normalAvailable = MAX_NORMAL_SLOTS - normalRunning;
+    for (let i = 0; i < normalAvailable; i++) {
+        const task = getNextPendingTask(false);
+        if (!task) break;
+        executeTask(task, false); // fire-and-forget
+    }
+}
+
+/**
+ * Execute a single task in a pipeline slot.
+ * This is the core agent runner — extracted from the old single-slot runNextTask.
+ */
+async function executeTask(task: any, isRemediation: boolean): Promise<void> {
     const abort = new AbortController();
-    runningAbort = abort;
+    const slotLabel = isRemediation ? 'Remediation' : 'Normal';
+
+    runningSlots.set(task.id, { taskId: task.id, abort, isRemediation });
 
     // Mark as running
     taskStmts.updateStatus.run('running', new Date().toISOString(), task.id);
     broadcastTaskUpdate(taskStmts.get.get(task.id));
 
-    console.log(`[Task] Starting: ${task.title} (${task.id})`);
+    console.log(`[${slotLabel}] Starting: ${task.title} (${task.id}) — slots: ${runningSlots.size}/${MAX_NORMAL_SLOTS + MAX_REMEDIATION_SLOTS}`);
 
     // Create task execution log (mirrors claude-logged format)
     const taskLog = createTaskLogger(task);
@@ -1757,8 +1808,8 @@ export async function runNextTask(): Promise<void> {
             }
         }
     } finally {
-        runningTaskId = null;
-        runningAbort = null;
+        runningSlots.delete(task.id);
+        console.log(`[${slotLabel}] Slot freed. Active: ${runningSlots.size}/${MAX_NORMAL_SLOTS + MAX_REMEDIATION_SLOTS}`);
         broadcastTaskUpdate(taskStmts.get.get(task.id));
 
         // Update goal progress on completion
@@ -1773,9 +1824,36 @@ export async function runNextTask(): Promise<void> {
 export { pendingApprovals };
 
 export function getRunningTaskId(): string | null {
-    return runningTaskId;
+    // Return the first running task ID (backwards compat for cancel endpoint)
+    const first = runningSlots.values().next().value;
+    return first?.taskId ?? null;
 }
 
 export function getRunningAbort(): AbortController | null {
-    return runningAbort;
+    // Return the first running abort (backwards compat for SIGTERM)
+    const first = runningSlots.values().next().value;
+    return first?.abort ?? null;
+}
+
+/**
+ * Get the abort controller for a specific task (for targeted cancellation).
+ */
+export function getAbortForTask(taskId: string): AbortController | null {
+    return runningSlots.get(taskId)?.abort ?? null;
+}
+
+/**
+ * Get all currently running task IDs.
+ */
+export function getRunningTaskIds(): string[] {
+    return [...runningSlots.keys()];
+}
+
+/**
+ * Abort all running tasks (for shutdown).
+ */
+export function abortAllTasks(): void {
+    for (const slot of runningSlots.values()) {
+        slot.abort.abort();
+    }
 }

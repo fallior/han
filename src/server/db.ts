@@ -250,6 +250,12 @@ if (!projCols10d.includes('ports')) {
     db.exec(`ALTER TABLE projects ADD COLUMN ports TEXT`);
 }
 
+// Concurrent pipelines: is_remediation flag on tasks
+const taskColsPipeline = (db.pragma("table_info('tasks')") as any[]).map((col: any) => col.name);
+if (!taskColsPipeline.includes('is_remediation')) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN is_remediation INTEGER DEFAULT 0`);
+}
+
 // Level 9 Phase 4 maintenance_enabled column on projects
 const projCols9p4 = (db.pragma("table_info('projects')") as any[]).map((col: any) => col.name);
 if (!projCols9p4.includes('maintenance_enabled')) {

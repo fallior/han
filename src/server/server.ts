@@ -21,7 +21,7 @@ import {
 } from './services/terminal';
 import {
     generateId, loadConfig, sendDigestPush, createGoal, runNextTask,
-    getRunningAbort, setBroadcastFn, setOrchestrator, setAdvancePipelineFn
+    abortAllTasks, setBroadcastFn, setOrchestrator, setAdvancePipelineFn
 } from './services/planning';
 import { checkDigestSchedule } from './services/digest';
 import { checkWeeklyReportSchedule } from './services/reports';
@@ -239,8 +239,7 @@ process.on('SIGTERM', () => {
     clearInterval(orchestratorInterval);
     clearInterval(digestInterval);
     clearInterval(weeklyReportInterval);
-    const abort = getRunningAbort();
-    if (abort) abort.abort();
+    abortAllTasks();
     try { db.close(); } catch {}
     wss.close();
     server.close();

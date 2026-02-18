@@ -6,6 +6,7 @@ import {
     createGoal,
     getRunningTaskId,
     getRunningAbort,
+    getAbortForTask,
     pendingApprovals
 } from '../services/planning';
 import { broadcastTaskUpdate, broadcastApprovalResolved } from '../ws';
@@ -61,7 +62,7 @@ router.post('/api/tasks', (req: Request, res: Response) => {
         const now = new Date().toISOString();
 
         taskStmts.insert.run(id, title, description, project_path,
-            priority || 0, model || 'sonnet', max_turns || 100, finalGateMode, allowedToolsJson, now, deadline || null);
+            priority || 0, model || 'opus', max_turns || 100, finalGateMode, allowedToolsJson, now, deadline || null);
 
         const task = taskStmts.get.get(id);
         broadcastTaskUpdate(task);
@@ -96,10 +97,10 @@ router.post('/api/tasks/:id/cancel', (req: Request<{ id: string }>, res: Respons
             return res.status(400).json({ success: false, error: 'Task is not pending or running' });
         }
 
-        // If running, abort the agent
-        const runningAbort = getRunningAbort();
-        if (task.status === 'running' && runningAbort) {
-            runningAbort.abort();
+        // If running, abort the specific agent via its slot
+        if (task.status === 'running') {
+            const taskAbort = getAbortForTask(task.id);
+            if (taskAbort) taskAbort.abort();
         }
 
         taskStmts.cancel.run('cancelled', new Date().toISOString(), task.id);
@@ -198,6 +199,9 @@ ${logTail}
 
             taskStmts.insert.run(diagId, diagTitle, diagDescription, task.project_path,
                 task.priority || 0, 'sonnet', 50, 'bypass', null, now, null);
+
+            // Mark as remediation task for the dedicated pipeline
+            db.prepare('UPDATE tasks SET is_remediation = 1 WHERE id = ?').run(diagId);
 
             // Set the original task to pending, blocked until diagnostic completes
             taskStmts.cancel.run('pending', null, task.id);

@@ -131,11 +131,20 @@ router.get('/api/status', (req: Request, res: Response) => {
 
     const sessions = listActiveSessions();
 
+    // Pipeline slot info
+    let pipelines;
+    try {
+        const { getRunningTaskIds } = require('../services/planning');
+        const ids = getRunningTaskIds();
+        pipelines = { active_slots: ids.length, max_slots: 3, running_tasks: ids };
+    } catch { pipelines = undefined; }
+
     res.json({
         success: true,
         status: 'running',
         pending_prompts: pendingCount,
         active_sessions: sessions,
+        pipelines,
         uptime: process.uptime()
     });
 });
