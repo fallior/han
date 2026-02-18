@@ -463,25 +463,13 @@
             }
         }
 
-        async function sendKeyDirect(key) {
-            if (!terminalLive || isSending) return;
-            isSending = true;
-
-            try {
-                const res = await fetch(`${API_BASE}/api/keys`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key })
-                });
-                const data = await res.json();
-                if (!data.success) {
-                    showToast(data.error || 'Failed', true);
-                }
-            } catch {
-                showToast('Connection error', true);
-            } finally {
-                isSending = false;
-            }
+        function sendKeyDirect(key) {
+            if (!terminalLive) return;
+            fetch(`${API_BASE}/api/keys`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key })
+            }).catch(() => {});
         }
 
         // Focus management — tap terminal to focus input bar

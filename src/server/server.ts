@@ -151,7 +151,7 @@ const wss = createWebSocketServer(server, () => {
 
 syncRegistry();
 
-// ── Terminal broadcast (1-second loop) ───────────────────
+// ── Terminal broadcast (200ms loop) ──────────────────────
 
 function broadcastTerminal() {
     if (!wss || wss.clients.size === 0) return;
@@ -182,7 +182,7 @@ function broadcastTerminal() {
 
 // ── Scheduled intervals ──────────────────────────────────
 
-const terminalBroadcastInterval = setInterval(broadcastTerminal, 1000);
+const terminalBroadcastInterval = setInterval(broadcastTerminal, 200);
 const orchestratorInterval = setInterval(runNextTask, 5000);
 
 const digestInterval = setInterval(() => {
