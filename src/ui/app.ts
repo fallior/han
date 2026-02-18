@@ -1495,85 +1495,162 @@
         const goalDetailActions = document.getElementById('goalDetailActions');
 
         let allGoals = [];
+        let archivedByProject = {};
         let viewingGoalId = null;
+        let showingArchived = false;
 
         async function loadGoals() {
             goalListContent.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">Loading...</div>';
             try {
-                const res = await fetch(`${API_BASE}/api/goals`);
+                // Fetch active goals
+                const res = await fetch(`${API_BASE}/api/goals?view=active`);
                 const data = await res.json();
                 if (!data.success) throw new Error(data.error);
-                allGoals = data.goals;
+                allGoals = data.goals || [];
+                showingArchived = false;
                 renderGoalList();
             } catch (err) {
                 goalListContent.innerHTML = `<div style="text-align:center;color:var(--red);padding:20px;">${err.message}</div>`;
             }
         }
 
+        async function loadArchivedGoals() {
+            goalListContent.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">Loading archived...</div>';
+            try {
+                const res = await fetch(`${API_BASE}/api/goals?view=archived`);
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                archivedByProject = data.projects || {};
+                showingArchived = true;
+                renderArchivedGoals();
+            } catch (err) {
+                goalListContent.innerHTML = `<div style="text-align:center;color:var(--red);padding:20px;">${err.message}</div>`;
+            }
+        }
+
+        function renderGoalCard(goal) {
+            const el = document.createElement('div');
+            el.className = 'task-item';
+            el.style.cursor = 'pointer';
+
+            const header = document.createElement('div');
+            header.className = 'task-item-header';
+
+            const title = document.createElement('span');
+            title.className = 'task-item-title';
+            title.textContent = goal.description.length > 60
+                ? goal.description.substring(0, 60) + '...'
+                : goal.description;
+
+            const badge = document.createElement('span');
+            badge.className = 'task-status-badge ' + goal.status;
+            badge.textContent = goal.status;
+
+            header.appendChild(title);
+            header.appendChild(badge);
+
+            const meta = document.createElement('div');
+            meta.className = 'task-item-meta';
+            meta.style.fontSize = '11px';
+            meta.style.color = 'var(--text-dim)';
+
+            const progress = `${goal.tasks_completed || 0}/${goal.task_count || 0} tasks`;
+            const cost = goal.total_cost_usd > 0 ? ` • $${goal.total_cost_usd.toFixed(4)}` : '';
+            meta.textContent = progress + cost;
+
+            el.appendChild(header);
+            el.appendChild(meta);
+
+            if (goal.task_count > 0) {
+                const progressBar = document.createElement('div');
+                progressBar.style.cssText = 'width:100%;height:3px;background:var(--border);margin-top:8px;border-radius:2px;overflow:hidden';
+                const progressFill = document.createElement('div');
+                const pct = (goal.tasks_completed / goal.task_count) * 100;
+                progressFill.style.cssText = `width:${pct}%;height:100%;transition:width 0.3s;background:${
+                    goal.status === 'done' ? 'var(--green)' : goal.status === 'failed' ? 'var(--red)' : 'var(--cyan)'}`;
+                progressBar.appendChild(progressFill);
+                el.appendChild(progressBar);
+            }
+
+            el.addEventListener('click', () => viewGoal(goal.id));
+            return el;
+        }
+
         function renderGoalList() {
+            goalListContent.innerHTML = '';
+
             if (allGoals.length === 0) {
-                goalListContent.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;">No goals yet<br><span style="font-size:11px;">Create a goal below to get started</span></div>';
+                goalListContent.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;">No active goals<br><span style="font-size:11px;">Create a goal below to get started</span></div>';
+            } else {
+                for (const goal of allGoals) {
+                    goalListContent.appendChild(renderGoalCard(goal));
+                }
+            }
+
+            // Archive toggle button
+            const toggleRow = document.createElement('div');
+            toggleRow.style.cssText = 'text-align:center;padding:12px 0;border-top:1px solid var(--border);margin-top:12px';
+            const toggleBtn = document.createElement('button');
+            toggleBtn.className = 'bridge-btn bridge-btn-secondary';
+            toggleBtn.style.cssText = 'font-size:11px;padding:6px 16px';
+            toggleBtn.textContent = 'View Archived Goals';
+            toggleBtn.addEventListener('click', loadArchivedGoals);
+            toggleRow.appendChild(toggleBtn);
+            goalListContent.appendChild(toggleRow);
+        }
+
+        function renderArchivedGoals() {
+            goalListContent.innerHTML = '';
+
+            // Back to active button
+            const backRow = document.createElement('div');
+            backRow.style.cssText = 'padding:8px 0 12px;border-bottom:1px solid var(--border);margin-bottom:12px';
+            const backBtn = document.createElement('button');
+            backBtn.className = 'bridge-btn bridge-btn-secondary';
+            backBtn.style.cssText = 'font-size:11px;padding:6px 16px';
+            backBtn.textContent = '← Active Goals';
+            backBtn.addEventListener('click', loadGoals);
+            backRow.appendChild(backBtn);
+            goalListContent.appendChild(backRow);
+
+            const projects = Object.keys(archivedByProject).sort();
+            if (projects.length === 0) {
+                goalListContent.innerHTML += '<div style="text-align:center;color:var(--text-muted);padding:40px;">No archived goals</div>';
                 return;
             }
 
-            goalListContent.innerHTML = '';
-            for (const goal of allGoals) {
-                const el = document.createElement('div');
-                el.className = 'task-item'; // Reuse task-item styles
-                el.style.cursor = 'pointer';
+            for (const projectPath of projects) {
+                const goals = archivedByProject[projectPath];
+                const projectName = projectPath.split('/').pop() || projectPath;
 
-                const header = document.createElement('div');
-                header.className = 'task-item-header';
+                // Project group header
+                const groupHeader = document.createElement('div');
+                groupHeader.style.cssText = 'padding:10px 12px;margin-bottom:4px;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:var(--overlay-subtle);border-radius:4px';
 
-                const title = document.createElement('span');
-                title.className = 'task-item-title';
-                title.textContent = goal.description.length > 60
-                    ? goal.description.substring(0, 60) + '...'
-                    : goal.description;
+                const doneCount = goals.filter(g => g.status === 'done').length;
+                const failedCount = goals.filter(g => g.status === 'failed').length;
+                const totalCost = goals.reduce((s, g) => s + (g.total_cost_usd || 0), 0);
 
-                const badge = document.createElement('span');
-                badge.className = 'task-status-badge ' + goal.status;
-                badge.textContent = goal.status;
+                groupHeader.innerHTML = `
+                    <span>${projectName} <span style="font-weight:400;font-size:10px;color:var(--text-dim)">${goals.length} goals</span></span>
+                    <span style="font-size:10px;font-weight:400;">
+                        ${doneCount ? `<span style="color:var(--green)">${doneCount} done</span>` : ''}
+                        ${failedCount ? ` <span style="color:var(--red)">${failedCount} failed</span>` : ''}
+                        ${totalCost > 0 ? ` • $${totalCost.toFixed(2)}` : ''}
+                    </span>`;
 
-                header.appendChild(title);
-                header.appendChild(badge);
-
-                const meta = document.createElement('div');
-                meta.className = 'task-item-meta';
-                meta.style.fontSize = '11px';
-                meta.style.color = 'var(--text-dim)';
-
-                const progress = `${goal.tasks_completed || 0}/${goal.task_count || 0} tasks`;
-                const cost = goal.total_cost_usd > 0 ? ` • $${goal.total_cost_usd.toFixed(4)}` : '';
-                const backend = goal.orchestrator_backend ? ` • ${goal.orchestrator_backend}` : '';
-                meta.textContent = progress + cost + backend;
-
-                el.appendChild(header);
-                el.appendChild(meta);
-
-                // Progress bar
-                if (goal.task_count > 0) {
-                    const progressBar = document.createElement('div');
-                    progressBar.style.width = '100%';
-                    progressBar.style.height = '3px';
-                    progressBar.style.background = 'var(--border)';
-                    progressBar.style.marginTop = '8px';
-                    progressBar.style.borderRadius = '2px';
-                    progressBar.style.overflow = 'hidden';
-
-                    const progressFill = document.createElement('div');
-                    const pct = (goal.tasks_completed / goal.task_count) * 100;
-                    progressFill.style.width = pct + '%';
-                    progressFill.style.height = '100%';
-                    progressFill.style.background = goal.status === 'done' ? 'var(--green)'
-                        : goal.status === 'failed' ? 'var(--red)' : 'var(--cyan)';
-                    progressFill.style.transition = 'width 0.3s';
-                    progressBar.appendChild(progressFill);
-                    el.appendChild(progressBar);
+                const groupContent = document.createElement('div');
+                groupContent.style.cssText = 'display:none;margin-bottom:12px';
+                for (const goal of goals) {
+                    groupContent.appendChild(renderGoalCard(goal));
                 }
 
-                el.addEventListener('click', () => viewGoal(goal.id));
-                goalListContent.appendChild(el);
+                groupHeader.addEventListener('click', () => {
+                    groupContent.style.display = groupContent.style.display === 'none' ? 'block' : 'none';
+                });
+
+                goalListContent.appendChild(groupHeader);
+                goalListContent.appendChild(groupContent);
             }
         }
 

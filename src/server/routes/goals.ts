@@ -34,12 +34,39 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 /**
- * GET / -- List all goals
+ * GET / -- List goals
+ *
+ * Query params:
+ *   ?view=active    (default) — active, decomposing, planning goals
+ *   ?view=archived  — done and failed goals, grouped by project
+ *   ?view=all       — everything
  */
 router.get('/', (req: Request, res: Response) => {
     try {
-        const goals = goalStmts.list.all();
-        res.json({ success: true, goals });
+        const view = (req.query.view as string) || 'active';
+        const allGoals = goalStmts.list.all() as any[];
+
+        if (view === 'active') {
+            const active = allGoals.filter((g: any) =>
+                ['active', 'decomposing', 'planning'].includes(g.status));
+            return res.json({ success: true, goals: active, view });
+        }
+
+        if (view === 'archived') {
+            const archived = allGoals.filter((g: any) =>
+                ['done', 'failed'].includes(g.status));
+            // Group by project
+            const byProject: Record<string, any[]> = {};
+            for (const g of archived) {
+                const proj = g.project_path || 'unknown';
+                if (!byProject[proj]) byProject[proj] = [];
+                byProject[proj].push(g);
+            }
+            return res.json({ success: true, projects: byProject, view });
+        }
+
+        // view=all
+        res.json({ success: true, goals: allGoals, view });
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
     }
