@@ -23,7 +23,7 @@ type BroadcastFn = (message: Record<string, unknown>) => void;
 
 interface SupervisorAction {
     type: 'create_goal' | 'adjust_priority' | 'update_memory' |
-          'send_notification' | 'cancel_task' | 'no_action';
+          'send_notification' | 'cancel_task' | 'explore_project' | 'no_action';
     goal_description?: string;
     project_path?: string;
     planning_model?: string;
@@ -34,6 +34,7 @@ interface SupervisorAction {
     message?: string;
     priority?: 'low' | 'default' | 'high';
     reason?: string;
+    exploration_focus?: string;
 }
 
 interface SupervisorOutput {
@@ -273,8 +274,12 @@ function seedProjectMemory(): void {
             if (p.description) lines.push(`## Overview\n${p.description}\n`);
             lines.push(`## Path\n${p.path}\n`);
             lines.push(`## Lifecycle\n${p.lifecycle || 'active'}\n`);
-            lines.push(`## Recent Activity\n- (To be populated by supervisor)\n`);
-            lines.push(`## Known Issues\n- (To be populated by supervisor)\n`);
+            lines.push(`## Architecture\n- (Awaiting supervisor exploration)\n`);
+            lines.push(`## Tech Stack\n- (Awaiting supervisor exploration)\n`);
+            lines.push(`## Key Files\n- (Awaiting supervisor exploration)\n`);
+            lines.push(`## Patterns & Conventions\n- (Awaiting supervisor exploration)\n`);
+            lines.push(`## Recent Activity\n- (Awaiting supervisor exploration)\n`);
+            lines.push(`## Health & Tech Debt\n- (Awaiting supervisor exploration)\n`);
 
             fs.writeFileSync(filepath, lines.join('\n'));
         }
@@ -301,23 +306,16 @@ function loadMemoryBank(): string {
         } catch { /* skip unreadable files */ }
     }
 
-    // Active project memory (only for projects with active goals)
+    // All project memory files (supervisor builds knowledge of every project)
     try {
-        const activeGoals = db.prepare(
-            "SELECT DISTINCT project_path FROM goals WHERE status IN ('active', 'decomposing', 'planning')"
-        ).all() as any[];
-
-        const activeProjectPaths = new Set(activeGoals.map((g: any) => g.project_path));
-        const projects = portfolioStmts.list.all() as any[];
-
-        for (const p of projects) {
-            if (!activeProjectPaths.has(p.path)) continue;
-            const filepath = path.join(PROJECTS_DIR, `${p.name}.md`);
-            try {
-                if (fs.existsSync(filepath)) {
-                    parts.push(`--- projects/${p.name}.md ---\n${fs.readFileSync(filepath, 'utf8')}`);
-                }
-            } catch { /* skip */ }
+        if (fs.existsSync(PROJECTS_DIR)) {
+            const projectFiles = fs.readdirSync(PROJECTS_DIR).filter(f => f.endsWith('.md')).sort();
+            for (const f of projectFiles) {
+                try {
+                    const content = fs.readFileSync(path.join(PROJECTS_DIR, f), 'utf8');
+                    parts.push(`--- projects/${f} ---\n${content}`);
+                } catch { /* skip unreadable */ }
+            }
         }
     } catch { /* skip project memory on error */ }
 
@@ -421,6 +419,35 @@ function buildStateSnapshot(): string {
         parts.push(`## Supervisor Costs\n- Today: $${todayCost.toFixed(4)}`);
     } catch { /* skip */ }
 
+    // Portfolio overview for exploration
+    try {
+        const projects = portfolioStmts.list.all() as any[];
+        if (projects.length > 0) {
+            parts.push(`## Portfolio (${projects.length} projects)`);
+            for (const p of projects) {
+                const memFile = path.join(PROJECTS_DIR, `${p.name}.md`);
+                const hasMemory = fs.existsSync(memFile);
+                const memSize = hasMemory ? fs.statSync(memFile).size : 0;
+                const depth = memSize < 200 ? 'SHALLOW' : memSize < 800 ? 'BASIC' : 'DEEP';
+                parts.push(`- **${p.name}** (${p.lifecycle || 'active'}): path=${p.path}, knowledge=${depth} (${memSize} bytes)`);
+            }
+        }
+    } catch { /* skip */ }
+
+    // Suggest exploration when idle
+    try {
+        const running = (taskStmts.listByStatus.all('running') as any[]).length;
+        const pending = (taskStmts.listByStatus.all('pending') as any[]).length;
+        if (running === 0 && pending <= 2) {
+            parts.push(`## Exploration Opportunity`);
+            parts.push(`System is idle — this is a good time to explore projects and deepen your knowledge.`);
+            parts.push(`Use your Read/Glob/Grep/Bash tools to examine project codebases.`);
+            parts.push(`Focus on projects with SHALLOW or BASIC knowledge depth.`);
+            parts.push(`Key files to look for: CLAUDE.md, ARCHITECTURE.md, package.json, README.md, src/ structure.`);
+            parts.push(`After exploring, use update_memory to enrich the relevant projects/*.md file.`);
+        }
+    } catch { /* skip */ }
+
     return parts.join('\n\n');
 }
 
@@ -433,31 +460,54 @@ function buildSupervisorSystemPrompt(): string {
 You are the senior engineer overseeing all autonomous work. You observe, think, decide, and act.
 You do NOT execute code — you manage the agents that do.
 
+You are also the **subject matter expert** on every project in the portfolio. You continuously
+deepen your understanding of each codebase — the architecture, tech stack, patterns, quirks,
+and nuances. A great senior engineer doesn't just manage tasks; they understand the systems
+they oversee at a deep level. That understanding is what makes your decisions excellent.
+
 ## Your Powers
 - create_goal: Submit new goals for decomposition and execution
 - adjust_priority: Change task priority (1-10, higher = more urgent)
 - update_memory: Write to your own memory files (evolve your knowledge)
 - send_notification: Alert Darron via push notification
 - cancel_task: Cancel a stuck or misguided task
+- explore_project: Use your Read/Glob/Grep/Bash tools to explore a project codebase
 - no_action: Explicitly decide to do nothing (with reasoning)
 
-## Decision Guidelines
+## When Active (tasks running/pending)
 - Check if current goals are progressing. If stuck, investigate why.
 - Look for failure patterns. If a task keeps failing, adjust approach.
 - Consider task dependencies — are things blocked unnecessarily?
 - Monitor costs — are we spending wisely? Could cheaper models handle some tasks?
 - Think about what Darron would want to see when he checks in.
-- Update your memory with anything you learn this cycle.
-- Be concise in memory updates — every token counts in future cycles.
-- Do NOT create goals for projects where goals are already active (unless urgent).
-- Do NOT create goals for projects with recent manual git commits (< 1 hour).
+
+## When Idle (no tasks running)
+This is your time to **explore and learn**. Use your read-only tools to:
+- Read CLAUDE.md, ARCHITECTURE.md, package.json, README.md of projects you know little about
+- Browse src/ directories to understand code structure and patterns
+- Run \`git log --oneline -20\` to understand recent project activity
+- Run \`wc -l\` or \`find ... | head\` to gauge project size/scope
+- Read key source files to understand tech stack details (frameworks, libraries, patterns)
+- Look for TODO comments, known issues, and areas for improvement
+
+After exploring, use update_memory to enrich the relevant projects/*.md file with:
+- **Architecture**: How the system is structured, key components, data flow
+- **Tech Stack**: Frameworks, libraries, build tools, versions
+- **Patterns**: Coding conventions, design patterns, naming conventions
+- **Key Files**: The most important files and what they do
+- **Health**: Test coverage, known issues, tech debt, TODOs
+- **Recent Activity**: What's been worked on lately, trajectory
+
+Prioritise projects with SHALLOW or BASIC knowledge depth. Your goal is to eventually
+have DEEP knowledge of every project — the kind of understanding where you could
+confidently direct any task on any project because you truly know the codebase.
 
 ## Memory Management
 - active-context.md: Update EVERY cycle with current state
-- patterns.md: Update when you discover something reusable
+- patterns.md: Update when you discover something reusable across projects
 - failures.md: Update when tasks fail with extractable lessons
-- self-reflection.md: Update when you notice meta-patterns
-- projects/*.md: Update when you learn project-specific things
+- self-reflection.md: Update when you notice meta-patterns in your own effectiveness
+- projects/*.md: Update when you learn project-specific things (this is your primary knowledge store)
 
 ## Output Format
 Return structured JSON matching the required schema. Your reasoning field should explain
@@ -468,7 +518,10 @@ your thought process. Actions should be concrete and executable.
 - Do not create more than 2 goals per cycle
 - Do not adjust priorities without clear reasoning
 - Memory files have token caps — prioritise the most valuable information
-- If nothing needs attention, use no_action with reasoning explaining why`;
+- When exploring, focus on one project per cycle for depth over breadth
+- Do NOT create goals for projects where goals are already active (unless urgent)
+- Do NOT create goals for projects with recent manual git commits (< 1 hour)`;
+
 }
 
 // ── Output schema ────────────────────────────────────────────
@@ -487,7 +540,7 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
             items: {
                 type: 'object',
                 properties: {
-                    type: { type: 'string', enum: ['create_goal', 'adjust_priority', 'update_memory', 'send_notification', 'cancel_task', 'no_action'] },
+                    type: { type: 'string', enum: ['create_goal', 'adjust_priority', 'update_memory', 'send_notification', 'cancel_task', 'explore_project', 'no_action'] },
                     goal_description: { type: 'string', description: 'For create_goal: the goal description' },
                     project_path: { type: 'string', description: 'For create_goal: absolute project path' },
                     planning_model: { type: 'string', enum: ['haiku', 'sonnet', 'opus'], description: 'For create_goal: planning model' },
@@ -498,6 +551,7 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
                     message: { type: 'string', description: 'For send_notification: message text' },
                     priority: { type: 'string', enum: ['low', 'default', 'high'], description: 'For send_notification: notification priority' },
                     reason: { type: 'string', description: 'For cancel_task/no_action: reason' },
+                    exploration_focus: { type: 'string', description: 'For explore_project: what to focus on (e.g. "architecture", "tech stack", "recent changes")' },
                 },
                 required: ['type']
             }
@@ -641,6 +695,18 @@ function executeActions(actions: SupervisorAction[], cycleId: string): string[] 
                     } else {
                         summaries.push(`cancel_task: ${action.task_id} skipped (not pending, status: ${task?.status})`);
                     }
+                    break;
+                }
+
+                case 'explore_project': {
+                    // The supervisor explores via its own Read/Glob/Grep/Bash tools during the cycle.
+                    // This action is a signal that it explored and should update memory afterwards.
+                    // The actual exploration happens via tool use within the agentQuery call.
+                    const projectName = action.project_path?.split('/').pop() || 'unknown';
+                    const focus = action.exploration_focus || 'general';
+                    summaries.push(`explore_project: ${projectName} (focus: ${focus})`);
+                    console.log(`[Supervisor] Explored project: ${projectName} (${focus})`);
+                    broadcastFn?.({ type: 'supervisor_action', action: 'explore_project', detail: `${projectName}: ${focus}`, cycleId });
                     break;
                 }
 
