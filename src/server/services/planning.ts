@@ -1367,6 +1367,119 @@ export function getNextPendingTask(): any | null {
 /**
  * Run the next pending task from the queue
  */
+// ── Auto-retry with escalation ──────────────────────────────
+
+const AUTO_RETRY_DELAY_MS = 30_000; // 30 seconds before retry
+
+/**
+ * Schedule an automatic retry for a failed task.
+ *
+ * Escalation strategy:
+ * - retry_count 0 (first failure):  simple reset to pending after delay
+ * - retry_count 1 (second failure): smart retry — diagnostic agent fixes the
+ *   issue first, then original task re-runs (blocked by depends_on)
+ * - retry_count 2+ (third+ failure): give up, leave failed for human
+ */
+function scheduleAutoRetry(task: any, errorMessage: string): void {
+    const retryCount = task.retry_count || 0;
+    const maxRetries = task.max_retries ?? 3;
+
+    if (retryCount >= maxRetries) {
+        console.log(`[AutoRetry] ${task.title} — exhausted ${maxRetries} retries, leaving failed`);
+        return;
+    }
+
+    const attempt = retryCount + 1;
+
+    if (attempt <= 1) {
+        // First failure: simple reset after delay
+        console.log(`[AutoRetry] ${task.title} — scheduling simple retry in ${AUTO_RETRY_DELAY_MS / 1000}s (attempt ${attempt}/${maxRetries})`);
+        setTimeout(() => {
+            try {
+                const current = taskStmts.get.get(task.id) as any;
+                if (!current || current.status !== 'failed') return; // Already retried or cancelled
+
+                db.prepare('UPDATE tasks SET status = ?, started_at = NULL, completed_at = NULL, error = NULL, retry_count = ? WHERE id = ?')
+                    .run('pending', attempt, task.id);
+                console.log(`[AutoRetry] ${task.title} — reset to pending (attempt ${attempt})`);
+                broadcastTaskUpdate(taskStmts.get.get(task.id));
+            } catch (err: any) {
+                console.error(`[AutoRetry] Simple retry failed:`, err.message);
+            }
+        }, AUTO_RETRY_DELAY_MS);
+    } else {
+        // Second+ failure: smart retry — spawn diagnostic agent
+        console.log(`[AutoRetry] ${task.title} — scheduling smart retry in ${AUTO_RETRY_DELAY_MS / 1000}s (attempt ${attempt}/${maxRetries})`);
+        setTimeout(() => {
+            try {
+                const current = taskStmts.get.get(task.id) as any;
+                if (!current || current.status !== 'failed') return;
+
+                // Read failure log for diagnostic context
+                let logTail = 'No log file available';
+                if (current.log_file) {
+                    try {
+                        const logContent = fs.readFileSync(current.log_file, 'utf8');
+                        logTail = logContent.length > 3000 ? '...\n' + logContent.slice(-3000) : logContent;
+                    } catch {}
+                }
+
+                // Create diagnostic task
+                const diagId = generateId();
+                const now = new Date().toISOString();
+                const diagTitle = `Diagnose and fix: ${task.title}`;
+                const diagDescription = `A task has failed ${attempt} times and needs diagnosis before retry.
+
+## Failed Task
+**Title:** ${task.title}
+**Description:** ${task.description}
+**Error:** ${errorMessage || 'unknown'}
+
+## Failure Log (tail)
+\`\`\`
+${logTail}
+\`\`\`
+
+## Instructions
+1. Read the failure log above to understand what went wrong
+2. Inspect the project state — check relevant files, configs, dependencies
+3. Take corrective action: fix broken files, install missing deps, resolve config issues
+4. Verify your fix by running the relevant commands (build, lint, test, etc.)
+5. Do NOT attempt to complete the original task — only fix the blocker
+
+**Constraint:** Only fix what caused the failure. Do not refactor, add features, or make unrelated changes.`;
+
+                taskStmts.insert.run(diagId, diagTitle, diagDescription, task.project_path,
+                    (task.priority || 0) + 1, 'sonnet', 50, 'bypass', null, now, null);
+
+                // If the original task belongs to a goal, link the diagnostic too
+                if (task.goal_id) {
+                    db.prepare('UPDATE tasks SET goal_id = ? WHERE id = ?').run(task.goal_id, diagId);
+                }
+
+                // Reset original task to pending, blocked on the diagnostic
+                let existingDeps: string[] = [];
+                try { existingDeps = current.depends_on ? JSON.parse(current.depends_on) : []; } catch {}
+                existingDeps.push(diagId);
+
+                db.prepare('UPDATE tasks SET status = ?, started_at = NULL, completed_at = NULL, error = NULL, retry_count = ?, depends_on = ? WHERE id = ?')
+                    .run('pending', attempt, JSON.stringify(existingDeps), task.id);
+
+                console.log(`[AutoRetry] ${task.title} — diagnostic task ${diagId} created, original blocked until fix completes`);
+                broadcastTaskUpdate(taskStmts.get.get(diagId));
+                broadcastTaskUpdate(taskStmts.get.get(task.id));
+
+                // Update goal progress to reflect new task
+                if (task.goal_id) {
+                    updateGoalProgress(task.goal_id);
+                }
+            } catch (err: any) {
+                console.error(`[AutoRetry] Smart retry failed:`, err.message);
+            }
+        }, AUTO_RETRY_DELAY_MS);
+    }
+}
+
 export async function runNextTask(): Promise<void> {
     if (runningTaskId) return; // Already running a task
 
@@ -1499,6 +1612,11 @@ export async function runNextTask(): Promise<void> {
                 // Record outcome in project memory (once per task)
                 recordTaskOutcome(taskStmts.get.get(task.id));
 
+                // Auto-retry on SDK result failure
+                if (!isSuccess) {
+                    scheduleAutoRetry(task, resultText || msg.subtype || 'SDK result failure');
+                }
+
                 // Commit changes and clean up checkpoint on success
                 // (Must run before updateGoalProgress so summary has commit SHAs)
                 if (isSuccess) {
@@ -1573,52 +1691,8 @@ export async function runNextTask(): Promise<void> {
         }
         recalcProjectCosts(task.project_path);
 
-        // Orchestrator retry logic
-        const retryCount = task.retry_count || 0;
-        const maxRetries = task.max_retries || 3;
-
-        if (retryCount < maxRetries && task.goal_id && orchestrator) {
-            console.log(`[Orchestrator] Analysing failure for retry (attempt ${retryCount + 1}/${maxRetries})...`);
-
-            try {
-                const recovery = await orchestrator.analyseFailure(task, err.message, retryCount + 1);
-
-                if (recovery.shouldRetry) {
-                    const retryId = generateId();
-                    const now = new Date().toISOString();
-                    const retryTitle = `${task.title} (retry ${retryCount + 1})`;
-                    const retryDescription = recovery.adjustedDescription || task.description;
-                    const retryModel = recovery.adjustedModel || task.model;
-
-                    // Create retry task
-                    taskStmts.insertWithGoal.run(
-                        retryId,
-                        retryTitle,
-                        retryDescription,
-                        task.project_path,
-                        task.priority + 1, // Bump priority
-                        retryModel,
-                        task.max_turns,
-                        task.gate_mode,
-                        task.allowed_tools,
-                        now,
-                        task.goal_id,
-                        task.complexity,
-                        task.depends_on,
-                        task.auto_model
-                    );
-
-                    // Update retry metadata
-                    db.prepare('UPDATE tasks SET retry_count = ?, parent_task_id = ? WHERE id = ?')
-                        .run(retryCount + 1, task.id, retryId);
-
-                    console.log(`[Orchestrator] Created retry task: ${retryTitle} (${recovery.reasoning})`);
-                    broadcastTaskUpdate(taskStmts.get.get(retryId));
-                }
-            } catch (retryErr: any) {
-                console.error(`[Orchestrator] Retry analysis failed:`, retryErr.message);
-            }
-        }
+        // Auto-retry on exception failure
+        scheduleAutoRetry(task, err.message);
 
         // Rollback on error
         if (checkpointRef && checkpointType !== 'none') {
