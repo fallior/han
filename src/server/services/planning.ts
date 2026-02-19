@@ -614,8 +614,11 @@ export function updateGoalProgress(goalId: string): void {
     const totalCost = tasks.reduce((sum: number, t: any) => sum + (t.cost_usd || 0), 0);
     const allDone = tasks.every(t => ['done', 'cancelled', 'failed'].includes(t.status));
     const anyFailed = tasks.some(t => t.status === 'failed');
+    const anyDone = tasks.some(t => t.status === 'done');
 
-    const status = allDone ? (anyFailed ? 'failed' : 'done') : 'active';
+    const status = allDone
+      ? (anyFailed ? 'failed' : (anyDone ? 'done' : 'cancelled'))
+      : 'active';
     const completedAt = allDone ? new Date().toISOString() : null;
 
     goalStmts.updateProgress.run(completed, failed, totalCost, status, completedAt, goalId);
