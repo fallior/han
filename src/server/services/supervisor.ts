@@ -292,6 +292,81 @@ function seedProjectMemory(): void {
     }
 }
 
+// ── Phantom goal cleanup ─────────────────────────────────────
+
+/**
+ * Clean up phantom goals that have become stale or stuck.
+ * Returns count of goals fixed.
+ */
+function cleanupPhantomGoals(): number {
+    let fixed = 0;
+    const now = new Date();
+
+    try {
+        // 1. Parent goals where ALL children are terminal (done/failed/cancelled)
+        // These should be marked as failed if still marked 'active'
+        const parentGoals = db.prepare(`
+            SELECT g.id FROM goals g
+            WHERE g.goal_type = 'parent'
+            AND g.status = 'active'
+            AND NOT EXISTS (
+                SELECT 1 FROM goals c
+                WHERE c.parent_goal_id = g.id
+                AND c.status NOT IN ('done', 'failed', 'cancelled')
+            )
+        `).all() as any[];
+
+        for (const g of parentGoals) {
+            goalStmts.updateProgress.run(0, 0, 0, 'failed', now.toISOString(), g.id);
+            console.log(`[Supervisor] Cleaned up phantom parent goal: ${g.id}`);
+            fixed++;
+        }
+
+        // 2. Standalone goals where ALL tasks are terminal AND there are no pending/running tasks
+        // These should be recalculated via updateGoalProgress
+        const staleGoals = db.prepare(`
+            SELECT g.id FROM goals g
+            WHERE g.status = 'active'
+            AND g.goal_type != 'parent'
+            AND EXISTS (SELECT 1 FROM tasks t WHERE t.goal_id = g.id)
+            AND NOT EXISTS (
+                SELECT 1 FROM tasks t
+                WHERE t.goal_id = g.id
+                AND t.status NOT IN ('done', 'failed', 'cancelled')
+            )
+        `).all() as any[];
+
+        for (const g of staleGoals) {
+            updateGoalProgress(g.id);
+            console.log(`[Supervisor] Recalculated phantom goal: ${g.id}`);
+            fixed++;
+        }
+
+        // 3. Goals stuck in 'decomposing' for more than 1 hour
+        const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+        const stuckDecomposing = db.prepare(`
+            SELECT id FROM goals
+            WHERE status = 'decomposing'
+            AND created_at < ?
+        `).all(oneHourAgo) as any[];
+
+        for (const g of stuckDecomposing) {
+            goalStmts.updateStatus.run('failed', g.id);
+            console.log(`[Supervisor] Cleaned up stuck decomposing goal: ${g.id} (timeout)`);
+            fixed++;
+        }
+
+    } catch (err: any) {
+        console.error('[Supervisor] Phantom goal cleanup failed:', err.message);
+    }
+
+    if (fixed > 0) {
+        console.log(`[Supervisor] Phantom goal cleanup: ${fixed} goals cleaned`);
+    }
+
+    return fixed;
+}
+
 // ── Memory loading ───────────────────────────────────────────
 
 /**
@@ -831,6 +906,9 @@ export async function runSupervisorCycle(): Promise<{
     runningCycleAbort = abort;
 
     try {
+        // Clean up phantom goals before building state snapshot
+        const cleanupCount = cleanupPhantomGoals();
+
         // Load context
         const memoryContent = loadMemoryBank();
         const stateSnapshot = buildStateSnapshot();
