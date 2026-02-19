@@ -188,11 +188,27 @@
                     } else if (data.type === 'digest_ready') {
                         if (dashOverlay.classList.contains('visible') && document.getElementById('dashDigests').classList.contains('active')) loadDigests();
                     } else if (data.type === 'supervisor_cycle' || data.type === 'supervisor_action') {
-                        if (dashOverlay.classList.contains('visible') && document.getElementById('dashSupervisor').classList.contains('active')) loadSupervisor();
+                        if (dashOverlay.classList.contains('visible') && document.getElementById('dashCommand')?.classList.contains('active')) {
+                            const feedPanel = document.getElementById('cmdFeed');
+                            const supPanel = document.getElementById('cmdSupervisor');
+                            if (feedPanel?.classList.contains('active')) loadActivityFeed();
+                            if (supPanel?.classList.contains('active')) loadSupervisor();
+                        }
+                    } else if (data.type === 'strategic_proposal') {
+                        if (dashOverlay.classList.contains('visible') && document.getElementById('dashCommand')?.classList.contains('active')) {
+                            const propPanel = document.getElementById('cmdProposals');
+                            const feedPanel = document.getElementById('cmdFeed');
+                            if (propPanel?.classList.contains('active')) loadStrategicProposals();
+                            if (feedPanel?.classList.contains('active')) loadActivityFeed();
+                        }
                     }
                     // Refresh dashboard analytics on task/goal updates if visible
-                    if ((data.type === 'task_update' || data.type === 'goal_update') && dashOverlay.classList.contains('visible') && document.getElementById('dashAnalytics').classList.contains('active')) {
-                        loadAnalytics();
+                    if ((data.type === 'task_update' || data.type === 'goal_update') && dashOverlay.classList.contains('visible')) {
+                        if (document.getElementById('dashAnalytics')?.classList.contains('active')) loadAnalytics();
+                        if (document.getElementById('dashCommand')?.classList.contains('active')) {
+                            if (document.getElementById('cmdFeed')?.classList.contains('active')) loadActivityFeed();
+                            if (document.getElementById('cmdTree')?.classList.contains('active')) loadProjectTree();
+                        }
                     }
                 } catch (e) {
                     console.error('WS parse error:', e);
@@ -2143,7 +2159,7 @@
             else if (tab === 'digests') { document.getElementById('dashDigests').classList.add('active'); loadDigests(); }
             else if (tab === 'reports') { document.getElementById('dashReports').classList.add('active'); loadReports(); }
             else if (tab === 'health') { document.getElementById('dashHealth').classList.add('active'); loadHealth(); }
-            else if (tab === 'supervisor') { document.getElementById('dashSupervisor').classList.add('active'); loadSupervisor(); }
+            else if (tab === 'command') { document.getElementById('dashCommand').classList.add('active'); switchCommandSubTab('feed'); }
         }
 
         dashBtn.addEventListener('click', () => {
@@ -2467,6 +2483,271 @@
                 else showToast(data.error || 'Failed', true);
             } catch { showToast('Connection error', true); }
         }
+
+        // ── Command Centre ─────────────────────────────────────
+
+        function switchCommandSubTab(tab: string) {
+            const container = document.getElementById('dashCommand');
+            if (!container) return;
+            container.querySelectorAll('[data-cmd-tab]').forEach(t => {
+                (t as HTMLElement).classList.toggle('active', (t as HTMLElement).dataset.cmdTab === tab);
+            });
+            container.querySelectorAll('.cmd-panel').forEach(p => p.classList.remove('active'));
+            if (tab === 'feed') { document.getElementById('cmdFeed')?.classList.add('active'); loadActivityFeed(); }
+            else if (tab === 'tree') { document.getElementById('cmdTree')?.classList.add('active'); loadProjectTree(); }
+            else if (tab === 'proposals') { document.getElementById('cmdProposals')?.classList.add('active'); loadStrategicProposals(); }
+            else if (tab === 'supervisor') { document.getElementById('cmdSupervisor')?.classList.add('active'); loadSupervisor(); }
+        }
+
+        // Sub-tab click handler
+        document.getElementById('commandSubTabs')?.addEventListener('click', (e) => {
+            const tab = (e.target as HTMLElement).closest('[data-cmd-tab]') as HTMLElement;
+            if (tab) switchCommandSubTab(tab.dataset.cmdTab);
+        });
+
+        // ── Activity Feed ──
+
+        async function loadActivityFeed() {
+            const el = document.getElementById('activityFeedContent');
+            try {
+                const res = await fetch(`${API_BASE}/api/supervisor/activity?limit=50`);
+                const data = await res.json();
+                if (data.success) renderActivityFeed(data.events || []);
+                else el.innerHTML = `<p style="color:var(--red);font-size:12px;">Failed to load feed</p>`;
+            } catch { el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error</p>`; }
+        }
+
+        function renderActivityFeed(events: any[]) {
+            const el = document.getElementById('activityFeedContent');
+            if (events.length === 0) {
+                el.innerHTML = `<p style="color:var(--text-dim);font-size:12px;">No activity yet. Supervisor cycles will appear here.</p>`;
+                return;
+            }
+
+            let html = '';
+            for (const ev of events) {
+                const dotClass = ev.status === 'failed' ? 'failed' :
+                    ev.type === 'supervisor_cycle' ? 'supervisor' :
+                    ev.type === 'goal' ? 'goal' :
+                    ev.type === 'proposal' ? 'proposal' : 'task';
+
+                const time = ev.timestamp ? timeSince(ev.timestamp) : '';
+                const project = ev.project ? `<span style="color:var(--cyan);">${escapeHtml(ev.project)}</span> · ` : '';
+                const statusLabel = ev.status ? `<span class="tree-task-status ${ev.status}">${ev.status}</span>` : '';
+
+                let detailHtml = '';
+                if (ev.detail) {
+                    if (ev.type === 'supervisor_cycle') {
+                        const obs = (ev.detail.observations || []).map(o => `• ${escapeHtml(o)}`).join('\n');
+                        const acts = (ev.detail.actions || []).map(a => `→ ${escapeHtml(a)}`).join('\n');
+                        const reasoning = ev.detail.reasoning ? `\nReasoning: ${escapeHtml(ev.detail.reasoning.slice(0, 300))}` : '';
+                        detailHtml = obs + (acts ? '\n' + acts : '') + reasoning;
+                    } else if (ev.type === 'task') {
+                        const parts = [];
+                        if (ev.detail.model) parts.push(`Model: ${ev.detail.model}`);
+                        if (ev.detail.cost_usd) parts.push(`Cost: $${ev.detail.cost_usd.toFixed(4)}`);
+                        if (ev.detail.turns) parts.push(`Turns: ${ev.detail.turns}`);
+                        if (ev.detail.error) parts.push(`Error: ${escapeHtml(ev.detail.error.slice(0, 200))}`);
+                        detailHtml = parts.join('\n');
+                    } else if (ev.type === 'goal') {
+                        detailHtml = `Tasks: ${ev.detail.tasks_completed || 0}/${ev.detail.task_count || 0} done, ${ev.detail.tasks_failed || 0} failed`;
+                        if (ev.detail.total_cost_usd) detailHtml += `\nCost: $${ev.detail.total_cost_usd.toFixed(4)}`;
+                    } else if (ev.type === 'proposal') {
+                        detailHtml = escapeHtml(ev.detail.description || '');
+                        if (ev.detail.supervisor_reasoning) detailHtml += `\n\nReasoning: ${escapeHtml(ev.detail.supervisor_reasoning)}`;
+                    }
+                }
+
+                html += `<div class="feed-event" onclick="this.classList.toggle('expanded')">
+                    <div class="feed-dot ${dotClass}"></div>
+                    <div class="feed-body">
+                        <div class="feed-title">${escapeHtml(ev.title || '')}</div>
+                        <div class="feed-meta">${project}${statusLabel} · ${time}${ev.detail?.cost_usd ? ` · $${ev.detail.cost_usd.toFixed(4)}` : ''}</div>
+                        ${detailHtml ? `<div class="feed-detail">${detailHtml}</div>` : ''}
+                    </div>
+                </div>`;
+            }
+
+            el.innerHTML = html;
+        }
+
+        // ── Project Tree ──
+
+        async function loadProjectTree() {
+            const el = document.getElementById('projectTreeContent');
+            try {
+                const [ecosystemRes, goalsRes] = await Promise.all([
+                    fetch(`${API_BASE}/api/ecosystem`),
+                    fetch(`${API_BASE}/api/goals?view=active`),
+                ]);
+                const ecosystem = await ecosystemRes.json();
+                const goalsData = await goalsRes.json();
+                if (ecosystem.success) {
+                    renderProjectTree(ecosystem.projects || [], goalsData.goals || []);
+                } else {
+                    el.innerHTML = `<p style="color:var(--red);font-size:12px;">Failed to load projects</p>`;
+                }
+            } catch { el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error</p>`; }
+        }
+
+        function renderProjectTree(projects: any[], goals: any[]) {
+            const el = document.getElementById('projectTreeContent');
+            if (projects.length === 0) {
+                el.innerHTML = `<p style="color:var(--text-dim);font-size:12px;">No projects registered.</p>`;
+                return;
+            }
+
+            // Group goals and tasks by project path
+            const goalsByProject: Record<string, any[]> = {};
+            for (const g of goals) {
+                const key = g.project_path || '';
+                if (!goalsByProject[key]) goalsByProject[key] = [];
+                goalsByProject[key].push(g);
+            }
+
+            let html = '';
+            for (const p of projects) {
+                const projectGoals = goalsByProject[p.path] || [];
+                const hasActivity = projectGoals.some(g => g.status === 'active' || g.status === 'decomposing');
+                const dotClass = hasActivity ? 'working' : (projectGoals.length > 0 ? 'active' : 'idle');
+
+                let childrenHtml = '';
+                if (projectGoals.length > 0) {
+                    for (const g of projectGoals) {
+                        const completed = g.tasks_completed || 0;
+                        const total = g.task_count || 0;
+                        const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+                        const desc = (g.description || '').slice(0, 60);
+
+                        let taskRows = '';
+                        if (g.tasks && g.tasks.length > 0) {
+                            for (const t of g.tasks) {
+                                taskRows += `<div class="tree-task">
+                                    <span class="tree-task-status ${t.status}">${t.status}</span>
+                                    ${escapeHtml(t.title || '')}
+                                </div>`;
+                            }
+                        }
+
+                        childrenHtml += `<div class="tree-goal">
+                            <div class="tree-goal-title">${escapeHtml(desc)}</div>
+                            <div class="tree-progress">${g.status} · ${completed}/${total} tasks · ${pct}%${g.total_cost_usd ? ` · $${g.total_cost_usd.toFixed(4)}` : ''}</div>
+                            ${taskRows}
+                        </div>`;
+                    }
+                } else {
+                    childrenHtml = `<div style="color:var(--text-muted);font-size:11px;">No active goals</div>`;
+                }
+
+                html += `<div class="tree-project" onclick="this.classList.toggle('expanded')">
+                    <div class="tree-header">
+                        <div class="tree-status-dot ${dotClass}"></div>
+                        <span class="tree-name">${escapeHtml(p.name)}</span>
+                        <span style="color:var(--text-muted);font-size:10px;">${p.lifecycle || 'active'}</span>
+                        <span class="tree-chevron">▶</span>
+                    </div>
+                    <div class="tree-children" onclick="event.stopPropagation()">
+                        ${childrenHtml}
+                    </div>
+                </div>`;
+            }
+
+            el.innerHTML = html;
+        }
+
+        // ── Strategic Proposals ──
+
+        async function loadStrategicProposals() {
+            const el = document.getElementById('proposalsContent');
+            try {
+                const res = await fetch(`${API_BASE}/api/supervisor/proposals`);
+                const data = await res.json();
+                if (data.success) renderStrategicProposals(data.proposals || []);
+                else el.innerHTML = `<p style="color:var(--red);font-size:12px;">Failed to load proposals</p>`;
+            } catch { el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error</p>`; }
+        }
+
+        function renderStrategicProposals(proposals: any[]) {
+            const el = document.getElementById('proposalsContent');
+            const pending = proposals.filter(p => p.status === 'pending');
+            const resolved = proposals.filter(p => p.status !== 'pending');
+
+            let html = '';
+
+            if (pending.length === 0) {
+                html += `<p style="color:var(--text-dim);font-size:12px;margin-bottom:12px;">No pending proposals. The supervisor will propose ideas as it discovers opportunities.</p>`;
+            } else {
+                html += `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Pending (${pending.length})</div>`;
+                for (const p of pending) {
+                    const project = p.project_path?.split('/').pop() || '';
+                    html += `<div class="proposal-card pending">
+                        <div class="proposal-header">
+                            <span class="proposal-title">${escapeHtml(p.title)}</span>
+                            <span class="proposal-badge ${p.category || 'improvement'}">${p.category || 'improvement'}</span>
+                        </div>
+                        <div class="proposal-body">${escapeHtml(p.description || '')}</div>
+                        <div class="proposal-meta">
+                            ${project ? `Project: ${escapeHtml(project)} · ` : ''}Effort: ${p.estimated_effort || 'medium'} · ${p.created_at ? timeSince(p.created_at) : ''}
+                        </div>
+                        ${p.supervisor_reasoning ? `<div class="proposal-meta" style="font-style:italic;">"${escapeHtml(p.supervisor_reasoning.slice(0, 200))}"</div>` : ''}
+                        <div class="proposal-actions">
+                            <button class="proposal-btn approve" onclick="approveStrategicProposal('${p.id}')">Approve</button>
+                            <button class="proposal-btn dismiss" onclick="dismissStrategicProposal('${p.id}')">Dismiss</button>
+                        </div>
+                    </div>`;
+                }
+            }
+
+            if (resolved.length > 0) {
+                html += `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin:16px 0 8px;">History (${resolved.length})</div>`;
+                for (const p of resolved) {
+                    html += `<div class="proposal-card ${p.status}">
+                        <div class="proposal-header">
+                            <span class="proposal-title">${escapeHtml(p.title)}</span>
+                            <span class="proposal-badge ${p.category || 'improvement'}">${p.category || 'improvement'}</span>
+                        </div>
+                        <div class="proposal-meta">${p.status} · ${p.reviewed_at ? timeSince(p.reviewed_at) : ''}${p.goal_id ? ` · Goal: ${p.goal_id}` : ''}</div>
+                        ${p.reviewer_notes ? `<div class="proposal-meta">${escapeHtml(p.reviewer_notes)}</div>` : ''}
+                    </div>`;
+                }
+            }
+
+            el.innerHTML = html;
+        }
+
+        // Global window functions for proposals
+        (window as any).approveStrategicProposal = async function(id: string) {
+            try {
+                const res = await fetch(`${API_BASE}/api/supervisor/proposals/${id}/approve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Proposal approved — goal created');
+                    loadStrategicProposals();
+                    loadActivityFeed();
+                } else {
+                    showToast(data.error || 'Failed', true);
+                }
+            } catch { showToast('Connection error', true); }
+        };
+
+        (window as any).dismissStrategicProposal = async function(id: string) {
+            try {
+                const res = await fetch(`${API_BASE}/api/supervisor/proposals/${id}/dismiss`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Proposal dismissed');
+                    loadStrategicProposals();
+                } else {
+                    showToast(data.error || 'Failed', true);
+                }
+            } catch { showToast('Connection error', true); }
+        };
 
         // ── Supervisor tab ────────────────────────────────────
 

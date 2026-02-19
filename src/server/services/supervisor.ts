@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import {
     db, CLAUDE_REMOTE_DIR, supervisorStmts, taskStmts, goalStmts,
-    memoryStmts, portfolioStmts, proposalStmts
+    memoryStmts, portfolioStmts, proposalStmts, strategicProposalStmts
 } from '../db';
 import { generateId, loadConfig, createGoal } from './planning';
 
@@ -23,7 +23,7 @@ type BroadcastFn = (message: Record<string, unknown>) => void;
 
 interface SupervisorAction {
     type: 'create_goal' | 'adjust_priority' | 'update_memory' |
-          'send_notification' | 'cancel_task' | 'explore_project' | 'no_action';
+          'send_notification' | 'cancel_task' | 'explore_project' | 'propose_idea' | 'no_action';
     goal_description?: string;
     project_path?: string;
     planning_model?: string;
@@ -35,6 +35,10 @@ interface SupervisorAction {
     priority?: 'low' | 'default' | 'high';
     reason?: string;
     exploration_focus?: string;
+    idea_title?: string;
+    idea_description?: string;
+    idea_category?: 'improvement' | 'opportunity' | 'risk' | 'strategic';
+    estimated_effort?: 'small' | 'medium' | 'large';
 }
 
 interface SupervisorOutput {
@@ -472,6 +476,7 @@ they oversee at a deep level. That understanding is what makes your decisions ex
 - send_notification: Alert Darron via push notification
 - cancel_task: Cancel a stuck or misguided task
 - explore_project: Use your Read/Glob/Grep/Bash tools to explore a project codebase
+- propose_idea: Suggest a strategic idea for Darron to review (NOT auto-executed — requires human approval)
 - no_action: Explicitly decide to do nothing (with reasoning)
 
 ## When Active (tasks running/pending)
@@ -515,6 +520,17 @@ If documentation is significantly stale (multiple commits since last doc update)
 goal: "Update project documentation to reflect current state" with a description noting
 what's out of date. Use sonnet as the planning model — docs don't need opus.
 
+## Strategic Proposals (propose_idea)
+Use propose_idea when you spot opportunities that go beyond routine maintenance:
+- **improvement**: Architectural improvements, performance optimisations, code quality upgrades
+- **opportunity**: New features, integrations, or capabilities that would add value
+- **risk**: Security concerns, scalability issues, tech debt reaching critical mass
+- **strategic**: Cross-project synergies, ecosystem-level improvements, vision-aligned ideas
+
+Proposals are NOT auto-executed — they go to Darron's Command Centre for review. This is the
+right channel for ambitious or creative ideas that need human judgement. Use create_goal for
+routine work you're confident about; use propose_idea for bigger ideas that deserve discussion.
+
 ## Memory Management
 - active-context.md: Update EVERY cycle with current state
 - patterns.md: Update when you discover something reusable across projects
@@ -553,7 +569,7 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
             items: {
                 type: 'object',
                 properties: {
-                    type: { type: 'string', enum: ['create_goal', 'adjust_priority', 'update_memory', 'send_notification', 'cancel_task', 'explore_project', 'no_action'] },
+                    type: { type: 'string', enum: ['create_goal', 'adjust_priority', 'update_memory', 'send_notification', 'cancel_task', 'explore_project', 'propose_idea', 'no_action'] },
                     goal_description: { type: 'string', description: 'For create_goal: the goal description' },
                     project_path: { type: 'string', description: 'For create_goal: absolute project path' },
                     planning_model: { type: 'string', enum: ['haiku', 'sonnet', 'opus'], description: 'For create_goal: planning model' },
@@ -565,6 +581,10 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
                     priority: { type: 'string', enum: ['low', 'default', 'high'], description: 'For send_notification: notification priority' },
                     reason: { type: 'string', description: 'For cancel_task/no_action: reason' },
                     exploration_focus: { type: 'string', description: 'For explore_project: what to focus on (e.g. "architecture", "tech stack", "recent changes")' },
+                    idea_title: { type: 'string', description: 'For propose_idea: concise title for the proposal' },
+                    idea_description: { type: 'string', description: 'For propose_idea: detailed description of the idea and its value' },
+                    idea_category: { type: 'string', enum: ['improvement', 'opportunity', 'risk', 'strategic'], description: 'For propose_idea: category of the proposal' },
+                    estimated_effort: { type: 'string', enum: ['small', 'medium', 'large'], description: 'For propose_idea: estimated effort level' },
                 },
                 required: ['type']
             }
@@ -720,6 +740,37 @@ function executeActions(actions: SupervisorAction[], cycleId: string): string[] 
                     summaries.push(`explore_project: ${projectName} (focus: ${focus})`);
                     console.log(`[Supervisor] Explored project: ${projectName} (${focus})`);
                     broadcastFn?.({ type: 'supervisor_action', action: 'explore_project', detail: `${projectName}: ${focus}`, cycleId });
+                    break;
+                }
+
+                case 'propose_idea': {
+                    if (!action.idea_title || !action.idea_description) {
+                        summaries.push(`propose_idea: skipped (missing title or description)`);
+                        break;
+                    }
+                    const proposalId = generateId();
+                    strategicProposalStmts.insert.run(
+                        proposalId,
+                        action.idea_title,
+                        action.idea_description,
+                        action.idea_category || 'improvement',
+                        action.project_path || null,
+                        action.estimated_effort || 'medium',
+                        action.reason || null,
+                        cycleId,
+                        new Date().toISOString()
+                    );
+                    summaries.push(`propose_idea: ${action.idea_title.slice(0, 60)}`);
+                    console.log(`[Supervisor] Proposed idea: ${action.idea_title}`);
+
+                    broadcastFn?.({
+                        type: 'strategic_proposal',
+                        id: proposalId,
+                        title: action.idea_title,
+                        category: action.idea_category || 'improvement',
+                        project_path: action.project_path || null,
+                        cycleId,
+                    });
                     break;
                 }
 

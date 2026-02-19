@@ -1226,6 +1226,165 @@
         html, body {
             background-color: var(--bg-term) !important;
         }
+
+        /* ── Command Centre ──────────────────────────── */
+        .cmd-sub-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+        }
+        .cmd-sub-tab {
+            background: none;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            color: var(--text-dim);
+            font-family: inherit;
+            font-size: 11px;
+            padding: 4px 10px;
+            cursor: pointer;
+        }
+        .cmd-sub-tab.active {
+            color: var(--purple, #b388ff);
+            border-color: var(--purple, #b388ff);
+            background: rgba(179, 136, 255, 0.1);
+        }
+        .cmd-panel { display: none; }
+        .cmd-panel.active { display: block; }
+
+        /* Activity feed events */
+        .feed-event {
+            display: flex;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+        }
+        .feed-event:last-child { border-bottom: none; }
+        .feed-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-top: 4px;
+            flex-shrink: 0;
+        }
+        .feed-dot.supervisor { background: var(--purple, #b388ff); }
+        .feed-dot.goal { background: var(--cyan); }
+        .feed-dot.task { background: var(--green); }
+        .feed-dot.failed { background: var(--red); }
+        .feed-dot.proposal { background: var(--amber, #ffb300); }
+        .feed-body { flex: 1; min-width: 0; }
+        .feed-title { color: var(--text); font-weight: 500; }
+        .feed-meta { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+        .feed-detail {
+            display: none;
+            margin-top: 6px;
+            padding: 6px 8px;
+            background: var(--bg-card, rgba(255,255,255,0.03));
+            border-radius: 4px;
+            font-size: 11px;
+            color: var(--text-dim);
+            white-space: pre-wrap;
+        }
+        .feed-event.expanded .feed-detail { display: block; }
+        .feed-event { cursor: pointer; }
+
+        /* Project tree */
+        .tree-project {
+            margin-bottom: 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .tree-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            cursor: pointer;
+            font-size: 12px;
+            color: var(--text);
+        }
+        .tree-header:hover { background: rgba(255,255,255,0.03); }
+        .tree-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .tree-status-dot.active { background: var(--green); }
+        .tree-status-dot.idle { background: var(--text-dim); }
+        .tree-status-dot.working { background: var(--amber, #ffb300); animation: pulse 1.5s ease-in-out infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .tree-name { font-weight: 500; flex: 1; }
+        .tree-chevron { color: var(--text-dim); font-size: 10px; transition: transform 0.2s; }
+        .tree-project.expanded .tree-chevron { transform: rotate(90deg); }
+        .tree-children {
+            display: none;
+            padding: 0 10px 8px 26px;
+            font-size: 11px;
+        }
+        .tree-project.expanded .tree-children { display: block; }
+        .tree-goal, .tree-task {
+            padding: 4px 0;
+            color: var(--text-dim);
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .tree-goal:last-child, .tree-task:last-child { border-bottom: none; }
+        .tree-goal-title { color: var(--cyan); font-weight: 500; }
+        .tree-task-status { display: inline-block; min-width: 50px; }
+        .tree-task-status.done { color: var(--green); }
+        .tree-task-status.running { color: var(--amber, #ffb300); }
+        .tree-task-status.failed { color: var(--red); }
+        .tree-task-status.pending { color: var(--text-dim); }
+        .tree-progress { color: var(--text-muted); font-size: 10px; }
+
+        /* Strategic proposals */
+        .proposal-card {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+        }
+        .proposal-card.pending { border-left: 3px solid var(--amber, #ffb300); }
+        .proposal-card.approved { border-left: 3px solid var(--green); opacity: 0.7; }
+        .proposal-card.dismissed { border-left: 3px solid var(--text-dim); opacity: 0.5; }
+        .proposal-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .proposal-title { font-size: 13px; font-weight: 500; color: var(--text); flex: 1; }
+        .proposal-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .proposal-badge.improvement { background: rgba(57, 208, 216, 0.15); color: var(--cyan); }
+        .proposal-badge.opportunity { background: rgba(76, 175, 80, 0.15); color: var(--green); }
+        .proposal-badge.risk { background: rgba(244, 67, 54, 0.15); color: var(--red); }
+        .proposal-badge.strategic { background: rgba(179, 136, 255, 0.15); color: var(--purple, #b388ff); }
+        .proposal-body { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+        .proposal-meta { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+        .proposal-actions { display: flex; gap: 8px; }
+        .proposal-btn {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-dim);
+            font-family: inherit;
+            font-size: 11px;
+            padding: 4px 12px;
+            cursor: pointer;
+        }
+        .proposal-btn.approve { color: var(--green); border-color: var(--green); }
+        .proposal-btn.approve:hover { background: rgba(76, 175, 80, 0.15); }
+        .proposal-btn.dismiss { color: var(--text-muted); }
+        .proposal-btn.dismiss:hover { background: rgba(255,255,255,0.05); }
     </style>
 </head>
 <body>
@@ -1502,7 +1661,7 @@
                 <button class="bridge-tab" data-dash-tab="digests">Digests</button>
                 <button class="bridge-tab" data-dash-tab="reports">Reports</button>
                 <button class="bridge-tab" data-dash-tab="health">Health</button>
-                <button class="bridge-tab" data-dash-tab="supervisor">Supervisor</button>
+                <button class="bridge-tab" data-dash-tab="command">Command</button>
             </div>
             <button class="bridge-close" id="dashClose">✕</button>
         </div>
@@ -1523,15 +1682,32 @@
             <div class="bridge-section" id="dashHealth">
                 <div id="dashHealthContent"><p style="color:var(--text-dim);font-size:12px;">Loading health...</p></div>
             </div>
-            <!-- Supervisor -->
-            <div class="bridge-section" id="dashSupervisor">
-                <div id="dashSupervisorContent"><p style="color:var(--text-dim);font-size:12px;">Loading supervisor...</p></div>
+            <!-- Command Centre -->
+            <div class="bridge-section" id="dashCommand">
+                <div class="cmd-sub-tabs" id="commandSubTabs">
+                    <button class="cmd-sub-tab active" data-cmd-tab="feed">Feed</button>
+                    <button class="cmd-sub-tab" data-cmd-tab="tree">Tree</button>
+                    <button class="cmd-sub-tab" data-cmd-tab="proposals">Proposals</button>
+                    <button class="cmd-sub-tab" data-cmd-tab="supervisor">Supervisor</button>
+                </div>
+                <div class="cmd-panel active" id="cmdFeed">
+                    <div id="activityFeedContent"><p style="color:var(--text-dim);font-size:12px;">Loading activity feed...</p></div>
+                </div>
+                <div class="cmd-panel" id="cmdTree">
+                    <div id="projectTreeContent"><p style="color:var(--text-dim);font-size:12px;">Loading project tree...</p></div>
+                </div>
+                <div class="cmd-panel" id="cmdProposals">
+                    <div id="proposalsContent"><p style="color:var(--text-dim);font-size:12px;">Loading proposals...</p></div>
+                </div>
+                <div class="cmd-panel" id="cmdSupervisor">
+                    <div id="dashSupervisorContent"><p style="color:var(--text-dim);font-size:12px;">Loading supervisor...</p></div>
+                </div>
             </div>
         </div>
     </div>
 
     <datalist id="projectPaths"></datalist>
 
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=4"></script>
 </body>
 </html>

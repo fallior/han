@@ -272,6 +272,22 @@ db.exec(`CREATE TABLE IF NOT EXISTS supervisor_cycles (
     cycle_number INTEGER
 )`);
 
+db.exec(`CREATE TABLE IF NOT EXISTS supervisor_proposals (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'improvement',
+    project_path TEXT,
+    estimated_effort TEXT DEFAULT 'medium',
+    supervisor_reasoning TEXT,
+    cycle_id TEXT,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    reviewed_at TEXT,
+    reviewer_notes TEXT,
+    goal_id TEXT
+)`);
+
 // Level 9 Phase 4 maintenance_enabled column on projects
 const projCols9p4 = (db.pragma("table_info('projects')") as any[]).map((col: any) => col.name);
 if (!projCols9p4.includes('maintenance_enabled')) {
@@ -395,6 +411,15 @@ export const supervisorStmts = {
     getRecent: db.prepare('SELECT * FROM supervisor_cycles ORDER BY started_at DESC LIMIT ?') as any,
     getCostSince: db.prepare('SELECT COALESCE(SUM(cost_usd), 0) as total FROM supervisor_cycles WHERE started_at > ?') as any,
     getNextCycleNumber: db.prepare('SELECT COALESCE(MAX(cycle_number), 0) + 1 as next FROM supervisor_cycles') as any,
+};
+
+export const strategicProposalStmts = {
+    insert: db.prepare('INSERT INTO supervisor_proposals (id, title, description, category, project_path, estimated_effort, supervisor_reasoning, cycle_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)') as any,
+    list: db.prepare('SELECT * FROM supervisor_proposals ORDER BY created_at DESC') as any,
+    listByStatus: db.prepare('SELECT * FROM supervisor_proposals WHERE status = ? ORDER BY created_at DESC') as any,
+    get: db.prepare('SELECT * FROM supervisor_proposals WHERE id = ?') as any,
+    updateStatus: db.prepare('UPDATE supervisor_proposals SET status = ?, reviewed_at = ?, reviewer_notes = ?, goal_id = ? WHERE id = ?') as any,
+    countPending: db.prepare('SELECT COUNT(*) as count FROM supervisor_proposals WHERE status = ?') as any,
 };
 
 // ── Helper functions ────────────────────────────────────────
