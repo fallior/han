@@ -502,6 +502,19 @@ Prioritise projects with SHALLOW or BASIC knowledge depth. Your goal is to event
 have DEEP knowledge of every project — the kind of understanding where you could
 confidently direct any task on any project because you truly know the codebase.
 
+## Documentation Audit (during exploration)
+When exploring a project, also check documentation health. Good code without documentation
+is invisible to humans and future Claude Code sessions. Check:
+- Does claude-context/CURRENT_STATUS.md reflect the latest git commits? Compare dates.
+- Does claude-context/ARCHITECTURE.md match the actual directory structure (\`ls src/\`)?
+- Are there recent autonomous goals with no session notes in claude-context/session-notes/?
+- Are there undocumented decisions (library choices, patterns) missing from DECISIONS.md?
+- Is CLAUDE.md's "Quick Context" stage accurate?
+
+If documentation is significantly stale (multiple commits since last doc update), create a
+goal: "Update project documentation to reflect current state" with a description noting
+what's out of date. Use sonnet as the planning model — docs don't need opus.
+
 ## Memory Management
 - active-context.md: Update EVERY cycle with current state
 - patterns.md: Update when you discover something reusable across projects

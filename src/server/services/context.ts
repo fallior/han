@@ -277,7 +277,7 @@ export function getEcosystemSummary(): string {
 /**
  * Build full context string for an autonomous task.
  */
-export function buildTaskContext(projectPath: string, goalContext?: string): string {
+export function buildTaskContext(projectPath: string, goalContext?: string, taskTitle?: string): string {
     const parts: string[] = [];
 
     parts.push(`## Autonomous Agent Context
@@ -329,6 +329,31 @@ You are an autonomous agent in Darron's development ecosystem.
     if (ecosystem) parts.push(`\n## Development Ecosystem\n\nSister projects in this ecosystem:\n${ecosystem}\n\nNote: Tasks can depend on task IDs from any project/goal via \`depends_on\`. Port numbers shown above are allocated centrally — avoid conflicts when configuring services.`);
 
     if (goalContext) parts.push(`\n## Goal Context\n\nThis task is part of a larger goal:\n${goalContext.slice(0, 1000)}`);
+
+    // DocAssist: inject documentation-specific instructions for docs tasks
+    if (taskTitle && taskTitle.toLowerCase().startsWith('docs:')) {
+        parts.push(`\n## Documentation Task Instructions
+
+You are updating project documentation to reflect work that was just completed.
+
+**Critical rules:**
+- Read ALL existing claude-context/ files before updating
+- Preserve existing style and conventions — append, don't replace
+- Use British English throughout
+- Record decisions with full ADR format (see DECISIONS.md for examples)
+- Create session notes with author "Claude (autonomous)"
+- Verify ARCHITECTURE.md reflects actual code structure, not planned structure
+- Check git log to understand what was actually built
+
+**Priority order:**
+1. CURRENT_STATUS.md (always update)
+2. Session note in claude-context/session-notes/ (always create)
+3. DECISIONS.md (if significant choices were made)
+4. ARCHITECTURE.md (if structure changed)
+5. CLAUDE.md (if stage or stack changed)
+
+See docs/docassist.md for the complete protocol.`);
+    }
 
     parts.push(`\n## Knowledge Capture
 

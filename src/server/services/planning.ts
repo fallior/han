@@ -173,6 +173,60 @@ export function sendDigestPush(summary: string): void {
     } catch {}
 }
 
+// ── DocAssist: documentation task description ───────────────────
+
+/**
+ * Build the description for the mandatory documentation task appended to every goal.
+ * See docs/docassist.md section 3.1 for the full protocol.
+ */
+function buildDocTaskDescription(goalDescription: string, taskTitles: string[]): string {
+    const taskList = taskTitles.map(t => `- ${t}`).join('\n');
+    return `Update project documentation to reflect the work completed in this goal.
+
+## Goal That Was Completed
+${goalDescription}
+
+## Tasks That Were Completed
+${taskList}
+
+## Files to Review and Update
+
+1. **claude-context/CURRENT_STATUS.md**
+   - Update "Current Stage" to reflect new progress
+   - Add entries to "Recent Changes" with today's date
+   - Update "What's Working" with newly functional features
+   - Move completed items in "Next Actions" to done
+   - Add new next actions discovered during implementation
+   - Update "Known Issues" if any were found or resolved
+
+2. **claude-context/ARCHITECTURE.md**
+   - Update system diagrams if components were added or changed
+   - Update directory structure if new files/directories were created
+   - Update API endpoints if routes were added or modified
+   - Update data models if types/interfaces changed
+   - Document new patterns introduced during implementation
+
+3. **claude-context/DECISIONS.md**
+   - Add DEC-XXX entries for every significant choice made during this goal
+   - Include: Context, Options Considered (with pros/cons), Decision, Consequences
+   - Significant choices include: library selections, architectural patterns,
+     API design choices, data model decisions, trade-offs made
+
+4. **claude-context/session-notes/YYYY-MM-DD-autonomous-[topic].md**
+   - Create a session note summarising the goal's work
+   - Include: Summary, What Was Built, Key Decisions, Code Changes, Next Steps
+   - Author should be "Claude (autonomous)" to distinguish from human sessions
+
+5. **CLAUDE.md**
+   - Update "Quick Context" if stage or stack changed
+   - Update "Key Commands" if new scripts were added
+   - Update "Project Structure" if directory layout changed
+
+Read the existing content of each file before updating. Preserve existing style and
+conventions. Use British English throughout. Do not remove existing content unless it
+is factually incorrect — append and update instead.`;
+}
+
 // ── Planning concurrency control ─────────────────────────────
 
 /**
@@ -472,6 +526,33 @@ export function createGoal(
                 broadcastTaskUpdate(taskStmts.get.get(taskId));
             }
 
+            // DocAssist: append mandatory documentation task (depends on all other tasks)
+            const allTaskIds = subtasks.map((s: any) => titleToId[s.title]).filter(Boolean);
+            if (allTaskIds.length > 0) {
+                const docTaskId = generateId();
+                const docDescription = buildDocTaskDescription(description, subtasks.map((s: any) => s.title));
+
+                taskStmts.insertWithGoal.run(
+                    docTaskId,
+                    `docs: Update project documentation for goal`,
+                    docDescription,
+                    projectPath,
+                    1,           // lowest priority (runs last via depends_on)
+                    'sonnet',    // documentation doesn't need opus
+                    100,         // max turns
+                    'bypass',
+                    null,
+                    now,
+                    goalId,
+                    null,
+                    JSON.stringify(allTaskIds),  // depends on ALL other tasks
+                    1
+                );
+
+                broadcastTaskUpdate(taskStmts.get.get(docTaskId));
+                console.log(`[Goal ${goalId}] DocAssist: appended documentation task ${docTaskId}`);
+            }
+
             const decomposition = {
                 subtasks: planResult.subtasks,
                 reasoning: planResult.reasoning,
@@ -483,7 +564,7 @@ export function createGoal(
 
             goalStmts.updateDecomposition.run(
                 JSON.stringify(decomposition),
-                subtasks.length,
+                subtasks.length + 1,  // +1 for the documentation task
                 autoExecute ? 'active' : 'pending',
                 goalId
             );
@@ -1631,7 +1712,7 @@ async function executeTask(task: any, isRemediation: boolean): Promise<void> {
             const goal = goalStmts.get.get(task.goal_id) as any;
             if (goal) goalContext = `Goal: ${goal.description}`;
         }
-        const taskContext = buildTaskContext(task.project_path, goalContext || undefined);
+        const taskContext = buildTaskContext(task.project_path, goalContext || undefined, task.title);
         console.log(`[Task] Context injected: ${taskContext.length} chars (~${Math.ceil(taskContext.length / 4)} tokens)`);
 
         const taskPrompt = task.description;
