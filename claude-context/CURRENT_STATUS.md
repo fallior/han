@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-18 (Session 28) by Darron (via Claude)
+> Last updated: 2026-02-20 (Autonomous) by Claude
 
 ## Current Stage
 
@@ -29,6 +29,29 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-20 — Claude (autonomous) — Phantom Goal Cleanup
+- **Phantom goal cleanup system** (`8cb37ec`, `95a5c3b`):
+  - `cleanupPhantomGoals()` runs at start of every supervisor cycle (before Agent SDK call)
+  - Three cleanup strategies: parent goals with all children terminal → failed; standalone goals with all tasks terminal → recalculate; goals stuck in decomposing >1hr → failed
+  - Returns count of goals cleaned (logged)
+  - Prevents accumulation of stale goals, keeps supervisor observations accurate
+- **All-cancelled goal state fix** (`cc10f75`, `181413e`):
+  - Root cause: `updateGoalProgress()` treated all-cancelled goals as 'done' instead of 'cancelled'
+  - Fixed detection logic in `planning.ts:updateGoalProgress()`
+  - All-cancelled goals now correctly marked as 'cancelled'
+- **Force-delete API** (`2c5f634`, `94a4711`):
+  - `DELETE /api/goals/:id?force=true` allows deletion of active/decomposing goals
+  - Enables manual cleanup when automated cleanup isn't suitable
+- **Supervisor frequency defence** (`d6809ec`, `5fc470f`):
+  - `getNextCycleDelay()` excludes phantom goals from frequency calculation
+  - Only counts goals with actual pending/running tasks or parent goals
+  - Prevents phantom goals from keeping supervisor in "very active" mode
+- **Supervisor memory cleanup** (`5da5ec3`):
+  - Removed references to phantom goals from active-context.md
+- **Direct DB cleanup** (`97719ce`):
+  - Manually marked 85 phantom maintenance goals as failed
+  - Cleared immediate blockage to unblock supervisor
 
 ### 2026-02-18 — Darron (via Claude) — Session 28
 - **Escalating retry ladder** (`441d2fc`):
@@ -463,6 +486,10 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Goal view filtering (active/archived/all) with project grouping
 - ✅ Dashboard UI (analytics, digests, reports, health tabs)
 - ✅ Manual retry endpoint with optional diagnostic agent
+- ✅ Automated phantom goal cleanup in supervisor cycle
+- ✅ All-cancelled goal state detection (correctly marks as 'cancelled' not 'done')
+- ✅ Force-delete API for manual goal cleanup
+- ✅ Supervisor frequency calculation excludes phantom goals
 
 ## Next Actions
 
@@ -500,6 +527,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [2026-02-20-autonomous-phantom-goal-cleanup.md](session-notes/2026-02-20-autonomous-phantom-goal-cleanup.md) — Phantom goal cleanup system
 - [session_2026-02-18_08-30-00.md](../_logs/session_2026-02-18_08-30-00.md) — Escalating retries, 3 pipelines, opus defaults, goal filtering
 - [session_2026-02-17_20-37-25.md](../_logs/session_2026-02-17_20-37-25.md) — Dashboard UI
 - [session_2026-02-17_16-03-47.md](../_logs/session_2026-02-17_16-03-47.md) — TypeScript migration + cleanup

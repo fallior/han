@@ -44,6 +44,8 @@ When you make a significant technical or design decision:
 | DEC-012 | Tool Scoping Storage (JSON in SQLite) | Accepted | 2026-02-15 |
 | DEC-013 | Terminal Rendering — Append-only buffer with client-side diff | **Settled** | 2026-02-15 |
 | DEC-014 | Scroll Behaviour — User controls scroll position | **Settled** | 2026-02-15 |
+| DEC-015 | Auto-commit on Task Success | Accepted | 2026-02-16 |
+| DEC-016 | Automated Phantom Goal Cleanup in Supervisor Cycle | Accepted | 2026-02-20 |
 
 ---
 
@@ -753,6 +755,118 @@ This preserves the checkpoint/rollback system for failures while ensuring succes
 - `git log` shows a clear trail of autonomous work with task metadata
 - Semantic prefixes make automator commits consistent with human conventions
 - **Known limitation:** If the automator runs a task in a project with pre-existing uncommitted work (from a human session), `git add -A` will capture that work in the task's commit. Mitigation: don't run automator tasks against projects you're actively editing.
+
+---
+
+### DEC-016: Automated Phantom Goal Cleanup in Supervisor Cycle
+
+**Date**: 2026-02-20
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Goals were accumulating in 'active' state with no pending/running tasks, causing the supervisor to report phantom goals and waste cycles checking goals that had no actual work. Three failure modes identified:
+
+1. Goals where all tasks were cancelled were marked 'done' instead of 'cancelled'
+2. Parent goals with all children terminal (done/failed/cancelled) remained 'active'
+3. Goals stuck in 'decomposing' state for hours/days
+
+The supervisor would observe these phantom goals, consume context window space, and potentially create actions to investigate them. This wasted API costs and cluttered observations.
+
+#### Options Considered
+
+1. **Manual cleanup via API**
+   - ✅ Simple DELETE endpoint implementation
+   - ❌ Requires human intervention every time
+   - ❌ Doesn't prevent recurrence
+   - ❌ Reactive rather than proactive
+
+2. **Separate cron job cleanup script**
+   - ✅ Runs independently of supervisor
+   - ❌ Duplication of logic (supervisor already queries goal/task state)
+   - ❌ Another process to manage
+   - ❌ May not run when needed (fixed schedule)
+
+3. **Cleanup during updateGoalProgress()**
+   - ✅ Happens naturally when tasks finish
+   - ❌ Only runs when tasks complete
+   - ❌ Doesn't handle parent goals or stuck decomposing goals
+   - ❌ Reactive — requires task activity to trigger
+
+4. **Cleanup at start of supervisor cycle**
+   - ✅ Proactive — runs regardless of task activity
+   - ✅ Supervisor already queries goal/task state for observations
+   - ✅ Runs deterministically before Agent SDK call (prevents cost waste)
+   - ✅ Handles all three failure modes
+   - ✅ Self-healing system — automatically corrects stale state
+   - ❌ Small query overhead per cycle (3 SQL queries)
+
+#### Decision
+
+We chose **cleanup at start of supervisor cycle** because the supervisor is the natural place for this logic. It's already the system's "senior engineer" observing state, and it runs periodically regardless of task activity.
+
+Implemented `cleanupPhantomGoals()` in `supervisor.ts` (lines 295-368) with three strategies:
+
+1. **Parent goals where ALL children are terminal** → mark as failed
+   ```sql
+   SELECT g.id FROM goals g
+   WHERE g.goal_type = 'parent'
+   AND g.status = 'active'
+   AND NOT EXISTS (
+       SELECT 1 FROM goals c
+       WHERE c.parent_goal_id = g.id
+       AND c.status NOT IN ('done', 'failed', 'cancelled')
+   )
+   ```
+
+2. **Standalone goals with all tasks terminal** → recalculate via `updateGoalProgress()`
+   ```sql
+   SELECT g.id FROM goals g
+   WHERE g.status = 'active'
+   AND g.goal_type != 'parent'
+   AND EXISTS (SELECT 1 FROM tasks t WHERE t.goal_id = g.id)
+   AND NOT EXISTS (
+       SELECT 1 FROM tasks t
+       WHERE t.goal_id = g.id
+       AND t.status NOT IN ('done', 'failed', 'cancelled')
+   )
+   ```
+
+3. **Goals stuck in 'decomposing' >1 hour** → mark as failed with timeout reason
+   ```sql
+   SELECT id FROM goals
+   WHERE status = 'decomposing'
+   AND created_at < (now - 1 hour)
+   ```
+
+Also fixed root cause in `planning.ts:updateGoalProgress()` — all-cancelled goals now correctly detected and marked 'cancelled' (not 'done').
+
+#### Consequences
+
+**Positive:**
+- Phantom goals automatically cleaned up every supervisor cycle
+- Supervisor observations remain accurate (no phantom goals reported)
+- System self-heals without human intervention
+- Prevents API cost waste on observing/reasoning about phantom goals
+- Handles all three failure modes (cancelled tasks, parent goals, stuck decomposition)
+- Logs cleanup actions for visibility
+
+**Negative:**
+- Small query overhead per supervisor cycle (~3 SQL queries, negligible)
+- Cleanup runs even when no phantom goals exist (acceptable tradeoff)
+
+**Implementation:**
+- `cleanupPhantomGoals()` returns count of goals cleaned
+- Called at start of `runSupervisorCycle()` before loading memory/state
+- Logs details of each cleanup action for debugging
+- `getNextCycleDelay()` also updated to exclude phantom goals from frequency calculation
+
+#### Related
+
+- DEC-015: Auto-commit on Task Success (ensures sequential tasks build on each other)
+- Root cause fix: `updateGoalProgress()` now detects all-cancelled state
+- Force-delete API: `DELETE /api/goals/:id?force=true` for manual cleanup when needed
 
 ---
 

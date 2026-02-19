@@ -297,6 +297,21 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
   - Allowed tools input (comma-separated)
   - Approval popup for gate-controlled operations
 
+### Level 8: Intelligent Orchestrator (Complete)
+
+- **Goal decomposition**: High-level goals broken into ordered subtasks
+- **Smart model routing**: Complexity-based routing (haiku/sonnet/opus)
+- **Retry logic**: Failure analysis with model escalation
+- **Project memory**: Outcome tracking, success rates by model
+- **Dependency-aware scheduling**: Tasks wait for dependencies before running
+- **Goals tab UI**: Create, view, retry, progress bars
+- **Phantom goal cleanup**: Automated cleanup in supervisor cycle
+  - `cleanupPhantomGoals()` runs at start of each supervisor cycle
+  - Three strategies: parent goals with all children terminal → failed; standalone goals with all tasks terminal → recalculate; goals stuck in decomposing >1hr → failed
+  - All-cancelled goals correctly marked as 'cancelled' (not 'done')
+  - Returns count of goals cleaned (logged)
+  - Prevents stale goal accumulation, keeps supervisor observations accurate
+
 ## Security Considerations
 
 - **Tailscale encryption**: All traffic encrypted via WireGuard
