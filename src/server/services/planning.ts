@@ -673,8 +673,11 @@ function updateParentGoalProgress(parentGoalId: string): void {
     const totalCost = children.reduce((sum: number, c: any) => sum + (c.total_cost_usd || 0), 0);
     const allDone = children.every((c: any) => ['done', 'failed', 'cancelled'].includes(c.status));
     const anyFailed = children.some((c: any) => c.status === 'failed');
+    const anyComplete = children.some((c: any) => c.status === 'done');
 
-    const status = allDone ? (anyFailed ? 'failed' : 'done') : 'active';
+    const status = allDone
+      ? (anyFailed ? 'failed' : (anyComplete ? 'done' : 'cancelled'))
+      : 'active';
     const completedAt = allDone ? new Date().toISOString() : null;
 
     goalStmts.updateProgress.run(completed, failed, totalCost, status, completedAt, parentGoalId);
