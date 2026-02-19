@@ -15,7 +15,7 @@ import {
     db, CLAUDE_REMOTE_DIR, supervisorStmts, taskStmts, goalStmts,
     memoryStmts, portfolioStmts, proposalStmts, strategicProposalStmts
 } from '../db';
-import { generateId, loadConfig, createGoal } from './planning';
+import { generateId, loadConfig, createGoal, updateGoalProgress } from './planning';
 
 // ── Types ────────────────────────────────────────────────────
 
