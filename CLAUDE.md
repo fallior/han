@@ -58,6 +58,9 @@ Review these cross-project learnings when relevant:
 |----|----------|----------------|
 | L008 | [javascript/date-timezone-gotchas.md](~/Projects/_learnings/javascript/date-timezone-gotchas.md) | Avoid UTC conversion bugs with `toISOString()`. Use local date components. |
 | L012 | [claude-agent-sdk/nested-session-env-var.md](~/Projects/_learnings/claude-agent-sdk/nested-session-env-var.md) | Agent SDK exit code 1 — remove `CLAUDECODE` env var for nested execution. |
+| L013 | [autonomous-agents/system-file-protection.md](~/Projects/_learnings/autonomous-agents/system-file-protection.md) | Agents must NEVER modify system config files (.bashrc, .ssh/, etc.). DEC-017. |
+| L014 | [linux/ssh-auth-sock-inheritance.md](~/Projects/_learnings/linux/ssh-auth-sock-inheritance.md) | SSH_AUTH_SOCK not inherited across processes. Init agent in .bashrc. |
+| L017 | [claude-agent-sdk/escalating-retry-ladder.md](~/Projects/_learnings/claude-agent-sdk/escalating-retry-ladder.md) | 4-step retry: reset → Sonnet diagnostic → Opus diagnostic → human escalation. |
 
 See `~/Projects/_learnings/INDEX.md` for full index.
 
