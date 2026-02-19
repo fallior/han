@@ -1022,10 +1022,12 @@ function getNextCycleDelay(): number {
     try {
         const running = (taskStmts.listByStatus.all('running') as any[]).length;
         const pending = (taskStmts.listByStatus.all('pending') as any[]).length;
-        const activeGoals = db.prepare(
-            "SELECT COUNT(*) as count FROM goals WHERE status IN ('active', 'decomposing', 'planning')"
+
+        // Only count goals that have actual pending work or are parent goals
+        const meaningfulGoals = db.prepare(
+            "SELECT COUNT(*) as count FROM goals WHERE status IN ('active', 'decomposing', 'planning') AND (goal_type = 'parent' OR EXISTS (SELECT 1 FROM tasks t WHERE t.goal_id = goals.id AND t.status IN ('pending', 'running')))"
         ).get() as any;
-        const goalCount = activeGoals?.count || 0;
+        const goalCount = meaningfulGoals?.count || 0;
 
         if (running > 0 && pending > 5) return FREQ_VERY_ACTIVE;
         if (running > 0 || goalCount > 0) return FREQ_ACTIVE;
