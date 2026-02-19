@@ -126,6 +126,9 @@ router.post('/:id/retry', async (req: Request<{ id: string }>, res: Response) =>
 
 /**
  * DELETE /:id -- Delete a goal and its tasks
+ *
+ * Query params:
+ *   ?force=true  — Force delete active/decomposing goals (but not those with running tasks)
  */
 router.delete('/:id', (req: Request<{ id: string }>, res: Response) => {
     try {
@@ -134,21 +137,38 @@ router.delete('/:id', (req: Request<{ id: string }>, res: Response) => {
             return res.status(404).json({ success: false, error: 'Goal not found' });
         }
 
-        if (goal.status === 'decomposing' || goal.status === 'active') {
-            return res.status(400).json({ success: false, error: 'Cannot delete active goal' });
+        const force = req.query.force === 'true';
+
+        // Check for running tasks first (never allow deleting goals with running tasks)
+        const tasks = taskStmts.getByGoal.all(goal.id) as any[];
+        const hasRunning = tasks.some((t: any) => t.status === 'running');
+        if (hasRunning) {
+            return res.status(400).json({ success: false, error: 'Cannot delete goal with running tasks' });
+        }
+
+        if (!force && (goal.status === 'decomposing' || goal.status === 'active')) {
+            return res.status(400).json({ success: false, error: 'Cannot delete active goal. Use ?force=true to override.' });
         }
 
         // Delete associated tasks
-        const tasks = taskStmts.getByGoal.all(goal.id);
         for (const task of tasks) {
-            if (task.status === 'running') {
-                return res.status(400).json({ success: false, error: 'Cannot delete goal with running tasks' });
-            }
             taskStmts.del.run(task.id);
         }
 
+        // Delete child goals if this is a parent
+        if (goal.goal_type === 'parent') {
+            const children = goalStmts.getChildren.all(goal.id) as any[];
+            for (const child of children) {
+                const childTasks = taskStmts.getByGoal.all(child.id) as any[];
+                for (const ct of childTasks) {
+                    taskStmts.del.run(ct.id);
+                }
+                goalStmts.del.run(child.id);
+            }
+        }
+
         goalStmts.del.run(goal.id);
-        res.json({ success: true });
+        res.json({ success: true, force });
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
     }
