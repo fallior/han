@@ -1,216 +1,132 @@
 # Claude Remote
 
-> Respond to Claude Code prompts from your phone
+> An autonomous development ecosystem you manage from your phone
 
-Claude Remote lets you respond to Claude Code permission prompts and questions from anywhere. When Claude needs your input, you get a notification and can respond via a mobile web UI — no need to rush back to your desk.
+What started as a simple prompt responder has evolved into a full autonomous development system. Claude Remote manages a portfolio of projects with a persistent Opus supervisor that explores codebases, creates goals, decomposes them into tasks, executes them via the Claude Agent SDK, and learns from every outcome — all while you approve, steer, and monitor from a mobile dashboard over Tailscale.
 
-## Features
+## What It Does
 
-- **Mobile Web UI** — Responsive interface optimised for phones
-- **Dark Mode** — Automatic theme detection with manual toggle (light/dark themes)
-- **Quick Actions** — One-tap buttons for Y, n, Enter, and custom responses
-- **Push Notifications** — Optional alerts via ntfy.sh when Claude needs input
-- **Multiple Sessions** — Support for concurrent Claude Code instances
-- **tmux Integration** — Detachable sessions you can reconnect to anytime
+- **Prompt Response** — Push notifications via ntfy.sh when Claude Code needs input. Respond from your phone with one-tap buttons.
+- **Live Terminal Mirror** — Watch Claude Code working in real-time from anywhere. Type directly into the terminal from your phone.
+- **Autonomous Task Execution** — Submit goals from your phone. The orchestrator decomposes them into tasks, routes to the right model (haiku/sonnet/opus), executes via Agent SDK, retries failures with escalation, and commits results.
+- **Persistent Opus Supervisor** — A background Opus agent that continuously monitors all projects, explores codebases to build deep knowledge, creates documentation goals, and proposes strategic ideas for your approval.
+- **Command Centre Dashboard** — Activity feed, project tree, strategic proposals, and supervisor insights. See what's happening across your entire portfolio at a glance.
+- **Multi-Project Portfolio** — Manages 13+ projects from a central infrastructure registry. Per-project budgets, priority engine, ecosystem-aware context injection.
+- **Product Factory** — 7-phase pipeline (research → design → architecture → build → test → document → deploy) with 42 parallel subagents and human gates at critical points.
 
-## Requirements
-
-- macOS (tested on Sonoma)
-- Node.js 18+
-- tmux
-- jq
-- Claude Code CLI
-
-## Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/fallior/clauderemote.git
-cd clauderemote
-
-# Run the installer
-./scripts/install.sh
-```
-
-The installer will:
-1. Check dependencies
-2. Create state directories
-3. Install npm packages
-4. Configure Claude Code hooks
-5. Set up the CLI
-
-## Usage
-
-### 1. Start the Server
-
-```bash
-./scripts/start-server.sh
-```
-
-The server runs on port 3847 by default.
-
-### 2. Start Claude Code
-
-In another terminal:
-
-```bash
-claude-remote
-```
-
-This launches Claude Code inside a tmux session, enabling remote response injection.
-
-### 3. Open the UI
-
-On your phone, navigate to:
-- `http://<your-mac-ip>:3847`
-- Or `http://<hostname>.local:3847`
-
-When Claude asks a question or requests permission, it will appear in the UI.
-
-### 4. Dark Mode
-
-The UI automatically detects your system theme preference and applies the appropriate theme:
-
-- **Toggle Theme**: Click the theme button in the titlebar
-  - 🌙 = Dark mode active (click to switch to light)
-  - ☀️ = Light mode active (click to switch to dark)
-- **Auto-Detection**: Respects your device's `prefers-color-scheme` setting
-- **Persistence**: Your choice is saved and remembered across sessions
-
-**Themes:**
-- **Dark** (default): GitHub Dark theme with reduced eye strain for night viewing
-- **Light**: GitHub Light theme optimized for bright environments
-
-For detailed information about the theme system, see [`claude-context/DARK_MODE_GUIDE.md`](claude-context/DARK_MODE_GUIDE.md).
-
-## CLI Options
-
-```bash
-claude-remote [OPTIONS] [-- CLAUDE_ARGS...]
-
-Options:
-    --list, -l      List active Claude Remote sessions
-    --attach, -a    Attach to an existing session
-    --status, -s    Show status of sessions and pending prompts
-    --kill          Kill all Claude Remote sessions
-    --help, -h      Show help
-
-Examples:
-    claude-remote                    # Start new session
-    claude-remote --list             # List sessions
-    claude-remote --attach           # Attach to session
-    claude-remote -- --model opus    # Pass args to claude
-```
-
-## Push Notifications (Optional)
-
-For instant notifications on your phone:
-
-1. Install the [ntfy app](https://ntfy.sh) on iOS or Android
-2. Subscribe to a secret topic (e.g., `my-claude-abc123`)
-3. Set the environment variable:
-
-```bash
-export NTFY_TOPIC="my-claude-abc123"
-```
-
-Now you'll get a push notification whenever Claude needs input.
-
-## Remote Access (Optional)
-
-To access Claude Remote from outside your local network:
-
-1. Install [Tailscale](https://tailscale.com) on your Mac and phone
-2. Both devices join your Tailscale network
-3. Access via Tailscale IP: `http://100.x.x.x:3847`
-
-## Project Structure
+## Architecture
 
 ```
 claude-remote/
 ├── src/
-│   ├── hooks/
-│   │   └── notify.sh          # Claude Code notification hook
+│   ├── hooks/notify.sh              # Claude Code notification hook
 │   ├── server/
-│   │   ├── server.js          # Express API server
-│   │   └── package.json
+│   │   ├── server.ts                # Express + WebSocket + Tailscale TLS
+│   │   ├── db.ts                    # SQLite schema + prepared statements
+│   │   ├── routes/                  # API route modules
+│   │   │   ├── tasks.ts             # Task CRUD + execution
+│   │   │   ├── goals.ts             # Goal decomposition + progress
+│   │   │   ├── supervisor.ts        # Supervisor cycles + proposals + activity feed
+│   │   │   ├── portfolio.ts         # Multi-project management
+│   │   │   ├── products.ts          # Product factory pipeline
+│   │   │   └── ...                  # Analytics, digests, reports, health
+│   │   └── services/
+│   │       ├── supervisor.ts        # Persistent Opus supervisor agent
+│   │       ├── planning.ts          # Goal decomposition + DocAssist
+│   │       ├── context.ts           # Ecosystem-aware task context injection
+│   │       └── orchestrator.ts      # LLM routing (Ollama / Anthropic)
 │   └── ui/
-│       └── index.html         # Mobile web interface
+│       ├── index.html               # Mobile-first dashboard
+│       └── app.ts                   # Client-side TypeScript
 ├── scripts/
-│   ├── claude-remote          # CLI launcher
-│   ├── start-server.sh        # Server starter
-│   └── install.sh             # Installation script
-└── claude-context/            # Project documentation
+│   ├── claude-remote                # CLI launcher (tmux integration)
+│   ├── start-server.sh              # Server startup
+│   └── install.sh                   # Installation
+└── claude-context/                  # Project documentation + decisions
 ```
 
-## API Endpoints
+## Stack
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/` | Serve web UI |
-| GET | `/api/prompts` | List pending prompts |
-| POST | `/api/respond` | Send response to Claude |
-| GET | `/api/status` | Server health check |
-| DELETE | `/api/prompts/:id` | Dismiss a prompt |
+- **Runtime**: Node.js + TypeScript (tsx)
+- **Server**: Express + WebSocket (ws)
+- **Database**: SQLite (better-sqlite3)
+- **AI**: Claude Agent SDK + Ollama local fallback
+- **Networking**: Tailscale (auto-TLS), ntfy.sh (push notifications)
+- **Sessions**: tmux
+- **Platform**: Linux (Ubuntu)
 
-## Environment Variables
+## Quick Start
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3847` | Server port |
-| `NTFY_TOPIC` | — | ntfy.sh topic for push notifications |
-| `CLAUDE_REMOTE_DIR` | `~/.claude-remote` | State directory |
+```bash
+# Clone and install
+git clone https://github.com/fallior/clauderemote.git
+cd clauderemote
+./scripts/install.sh
 
-## Browser Settings
+# Start the server
+cd src/server && npx tsx server.ts
 
-Claude Remote stores user preferences in the browser's localStorage:
+# In another terminal, start Claude Code in a managed tmux session
+claude-remote
+```
 
-| Key | Values | Description |
-|-----|--------|-------------|
-| `theme` | `dark`, `light` | UI theme preference (overrides system default) |
+Access the dashboard from your phone at `https://<tailscale-ip>:3847`.
 
-## How It Works
+## Configuration
 
-1. Claude Code enters a wait state (permission prompt or idle)
-2. A hook fires, triggering `notify.sh`
-3. The hook creates a state file and optionally sends a push notification
-4. The web UI polls for pending prompts
-5. User taps a response button
-6. Server injects the response via `tmux send-keys`
-7. Claude Code continues
+```json
+// ~/.claude-remote/config.json
+{
+  "ntfy_topic": "your-secret-topic",
+  "remote_url": "https://100.x.x.x:3847",
+  "notify_idle_prompt": true,
+  "supervisor": {
+    "daily_budget_usd": 300
+  }
+}
+```
 
-## Troubleshooting
+## CLI
 
-### Hooks not firing
-- Ensure hooks are configured: `cat ~/.claude/settings.json`
-- VSCode users: Use terminal mode (extension hooks have known issues)
+```bash
+claude-remote                    # Start new session
+claude-remote --list             # List active sessions
+claude-remote --attach           # Attach to existing session
+claude-remote --status           # Show status
+claude-remote -- --model opus    # Pass args to Claude Code
+```
 
-### Can't connect from phone
-- Check firewall allows port 3847
-- Ensure devices are on the same network
-- Try using IP address instead of hostname
+## Implementation Levels
 
-### Response not injected
-- Verify tmux session exists: `tmux list-sessions`
-- Check server logs for errors
+| Level | Focus | Status |
+|-------|-------|--------|
+| 1 | Prompt Responder (MVP) | Complete |
+| 2 | Push Alerts (ntfy.sh) | Complete |
+| 3 | Context Window (search + copy) | Complete |
+| 4 | Terminal Mirror (live view) | Complete |
+| 5 | Mobile Keyboard | Complete |
+| 6 | Claude Bridge (export/import/handoff) | Complete |
+| 7 | Autonomous Task Runner (Agent SDK) | Complete |
+| 8 | Intelligent Orchestrator (goal decomposition) | Complete |
+| 9 | Multi-Project Autonomy (portfolio + budgets + digests) | Complete |
+| 10 | Self-Improving System (learnings + error pre-emption) | Complete |
+| 11 | Product Factory (7-phase pipeline, 42 subagents) | Complete |
 
-### Theme not switching
-- Clear browser cache and reload the page
-- Check localStorage: Open browser console and run `localStorage.getItem('theme')`
-- Reset to system preference: Run `localStorage.removeItem('theme')` and reload
+## Key Capabilities
 
-## Roadmap
+**Supervisor** — Persistent Opus agent running on adaptive schedule (2min when active, 30min when idle). Maintains memory banks per project, audits documentation health, proposes strategic improvements. Actions: create goals, adjust priorities, update memory, send notifications, propose ideas.
 
-See `claude-context/LEVELS.md` for planned features:
-- Level 2: Smarter push notifications
-- Level 3: Terminal context in UI
-- Level 4: Full terminal mirror
-- Level 5: Interactive terminal
-- Level 6: Claude.ai bridge
+**Orchestrator** — Decomposes high-level goals into ordered tasks with dependency chains. Routes to cheapest model with proven success rate. Escalating retry ladder: reset → Sonnet diagnostic → Opus diagnostic → human notification.
+
+**3 Concurrent Pipelines** — 2 normal task slots + 1 dedicated remediation slot. Git checkpoint before every task with automatic rollback on failure.
+
+**DocAssist** — Mandatory documentation task appended to every goal. Ensures CURRENT_STATUS.md, ARCHITECTURE.md, and session notes stay current as the system evolves.
+
+**Command Centre** — Dashboard with 4 sub-tabs: Activity Feed (chronological events), Project Tree (portfolio hierarchy with status indicators), Strategic Proposals (approve/dismiss supervisor ideas), Supervisor (cycle history and memory).
 
 ## Author
 
-**Darron** — Perth, Australia
+**Darron** — Mackay, Queensland, Australia
 
 ## Licence
 
