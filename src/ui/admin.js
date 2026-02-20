@@ -6,6 +6,8 @@
   let ws = null;
   let chartInstances = {};
   let refreshInterval = null;
+  let selectedProductId = null;
+  let selectedConversationId = null;
   function escapeHtml(s) {
     const div = document.createElement("div");
     div.textContent = s;
@@ -25,6 +27,11 @@
     const d = new Date(iso);
     return d.toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
   }
+  function formatTime(iso) {
+    if (!iso) return "\u2014";
+    const d = new Date(iso);
+    return d.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" });
+  }
   function formatDateTime(iso) {
     if (!iso) return "\u2014";
     const d = new Date(iso);
@@ -37,6 +44,10 @@
     if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
     if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
     return `${Math.floor(secs / 86400)}d ago`;
+  }
+  function statusBadge(status) {
+    const cls = status === "done" || status === "completed" ? "done" : status === "running" || status === "active" || status === "decomposing" ? "running" : status === "failed" ? "failed" : status === "pending" ? "pending" : "cancelled";
+    return `<span class="badge badge-${cls}">${escapeHtml(status)}</span>`;
   }
   function categoryBadge(cat) {
     const cls = cat === "improvement" ? "improvement" : cat === "opportunity" ? "opportunity" : cat === "risk" ? "risk" : "strategic";
@@ -133,38 +144,25 @@
         case "projects":
           await loadProjects(content);
           break;
+        case "work":
+          await loadWork(content);
+          break;
         case "supervisor":
           await loadSupervisor(content);
           break;
         case "reports":
           await loadReports(content);
           break;
-        case "work":
-        case "conversations":
         case "products":
-          renderComingSoon(content, mod);
+          await loadProducts(content);
+          break;
+        case "conversations":
+          await loadConversations(content);
           break;
       }
     } catch (err) {
       content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading module: ${escapeHtml(err.message)}</p></div>`;
     }
-  }
-  function renderComingSoon(content, mod) {
-    const icons = {
-      work: "&#9745;",
-      conversations: "&#128172;",
-      products: "&#128230;"
-    };
-    const descs = {
-      work: "Tasks and goals unified kanban view",
-      conversations: "Human-AI strategic discussion threads",
-      products: "Product pipeline visualisation"
-    };
-    content.innerHTML = `<div class="coming-soon-page fade-in">
-        <div class="icon">${icons[mod] || ""}</div>
-        <h2>${mod.charAt(0).toUpperCase() + mod.slice(1)}</h2>
-        <p>${descs[mod] || "Coming in Phase 2"}</p>
-    </div>`;
   }
   let wsRetryDelay = 1e3;
   function connectWebSocket() {
@@ -203,6 +201,11 @@
     } else if (data.type === "task_update" || data.type === "goal_update") {
       if (currentModule === "overview") renderModule("overview");
       if (currentModule === "projects") renderModule("projects");
+      if (currentModule === "work") renderModule("work");
+    } else if (data.type === "conversation_message") {
+      if (currentModule === "conversations" && data.conversation_id === selectedConversationId) {
+        renderModule("conversations");
+      }
     }
   }
   function updateConnectionStatus(connected) {
@@ -416,6 +419,219 @@
         </div>`;
     }).join("");
   }
+  let workFilters = { project: "", status: "", model: "" };
+  let workData = null;
+  async function loadWork(content) {
+    const [tasksRes, activeGoalsRes, archivedGoalsRes] = await Promise.all([
+      fetch(`${API_BASE}/api/tasks`),
+      fetch(`${API_BASE}/api/goals?view=active`),
+      fetch(`${API_BASE}/api/goals?view=archived`)
+    ]);
+    const tasksData = await tasksRes.json();
+    const activeGoalsData = await activeGoalsRes.json();
+    const archivedGoalsData = await archivedGoalsRes.json();
+    const tasks = tasksData.tasks || [];
+    const activeGoals = activeGoalsData.goals || [];
+    const archivedGoals = archivedGoalsData.goals || [];
+    workData = { tasks, activeGoals, archivedGoals };
+    const projects = [...new Set(tasks.map((t) => t.project_path?.split("/").pop() || "unknown"))].sort();
+    const models = [...new Set(tasks.map((t) => t.model || "unknown"))].filter((m) => m).sort();
+    const statuses = ["pending", "running", "done", "failed"];
+    let html = `<div class="fade-in">
+        <div class="filter-bar">
+            <select class="form-select" id="filterStatus" onchange="applyWorkFilters()">
+                <option value="">All Statuses</option>
+                ${statuses.map((s) => `<option value="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</option>`).join("")}
+            </select>
+            <select class="form-select" id="filterProject" onchange="applyWorkFilters()">
+                <option value="">All Projects</option>
+                ${projects.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("")}
+            </select>
+            <select class="form-select" id="filterModel" onchange="applyWorkFilters()">
+                <option value="">All Models</option>
+                ${models.map((m) => `<option value="${m}">${m}</option>`).join("")}
+            </select>
+        </div>`;
+    html += `<div class="kanban-board">`;
+    for (const status of statuses) {
+      const statusTasks = filterWorkTasks(tasks, status);
+      const count = statusTasks.length;
+      const borderColor = status === "done" ? "var(--green)" : status === "running" ? "var(--cyan)" : status === "failed" ? "var(--red)" : "var(--amber)";
+      html += `<div class="kanban-column">
+            <div class="kanban-column-header" style="border-bottom-color: ${borderColor}">
+                <span class="kanban-column-title">${status.charAt(0).toUpperCase() + status.slice(1)}</span>
+                <span class="kanban-column-count">${count}</span>
+            </div>
+            <div class="kanban-column-body">`;
+      for (const task of statusTasks) {
+        const projectName = task.project_path?.split("/").pop() || "\u2014";
+        const taskStatus = task.status || "pending";
+        const borderSide = taskStatus === "done" || taskStatus === "completed" ? "var(--green)" : taskStatus === "running" || taskStatus === "active" || taskStatus === "decomposing" ? "var(--cyan)" : taskStatus === "failed" ? "var(--red)" : "var(--amber)";
+        const pulseClass = taskStatus === "running" || taskStatus === "active" ? "pulse" : "";
+        html += `<div class="kanban-card ${pulseClass}" data-task-id="${task.id}" style="border-left-color: ${borderSide}" onclick="toggleWorkCardExpanded(event, '${task.id}')">
+                <div class="kanban-card-header">
+                    <span class="kanban-card-title">${escapeHtml(task.title || "Untitled")}</span>
+                </div>
+                <div class="kanban-card-meta">
+                    <span class="badge badge-${task.model === "opus" ? "strategic" : task.model === "sonnet" ? "improvement" : "opportunity"}">${escapeHtml(task.model || "?")}</span>
+                    <span style="font-size:12px;color:var(--text-muted)">${escapeHtml(projectName)}</span>
+                </div>
+                <div class="kanban-card-footer">
+                    <span style="font-size:12px;color:var(--text-muted)">${formatCost(task.cost_usd || 0)}</span>
+                    <span style="font-size:12px;color:var(--text-muted)">${timeSince(task.created_at)}</span>
+                </div>
+                <div class="kanban-card-detail" style="display:none">
+                    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-subtle)">
+                        <div style="margin-bottom:6px"><strong style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Description</strong></div>
+                        <div style="font-size:12px;color:var(--text-dim);line-height:1.5">${escapeHtml((task.description || "\u2014").substring(0, 200))}</div>
+                        ${task.error ? `<div style="margin-top:8px;padding:6px 8px;background:rgba(248, 81, 73, 0.1);border-radius:4px;border-left:2px solid var(--red)"><strong style="font-size:11px;color:var(--red);text-transform:uppercase">Error</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">${escapeHtml(task.error.substring(0, 150))}</div></div>` : ""}
+                        ${task.log_file ? `<div style="margin-top:6px"><a href="#" onclick="viewTaskLog('${task.id}', event)" style="font-size:12px;color:var(--blue)">View Log</a></div>` : ""}
+                        ${task.commit_sha ? `<div style="margin-top:6px;font-size:11px;color:var(--text-muted)"><strong>Commit:</strong> ${escapeHtml(task.commit_sha.slice(0, 8))}</div>` : ""}
+                        ${task.goal_id ? `<div style="margin-top:6px"><a href="#" style="font-size:12px;color:var(--blue)">Goal: ${escapeHtml(task.goal_id)}</a></div>` : ""}
+                    </div>
+                </div>
+            </div>`;
+      }
+      html += `</div></div>`;
+    }
+    html += `</div>`;
+    if (activeGoals.length > 0) {
+      html += `<div class="admin-card">
+            <h2>Active Goals</h2>
+            <div class="goals-list">`;
+      const goalsByProject = {};
+      for (const goal of activeGoals) {
+        const proj = goal.project_path?.split("/").pop() || "unknown";
+        if (!goalsByProject[proj]) goalsByProject[proj] = [];
+        goalsByProject[proj].push(goal);
+      }
+      for (const [proj, goals] of Object.entries(goalsByProject)) {
+        for (const goal of goals) {
+          const completed = goal.tasks_completed || 0;
+          const total = goal.task_count || 1;
+          const pct = total > 0 ? completed / total : 0;
+          html += `<div class="goal-item" onclick="toggleGoalExpanded(event, '${goal.id}')">
+                    <div class="goal-header">
+                        <span class="goal-title">${escapeHtml(goal.title || "Untitled Goal")}</span>
+                        <span style="font-size:12px;color:var(--text-muted)">${escapeHtml(proj)}</span>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;line-height:1.4">${escapeHtml((goal.description || "\u2014").substring(0, 100))}</div>
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill" style="width:${(pct * 100).toFixed(1)}%"></div>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${completed}/${total} tasks \xB7 ${formatCost(goal.cost_usd || 0)}</div>
+                    <div class="goal-detail" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border-subtle)">
+                        <div style="margin-bottom:4px"><strong style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Child Tasks</strong></div>
+                        ${goal.child_task_count ? `<div style="font-size:12px;color:var(--text-dim)">${goal.child_task_count} tasks assigned</div>` : ""}
+                    </div>
+                </div>`;
+        }
+      }
+      html += `</div></div>`;
+    }
+    html += `</div>`;
+    content.innerHTML = html;
+    const statusSelect = document.getElementById("filterStatus");
+    const projectSelect = document.getElementById("filterProject");
+    const modelSelect = document.getElementById("filterModel");
+    if (statusSelect) statusSelect.value = workFilters.status;
+    if (projectSelect) projectSelect.value = workFilters.project;
+    if (modelSelect) modelSelect.value = workFilters.model;
+  }
+  function filterWorkTasks(tasks, statusFilter) {
+    return tasks.filter((t) => {
+      const taskStatus = t.status || "pending";
+      const taskProject = t.project_path?.split("/").pop() || "";
+      const taskModel = t.model || "";
+      let statusMatch = false;
+      if (statusFilter === "pending") statusMatch = taskStatus === "pending";
+      else if (statusFilter === "running") statusMatch = taskStatus === "running" || taskStatus === "active" || taskStatus === "decomposing";
+      else if (statusFilter === "done") statusMatch = taskStatus === "done" || taskStatus === "completed";
+      else if (statusFilter === "failed") statusMatch = taskStatus === "failed";
+      const projectMatch = !workFilters.project || taskProject === workFilters.project;
+      const modelMatch = !workFilters.model || taskModel === workFilters.model;
+      return statusMatch && projectMatch && modelMatch;
+    });
+  }
+  window.applyWorkFilters = function() {
+    const statusSelect = document.getElementById("filterStatus");
+    const projectSelect = document.getElementById("filterProject");
+    const modelSelect = document.getElementById("filterModel");
+    workFilters.status = statusSelect?.value || "";
+    workFilters.project = projectSelect?.value || "";
+    workFilters.model = modelSelect?.value || "";
+    if (workData) {
+      const content = document.getElementById("mainContent");
+      if (content) {
+        const columns = ["pending", "running", "done", "failed"];
+        for (const status of columns) {
+          const col = content.querySelector(`[data-kanban-status="${status}"]`);
+          if (col) {
+            const statusTasks = filterWorkTasks(workData.tasks, status);
+            let cardHtml = "";
+            for (const task of statusTasks) {
+              const projectName = task.project_path?.split("/").pop() || "\u2014";
+              const taskStatus = task.status || "pending";
+              const borderSide = taskStatus === "done" || taskStatus === "completed" ? "var(--green)" : taskStatus === "running" || taskStatus === "active" || taskStatus === "decomposing" ? "var(--cyan)" : taskStatus === "failed" ? "var(--red)" : "var(--amber)";
+              const pulseClass = taskStatus === "running" || taskStatus === "active" ? "pulse" : "";
+              cardHtml += `<div class="kanban-card ${pulseClass}" data-task-id="${task.id}" style="border-left-color: ${borderSide}" onclick="toggleWorkCardExpanded(event, '${task.id}')">
+                            <div class="kanban-card-header">
+                                <span class="kanban-card-title">${escapeHtml(task.title || "Untitled")}</span>
+                            </div>
+                            <div class="kanban-card-meta">
+                                <span class="badge badge-${task.model === "opus" ? "strategic" : task.model === "sonnet" ? "improvement" : "opportunity"}">${escapeHtml(task.model || "?")}</span>
+                                <span style="font-size:12px;color:var(--text-muted)">${escapeHtml(projectName)}</span>
+                            </div>
+                            <div class="kanban-card-footer">
+                                <span style="font-size:12px;color:var(--text-muted)">${formatCost(task.cost_usd || 0)}</span>
+                                <span style="font-size:12px;color:var(--text-muted)">${timeSince(task.created_at)}</span>
+                            </div>
+                            <div class="kanban-card-detail" style="display:none">
+                                <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-subtle)">
+                                    <div style="margin-bottom:6px"><strong style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Description</strong></div>
+                                    <div style="font-size:12px;color:var(--text-dim);line-height:1.5">${escapeHtml((task.description || "\u2014").substring(0, 200))}</div>
+                                    ${task.error ? `<div style="margin-top:8px;padding:6px 8px;background:rgba(248, 81, 73, 0.1);border-radius:4px;border-left:2px solid var(--red)"><strong style="font-size:11px;color:var(--red);text-transform:uppercase">Error</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">${escapeHtml(task.error.substring(0, 150))}</div></div>` : ""}
+                                    ${task.log_file ? `<div style="margin-top:6px"><a href="#" onclick="viewTaskLog('${task.id}', event)" style="font-size:12px;color:var(--blue)">View Log</a></div>` : ""}
+                                    ${task.commit_sha ? `<div style="margin-top:6px;font-size:11px;color:var(--text-muted)"><strong>Commit:</strong> ${escapeHtml(task.commit_sha.slice(0, 8))}</div>` : ""}
+                                    ${task.goal_id ? `<div style="margin-top:6px"><a href="#" style="font-size:12px;color:var(--blue)">Goal: ${escapeHtml(task.goal_id)}</a></div>` : ""}
+                                </div>
+                            </div>
+                        </div>`;
+            }
+            const bodyEl = col.querySelector(".kanban-column-body");
+            if (bodyEl) bodyEl.innerHTML = cardHtml;
+            const countEl = col.querySelector(".kanban-column-count");
+            if (countEl) countEl.textContent = String(statusTasks.length);
+          }
+        }
+      }
+    }
+  };
+  window.toggleWorkCardExpanded = function(event, taskId) {
+    event.stopPropagation();
+    const card = event.target.closest(".kanban-card");
+    if (!card) return;
+    const detail = card.querySelector(".kanban-card-detail");
+    if (detail) {
+      const isHidden = detail.style.display === "none";
+      detail.style.display = isHidden ? "block" : "none";
+    }
+  };
+  window.toggleGoalExpanded = function(event, goalId) {
+    event.stopPropagation();
+    const goal = event.target.closest(".goal-item");
+    if (!goal) return;
+    const detail = goal.querySelector(".goal-detail");
+    if (detail) {
+      const isHidden = detail.style.display === "none";
+      detail.style.display = isHidden ? "block" : "none";
+    }
+  };
+  window.viewTaskLog = function(taskId, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    alert(`Log viewer for task ${taskId} would open here`);
+  };
   let selectedProject = null;
   async function loadProjects(content) {
     const [ecosystemRes, portfolioRes] = await Promise.all([
@@ -984,6 +1200,360 @@
             </div>`;
       }
     } catch {
+    }
+  };
+  async function loadProducts(content) {
+    if (selectedProductId) {
+      await loadProductDetail(content, selectedProductId);
+    } else {
+      await loadProductList(content);
+    }
+  }
+  async function loadProductList(content) {
+    const res = await fetch(`${API_BASE}/api/products`);
+    const data = await res.json();
+    const products = data.products || [];
+    let html = `<div class="fade-in">
+        <div class="product-grid">`;
+    for (const p of products) {
+      const phasesCompleted = p.phases_completed || 0;
+      const totalPhases = 7;
+      const pct = phasesCompleted / totalPhases * 100;
+      const statusCls = p.status === "completed" ? "done" : p.status === "active" || p.status === "running" ? "running" : p.status === "paused" ? "pending" : "cancelled";
+      html += `<div class="product-card" data-product-id="${escapeHtml(p.id)}" onclick="selectProduct('${escapeHtml(p.id)}')">
+            <div class="product-card-header">
+                <span class="product-card-name">${escapeHtml(p.name)}</span>
+                <span class="phase-indicator badge badge-${p.current_phase_index >= 6 ? "done" : p.current_phase_index >= 3 ? "improvement" : "strategic"}">Phase ${(p.current_phase_index || 0) + 1}/7</span>
+            </div>
+            <div class="product-card-status">
+                ${statusBadge(p.status || "pending")}
+            </div>
+            <div class="progress-bar" style="margin: 8px 0">
+                <div class="progress-bar-fill" style="width: ${pct}%"></div>
+            </div>
+            <div class="product-card-stats">
+                <span>${phasesCompleted}/7 phases</span>
+                <span>${formatCost(p.total_cost_usd || 0)}</span>
+            </div>
+            <div class="product-card-meta">
+                <span style="font-size: 11px; color: var(--text-muted)">${formatDate(p.created_at)}</span>
+            </div>
+        </div>`;
+    }
+    html += `</div></div>`;
+    content.innerHTML = html;
+  }
+  async function loadProductDetail(content, productId) {
+    const res = await fetch(`${API_BASE}/api/products/${encodeURIComponent(productId)}`);
+    const data = await res.json();
+    const product = data.product || {};
+    const phases = data.phases || [];
+    const knowledge = data.knowledge || [];
+    const knowledgeByCategory = {};
+    for (const k of knowledge) {
+      const cat = k.category || "general";
+      if (!knowledgeByCategory[cat]) knowledgeByCategory[cat] = [];
+      knowledgeByCategory[cat].push(k);
+    }
+    let html = `<div class="fade-in">
+        <div style="margin-bottom: 16px">
+            <button class="admin-btn admin-btn-sm" onclick="backToProductList()">\u2190 Back to Products</button>
+        </div>
+
+        <div class="detail-panel">
+            <h2>${escapeHtml(product.name)}</h2>
+            <div class="detail-grid">
+                <div class="detail-field">
+                    <span class="label">Status</span>
+                    <span class="value">${statusBadge(product.status || "pending")}</span>
+                </div>
+                <div class="detail-field">
+                    <span class="label">Current Phase</span>
+                    <span class="value">Phase ${(product.current_phase_index || 0) + 1} of 7</span>
+                </div>
+                <div class="detail-field">
+                    <span class="label">Total Cost</span>
+                    <span class="value">${formatCost(product.total_cost_usd || 0)}</span>
+                </div>
+                <div class="detail-field">
+                    <span class="label">Created</span>
+                    <span class="value">${formatDateTime(product.created_at)}</span>
+                </div>
+                ${product.seed_text ? `<div class="detail-field">
+                    <span class="label">Seed</span>
+                    <span class="value" style="font-size: 12px">${escapeHtml((product.seed_text || "").substring(0, 60))}</span>
+                </div>` : ""}
+            </div>
+        </div>
+
+        <div class="admin-card">
+            <h2>Phase Timeline</h2>
+            <div class="phase-timeline">`;
+    const phaseNames = ["Research", "Design", "Architecture", "Build", "Test", "Document", "Deploy"];
+    for (let i = 0; i < 7; i++) {
+      const phase = phases.find((p) => p.phase_index === i);
+      const isCurrentPhase = i === product.current_phase_index;
+      const isCompleted = i < product.current_phase_index || phase && phase.status === "completed";
+      const statusClass = isCompleted ? "done" : isCurrentPhase ? "current" : "pending";
+      html += `<div class="phase-node ${statusClass}" onclick="expandPhase(event, ${i})">
+            <div class="phase-node-circle"></div>
+            <div class="phase-node-label">${phaseNames[i]}</div>
+            ${phase ? `<div class="phase-node-badge">${statusBadge(phase.status || "pending")}</div>` : ""}
+        </div>`;
+    }
+    html += `</div></div>`;
+    if (phases.length > 0) {
+      html += `<div class="admin-card">
+            <h2>Phase Details</h2>
+            <div class="phase-details-list">`;
+      for (const phase of phases) {
+        const phaseStatus = phase.status || "pending";
+        const gateStatus = phase.gate_status || "\u2014";
+        const costUsd = phase.cost_usd || 0;
+        const costColor = costUsd > 0 ? "var(--text)" : "var(--text-muted)";
+        html += `<div class="phase-detail-card" onclick="togglePhaseDetail(event, ${phase.phase_index})">
+                <div class="phase-detail-header">
+                    <span class="phase-detail-name">${phaseNames[phase.phase_index]}</span>
+                    <div class="phase-detail-badges">
+                        ${statusBadge(phaseStatus)}
+                        ${phase.gate_status ? `<span class="badge badge-${gateStatus === "passed" ? "done" : gateStatus === "pending" ? "pending" : "failed"}">${escapeHtml(gateStatus)}</span>` : ""}
+                    </div>
+                </div>
+                <div class="phase-detail-meta">
+                    <span style="color: ${costColor}">Cost: ${formatCost(costUsd)}</span>
+                    ${phase.started_at ? `<span style="color: var(--text-muted)">Started: ${formatDateTime(phase.started_at)}</span>` : ""}
+                    ${phase.completed_at ? `<span style="color: var(--text-muted)">Completed: ${formatDateTime(phase.completed_at)}</span>` : ""}
+                </div>
+                <div class="phase-detail-expanded" style="display: none">
+                    ${phase.goal_id ? `<div style="margin-top: 8px; padding: 8px; background: var(--bg-page); border-radius: 4px; font-size: 12px">
+                        <strong style="color: var(--text-muted)">Goal:</strong> <a href="#" style="color: var(--blue)">${escapeHtml(phase.goal_id)}</a>
+                    </div>` : ""}
+                    ${phase.artifacts ? `<div style="margin-top: 8px; padding: 8px; background: var(--bg-page); border-radius: 4px; font-size: 11px; font-family: ui-monospace">
+                        <strong style="color: var(--text-muted)">Artifacts:</strong>
+                        <pre style="margin-top: 4px; color: var(--text-dim); overflow-x: auto">${escapeHtml(typeof phase.artifacts === "string" ? phase.artifacts : JSON.stringify(phase.artifacts, null, 2))}</pre>
+                    </div>` : ""}
+                </div>
+            </div>`;
+      }
+      html += `</div></div>`;
+    }
+    if (Object.keys(knowledgeByCategory).length > 0) {
+      html += `<div class="admin-card">
+            <h2>Knowledge Base</h2>
+            <div class="knowledge-section">`;
+      for (const [category, entries] of Object.entries(knowledgeByCategory)) {
+        html += `<div class="knowledge-category">
+                <div class="knowledge-category-title">${escapeHtml(category.charAt(0).toUpperCase() + category.slice(1))}</div>`;
+        for (const entry of entries) {
+          html += `<div class="knowledge-entry" onclick="toggleKnowledgeEntry(event, this)">
+                    <div class="knowledge-entry-header">
+                        <span class="knowledge-entry-title">${escapeHtml(entry.title || "Untitled")}</span>
+                        <span style="font-size: 11px; color: var(--text-muted)">${formatDate(entry.created_at)}</span>
+                    </div>
+                    <div class="knowledge-entry-content" style="display: none">
+                        <div style="margin-top: 8px; padding: 8px; background: var(--bg-page); border-radius: 4px; font-size: 12px; line-height: 1.5">
+                            ${escapeHtml(entry.content || "\u2014").replace(/\n/g, "<br>")}
+                        </div>
+                        ${entry.source_phase ? `<div style="margin-top: 6px; font-size: 11px; color: var(--text-muted)">Source: Phase ${entry.source_phase + 1}</div>` : ""}
+                    </div>
+                </div>`;
+        }
+        html += `</div>`;
+      }
+      html += `</div></div>`;
+    }
+    html += `</div>`;
+    content.innerHTML = html;
+  }
+  window.selectProduct = function(id) {
+    selectedProductId = selectedProductId === id ? null : id;
+    renderModule("products");
+  };
+  window.backToProductList = function() {
+    selectedProductId = null;
+    renderModule("products");
+  };
+  window.togglePhaseDetail = function(event, phaseIndex) {
+    event.stopPropagation();
+    const card = event.target.closest(".phase-detail-card");
+    if (!card) return;
+    const expanded = card.querySelector(".phase-detail-expanded");
+    if (expanded) {
+      const isHidden = expanded.style.display === "none";
+      expanded.style.display = isHidden ? "block" : "none";
+    }
+  };
+  window.toggleKnowledgeEntry = function(event, element) {
+    event.stopPropagation();
+    const content = element.querySelector(".knowledge-entry-content");
+    if (content) {
+      const isHidden = content.style.display === "none";
+      content.style.display = isHidden ? "block" : "none";
+    }
+  };
+  async function loadConversations(content) {
+    try {
+      const res = await fetch(`${API_BASE}/api/conversations`);
+      const data = await res.json();
+      const conversations = data.conversations || [];
+      const actionsEl = document.getElementById("moduleActions");
+      if (actionsEl) {
+        actionsEl.innerHTML = `
+                <button class="admin-btn admin-btn-primary admin-btn-sm" onclick="showNewThreadForm()">New Thread</button>
+            `;
+      }
+      let html = `<div class="fade-in conversation-container">
+            <div class="conversation-layout">
+                <div class="thread-list-panel">
+                    <div id="threadList" class="thread-list">`;
+      if (conversations.length === 0) {
+        html += `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">No threads yet</div>`;
+      } else {
+        for (const conv of conversations) {
+          const messageCount = conv.message_count || 0;
+          const isSelected = selectedConversationId === conv.id;
+          const statusBadgeClass = conv.status === "open" ? "badge-running" : "badge-done";
+          const statusText = conv.status === "open" ? "Open" : "Resolved";
+          html += `<div class="thread-item ${isSelected ? "active" : ""}" data-thread-id="${conv.id}" onclick="selectConversationThread('${conv.id}')">
+                    <div class="thread-item-title">${escapeHtml(conv.title)}</div>
+                    <div class="thread-item-meta">
+                        <span style="font-size:11px;color:var(--text-muted)">${timeSince(conv.updated_at)}</span>
+                        <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
+                    </div>
+                    <div class="thread-item-count" style="font-size:11px;color:var(--text-muted)">${messageCount} message${messageCount !== 1 ? "s" : ""}</div>
+                </div>`;
+        }
+      }
+      html += `</div></div>
+                <div class="thread-detail-panel" id="threadDetailPanel">`;
+      if (selectedConversationId && conversations.find((c) => c.id === selectedConversationId)) {
+        html += `<div id="threadDetail"></div>`;
+      } else {
+        html += `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Select a thread to view messages</div>`;
+      }
+      html += `</div>
+            </div>
+        </div>`;
+      content.innerHTML = html;
+      if (selectedConversationId) {
+        await renderConversationThread(selectedConversationId);
+      }
+    } catch (err) {
+      content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading conversations: ${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+  async function renderConversationThread(conversationId) {
+    try {
+      const res = await fetch(`${API_BASE}/api/conversations/${conversationId}`);
+      const data = await res.json();
+      const conversation = data.conversation;
+      const messages = data.messages || [];
+      const detailPanel = document.getElementById("threadDetail");
+      if (!detailPanel) return;
+      const resolveButton = conversation.status === "open" ? `<button class="admin-btn admin-btn-sm" onclick="resolveConversation('${conversation.id}')">Resolve</button>` : `<button class="admin-btn admin-btn-sm" onclick="reopenConversation('${conversation.id}')">Reopen</button>`;
+      let html = `<div class="thread-header">
+            <div style="flex:1">
+                <h2 style="margin:0;margin-bottom:4px;font-size:16px">${escapeHtml(conversation.title)}</h2>
+                <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
+            </div>
+            <div>${resolveButton}</div>
+        </div>
+
+        <div class="message-list" id="messageList">`;
+      if (messages.length === 0) {
+        html += `<div style="padding:16px;color:var(--text-muted);text-align:center;font-size:12px">No messages yet</div>`;
+      } else {
+        for (const msg of messages) {
+          const isHuman = msg.role === "human";
+          const bubbleClass = isHuman ? "message-bubble human" : "message-bubble supervisor";
+          const label = isHuman ? "You" : "Supervisor";
+          html += `<div class="${bubbleClass}">
+                    <div style="font-size:10px;color:${isHuman ? "rgba(255,255,255,0.6)" : "var(--text-muted)"};margin-bottom:4px">${label} \xB7 ${formatTime(msg.created_at)}</div>
+                    <div style="word-break:break-word;line-height:1.5">${escapeHtml(msg.content)}</div>
+                </div>`;
+        }
+      }
+      html += `</div>
+
+        <div class="message-input-area">
+            <textarea class="message-input" id="messageInput" placeholder="Type your message..." style="resize:vertical;min-height:60px"></textarea>
+            <button class="admin-btn admin-btn-primary" onclick="sendConversationMessage('${conversation.id}')">Send</button>
+        </div>`;
+      detailPanel.innerHTML = html;
+      const messageList = document.getElementById("messageList");
+      if (messageList) {
+        setTimeout(() => messageList.scrollTop = messageList.scrollHeight, 0);
+      }
+      const input = document.getElementById("messageInput");
+      if (input) {
+        input.focus();
+      }
+    } catch (err) {
+      const detailPanel = document.getElementById("threadDetail");
+      if (detailPanel) {
+        detailPanel.innerHTML = `<div style="color:var(--red);padding:16px">Error loading thread: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+  }
+  window.selectConversationThread = async function(conversationId) {
+    selectedConversationId = conversationId;
+    await renderConversationThread(conversationId);
+    document.querySelectorAll(".thread-item").forEach((el) => {
+      el.classList.toggle("active", el.getAttribute("data-thread-id") === conversationId);
+    });
+  };
+  window.showNewThreadForm = function() {
+    const title = prompt("Thread title:");
+    if (!title) return;
+    createNewConversation(title);
+  };
+  async function createNewConversation(title) {
+    try {
+      const res = await fetch(`${API_BASE}/api/conversations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title })
+      });
+      const data = await res.json();
+      if (data.conversation) {
+        selectedConversationId = data.conversation.id;
+        await renderModule("conversations");
+      }
+    } catch (err) {
+      alert("Error creating thread: " + err.message);
+    }
+  }
+  window.sendConversationMessage = async function(conversationId) {
+    const input = document.getElementById("messageInput");
+    if (!input || !input.value.trim()) return;
+    const content = input.value;
+    input.value = "";
+    try {
+      await fetch(`${API_BASE}/api/conversations/${conversationId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, role: "human" })
+      });
+      await renderConversationThread(conversationId);
+    } catch (err) {
+      alert("Error sending message: " + err.message);
+      input.value = content;
+    }
+  };
+  window.resolveConversation = async function(conversationId) {
+    try {
+      await fetch(`${API_BASE}/api/conversations/${conversationId}/resolve`, { method: "POST" });
+      await renderModule("conversations");
+    } catch (err) {
+      alert("Error resolving conversation: " + err.message);
+    }
+  };
+  window.reopenConversation = async function(conversationId) {
+    try {
+      await fetch(`${API_BASE}/api/conversations/${conversationId}/reopen`, { method: "POST" });
+      await renderModule("conversations");
+    } catch (err) {
+      alert("Error reopening conversation: " + err.message);
     }
   };
   document.addEventListener("DOMContentLoaded", () => {
