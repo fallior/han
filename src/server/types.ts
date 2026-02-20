@@ -334,3 +334,21 @@ export interface BridgeEvent {
     timestamp: string;
     [key: string]: any;
 }
+
+// ── Conversations ───────────────────────────────────────────
+
+export interface ConversationRow {
+    id: string;
+    title: string;
+    status: 'open' | 'resolved';
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ConversationMessageRow {
+    id: string;
+    conversation_id: string;
+    role: 'human' | 'supervisor';
+    content: string;
+    created_at: string;
+}

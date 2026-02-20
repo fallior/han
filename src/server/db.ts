@@ -256,6 +256,24 @@ if (!taskColsPipeline.includes('is_remediation')) {
     db.exec(`ALTER TABLE tasks ADD COLUMN is_remediation INTEGER DEFAULT 0`);
 }
 
+// Conversations tables
+db.exec(`CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    status TEXT DEFAULT 'open',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+)`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS conversation_messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+)`);
+
 // Supervisor cycles table
 db.exec(`CREATE TABLE IF NOT EXISTS supervisor_cycles (
     id TEXT PRIMARY KEY,
@@ -420,6 +438,20 @@ export const strategicProposalStmts = {
     get: db.prepare('SELECT * FROM supervisor_proposals WHERE id = ?') as any,
     updateStatus: db.prepare('UPDATE supervisor_proposals SET status = ?, reviewed_at = ?, reviewer_notes = ?, goal_id = ? WHERE id = ?') as any,
     countPending: db.prepare('SELECT COUNT(*) as count FROM supervisor_proposals WHERE status = ?') as any,
+};
+
+export const conversationStmts = {
+    list: db.prepare('SELECT * FROM conversations ORDER BY updated_at DESC') as any,
+    get: db.prepare('SELECT * FROM conversations WHERE id = ?') as any,
+    insert: db.prepare('INSERT INTO conversations (id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)') as any,
+    updateStatus: db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?') as any,
+    updateTimestamp: db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?') as any,
+};
+
+export const conversationMessageStmts = {
+    list: db.prepare('SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at ASC') as any,
+    insert: db.prepare('INSERT INTO conversation_messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)') as any,
+    getPending: db.prepare('SELECT cm.* FROM conversation_messages cm JOIN conversations c ON cm.conversation_id = c.id WHERE c.status = \'open\' AND cm.role = \'human\' AND NOT EXISTS (SELECT 1 FROM conversation_messages cm2 WHERE cm2.conversation_id = cm.conversation_id AND cm2.role = \'supervisor\' AND cm2.created_at > cm.created_at) ORDER BY cm.created_at ASC') as any,
 };
 
 // ── Helper functions ────────────────────────────────────────

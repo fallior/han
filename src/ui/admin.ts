@@ -188,9 +188,9 @@ async function renderModule(mod: ModuleName): Promise<void> {
         switch (mod) {
             case 'overview': await loadOverview(content); break;
             case 'projects': await loadProjects(content); break;
+            case 'work': await loadWork(content); break;
             case 'supervisor': await loadSupervisor(content); break;
             case 'reports': await loadReports(content); break;
-            case 'work':
             case 'conversations':
             case 'products':
                 renderComingSoon(content, mod); break;
@@ -259,6 +259,7 @@ function handleWsMessage(data: any): void {
     } else if (data.type === 'task_update' || data.type === 'goal_update') {
         if (currentModule === 'overview') renderModule('overview');
         if (currentModule === 'projects') renderModule('projects');
+        if (currentModule === 'work') renderModule('work');
     }
 }
 
