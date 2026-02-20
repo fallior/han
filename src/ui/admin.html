@@ -1272,7 +1272,7 @@
         /* ─── Conversations ─── */
         .conversation-container {
             width: 100%;
-            height: 100%;
+            height: calc(100vh - 130px);
             display: flex;
             flex-direction: column;
         }
@@ -1352,6 +1352,13 @@
             overflow: hidden;
         }
 
+        #threadDetail {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+        }
+
         .thread-header {
             display: flex;
             align-items: flex-start;
@@ -1418,6 +1425,19 @@
             resize: none;
         }
 
+        .message-content strong {
+            font-weight: 600;
+            color: var(--text-heading);
+        }
+
+        .message-content em {
+            font-style: italic;
+        }
+
+        .message-content li {
+            margin-bottom: 2px;
+        }
+
         .message-input:focus {
             outline: none;
             border-color: var(--blue);
@@ -1436,8 +1456,16 @@
                 grid-template-columns: 1fr;
             }
 
-            .thread-list-panel {
+            .conversation-layout.thread-selected .thread-list-panel {
                 display: none;
+            }
+
+            .conversation-layout:not(.thread-selected) .thread-detail-panel {
+                display: none;
+            }
+
+            .thread-back-btn {
+                display: inline-block !important;
             }
         }
     </style>
@@ -1511,6 +1539,6 @@
         </footer>
     </div>
 
-    <script src="admin.js?v=1"></script>
+    <script src="admin.js?v=5"></script>
 </body>
 </html>

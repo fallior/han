@@ -24,6 +24,45 @@ function escapeHtml(s: string): string {
     return div.innerHTML;
 }
 
+function renderMarkdown(text: string): string {
+    // Escape HTML first, then apply markdown patterns
+    let html = escapeHtml(text);
+
+    // Code blocks (``` ... ```)
+    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) =>
+        `<pre style="background:var(--bg-input);padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;margin:8px 0"><code>${code.trim()}</code></pre>`
+    );
+
+    // Inline code
+    html = html.replace(/`([^`]+)`/g, '<code style="background:var(--bg-input);padding:1px 5px;border-radius:3px;font-size:12px">$1</code>');
+
+    // Headers (## and ###)
+    html = html.replace(/^### (.+)$/gm, '<h4 style="margin:12px 0 4px;font-size:13px;color:var(--text-heading)">$1</h4>');
+    html = html.replace(/^## (.+)$/gm, '<h3 style="margin:14px 0 6px;font-size:14px;color:var(--text-heading)">$1</h3>');
+
+    // Horizontal rules
+    html = html.replace(/^---$/gm, '<hr style="border:none;border-top:1px solid var(--border-subtle);margin:12px 0">');
+
+    // Bold + italic
+    html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+    // Unordered lists
+    html = html.replace(/^- (.+)$/gm, '<li style="margin-left:16px;list-style:disc;font-size:inherit">$1</li>');
+
+    // Ordered lists
+    html = html.replace(/^\d+\. (.+)$/gm, '<li style="margin-left:16px;list-style:decimal;font-size:inherit">$1</li>');
+
+    // Paragraphs — double newlines become paragraph breaks
+    html = html.replace(/\n\n/g, '</p><p style="margin:8px 0">');
+
+    // Single newlines become <br> (except inside pre/code blocks handled above)
+    html = html.replace(/\n/g, '<br>');
+
+    return `<p style="margin:0">${html}</p>`;
+}
+
 function formatCost(usd: number): string {
     if (usd === 0) return '$0.00';
     if (usd < 0.01) return `$${usd.toFixed(4)}`;
@@ -263,7 +302,10 @@ function handleWsMessage(data: any): void {
         if (currentModule === 'work') renderModule('work');
     } else if (data.type === 'conversation_message') {
         if (currentModule === 'conversations' && data.conversation_id === selectedConversationId) {
-            renderModule('conversations');
+            // Remove waiting indicator and re-render thread
+            const waiting = document.getElementById('supervisorWaiting');
+            if (waiting) waiting.remove();
+            renderConversationThread(selectedConversationId);
         }
     }
 }
@@ -1624,6 +1666,21 @@ async function loadProductDetail(content: HTMLElement, productId: string): Promi
     content.innerHTML = html;
 }
 
+(window as any).expandPhase = function(event: Event, phaseIndex: number) {
+    // Scroll to the corresponding phase detail card
+    const cards = document.querySelectorAll('.phase-detail-card');
+    if (cards[phaseIndex]) {
+        cards[phaseIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Toggle it open
+        const expanded = cards[phaseIndex].querySelector('.phase-detail-expanded') as HTMLElement;
+        if (expanded && expanded.style.display === 'none') {
+            expanded.style.display = 'block';
+        }
+    }
+};
+
+(window as any).renderModule = renderModule;
+
 (window as any).selectProduct = function(id: string) {
     selectedProductId = selectedProductId === id ? null : id;
     renderModule('products');
@@ -1701,12 +1758,10 @@ async function loadConversations(content: HTMLElement): Promise<void> {
         html += `</div></div>
                 <div class="thread-detail-panel" id="threadDetailPanel">`;
 
-        // Right panel - selected thread or empty state
-        if (selectedConversationId && conversations.find((c: any) => c.id === selectedConversationId)) {
-            html += `<div id="threadDetail"></div>`;
-        } else {
-            html += `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Select a thread to view messages</div>`;
-        }
+        // Right panel - always include threadDetail div so selectConversationThread can render into it
+        html += `<div id="threadDetail">
+            <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Select a thread to view messages</div>
+        </div>`;
 
         html += `</div>
             </div>
@@ -1739,6 +1794,7 @@ async function renderConversationThread(conversationId: string): Promise<void> {
 
         let html = `<div class="thread-header">
             <div style="flex:1">
+                <button class="admin-btn admin-btn-sm thread-back-btn" onclick="backToThreadList()" style="display:none;margin-bottom:6px;font-size:11px">&larr; Back</button>
                 <h2 style="margin:0;margin-bottom:4px;font-size:16px">${escapeHtml(conversation.title)}</h2>
                 <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
             </div>
@@ -1758,7 +1814,7 @@ async function renderConversationThread(conversationId: string): Promise<void> {
 
                 html += `<div class="${bubbleClass}">
                     <div style="font-size:10px;color:${isHuman ? 'rgba(255,255,255,0.6)' : 'var(--text-muted)'};margin-bottom:4px">${label} · ${formatTime(msg.created_at)}</div>
-                    <div style="word-break:break-word;line-height:1.5">${escapeHtml(msg.content)}</div>
+                    <div class="message-content" style="word-break:break-word;line-height:1.5">${renderMarkdown(msg.content)}</div>
                 </div>`;
             }
         }
@@ -1799,6 +1855,16 @@ async function renderConversationThread(conversationId: string): Promise<void> {
     document.querySelectorAll('.thread-item').forEach(el => {
         el.classList.toggle('active', el.getAttribute('data-thread-id') === conversationId);
     });
+
+    // Mobile: show thread detail, hide list
+    const layout = document.querySelector('.conversation-layout');
+    if (layout) layout.classList.add('thread-selected');
+};
+
+(window as any).backToThreadList = function() {
+    selectedConversationId = null;
+    const layout = document.querySelector('.conversation-layout');
+    if (layout) layout.classList.remove('thread-selected');
 };
 
 (window as any).showNewThreadForm = function() {
@@ -1838,6 +1904,18 @@ async function createNewConversation(title: string): Promise<void> {
             body: JSON.stringify({ content, role: 'human' })
         });
         await renderConversationThread(conversationId);
+
+        // Show waiting indicator — supervisor wakes automatically on human message
+        const messageList = document.getElementById('messageList');
+        if (messageList) {
+            const waiting = document.createElement('div');
+            waiting.id = 'supervisorWaiting';
+            waiting.className = 'message-bubble supervisor';
+            waiting.style.opacity = '0.5';
+            waiting.innerHTML = '<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Supervisor</div><div style="font-size:12px;color:var(--text-muted)">Thinking...</div>';
+            messageList.appendChild(waiting);
+            messageList.scrollTop = messageList.scrollHeight;
+        }
     } catch (err: any) {
         alert('Error sending message: ' + err.message);
         input.value = content;

@@ -1,16 +1,25 @@
 import { Router, Request, Response } from 'express';
-import { conversationStmts, conversationMessageStmts } from '../db';
+import { db, conversationStmts, conversationMessageStmts } from '../db';
 import { generateId } from '../services/planning';
 import { broadcast } from '../ws';
+import { runSupervisorCycle } from '../services/supervisor';
 
 const router = Router();
+
+const listWithCounts = db.prepare(`
+    SELECT c.*, COUNT(cm.id) as message_count
+    FROM conversations c
+    LEFT JOIN conversation_messages cm ON c.id = cm.conversation_id
+    GROUP BY c.id
+    ORDER BY c.updated_at DESC
+`) as any;
 
 /**
  * GET / -- List all conversations
  */
 router.get('/', (req: Request, res: Response) => {
     try {
-        const conversations = conversationStmts.list.all();
+        const conversations = listWithCounts.all();
         res.json({ success: true, conversations });
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
@@ -85,6 +94,11 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         });
 
         res.json({ success: true, message });
+
+        // Wake supervisor to respond (fire and forget, only for human messages)
+        if (finalRole === 'human') {
+            runSupervisorCycle().catch(() => {});
+        }
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
     }

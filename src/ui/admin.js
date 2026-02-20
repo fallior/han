@@ -13,6 +13,25 @@
     div.textContent = s;
     return div.innerHTML;
   }
+  function renderMarkdown(text) {
+    let html = escapeHtml(text);
+    html = html.replace(
+      /```(\w*)\n([\s\S]*?)```/g,
+      (_m, _lang, code) => `<pre style="background:var(--bg-input);padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;margin:8px 0"><code>${code.trim()}</code></pre>`
+    );
+    html = html.replace(/`([^`]+)`/g, '<code style="background:var(--bg-input);padding:1px 5px;border-radius:3px;font-size:12px">$1</code>');
+    html = html.replace(/^### (.+)$/gm, '<h4 style="margin:12px 0 4px;font-size:13px;color:var(--text-heading)">$1</h4>');
+    html = html.replace(/^## (.+)$/gm, '<h3 style="margin:14px 0 6px;font-size:14px;color:var(--text-heading)">$1</h3>');
+    html = html.replace(/^---$/gm, '<hr style="border:none;border-top:1px solid var(--border-subtle);margin:12px 0">');
+    html = html.replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>");
+    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+    html = html.replace(/^- (.+)$/gm, '<li style="margin-left:16px;list-style:disc;font-size:inherit">$1</li>');
+    html = html.replace(/^\d+\. (.+)$/gm, '<li style="margin-left:16px;list-style:decimal;font-size:inherit">$1</li>');
+    html = html.replace(/\n\n/g, '</p><p style="margin:8px 0">');
+    html = html.replace(/\n/g, "<br>");
+    return `<p style="margin:0">${html}</p>`;
+  }
   function formatCost(usd) {
     if (usd === 0) return "$0.00";
     if (usd < 0.01) return `$${usd.toFixed(4)}`;
@@ -204,7 +223,9 @@
       if (currentModule === "work") renderModule("work");
     } else if (data.type === "conversation_message") {
       if (currentModule === "conversations" && data.conversation_id === selectedConversationId) {
-        renderModule("conversations");
+        const waiting = document.getElementById("supervisorWaiting");
+        if (waiting) waiting.remove();
+        renderConversationThread(selectedConversationId);
       }
     }
   }
@@ -1365,6 +1386,17 @@
     html += `</div>`;
     content.innerHTML = html;
   }
+  window.expandPhase = function(event, phaseIndex) {
+    const cards = document.querySelectorAll(".phase-detail-card");
+    if (cards[phaseIndex]) {
+      cards[phaseIndex].scrollIntoView({ behavior: "smooth", block: "center" });
+      const expanded = cards[phaseIndex].querySelector(".phase-detail-expanded");
+      if (expanded && expanded.style.display === "none") {
+        expanded.style.display = "block";
+      }
+    }
+  };
+  window.renderModule = renderModule;
   window.selectProduct = function(id) {
     selectedProductId = selectedProductId === id ? null : id;
     renderModule("products");
@@ -1426,11 +1458,9 @@
       }
       html += `</div></div>
                 <div class="thread-detail-panel" id="threadDetailPanel">`;
-      if (selectedConversationId && conversations.find((c) => c.id === selectedConversationId)) {
-        html += `<div id="threadDetail"></div>`;
-      } else {
-        html += `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Select a thread to view messages</div>`;
-      }
+      html += `<div id="threadDetail">
+            <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Select a thread to view messages</div>
+        </div>`;
       html += `</div>
             </div>
         </div>`;
@@ -1453,6 +1483,7 @@
       const resolveButton = conversation.status === "open" ? `<button class="admin-btn admin-btn-sm" onclick="resolveConversation('${conversation.id}')">Resolve</button>` : `<button class="admin-btn admin-btn-sm" onclick="reopenConversation('${conversation.id}')">Reopen</button>`;
       let html = `<div class="thread-header">
             <div style="flex:1">
+                <button class="admin-btn admin-btn-sm thread-back-btn" onclick="backToThreadList()" style="display:none;margin-bottom:6px;font-size:11px">&larr; Back</button>
                 <h2 style="margin:0;margin-bottom:4px;font-size:16px">${escapeHtml(conversation.title)}</h2>
                 <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
             </div>
@@ -1469,7 +1500,7 @@
           const label = isHuman ? "You" : "Supervisor";
           html += `<div class="${bubbleClass}">
                     <div style="font-size:10px;color:${isHuman ? "rgba(255,255,255,0.6)" : "var(--text-muted)"};margin-bottom:4px">${label} \xB7 ${formatTime(msg.created_at)}</div>
-                    <div style="word-break:break-word;line-height:1.5">${escapeHtml(msg.content)}</div>
+                    <div class="message-content" style="word-break:break-word;line-height:1.5">${renderMarkdown(msg.content)}</div>
                 </div>`;
         }
       }
@@ -1501,6 +1532,13 @@
     document.querySelectorAll(".thread-item").forEach((el) => {
       el.classList.toggle("active", el.getAttribute("data-thread-id") === conversationId);
     });
+    const layout = document.querySelector(".conversation-layout");
+    if (layout) layout.classList.add("thread-selected");
+  };
+  window.backToThreadList = function() {
+    selectedConversationId = null;
+    const layout = document.querySelector(".conversation-layout");
+    if (layout) layout.classList.remove("thread-selected");
   };
   window.showNewThreadForm = function() {
     const title = prompt("Thread title:");
@@ -1535,6 +1573,16 @@
         body: JSON.stringify({ content, role: "human" })
       });
       await renderConversationThread(conversationId);
+      const messageList = document.getElementById("messageList");
+      if (messageList) {
+        const waiting = document.createElement("div");
+        waiting.id = "supervisorWaiting";
+        waiting.className = "message-bubble supervisor";
+        waiting.style.opacity = "0.5";
+        waiting.innerHTML = '<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Supervisor</div><div style="font-size:12px;color:var(--text-muted)">Thinking...</div>';
+        messageList.appendChild(waiting);
+        messageList.scrollTop = messageList.scrollHeight;
+      }
     } catch (err) {
       alert("Error sending message: " + err.message);
       input.value = content;
