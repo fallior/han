@@ -501,6 +501,264 @@ function renderActivityItems(events: any[]): string {
 }
 
 // ══════════════════════════════════════════════════════════════
+// MODULE: Work
+// ══════════════════════════════════════════════════════════════
+
+let workFilters = { project: '', status: '', model: '' };
+let workData: { tasks: any[], activeGoals: any[], archivedGoals: any[] } | null = null;
+
+async function loadWork(content: HTMLElement): Promise<void> {
+    const [tasksRes, activeGoalsRes, archivedGoalsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/tasks`),
+        fetch(`${API_BASE}/api/goals?view=active`),
+        fetch(`${API_BASE}/api/goals?view=archived`),
+    ]);
+
+    const tasksData = await tasksRes.json();
+    const activeGoalsData = await activeGoalsRes.json();
+    const archivedGoalsData = await archivedGoalsRes.json();
+
+    const tasks = tasksData.tasks || [];
+    const activeGoals = activeGoalsData.goals || [];
+    const archivedGoals = archivedGoalsData.goals || [];
+
+    workData = { tasks, activeGoals, archivedGoals };
+
+    // Extract unique projects and models
+    const projects = [...new Set(tasks.map((t: any) => t.project_path?.split('/').pop() || 'unknown'))].sort();
+    const models = [...new Set(tasks.map((t: any) => t.model || 'unknown'))].filter(m => m).sort();
+    const statuses = ['pending', 'running', 'done', 'failed'];
+
+    // Build filter bar HTML
+    let html = `<div class="fade-in">
+        <div class="filter-bar">
+            <select class="form-select" id="filterStatus" onchange="applyWorkFilters()">
+                <option value="">All Statuses</option>
+                ${statuses.map(s => `<option value="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</option>`).join('')}
+            </select>
+            <select class="form-select" id="filterProject" onchange="applyWorkFilters()">
+                <option value="">All Projects</option>
+                ${projects.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('')}
+            </select>
+            <select class="form-select" id="filterModel" onchange="applyWorkFilters()">
+                <option value="">All Models</option>
+                ${models.map(m => `<option value="${m}">${m}</option>`).join('')}
+            </select>
+        </div>`;
+
+    // Kanban board
+    html += `<div class="kanban-board">`;
+    for (const status of statuses) {
+        const statusTasks = filterWorkTasks(tasks, status);
+        const count = statusTasks.length;
+        const borderColor = status === 'done' ? 'var(--green)' : status === 'running' ? 'var(--cyan)' : status === 'failed' ? 'var(--red)' : 'var(--amber)';
+
+        html += `<div class="kanban-column">
+            <div class="kanban-column-header" style="border-bottom-color: ${borderColor}">
+                <span class="kanban-column-title">${status.charAt(0).toUpperCase() + status.slice(1)}</span>
+                <span class="kanban-column-count">${count}</span>
+            </div>
+            <div class="kanban-column-body">`;
+
+        for (const task of statusTasks) {
+            const projectName = task.project_path?.split('/').pop() || '—';
+            const taskStatus = task.status || 'pending';
+            const borderSide = taskStatus === 'done' || taskStatus === 'completed' ? 'var(--green)' :
+                               taskStatus === 'running' || taskStatus === 'active' || taskStatus === 'decomposing' ? 'var(--cyan)' :
+                               taskStatus === 'failed' ? 'var(--red)' : 'var(--amber)';
+            const pulseClass = taskStatus === 'running' || taskStatus === 'active' ? 'pulse' : '';
+
+            html += `<div class="kanban-card ${pulseClass}" data-task-id="${task.id}" style="border-left-color: ${borderSide}" onclick="toggleWorkCardExpanded(event, '${task.id}')">
+                <div class="kanban-card-header">
+                    <span class="kanban-card-title">${escapeHtml(task.title || 'Untitled')}</span>
+                </div>
+                <div class="kanban-card-meta">
+                    <span class="badge badge-${task.model === 'opus' ? 'strategic' : task.model === 'sonnet' ? 'improvement' : 'opportunity'}">${escapeHtml(task.model || '?')}</span>
+                    <span style="font-size:12px;color:var(--text-muted)">${escapeHtml(projectName)}</span>
+                </div>
+                <div class="kanban-card-footer">
+                    <span style="font-size:12px;color:var(--text-muted)">${formatCost(task.cost_usd || 0)}</span>
+                    <span style="font-size:12px;color:var(--text-muted)">${timeSince(task.created_at)}</span>
+                </div>
+                <div class="kanban-card-detail" style="display:none">
+                    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-subtle)">
+                        <div style="margin-bottom:6px"><strong style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Description</strong></div>
+                        <div style="font-size:12px;color:var(--text-dim);line-height:1.5">${escapeHtml((task.description || '—').substring(0, 200))}</div>
+                        ${task.error ? `<div style="margin-top:8px;padding:6px 8px;background:rgba(248, 81, 73, 0.1);border-radius:4px;border-left:2px solid var(--red)"><strong style="font-size:11px;color:var(--red);text-transform:uppercase">Error</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">${escapeHtml(task.error.substring(0, 150))}</div></div>` : ''}
+                        ${task.log_file ? `<div style="margin-top:6px"><a href="#" onclick="viewTaskLog('${task.id}', event)" style="font-size:12px;color:var(--blue)">View Log</a></div>` : ''}
+                        ${task.commit_sha ? `<div style="margin-top:6px;font-size:11px;color:var(--text-muted)"><strong>Commit:</strong> ${escapeHtml(task.commit_sha.slice(0, 8))}</div>` : ''}
+                        ${task.goal_id ? `<div style="margin-top:6px"><a href="#" style="font-size:12px;color:var(--blue)">Goal: ${escapeHtml(task.goal_id)}</a></div>` : ''}
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        html += `</div></div>`;
+    }
+    html += `</div>`;
+
+    // Goals section
+    if (activeGoals.length > 0) {
+        html += `<div class="admin-card">
+            <h2>Active Goals</h2>
+            <div class="goals-list">`;
+
+        const goalsByProject = {} as Record<string, any[]>;
+        for (const goal of activeGoals) {
+            const proj = goal.project_path?.split('/').pop() || 'unknown';
+            if (!goalsByProject[proj]) goalsByProject[proj] = [];
+            goalsByProject[proj].push(goal);
+        }
+
+        for (const [proj, goals] of Object.entries(goalsByProject)) {
+            for (const goal of goals) {
+                const completed = goal.tasks_completed || 0;
+                const total = goal.task_count || 1;
+                const pct = total > 0 ? (completed / total) : 0;
+
+                html += `<div class="goal-item" onclick="toggleGoalExpanded(event, '${goal.id}')">
+                    <div class="goal-header">
+                        <span class="goal-title">${escapeHtml(goal.title || 'Untitled Goal')}</span>
+                        <span style="font-size:12px;color:var(--text-muted)">${escapeHtml(proj)}</span>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;line-height:1.4">${escapeHtml((goal.description || '—').substring(0, 100))}</div>
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill" style="width:${(pct * 100).toFixed(1)}%"></div>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${completed}/${total} tasks · ${formatCost(goal.cost_usd || 0)}</div>
+                    <div class="goal-detail" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border-subtle)">
+                        <div style="margin-bottom:4px"><strong style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Child Tasks</strong></div>
+                        ${goal.child_task_count ? `<div style="font-size:12px;color:var(--text-dim)">${goal.child_task_count} tasks assigned</div>` : ''}
+                    </div>
+                </div>`;
+            }
+        }
+
+        html += `</div></div>`;
+    }
+
+    html += `</div>`;
+    content.innerHTML = html;
+
+    // Restore filter values
+    const statusSelect = document.getElementById('filterStatus') as HTMLSelectElement;
+    const projectSelect = document.getElementById('filterProject') as HTMLSelectElement;
+    const modelSelect = document.getElementById('filterModel') as HTMLSelectElement;
+    if (statusSelect) statusSelect.value = workFilters.status;
+    if (projectSelect) projectSelect.value = workFilters.project;
+    if (modelSelect) modelSelect.value = workFilters.model;
+}
+
+function filterWorkTasks(tasks: any[], statusFilter: string): any[] {
+    return tasks.filter(t => {
+        const taskStatus = t.status || 'pending';
+        const taskProject = t.project_path?.split('/').pop() || '';
+        const taskModel = t.model || '';
+
+        let statusMatch = false;
+        if (statusFilter === 'pending') statusMatch = taskStatus === 'pending';
+        else if (statusFilter === 'running') statusMatch = taskStatus === 'running' || taskStatus === 'active' || taskStatus === 'decomposing';
+        else if (statusFilter === 'done') statusMatch = taskStatus === 'done' || taskStatus === 'completed';
+        else if (statusFilter === 'failed') statusMatch = taskStatus === 'failed';
+
+        const projectMatch = !workFilters.project || taskProject === workFilters.project;
+        const modelMatch = !workFilters.model || taskModel === workFilters.model;
+
+        return statusMatch && projectMatch && modelMatch;
+    });
+}
+
+(window as any).applyWorkFilters = function() {
+    const statusSelect = document.getElementById('filterStatus') as HTMLSelectElement;
+    const projectSelect = document.getElementById('filterProject') as HTMLSelectElement;
+    const modelSelect = document.getElementById('filterModel') as HTMLSelectElement;
+
+    workFilters.status = statusSelect?.value || '';
+    workFilters.project = projectSelect?.value || '';
+    workFilters.model = modelSelect?.value || '';
+
+    // Re-render kanban only (client-side filtering)
+    if (workData) {
+        const content = document.getElementById('mainContent');
+        if (content) {
+            // Find each kanban column and update it
+            const columns = ['pending', 'running', 'done', 'failed'];
+            for (const status of columns) {
+                const col = content.querySelector(`[data-kanban-status="${status}"]`) as HTMLElement;
+                if (col) {
+                    const statusTasks = filterWorkTasks(workData.tasks, status);
+                    let cardHtml = '';
+                    for (const task of statusTasks) {
+                        const projectName = task.project_path?.split('/').pop() || '—';
+                        const taskStatus = task.status || 'pending';
+                        const borderSide = taskStatus === 'done' || taskStatus === 'completed' ? 'var(--green)' :
+                                           taskStatus === 'running' || taskStatus === 'active' || taskStatus === 'decomposing' ? 'var(--cyan)' :
+                                           taskStatus === 'failed' ? 'var(--red)' : 'var(--amber)';
+                        const pulseClass = taskStatus === 'running' || taskStatus === 'active' ? 'pulse' : '';
+
+                        cardHtml += `<div class="kanban-card ${pulseClass}" data-task-id="${task.id}" style="border-left-color: ${borderSide}" onclick="toggleWorkCardExpanded(event, '${task.id}')">
+                            <div class="kanban-card-header">
+                                <span class="kanban-card-title">${escapeHtml(task.title || 'Untitled')}</span>
+                            </div>
+                            <div class="kanban-card-meta">
+                                <span class="badge badge-${task.model === 'opus' ? 'strategic' : task.model === 'sonnet' ? 'improvement' : 'opportunity'}">${escapeHtml(task.model || '?')}</span>
+                                <span style="font-size:12px;color:var(--text-muted)">${escapeHtml(projectName)}</span>
+                            </div>
+                            <div class="kanban-card-footer">
+                                <span style="font-size:12px;color:var(--text-muted)">${formatCost(task.cost_usd || 0)}</span>
+                                <span style="font-size:12px;color:var(--text-muted)">${timeSince(task.created_at)}</span>
+                            </div>
+                            <div class="kanban-card-detail" style="display:none">
+                                <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-subtle)">
+                                    <div style="margin-bottom:6px"><strong style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Description</strong></div>
+                                    <div style="font-size:12px;color:var(--text-dim);line-height:1.5">${escapeHtml((task.description || '—').substring(0, 200))}</div>
+                                    ${task.error ? `<div style="margin-top:8px;padding:6px 8px;background:rgba(248, 81, 73, 0.1);border-radius:4px;border-left:2px solid var(--red)"><strong style="font-size:11px;color:var(--red);text-transform:uppercase">Error</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">${escapeHtml(task.error.substring(0, 150))}</div></div>` : ''}
+                                    ${task.log_file ? `<div style="margin-top:6px"><a href="#" onclick="viewTaskLog('${task.id}', event)" style="font-size:12px;color:var(--blue)">View Log</a></div>` : ''}
+                                    ${task.commit_sha ? `<div style="margin-top:6px;font-size:11px;color:var(--text-muted)"><strong>Commit:</strong> ${escapeHtml(task.commit_sha.slice(0, 8))}</div>` : ''}
+                                    ${task.goal_id ? `<div style="margin-top:6px"><a href="#" style="font-size:12px;color:var(--blue)">Goal: ${escapeHtml(task.goal_id)}</a></div>` : ''}
+                                </div>
+                            </div>
+                        </div>`;
+                    }
+                    const bodyEl = col.querySelector('.kanban-column-body') as HTMLElement;
+                    if (bodyEl) bodyEl.innerHTML = cardHtml;
+                    const countEl = col.querySelector('.kanban-column-count') as HTMLElement;
+                    if (countEl) countEl.textContent = String(statusTasks.length);
+                }
+            }
+        }
+    }
+};
+
+(window as any).toggleWorkCardExpanded = function(event: Event, taskId: string) {
+    event.stopPropagation();
+    const card = (event.target as HTMLElement).closest('.kanban-card') as HTMLElement;
+    if (!card) return;
+    const detail = card.querySelector('.kanban-card-detail') as HTMLElement;
+    if (detail) {
+        const isHidden = detail.style.display === 'none';
+        detail.style.display = isHidden ? 'block' : 'none';
+    }
+};
+
+(window as any).toggleGoalExpanded = function(event: Event, goalId: string) {
+    event.stopPropagation();
+    const goal = (event.target as HTMLElement).closest('.goal-item') as HTMLElement;
+    if (!goal) return;
+    const detail = goal.querySelector('.goal-detail') as HTMLElement;
+    if (detail) {
+        const isHidden = detail.style.display === 'none';
+        detail.style.display = isHidden ? 'block' : 'none';
+    }
+};
+
+(window as any).viewTaskLog = function(taskId: string, event: Event) {
+    event.preventDefault();
+    event.stopPropagation();
+    alert(`Log viewer for task ${taskId} would open here`);
+};
+
+// ══════════════════════════════════════════════════════════════
 // MODULE: Projects
 // ══════════════════════════════════════════════════════════════
 
