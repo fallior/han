@@ -193,8 +193,15 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 | GET | /api/approvals/:id | Get approval details |
 | POST | /api/approvals/:id/approve | Approve operation |
 | POST | /api/approvals/:id/deny | Deny operation |
-| WS | /ws | WebSocket push (prompts + terminal + tasks + approvals) |
+| GET | /api/conversations | List conversation threads |
+| POST | /api/conversations | Create new thread |
+| GET | /api/conversations/:id | Get thread with messages |
+| POST | /api/conversations/:id/messages | Add message to thread |
+| POST | /api/conversations/:id/resolve | Mark conversation resolved |
+| POST | /api/conversations/:id/reopen | Reopen resolved conversation |
+| WS | /ws | WebSocket push (prompts + terminal + tasks + approvals + conversations) |
 | GET | / | Serve web UI |
+| GET | /admin | Admin console (desktop-optimised) |
 
 ### Request/Response Examples
 
@@ -311,6 +318,34 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
   - All-cancelled goals correctly marked as 'cancelled' (not 'done')
   - Returns count of goals cleaned (logged)
   - Prevents stale goal accumulation, keeps supervisor observations accurate
+- **Admin console (Phase 2)**:
+  - **Work module**: Unified task/goal Kanban board with pending/running/done columns, goal grouping with progress bars, filters by project/status/model, real-time WebSocket updates
+  - **Conversations module**: Strategic discussion threads between human and supervisor, async Q&A channel for nuanced decisions that don't fit task/goal work
+  - **Products module**: Product pipeline visualisation showing phase progress, knowledge accumulation, synthesis reports, cost tracking
+  - TypeScript source (`admin.ts`) compiled to `admin.js` via `build-client.js`
+  - All modules integrated with existing WebSocket events
+
+### Level 12: Strategic Conversations (Complete)
+
+- **Conversation threads**: Async strategic discussion between Darron and supervisor
+- **Database schema**:
+  - `conversations` table: id, title, status (open/resolved), created_at, updated_at
+  - `conversation_messages` table: id, conversation_id, role (human/supervisor), content, created_at
+- **API endpoints**:
+  - `GET /api/conversations` — list all threads
+  - `POST /api/conversations` — create thread
+  - `GET /api/conversations/:id` — get thread with messages
+  - `POST /api/conversations/:id/messages` — add message
+  - `POST /api/conversations/:id/resolve` — mark resolved
+  - `POST /api/conversations/:id/reopen` — reopen thread
+- **Supervisor integration**:
+  - Supervisor observes pending conversations in system state
+  - New action type: `respond_conversation` with conversation_id and response_content
+  - Queries for unanswered human messages: messages where no supervisor message exists with later timestamp
+  - Responds thoughtfully with strategic insight, not just task status
+- **WebSocket broadcasts**:
+  - `conversation_message` event when new message posted
+  - Real-time updates in admin UI
 
 ## Security Considerations
 

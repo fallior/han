@@ -47,6 +47,7 @@ When you make a significant technical or design decision:
 | DEC-015 | Auto-commit on Task Success | Accepted | 2026-02-16 |
 | DEC-016 | Automated Phantom Goal Cleanup in Supervisor Cycle | Accepted | 2026-02-20 |
 | DEC-017 | Protected System Files — Autonomous Agents Blocked | **Settled** | 2026-02-20 |
+| DEC-018 | Conversations as Strategic Async Discussion Channel | Accepted | 2026-02-20 |
 
 ---
 
@@ -887,6 +888,98 @@ The block is enforced via `checkProtectedFiles()` in `planning.ts`, called befor
 **Why Settled**: Autonomous agents modifying shell config files can silently break authentication, environment variables, PATH, and other foundational system state. The damage is invisible until something fails hours later. There is no scenario where the benefit outweighs the risk. If system files need changing, a human does it.
 
 **Incident**: Session log at `licences/_logs/session_2026-02-19_18-41-52.md` — Claude rewrote `.bashrc` at ~02:45 AEST, SSH agent block lost, git push broken for 6+ hours until manually diagnosed.
+
+---
+
+### DEC-018: Conversations as Strategic Async Discussion Channel
+
+**Date**: 2026-02-20
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+The admin console needed a way for Darron to have strategic, nuanced discussions with the supervisor that don't fit the task/goal execution model. Questions like "Should we refactor this architecture?" or "What's the best approach for X?" deserve thoughtful discussion, not just action items.
+
+Existing channels:
+- **Tasks**: Execute specific work (read-only, deterministic)
+- **Goals**: Decompose and execute multi-step work
+- **Proposals**: Ideas requiring human approval (one-way: supervisor → human)
+
+None of these support back-and-forth strategic dialogue.
+
+#### Options Considered
+
+1. **Extend Proposals to support replies**
+   - ✅ Reuses existing table
+   - ❌ Proposals are fundamentally one-way (supervisor suggests, human approves/rejects)
+   - ❌ Doesn't fit the mental model of "discussion"
+   - ❌ Would overload the Proposals concept
+
+2. **Use Goals with special "discussion" type**
+   - ✅ Reuses existing infrastructure
+   - ❌ Goals are about work execution, not dialogue
+   - ❌ Confusing to mix discussion with task orchestration
+   - ❌ Would clutter the Goals UI
+
+3. **Separate Conversations table with threaded messages**
+   - ✅ Clear separation of concerns (work vs discussion)
+   - ✅ Natural mental model (threads, messages, status)
+   - ✅ Supervisor can see pending conversations in observations
+   - ✅ Supports multi-turn dialogue
+   - ✅ Status lifecycle (open → resolved → reopen)
+   - ❌ Additional tables and API routes
+
+4. **External chat tool (Slack, Discord, etc.)**
+   - ✅ Rich features
+   - ❌ Context split across systems
+   - ❌ Supervisor can't see or respond automatically
+   - ❌ Extra dependency
+
+#### Decision
+
+We chose **Option 3: Separate Conversations table with threaded messages** because it provides a dedicated channel for strategic dialogue while keeping everything in one system.
+
+**Database schema**:
+- `conversations` table: id, title, status (open/resolved), created_at, updated_at
+- `conversation_messages` table: id, conversation_id, role (human/supervisor), content, created_at
+
+**Supervisor integration**:
+- Supervisor observes pending conversations (threads with unanswered human messages)
+- New action: `respond_conversation` with conversation_id and response_content
+- Query: finds human messages where no supervisor message exists with later timestamp
+- System prompt: "Respond thoughtfully with strategic insight, not just task status"
+
+**UI**: Admin console Conversations module with thread list, message view, compose, resolve/reopen actions
+
+**API**: 6 endpoints for CRUD + resolve/reopen
+
+#### Consequences
+
+**Positive**:
+- Clear separation: tasks/goals = execution, conversations = strategic discussion
+- Supervisor can participate in async dialogue automatically
+- Darron can ask open-ended questions and get thoughtful responses
+- Conversation history preserved for context
+- Status lifecycle (open/resolved) keeps UI organised
+
+**Negative**:
+- Additional database tables and API routes
+- Supervisor must check for pending conversations every cycle (small overhead)
+- Risk of supervisor misinterpreting conversation intent (mitigated by clear system prompt)
+
+**Implementation**:
+- Tables created in `db.ts` with prepared statements
+- Routes in `src/server/routes/conversations.ts` (129 lines)
+- Supervisor awareness in `supervisor.ts` (observations + `respond_conversation` action)
+- Admin UI module in `admin.ts` (Conversations section)
+- WebSocket broadcast: `conversation_message` event
+
+#### Related
+
+- Admin console Phase 2 implementation (Work, Conversations, Products modules)
+- Supervisor system prompt update for conversation awareness
+- DEC-007: Task Execution via Agent SDK (provides foundation for supervisor actions)
 
 ---
 

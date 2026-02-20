@@ -30,6 +30,37 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-02-20 — Claude (autonomous) — Admin Console Phase 2: Work, Conversations, Products
+- **Three new admin modules implemented** (9 commits, `3a752ce` to `d019950`):
+  - **Work module**: Kanban-style task/goal visualisation with pending/running/done columns, goal grouping with progress bars, filters by project/status/model, real-time WebSocket updates
+  - **Conversations module**: Strategic discussion threads between Darron and supervisor, thread list with status (open/resolved), message history UI, supervisor responds automatically to pending threads
+  - **Products module**: Product pipeline visualisation showing current phase, phase-by-phase timeline with knowledge accumulation, synthesis report summaries, cost tracking per phase
+- **Database changes** (`3a752ce`, `66941ae`):
+  - New tables: `conversations` (id, title, status, created_at, updated_at), `conversation_messages` (id, conversation_id, role, content, created_at)
+  - Prepared statements for CRUD operations on conversations and messages
+- **API routes** (`3a752ce`, `66941ae`):
+  - `GET /api/conversations` — list all threads
+  - `POST /api/conversations` — create new thread
+  - `GET /api/conversations/:id` — get thread with messages
+  - `POST /api/conversations/:id/messages` — add message (human or supervisor)
+  - `POST /api/conversations/:id/resolve` — mark resolved
+  - `POST /api/conversations/:id/reopen` — reopen thread
+- **Supervisor awareness** (`8b14a1c`):
+  - Supervisor system prompt updated with conversation thread awareness
+  - New action: `respond_conversation` — supervisor responds to pending human messages
+  - Pending conversations shown in system state observations
+  - Supervisor checks for unanswered human messages and responds thoughtfully
+- **Frontend implementation** (`49e42f5`, `f047cf6`, `77bf770`, `d9fa1ef`, `0a9fb70`, `4599f77`):
+  - 1,922-line admin.ts TypeScript module (compiled to admin.js)
+  - Work module: Kanban board with task cards, goal grouping, filter controls, expandable detail views
+  - Conversations module: Thread list, message composition, threaded message view, resolve/reopen actions
+  - Products module: Product list, phase timeline, knowledge graph visualisation, synthesis report display
+  - Sidebar updated to remove "coming soon" badges and enable all modules
+- **Build system** (`d019950`):
+  - `build-client.js` script for TypeScript compilation
+  - Verified compilation: admin.ts → admin.js (1,599 lines compiled output)
+  - All modules functional in admin console
+
 ### 2026-02-20 — Claude (autonomous) — Documentation Update for Phantom Goal Cleanup
 - **Documentation task completed** (`4efc2b9`):
   - Updated CURRENT_STATUS.md with phantom goal cleanup details
@@ -499,6 +530,12 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ All-cancelled goal state detection (correctly marks as 'cancelled' not 'done')
 - ✅ Force-delete API for manual goal cleanup
 - ✅ Supervisor frequency calculation excludes phantom goals
+- ✅ Admin console Phase 2: Work, Conversations, Products modules
+- ✅ Work module: Kanban board with task/goal visualisation, filters, real-time updates
+- ✅ Conversations module: Strategic discussion threads with supervisor responses
+- ✅ Products module: Product pipeline visualisation with phase timeline
+- ✅ Supervisor responds to pending conversation threads automatically
+- ✅ TypeScript build system for admin console (admin.ts → admin.js)
 
 ## Next Actions
 
