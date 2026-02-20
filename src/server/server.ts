@@ -132,6 +132,17 @@ app.get('/', (_req, res) => {
     }
 });
 
+// Admin console
+const ADMIN_PATH = path.join(UI_DIR, 'admin.html');
+app.get('/admin', (_req, res) => {
+    if (fs.existsSync(ADMIN_PATH)) {
+        res.set('Cache-Control', 'no-store');
+        res.sendFile(ADMIN_PATH);
+    } else {
+        res.status(404).send('Admin console not found. Ensure src/ui/admin.html exists.');
+    }
+});
+
 // ── WebSocket ────────────────────────────────────────────
 
 const wss = createWebSocketServer(server, () => {

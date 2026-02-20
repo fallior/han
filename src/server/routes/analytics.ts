@@ -60,10 +60,11 @@ router.get('/api/analytics', (req: Request, res: Response) => {
             delete byProject[p].successes;
         }
 
-        // Velocity: tasks per day (last 7 days)
+        // Velocity: tasks per day (configurable lookback via ?days=)
         const now = new Date();
+        const velocityDays = Math.min(Math.max(parseInt(req.query.days as string) || 7, 1), 90);
         const dailyCounts: Array<{ date: string; count: number }> = [];
-        for (let i = 0; i < 7; i++) {
+        for (let i = 0; i < velocityDays; i++) {
             const date = new Date(now);
             date.setDate(date.getDate() - i);
             const dateStr = date.toISOString().split('T')[0];

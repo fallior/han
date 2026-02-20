@@ -14,3 +14,13 @@ esbuild.buildSync({
     sourcemap: false,
     logLevel: 'info',
 });
+
+esbuild.buildSync({
+    entryPoints: [path.join(__dirname, '..', 'ui', 'admin.ts')],
+    outfile: path.join(__dirname, '..', 'ui', 'admin.js'),
+    bundle: false,
+    format: 'iife',
+    target: 'es2022',
+    sourcemap: false,
+    logLevel: 'info',
+});
