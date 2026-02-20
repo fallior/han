@@ -1561,10 +1561,6 @@
     initChartDefaults();
     document.querySelectorAll(".sidebar-item[data-module]").forEach((el) => {
       el.addEventListener("click", (e) => {
-        if (el.classList.contains("coming-soon")) {
-          e.preventDefault();
-          return;
-        }
       });
     });
     const collapseBtn = document.getElementById("collapseBtn");
