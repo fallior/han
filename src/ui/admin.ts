@@ -1744,11 +1744,25 @@ async function loadConversations(content: HTMLElement): Promise<void> {
                 const statusBadgeClass = conv.status === 'open' ? 'badge-running' : 'badge-done';
                 const statusText = conv.status === 'open' ? 'Open' : 'Resolved';
 
+                // Participant indicators
+                const participants = (conv.participants || '').split(',').filter(Boolean);
+                let participantHtml = '';
+                if (participants.length > 0) {
+                    const badges = participants.map((p: string) => {
+                        if (p === 'human') return '<span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:rgba(56,139,253,0.3);color:var(--blue);font-size:9px;line-height:16px;text-align:center;font-weight:600" title="Darron">D</span>';
+                        if (p === 'supervisor') return '<span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:rgba(163,113,247,0.3);color:var(--purple);font-size:9px;line-height:16px;text-align:center;font-weight:600" title="Jim">J</span>';
+                        if (p === 'leo') return '<span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:rgba(56,207,135,0.3);color:var(--green);font-size:9px;line-height:16px;text-align:center;font-weight:600" title="Leo">L</span>';
+                        return '';
+                    }).join('');
+                    participantHtml = `<span style="display:flex;gap:3px;align-items:center">${badges}</span>`;
+                }
+
                 html += `<div class="thread-item ${isSelected ? 'active' : ''}" data-thread-id="${conv.id}" onclick="selectConversationThread('${conv.id}')">
                     <div class="thread-item-title">${escapeHtml(conv.title)}</div>
                     <div class="thread-item-meta">
                         <span style="font-size:11px;color:var(--text-muted)">${timeSince(conv.updated_at)}</span>
                         <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
+                        ${participantHtml}
                     </div>
                     <div class="thread-item-count" style="font-size:11px;color:var(--text-muted)">${messageCount} message${messageCount !== 1 ? 's' : ''}</div>
                 </div>`;
@@ -1809,11 +1823,17 @@ async function renderConversationThread(conversationId: string): Promise<void> {
         } else {
             for (const msg of messages) {
                 const isHuman = msg.role === 'human';
-                const bubbleClass = isHuman ? 'message-bubble human' : 'message-bubble supervisor';
-                const label = isHuman ? 'You' : 'Supervisor';
+                const isLeo = msg.role === 'leo';
+                const bubbleClass = isHuman ? 'message-bubble human'
+                    : isLeo ? 'message-bubble leo'
+                    : 'message-bubble supervisor';
+                const label = isHuman ? 'Darron' : isLeo ? 'Leo' : 'Jim';
+                const labelColor = isHuman ? 'rgba(255,255,255,0.6)'
+                    : isLeo ? 'rgba(56,207,135,0.6)'
+                    : 'var(--text-muted)';
 
                 html += `<div class="${bubbleClass}">
-                    <div style="font-size:10px;color:${isHuman ? 'rgba(255,255,255,0.6)' : 'var(--text-muted)'};margin-bottom:4px">${label} · ${formatTime(msg.created_at)}</div>
+                    <div style="font-size:10px;color:${labelColor};margin-bottom:4px">${label} · ${formatTime(msg.created_at)}</div>
                     <div class="message-content" style="word-break:break-word;line-height:1.5">${renderMarkdown(msg.content)}</div>
                 </div>`;
             }
@@ -1912,7 +1932,7 @@ async function createNewConversation(title: string): Promise<void> {
             waiting.id = 'supervisorWaiting';
             waiting.className = 'message-bubble supervisor';
             waiting.style.opacity = '0.5';
-            waiting.innerHTML = '<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Supervisor</div><div style="font-size:12px;color:var(--text-muted)">Thinking...</div>';
+            waiting.innerHTML = '<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Jim</div><div style="font-size:12px;color:var(--text-muted)">Thinking...</div>';
             messageList.appendChild(waiting);
             messageList.scrollTop = messageList.scrollHeight;
         }

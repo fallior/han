@@ -7,7 +7,8 @@ import { runSupervisorCycle } from '../services/supervisor';
 const router = Router();
 
 const listWithCounts = db.prepare(`
-    SELECT c.*, COUNT(cm.id) as message_count
+    SELECT c.*, COUNT(cm.id) as message_count,
+        GROUP_CONCAT(DISTINCT cm.role) as participants
     FROM conversations c
     LEFT JOIN conversation_messages cm ON c.id = cm.conversation_id
     GROUP BY c.id
@@ -95,9 +96,25 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
 
         res.json({ success: true, message });
 
-        // Wake supervisor to respond (fire and forget, only for human messages)
+        // Wake supervisor to respond (fire and forget)
         if (finalRole === 'human') {
+            // Immediate wake for Darron
             runSupervisorCycle().catch(() => {});
+        } else if (finalRole === 'leo') {
+            // Cooldown-aware wake for Leo — respect 10-min contemplation interval
+            const LEO_COOLDOWN_MS = 10 * 60 * 1000;
+            const lastResponse = conversationMessageStmts.getLastSupervisorResponse.get(req.params.id) as any;
+            if (lastResponse) {
+                const elapsed = Date.now() - new Date(lastResponse.created_at).getTime();
+                if (elapsed < LEO_COOLDOWN_MS) {
+                    const delay = LEO_COOLDOWN_MS - elapsed;
+                    setTimeout(() => runSupervisorCycle().catch(() => {}), delay);
+                } else {
+                    runSupervisorCycle().catch(() => {});
+                }
+            } else {
+                runSupervisorCycle().catch(() => {});
+            }
         }
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });

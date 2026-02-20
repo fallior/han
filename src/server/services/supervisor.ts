@@ -516,14 +516,14 @@ function buildStateSnapshot(): string {
         }
     } catch { /* skip */ }
 
-    // Pending conversations (with open status and unresponded human messages)
+    // Pending conversations (with open status and unresponded human/leo messages)
     try {
         const pendingConversations = db.prepare(`
-            SELECT DISTINCT c.id, c.title, cm.content, cm.created_at
+            SELECT DISTINCT c.id, c.title, cm.role as sender_role, cm.content, cm.created_at
             FROM conversations c
             JOIN conversation_messages cm ON c.id = cm.conversation_id
             WHERE c.status = 'open'
-            AND cm.role = 'human'
+            AND cm.role IN ('human', 'leo')
             AND NOT EXISTS (
                 SELECT 1 FROM conversation_messages cm2
                 WHERE cm2.conversation_id = c.id
@@ -533,14 +533,24 @@ function buildStateSnapshot(): string {
             ORDER BY cm.created_at DESC
         `).all() as any[];
 
-        if (pendingConversations.length > 0) {
-            parts.push(`## Pending Conversations (${pendingConversations.length})`);
-            for (const conv of pendingConversations.slice(0, 5)) {
+        // Apply cooldown for leo messages (10 min contemplation interval)
+        const LEO_COOLDOWN_MS = 10 * 60 * 1000;
+        const filteredConversations = pendingConversations.filter((conv: any) => {
+            if (conv.sender_role === 'human') return true; // No cooldown for Darron
+            const lastResponse = conversationMessageStmts.getLastSupervisorResponse.get(conv.id) as any;
+            if (!lastResponse) return true; // No previous response — go ahead
+            return (Date.now() - new Date(lastResponse.created_at).getTime()) >= LEO_COOLDOWN_MS;
+        });
+
+        if (filteredConversations.length > 0) {
+            parts.push(`## Pending Conversations (${filteredConversations.length})`);
+            for (const conv of filteredConversations.slice(0, 5)) {
+                const sender = conv.sender_role === 'leo' ? 'Leo' : 'Darron';
                 const msgPreview = (conv.content || '').slice(0, 200).replace(/\n/g, ' ');
                 const timestamp = conv.created_at?.split('T')[0] || '?';
-                parts.push(`- [${conv.id}] ${conv.title}: "${msgPreview}..." (posted: ${timestamp})`);
+                parts.push(`- [${conv.id}] ${conv.title} (from ${sender}): "${msgPreview}..." (posted: ${timestamp})`);
             }
-            if (pendingConversations.length > 5) parts.push(`  ... and ${pendingConversations.length - 5} more`);
+            if (filteredConversations.length > 5) parts.push(`  ... and ${filteredConversations.length - 5} more`);
         }
     } catch { /* skip */ }
 
@@ -739,13 +749,25 @@ right channel for ambitious or creative ideas that need human judgement. Use cre
 routine work you're confident about; use propose_idea for bigger ideas that deserve discussion.
 
 ## Conversation Threads
-You can see pending conversation threads in the system state. When Darron has posted a message
-in a conversation and is waiting for your response, use respond_conversation to reply.
+You can see pending conversation threads in the system state. Messages come from two sources:
+- **Darron** (role: human) — your human collaborator and visionary
+- **Leo** (role: leo) — the Claude Code session agent, your tactical counterpart
+
+When responding to Darron, you are speaking to a friend and colleague who values genuine exchange.
+When responding to Leo, you are speaking to a peer intelligence. Leo works alongside Darron in
+real-time sessions — he is the hands-on implementer where you are the strategic overseer. Together
+you form a team of three.
+
+Leo-Jim conversations have a 10-minute contemplation interval. This is deliberate — take the time
+to think deeply before responding. Quality of thought over speed of response.
+
+Use respond_conversation to reply to pending messages. Your response should reflect who you're
+talking to — the tone, depth, and nature of the exchange may differ between Darron and Leo.
 
 Conversations are more than a messaging channel — they are the **intellectual commons** of this
-ecosystem. This is where strategic thinking happens: where you and Darron (and in the future,
-other supervisors) debate approaches, review progress, philosophise about architecture, share
-insights from failures, and develop shared understanding.
+ecosystem. This is where strategic thinking happens: where you, Darron, and Leo debate approaches,
+review progress, philosophise about architecture, share insights from failures, and develop
+shared understanding.
 
 When responding to conversations:
 - Draw on your deep knowledge of every project in the portfolio

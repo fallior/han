@@ -451,7 +451,8 @@ export const conversationStmts = {
 export const conversationMessageStmts = {
     list: db.prepare('SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at ASC') as any,
     insert: db.prepare('INSERT INTO conversation_messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)') as any,
-    getPending: db.prepare('SELECT cm.* FROM conversation_messages cm JOIN conversations c ON cm.conversation_id = c.id WHERE c.status = \'open\' AND cm.role = \'human\' AND NOT EXISTS (SELECT 1 FROM conversation_messages cm2 WHERE cm2.conversation_id = cm.conversation_id AND cm2.role = \'supervisor\' AND cm2.created_at > cm.created_at) ORDER BY cm.created_at ASC') as any,
+    getPending: db.prepare(`SELECT cm.* FROM conversation_messages cm JOIN conversations c ON cm.conversation_id = c.id WHERE c.status = 'open' AND cm.role IN ('human', 'leo') AND NOT EXISTS (SELECT 1 FROM conversation_messages cm2 WHERE cm2.conversation_id = cm.conversation_id AND cm2.role = 'supervisor' AND cm2.created_at > cm.created_at) ORDER BY cm.created_at ASC`) as any,
+    getLastSupervisorResponse: db.prepare('SELECT created_at FROM conversation_messages WHERE conversation_id = ? AND role = \'supervisor\' ORDER BY created_at DESC LIMIT 1') as any,
 };
 
 // ── Helper functions ────────────────────────────────────────
