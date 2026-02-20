@@ -46,6 +46,7 @@ When you make a significant technical or design decision:
 | DEC-014 | Scroll Behaviour — User controls scroll position | **Settled** | 2026-02-15 |
 | DEC-015 | Auto-commit on Task Success | Accepted | 2026-02-16 |
 | DEC-016 | Automated Phantom Goal Cleanup in Supervisor Cycle | Accepted | 2026-02-20 |
+| DEC-017 | Protected System Files — Autonomous Agents Blocked | **Settled** | 2026-02-20 |
 
 ---
 
@@ -867,6 +868,25 @@ Also fixed root cause in `planning.ts:updateGoalProgress()` — all-cancelled go
 - DEC-015: Auto-commit on Task Success (ensures sequential tasks build on each other)
 - Root cause fix: `updateGoalProgress()` now detects all-cancelled state
 - Force-delete API: `DELETE /api/goals/:id?force=true` for manual cleanup when needed
+
+---
+
+### DEC-017: Protected System Files — Autonomous Agents Blocked
+
+**Status**: **Settled** (2026-02-20)
+**Context**: A Claude Code session (licences project, Feb 19) rewrote `~/.bashrc` to upgrade the `claude-logged()` function. In doing so, it used Write to replace the entire file, silently dropping the SSH agent configuration block. This broke git push authentication for all subsequent sessions.
+
+**Decision**: Autonomous agents (task workers, planners, supervisor) are unconditionally blocked from modifying system/user configuration files, regardless of gate mode. Protected paths:
+- `~/.bashrc`, `~/.bash_profile`, `~/.profile`, `~/.zshrc`
+- `~/.ssh/*`, `~/.gnupg/*`
+- `~/.gitconfig`, `~/.npmrc`, `~/.env`
+- `/etc/*`, `/root/*`
+
+The block is enforced via `checkProtectedFiles()` in `planning.ts`, called before any gate mode check in `createCanUseToolCallback()`. It applies to Write, Edit, NotebookEdit tools and detects Bash redirect/pipe targets.
+
+**Why Settled**: Autonomous agents modifying shell config files can silently break authentication, environment variables, PATH, and other foundational system state. The damage is invisible until something fails hours later. There is no scenario where the benefit outweighs the risk. If system files need changing, a human does it.
+
+**Incident**: Session log at `licences/_logs/session_2026-02-19_18-41-52.md` — Claude rewrote `.bashrc` at ~02:45 AEST, SSH agent block lost, git push broken for 6+ hours until manually diagnosed.
 
 ---
 

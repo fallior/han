@@ -330,7 +330,10 @@ export async function planGoal(description: string, projectPath: string, options
             allowDangerouslySkipPermissions: true,
             env: cleanEnv,
             persistSession: false,
-            canUseTool: async () => ({ behavior: 'allow' as const }),
+            canUseTool: async (toolName: string, input: any) => {
+                const blocked = checkProtectedFiles(toolName, input);
+                return blocked || { behavior: 'allow' as const };
+            },
             tools: ['Read', 'Glob', 'Grep', 'Bash'],
             systemPrompt: {
                 type: 'preset',
@@ -1208,6 +1211,68 @@ export function recordTaskOutcome(task: any): void {
     }
 }
 
+// ── Protected system paths ───────────────────────────────────
+
+/**
+ * Paths that autonomous agents must NEVER modify.
+ * These are system/user config files outside project directories.
+ */
+const PROTECTED_PATH_PATTERNS = [
+    /^\/home\/[^/]+\/\.bashrc$/,
+    /^\/home\/[^/]+\/\.bash_profile$/,
+    /^\/home\/[^/]+\/\.profile$/,
+    /^\/home\/[^/]+\/\.zshrc$/,
+    /^\/home\/[^/]+\/\.ssh\//,
+    /^\/home\/[^/]+\/\.gnupg\//,
+    /^\/home\/[^/]+\/\.gitconfig$/,
+    /^\/home\/[^/]+\/\.npmrc$/,
+    /^\/home\/[^/]+\/\.env$/,
+    /^\/etc\//,
+    /^\/root\//,
+];
+
+function isProtectedPath(filepath: string): boolean {
+    if (!filepath) return false;
+    const resolved = path.resolve(filepath);
+    return PROTECTED_PATH_PATTERNS.some(p => p.test(resolved));
+}
+
+/**
+ * Check if a tool call targets a protected system file.
+ * Returns a deny response if so, null if allowed.
+ */
+function checkProtectedFiles(toolName: string, input: any): { behavior: 'deny'; message: string } | null {
+    const writingTools = ['Write', 'Edit', 'NotebookEdit'];
+    if (writingTools.includes(toolName)) {
+        const filepath = input?.file_path || input?.notebook_path || '';
+        if (isProtectedPath(filepath)) {
+            return {
+                behavior: 'deny' as const,
+                message: `BLOCKED: Cannot modify protected system file "${filepath}". System config files (.bashrc, .profile, .ssh/, .gitconfig, /etc/) are off-limits to autonomous agents.`
+            };
+        }
+    }
+
+    if (toolName === 'Bash') {
+        const cmd = ((input as any)?.command || '');
+        // Check for redirects/pipes to protected paths
+        for (const pattern of PROTECTED_PATH_PATTERNS) {
+            const pathMatches = cmd.match(/(?:>|>>|tee\s+(?:-a\s+)?|cp\s+\S+\s+|mv\s+\S+\s+)(\S+)/g) || [];
+            for (const match of pathMatches) {
+                const target = match.replace(/^(?:>>?|tee\s+(?:-a\s+)?|cp\s+\S+\s+|mv\s+\S+\s+)/, '').trim();
+                if (pattern.test(target) || pattern.test(path.resolve(target))) {
+                    return {
+                        behavior: 'deny' as const,
+                        message: `BLOCKED: Cannot modify protected system file "${target}" via Bash. System config files are off-limits to autonomous agents.`
+                    };
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
 // ── Approval gates ───────────────────────────────────────────
 
 /**
@@ -1218,6 +1283,10 @@ export async function createCanUseToolCallback(
     gateMode: string
 ): Promise<(toolName: string, input: any, options: any) => Promise<{ behavior: 'allow' } | { behavior: 'deny'; message: string }>> {
     return async (toolName: string, input: any, options: any) => {
+        // ALWAYS check protected files — regardless of gate mode
+        const protectedCheck = checkProtectedFiles(toolName, input);
+        if (protectedCheck) return protectedCheck;
+
         if (gateMode === 'bypass') {
             return { behavior: 'allow' as const };
         }
