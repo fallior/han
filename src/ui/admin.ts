@@ -1873,10 +1873,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Sidebar navigation
     document.querySelectorAll('.sidebar-item[data-module]').forEach(el => {
         el.addEventListener('click', (e) => {
-            if (el.classList.contains('coming-soon')) {
-                e.preventDefault();
-                return;
-            }
+            // Navigation enabled for all modules
         });
     });
 
