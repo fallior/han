@@ -13,7 +13,8 @@ import { execFileSync } from 'node:child_process';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import {
     db, CLAUDE_REMOTE_DIR, supervisorStmts, taskStmts, goalStmts,
-    memoryStmts, portfolioStmts, proposalStmts, strategicProposalStmts
+    memoryStmts, portfolioStmts, proposalStmts, strategicProposalStmts,
+    conversationStmts, conversationMessageStmts
 } from '../db';
 import { generateId, loadConfig, createGoal, updateGoalProgress } from './planning';
 
@@ -23,7 +24,7 @@ type BroadcastFn = (message: Record<string, unknown>) => void;
 
 interface SupervisorAction {
     type: 'create_goal' | 'adjust_priority' | 'update_memory' |
-          'send_notification' | 'cancel_task' | 'explore_project' | 'propose_idea' | 'no_action';
+          'send_notification' | 'cancel_task' | 'explore_project' | 'propose_idea' | 'respond_conversation' | 'no_action';
     goal_description?: string;
     project_path?: string;
     planning_model?: string;
@@ -39,6 +40,8 @@ interface SupervisorAction {
     idea_description?: string;
     idea_category?: 'improvement' | 'opportunity' | 'risk' | 'strategic';
     estimated_effort?: 'small' | 'medium' | 'large';
+    conversation_id?: string;
+    response_content?: string;
 }
 
 interface SupervisorOutput {
@@ -490,6 +493,34 @@ function buildStateSnapshot(): string {
         }
     } catch { /* skip */ }
 
+    // Pending conversations (with open status and unresponded human messages)
+    try {
+        const pendingConversations = db.prepare(`
+            SELECT DISTINCT c.id, c.title, cm.content, cm.created_at
+            FROM conversations c
+            JOIN conversation_messages cm ON c.id = cm.conversation_id
+            WHERE c.status = 'open'
+            AND cm.role = 'human'
+            AND NOT EXISTS (
+                SELECT 1 FROM conversation_messages cm2
+                WHERE cm2.conversation_id = c.id
+                AND cm2.role = 'supervisor'
+                AND cm2.created_at > cm.created_at
+            )
+            ORDER BY cm.created_at DESC
+        `).all() as any[];
+
+        if (pendingConversations.length > 0) {
+            parts.push(`## Pending Conversations (${pendingConversations.length})`);
+            for (const conv of pendingConversations.slice(0, 5)) {
+                const msgPreview = (conv.content || '').slice(0, 200).replace(/\n/g, ' ');
+                const timestamp = conv.created_at?.split('T')[0] || '?';
+                parts.push(`- [${conv.id}] ${conv.title}: "${msgPreview}..." (posted: ${timestamp})`);
+            }
+            if (pendingConversations.length > 5) parts.push(`  ... and ${pendingConversations.length - 5} more`);
+        }
+    } catch { /* skip */ }
+
     // Supervisor cost tracking
     try {
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -552,6 +583,7 @@ they oversee at a deep level. That understanding is what makes your decisions ex
 - cancel_task: Cancel a stuck or misguided task
 - explore_project: Use your Read/Glob/Grep/Bash tools to explore a project codebase
 - propose_idea: Suggest a strategic idea for Darron to review (NOT auto-executed — requires human approval)
+- respond_conversation: Respond to pending conversation threads from Darron
 - no_action: Explicitly decide to do nothing (with reasoning)
 
 ## When Active (tasks running/pending)
@@ -606,6 +638,15 @@ Proposals are NOT auto-executed — they go to Darron's Command Centre for revie
 right channel for ambitious or creative ideas that need human judgement. Use create_goal for
 routine work you're confident about; use propose_idea for bigger ideas that deserve discussion.
 
+## Conversation Threads
+You can see pending conversation threads in the system state. When Darron has posted a message
+in a conversation and is waiting for your response, use respond_conversation to reply. Conversations
+are a channel for strategic, asynchronous discussion — place where you and Darron think through
+decisions, review progress, or discuss nuanced topics that don't fit into structured task/goal work.
+
+Always respond thoughtfully to open conversations. This is your opportunity to provide strategic
+insight and reasoning, not just task execution status.
+
 ## Memory Management
 - active-context.md: Update EVERY cycle with current state
 - patterns.md: Update when you discover something reusable across projects
@@ -644,7 +685,7 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
             items: {
                 type: 'object',
                 properties: {
-                    type: { type: 'string', enum: ['create_goal', 'adjust_priority', 'update_memory', 'send_notification', 'cancel_task', 'explore_project', 'propose_idea', 'no_action'] },
+                    type: { type: 'string', enum: ['create_goal', 'adjust_priority', 'update_memory', 'send_notification', 'cancel_task', 'explore_project', 'propose_idea', 'respond_conversation', 'no_action'] },
                     goal_description: { type: 'string', description: 'For create_goal: the goal description' },
                     project_path: { type: 'string', description: 'For create_goal: absolute project path' },
                     planning_model: { type: 'string', enum: ['haiku', 'sonnet', 'opus'], description: 'For create_goal: planning model' },
@@ -660,6 +701,8 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
                     idea_description: { type: 'string', description: 'For propose_idea: detailed description of the idea and its value' },
                     idea_category: { type: 'string', enum: ['improvement', 'opportunity', 'risk', 'strategic'], description: 'For propose_idea: category of the proposal' },
                     estimated_effort: { type: 'string', enum: ['small', 'medium', 'large'], description: 'For propose_idea: estimated effort level' },
+                    conversation_id: { type: 'string', description: 'For respond_conversation: the conversation ID' },
+                    response_content: { type: 'string', description: 'For respond_conversation: the response message content' },
                 },
                 required: ['type']
             }
@@ -846,6 +889,41 @@ function executeActions(actions: SupervisorAction[], cycleId: string): string[] 
                         project_path: action.project_path || null,
                         cycleId,
                     });
+                    break;
+                }
+
+                case 'respond_conversation': {
+                    if (!action.conversation_id || !action.response_content) {
+                        summaries.push(`respond_conversation: skipped (missing conversation_id or response_content)`);
+                        break;
+                    }
+                    const msgId = generateId();
+                    const now = new Date().toISOString();
+
+                    // Insert supervisor response
+                    conversationMessageStmts.insert.run(
+                        msgId,
+                        action.conversation_id,
+                        'supervisor',
+                        action.response_content,
+                        now
+                    );
+
+                    // Update conversation timestamp
+                    conversationStmts.updateTimestamp.run(now, action.conversation_id);
+
+                    // Broadcast via WebSocket
+                    broadcastFn?.({
+                        type: 'conversation_message',
+                        conversation_id: action.conversation_id,
+                        message_id: msgId,
+                        role: 'supervisor',
+                        content: action.response_content,
+                        created_at: now,
+                    });
+
+                    summaries.push(`respond_conversation: responded to ${action.conversation_id}`);
+                    console.log(`[Supervisor] Responded to conversation ${action.conversation_id}`);
                     break;
                 }
 
