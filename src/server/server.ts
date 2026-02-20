@@ -39,6 +39,7 @@ import bridgeRouter from './routes/bridge';
 import analyticsRouter from './routes/analytics';
 import proposalsRouter from './routes/proposals';
 import supervisorRouter from './routes/supervisor';
+import conversationsRouter from './routes/conversations';
 
 // ── Single instance lock ─────────────────────────────────
 
@@ -119,6 +120,7 @@ app.use('/api/supervisor', supervisorRouter);
 // Prefix-mounted routers (use relative paths internally)
 app.use('/api/goals', goalsRouter);
 app.use('/api/products', productsRouter);
+app.use('/api/conversations', conversationsRouter);
 app.use('/api', portfolioRouter);
 
 // Serve the UI
