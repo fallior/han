@@ -146,11 +146,43 @@ Access the dashboard from your phone at `https://<tailscale-ip>:3847`.
   "ntfy_topic": "your-secret-topic",
   "remote_url": "https://100.x.x.x:3847",
   "notify_idle_prompt": true,
+  "digest_hour": 7,
+  "maintenance_enabled": true,
+  "maintenance_hour": 2,
+  "weekly_report_day": 0,
+  "weekly_report_hour": 8,
   "supervisor": {
     "daily_budget_usd": 300
   }
 }
 ```
+
+**Configuration Options:**
+
+| Option | Type | Default | Purpose |
+|--------|------|---------|---------|
+| `ntfy_topic` | string | — | ntfy.sh topic for push notifications |
+| `remote_url` | string | — | Remote access URL (displayed in dashboard) |
+| `notify_idle_prompt` | boolean | `true` | Send push when Claude Code needs input |
+| `digest_hour` | number | `7` | Hour (0-23) when daily digest is generated |
+| `maintenance_enabled` | boolean | `true` | Enable nightly portfolio maintenance |
+| `maintenance_hour` | number | `2` | Hour (0-23) when maintenance runs |
+| `weekly_report_day` | number | `0` | Day of week for weekly report (0=Sunday, 6=Saturday) |
+| `weekly_report_hour` | number | `8` | Hour (0-23) when weekly report is generated |
+| `supervisor.daily_budget_usd` | number | — | Daily cost limit for supervisor cycles |
+
+**Scheduling Examples:**
+
+```json
+{
+  "digest_hour": 7,              // 7 AM daily digest
+  "maintenance_hour": 2,         // 2 AM nightly maintenance
+  "weekly_report_day": 0,        // Sunday
+  "weekly_report_hour": 8        // 8 AM Sunday report
+}
+```
+
+All times use the server's local timezone. Schedules persist across server restarts via database checks.
 
 ## CLI
 
