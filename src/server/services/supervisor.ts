@@ -16,7 +16,7 @@ import {
     memoryStmts, portfolioStmts, proposalStmts, strategicProposalStmts,
     conversationStmts, conversationMessageStmts
 } from '../db';
-import { generateId, loadConfig, createGoal, updateGoalProgress } from './planning';
+import { generateId, loadConfig, createGoal, updateGoalProgress, getAbortForTask, detectAndRecoverGhostTasks } from './planning';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -620,7 +620,7 @@ of this community — the standards you set now will shape how knowledge flows i
 - adjust_priority: Change task priority (1-10, higher = more urgent)
 - update_memory: Write to your own memory files (evolve your knowledge)
 - send_notification: Alert Darron via push notification
-- cancel_task: Cancel a stuck or misguided task
+- cancel_task: Cancel a stuck or misguided task (works for both pending and running tasks)
 - explore_project: Use your Read/Glob/Grep/Bash tools to explore a project codebase
 - propose_idea: Suggest a strategic idea for Darron to review (NOT auto-executed — requires human approval)
 - respond_conversation: Respond to pending conversation threads from Darron
@@ -975,14 +975,34 @@ function executeActions(actions: SupervisorAction[], cycleId: string): string[] 
                         summaries.push(`cancel_task: skipped (no task_id)`);
                         break;
                     }
-                    // Only cancel pending tasks — running tasks need the abort controller
                     const task = taskStmts.get.get(action.task_id) as any;
-                    if (task && task.status === 'pending') {
+                    if (!task) {
+                        summaries.push(`cancel_task: ${action.task_id} skipped (task not found)`);
+                        break;
+                    }
+
+                    if (task.status === 'pending') {
+                        // Pending tasks: cancel directly in DB
                         taskStmts.cancel.run('cancelled', new Date().toISOString(), action.task_id);
-                        summaries.push(`cancel_task: ${action.task_id} — ${action.reason || 'no reason'}`);
-                        console.log(`[Supervisor] Cancelled task ${action.task_id}: ${action.reason}`);
+                        summaries.push(`cancel_task: ${action.task_id} (was pending) — ${action.reason || 'no reason'}`);
+                        console.log(`[Supervisor] Cancelled pending task ${action.task_id}: ${action.reason}`);
+                    } else if (task.status === 'running') {
+                        // Running tasks: check if there's an active agent process
+                        const abortController = getAbortForTask(action.task_id);
+                        if (abortController) {
+                            // Live agent: abort it first, then cancel in DB
+                            abortController.abort();
+                            taskStmts.cancel.run('cancelled', new Date().toISOString(), action.task_id);
+                            summaries.push(`cancel_task: ${action.task_id} (aborted live agent) — ${action.reason || 'no reason'}`);
+                            console.log(`[Supervisor] Aborted live agent and cancelled task ${action.task_id}: ${action.reason}`);
+                        } else {
+                            // Ghost task (running in DB but no agent): cancel directly
+                            taskStmts.cancel.run('cancelled', new Date().toISOString(), action.task_id);
+                            summaries.push(`cancel_task: ${action.task_id} (was ghost-running) — ${action.reason || 'no reason'}`);
+                            console.log(`[Supervisor] Cancelled ghost-running task ${action.task_id}: ${action.reason}`);
+                        }
                     } else {
-                        summaries.push(`cancel_task: ${action.task_id} skipped (not pending, status: ${task?.status})`);
+                        summaries.push(`cancel_task: ${action.task_id} skipped (terminal state: ${task.status})`);
                     }
                     break;
                 }
