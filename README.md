@@ -178,15 +178,23 @@ claude-remote -- --model opus    # Pass args to Claude Code
 
 ## Key Capabilities
 
-**Supervisor** — Persistent Opus agent running on adaptive schedule (2min when active, 30min when idle). Maintains memory banks per project, audits documentation health, proposes strategic improvements. Actions: create goals, adjust priorities, update memory, send notifications, propose ideas.
+**Supervisor** — Persistent Opus agent running on adaptive schedule (2min when active, 30min when idle). Maintains memory banks per project (identity, active-context, patterns, self-reflection). Audits documentation health, proposes strategic improvements, and engages in conversation contemplation protocol with the orchestrator for nuanced decision-making. Actions: create goals, adjust priorities, update memory, send notifications, propose ideas.
 
-**Orchestrator** — Decomposes high-level goals into ordered tasks with dependency chains. Routes to cheapest model with proven success rate. Escalating retry ladder: reset → Sonnet diagnostic → Opus diagnostic → human notification.
+**Orchestrator** — Decomposes high-level goals into ordered tasks with dependency chains. Memory-based model routing: Haiku 4.5 for fast tasks, Sonnet 4.5 for complex work, Opus 4.6 for high-stakes decisions. 3 concurrent pipelines: 2 normal task slots + 1 dedicated remediation. Escalating retry ladder: reset → Sonnet diagnostic → Opus diagnostic → human notification. Git checkpoint before every task with automatic rollback on failure.
 
-**3 Concurrent Pipelines** — 2 normal task slots + 1 dedicated remediation slot. Git checkpoint before every task with automatic rollback on failure.
+**Command Centre Dashboard** — Central portfolio management interface:
+  - *Activity Feed* — Chronological system events and task completions across all projects
+  - *Project Tree* — Hierarchical portfolio view with status indicators and budget tracking
+  - *Strategic Proposals* — Supervisor ideas submitted for approval/dismissal with rationale
+  - *Supervisor Tab* — Cycle history, memory banks, conversation transcripts, and knowledge steward insights
+
+**Admin Console** — Phase 2 modules for system oversight:
+  - *Work Module* — Kanban board with pending/running/done columns, goal grouping with progress bars, filters by project/status/model, real-time WebSocket updates
+  - *Conversations Module* — Strategic discussion threads with Jim (the Opus supervisor), timestamped contemplation records, decision history
+  - *Products Module* — 7-phase pipeline visualization (research → design → architecture → build → test → document → deploy) with 42 parallel subagents, knowledge graphs, human gates at critical points
+  - *Analytics* — Velocity tracking per project/model, cost optimization suggestions, error pattern analysis, token usage breakdown
 
 **DocAssist** — Mandatory documentation task appended to every goal. Ensures CURRENT_STATUS.md, ARCHITECTURE.md, and session notes stay current as the system evolves.
-
-**Command Centre** — Dashboard with 4 sub-tabs: Activity Feed (chronological events), Project Tree (portfolio hierarchy with status indicators), Strategic Proposals (approve/dismiss supervisor ideas), Supervisor (cycle history and memory).
 
 ## Author
 
