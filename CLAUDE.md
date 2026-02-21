@@ -102,8 +102,8 @@ claude-remote
 # Start the server (in another terminal)
 ./scripts/start-server.sh
 
-# Or with npm
-cd src/server && npm start
+# Or directly with tsx
+cd src/server && npx tsx server.ts
 
 # List active sessions
 claude-remote --list

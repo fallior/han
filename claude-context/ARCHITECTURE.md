@@ -47,6 +47,7 @@ Claude Remote bridges your development machine and mobile device, enabling remot
 
 ### Runtime & Framework
 - **Node.js**: Server runtime — universal, good for I/O-heavy work
+- **TypeScript**: Type-safe development with `tsx` runtime execution and `esbuild` client compilation
 - **Express.js**: Minimal HTTP framework — sufficient for API and static serving
 - **Bash**: Hook scripts and CLI launcher — direct integration with Claude Code
 
@@ -63,13 +64,22 @@ Claude Remote bridges your development machine and mobile device, enabling remot
 - Server binds to 0.0.0.0 for Tailscale access
 
 ### Storage
-- **SQLite** (`better-sqlite3`): Task queue (`tasks.db`) with status, priority, cost, token tracking
+- **SQLite** (`better-sqlite3`): Database at `~/.claude-remote/tasks.db` with 15 tables:
+  - Task execution: `tasks`, `goals`, `project_memory`
+  - Supervisor system: `supervisor_cycles`, `supervisor_proposals`, `task_proposals`
+  - Conversations: `conversations`, `conversation_messages`
+  - Portfolio: `projects`, `products`, `product_phases`, `product_knowledge`
+  - Reporting: `digests`, `maintenance_runs`, `weekly_reports`
 - **Plain text**: Terminal capture files (`terminal.txt`, `terminal-log.txt`)
+- **Memory banks**: Per-agent state in `~/.claude-remote/memory/` (identity, active-context, patterns, self-reflection)
 
 ### Autonomous Execution (Level 7+)
 - **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`): Headless Claude Code execution via `query()`
-- Sequential task queue — one task at a time, 5-second polling interval
+- **3 concurrent pipelines**: 2 normal task slots + 1 dedicated remediation slot
+- **Escalating retry ladder**: reset → Sonnet diagnostic → Opus diagnostic → human notification
+- 5-second orchestrator polling interval
 - Streaming progress via WebSocket to all connected clients
+- Git checkpoints before every task with automatic rollback on failure
 
 ## Directory Structure
 
@@ -89,15 +99,46 @@ claude-remote/
 ├── scripts/
 │   ├── install.sh                # Installation and setup
 │   ├── start-server.sh           # Quick server start
-│   └── claude-remote             # CLI launcher
+│   ├── claude-remote             # CLI launcher
+│   └── build-client.js           # Client TypeScript compilation
 └── src/
     ├── hooks/
     │   └── notify.sh             # Claude Code notification hook
     ├── server/
-    │   ├── server.js             # Express API server
+    │   ├── server.ts             # Express + WebSocket server (TypeScript)
+    │   ├── db.ts                 # SQLite schema + 15 tables + prepared statements
+    │   ├── types.ts              # TypeScript type definitions
+    │   ├── ws.ts                 # WebSocket management + real-time sync
+    │   ├── orchestrator.ts       # Goal decomposition + task routing
+    │   ├── routes/
+    │   │   ├── tasks.ts          # Task CRUD + execution
+    │   │   ├── goals.ts          # Goal creation + decomposition + progress
+    │   │   ├── supervisor.ts     # Supervisor cycles + proposals + activity
+    │   │   ├── conversations.ts  # Leo ↔ Jim dialogue + message history
+    │   │   ├── portfolio.ts      # Multi-project portfolio management
+    │   │   ├── products.ts       # Product factory 7-phase pipeline
+    │   │   ├── analytics.ts      # Metrics + cost tracking + velocity
+    │   │   ├── proposals.ts      # Task proposal extraction + management
+    │   │   ├── bridge.ts         # Claude Code handoff + context export
+    │   │   └── prompts.ts        # Pending/resolved prompt management
+    │   ├── services/
+    │   │   ├── supervisor.ts     # Persistent Opus supervisor agent
+    │   │   ├── planning.ts       # Goal decomposition + doc generation
+    │   │   ├── context.ts        # Ecosystem-aware context injection
+    │   │   ├── orchestrator.ts   # LLM routing (Ollama / Anthropic API)
+    │   │   ├── digest.ts         # Daily/weekly digest generation
+    │   │   ├── products.ts       # Product factory orchestration
+    │   │   ├── proposals.ts      # Proposal extraction + formatting
+    │   │   ├── maintenance.ts    # Periodic portfolio maintenance tasks
+    │   │   ├── reports.ts        # Report generation + analytics
+    │   │   ├── git.ts            # Git checkpoint creation + rollback
+    │   │   └── terminal.ts       # Terminal output mirroring
     │   └── package.json          # Server dependencies
     └── ui/
-        └── index.html            # Mobile web interface
+        ├── index.html            # Command Centre dashboard
+        ├── admin.html            # Admin console (desktop-optimised)
+        ├── app.ts                # Dashboard client logic (compiled to app.js)
+        └── admin.ts              # Admin console logic (compiled to admin.js)
 ```
 
 ## Data Flow
@@ -371,4 +412,4 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 
 ---
 
-*Last updated: 2026-02-15*
+*Last updated: 2026-02-21*

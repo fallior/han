@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-20 (Autonomous) by Claude
+> Last updated: 2026-02-21 (Autonomous) by Claude
 
 ## Current Stage
 
@@ -29,6 +29,19 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-21 — Claude (autonomous) — README Rewrite: Levels 1-12 Complete
+- **README.md comprehensive rewrite** (10 commits, `d772c91` to `f4f307a`):
+  - **Three-Way Collaboration section** (`d772c91`): Documented unique collaboration model between Darron, Leo (session agent), and Jim (supervisor). Explained conversation contemplation protocol, asynchronous dialogue, and continuous ecosystem.
+  - **Key Capabilities enhancement** (`17cc1ea`): Added Command Centre dashboard details (activity feed, project tree, strategic proposals, supervisor tab), Admin Console Phase 2 modules (Work, Conversations, Products, Analytics), and DocAssist integration.
+  - **What It Does section review** (`726efec`): Updated feature descriptions to reflect current capabilities (autonomous task execution with memory-based routing, persistent Opus supervisor with conversation contemplation, admin console real-time updates, product factory, learning system, Command Centre dashboard, multi-project portfolio).
+  - **API Overview section** (`fc703f4`): Added comprehensive developer-focused API documentation with all endpoints organised by category (Task Management, Goal Orchestration, Supervisor, Conversations, Portfolio, Products, Analytics), WebSocket event descriptions, JSON format notes, and implementation file references.
+  - **Configuration section complete** (`06e9b49`, `2962ccd`): Full config.json schema with all 10 options documented (ntfy_topic, remote_url, digest_hour, maintenance_enabled, maintenance_hour, weekly_report_day, weekly_report_hour, supervisor.daily_budget_usd), scheduling examples, timezone behaviour.
+  - **Implementation Levels table** (`097df93`, `19ccf0e`): Expanded from 6 to 12 levels showing all completed features. Added Level 12 (Strategic Conversations - Admin Phase 2: Work, Conversations, Products).
+  - **British English correction** (`f0ac640`): Fixed "optimizations" → "optimisations" throughout Stack section.
+  - **Final review** (`f4f307a`): Consistency check, verified all 12 levels documented, cross-referenced Architecture/Stack sections.
+- **README transformation**: Level 1 → Level 12 (1,200 lines frozen at basic prompt responder → 311 lines reflecting 11-level autonomous development ecosystem with TypeScript, 15 database tables, WebSocket, persistent supervisor, product factory, Command Centre, admin console, and portfolio management across 13 projects).
+- **Documentation accuracy**: OS (macOS → Linux), entry point (server.js → src/server/server.ts TypeScript), architecture (simple Express API → full ecosystem), features (5 endpoints → dozens of routes, WebSocket, SSE, conversations, portfolio), roadmap (removed Levels 2-6 roadmap as all implemented), location (Perth → Mackay, Queensland), stack (added all actual dependencies: better-sqlite3, claude-agent-sdk, ws, esbuild, tsx, etc.).
 
 ### 2026-02-20 — Claude (autonomous) — Admin Console Phase 2: Work, Conversations, Products
 - **Three new admin modules implemented** (9 commits, `3a752ce` to `d019950`):
@@ -573,6 +586,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [2026-02-21-autonomous-readme-rewrite.md](session-notes/2026-02-21-autonomous-readme-rewrite.md) — README.md comprehensive rewrite (Levels 1-12)
 - [2026-02-20-autonomous-documentation-update.md](session-notes/2026-02-20-autonomous-documentation-update.md) — Documentation update for phantom goal cleanup
 - [2026-02-20-autonomous-phantom-goal-cleanup.md](session-notes/2026-02-20-autonomous-phantom-goal-cleanup.md) — Phantom goal cleanup system
 - [session_2026-02-18_08-30-00.md](../_logs/session_2026-02-18_08-30-00.md) — Escalating retries, 3 pipelines, opus defaults, goal filtering
