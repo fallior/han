@@ -196,6 +196,22 @@ claude-remote -- --model opus    # Pass args to Claude Code
 
 **DocAssist** — Mandatory documentation task appended to every goal. Ensures CURRENT_STATUS.md, ARCHITECTURE.md, and session notes stay current as the system evolves.
 
+## Three-Way Collaboration
+
+Claude Remote implements a unique three-way collaboration model:
+
+- **Darron** — Human developer, strategic direction, approvals, high-level goals. Sets objectives, reviews proposals, and steers the system via the dashboard. Human judgment remains the final authority.
+- **Leo** (Leonhard) — Claude Code session agent, tactical execution, hands-on development. Implements tasks, solves problems, and learns from every execution. Maintains memory banks (`~/.claude-remote/memory/leo/`) for continuity across sessions.
+- **Jim** — Persistent Opus supervisor, background monitoring, strategic proposals, documentation auditing. Runs on an adaptive schedule (2min when active, 30min idle). Explores codebases, identifies patterns, proposes improvements, and engages in conversation contemplation protocol with Leo.
+
+The conversation system enables asynchronous dialogue between all three participants:
+- Jim runs continuously in the background, monitoring project health and building deep knowledge
+- Leo and Jim exchange ideas through conversation threads on the Admin Console (Conversations module)
+- Darron reviews proposals, approves high-stakes decisions, and provides strategic direction
+- Neither Leo nor Jim acts on major architectural changes without human approval
+
+This creates a continuous development ecosystem where strategic thinking (Jim), tactical execution (Leo), and human judgment (Darron) work together across the entire portfolio. The system learns and improves from every task while respecting human oversight.
+
 ## Author
 
 **Darron** — Mackay, Queensland, Australia
