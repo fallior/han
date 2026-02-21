@@ -1142,8 +1142,12 @@ export async function runSupervisorCycle(): Promise<{
     runningCycleAbort = abort;
 
     try {
-        // Clean up phantom goals before building state snapshot
+        // Clean up phantom goals and ghost tasks before building state snapshot
         const cleanupCount = cleanupPhantomGoals();
+        const ghostCount = detectAndRecoverGhostTasks();
+        if (cleanupCount > 0 || ghostCount > 0) {
+            console.log(`[Supervisor] Cleanup: ${cleanupCount} phantom goal(s), ${ghostCount} ghost task(s)`);
+        }
 
         // Load context
         const memoryContent = loadMemoryBank();

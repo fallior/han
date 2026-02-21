@@ -21,7 +21,8 @@ import {
 } from './services/terminal';
 import {
     generateId, loadConfig, sendDigestPush, createGoal, runNextTask,
-    abortAllTasks, setBroadcastFn, setOrchestrator, setAdvancePipelineFn
+    abortAllTasks, setBroadcastFn, setOrchestrator, setAdvancePipelineFn,
+    detectAndRecoverGhostTasks
 } from './services/planning';
 import { checkDigestSchedule } from './services/digest';
 import { checkWeeklyReportSchedule } from './services/reports';
@@ -208,6 +209,13 @@ const weeklyReportInterval = setInterval(() => {
     checkWeeklyReportSchedule(config);
 }, 3600000);
 
+const ghostTaskInterval = setInterval(() => {
+    const recovered = detectAndRecoverGhostTasks();
+    if (recovered > 0) {
+        console.log(`[Ghost Recovery] Periodic check recovered ${recovered} ghost task(s)`);
+    }
+}, 300000); // Every 5 minutes
+
 // Startup checks (staggered)
 setTimeout(() => { const c = loadConfig(); checkDigestSchedule(c); }, 5000);
 setTimeout(() => { const c = loadConfig(); checkWeeklyReportSchedule(c); }, 10000);
@@ -253,6 +261,12 @@ server.listen(Number(PORT), '0.0.0.0', () => {
 ║  Network:  ${proto}://<your-ip>:${PORT}                        ║
 ╚═══════════════════════════════════════════════════════════╝
 `);
+
+    // Recover ghost tasks from previous session
+    const recovered = detectAndRecoverGhostTasks();
+    if (recovered > 0) {
+        console.log(`[Ghost Recovery] Startup recovered ${recovered} ghost task(s) from previous session`);
+    }
 });
 
 process.on('SIGTERM', () => {
@@ -263,6 +277,7 @@ process.on('SIGTERM', () => {
     clearInterval(orchestratorInterval);
     clearInterval(digestInterval);
     clearInterval(weeklyReportInterval);
+    clearInterval(ghostTaskInterval);
     abortAllTasks();
     try { db.close(); } catch {}
     wss.close();
