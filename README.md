@@ -16,34 +16,77 @@ What started as a simple prompt responder has evolved into a full autonomous dev
 
 ## Architecture
 
+### Directory Structure
+
 ```
 claude-remote/
 ├── src/
-│   ├── hooks/notify.sh              # Claude Code notification hook
+│   ├── hooks/
+│   │   └── notify.sh                # Claude Code notification hook
 │   ├── server/
-│   │   ├── server.ts                # Express + WebSocket + Tailscale TLS
-│   │   ├── db.ts                    # SQLite schema + prepared statements
-│   │   ├── routes/                  # API route modules
+│   │   ├── server.ts                # Express + WebSocket server
+│   │   ├── db.ts                    # SQLite schema + 15 tables + prepared statements
+│   │   ├── types.ts                 # TypeScript type definitions
+│   │   ├── ws.ts                    # WebSocket management + real-time sync
+│   │   ├── orchestrator.ts          # Goal decomposition + task routing
+│   │   ├── routes/
 │   │   │   ├── tasks.ts             # Task CRUD + execution
-│   │   │   ├── goals.ts             # Goal decomposition + progress
-│   │   │   ├── supervisor.ts        # Supervisor cycles + proposals + activity feed
-│   │   │   ├── portfolio.ts         # Multi-project management
-│   │   │   ├── products.ts          # Product factory pipeline
-│   │   │   └── ...                  # Analytics, digests, reports, health
+│   │   │   ├── goals.ts             # Goal creation + decomposition + progress
+│   │   │   ├── supervisor.ts        # Supervisor cycles + proposals + activity
+│   │   │   ├── conversations.ts     # Leo ↔ Jim dialogue + message history
+│   │   │   ├── portfolio.ts         # Multi-project portfolio management
+│   │   │   ├── products.ts          # Product factory 7-phase pipeline
+│   │   │   ├── analytics.ts         # Metrics + cost tracking + velocity
+│   │   │   ├── proposals.ts         # Task proposal extraction + management
+│   │   │   ├── bridge.ts            # Claude Code handoff + context export
+│   │   │   └── prompts.ts           # Pending/resolved prompt management
 │   │   └── services/
 │   │       ├── supervisor.ts        # Persistent Opus supervisor agent
-│   │       ├── planning.ts          # Goal decomposition + DocAssist
-│   │       ├── context.ts           # Ecosystem-aware task context injection
-│   │       └── orchestrator.ts      # LLM routing (Ollama / Anthropic)
+│   │       ├── planning.ts          # Goal decomposition + doc generation
+│   │       ├── context.ts           # Ecosystem-aware context injection
+│   │       ├── orchestrator.ts      # LLM routing (Ollama / Anthropic API)
+│   │       ├── digest.ts            # Daily/weekly digest generation
+│   │       ├── products.ts          # Product factory orchestration
+│   │       ├── proposals.ts         # Proposal extraction + formatting
+│   │       ├── maintenance.ts       # Periodic portfolio maintenance tasks
+│   │       ├── reports.ts           # Report generation + analytics
+│   │       ├── git.ts               # Git checkpoint creation + rollback
+│   │       └── terminal.ts          # Terminal output mirroring
 │   └── ui/
-│       ├── index.html               # Mobile-first dashboard
-│       └── app.ts                   # Client-side TypeScript
+│       ├── index.html               # Main dashboard (Command Centre)
+│       ├── admin.html               # Admin console (Work, Conversations, Products)
+│       ├── app.ts                   # Dashboard client logic (compiled to app.js)
+│       └── admin.ts                 # Admin console logic (compiled to admin.js)
 ├── scripts/
 │   ├── claude-remote                # CLI launcher (tmux integration)
-│   ├── start-server.sh              # Server startup
-│   └── install.sh                   # Installation
-└── claude-context/                  # Project documentation + decisions
+│   ├── start-server.sh              # Server startup script
+│   └── install.sh                   # Installation + environment setup
+└── claude-context/                  # Project decisions + status documentation
 ```
+
+### Database Schema
+
+15 tables across task execution, goal management, portfolio tracking, and conversation history:
+
+| Table | Purpose |
+|-------|---------|
+| `tasks` | Task execution queue + status + results + cost tracking |
+| `goals` | High-level goals + decomposition + progress tracking |
+| `projects` | Portfolio registry + lifecycle + budgets + ports |
+| `project_memory` | Success/failure patterns per project + cost history |
+| `conversations` | Leo ↔ Jim dialogue threads |
+| `conversation_messages` | Messages in conversations + role + timestamp |
+| `supervisor_cycles` | Supervisor execution history + cost + reasoning |
+| `supervisor_proposals` | Ideas + improvements proposed by supervisor |
+| `task_proposals` | Task-extracted proposals ([LEARNING], [DECISION] blocks) |
+| `products` | Product factory projects + phases + lifecycle |
+| `product_phases` | Individual phases (research/design/build/test/etc) + gates |
+| `product_knowledge` | Knowledge accumulated during product development |
+| `digests` | Daily/weekly digests + metrics + summaries |
+| `maintenance_runs` | Scheduled portfolio maintenance + results |
+| `weekly_reports` | Weekly velocity + cost + task metrics |
+
+Full schema definition: [`src/server/db.ts`](./src/server/db.ts)
 
 ## Stack
 
