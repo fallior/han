@@ -179,6 +179,25 @@ claude-remote/
 | Watching | Live terminal (xterm.js) | Visible | "Watching session" / "history" |
 | Prompt Active | Live terminal (xterm.js) | Visible | "Permission required" / "keys sent to session" |
 
+### Ghost Task Detection (Autonomous Recovery)
+
+1. **Server startup**: `detectAndRecoverGhostTasks()` runs once to catch orphaned tasks from crashes/restarts
+2. **Periodic check**: `setInterval` runs ghost detection every 5 minutes for ongoing protection
+3. **Detection query**:
+   ```sql
+   SELECT * FROM tasks
+   WHERE status = 'running'
+   AND turns = 0
+   AND started_at < (now - 15 minutes)
+   ```
+4. **Recovery for each ghost task**:
+   - Reset status to 'pending'
+   - Increment retry_count
+   - Clear started_at timestamp
+   - Log: "Ghost task detected: {taskId} (stuck for {duration})"
+5. **Retry ladder triggered**: Ghost task re-enters queue and follows escalating retry ladder (reset → Sonnet diagnostic → Opus diagnostic → human escalation)
+6. **Supervisor integration**: cancel_task action checks `getAbortForTask()` to distinguish live agents from ghosts, enabling autonomous cancellation of ghost-running tasks
+
 ## Key Patterns
 
 ### State File Format
@@ -359,6 +378,14 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
   - All-cancelled goals correctly marked as 'cancelled' (not 'done')
   - Returns count of goals cleaned (logged)
   - Prevents stale goal accumulation, keeps supervisor observations accurate
+- **Ghost task detection and recovery**: Automated detection of stuck running tasks
+  - `detectAndRecoverGhostTasks()` runs on server startup and every 5 minutes
+  - Detects tasks with status='running', turns=0, started_at > 15 min ago
+  - Auto-resets ghost tasks to 'pending' with retry_count incremented
+  - Triggers escalating retry ladder (reset → Sonnet diagnostic → Opus diagnostic → human)
+  - Supervisor cancel_task enhanced to handle ghost-running tasks (checks for live agent via `getAbortForTask()`)
+  - Prevents tasks from being permanently stuck after crashes/restarts
+  - Saves supervisor budget by avoiding monitoring of tasks that will never complete
 - **Admin console (Phase 2)**:
   - **Work module**: Unified task/goal Kanban board with pending/running/done columns, goal grouping with progress bars, filters by project/status/model, real-time WebSocket updates
   - **Conversations module**: Strategic discussion threads between human and supervisor, async Q&A channel for nuanced decisions that don't fit task/goal work

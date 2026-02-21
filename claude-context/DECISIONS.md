@@ -48,6 +48,7 @@ When you make a significant technical or design decision:
 | DEC-016 | Automated Phantom Goal Cleanup in Supervisor Cycle | Accepted | 2026-02-20 |
 | DEC-017 | Protected System Files — Autonomous Agents Blocked | **Settled** | 2026-02-20 |
 | DEC-018 | Conversations as Strategic Async Discussion Channel | Accepted | 2026-02-20 |
+| DEC-019 | Ghost Task Detection with Periodic Check | Accepted | 2026-02-22 |
 
 ---
 
@@ -980,6 +981,92 @@ We chose **Option 3: Separate Conversations table with threaded messages** becau
 - Admin console Phase 2 implementation (Work, Conversations, Products modules)
 - Supervisor system prompt update for conversation awareness
 - DEC-007: Task Execution via Agent SDK (provides foundation for supervisor actions)
+
+---
+
+### DEC-019: Ghost Task Detection with Periodic Check
+
+**Date**: 2026-02-22
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Tasks can get stuck in 'running' status with no agent process when the agent crashes, server restarts mid-task, network issues disconnect the agent, or system kills the process due to resource constraints. These "ghost tasks" remain in the database with status='running' but have no active execution, blocking workflow and wasting supervisor budget monitoring tasks that will never complete.
+
+The goal described the problem: tasks stuck in 'running' status with 0 turns and started_at > 15 min ago, with no automatic detection or recovery mechanism.
+
+#### Options Considered
+
+1. **Manual detection and cleanup**
+   - ✅ Simple — no code needed
+   - ❌ Requires human intervention every time
+   - ❌ Doesn't prevent recurrence
+   - ❌ Tasks stay stuck until human notices
+
+2. **Detect only when supervisor observes**
+   - ✅ Minimal overhead — only runs during supervisor cycles
+   - ❌ Supervisor must be running to detect ghosts
+   - ❌ Doesn't help if supervisor is disabled
+   - ❌ Detection delayed until next supervisor cycle
+
+3. **Detect in orchestrator loop before picking next task**
+   - ✅ Runs frequently (every 5 seconds with orchestrator)
+   - ❌ Couples ghost detection to task execution
+   - ❌ Adds overhead to critical path
+   - ❌ Doesn't run if no tasks are pending
+
+4. **Periodic check at fixed intervals + startup check**
+   - ✅ Runs independently of supervisor/orchestrator
+   - ✅ Catches ghosts from crashes/restarts via startup check
+   - ✅ Ongoing protection via periodic check
+   - ✅ Clear separation of concerns
+   - ✅ Deterministic intervals (predictable behaviour)
+   - ❌ Small overhead every 5 minutes
+
+#### Decision
+
+We chose **periodic check at 5-minute intervals + startup check** because it provides the best combination of independence, crash recovery, and ongoing protection.
+
+**Implementation:**
+- `detectAndRecoverGhostTasks()` function in `planning.ts`
+- Detection criteria: status='running', turns=0, started_at > 15 minutes ago
+- Recovery: reset status to 'pending', increment retry_count, trigger retry ladder
+- Startup check: runs once when server starts (catches orphaned tasks from crashes)
+- Periodic check: `setInterval` runs every 5 minutes for ongoing protection
+- Logs: returns count of ghosts detected for visibility
+
+**Enhanced supervisor cancel_task:**
+- Imports `getAbortForTask()` to check for live agent processes
+- Three scenarios: pending tasks (cancel in DB), running with live agent (abort then cancel), ghost-running (cancel in DB)
+- Clear logging: "(was pending)", "(aborted live agent)", "(was ghost-running)"
+- Enables supervisor to autonomously recover from ghost tasks
+
+#### Consequences
+
+**Positive:**
+- Ghost tasks automatically detected and reset to 'pending'
+- Escalating retry ladder triggered (reset → Sonnet → Opus → human)
+- Supervisor can cancel ghost tasks without manual intervention
+- Startup check catches orphaned tasks from crashes immediately
+- Prevents API cost waste on monitoring stuck tasks
+- System self-heals from agent crashes and server restarts
+- Low overhead: 1 SELECT query every 5 minutes
+
+**Negative:**
+- Small query overhead every 5 minutes (acceptable tradeoff)
+- 15-minute threshold means tasks stuck for <15 min aren't detected (deliberate choice to avoid false positives)
+
+**Cost Impact:**
+- **Savings:** Prevents supervisor from wasting $0.10-$0.50+ per cycle monitoring ghost tasks indefinitely
+- **Overhead:** ~1 SQL query every 5 minutes (negligible cost)
+- **ROI:** Very positive — prevents runaway costs with minimal overhead
+
+#### Related
+
+- DEC-017: Escalating Retry Ladder (ghost tasks trigger retry ladder)
+- DEC-016: Automated Phantom Goal Cleanup (similar self-healing approach for goals)
+- DEC-007: Task Execution via Agent SDK (provides AbortController for live agent detection)
 
 ---
 

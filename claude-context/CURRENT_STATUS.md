@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-21 (Autonomous) by Claude
+> Last updated: 2026-02-22 (Autonomous) by Claude
 
 ## Current Stage
 
@@ -29,6 +29,27 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-22 — Claude (autonomous) — Ghost Task Detection and Recovery
+- **Ghost task detection system** (`398ee8a`, `1b88b67`, `d6abbf0`):
+  - `detectAndRecoverGhostTasks()` runs periodically (5-minute intervals) in `planning.ts`
+  - Detects tasks with status='running' that have 0 turns and started_at > 15 min ago
+  - Auto-resets ghost tasks to 'pending' with retry_count incremented
+  - Triggers escalating retry ladder (reset → Sonnet diagnostic → Opus diagnostic → human)
+  - Returns count of ghosts detected (logged)
+  - Prevents tasks from being permanently stuck in 'running' status
+- **Enhanced supervisor cancel_task** (`1b88b67`):
+  - Upgraded to handle three scenarios: pending tasks, running tasks with live agents, and ghost-running tasks
+  - Imports `getAbortForTask()` to check for active agent processes
+  - Running tasks with live agent: aborts agent then cancels in DB
+  - Running tasks without agent (ghost): cancels directly in DB
+  - Clear logging: "(was pending)", "(aborted live agent)", "(was ghost-running)"
+  - Supervisor can now autonomously recover from ghost-running tasks without manual intervention
+- **Server startup integration** (`d6abbf0`):
+  - Ghost detection runs on server startup to catch orphaned tasks from crashes/restarts
+  - Periodic check runs every 5 minutes via `setInterval`
+  - Logged at startup and in periodic checks: "Checked for ghost tasks: N detected and reset"
+- **Cost savings**: Prevents supervisor from wasting budget monitoring tasks that are never actually executing
 
 ### 2026-02-21 — Claude (autonomous) — README Rewrite: Levels 1-12 Complete
 - **README.md comprehensive rewrite** (10 commits, `d772c91` to `f4f307a`):
@@ -549,6 +570,10 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Products module: Product pipeline visualisation with phase timeline
 - ✅ Supervisor responds to pending conversation threads automatically
 - ✅ TypeScript build system for admin console (admin.ts → admin.js)
+- ✅ Ghost task detection and auto-recovery (5-minute periodic check)
+- ✅ Ghost tasks auto-reset to 'pending' with retry_count incremented
+- ✅ Supervisor cancel_task handles ghost-running tasks (no agent_pid)
+- ✅ Server startup ghost detection catches orphaned tasks from crashes
 
 ## Next Actions
 
@@ -586,6 +611,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [2026-02-22-autonomous-ghost-task-detection.md](session-notes/2026-02-22-autonomous-ghost-task-detection.md) — Ghost task detection and recovery system
 - [2026-02-21-autonomous-readme-rewrite.md](session-notes/2026-02-21-autonomous-readme-rewrite.md) — README.md comprehensive rewrite (Levels 1-12)
 - [2026-02-20-autonomous-documentation-update.md](session-notes/2026-02-20-autonomous-documentation-update.md) — Documentation update for phantom goal cleanup
 - [2026-02-20-autonomous-phantom-goal-cleanup.md](session-notes/2026-02-20-autonomous-phantom-goal-cleanup.md) — Phantom goal cleanup system
