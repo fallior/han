@@ -1715,6 +1715,91 @@ function notifyHumanOfFailure(task: any, errorMessage: string, retryCount: numbe
 }
 
 /**
+ * Detect and recover "ghost" tasks — tasks marked as 'running' in the database
+ * but not actually executing (not present in runningSlots).
+ *
+ * This can happen if:
+ * - The agent process crashes mid-task
+ * - The server restarts while tasks are running
+ * - An abort operation fails to clean up database state
+ *
+ * Runs periodically (every 5 minutes) to detect stale tasks and reset them
+ * for retry via the escalating retry ladder.
+ *
+ * @returns Number of ghost tasks recovered
+ */
+export function detectAndRecoverGhostTasks(): number {
+    const GHOST_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
+    const LONG_RUNNING_WARNING_MS = 2 * 60 * 60 * 1000; // 2 hours
+    const now = Date.now();
+    let recoveredCount = 0;
+
+    // Get all tasks marked as 'running' in the database
+    const runningTasks = taskStmts.listByStatus.all('running') as any[];
+
+    for (const task of runningTasks) {
+        const isInMemory = runningSlots.has(task.id);
+        const startedAt = task.started_at ? new Date(task.started_at).getTime() : 0;
+        const runningDuration = now - startedAt;
+
+        // Check for legitimately running tasks that have been running too long
+        if (isInMemory && runningDuration > LONG_RUNNING_WARNING_MS) {
+            console.log(`[GhostDetect] Warning: Task ${task.id} (${task.title}) has been running for ${Math.round(runningDuration / 60000)} minutes — may be stuck but still in runningSlots`);
+            continue;
+        }
+
+        // Skip if task is legitimately running (in memory)
+        if (isInMemory) {
+            continue;
+        }
+
+        // Task is NOT in runningSlots but marked as 'running' in DB
+        // Check if it's been long enough to consider it a ghost
+        if (runningDuration < GHOST_THRESHOLD_MS) {
+            // Too recent — might be in the process of starting, give it more time
+            continue;
+        }
+
+        // This is a ghost task — recover it
+        console.log(`[GhostDetect] Found ghost task: ${task.id} (${task.title}) — running for ${Math.round(runningDuration / 60000)} min but not in runningSlots`);
+
+        const currentRetryCount = task.retry_count || 0;
+        const newRetryCount = currentRetryCount + 1;
+
+        if (newRetryCount > 3) {
+            // Max retries exhausted — mark as failed
+            const errorMsg = `Ghost task detected: marked as running for ${Math.round(runningDuration / 60000)} minutes but no active agent process. Retry limit (3) exhausted.`;
+
+            db.prepare('UPDATE tasks SET status = ?, completed_at = ?, error = ? WHERE id = ?')
+                .run('failed', new Date().toISOString(), errorMsg, task.id);
+
+            console.log(`[GhostDetect] ${task.title} — max retries exhausted, marking as failed`);
+
+            // Notify human of failure
+            notifyHumanOfFailure(task, errorMsg, currentRetryCount);
+
+            broadcastTaskUpdate(taskStmts.get.get(task.id));
+        } else {
+            // Reset to pending for retry
+            db.prepare('UPDATE tasks SET status = ?, started_at = NULL, completed_at = NULL, error = NULL, retry_count = ? WHERE id = ?')
+                .run('pending', newRetryCount, task.id);
+
+            console.log(`[GhostDetect] ${task.title} — reset to pending (retry ${newRetryCount}/3) after ghost detection`);
+
+            broadcastTaskUpdate(taskStmts.get.get(task.id));
+        }
+
+        recoveredCount++;
+    }
+
+    if (recoveredCount > 0) {
+        console.log(`[GhostDetect] Recovered ${recoveredCount} ghost task(s)`);
+    }
+
+    return recoveredCount;
+}
+
+/**
  * Main scheduler entry point — called on interval.
  * Fills available pipeline slots: 2 normal + 1 remediation.
  */
