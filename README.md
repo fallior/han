@@ -7,12 +7,14 @@ What started as a simple prompt responder has evolved into a full autonomous dev
 ## What It Does
 
 - **Prompt Response** — Push notifications via ntfy.sh when Claude Code needs input. Respond from your phone with one-tap buttons.
-- **Live Terminal Mirror** — Watch Claude Code working in real-time from anywhere. Type directly into the terminal from your phone.
-- **Autonomous Task Execution** — Submit goals from your phone. The orchestrator decomposes them into tasks, routes to the right model (haiku/sonnet/opus), executes via Agent SDK, retries failures with escalation, and commits results.
-- **Persistent Opus Supervisor** — A background Opus agent that continuously monitors all projects, explores codebases to build deep knowledge, creates documentation goals, and proposes strategic ideas for your approval.
-- **Command Centre Dashboard** — Activity feed, project tree, strategic proposals, and supervisor insights. See what's happening across your entire portfolio at a glance.
-- **Multi-Project Portfolio** — Manages 13+ projects from a central infrastructure registry. Per-project budgets, priority engine, ecosystem-aware context injection.
-- **Product Factory** — 7-phase pipeline (research → design → architecture → build → test → document → deploy) with 42 parallel subagents and human gates at critical points.
+- **Live Terminal Mirror** — Watch Claude Code working in real-time from anywhere. Type directly into the terminal. WebSocket-based updates stream 1s refresh cycle.
+- **Autonomous Task Execution** — Submit goals from your phone. The orchestrator decomposes them into ordered tasks, routes to the optimal model (Haiku/Sonnet/Opus), executes via Agent SDK with memory-based routing, retries failures with escalating diagnostics, and commits results with automatic rollback on error.
+- **Persistent Opus Supervisor** — Background agent continuously monitoring all 13+ projects. Explores codebases, audits documentation, identifies patterns, proposes strategic improvements, and engages in conversation contemplation with Leo for nuanced decision-making.
+- **Admin Console** — Work Kanban board (pending/running/done), strategic conversation threads with supervisor, product pipeline visualization, analytics dashboard. Real-time WebSocket updates and supervisor activity feed.
+- **Product Factory** — 7-phase pipeline (research → design → architecture → build → test → document → deploy) with 42 parallel subagents, knowledge accumulation between phases, and human gates at critical points.
+- **Learning System** — Cross-project learnings database tracks error patterns, settled decisions, cost optimizations, and ecosystem-aware context injection. Pre-empts known failures and captures reusable knowledge from every task execution.
+- **Command Centre Dashboard** — Unified portfolio management: activity feed, project tree with budget tracking, strategic proposals with rationale, supervisor memory banks, cost analytics, and velocity metrics across all projects.
+- **Multi-Project Portfolio** — Manages 13+ concurrent projects from central infrastructure registry with per-project budgets, priority engine, lifecycle management, and ecosystem-aware context that prevents failures and accelerates decisions.
 
 ## Architecture
 
