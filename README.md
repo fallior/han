@@ -162,6 +162,58 @@ claude-remote --status           # Show status
 claude-remote -- --model opus    # Pass args to Claude Code
 ```
 
+## API Overview
+
+Claude Remote exposes a comprehensive REST API for developers who want to integrate or extend the system:
+
+**Task Management**
+- `GET /api/tasks` — List all tasks with filters
+- `POST /api/tasks` — Create new task
+- `POST /api/tasks/:id/retry` — Retry failed task with optional diagnostic
+- `POST /api/tasks/:id/cancel` — Cancel running task
+
+**Goal Orchestration**
+- `GET /api/goals` — List all goals with progress
+- `POST /api/goals` — Create new goal for decomposition
+- `GET /api/goals/:id` — Goal detail with task breakdown
+- `DELETE /api/goals/:id?force=true` — Force delete goal
+
+**Supervisor**
+- `GET /api/supervisor/status` — Supervisor state and memory banks
+- `GET /api/supervisor/proposals` — Strategic proposals from supervisor
+- `POST /api/supervisor/cycle` — Trigger supervisor analysis cycle
+
+**Conversations**
+- `GET /api/conversations` — List all discussion threads
+- `POST /api/conversations` — Create new conversation
+- `POST /api/conversations/:id/messages` — Add message to thread
+- `POST /api/conversations/:id/resolve` — Mark conversation resolved
+
+**Portfolio**
+- `GET /api/projects` — All projects with stats and budgets
+- `GET /api/ecosystem` — Ecosystem summary with allocated ports
+- `PUT /api/portfolio/:name/budget` — Update project budget
+
+**Products**
+- `GET /api/products` — Product pipeline with phase status
+- `POST /api/products` — Create new product
+- `GET /api/products/:id/:phase` — Phase status and knowledge accumulation
+
+**Analytics**
+- `GET /api/analytics` — System-wide metrics, velocity, cost breakdown
+- `GET /api/errors/:project` — Error patterns and failure analysis
+
+**WebSocket Events** (`wss://host:3847/ws`)
+- `task_update` — Task status change (queued → running → done/failed)
+- `task_progress` — Real-time terminal output from running task
+- `goal_update` — Goal progress or status change
+- `goal_decomposed` — Goal decomposition complete with task list
+- `supervisor_cycle` — Supervisor cycle completed with proposals
+- `supervisor_proposal` — New strategic proposal from supervisor
+- `digest_ready` — Daily/weekly digest available for download
+
+All endpoints use JSON request/response format. Supervisor cycles trigger automatically and on-demand. WebSocket connections persist across task executions and provide 1-second refresh cycle for terminal mirroring. See [`src/server/routes/`](./src/server/routes/) for endpoint implementations.
+
 ## Implementation Levels
 
 | Level | Focus | Status |
