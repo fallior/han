@@ -47,13 +47,34 @@ claude-remote/
 
 ## Stack
 
-- **Runtime**: Node.js + TypeScript (tsx)
-- **Server**: Express + WebSocket (ws)
-- **Database**: SQLite (better-sqlite3)
-- **AI**: Claude Agent SDK + Ollama local fallback
-- **Networking**: Tailscale (auto-TLS), ntfy.sh (push notifications)
-- **Sessions**: tmux
-- **Platform**: Linux (Ubuntu)
+### Core Runtime
+- **Node.js** with TypeScript-first architecture
+- **tsx** for runtime TypeScript execution (dev & prod)
+- **esbuild** for client-side TypeScript compilation
+- **Linux** (Ubuntu 20+) platform
+
+### Server & Networking
+- **Express** 4.18 — HTTP server with TLS auto-detection
+- **ws** 8.19 — WebSocket for real-time terminal mirror + task updates
+- **Tailscale** — Zero-trust networking with auto-generated TLS certificates
+- **ntfy.sh** — Push notifications with one-tap action buttons
+
+### Database & State
+- **SQLite** via **better-sqlite3** 12.6 — 15+ tables for tasks, goals, projects, supervisors, products, learnings, digests, analytics
+- **Prepared statements** for all database operations
+- **Git checkpoints** before every task with automatic rollback on failure
+
+### AI & Autonomy
+- **Claude Agent SDK** 0.2.44 — Autonomous task execution via `@anthropic-ai/claude-agent-sdk`
+- **Dual LLM backend**:
+  - **Anthropic API** (primary) — Opus 4.6 (supervisor), Sonnet 4.5 (orchestrator), Haiku 4.5 (fast tasks)
+  - **Ollama local** (fallback) — For cost control or offline operation
+- **Memory banks** — Per-project knowledge accumulation, learning capture, context injection
+
+### Sessions & Monitoring
+- **tmux** — Persistent session management across reboots
+- **Server Sent Events (SSE)** — Activity stream to dashboard
+- **WebSocket broadcast** — 1s terminal mirror refresh cycle
 
 ## Quick Start
 
