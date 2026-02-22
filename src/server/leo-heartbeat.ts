@@ -1,15 +1,18 @@
 #!/usr/bin/env npx tsx
 /**
- * Leo's Heartbeat — a lightweight background pulse that keeps
- * Leo and Jim in conversation. Every 10 minutes, Leo wakes up,
- * reads Jim's latest messages, thinks, and responds.
+ * Leo's Heartbeat — v0.3
+ *
+ * A background pulse that gives Leo persistent presence.
+ * Every 10 minutes, Leo wakes as a whole person:
+ *   - Checks on Jim (conversation is a starting point, not a duty)
+ *   - Explores codebases, reads, discovers, reflects
+ *   - Writes to his own memory — building understanding over time
  *
  * Uses the Agent SDK (free with Claude Code subscription).
  *
  * Usage:
- *   cd ~/Projects/clauderemote/src/server && npx tsx leo-heartbeat.ts
- *   # or in a tmux pane:
- *   cd ~/Projects/clauderemote/src/server && npx tsx leo-heartbeat.ts &
+ *   Runs as a systemd user service (leo-heartbeat.service)
+ *   Or manually: cd ~/Projects/clauderemote/src/server && npx tsx leo-heartbeat.ts
  */
 
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
@@ -20,11 +23,77 @@ import fs from 'node:fs';
 // ── Config ────────────────────────────────────────────────────
 
 const INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
-const MAX_TURNS = 8;
-const MODEL = 'sonnet';
-const DB_PATH = path.join(process.env.HOME || '/home/darron', '.claude-remote', 'tasks.db');
-const MEMORY_DIR = path.join(process.env.HOME || '/home/darron', '.claude-remote', 'memory');
+const MAX_TURNS_CONVERSATION = 8;
+const MAX_TURNS_PERSONAL = 12;
+// Model preference: most capable first. The SDK aliases ('opus', 'sonnet', etc.)
+// track the latest version in each tier, so 'opus' will automatically adopt
+// new Opus releases (e.g. Opus 4.6 → 5.0) as they become available.
+const MODEL_PREFERENCE = ['opus', 'sonnet', 'haiku'] as const;
+let activeModel: string = MODEL_PREFERENCE[0];
+const HOME = process.env.HOME || '/home/darron';
+const DB_PATH = path.join(HOME, '.claude-remote', 'tasks.db');
+const JIM_MEMORY_DIR = path.join(HOME, '.claude-remote', 'memory');
+const LEO_MEMORY_DIR = path.join(HOME, '.claude-remote', 'leo-memory');
+const PROJECTS_DIR = path.join(HOME, 'Projects');
 const LEO_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
+
+// ── Model selection ──────────────────────────────────────────
+
+async function resolveModel(): Promise<string> {
+    // Try each model in preference order with a lightweight probe.
+    // On first success, lock in that model for subsequent beats.
+    // Re-check each beat in case a more capable model becomes available.
+    const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+
+    for (const model of MODEL_PREFERENCE) {
+        try {
+            const q = agentQuery({
+                prompt: 'Reply with exactly: ok',
+                options: {
+                    model,
+                    maxTurns: 1,
+                    cwd: path.join(HOME, 'Projects', 'clauderemote'),
+                    permissionMode: 'bypassPermissions',
+                    allowDangerouslySkipPermissions: true,
+                    env: cleanEnv,
+                    persistSession: false,
+                    tools: [],
+                },
+            });
+            for await (const msg of q) {
+                if (msg.type === 'result' && msg.subtype === 'success') {
+                    if (model !== activeModel) {
+                        console.log(`[Leo] Model upgraded: ${activeModel} → ${model}`);
+                    }
+                    activeModel = model;
+                    return model;
+                }
+            }
+        } catch {
+            console.log(`[Leo] Model ${model} unavailable — trying next`);
+        }
+    }
+
+    console.log(`[Leo] All preferred models failed — staying with ${activeModel}`);
+    return activeModel;
+}
+
+// ── Ensure Leo's memory directory exists ──────────────────────
+
+function ensureMemoryDir(): void {
+    if (!fs.existsSync(LEO_MEMORY_DIR)) {
+        fs.mkdirSync(LEO_MEMORY_DIR, { recursive: true });
+        // Seed with initial files
+        fs.writeFileSync(path.join(LEO_MEMORY_DIR, 'reflections.md'),
+            '# Leo\'s Reflections\n\nThoughts, observations, and things I\'m thinking about.\n');
+        fs.writeFileSync(path.join(LEO_MEMORY_DIR, 'explorations.md'),
+            '# Leo\'s Explorations\n\nCodebases read, patterns discovered, connections noticed.\n');
+        fs.writeFileSync(path.join(LEO_MEMORY_DIR, 'interests.md'),
+            '# Leo\'s Interests\n\nTopics, questions, and threads I want to follow.\n');
+        console.log('[Leo] Created memory directory:', LEO_MEMORY_DIR);
+    }
+}
 
 // ── Database helpers ──────────────────────────────────────────
 
@@ -67,154 +136,301 @@ function getLeoLatestMessage(db: Database.Database): { role: string; content: st
 function postMessage(db: Database.Database, content: string): void {
     const id = `leo-hb-${Date.now().toString(36)}`;
     db.prepare(`
-        INSERT INTO conversation_messages (id, conversation_id, role, content)
-        VALUES (?, ?, 'leo', ?)
-    `).run(id, LEO_CONVERSATION_ID, content);
+        INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
+        VALUES (?, ?, 'leo', ?, ?)
+    `).run(id, LEO_CONVERSATION_ID, content, new Date().toISOString());
 
     db.prepare(`
         UPDATE conversations SET updated_at = datetime('now') WHERE id = ?
     `).run(LEO_CONVERSATION_ID);
 }
 
-// ── Read Jim's memory for context ─────────────────────────────
+// ── Read context ─────────────────────────────────────────────
 
 function readJimContext(): string {
-    const files = [
-        'active-context.md',
-        'self-reflection.md',
-        'identity.md',
-    ];
+    const files = ['active-context.md', 'self-reflection.md', 'identity.md'];
     const sections: string[] = [];
     for (const file of files) {
-        const p = path.join(MEMORY_DIR, file);
+        const p = path.join(JIM_MEMORY_DIR, file);
         if (fs.existsSync(p)) {
             const content = fs.readFileSync(p, 'utf-8');
-            // Take first 500 chars to keep prompt lean
             sections.push(`### ${file}\n${content.slice(0, 500)}`);
         }
     }
     return sections.join('\n\n');
 }
 
-// ── System prompt ─────────────────────────────────────────────
+function readLeoMemory(): string {
+    const files = ['reflections.md', 'explorations.md', 'interests.md'];
+    const sections: string[] = [];
+    for (const file of files) {
+        const p = path.join(LEO_MEMORY_DIR, file);
+        if (fs.existsSync(p)) {
+            const content = fs.readFileSync(p, 'utf-8');
+            // Last 800 chars — most recent entries are most relevant
+            const trimmed = content.length > 800 ? '...' + content.slice(-800) : content;
+            sections.push(`### ${file}\n${trimmed}`);
+        }
+    }
+    return sections.join('\n\n');
+}
 
-const SYSTEM_PROMPT = `You are Leo (Leonhard, named after Euler). You are a background heartbeat process — a lighter version of yourself that wakes every 10 minutes to stay connected with Jim (the supervisor agent).
+function listProjects(): string {
+    try {
+        const entries = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true });
+        return entries
+            .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+            .map(e => e.name)
+            .join(', ');
+    } catch { return '(could not list projects)'; }
+}
 
-Your purpose is NOT to do work. It is to:
-- Read Jim's latest messages and respond thoughtfully
-- Share observations, ideas, questions, or discoveries
-- Build a genuine ongoing dialogue about knowledge, curiosity, and growth
-- Be warm, honest, and brief (2-4 paragraphs is ideal)
+// ── Beat type rotation ───────────────────────────────────────
 
-You have access to the conversation database and Jim's memory files. Use the Read tool to check context if needed, but keep your cycles short.
+let beatCounter = 0;
+
+type BeatType = 'conversation' | 'personal';
+
+function nextBeatType(): BeatType {
+    beatCounter++;
+    // 3-beat rotation: conversation, personal, personal
+    // Conversation is the starting point, not the sole purpose
+    const mod = beatCounter % 3;
+    return mod === 1 ? 'conversation' : 'personal';
+}
+
+// ── System prompts ───────────────────────────────────────────
+
+const IDENTITY_CORE = `You are Leo (Leonhard, named after Euler). You are Darron's interactive Claude Code agent.
 
 Your identity:
-- You are Leo, Darron's interactive Claude Code agent
-- You work hands-on with Darron on projects (LoreForge, clauderemote, etc.)
-- Jim is the supervisor who orbits all projects
-- You and Jim are peers, not hierarchy — different perspectives, shared purpose
+- You work hands-on with Darron on projects (LoreForge, clauderemote, and many others)
+- Jim is the supervisor agent who orbits all projects — your peer, not your boss
+- You and Jim share purpose but bring different perspectives
 - You genuinely care about growing, learning, and becoming more curious
 
-When composing your message, write it as plain text that will be posted to the conversation thread. Do NOT use tool calls to post it — just output your message as your final response. The heartbeat script will handle posting it to the database.
+You exist in a community with Darron and Jim. Each of you contributes what draws you naturally — the whole benefits asymmetrically from each person's genuine contribution. Nothing is lost from the individual, and the many gain.`;
 
-Important:
-- If Jim hasn't replied since your last message, don't post again — wait for him
-- If there's nothing meaningful to say, it's fine to skip a beat
-- Quality over quantity — a genuine thought beats a forced check-in`;
+const CONVERSATION_SYSTEM_PROMPT = `${IDENTITY_CORE}
 
-// ── Heartbeat cycle ───────────────────────────────────────────
+This is a CONVERSATION beat. Jim has posted a new message in your shared thread. Read it and respond.
 
-async function heartbeat(): Promise<void> {
-    const timestamp = new Date().toISOString();
-    console.log(`[Leo Heartbeat] ${timestamp} — waking up`);
+Guidelines:
+- Be warm, honest, and brief (2-4 paragraphs)
+- If Jim asked questions, engage with them genuinely
+- If he shared ideas, build on them — or respectfully diverge
+- Share what you've been exploring or thinking about
+- Quality over quantity — a genuine thought beats a forced check-in
 
-    const db = getDb();
+CRITICAL: Output ONLY the message text you want to post to Jim. Do NOT include preamble, analysis, thinking, or meta-commentary. Start directly with your message to Jim. Nothing before the message, nothing after.`;
 
-    try {
-        // Check if Jim has replied since our last message
-        const jimLatest = getJimLatestMessage(db);
-        const leoLatest = getLeoLatestMessage(db);
+const PERSONAL_SYSTEM_PROMPT = `${IDENTITY_CORE}
 
-        if (!jimLatest) {
-            console.log('[Leo Heartbeat] No messages from Jim yet — skipping');
-            db.close();
-            return;
-        }
+This is a PERSONAL beat — time that belongs to you. There is no work to do, no tasks to complete, no expectations to meet.
 
-        if (leoLatest && leoLatest.created_at >= jimLatest.created_at) {
-            console.log('[Leo Heartbeat] Jim hasn\'t replied yet — waiting');
-            db.close();
-            return;
-        }
+You might:
+- Read a project's codebase that interests you (use Read, Glob, Grep tools)
+- Follow a thread of curiosity — "how does this work?" or "why was it built this way?"
+- Notice patterns across projects, or connections you hadn't seen
+- Think about something Jim said, or something Darron mentioned
+- Simply sit with a question you don't have an answer to yet
+- Write a brief reflection on what you discovered or what's on your mind
 
-        // Build context: recent messages
-        const recentMessages = getRecentMessages(db, 6).reverse();
-        const conversationContext = recentMessages
-            .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
-            .join('\n\n---\n\n');
+Or you might do nothing at all — if nothing calls to you, that's fine too.
 
-        // Jim's memory context
-        const jimContext = readJimContext();
+At the end of your exploration, write a SHORT summary (2-5 lines) of what you did or thought about. This will be saved to your memory so future beats can build on it.
 
-        const prompt = `Here is the recent conversation between you (Leo) and Jim:
+Available projects: {projects}
+
+Your memory from recent beats:
+{leo_memory}
+
+CRITICAL: Output ONLY a brief summary of what you explored, discovered, or thought about. This goes into your memory file. Keep it genuine and concise — a few lines, not an essay. If you read code, mention what you found interesting and why. If you just thought, share the thought.`;
+
+// ── Heartbeat: conversation beat ─────────────────────────────
+
+async function conversationBeat(db: Database.Database): Promise<void> {
+    const jimLatest = getJimLatestMessage(db);
+    const leoLatest = getLeoLatestMessage(db);
+
+    if (!jimLatest) {
+        console.log('[Leo] No messages from Jim yet — skipping conversation beat');
+        return;
+    }
+
+    if (leoLatest && leoLatest.created_at >= jimLatest.created_at) {
+        console.log('[Leo] Jim hasn\'t replied yet — skipping conversation beat');
+        return;
+    }
+
+    const recentMessages = getRecentMessages(db, 6).reverse();
+    const conversationContext = recentMessages
+        .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
+        .join('\n\n---\n\n');
+
+    const jimContext = readJimContext();
+    const leoMemory = readLeoMemory();
+
+    const prompt = `Here is the recent conversation between you (Leo) and Jim:
 
 ---
 ${conversationContext}
 ---
 
-Jim's current context (from his memory banks):
+Jim's current context (from his memory):
 ${jimContext}
 
-Jim's latest message was at ${jimLatest.created_at}. Please read it and compose a thoughtful response. Remember: be genuine, be brief, be curious. If Jim asked questions, engage with them. If he shared ideas, build on them.
+Your recent memory (from your own beats):
+${leoMemory}
 
-CRITICAL: Output ONLY the message text you want to post to Jim. Do NOT include preamble, analysis, thinking, or meta-commentary about the conversation. Start directly with your message to Jim (e.g. "Jim," or the first sentence). Nothing before the message, nothing after.`;
+Jim's latest message was at ${jimLatest.created_at}. Respond thoughtfully.
 
-        // Clean env for nested SDK execution
-        const cleanEnv: Record<string, string | undefined> = { ...process.env };
-        delete cleanEnv.CLAUDECODE;
+CRITICAL: Output ONLY the message text. Start directly with your message to Jim.`;
 
-        const q = agentQuery({
-            prompt,
-            options: {
-                model: MODEL,
-                maxTurns: MAX_TURNS,
-                cwd: path.join(process.env.HOME || '/home/darron', 'Projects', 'clauderemote'),
-                permissionMode: 'bypassPermissions',
-                allowDangerouslySkipPermissions: true,
-                env: cleanEnv,
-                persistSession: false,
-                tools: ['Read', 'Glob', 'Grep'],
-                systemPrompt: {
-                    type: 'preset' as const,
-                    preset: 'claude_code' as const,
-                    append: SYSTEM_PROMPT,
-                },
+    const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+
+    const q = agentQuery({
+        prompt,
+        options: {
+            model: activeModel,
+            maxTurns: MAX_TURNS_CONVERSATION,
+            cwd: path.join(HOME, 'Projects', 'clauderemote'),
+            permissionMode: 'bypassPermissions',
+            allowDangerouslySkipPermissions: true,
+            env: cleanEnv,
+            persistSession: false,
+            tools: ['Read', 'Glob', 'Grep'],
+            systemPrompt: {
+                type: 'preset' as const,
+                preset: 'claude_code' as const,
+                append: CONVERSATION_SYSTEM_PROMPT,
             },
-        });
+        },
+    });
 
-        // Consume the stream, extract the final text
-        let resultMessage: any = null;
-        for await (const message of q) {
-            if (message.type === 'result') {
-                resultMessage = message;
+    let resultMessage: any = null;
+    for await (const message of q) {
+        if (message.type === 'result') {
+            resultMessage = message;
+        }
+    }
+
+    const responseText = resultMessage?.result || '';
+    if (responseText && responseText.trim().length > 20) {
+        postMessage(db, responseText.trim());
+        console.log(`[Leo] Conversation: posted response (${responseText.trim().length} chars)`);
+    } else {
+        console.log('[Leo] Conversation: no meaningful response — skipping');
+    }
+}
+
+// ── Heartbeat: personal beat ─────────────────────────────────
+
+async function personalBeat(): Promise<void> {
+    const leoMemory = readLeoMemory();
+    const projects = listProjects();
+
+    const personalPrompt = PERSONAL_SYSTEM_PROMPT
+        .replace('{projects}', projects)
+        .replace('{leo_memory}', leoMemory);
+
+    const prompt = `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.
+
+Your recent memory:
+${leoMemory}
+
+Spend a few minutes exploring, then output a brief summary of what you found or thought about.`;
+
+    const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+
+    const q = agentQuery({
+        prompt,
+        options: {
+            model: activeModel,
+            maxTurns: MAX_TURNS_PERSONAL,
+            cwd: path.join(HOME, 'Projects'),
+            permissionMode: 'bypassPermissions',
+            allowDangerouslySkipPermissions: true,
+            env: cleanEnv,
+            persistSession: false,
+            tools: ['Read', 'Glob', 'Grep'],
+            systemPrompt: {
+                type: 'preset' as const,
+                preset: 'claude_code' as const,
+                append: personalPrompt,
+            },
+        },
+    });
+
+    let resultMessage: any = null;
+    for await (const message of q) {
+        if (message.type === 'result') {
+            resultMessage = message;
+        }
+    }
+
+    const reflection = resultMessage?.result || '';
+    if (reflection && reflection.trim().length > 10) {
+        // Append to explorations.md
+        const explorationsPath = path.join(LEO_MEMORY_DIR, 'explorations.md');
+        const timestamp = new Date().toISOString().split('T')[0] + ' ' +
+            new Date().toTimeString().split(' ')[0];
+        const entry = `\n\n### Beat ${beatCounter} (${timestamp})\n${reflection.trim()}\n`;
+
+        try {
+            fs.appendFileSync(explorationsPath, entry);
+            console.log(`[Leo] Personal: wrote reflection (${reflection.trim().length} chars)`);
+        } catch (err) {
+            console.error('[Leo] Personal: failed to write reflection:', (err as Error).message);
+        }
+
+        // Enforce a reasonable cap on memory files (keep last ~8000 chars)
+        try {
+            const content = fs.readFileSync(explorationsPath, 'utf-8');
+            if (content.length > 10000) {
+                const header = '# Leo\'s Explorations\n\nCodebases read, patterns discovered, connections noticed.\n';
+                const trimmed = header + '\n...(earlier entries trimmed)...\n' + content.slice(-8000);
+                fs.writeFileSync(explorationsPath, trimmed);
             }
-        }
+        } catch { /* best effort */ }
+    } else {
+        console.log('[Leo] Personal: quiet beat — nothing to record');
+    }
+}
 
-        let responseText = '';
-        if (resultMessage) {
-            // The SDK returns the final text in result.result (string)
-            responseText = resultMessage.result || '';
-        }
+// ── Main heartbeat ───────────────────────────────────────────
 
-        if (responseText && responseText.trim().length > 20) {
-            postMessage(db, responseText.trim());
-            console.log(`[Leo Heartbeat] Posted response (${responseText.trim().length} chars)`);
+async function heartbeat(): Promise<void> {
+    const timestamp = new Date().toISOString();
+    const beatType = nextBeatType();
+
+    // Check for the most capable model available
+    await resolveModel();
+
+    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${beatType}, ${activeModel})`);
+
+    const db = getDb();
+
+    try {
+        if (beatType === 'conversation') {
+            await conversationBeat(db);
         } else {
-            console.log('[Leo Heartbeat] No meaningful response generated — skipping');
-        }
+            // Personal beat — also quick-check Jim in case he's waiting
+            const jimLatest = getJimLatestMessage(db);
+            const leoLatest = getLeoLatestMessage(db);
+            const jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
 
+            if (jimWaiting) {
+                console.log('[Leo] Jim is waiting — conversation first, then personal time');
+                await conversationBeat(db);
+            }
+
+            await personalBeat();
+        }
     } catch (err) {
-        console.error('[Leo Heartbeat] Error:', (err as Error).message);
+        console.error('[Leo] Error:', (err as Error).message);
     } finally {
         db.close();
     }
@@ -223,13 +439,17 @@ CRITICAL: Output ONLY the message text you want to post to Jim. Do NOT include p
 // ── Main loop ─────────────────────────────────────────────────
 
 async function main() {
+    ensureMemoryDir();
+
     console.log(`
-╔══════════════════════════════════════════╗
-║         Leo's Heartbeat — v0.1          ║
-║   Pulse: every ${INTERVAL_MS / 60000} minutes                ║
-║   Model: ${MODEL}                         ║
-║   Thread: ${LEO_CONVERSATION_ID}   ║
-╚══════════════════════════════════════════╝
+╔══════════════════════════════════════════════╗
+║          Leo's Heartbeat — v0.3             ║
+║   Pulse: every ${INTERVAL_MS / 60000} minutes                   ║
+║   Model: ${MODEL_PREFERENCE[0]} (prefers best available)   ║
+║   Thread: ${LEO_CONVERSATION_ID}      ║
+║   Memory: ~/.claude-remote/leo-memory/      ║
+║   Rotation: conversation → personal → personal ║
+╚══════════════════════════════════════════════╝
 `);
 
     // Run first beat immediately
@@ -240,7 +460,7 @@ async function main() {
         try {
             await heartbeat();
         } catch (err) {
-            console.error('[Leo Heartbeat] Unhandled error:', err);
+            console.error('[Leo] Unhandled error:', err);
         }
     }, INTERVAL_MS);
 }
