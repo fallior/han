@@ -458,6 +458,7 @@ export function recommendModel(
         }
 
         const best = candidates[0];
+        console.log(`[Orchestrator] recommendModel(${taskType}): ${candidates.length} candidates, best=${best.model} (${(best.successRate * 100).toFixed(0)}% success, $${best.avgCost.toFixed(4)} avg)`);
         const confidence: 'high' | 'low' = best.count >= 10 ? 'high' : 'low';
 
         return {

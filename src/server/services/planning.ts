@@ -500,6 +500,7 @@ export function createGoal(
                 let finalModel = subtask.model || 'opus';
                 if (orchestrator) {
                     const recommendation = orchestrator.recommendModel(db, projectPath, subtask.category || 'unknown');
+                    console.log(`[Goal ${goalId}] Model recommendation for "${subtask.title}" [${subtask.category || 'unknown'}]: ${recommendation.model || 'none'} (${recommendation.confidence}, ${recommendation.reason})`);
                     if (recommendation.model && recommendation.confidence !== 'none') {
                         const costRank: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3 };
                         const recRank = costRank[recommendation.model] || 99;
@@ -511,6 +512,11 @@ export function createGoal(
                             finalModel = recommendation.model;
                         }
                     }
+                }
+
+                // Log if model was adjusted from planner's suggestion
+                if (finalModel !== subtask.model && subtask.model) {
+                    console.log(`[Goal ${goalId}] Model adjusted: planner suggested ${subtask.model}, using ${finalModel} for "${subtask.title}" [${subtask.category || 'unknown'}]`);
                 }
 
                 const maxTurns = Math.max((subtask.estimated_turns || 100) * 3, 1000);
