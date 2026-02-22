@@ -201,6 +201,11 @@
                             if (propPanel?.classList.contains('active')) loadStrategicProposals();
                             if (feedPanel?.classList.contains('active')) loadActivityFeed();
                         }
+                    } else if (data.type === 'conversation_message' || data.type === 'conversation_update') {
+                        if (dashOverlay.classList.contains('visible') && document.getElementById('dashCommand')?.classList.contains('active')) {
+                            const convPanel = document.getElementById('cmdConversations');
+                            if (convPanel?.classList.contains('active')) loadConversations();
+                        }
                     }
                     // Refresh dashboard analytics on task/goal updates if visible
                     if ((data.type === 'task_update' || data.type === 'goal_update') && dashOverlay.classList.contains('visible')) {
@@ -2497,6 +2502,7 @@
             else if (tab === 'tree') { document.getElementById('cmdTree')?.classList.add('active'); loadProjectTree(); }
             else if (tab === 'proposals') { document.getElementById('cmdProposals')?.classList.add('active'); loadStrategicProposals(); }
             else if (tab === 'supervisor') { document.getElementById('cmdSupervisor')?.classList.add('active'); loadSupervisor(); }
+            else if (tab === 'conversations') { document.getElementById('cmdConversations')?.classList.add('active'); loadConversations(); }
         }
 
         // Sub-tab click handler
@@ -2922,6 +2928,170 @@
                 }
             } catch { showToast('Connection error', true); }
         };
+
+        // ── Conversations ──
+
+        async function loadConversations() {
+            const el = document.getElementById('conversationsContent');
+            try {
+                const res = await fetch(`${API_BASE}/api/conversations`);
+                const data = await res.json();
+                if (data.success) {
+                    dashData.conversations = data.conversations || [];
+                    renderConversations(data.conversations || []);
+                } else {
+                    el.innerHTML = `<p style="color:var(--red);font-size:12px;">Failed to load conversations</p>`;
+                }
+            } catch {
+                el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error</p>`;
+            }
+        }
+
+        function renderConversations(conversations: any[]) {
+            const el = document.getElementById('conversationsContent');
+            if (!conversations || conversations.length === 0) {
+                el.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:12px;">No conversations yet</div>`;
+                return;
+            }
+
+            let html = '<div style="display:flex;flex-direction:column;gap:8px;padding:8px;">';
+            for (const conv of conversations) {
+                const msgCount = conv.message_count || 0;
+                const createdDate = new Date(conv.created_at);
+                const now = new Date();
+                const diffMs = now.getTime() - createdDate.getTime();
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMins / 60);
+                const diffDays = Math.floor(diffHours / 24);
+
+                let relDate = '';
+                if (diffMins < 1) relDate = 'now';
+                else if (diffMins < 60) relDate = `${diffMins}m`;
+                else if (diffHours < 24) relDate = `${diffHours}h`;
+                else if (diffDays < 7) relDate = `${diffDays}d`;
+                else relDate = createdDate.toLocaleDateString();
+
+                const statusBadge = conv.status === 'open' ? '<span style="font-size:10px;padding:2px 6px;background:var(--green);color:#000;border-radius:3px;font-weight:600;">Open</span>' :
+                    conv.status === 'resolved' ? '<span style="font-size:10px;padding:2px 6px;background:var(--amber);color:#000;border-radius:3px;font-weight:600;">Resolved</span>' :
+                    `<span style="font-size:10px;padding:2px 6px;background:var(--text-dim);color:var(--bg);border-radius:3px;font-weight:600;">${conv.status}</span>`;
+
+                html += `<div class="conv-card" style="padding:12px;background:var(--overlay-subtle);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:background 0.2s;" onclick="openConversationThread('${escapeHtml(conv.id)}')">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                        <div style="font-size:13px;font-weight:600;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(conv.title)}</div>
+                        ${statusBadge}
+                    </div>
+                    <div style="display:flex;gap:12px;font-size:11px;color:var(--text-dim);">
+                        <span>${msgCount} message${msgCount !== 1 ? 's' : ''}</span>
+                        <span>${relDate}</span>
+                    </div>
+                </div>`;
+            }
+            html += '</div>';
+            el.innerHTML = html;
+        }
+
+        function openConversationThread(conversationId: string) {
+            // Create modal for thread view
+            const modal = document.createElement('div');
+            modal.id = 'conversationThreadModal';
+            modal.style.cssText = `
+                position:fixed;top:0;left:0;right:0;bottom:0;
+                background:rgba(0,0,0,0.5);
+                display:flex;flex-direction:column;
+                z-index:10000;
+                animation:fadeIn 0.2s ease-out;
+            `;
+
+            const container = document.createElement('div');
+            container.style.cssText = `
+                flex:1;display:flex;flex-direction:column;
+                background:var(--bg);
+                margin:0;border-radius:0;
+                overflow:hidden;
+            `;
+
+            const header = document.createElement('div');
+            header.style.cssText = `
+                padding:12px 16px;
+                border-bottom:1px solid var(--border);
+                background:var(--overlay-subtle);
+                display:flex;justify-content:space-between;align-items:center;
+            `;
+            header.innerHTML = `
+                <div style="font-weight:600;color:var(--text);flex:1;">Conversation Thread</div>
+                <button class="bridge-btn bridge-btn-secondary" style="padding:4px 8px;font-size:11px;" onclick="closeConversationThread()">Close</button>
+            `;
+
+            const content = document.createElement('div');
+            content.id = 'threadContent';
+            content.style.cssText = `
+                flex:1;overflow-y:auto;
+                padding:12px;
+                font-size:12px;
+            `;
+            content.innerHTML = '<p style="color:var(--text-dim);">Loading thread...</p>';
+
+            container.appendChild(header);
+            container.appendChild(content);
+            modal.appendChild(container);
+            document.body.appendChild(modal);
+
+            loadConversationThread(conversationId);
+        }
+
+        function closeConversationThread() {
+            const modal = document.getElementById('conversationThreadModal');
+            if (modal) {
+                modal.style.animation = 'fadeOut 0.2s ease-out';
+                setTimeout(() => modal.remove(), 200);
+            }
+        }
+
+        async function loadConversationThread(conversationId: string) {
+            try {
+                const res = await fetch(`${API_BASE}/api/conversations/${conversationId}`);
+                const data = await res.json();
+                if (data.success && data.conversation) {
+                    const content = document.getElementById('threadContent');
+                    renderConversationThread(data.conversation, data.messages || []);
+                }
+            } catch (err: any) {
+                const content = document.getElementById('threadContent');
+                if (content) content.innerHTML = `<p style="color:var(--red);font-size:12px;">Failed to load thread: ${err.message}</p>`;
+            }
+        }
+
+        function renderConversationThread(conversation: any, messages: any[]) {
+            const content = document.getElementById('threadContent');
+            if (!content) return;
+
+            let html = `<div style="margin-bottom:16px;">
+                <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">${escapeHtml(conversation.title)}</div>
+                <div style="font-size:11px;color:var(--text-dim);">
+                    Created: ${new Date(conversation.created_at).toLocaleString()} •
+                    ${messages.length} message${messages.length !== 1 ? 's' : ''}
+                </div>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:12px;">`;
+
+            if (messages.length === 0) {
+                html += '<p style="color:var(--text-dim);text-align:center;padding:20px;font-size:12px;">No messages yet</p>';
+            } else {
+                for (const msg of messages) {
+                    const msgTime = new Date(msg.created_at).toLocaleTimeString();
+                    const isLeo = msg.role === 'leo' || msg.role === 'assistant';
+                    const bg = isLeo ? 'var(--overlay-subtle)' : 'var(--border)';
+                    const textColour = isLeo ? 'var(--text)' : 'var(--text)';
+
+                    html += `<div style="margin-bottom:12px;padding:12px;background:${bg};border-radius:6px;border-left:3px solid ${isLeo ? 'var(--green)' : 'var(--blue)'};">
+                        <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;font-weight:600;">${escapeHtml(msg.role)} • ${msgTime}</div>
+                        <div style="font-size:12px;color:${textColour};line-height:1.5;white-space:pre-wrap;word-break:break-word;">${escapeHtml(msg.content)}</div>
+                    </div>`;
+                }
+            }
+            html += '</div>';
+            content.innerHTML = html;
+        }
 
         // ── Start ─────────────────────────────────────────────
 
