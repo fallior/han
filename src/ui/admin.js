@@ -8,6 +8,8 @@
   let refreshInterval = null;
   let selectedProductId = null;
   let selectedConversationId = null;
+  let selectedConversationPeriod = 'all';
+  let conversationSearchTimeout = null;
   function escapeHtml(s) {
     const div = document.createElement("div");
     div.textContent = s;
@@ -1425,9 +1427,9 @@
   };
   async function loadConversations(content) {
     try {
-      const res = await fetch(`${API_BASE}/api/conversations`);
+      const res = await fetch(`${API_BASE}/api/conversations/grouped`);
       const data = await res.json();
-      const conversations = data.conversations || [];
+      const periods = data.periods || {};
       const actionsEl = document.getElementById("moduleActions");
       if (actionsEl) {
         actionsEl.innerHTML = `
@@ -1437,9 +1439,55 @@
       let html = `<div class="fade-in conversation-container">
             <div class="conversation-layout">
                 <div class="thread-list-panel">
+                    <!-- Period Filter Bar -->
+                    <div class="period-filter-bar">`;
+      const allCount = Object.values(periods).reduce((sum, p) => sum + (p.count || 0), 0);
+      const isAllActive = selectedConversationPeriod === 'all';
+      html += `<button class="period-filter-btn ${isAllActive ? 'active' : ''}" onclick="filterConversationsByPeriod('all')" title="All conversations">
+            <span>All</span>
+            <span class="period-badge">${allCount}</span>
+        </button>`;
+      const periodOrder = ['today', 'this_week', 'last_week', 'this_month', 'older'];
+      const periodLabels = {
+        'today': 'Today',
+        'this_week': 'This Week',
+        'last_week': 'Last Week',
+        'this_month': 'This Month',
+        'older': 'Older'
+      };
+      for (const period of periodOrder) {
+        const p = periods[period];
+        if (!p) continue;
+        const isActive = selectedConversationPeriod === period;
+        const label = periodLabels[period] || p.label;
+        html += `<button class="period-filter-btn ${isActive ? 'active' : ''}" onclick="filterConversationsByPeriod('${period}')" title="${label}">
+                <span>${label}</span>
+                <span class="period-badge">${p.count}</span>
+            </button>`;
+      }
+      html += `</div>
+
+                    <!-- Search Bar -->
+                    <div style="padding:8px;border-bottom:1px solid var(--border-subtle)">
+                        <div style="display:flex;gap:6px;align-items:center">
+                            <input type="text" id="conversationSearchInput" class="form-input" placeholder="Search conversations..." style="flex:1;font-size:12px;padding:6px 10px" onkeyup="performConversationSearch(this.value, event)">
+                            <button class="admin-btn admin-btn-sm" onclick="clearConversationSearch()" id="clearSearchBtn" style="display:none;padding:4px 8px;font-size:11px">Clear</button>
+                        </div>
+                    </div>
                     <div id="threadList" class="thread-list">`;
+      let conversations = [];
+      if (selectedConversationPeriod === 'all') {
+        for (const period of periodOrder) {
+          if (periods[period]) {
+            conversations = conversations.concat(periods[period].conversations || []);
+          }
+        }
+      } else {
+        const p = periods[selectedConversationPeriod];
+        conversations = p ? (p.conversations || []) : [];
+      }
       if (conversations.length === 0) {
-        html += `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">No threads yet</div>`;
+        html += `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">No threads in this period</div>`;
       } else {
         for (const conv of conversations) {
           const messageCount = conv.message_count || 0;
@@ -1457,6 +1505,23 @@
             }).join("");
             participantHtml = `<span style="display:flex;gap:3px;align-items:center">${badges}</span>`;
           }
+          let summaryHtml = "";
+          if (conv.summary) {
+            const truncatedSummary = conv.summary.length > 120
+              ? conv.summary.substring(0, 120) + '\u2026'
+              : conv.summary;
+            summaryHtml = `<div class="thread-item-summary" style="font-size:12px;color:var(--text-body);margin-top:6px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(truncatedSummary)}</div>`;
+          }
+          let topicsHtml = "";
+          if (conv.topics) {
+            const topics = conv.topics.split(',').map(t => t.trim()).filter(Boolean);
+            if (topics.length > 0) {
+              const topicBadges = topics.slice(0, 3).map((topic) =>
+                `<span class="topic-badge" style="display:inline-block;background:var(--bg-input);color:var(--text-body);font-size:10px;padding:2px 8px;border-radius:3px;margin-right:4px;cursor:pointer" title="Filter by: ${escapeHtml(topic)}">${escapeHtml(topic)}</span>`
+              ).join('');
+              topicsHtml = `<div class="thread-item-topics" style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">${topicBadges}${topics.length > 3 ? `<span style="font-size:10px;color:var(--text-muted)">+${topics.length - 3}</span>` : ''}</div>`;
+            }
+          }
           html += `<div class="thread-item ${isSelected ? "active" : ""}" data-thread-id="${conv.id}" onclick="selectConversationThread('${conv.id}')">
                     <div class="thread-item-title">${escapeHtml(conv.title)}</div>
                     <div class="thread-item-meta">
@@ -1464,7 +1529,9 @@
                         <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
                         ${participantHtml}
                     </div>
-                    <div class="thread-item-count" style="font-size:11px;color:var(--text-muted)">${messageCount} message${messageCount !== 1 ? "s" : ""}</div>
+                    ${summaryHtml}
+                    ${topicsHtml}
+                    <div class="thread-item-count" style="font-size:11px;color:var(--text-muted);margin-top:${summaryHtml || topicsHtml ? '6px' : '0'}">${messageCount} message${messageCount !== 1 ? "s" : ""}</div>
                 </div>`;
         }
       }
