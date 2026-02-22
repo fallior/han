@@ -502,7 +502,11 @@ export function createGoal(
                     const recommendation = orchestrator.recommendModel(db, projectPath, subtask.category || 'unknown');
                     if (recommendation.model && recommendation.confidence !== 'none') {
                         const costRank: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3 };
-                        if ((costRank[recommendation.model] || 99) <= (costRank[finalModel] || 99)) {
+                        const recRank = costRank[recommendation.model] || 99;
+                        const curRank = costRank[finalModel] || 99;
+
+                        // Allow downgrades always; allow upgrades only with high confidence
+                        if (recRank <= curRank || recommendation.confidence === 'high') {
                             console.log(`[Goal ${goalId}] Memory override: ${finalModel} → ${recommendation.model} for "${subtask.title}" (${recommendation.reason})`);
                             finalModel = recommendation.model;
                         }
