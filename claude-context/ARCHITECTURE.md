@@ -633,11 +633,12 @@ POST /api/conversations/search/semantic
 #### UI Integration
 
 **Admin Console** (desktop):
-- Conversations module with side-by-side layout
-- Left sidebar: temporal navigation (Today/This Week/Last Week/This Month/Older)
+- Conversations module with two-column layout (thread list | thread detail)
+- Period filter bar: horizontal row of temporal period buttons (All/Today/This Week/Last Week/This Month/Older) at top of thread list panel
 - Search bar: both text (FTS5) and semantic (Haiku-powered)
-- Conversation list: displays title, message count, last updated time, summary preview, topic tags
-- Click to expand: full thread view with all messages
+- Thread list (280px): displays title, message count, last updated time, summary preview, topic tags
+- Thread detail (1fr): full thread view with all messages
+- Responsive breakpoints at 1400px, 1024px, mobile stack layout
 
 **Command Centre** (mobile):
 - Conversations tab with search functionality

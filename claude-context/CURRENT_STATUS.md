@@ -32,6 +32,30 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-02-23 — Claude (autonomous) — Conversation Panel Layout Restored
+- **Two-column layout reinstated** — Fixed narrow, cramped conversation panel that appeared after temporal sidebar was added:
+  - Reverted conversation-layout grid from `120px 260px 1fr` (three columns) to `280px 1fr` (two columns)
+  - Removed dedicated 120px temporal sidebar column
+  - Integrated temporal period filter into thread list panel as compact horizontal filter bar
+  - Period filter buttons now pill-shaped with badge counts, positioned at top of thread list
+  - Thread detail panel now fills all remaining horizontal space (1fr)
+- **CSS restructure** (`src/ui/admin.html`):
+  - `.conversation-layout` grid changed to `280px 1fr`
+  - New `.period-filter-bar` flex container for horizontal button row
+  - New `.period-filter-btn` pill-shaped button style (replaces `.temporal-period-btn`)
+  - Removed `.temporal-sidebar`, `.temporal-header`, `.temporal-periods` styles
+  - Responsive breakpoints preserved (1400px, 1024px, mobile)
+- **TypeScript changes** (`src/ui/admin.ts`):
+  - Removed temporal sidebar column from HTML generation in `loadConversations()`
+  - Added period filter bar inside thread list panel
+  - Simplified button labels (removed separate `period-label` spans)
+  - Fixed `filterConversationsByPeriod()` target (corrected to `mainContent`)
+- **Compiled output synced** — admin.js updated to match admin.ts changes
+- **Why this matters**: Conversation panel now uses full available width for content instead of cramming into 260px thread list + narrow detail panel. Period filter is still accessible but doesn't consume permanent screen real estate. Layout feels spacious and matches other admin modules' clean two-column pattern.
+- **Commits**: 5 commits (0ee593c, 764790d, c7bcb06, 5266e8b, acc80be)
+- **Files changed**: `src/ui/admin.html` (CSS), `src/ui/admin.ts` (HTML generation), `src/ui/admin.js` (compiled output)
+- **Scope**: Admin console UI fix — Level 13 conversation panel layout restored to full-width utilisation
+
 ### 2026-02-23 — Claude (autonomous) — Model Selection Strategy Alignment Complete
 - **Category-based model routing** — Fixed disconnected model routing so task type informs model selection:
   - Added `category` field to planning schema (architecture, feature, bugfix, refactor, docs, test, config, other)
@@ -649,7 +673,8 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Supervisor frequency calculation excludes phantom goals
 - ✅ Admin console Phase 2: Work, Conversations, Products modules
 - ✅ Work module: Kanban board with task/goal visualisation, filters, real-time updates
-- ✅ Conversations module: Strategic discussion threads with supervisor responses
+- ✅ Conversations module: Strategic discussion threads with supervisor responses, two-column layout (280px thread list | 1fr detail)
+- ✅ Conversation panel: Integrated period filter bar (horizontal pills at top of thread list)
 - ✅ Products module: Product pipeline visualisation with phase timeline
 - ✅ Supervisor responds to pending conversation threads automatically
 - ✅ TypeScript build system for admin console (admin.ts → admin.js)
