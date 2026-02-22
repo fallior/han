@@ -15,6 +15,7 @@ let chartInstances: Record<string, any> = {};
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
 let selectedProductId: string | null = null;
 let selectedConversationId: string | null = null;
+let selectedConversationPeriod: string = 'all';
 
 // ── Utilities ────────────────────────────────────────────────
 
@@ -1717,9 +1718,10 @@ async function loadProductDetail(content: HTMLElement, productId: string): Promi
 
 async function loadConversations(content: HTMLElement): Promise<void> {
     try {
-        const res = await fetch(`${API_BASE}/api/conversations`);
+        // Fetch grouped conversations by temporal period
+        const res = await fetch(`${API_BASE}/api/conversations/grouped`);
         const data = await res.json();
-        const conversations = data.conversations || [];
+        const periods = data.periods || {};
 
         // Header actions
         const actionsEl = document.getElementById('moduleActions');
@@ -1729,8 +1731,40 @@ async function loadConversations(content: HTMLElement): Promise<void> {
             `;
         }
 
+        // Build HTML with three-column layout: temporal sidebar | thread list | thread detail
         let html = `<div class="fade-in conversation-container">
             <div class="conversation-layout">
+                <!-- Temporal Sidebar -->
+                <div class="temporal-sidebar">
+                    <div class="temporal-header">
+                        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);padding:8px 10px">When</div>
+                    </div>
+                    <div class="temporal-periods">`;
+
+        // Add "All" button
+        const allCount = Object.values(periods).reduce((sum, p: any) => sum + (p.count || 0), 0);
+        const isAllActive = selectedConversationPeriod === 'all';
+        html += `<button class="temporal-period-btn ${isAllActive ? 'active' : ''}" onclick="filterConversationsByPeriod('all')" title="All conversations">
+            <span class="period-label">All</span>
+            <span class="period-badge">${allCount}</span>
+        </button>`;
+
+        // Add period buttons
+        const periodOrder = ['today', 'this_week', 'last_week', 'this_month', 'older'];
+        for (const period of periodOrder) {
+            const p = periods[period];
+            if (!p) continue;
+            const isActive = selectedConversationPeriod === period;
+            html += `<button class="temporal-period-btn ${isActive ? 'active' : ''}" onclick="filterConversationsByPeriod('${period}')" title="${p.label}">
+                <span class="period-label">${p.label}</span>
+                <span class="period-badge">${p.count}</span>
+            </button>`;
+        }
+
+        html += `</div>
+                </div>
+
+                <!-- Thread List -->
                 <div class="thread-list-panel">
                     <div style="padding:8px;border-bottom:1px solid var(--border-subtle)">
                         <div style="display:flex;gap:6px;align-items:center">
@@ -1740,9 +1774,22 @@ async function loadConversations(content: HTMLElement): Promise<void> {
                     </div>
                     <div id="threadList" class="thread-list">`;
 
+        // Get conversations for current period
+        let conversations: any[] = [];
+        if (selectedConversationPeriod === 'all') {
+            for (const period of periodOrder) {
+                if (periods[period]) {
+                    conversations = conversations.concat(periods[period].conversations || []);
+                }
+            }
+        } else {
+            const p = periods[selectedConversationPeriod];
+            conversations = p ? (p.conversations || []) : [];
+        }
+
         // Thread list
         if (conversations.length === 0) {
-            html += `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">No threads yet</div>`;
+            html += `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">No threads in this period</div>`;
         } else {
             for (const conv of conversations) {
                 const messageCount = conv.message_count || 0;
@@ -1776,6 +1823,8 @@ async function loadConversations(content: HTMLElement): Promise<void> {
         }
 
         html += `</div></div>
+
+                <!-- Thread Detail -->
                 <div class="thread-detail-panel" id="threadDetailPanel">`;
 
         // Right panel - always include threadDetail div so selectConversationThread can render into it
@@ -1797,6 +1846,19 @@ async function loadConversations(content: HTMLElement): Promise<void> {
         content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading conversations: ${escapeHtml(err.message)}</p></div>`;
     }
 }
+
+(window as any).filterConversationsByPeriod = async function(period: string) {
+    selectedConversationPeriod = period;
+    const content = document.getElementById('moduleContent');
+    if (content) {
+        // Smooth transition
+        content.style.opacity = '0.5';
+        setTimeout(async () => {
+            await loadConversations(content);
+            content.style.opacity = '1';
+        }, 150);
+    }
+};
 
 async function renderConversationThread(conversationId: string): Promise<void> {
     try {

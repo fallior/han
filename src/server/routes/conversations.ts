@@ -49,6 +49,58 @@ router.post('/', (req: Request, res: Response) => {
 });
 
 /**
+ * GET /grouped -- List conversations grouped by temporal period
+ * Returns: { periods: { 'today': { count, conversations }, 'this_week': {...}, ... } }
+ */
+router.get('/grouped', (req: Request, res: Response) => {
+    try {
+        const conversations = listWithCounts.all() as any[];
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const twoWeeksAgo = new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000);
+        const monthAgo = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate());
+
+        const groups: Record<string, any[]> = {
+            today: [],
+            this_week: [],
+            last_week: [],
+            this_month: [],
+            older: []
+        };
+
+        for (const conv of conversations) {
+            const convDate = new Date(conv.updated_at);
+            const convDateOnly = new Date(convDate.getFullYear(), convDate.getMonth(), convDate.getDate());
+
+            if (convDateOnly.getTime() === today.getTime()) {
+                groups.today.push(conv);
+            } else if (convDateOnly.getTime() >= weekAgo.getTime()) {
+                groups.this_week.push(conv);
+            } else if (convDateOnly.getTime() >= twoWeeksAgo.getTime()) {
+                groups.last_week.push(conv);
+            } else if (convDateOnly.getTime() >= monthAgo.getTime()) {
+                groups.this_month.push(conv);
+            } else {
+                groups.older.push(conv);
+            }
+        }
+
+        const periods = {
+            today: { count: groups.today.length, label: 'Today', conversations: groups.today },
+            this_week: { count: groups.this_week.length, label: 'This Week', conversations: groups.this_week },
+            last_week: { count: groups.last_week.length, label: 'Last Week', conversations: groups.last_week },
+            this_month: { count: groups.this_month.length, label: 'This Month', conversations: groups.this_month },
+            older: { count: groups.older.length, label: 'Older', conversations: groups.older }
+        };
+
+        res.json({ success: true, periods });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * GET /search -- Full-text search across conversation messages
  * Query params:
  *   - q: search term (required)
