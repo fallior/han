@@ -1294,7 +1294,8 @@ export async function runSupervisorCycle(): Promise<{
         delete cleanEnv.CLAUDECODE;
 
         const model = supervisorConfig.model || 'opus';
-        const maxTurns = supervisorConfig.max_turns_per_cycle || 15;
+        // Set max turns based on cycle type
+        const maxTurns = cycleType === 'personal' ? 15 : (supervisorConfig.max_turns_per_cycle || 15);
 
         // Call Opus via Agent SDK
         const q = agentQuery({
