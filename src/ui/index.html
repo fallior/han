@@ -1189,6 +1189,12 @@
             scroll-behavior: smooth;
         }
 
+        /* Spinner animation for search loading state */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
         /* Dark mode specific overrides for better contrast */
         :root.dark-mode {
             --border: rgba(48, 54, 61, 0.6);

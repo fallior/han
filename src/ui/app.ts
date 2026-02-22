@@ -2990,6 +2990,159 @@
             el.innerHTML = html;
         }
 
+        // ── Conversation Search ──
+
+        let conversationSearchActive = false;
+        let conversationSearchQuery = '';
+
+        function initConversationSearch() {
+            const searchBar = document.createElement('div');
+            searchBar.id = 'conversationSearchBar';
+            searchBar.style.cssText = `
+                display:flex;
+                gap:8px;
+                padding:8px 8px;
+                background:var(--bg-titlebar);
+                border-bottom:1px solid var(--border);
+                align-items:center;
+                flex-shrink:0;
+            `;
+            searchBar.innerHTML = `
+                <input type="text" id="conversationSearchInput" placeholder="Search messages..."
+                    style="flex:1;background:var(--overlay-light);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-family:inherit;font-size:14px;color:var(--text);outline:none;"
+                    autocomplete="off" autocorrect="off" autocapitalize="off">
+                <button class="search-btn" id="conversationSearchBtn" style="min-width:44px;">🔍</button>
+                <button class="search-btn" id="conversationSearchClear" style="min-width:44px;">✕</button>
+            `;
+            return searchBar;
+        }
+
+        async function performConversationSearch(query: string) {
+            if (!query.trim()) {
+                renderConversations(dashData.conversations || []);
+                conversationSearchActive = false;
+                return;
+            }
+
+            conversationSearchActive = true;
+            conversationSearchQuery = query;
+
+            const el = document.getElementById('conversationsContent');
+            el.innerHTML = `<div style="padding:16px;text-align:center;"><div style="color:var(--text-dim);font-size:12px;margin-bottom:8px;">Searching...</div><div style="width:20px;height:20px;border:2px solid var(--cyan);border-top:2px solid transparent;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto;"></div></div>`;
+
+            try {
+                const searchParams = new URLSearchParams();
+                searchParams.append('q', query);
+                searchParams.append('limit', '50');
+
+                const res = await fetch(`${API_BASE}/api/conversations/search?${searchParams}`);
+                const data = await res.json();
+
+                if (!data.success) {
+                    el.innerHTML = `<div style="padding:16px;text-align:center;color:var(--red);font-size:12px;">Error: ${escapeHtml(data.error || 'Invalid query')}</div>`;
+                    return;
+                }
+
+                if (!data.results || data.results.length === 0) {
+                    el.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:12px;">No matches found for "${escapeHtml(query)}"</div>`;
+                    return;
+                }
+
+                renderSearchResults(data.results, query);
+            } catch (err: any) {
+                el.innerHTML = `<div style="padding:16px;text-align:center;color:var(--red);font-size:12px;">Connection error: ${err.message}</div>`;
+            }
+        }
+
+        function renderSearchResults(results: any[], query: string) {
+            const el = document.getElementById('conversationsContent');
+            if (!results || results.length === 0) {
+                el.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:12px;">No results</div>`;
+                return;
+            }
+
+            let html = `<div style="padding:8px;">
+                <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px;padding:0 8px;">Found ${results.length} match${results.length !== 1 ? 'es' : ''}</div>`;
+
+            for (const result of results) {
+                const snippet = result.matched_message.snippet || result.matched_message.content;
+                const createdDate = new Date(result.created_at);
+                const now = new Date();
+                const diffMs = now.getTime() - createdDate.getTime();
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMins / 60);
+                const diffDays = Math.floor(diffHours / 24);
+
+                let relDate = '';
+                if (diffMins < 1) relDate = 'now';
+                else if (diffMins < 60) relDate = `${diffMins}m`;
+                else if (diffHours < 24) relDate = `${diffHours}h`;
+                else if (diffDays < 7) relDate = `${diffDays}d`;
+                else relDate = createdDate.toLocaleDateString();
+
+                const roleIndicator = result.matched_message.role === 'leo' || result.matched_message.role === 'assistant'
+                    ? '<span style="display:inline-block;width:6px;height:6px;background:var(--green);border-radius:50%;margin-right:4px;"></span>'
+                    : '<span style="display:inline-block;width:6px;height:6px;background:var(--blue);border-radius:50%;margin-right:4px;"></span>';
+
+                html += `<div class="search-result-card" style="padding:12px;background:var(--overlay-subtle);border:1px solid var(--border);border-radius:8px;cursor:pointer;margin-bottom:8px;transition:background 0.2s;cursor:pointer;" onclick="openConversationThread('${escapeHtml(result.conversation_id)}')">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                        <div style="font-size:12px;font-weight:600;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(result.conversation_title)}</div>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;display:flex;align-items:center;gap:4px;">
+                        ${roleIndicator}
+                        <span style="opacity:0.8;">${escapeHtml(result.matched_message.role)}</span>
+                        <span style="opacity:0.6;">•</span>
+                        <span>${relDate}</span>
+                    </div>
+                    <div style="font-size:12px;color:var(--text);line-height:1.5;word-break:break-word;padding:8px;background:var(--bg-term);border-radius:4px;border-left:3px solid var(--cyan);">${escapeHtml(snippet).substring(0, 200)}${snippet.length > 200 ? '...' : ''}</div>
+                </div>`;
+            }
+
+            html += '</div>';
+            el.innerHTML = html;
+        }
+
+        // Wrap loadConversations to add search bar
+        const origLoadConversations = loadConversations;
+        loadConversations = async function() {
+            await origLoadConversations();
+            const el = document.getElementById('conversationsContent');
+            const existingSearchBar = document.getElementById('conversationSearchBar');
+            if (!existingSearchBar && el) {
+                const searchBar = initConversationSearch();
+                el.parentElement?.insertBefore(searchBar, el);
+
+                // Attach event listeners
+                const searchInput = document.getElementById('conversationSearchInput') as HTMLInputElement;
+                const searchBtn = document.getElementById('conversationSearchBtn') as HTMLButtonElement;
+                const clearBtn = document.getElementById('conversationSearchClear') as HTMLButtonElement;
+
+                if (searchBtn && clearBtn && searchInput) {
+                    searchBtn.addEventListener('click', () => {
+                        if (searchInput.value.trim()) {
+                            performConversationSearch(searchInput.value.trim());
+                        }
+                    });
+
+                    searchInput.addEventListener('keydown', (e: KeyboardEvent) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (searchInput.value.trim()) {
+                                performConversationSearch(searchInput.value.trim());
+                            }
+                        }
+                    });
+
+                    clearBtn.addEventListener('click', () => {
+                        searchInput.value = '';
+                        conversationSearchActive = false;
+                        conversationSearchQuery = '';
+                        renderConversations(dashData.conversations || []);
+                    });
+                }
+            }
+        };
+
         function openConversationThread(conversationId: string) {
             // Create modal for thread view
             const modal = document.createElement('div');
