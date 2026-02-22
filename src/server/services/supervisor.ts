@@ -163,10 +163,11 @@ function startWorker(): void {
         return;
     }
 
-    const workerPath = path.join(__dirname, 'supervisor-worker.js');
+    const workerPath = path.join(__dirname, 'supervisor-worker.ts');
     console.log(`[Supervisor] Starting worker: ${workerPath}`);
 
     workerProcess = fork(workerPath, [], {
+        execArgv: ['-r', 'tsx/cjs'],
         env: process.env,
         stdio: ['inherit', 'inherit', 'inherit', 'ipc']
     });
