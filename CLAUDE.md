@@ -85,9 +85,9 @@ See `~/Projects/_learnings/INDEX.md` for full index.
 
 ## Quick Context
 
-- **Stage**: All levels (1-12) complete
+- **Stage**: All levels (1-13) complete
 - **Stack**: Node.js + Express + SQLite + Agent SDK + Ollama + tmux + ntfy.sh + WebSocket + TypeScript
-- **Status**: Feature-complete (all ROADMAP levels implemented + admin console Phase 2)
+- **Status**: Feature-complete (all ROADMAP levels implemented + admin console Phase 2 + conversation search)
 
 ## What This Is
 
@@ -154,6 +154,7 @@ Check `claude-context/CURRENT_STATUS.md` for:
 | 10 | Self-Improving Development System | 🟢 Complete |
 | 11 | Autonomous Product Factory | 🟢 Complete |
 | 12 | Strategic Conversations (Admin Phase 2) | 🟢 Complete |
+| 13 | Conversation Catalogue & Search | 🟢 Complete |
 
 See [`ROADMAP.md`](ROADMAP.md) for the full vision document.
 

@@ -662,6 +662,9 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ### Immediate (Next Session)
 - [x] Level 11 (user choice — final level in ROADMAP)
+- [x] Level 13 — Conversation catalogue & search complete
+- [ ] Test conversation search with real conversation history
+- [ ] Test backfill endpoint on existing conversations (`POST /api/conversations/recatalogue-all`)
 - [ ] Test daily digest generation (`POST /api/digest/generate`)
 - [ ] Test weekly report generation (`POST /api/weekly-report/generate`)
 - [ ] Test maintenance run (`POST /api/maintenance/run`)
@@ -670,6 +673,8 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ### Short-term
 - [ ] Add git checkpoint visualisation in task detail view
 - [ ] Add approval history tracking
+- [ ] Monitor Haiku cataloguing costs over time
+- [ ] Consider conversation export/import functionality
 - [ ] Refine UI based on continued mobile usage
 
 ## Known Issues
@@ -694,6 +699,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [2026-02-22-autonomous-conversation-search-complete.md](session-notes/2026-02-22-autonomous-conversation-search-complete.md) — Level 13: Conversation catalogue & search system complete
 - [2026-02-22-autonomous-dependency-resolution-fix.md](session-notes/2026-02-22-autonomous-dependency-resolution-fix.md) — Fixed critical dependency resolution bug (DEC-020)
 - [2026-02-22-autonomous-learnings-system-repair.md](session-notes/2026-02-22-autonomous-learnings-system-repair.md) — Created 5 missing learning files (L002-L006) in _learnings repository
 - [2026-02-22-autonomous-ghost-task-detection.md](session-notes/2026-02-22-autonomous-ghost-task-detection.md) — Ghost task detection and recovery system
