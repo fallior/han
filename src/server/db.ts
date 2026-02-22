@@ -312,6 +312,14 @@ if (!projCols9p4.includes('maintenance_enabled')) {
     db.exec(`ALTER TABLE projects ADD COLUMN maintenance_enabled INTEGER DEFAULT 1`);
 }
 
+// Personal cycle tracking - cycle_type column on supervisor_cycles
+const supervisorCyclesCols = (db.pragma("table_info('supervisor_cycles')") as any[]).map((col: any) => col.name);
+if (!supervisorCyclesCols.includes('cycle_type')) {
+    console.log('[DB] Adding cycle_type column to supervisor_cycles...');
+    db.exec(`ALTER TABLE supervisor_cycles ADD COLUMN cycle_type TEXT DEFAULT 'supervisor'`);
+    console.log('[DB] Migration complete: cycle_type column added');
+}
+
 // ── Prepared statements ─────────────────────────────────────
 
 export const taskStmts = {

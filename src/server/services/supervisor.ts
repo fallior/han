@@ -59,6 +59,9 @@ let supervisorEnabled = true;
 let supervisorPaused = false;
 let nextCycleTimeout: ReturnType<typeof setTimeout> | null = null;
 let runningCycleAbort: AbortController | null = null;
+// Personal cycle rotation counter: 0 = supervisor (work), 1-2 = personal (exploration/learning)
+// Increments on each idle cycle; the rotation repeats every 3 cycles
+let personalCycleCounter = 0;
 
 const MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
 const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
