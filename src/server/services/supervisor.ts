@@ -1238,8 +1238,20 @@ export async function runSupervisorCycle(): Promise<{
     const cycleNumber = cycleNumberRow?.next || 1;
     const startedAt = new Date().toISOString();
 
-    supervisorStmts.insertCycle.run(cycleId, startedAt, cycleNumber);
-    console.log(`[Supervisor] Cycle #${cycleNumber} starting`);
+    // Determine cycle type based on idle status and personal cycle counter
+    const nextDelay = getNextCycleDelay();
+    const isIdle = nextDelay === FREQ_IDLE;
+    let cycleType: 'supervisor' | 'personal' = 'supervisor';
+
+    if (isIdle) {
+        // Rotate through cycles: 0=supervisor, 1=personal, 2=personal
+        const counterMod = personalCycleCounter % 3;
+        cycleType = counterMod === 0 ? 'supervisor' : 'personal';
+        personalCycleCounter++;
+    }
+
+    supervisorStmts.insertCycle.run(cycleId, startedAt, cycleNumber, cycleType);
+    console.log(`[Supervisor] Cycle #${cycleNumber} starting (type: ${cycleType}, idle: ${isIdle})`);
 
     const abort = new AbortController();
     runningCycleAbort = abort;
