@@ -499,7 +499,7 @@ export function createGoal(
                 // Default to opus unless planner specifically chose a lighter model
                 let finalModel = subtask.model || 'opus';
                 if (orchestrator) {
-                    const recommendation = orchestrator.recommendModel(db, projectPath, 'unknown');
+                    const recommendation = orchestrator.recommendModel(db, projectPath, subtask.category || 'unknown');
                     if (recommendation.model && recommendation.confidence !== 'none') {
                         const costRank: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3 };
                         if ((costRank[recommendation.model] || 99) <= (costRank[finalModel] || 99)) {
@@ -523,7 +523,7 @@ export function createGoal(
                     null,
                     now,
                     goalId,
-                    null,
+                    subtask.category || null,
                     dependsOnJson,
                     1
                 );
