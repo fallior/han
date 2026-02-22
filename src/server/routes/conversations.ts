@@ -68,7 +68,7 @@ router.get('/search', (req: Request, res: Response) => {
 
         const resultLimit = Math.min(parseInt(limit as string, 10) || 20, 100);
 
-        // FTS5 search query
+        // FTS5 search query with snippet highlighting
         const searchStmt = db.prepare(`
             SELECT
                 fts.id,
@@ -77,7 +77,8 @@ router.get('/search', (req: Request, res: Response) => {
                 cm.content,
                 cm.created_at,
                 c.title as conversation_title,
-                c.status as conversation_status
+                c.status as conversation_status,
+                snippet(conversation_messages_fts, 2, '<mark>', '</mark>', '...', 32) as snippet
             FROM conversation_messages_fts fts
             JOIN conversation_messages cm ON fts.id = cm.id
             JOIN conversations c ON cm.conversation_id = c.id
@@ -126,6 +127,7 @@ router.get('/search', (req: Request, res: Response) => {
                     id: match.id,
                     role: match.role,
                     content: match.content,
+                    snippet: match.snippet,
                     created_at: match.created_at
                 },
                 context_messages: contextMessages,
