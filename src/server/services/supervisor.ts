@@ -78,7 +78,7 @@ const PROJECT_MEMORY_CAP = 1500;
 const FREQ_VERY_ACTIVE = 2 * 60 * 1000;     // 2 minutes
 const FREQ_ACTIVE = 5 * 60 * 1000;           // 5 minutes
 const FREQ_MODERATE = 15 * 60 * 1000;        // 15 minutes
-const FREQ_IDLE = 30 * 60 * 1000;            // 30 minutes
+const FREQ_IDLE = 10 * 60 * 1000;            // 10 minutes
 
 // ── Public setters ───────────────────────────────────────────
 
