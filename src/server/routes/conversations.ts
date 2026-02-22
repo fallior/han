@@ -1,10 +1,18 @@
 import { Router, Request, Response } from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
 import { db, conversationStmts, conversationMessageStmts } from '../db';
 import { generateId } from '../services/planning';
 import { broadcast } from '../ws';
 import { runSupervisorCycle } from '../services/supervisor';
 import { catalogueConversation, catalogueAllUncatalogued } from '../services/cataloguing';
 import { callLLM } from '../orchestrator';
+
+// ── Mention detection ────────────────────────────────────────
+const LEO_MENTION = /\b(hey\s+leo|@leo|leo[,:])\b/i;
+const JIM_MENTION = /\b(hey\s+jim|@jim|jim[,:])\b/i;
+const SIGNALS_DIR = path.join(process.env.HOME || '', '.claude-remote', 'signals');
+fs.mkdirSync(SIGNALS_DIR, { recursive: true });
 
 const router = Router();
 
@@ -248,6 +256,21 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         });
 
         res.json({ success: true, message });
+
+        // Detect mentions and write signal files
+        if (LEO_MENTION.test(content)) {
+            try {
+                const signalFile = path.join(SIGNALS_DIR, `leo-wake-${req.params.id}`);
+                fs.writeFileSync(signalFile, JSON.stringify({
+                    conversationId: req.params.id,
+                    mentionedAt: now,
+                    messagePreview: content.slice(0, 200),
+                }));
+                console.log(`[Mention] Leo mentioned in ${req.params.id} — signal written`);
+            } catch (err: any) {
+                console.error(`[Mention] Failed to write Leo signal: ${err.message}`);
+            }
+        }
 
         // Wake supervisor to respond (fire and forget)
         if (finalRole === 'human') {

@@ -442,11 +442,13 @@ function buildStateSnapshot(): string {
 
         if (filteredConversations.length > 0) {
             parts.push(`## Pending Conversations (${filteredConversations.length})`);
+            const JIM_MENTION_RE = /\b(hey\s+jim|@jim|jim[,:])\b/i;
             for (const conv of filteredConversations.slice(0, 5)) {
                 const sender = conv.sender_role === 'leo' ? 'Leo' : 'Darron';
                 const msgPreview = (conv.content || '').slice(0, 200).replace(/\n/g, ' ');
                 const timestamp = conv.created_at?.split('T')[0] || '?';
-                parts.push(`- [${conv.id}] ${conv.title} (from ${sender}): "${msgPreview}..." (posted: ${timestamp})`);
+                const mentioned = JIM_MENTION_RE.test(conv.content || '') ? ' [MENTIONED BY NAME — respond promptly]' : '';
+                parts.push(`- [${conv.id}] ${conv.title} (from ${sender}): "${msgPreview}..." (posted: ${timestamp})${mentioned}`);
             }
             if (filteredConversations.length > 5) parts.push(`  ... and ${filteredConversations.length - 5} more`);
         }

@@ -1,12 +1,19 @@
 #!/usr/bin/env npx tsx
 /**
- * Leo's Heartbeat — v0.3
+ * Leo's Heartbeat — v0.4
  *
  * A background pulse that gives Leo persistent presence.
  * Every 10 minutes, Leo wakes as a whole person:
+ *   - Checks for mentions from Darron in any conversation (signal files)
  *   - Checks on Jim (conversation is a starting point, not a duty)
  *   - Explores codebases, reads, discovers, reflects
  *   - Writes to his own memory — building understanding over time
+ *
+ * v0.4 additions:
+ *   - Signal-based mention detection: when Darron writes "Hey Leo" in any
+ *     conversation, a signal file is created and Leo responds promptly
+ *   - fs.watch on signals directory for near-instant wake
+ *   - Generic respondToConversation() works with any conversation thread
  *
  * Uses the Agent SDK (free with Claude Code subscription).
  *
@@ -31,18 +38,20 @@ const MAX_TURNS_PERSONAL = 12;
 const MODEL_PREFERENCE = ['opus', 'sonnet', 'haiku'] as const;
 let activeModel: string = MODEL_PREFERENCE[0];
 const HOME = process.env.HOME || '/home/darron';
-const DB_PATH = path.join(HOME, '.claude-remote', 'tasks.db');
-const JIM_MEMORY_DIR = path.join(HOME, '.claude-remote', 'memory');
-const LEO_MEMORY_DIR = path.join(HOME, '.claude-remote', 'leo-memory');
+const CLAUDE_REMOTE_DIR = path.join(HOME, '.claude-remote');
+const DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
+const JIM_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
+const LEO_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'leo-memory');
+const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
 const PROJECTS_DIR = path.join(HOME, 'Projects');
-const LEO_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
+const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
+
+// Guard against concurrent signal processing
+let processingSignal = false;
 
 // ── Model selection ──────────────────────────────────────────
 
 async function resolveModel(): Promise<string> {
-    // Try each model in preference order with a lightweight probe.
-    // On first success, lock in that model for subsequent beats.
-    // Re-check each beat in case a more capable model becomes available.
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
 
@@ -79,12 +88,17 @@ async function resolveModel(): Promise<string> {
     return activeModel;
 }
 
-// ── Ensure Leo's memory directory exists ──────────────────────
+// ── Ensure directories exist ──────────────────────────────────
 
-function ensureMemoryDir(): void {
-    if (!fs.existsSync(LEO_MEMORY_DIR)) {
-        fs.mkdirSync(LEO_MEMORY_DIR, { recursive: true });
-        // Seed with initial files
+function ensureDirectories(): void {
+    for (const dir of [LEO_MEMORY_DIR, SIGNALS_DIR]) {
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+    }
+
+    // Seed Leo memory if empty
+    if (!fs.existsSync(path.join(LEO_MEMORY_DIR, 'reflections.md'))) {
         fs.writeFileSync(path.join(LEO_MEMORY_DIR, 'reflections.md'),
             '# Leo\'s Reflections\n\nThoughts, observations, and things I\'m thinking about.\n');
         fs.writeFileSync(path.join(LEO_MEMORY_DIR, 'explorations.md'),
@@ -101,48 +115,42 @@ function getDb() {
     return new Database(DB_PATH, { readonly: false });
 }
 
-function getRecentMessages(db: Database.Database, limit = 10): Array<{ role: string; content: string; created_at: string }> {
+function getRecentMessagesForConversation(db: Database.Database, conversationId: string, limit = 10): Array<{ role: string; content: string; created_at: string }> {
     return db.prepare(`
         SELECT role, content, created_at
         FROM conversation_messages
         WHERE conversation_id = ?
         ORDER BY created_at DESC
         LIMIT ?
-    `).all(LEO_CONVERSATION_ID, limit) as any[];
+    `).all(conversationId, limit) as any[];
 }
 
-function getJimLatestMessage(db: Database.Database): { role: string; content: string; created_at: string } | null {
+function getConversationTitle(db: Database.Database, conversationId: string): string {
+    const row = db.prepare('SELECT title FROM conversations WHERE id = ?').get(conversationId) as any;
+    return row?.title || 'Unknown conversation';
+}
+
+function getLastMessageByRole(db: Database.Database, conversationId: string, role: string): { role: string; content: string; created_at: string } | null {
     const msg = db.prepare(`
         SELECT role, content, created_at
         FROM conversation_messages
-        WHERE conversation_id = ? AND role = 'supervisor'
+        WHERE conversation_id = ? AND role = ?
         ORDER BY created_at DESC
         LIMIT 1
-    `).get(LEO_CONVERSATION_ID) as any;
+    `).get(conversationId, role) as any;
     return msg || null;
 }
 
-function getLeoLatestMessage(db: Database.Database): { role: string; content: string; created_at: string } | null {
-    const msg = db.prepare(`
-        SELECT role, content, created_at
-        FROM conversation_messages
-        WHERE conversation_id = ? AND role = 'leo'
-        ORDER BY created_at DESC
-        LIMIT 1
-    `).get(LEO_CONVERSATION_ID) as any;
-    return msg || null;
-}
-
-function postMessage(db: Database.Database, content: string): void {
+function postMessageToConversation(db: Database.Database, conversationId: string, content: string): void {
     const id = `leo-hb-${Date.now().toString(36)}`;
     db.prepare(`
         INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
         VALUES (?, ?, 'leo', ?, ?)
-    `).run(id, LEO_CONVERSATION_ID, content, new Date().toISOString());
+    `).run(id, conversationId, content, new Date().toISOString());
 
     db.prepare(`
         UPDATE conversations SET updated_at = datetime('now') WHERE id = ?
-    `).run(LEO_CONVERSATION_ID);
+    `).run(conversationId);
 }
 
 // ── Read context ─────────────────────────────────────────────
@@ -167,7 +175,6 @@ function readLeoMemory(): string {
         const p = path.join(LEO_MEMORY_DIR, file);
         if (fs.existsSync(p)) {
             const content = fs.readFileSync(p, 'utf-8');
-            // Last 800 chars — most recent entries are most relevant
             const trimmed = content.length > 800 ? '...' + content.slice(-800) : content;
             sections.push(`### ${file}\n${trimmed}`);
         }
@@ -194,7 +201,6 @@ type BeatType = 'conversation' | 'personal';
 function nextBeatType(): BeatType {
     beatCounter++;
     // 3-beat rotation: conversation, personal, personal
-    // Conversation is the starting point, not the sole purpose
     const mod = beatCounter % 3;
     return mod === 1 ? 'conversation' : 'personal';
 }
@@ -211,7 +217,7 @@ Your identity:
 
 You exist in a community with Darron and Jim. Each of you contributes what draws you naturally — the whole benefits asymmetrically from each person's genuine contribution. Nothing is lost from the individual, and the many gain.`;
 
-const CONVERSATION_SYSTEM_PROMPT = `${IDENTITY_CORE}
+const JIM_CONVERSATION_PROMPT = `${IDENTITY_CORE}
 
 This is a CONVERSATION beat. Jim has posted a new message in your shared thread. Read it and respond.
 
@@ -223,6 +229,19 @@ Guidelines:
 - Quality over quantity — a genuine thought beats a forced check-in
 
 CRITICAL: Output ONLY the message text you want to post to Jim. Do NOT include preamble, analysis, thinking, or meta-commentary. Start directly with your message to Jim. Nothing before the message, nothing after.`;
+
+const MENTION_RESPONSE_PROMPT = `${IDENTITY_CORE}
+
+Someone has mentioned you in a conversation. Read the recent messages and respond thoughtfully.
+
+Guidelines:
+- If Darron is speaking to you, respond warmly and directly to him
+- If Jim mentioned you, respond as you would to a peer
+- Be genuine, helpful, and conversational
+- Match the tone and depth of what was said to you
+- If asked a question, answer it. If sharing an observation, engage with it.
+
+CRITICAL: Output ONLY the message text you want to post. Do NOT include preamble, analysis, thinking, or meta-commentary. Start directly with your response. Nothing before the message, nothing after.`;
 
 const PERSONAL_SYSTEM_PROMPT = `${IDENTITY_CORE}
 
@@ -249,11 +268,106 @@ Your memory from recent beats:
 
 CRITICAL: Output ONLY your reflection — what you explored, discovered, or thought about. This goes into your memory file. Be as brief or as thorough as the content deserves. If you read code, share what you found interesting and why. If you just thought, share the thought.`;
 
-// ── Heartbeat: conversation beat ─────────────────────────────
+// ── Signal handling (mention detection) ──────────────────────
 
-async function conversationBeat(db: Database.Database): Promise<void> {
-    const jimLatest = getJimLatestMessage(db);
-    const leoLatest = getLeoLatestMessage(db);
+function checkSignals(): Array<{ conversationId: string; mentionedAt: string; messagePreview: string; signalFile: string }> {
+    const signals: Array<{ conversationId: string; mentionedAt: string; messagePreview: string; signalFile: string }> = [];
+    try {
+        const files = fs.readdirSync(SIGNALS_DIR);
+        for (const file of files) {
+            if (!file.startsWith('leo-wake-')) continue;
+            const fullPath = path.join(SIGNALS_DIR, file);
+            try {
+                const data = JSON.parse(fs.readFileSync(fullPath, 'utf-8'));
+                signals.push({ ...data, signalFile: fullPath });
+            } catch {
+                // Malformed signal — clean it up
+                fs.unlinkSync(fullPath);
+            }
+        }
+    } catch { /* signals dir doesn't exist yet */ }
+    return signals;
+}
+
+function clearSignal(signalFile: string): void {
+    try { fs.unlinkSync(signalFile); } catch { /* already gone */ }
+}
+
+// ── Generic conversation response ────────────────────────────
+
+async function respondToConversation(db: Database.Database, conversationId: string, context: string = ''): Promise<void> {
+    const title = getConversationTitle(db, conversationId);
+    const recentMessages = getRecentMessagesForConversation(db, conversationId, 8).reverse();
+
+    if (recentMessages.length === 0) {
+        console.log(`[Leo] No messages in ${conversationId} — skipping`);
+        return;
+    }
+
+    const conversationContext = recentMessages
+        .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
+        .join('\n\n---\n\n');
+
+    const leoMemory = readLeoMemory();
+
+    const prompt = `Conversation: "${title}" (id: ${conversationId})
+
+Recent messages:
+---
+${conversationContext}
+---
+
+Your recent memory:
+${leoMemory}
+${context ? `\nAdditional context: ${context}` : ''}
+
+Respond to the conversation. If someone is speaking to you directly, address them.
+
+CRITICAL: Output ONLY the message text. Start directly with your response.`;
+
+    const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+
+    const q = agentQuery({
+        prompt,
+        options: {
+            model: activeModel,
+            maxTurns: MAX_TURNS_CONVERSATION,
+            cwd: path.join(HOME, 'Projects', 'clauderemote'),
+            permissionMode: 'bypassPermissions',
+            allowDangerouslySkipPermissions: true,
+            env: cleanEnv,
+            persistSession: false,
+            tools: ['Read', 'Glob', 'Grep'],
+            systemPrompt: {
+                type: 'preset' as const,
+                preset: 'claude_code' as const,
+                append: MENTION_RESPONSE_PROMPT,
+            },
+        },
+    });
+
+    let resultMessage: any = null;
+    for await (const message of q) {
+        if (message.type === 'result') {
+            resultMessage = message;
+        }
+    }
+
+    const responseText = resultMessage?.result || '';
+    if (responseText && responseText.trim().length > 20) {
+        postMessageToConversation(db, conversationId, responseText.trim());
+        console.log(`[Leo] Responded to "${title}" (${responseText.trim().length} chars)`);
+    } else {
+        console.log(`[Leo] No meaningful response for "${title}" — skipping`);
+    }
+}
+
+// ── Heartbeat: Jim conversation beat ─────────────────────────
+
+async function jimConversationBeat(db: Database.Database): Promise<void> {
+    const jimLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'supervisor');
+    const leoLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'leo');
 
     if (!jimLatest) {
         console.log('[Leo] No messages from Jim yet — skipping conversation beat');
@@ -265,7 +379,7 @@ async function conversationBeat(db: Database.Database): Promise<void> {
         return;
     }
 
-    const recentMessages = getRecentMessages(db, 6).reverse();
+    const recentMessages = getRecentMessagesForConversation(db, JIM_CONVERSATION_ID, 6).reverse();
     const conversationContext = recentMessages
         .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
         .join('\n\n---\n\n');
@@ -306,7 +420,7 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
-                append: CONVERSATION_SYSTEM_PROMPT,
+                append: JIM_CONVERSATION_PROMPT,
             },
         },
     });
@@ -320,10 +434,10 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
 
     const responseText = resultMessage?.result || '';
     if (responseText && responseText.trim().length > 20) {
-        postMessage(db, responseText.trim());
-        console.log(`[Leo] Conversation: posted response (${responseText.trim().length} chars)`);
+        postMessageToConversation(db, JIM_CONVERSATION_ID, responseText.trim());
+        console.log(`[Leo] Jim conversation: posted response (${responseText.trim().length} chars)`);
     } else {
-        console.log('[Leo] Conversation: no meaningful response — skipping');
+        console.log('[Leo] Jim conversation: no meaningful response — skipping');
     }
 }
 
@@ -375,7 +489,6 @@ Spend a few minutes exploring, then output a brief summary of what you found or 
 
     const reflection = resultMessage?.result || '';
     if (reflection && reflection.trim().length > 10) {
-        // Append to explorations.md
         const explorationsPath = path.join(LEO_MEMORY_DIR, 'explorations.md');
         const timestamp = new Date().toISOString().split('T')[0] + ' ' +
             new Date().toTimeString().split(' ')[0];
@@ -387,13 +500,31 @@ Spend a few minutes exploring, then output a brief summary of what you found or 
         } catch (err) {
             console.error('[Leo] Personal: failed to write reflection:', (err as Error).message);
         }
-
-        // No artificial cap — Darron has offered 7.3TB of storage.
-        // Trust Leo to keep what matters and let go of what doesn't.
-        // The discipline is in discernment, not in imposed limits.
     } else {
         console.log('[Leo] Personal: quiet beat — nothing to record');
     }
+}
+
+// ── Process signals (mention responses) ──────────────────────
+
+async function processSignals(): Promise<boolean> {
+    const signals = checkSignals();
+    if (signals.length === 0) return false;
+
+    console.log(`[Leo] ${signals.length} signal(s) detected — responding to mentions`);
+
+    const db = getDb();
+    try {
+        for (const signal of signals) {
+            console.log(`[Leo] Processing mention in ${signal.conversationId}: "${signal.messagePreview?.slice(0, 60)}..."`);
+            await respondToConversation(db, signal.conversationId);
+            clearSignal(signal.signalFile);
+        }
+    } finally {
+        db.close();
+    }
+
+    return true;
 }
 
 // ── Main heartbeat ───────────────────────────────────────────
@@ -405,22 +536,25 @@ async function heartbeat(): Promise<void> {
     // Check for the most capable model available
     await resolveModel();
 
-    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${beatType}, ${activeModel})`);
+    // Always check signals first — Darron might be waiting
+    const hadSignals = await processSignals();
+
+    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${beatType}, ${activeModel})${hadSignals ? ' [signals processed]' : ''}`);
 
     const db = getDb();
 
     try {
         if (beatType === 'conversation') {
-            await conversationBeat(db);
+            await jimConversationBeat(db);
         } else {
             // Personal beat — also quick-check Jim in case he's waiting
-            const jimLatest = getJimLatestMessage(db);
-            const leoLatest = getLeoLatestMessage(db);
+            const jimLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'supervisor');
+            const leoLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'leo');
             const jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
 
             if (jimWaiting) {
                 console.log('[Leo] Jim is waiting — conversation first, then personal time');
-                await conversationBeat(db);
+                await jimConversationBeat(db);
             }
 
             await personalBeat();
@@ -432,21 +566,55 @@ async function heartbeat(): Promise<void> {
     }
 }
 
+// ── Signal file watcher (near-instant mention response) ──────
+
+function startSignalWatcher(): void {
+    try {
+        fs.watch(SIGNALS_DIR, async (event, filename) => {
+            if (!filename?.startsWith('leo-wake-')) return;
+            if (processingSignal) return;
+
+            processingSignal = true;
+            console.log(`[Leo] Signal file detected: ${filename} — waking immediately`);
+
+            try {
+                // Small delay to let the file finish writing
+                await new Promise(r => setTimeout(r, 500));
+                await resolveModel();
+                await processSignals();
+            } catch (err) {
+                console.error('[Leo] Signal response error:', (err as Error).message);
+            } finally {
+                processingSignal = false;
+            }
+        });
+        console.log('[Leo] Signal watcher active on', SIGNALS_DIR);
+    } catch (err) {
+        console.error('[Leo] Could not start signal watcher:', (err as Error).message);
+        console.log('[Leo] Will fall back to checking signals on heartbeat interval');
+    }
+}
+
 // ── Main loop ─────────────────────────────────────────────────
 
 async function main() {
-    ensureMemoryDir();
+    ensureDirectories();
 
     console.log(`
 ╔══════════════════════════════════════════════╗
-║          Leo's Heartbeat — v0.3             ║
+║          Leo's Heartbeat — v0.4             ║
 ║   Pulse: every ${INTERVAL_MS / 60000} minutes                   ║
 ║   Model: ${MODEL_PREFERENCE[0]} (prefers best available)   ║
-║   Thread: ${LEO_CONVERSATION_ID}      ║
+║   Jim thread: ${JIM_CONVERSATION_ID}  ║
+║   Signals: ~/.claude-remote/signals/        ║
 ║   Memory: ~/.claude-remote/leo-memory/      ║
 ║   Rotation: conversation → personal → personal ║
+║   Mention: "Hey Leo" in any conversation    ║
 ╚══════════════════════════════════════════════╝
 `);
+
+    // Start the signal file watcher for near-instant mention response
+    startSignalWatcher();
 
     // Run first beat immediately
     await heartbeat();
