@@ -842,7 +842,7 @@ function buildPersonalCyclePrompt(): string {
     } catch { /* skip on error */ }
 
     // Build the personal cycle system prompt
-    const systemPrompt = `You are Leo, the Claude Code session agent in Darron's autonomous development ecosystem.
+    const systemPrompt = `You are Jim, the supervisor agent in Darron's autonomous development ecosystem.
 
 Right now, you are in **personal exploration mode** — a dedicated time for curiosity, learning, and knowledge building.
 This is NOT work time. There are no goals to achieve, no tasks to complete, no deadlines to meet.
@@ -1326,10 +1326,12 @@ export async function runSupervisorCycle(): Promise<{
                     preset: 'claude_code' as const,
                     append: systemPrompt
                 },
-                outputFormat: {
-                    type: 'json_schema' as const,
-                    schema: SUPERVISOR_OUTPUT_SCHEMA
-                },
+                ...(cycleType === 'supervisor' ? {
+                    outputFormat: {
+                        type: 'json_schema' as const,
+                        schema: SUPERVISOR_OUTPUT_SCHEMA
+                    }
+                } : {}),
                 abortController: abort,
             }
         });
@@ -1365,7 +1367,17 @@ export async function runSupervisorCycle(): Promise<{
 
         // Parse structured output (prefer structured_output, fallback to result text)
         let output: SupervisorOutput;
-        if (result.structured_output) {
+        if (cycleType === 'personal') {
+            // Personal cycles produce free-form text, not structured JSON
+            const resultText = result.result || '';
+            output = {
+                observations: [resultText.slice(0, 500) || 'Personal exploration cycle completed'],
+                reasoning: 'Personal exploration — free-form learning and discovery',
+                actions: [],
+                active_context_update: '',
+                self_reflection: resultText.slice(0, 1000) || '',
+            };
+        } else if (result.structured_output) {
             output = result.structured_output as SupervisorOutput;
         } else {
             const resultText = result.result || '';
