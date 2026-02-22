@@ -49,6 +49,7 @@ When you make a significant technical or design decision:
 | DEC-017 | Protected System Files — Autonomous Agents Blocked | **Settled** | 2026-02-20 |
 | DEC-018 | Conversations as Strategic Async Discussion Channel | Accepted | 2026-02-20 |
 | DEC-019 | Ghost Task Detection with Periodic Check | Accepted | 2026-02-22 |
+| DEC-020 | Cancelled Tasks Satisfy Dependencies | **Settled** | 2026-02-22 |
 
 ---
 
@@ -1067,6 +1068,79 @@ We chose **periodic check at 5-minute intervals + startup check** because it pro
 - DEC-017: Escalating Retry Ladder (ghost tasks trigger retry ladder)
 - DEC-016: Automated Phantom Goal Cleanup (similar self-healing approach for goals)
 - DEC-007: Task Execution via Agent SDK (provides AbortController for live agent detection)
+
+---
+
+### DEC-020: Cancelled Tasks Satisfy Dependencies
+
+**Date**: 2026-02-22
+**Author**: Claude (autonomous)
+**Status**: Settled
+
+#### Context
+
+The task dependency resolution system uses `getNextPendingTask()` to filter tasks whose dependencies are satisfied. When tasks become stuck (ghost tasks), the recovery mechanism correctly cancels them via `detectAndRecoverGhostTasks()`. However, the dependency check only considered status='done' as satisfying a dependency, not status='cancelled'. This created a deadlock: two ghost tasks were cancelled (the correct recovery action), but all 9 downstream tasks remained permanently blocked because their cancelled dependencies weren't considered satisfied.
+
+The problem manifested in the Conversation Catalogue goal (mlxo5qjq-hdl2l5): ghost tasks were correctly detected and cancelled in cycle #343, but dependent tasks never became schedulable.
+
+#### Options Considered
+
+1. **Change dependency check to accept both 'done' and 'cancelled'**
+   - ✅ Logically sound — a cancelled dependency is resolved (just in the 'no work' state)
+   - ✅ Unblocks downstream tasks naturally
+   - ✅ Allows recovery pipelines to proceed after ghost task cancellation
+   - ✅ No impact on dependencies that complete successfully ('done' still works)
+   - ❌ Slight change to scheduling semantics
+
+2. **Keep blocked tasks blocked indefinitely**
+   - ✅ Philosophically pure (never run anything whose dependency didn't succeed)
+   - ❌ Creates orphaned tasks that will never run
+   - ❌ Defeats the purpose of ghost task recovery
+   - ❌ Requires manual cleanup
+
+3. **Require explicit "dependency waived" flag to proceed**
+   - ✅ Explicit control
+   - ❌ More complex logic
+   - ❌ Requires human intervention to recover
+   - ❌ Slows down automation
+
+#### Decision
+
+We chose **Option 1: Accept 'cancelled' as satisfying dependencies**. The reasoning is that a cancelled dependency is resolved — the dependency relationship has been examined and the dependency task is no longer pending/running. Whether the upstream task completed successfully ('done') or was deliberately cancelled ('cancelled'), the downstream task can proceed; the scheduler doesn't judge the outcome, only whether the dependency exists and is terminal.
+
+Fixed in `planning.ts` line 1472:
+```typescript
+// Before:
+return dep && dep.status === 'done';
+
+// After:
+return dep && (dep.status === 'done' || dep.status === 'cancelled');
+```
+
+#### Consequences
+
+**Positive:**
+- Ghost task recovery pipeline now works end-to-end
+- Downstream tasks unblock when dependencies are cancelled
+- No longer creates orphaned tasks that will never run
+- Recovery mechanism (detect → cancel → reschedule) succeeds
+
+**Negative:**
+- None identified. Semantically, a cancelled dependency is as resolved as a completed one.
+
+**Verification:**
+- Two ghost tasks were cancelled (mlxo8wdf-s5zext, mlxo8wdg-v92287)
+- Nine downstream tasks in goal mlxo5qjq-hdl2l5 immediately became 'pending' (schedulable)
+- Orchestrator can now pick them up for execution
+
+#### Related
+
+- DEC-019: Ghost Task Detection with Periodic Check (provides the ghost cancellation that triggered this fix)
+- `planning.ts:getNextPendingTask()` — dependency resolution
+- `planning.ts:detectAndRecoverGhostTasks()` — ghost task cancellation
+- Goal mlxo5qjq-hdl2l5: Conversation Catalogue (9 unblocked tasks)
+
+**Why Settled**: Ghost task recovery is a critical reliability mechanism. This fix completes the recovery pipeline. Changing the semantics back to "only 'done' satisfies dependencies" would require a different recovery strategy (e.g., restarting cancelled tasks instead of cancelling them). If either strategy changes, it requires explicit user discussion.
 
 ---
 
