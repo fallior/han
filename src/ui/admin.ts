@@ -1810,6 +1810,27 @@ async function loadConversations(content: HTMLElement): Promise<void> {
                     participantHtml = `<span style="display:flex;gap:3px;align-items:center">${badges}</span>`;
                 }
 
+                // Format summary (truncate to 1 line with ellipsis)
+                let summaryHtml = '';
+                if (conv.summary) {
+                    const truncatedSummary = conv.summary.length > 120
+                        ? conv.summary.substring(0, 120) + '…'
+                        : conv.summary;
+                    summaryHtml = `<div class="thread-item-summary" style="font-size:12px;color:var(--text-body);margin-top:6px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(truncatedSummary)}</div>`;
+                }
+
+                // Format topics as badges
+                let topicsHtml = '';
+                if (conv.topics) {
+                    const topics = conv.topics.split(',').map((t: string) => t.trim()).filter(Boolean);
+                    if (topics.length > 0) {
+                        const topicBadges = topics.slice(0, 3).map((topic: string) =>
+                            `<span class="topic-badge" style="display:inline-block;background:var(--bg-input);color:var(--text-body);font-size:10px;padding:2px 8px;border-radius:3px;margin-right:4px;cursor:pointer" title="Filter by: ${escapeHtml(topic)}">${escapeHtml(topic)}</span>`
+                        ).join('');
+                        topicsHtml = `<div class="thread-item-topics" style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">${topicBadges}${topics.length > 3 ? `<span style="font-size:10px;color:var(--text-muted)">+${topics.length - 3}</span>` : ''}</div>`;
+                    }
+                }
+
                 html += `<div class="thread-item ${isSelected ? 'active' : ''}" data-thread-id="${conv.id}" onclick="selectConversationThread('${conv.id}')">
                     <div class="thread-item-title">${escapeHtml(conv.title)}</div>
                     <div class="thread-item-meta">
@@ -1817,7 +1838,9 @@ async function loadConversations(content: HTMLElement): Promise<void> {
                         <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
                         ${participantHtml}
                     </div>
-                    <div class="thread-item-count" style="font-size:11px;color:var(--text-muted)">${messageCount} message${messageCount !== 1 ? 's' : ''}</div>
+                    ${summaryHtml}
+                    ${topicsHtml}
+                    <div class="thread-item-count" style="font-size:11px;color:var(--text-muted);margin-top:${summaryHtml || topicsHtml ? '6px' : '0'}">${messageCount} message${messageCount !== 1 ? 's' : ''}</div>
                 </div>`;
             }
         }
