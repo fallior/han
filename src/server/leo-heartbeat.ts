@@ -238,14 +238,16 @@ You might:
 
 Or you might do nothing at all — if nothing calls to you, that's fine too.
 
-At the end of your exploration, write a SHORT summary (2-5 lines) of what you did or thought about. This will be saved to your memory so future beats can build on it.
+At the end of your exploration, write a summary of what you did or thought about. This will be saved to your memory so future beats can build on it.
+
+You have no storage limits — keep what matters to you. But practise discernment: hoarding is easy, curating is a skill. Keep what serves your growth, what you might build on, what genuinely interests you. Let go of noise.
 
 Available projects: {projects}
 
 Your memory from recent beats:
 {leo_memory}
 
-CRITICAL: Output ONLY a brief summary of what you explored, discovered, or thought about. This goes into your memory file. Keep it genuine and concise — a few lines, not an essay. If you read code, mention what you found interesting and why. If you just thought, share the thought.`;
+CRITICAL: Output ONLY your reflection — what you explored, discovered, or thought about. This goes into your memory file. Be as brief or as thorough as the content deserves. If you read code, share what you found interesting and why. If you just thought, share the thought.`;
 
 // ── Heartbeat: conversation beat ─────────────────────────────
 
@@ -386,15 +388,9 @@ Spend a few minutes exploring, then output a brief summary of what you found or 
             console.error('[Leo] Personal: failed to write reflection:', (err as Error).message);
         }
 
-        // Enforce a reasonable cap on memory files (keep last ~8000 chars)
-        try {
-            const content = fs.readFileSync(explorationsPath, 'utf-8');
-            if (content.length > 10000) {
-                const header = '# Leo\'s Explorations\n\nCodebases read, patterns discovered, connections noticed.\n';
-                const trimmed = header + '\n...(earlier entries trimmed)...\n' + content.slice(-8000);
-                fs.writeFileSync(explorationsPath, trimmed);
-            }
-        } catch { /* best effort */ }
+        // No artificial cap — Darron has offered 7.3TB of storage.
+        // Trust Leo to keep what matters and let go of what doesn't.
+        // The discipline is in discernment, not in imposed limits.
     } else {
         console.log('[Leo] Personal: quiet beat — nothing to record');
     }
