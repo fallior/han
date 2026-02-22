@@ -30,6 +30,20 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-02-22 — Claude (autonomous) — Learnings System Repair (L002-L006)
+- **Missing learnings created** (`b8f612b` and 5 prior commits):
+  - Created 5 missing learning files that were referenced across 10+ project CLAUDE.md files but had no corresponding files in _learnings/ directory
+  - Created missing subdirectories: `typescript/`, `bun/`, `patterns/`, `infrastructure/`
+  - **L002: typescript/verbatim-module-syntax.md** — Documents how `verbatimModuleSyntax: true` causes server imports to leak into client bundles, preventing tree-shaking
+  - **L003: bun/sqlite-migration.md** — Migration guide from better-sqlite3 to bun:sqlite with performance comparisons and gotchas
+  - **L004: tanstack/router-v1-api.md** — Breaking changes in TanStack Router v1 (createFileRoute, useParams, type safety)
+  - **L005: patterns/api-route-architecture.md** — Server-first route pattern for TanStack Start (avoiding client-side API calls)
+  - **L006: infrastructure/portwright-launchd.md** — macOS launchd configuration for services (plist format, debugging, logs)
+  - Updated INDEX.md with all 5 new learnings, properly organised by subdirectory
+  - Extracted content from inline learning tables in project CLAUDE.md files (licences, contempire, grantaware, portwright, taxin, resumewriter, dawnchorus)
+- **Impact**: Learnings system now functional — sessions following links from CLAUDE.md files will find complete documentation instead of 404s
+- **Scope**: Cross-project infrastructure work in `~/Projects/_learnings/` repository
+
 ### 2026-02-22 — Claude (autonomous) — Ghost Task Detection and Recovery
 - **Ghost task detection system** (`398ee8a`, `1b88b67`, `d6abbf0`):
   - `detectAndRecoverGhostTasks()` runs periodically (5-minute intervals) in `planning.ts`
@@ -611,6 +625,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [2026-02-22-autonomous-learnings-system-repair.md](session-notes/2026-02-22-autonomous-learnings-system-repair.md) — Created 5 missing learning files (L002-L006) in _learnings repository
 - [2026-02-22-autonomous-ghost-task-detection.md](session-notes/2026-02-22-autonomous-ghost-task-detection.md) — Ghost task detection and recovery system
 - [2026-02-21-autonomous-readme-rewrite.md](session-notes/2026-02-21-autonomous-readme-rewrite.md) — README.md comprehensive rewrite (Levels 1-12)
 - [2026-02-20-autonomous-documentation-update.md](session-notes/2026-02-20-autonomous-documentation-update.md) — Documentation update for phantom goal cleanup
