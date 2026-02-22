@@ -3023,6 +3023,8 @@
             if (!query.trim()) {
                 renderConversations(dashData.conversations || []);
                 conversationSearchActive = false;
+                selectedPeriod = 'today';
+                updateTemporalNavHighlight();
                 return;
             }
 
@@ -3104,12 +3106,163 @@
             el.innerHTML = html;
         }
 
-        // Wrap loadConversations to add search bar
-        const origLoadConversations = loadConversations;
+        // ── Temporal Period Navigation ──
+
+        function initTemporalNav() {
+            const navBar = document.createElement('div');
+            navBar.id = 'temporalNavBar';
+            navBar.style.cssText = `
+                display:flex;
+                gap:8px;
+                padding:8px 8px;
+                background:var(--bg-titlebar);
+                border-bottom:1px solid var(--border);
+                overflow-x:auto;
+                overflow-y:hidden;
+                flex-shrink:0;
+                scroll-behavior:smooth;
+            `;
+
+            const periods = [
+                { key: 'today', label: 'Today' },
+                { key: 'this_week', label: 'This Week' },
+                { key: 'last_week', label: 'Last Week' },
+                { key: 'this_month', label: 'This Month' },
+                { key: 'older', label: 'Older' }
+            ];
+
+            for (const period of periods) {
+                const btn = document.createElement('button');
+                btn.className = 'temporal-period-btn';
+                btn.dataset.period = period.key;
+                btn.style.cssText = `
+                    padding:6px 12px;
+                    background:var(--overlay-light);
+                    border:1px solid var(--border);
+                    border-radius:6px;
+                    font-size:12px;
+                    color:var(--text-dim);
+                    font-weight:500;
+                    cursor:pointer;
+                    transition:all 0.2s;
+                    white-space:nowrap;
+                    flex-shrink:0;
+                `;
+                btn.textContent = period.label;
+
+                btn.addEventListener('click', () => {
+                    selectTemporalPeriod(period.key);
+                });
+
+                navBar.appendChild(btn);
+            }
+
+            return navBar;
+        }
+
+        function selectTemporalPeriod(period: string) {
+            if (conversationSearchActive) {
+                // Clear search when selecting temporal period
+                const searchInput = document.getElementById('conversationSearchInput') as HTMLInputElement;
+                if (searchInput) {
+                    searchInput.value = '';
+                    conversationSearchActive = false;
+                    conversationSearchQuery = '';
+                }
+            }
+
+            selectedPeriod = period;
+            updateTemporalNavHighlight();
+
+            // Filter conversations for selected period
+            if (allConversationsByPeriod[period]) {
+                renderConversations(allConversationsByPeriod[period].conversations || []);
+            }
+        }
+
+        function updateTemporalNavHighlight() {
+            const buttons = document.querySelectorAll('.temporal-period-btn');
+            for (const btn of buttons) {
+                const periodKey = (btn as any).dataset.period;
+                const count = allConversationsByPeriod[periodKey]?.count || 0;
+
+                if (periodKey === selectedPeriod) {
+                    (btn as HTMLElement).style.cssText = `
+                        padding:6px 12px;
+                        background:var(--cyan);
+                        border:1px solid var(--cyan);
+                        border-radius:6px;
+                        font-size:12px;
+                        color:#000;
+                        font-weight:600;
+                        cursor:pointer;
+                        transition:all 0.2s;
+                        white-space:nowrap;
+                        flex-shrink:0;
+                    `;
+                } else {
+                    (btn as HTMLElement).style.cssText = `
+                        padding:6px 12px;
+                        background:var(--overlay-light);
+                        border:1px solid var(--border);
+                        border-radius:6px;
+                        font-size:12px;
+                        color:var(--text-dim);
+                        font-weight:500;
+                        cursor:pointer;
+                        transition:all 0.2s;
+                        white-space:nowrap;
+                        flex-shrink:0;
+                    `;
+                }
+
+                // Update button label with count
+                const period = periodKey === 'this_week' ? 'This Week' :
+                    periodKey === 'last_week' ? 'Last Week' :
+                    periodKey === 'this_month' ? 'This Month' :
+                    periodKey === 'today' ? 'Today' : 'Older';
+                (btn as HTMLElement).textContent = `${period} ${count > 0 ? `(${count})` : ''}`;
+            }
+        }
+
+        async function loadTemporalGroupedConversations() {
+            try {
+                const res = await fetch(`${API_BASE}/api/conversations/grouped`);
+                const data = await res.json();
+                if (data.success && data.periods) {
+                    allConversationsByPeriod = data.periods;
+                    updateTemporalNavHighlight();
+                    // Load today's conversations by default
+                    if (data.periods.today?.conversations) {
+                        renderConversations(data.periods.today.conversations);
+                    }
+                } else {
+                    const el = document.getElementById('conversationsContent');
+                    if (el) el.innerHTML = `<p style="color:var(--red);font-size:12px;">Failed to load conversations</p>`;
+                }
+            } catch (err: any) {
+                const el = document.getElementById('conversationsContent');
+                if (el) el.innerHTML = `<p style="color:var(--red);font-size:12px;">Connection error: ${err.message}</p>`;
+            }
+        }
+
+        // Wrap loadConversations to add temporal nav
+        const origLoadConversationsWithSearchBar = loadConversations;
         loadConversations = async function() {
-            await origLoadConversations();
+            // Load grouped conversations and render temporal nav
+            await loadTemporalGroupedConversations();
+
             const el = document.getElementById('conversationsContent');
+            const existingNavBar = document.getElementById('temporalNavBar');
             const existingSearchBar = document.getElementById('conversationSearchBar');
+
+            // Insert temporal nav if not already present
+            if (!existingNavBar && el) {
+                const navBar = initTemporalNav();
+                el.parentElement?.insertBefore(navBar, el);
+            }
+
+            // Insert search bar if not already present
             if (!existingSearchBar && el) {
                 const searchBar = initConversationSearch();
                 el.parentElement?.insertBefore(searchBar, el);
@@ -3139,7 +3292,11 @@
                         searchInput.value = '';
                         conversationSearchActive = false;
                         conversationSearchQuery = '';
-                        renderConversations(dashData.conversations || []);
+                        selectedPeriod = 'today';
+                        updateTemporalNavHighlight();
+                        if (allConversationsByPeriod.today?.conversations) {
+                            renderConversations(allConversationsByPeriod.today.conversations);
+                        }
                     });
                 }
             }
