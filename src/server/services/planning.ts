@@ -279,6 +279,7 @@ export async function planGoal(description: string, projectPath: string, options
         priority: number;
         model: string;
         estimated_turns?: number;
+        category: string;
         depends_on: string[];
     }>;
     reasoning: string;
@@ -306,9 +307,10 @@ export async function planGoal(description: string, projectPath: string, options
                         priority: { type: 'integer', minimum: 1, maximum: 10, description: 'Priority (1-10, higher = more urgent)' },
                         model: { type: 'string', enum: ['haiku', 'sonnet', 'opus'], description: 'Best model for the task. Default to opus for anything involving reasoning, multi-file changes, debugging, or architecture. Use sonnet for straightforward single-file changes. Use haiku only for trivial tasks like creating config files or running a single command.' },
                         estimated_turns: { type: 'integer', minimum: 1, maximum: 200, description: 'Estimated agent turns needed' },
+                        category: { type: 'string', enum: ['architecture', 'feature', 'bugfix', 'refactor', 'docs', 'test', 'config', 'other'], description: 'Task category — classify what kind of work this subtask performs' },
                         depends_on: { type: 'array', items: { type: 'string' }, description: 'Task titles this depends on (empty if independent)' }
                     },
-                    required: ['title', 'description', 'priority', 'model', 'depends_on']
+                    required: ['title', 'description', 'priority', 'model', 'category', 'depends_on']
                 }
             },
             reasoning: { type: 'string', description: 'Brief explanation of the decomposition strategy' }
