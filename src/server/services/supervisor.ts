@@ -62,6 +62,8 @@ let runningCycleAbort: AbortController | null = null;
 // Personal cycle rotation counter: 0 = supervisor (work), 1-2 = personal (exploration/learning)
 // Increments on each idle cycle; the rotation repeats every 3 cycles
 let personalCycleCounter = 0;
+// Track the previous cycle delay to detect state transitions (idle → active)
+let lastCycleDelay: number | null = null;
 
 const MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
 const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
@@ -1243,6 +1245,14 @@ export async function runSupervisorCycle(): Promise<{
     const isIdle = nextDelay === FREQ_IDLE;
     let cycleType: 'supervisor' | 'personal' = 'supervisor';
 
+    // Detect state transition: idle → active
+    // When transitioning from idle (last cycle was FREQ_IDLE) to active (current is not FREQ_IDLE),
+    // reset the personal cycle counter to 0 so next idle period starts fresh
+    if (lastCycleDelay === FREQ_IDLE && nextDelay !== FREQ_IDLE) {
+        console.log(`[Supervisor] State transition: idle → active, resetting personal cycle counter`);
+        personalCycleCounter = 0;
+    }
+
     if (isIdle) {
         // Rotate through cycles: 0=supervisor, 1=personal, 2=personal
         const counterMod = personalCycleCounter % 3;
@@ -1264,12 +1274,21 @@ export async function runSupervisorCycle(): Promise<{
             console.log(`[Supervisor] Cleanup: ${cleanupCount} phantom goal(s), ${ghostCount} ghost task(s)`);
         }
 
-        // Load context
-        const memoryContent = loadMemoryBank();
-        const stateSnapshot = buildStateSnapshot();
-        const systemPrompt = buildSupervisorSystemPrompt();
+        // Load context and select system prompt based on cycle type
+        let systemPrompt: string;
+        let prompt: string;
 
-        const prompt = `## Your Memory Banks\n\n${memoryContent}\n\n## Current System State\n\n${stateSnapshot}\n\nReview the state, think about what needs attention, and return your structured response.`;
+        if (cycleType === 'personal') {
+            // Personal exploration cycle - no state snapshot, just prompt
+            systemPrompt = buildPersonalCyclePrompt();
+            prompt = 'You are in personal exploration mode. Spend this time reading code, discovering patterns, and building knowledge. Update your memory with what you learn.';
+        } else {
+            // Supervisor cycle - full state and system prompt
+            const memoryContent = loadMemoryBank();
+            const stateSnapshot = buildStateSnapshot();
+            systemPrompt = buildSupervisorSystemPrompt();
+            prompt = `## Your Memory Banks\n\n${memoryContent}\n\n## Current System State\n\n${stateSnapshot}\n\nReview the state, think about what needs attention, and return your structured response.`;
+        }
 
         const cleanEnv: Record<string, string | undefined> = { ...process.env };
         delete cleanEnv.CLAUDECODE;
@@ -1412,11 +1431,15 @@ export async function runSupervisorCycle(): Promise<{
         });
 
         const nextDelay = getNextCycleDelay();
+        // Update lastCycleDelay for next cycle's state transition detection
+        lastCycleDelay = nextDelay;
         return { cycleId, observations: output.observations || [], actionSummaries, costUsd: totalCost, nextDelayMs: nextDelay };
 
     } catch (err: any) {
         console.error(`[Supervisor] Cycle #${cycleNumber} failed:`, err.message);
         supervisorStmts.failCycle.run(new Date().toISOString(), err.message, cycleId);
+        const nextDelay = getNextCycleDelay();
+        lastCycleDelay = nextDelay;
         return { cycleId, observations: [], actionSummaries: [`ERROR: ${err.message}`], costUsd: 0, nextDelayMs: FREQ_ACTIVE };
     } finally {
         runningCycleAbort = null;
