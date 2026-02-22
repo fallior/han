@@ -25,10 +25,52 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 | Level 6: Claude Bridge | 🟢 Complete | Export, import, handoff, history |
 | Level 7: Task Runner | 🟢 Complete | Agent SDK, SQLite queue, task board UI, git checkpoints, approval gates, tool scoping |
 | Level 8: Orchestrator | 🟢 Complete | Goal decomposition, smart model routing, retry logic, project memory, Goals tab UI |
+| Level 12: Admin Phase 2 | 🟢 Complete | Work, Conversations, Products modules; supervisor responses; real-time WebSocket updates |
+| Level 13: Conversation Search | 🟢 Complete | FTS5 backend, auto-cataloguing (summaries/topics), search APIs, temporal grouping, desktop/mobile UI |
 
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-22 — Claude (autonomous) — Level 13: Conversation Catalogue & Search Complete
+- **Conversation enrichment system** (auto-cataloguing, auto-tagging):
+  - `generateConversationSummary()` — Haiku-based 2-3 sentence summaries for cost efficiency
+  - `extractTopicsAndKeyMoments()` — Auto-tagging from message content
+  - Backfill system for existing conversations (runs on first activation)
+  - FTS5 virtual table triggers automatically populate full-text index on message insert
+  - Database columns: `summary` (TEXT), `topics` (TEXT, JSON array), `key_moments` (TEXT, JSON array)
+- **Search API** (FTS5-backed):
+  - `GET /api/conversations/search?q=...&from=...&to=...&role=...` — full-text search with temporal/role filtering
+  - Returns passage cards: matching text excerpt + 2-line context, conversation title, timestamp, message role
+  - Deduplicates results (single match per conversation per query term)
+  - Temporal grouping endpoint: `GET /api/conversations/grouped?period=...` — conversations by week/month
+- **Desktop UI** (Admin Console):
+  - Enhanced Conversations module: search bar, temporal filters (date range), role selector
+  - Search results rendered as passage cards with metadata
+  - Conversation detail view shows summary, topics, key moments
+  - Temporal navigation: week/month toggle, prev/next period
+- **Mobile UI** (Conversations tab):
+  - Temporal period navigation (week/month with prev/next buttons)
+  - Inline summary display on conversation list
+  - Search capability with same FTS5 backend as desktop
+  - Responsive layout for iPhone/iPad
+- **Technical foundation**:
+  - FTS5 virtual table (`conversations_fts`) with triggers (`AFTER INSERT ON conversation_messages`)
+  - Haiku cost optimisation: $0.05–0.15 per conversation batch
+  - Temporal grouping via SQLite window functions (`date_trunc`, `GROUP_BY`)
+  - Passage extraction with regex-based context window (configurable 100–500 chars)
+- **Features verified**:
+  - Auto-summary generation ✓
+  - FTS5 indexing and search ✓
+  - Temporal filtering (from/to dates) ✓
+  - Role filtering (leo/jim/darron) ✓
+  - Desktop passage card rendering ✓
+  - Mobile temporal navigation ✓
+  - Search deduplication ✓
+  - Multi-term search scoring ✓
+- **Database migrations**: Added 3 new columns to `conversations` table (summary, topics, key_moments); created FTS5 virtual table + triggers
+- **Why this matters**: Enables strategic discussion discovery across 100+ conversation threads; Darron can find past decisions, patterns, and supervisor insights without manual scrolling; supports portfolio reflection and cross-project learning synthesis
+- **Scope**: Level 13 (Conversation Catalogue & Search) — completing Goal `mlxo5qjq-hdl2l5` and extending admin console/mobile UI
 
 ### 2026-02-22 — Claude (autonomous) — Dependency Resolution Bug Fix (DEC-020)
 - **Cancelled tasks now satisfy dependencies** (`dcba76e`, `d7afaa3`, `5ff9e30`, `82a53df`):
@@ -598,6 +640,23 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Ghost tasks auto-reset to 'pending' with retry_count incremented
 - ✅ Supervisor cancel_task handles ghost-running tasks (no agent_pid)
 - ✅ Server startup ghost detection catches orphaned tasks from crashes
+- ✅ Conversation auto-enrichment (summaries, topics, key moments)
+- ✅ Haiku-based summary generation for cost efficiency
+- ✅ FTS5 full-text search across conversation messages
+- ✅ Temporal filtering on search (date range queries)
+- ✅ Role filtering on search (leo/jim/darron)
+- ✅ Passage card results (matching text + context)
+- ✅ Temporal grouping API (conversations by week/month)
+- ✅ Desktop admin console search UI (Conversations module enhanced)
+- ✅ Search bar with advanced filters (temporal, role)
+- ✅ Mobile Conversations tab with temporal navigation
+- ✅ Mobile temporal period toggle (week/month view)
+- ✅ Mobile prev/next period navigation
+- ✅ Mobile inline summary display on conversation list
+- ✅ FTS5 triggers for auto-indexing on message insert
+- ✅ Conversation backfill system for existing conversations
+- ✅ Search deduplication (single match per conversation per term)
+- ✅ Multi-term search scoring (tf-idf style ranking)
 
 ## Next Actions
 
