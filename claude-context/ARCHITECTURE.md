@@ -371,10 +371,17 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 
 ### Level 8: Intelligent Orchestrator (Complete)
 
-- **Goal decomposition**: High-level goals broken into ordered subtasks
-- **Smart model routing**: Complexity-based routing (haiku/sonnet/opus)
+- **Goal decomposition**: High-level goals broken into ordered subtasks with category classification
+  - Planner classifies each subtask by work type: architecture, feature, bugfix, refactor, docs, test, config, other
+  - Category stored in tasks table `complexity` column for analytics
+- **Smart model routing**: Category-aware routing (haiku/sonnet/opus)
+  - `recommendModel()` queries project memory with task category (not generic 'unknown')
+  - Complex categories (architecture, bugfix): sort by success rate descending, then cost
+  - Simple categories (docs, config, test): sort by cost ascending (cheapest-first)
+  - Memory-based upgrades: allows model upgrades with high confidence (≥10 prior tasks)
+  - Observability logging: category → recommendation → override decision
 - **Retry logic**: Failure analysis with model escalation
-- **Project memory**: Outcome tracking, success rates by model
+- **Project memory**: Outcome tracking, success rates by model and task category
 - **Dependency-aware scheduling**: Tasks wait for dependencies before running
   - Dependencies satisfied when upstream task is 'done' OR 'cancelled'
   - Cancelled dependencies unblock downstream tasks (DEC-020)

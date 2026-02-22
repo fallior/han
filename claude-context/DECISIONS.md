@@ -50,6 +50,7 @@ When you make a significant technical or design decision:
 | DEC-018 | Conversations as Strategic Async Discussion Channel | Accepted | 2026-02-20 |
 | DEC-019 | Ghost Task Detection with Periodic Check | Accepted | 2026-02-22 |
 | DEC-020 | Cancelled Tasks Satisfy Dependencies | **Settled** | 2026-02-22 |
+| DEC-021 | Category-Aware Model Selection Strategy | Accepted | 2026-02-23 |
 
 ---
 
@@ -1141,6 +1142,96 @@ return dep && (dep.status === 'done' || dep.status === 'cancelled');
 - Goal mlxo5qjq-hdl2l5: Conversation Catalogue (9 unblocked tasks)
 
 **Why Settled**: Ghost task recovery is a critical reliability mechanism. This fix completes the recovery pipeline. Changing the semantics back to "only 'done' satisfies dependencies" would require a different recovery strategy (e.g., restarting cancelled tasks instead of cancelling them). If either strategy changes, it requires explicit user discussion.
+
+---
+
+### DEC-021: Category-Aware Model Selection Strategy
+
+**Date**: 2026-02-23
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+The orchestrator's `recommendModel()` function already had the capability to query project memory for task-type-specific success rates, but `planning.ts` always passed `'unknown'` as the task type, wasting this capability. Additionally, the sort logic always prioritised cost (cheapest-first) regardless of task complexity, and the costRank guard only allowed model downgrades.
+
+This meant that architecture and debugging tasks — which require deep reasoning and are more prone to failure with weaker models — were routed to haiku just because it was cheapest, even when project memory showed haiku consistently failing at those tasks while opus succeeded.
+
+#### Options Considered
+
+1. **Add task category field and use category-aware routing**
+   - ✅ Leverages existing `recommendModel()` taskType parameter
+   - ✅ Planner can classify tasks naturally (architecture, bugfix, docs, etc.)
+   - ✅ Different sort strategies for complex vs simple tasks
+   - ✅ Allows memory-based model upgrades with high confidence
+   - ✅ Minimal code changes — mostly wiring existing capabilities
+   - ❌ Planner must classify tasks correctly (depends on prompt quality)
+
+2. **Estimate task complexity via description length or keyword analysis**
+   - ✅ Automatic — no schema change needed
+   - ❌ Unreliable — description length doesn't correlate with complexity
+   - ❌ Keyword analysis is fragile
+   - ❌ Doesn't capture task intent (architecture vs docs)
+
+3. **Always use cheapest model, rely on retry ladder**
+   - ✅ Simplest — no changes needed
+   - ❌ Wastes budget on retries (haiku fails, Sonnet diagnostic, Opus retry)
+   - ❌ Slower — failed task + diagnostic + retry takes longer than using opus from start
+   - ❌ Ignores project memory learnings
+
+4. **Always use opus for everything**
+   - ✅ Simplest — guaranteed success
+   - ❌ Wasteful — docs and config tasks don't need opus
+   - ❌ Ignores cost optimisation entirely
+
+#### Decision
+
+We chose **Option 1: Add task category field and use category-aware routing**.
+
+**Changes made:**
+
+1. **Planning schema** — Added `category` enum field (architecture, feature, bugfix, refactor, docs, test, config, other) with guidance in prompt for planner to classify each subtask
+
+2. **Category wiring** — Pass `subtask.category` to `recommendModel()` instead of hardcoded `'unknown'`, store in tasks table `complexity` column
+
+3. **Category-aware sorting** in `recommendModel()`:
+   - Complex categories (architecture, bugfix): sort by success rate descending, then cost as tiebreaker
+   - Simple categories (docs, config, test, other): sort by cost ascending (existing behaviour)
+
+4. **Fixed costRank guard** — Allow downgrades always; allow upgrades only with high confidence (≥10 prior tasks)
+
+5. **Observability logging** — Log category, recommendations, memory overrides, sort strategies
+
+#### Consequences
+
+**Positive:**
+- Complex tasks get models with proven success rates even if more expensive
+- Simple tasks still get cheapest model (cost-optimised)
+- Memory-based routing can upgrade models when history shows a task type needs stronger reasoning
+- Clear observability into category → model recommendation → override decision
+- Leverages existing infrastructure — minimal new code
+
+**Negative:**
+- Planner must classify tasks correctly (quality depends on prompt and planner reasoning)
+- High-confidence threshold (≥10 tasks) means early projects won't benefit from upgrades until sufficient history exists
+- Category is somewhat subjective (is refactoring "architecture" or "refactor"?)
+
+**Trade-offs:**
+- Prioritising success rate for complex tasks may increase cost short-term, but reduces cost long-term by avoiding retry ladder ($0.10-$0.50+ per failed task diagnostic cycle)
+- Simple tasks could theoretically benefit from success-weighting too, but empirically they fail less often regardless of model, so cost-first is justified
+
+**Implementation notes:**
+- Repurposed existing `complexity` column to store category (avoids schema migration)
+- Falls back to 'unknown' if category missing (backwards compatible)
+- Sort strategy logged for debugging ('success-weighted' vs 'cost-weighted')
+
+#### Related
+
+- Level 8: Intelligent Orchestrator (foundation for this work)
+- `project_memory` table (stores per-model success rates)
+- `recommendModel()` function (orchestrator.ts:420-469)
+- `decomposeGoal()` function (planning.ts:280-580)
+- DEC-017: Escalating Retry Ladder (avoided by routing correctly upfront)
 
 ---
 

@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-22 (Autonomous) by Claude
+> Last updated: 2026-02-23 (Autonomous) by Claude
 
 ## Current Stage
 
@@ -31,6 +31,23 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-23 — Claude (autonomous) — Model Selection Strategy Alignment Complete
+- **Category-based model routing** — Fixed disconnected model routing so task type informs model selection:
+  - Added `category` field to planning schema (architecture, feature, bugfix, refactor, docs, test, config, other)
+  - Planner now classifies each subtask by work type in `decomposeGoal()`
+  - Category wired through to `recommendModel()` instead of hardcoded 'unknown'
+  - Category persisted in tasks table `complexity` column for analytics
+  - `recommendModel()` sort logic now category-aware:
+    - Complex categories (architecture, bugfix): prioritise success rate over cost
+    - Simple categories (docs, config, test): keep cheapest-first strategy
+    - Sort strategy logged for observability ('success-weighted' vs 'cost-weighted')
+  - Fixed costRank guard in planning.ts:510 to allow model upgrades when recommendModel returns higher-tier model with high confidence
+  - Observability logging throughout: category classification, model recommendations, memory overrides, sort strategies
+- **Why this matters**: Task category now influences model selection. Architecture and bugfix tasks get models with proven success rates even if more expensive. Docs and config tasks still get cheapest model. Memory-based routing can now upgrade models when history shows haiku fails at architecture tasks but opus succeeds.
+- **Commits**: 5 commits (c4cd219, 12ba8ae, f802bbe, 545dd49, 00b3c19)
+- **Files changed**: `src/server/services/planning.ts` (schema + prompt + wiring + guard), `src/server/orchestrator.ts` (sort logic + logging)
+- **Scope**: Targeted wiring fix for Level 8 orchestrator — no new features, just connecting existing capabilities
 
 ### 2026-02-22 — Claude (autonomous) — Level 13: Conversation Catalogue & Search Complete
 - **Conversation enrichment system** (auto-cataloguing, auto-tagging):
