@@ -396,12 +396,12 @@ export async function runSupervisorCycle(): Promise<{
         costUsd: number;
         nextDelayMs: number;
     } | null>((resolve) => {
-        // Set up timeout (10 minutes safety net)
+        // Set up timeout (2 hours — generous safety net, cycles can run long)
         const timeout = setTimeout(() => {
             pendingCycleResolve = null;
-            console.error('[Supervisor] Cycle timeout after 10 minutes');
+            console.error('[Supervisor] Cycle timeout after 2 hours');
             resolve(null);
-        }, 10 * 60 * 1000);
+        }, 2 * 60 * 60 * 1000);
 
         // Set up promise resolver
         pendingCycleResolve = (result) => {
