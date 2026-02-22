@@ -371,6 +371,9 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 - **Retry logic**: Failure analysis with model escalation
 - **Project memory**: Outcome tracking, success rates by model
 - **Dependency-aware scheduling**: Tasks wait for dependencies before running
+  - Dependencies satisfied when upstream task is 'done' OR 'cancelled'
+  - Cancelled dependencies unblock downstream tasks (DEC-020)
+  - Enables recovery: ghost tasks can be cancelled without orphaning dependents
 - **Goals tab UI**: Create, view, retry, progress bars
 - **Phantom goal cleanup**: Automated cleanup in supervisor cycle
   - `cleanupPhantomGoals()` runs at start of each supervisor cycle

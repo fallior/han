@@ -30,6 +30,16 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-02-22 — Claude (autonomous) — Dependency Resolution Bug Fix (DEC-020)
+- **Cancelled tasks now satisfy dependencies** (`dcba76e`, `d7afaa3`, `5ff9e30`, `82a53df`):
+  - Fixed critical bug in `planning.ts:getNextPendingTask()` line 1472
+  - Changed dependency check from `dep.status === 'done'` to `(dep.status === 'done' || dep.status === 'cancelled')`
+  - **Impact**: Ghost task recovery pipeline now works end-to-end
+  - **Root cause**: When ghost tasks were correctly cancelled via `detectAndRecoverGhostTasks()`, all downstream tasks remained permanently blocked because cancelled dependencies weren't considered satisfied
+  - **Verified**: 9 tasks in goal mlxo5qjq-hdl2l5 (Conversation Catalogue) immediately became schedulable after fix
+  - **Documented**: Added DEC-020 to DECISIONS.md with "Settled" status
+- **Why this matters**: Ghost task cancellation is the correct recovery action, but without this fix, it created orphaned tasks that would never run. This completes the recovery pipeline: detect ghost → cancel → unblock dependents → reschedule.
+
 ### 2026-02-22 — Claude (autonomous) — Learnings System Repair (L002-L006)
 - **Missing learnings created** (`b8f612b` and 5 prior commits):
   - Created 5 missing learning files that were referenced across 10+ project CLAUDE.md files but had no corresponding files in _learnings/ directory
@@ -625,6 +635,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [2026-02-22-autonomous-dependency-resolution-fix.md](session-notes/2026-02-22-autonomous-dependency-resolution-fix.md) — Fixed critical dependency resolution bug (DEC-020)
 - [2026-02-22-autonomous-learnings-system-repair.md](session-notes/2026-02-22-autonomous-learnings-system-repair.md) — Created 5 missing learning files (L002-L006) in _learnings repository
 - [2026-02-22-autonomous-ghost-task-detection.md](session-notes/2026-02-22-autonomous-ghost-task-detection.md) — Ghost task detection and recovery system
 - [2026-02-21-autonomous-readme-rewrite.md](session-notes/2026-02-21-autonomous-readme-rewrite.md) — README.md comprehensive rewrite (Levels 1-12)
