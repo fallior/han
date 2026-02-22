@@ -3,6 +3,7 @@ import { db, conversationStmts, conversationMessageStmts } from '../db';
 import { generateId } from '../services/planning';
 import { broadcast } from '../ws';
 import { runSupervisorCycle } from '../services/supervisor';
+import { catalogueConversation, catalogueAllUncatalogued } from '../services/cataloguing';
 
 const router = Router();
 
@@ -123,6 +124,7 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
 
 /**
  * POST /:id/resolve -- Mark a conversation as resolved
+ * Triggers automatic cataloguing (fire and forget)
  */
 router.post('/:id/resolve', (req: Request<{ id: string }>, res: Response) => {
     try {
@@ -134,6 +136,11 @@ router.post('/:id/resolve', (req: Request<{ id: string }>, res: Response) => {
 
         const updated = conversationStmts.get.get(req.params.id);
         res.json({ success: true, conversation: updated });
+
+        // Trigger cataloguing in background (fire and forget)
+        catalogueConversation(req.params.id).catch(err =>
+            console.error(`[Routes] Error cataloguing conversation ${req.params.id}:`, err.message)
+        );
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -152,6 +159,49 @@ router.post('/:id/reopen', (req: Request<{ id: string }>, res: Response) => {
 
         const updated = conversationStmts.get.get(req.params.id);
         res.json({ success: true, conversation: updated });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /:id/catalogue -- Manually trigger cataloguing for a conversation
+ */
+router.post('/:id/catalogue', (req: Request<{ id: string }>, res: Response) => {
+    try {
+        const conversation = conversationStmts.get.get(req.params.id);
+        if (!conversation) return res.status(404).json({ success: false, error: 'Conversation not found' });
+
+        res.json({ success: true, message: 'Cataloguing triggered' });
+
+        // Trigger cataloguing in background (fire and forget)
+        catalogueConversation(req.params.id).catch(err =>
+            console.error(`[Routes] Error cataloguing conversation ${req.params.id}:`, err.message)
+        );
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /recatalogue-all -- Re-catalogue all uncatalogued resolved conversations (admin only)
+ * Useful for backfilling summaries after schema changes or prompt improvements
+ */
+router.post('/recatalogue-all', async (req: Request, res: Response) => {
+    try {
+        // TODO: Add authentication check for admin-only access
+        // For now, this endpoint is available to anyone with access to the API
+
+        res.json({ success: true, message: 'Recataloguing started' });
+
+        // Run cataloguing in background (fire and forget)
+        catalogueAllUncatalogued()
+            .then(count => {
+                console.log(`[Routes] Recatalogued ${count} conversations`);
+            })
+            .catch(err =>
+                console.error('[Routes] Error in recatalogue-all:', err.message)
+            );
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
     }

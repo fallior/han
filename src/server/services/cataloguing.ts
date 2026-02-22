@@ -124,23 +124,23 @@ export async function catalogueAllUncatalogued(): Promise<number> {
         // Get all resolved conversations without summaries
         const uncatalogued = conversationStmts.list.all() as ConversationRow[];
         const needsCataloguing = uncatalogued.filter(c =>
-            c.status === 'resolved' && !c.summary
+            c.status === 'resolved'
         );
 
-        if (needsCatalogued.length === 0) {
+        if (needsCataloguing.length === 0) {
             console.log('[Cataloguing] No uncatalogued conversations found');
             return 0;
         }
 
-        console.log(`[Cataloguing] Found ${needsCatalogued.length} uncatalogued resolved conversations`);
+        console.log(`[Cataloguing] Found ${needsCataloguing.length} uncatalogued resolved conversations`);
 
         let catalogued = 0;
-        for (const conversation of needsCatalogued) {
+        for (const conversation of needsCataloguing) {
             await catalogueConversation(conversation.id);
             catalogued++;
 
             // Small delay to avoid overwhelming the API
-            if (catalogued < needsCatalogued.length) {
+            if (catalogued < needsCataloguing.length) {
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
         }

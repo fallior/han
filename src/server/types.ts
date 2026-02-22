@@ -343,6 +343,9 @@ export interface ConversationRow {
     status: 'open' | 'resolved';
     created_at: string;
     updated_at: string;
+    summary?: string;
+    topics?: string; // JSON array of strings
+    key_moments?: string;
 }
 
 export interface ConversationMessageRow {
