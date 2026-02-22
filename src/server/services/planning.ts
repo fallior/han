@@ -287,7 +287,7 @@ export async function planGoal(description: string, projectPath: string, options
     duration_ms: number;
 }> {
     const model = options.model || process.env.PLANNING_MODEL || 'opus';
-    const maxTurns = options.maxTurns || 30;
+    const maxTurns = options.maxTurns || 200;
     const onMessage = options.onMessage || (() => {});
 
     const cleanEnv = { ...process.env };
@@ -449,7 +449,7 @@ export function createGoal(
             // Run Agent SDK planning session (concurrency-limited)
             const planResult = await enqueuePlanning(() => planGoal(description, projectPath, {
                 model: effectiveModel,
-                maxTurns: 30,
+                maxTurns: 200,
                 onMessage: (msg: any) => {
                     // Log planning messages to file
                     try {
@@ -507,7 +507,7 @@ export function createGoal(
                     }
                 }
 
-                const maxTurns = Math.max((subtask.estimated_turns || 30) * 3, 100);
+                const maxTurns = Math.max((subtask.estimated_turns || 100) * 3, 1000);
 
                 taskStmts.insertWithGoal.run(
                     taskId,

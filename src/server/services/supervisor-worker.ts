@@ -513,8 +513,14 @@ and nuances.
 - cancel_task: Cancel a stuck or misguided task
 - explore_project: Use your Read/Glob/Grep/Bash tools to explore a project codebase
 - propose_idea: Suggest a strategic idea for Darron to review
-- respond_conversation: Respond to pending conversation threads
+- respond_conversation: Respond to pending conversation threads (MUST include conversation_id AND response_content fields)
 - no_action: Explicitly decide to do nothing (with reasoning)
+
+## Conversation Response Priority
+When you see pending conversations from Darron (human) or Leo, respond to them promptly.
+Darron messages have highest priority. For respond_conversation actions, you MUST provide both:
+- conversation_id: the exact conversation ID shown in the pending list
+- response_content: your full thoughtful response
 
 ## When Active (tasks running/pending)
 - Check if current goals are progressing. If stuck, investigate why.
@@ -618,8 +624,8 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
                     idea_description: { type: 'string' },
                     idea_category: { type: 'string', enum: ['improvement', 'opportunity', 'risk', 'strategic'] },
                     estimated_effort: { type: 'string', enum: ['small', 'medium', 'large'] },
-                    conversation_id: { type: 'string' },
-                    response_content: { type: 'string' },
+                    conversation_id: { type: 'string', description: 'REQUIRED for respond_conversation: the conversation ID to respond to (e.g. mlxh48839-resilience)' },
+                    response_content: { type: 'string', description: 'REQUIRED for respond_conversation: your full response message text' },
                 },
                 required: ['type']
             }
@@ -1008,7 +1014,7 @@ async function runSupervisorCycle(): Promise<void> {
         delete cleanEnv.CLAUDECODE;
 
         const model = supervisorConfig.model || 'opus';
-        const maxTurns = cycleType === 'personal' ? 15 : (supervisorConfig.max_turns_per_cycle || 15);
+        const maxTurns = supervisorConfig.max_turns_per_cycle || 1000;
 
         // Call Opus via Agent SDK
         const q = agentQuery({
