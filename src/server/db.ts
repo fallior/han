@@ -430,7 +430,7 @@ export const knowledgeStmts = {
 };
 
 export const supervisorStmts = {
-    insertCycle: db.prepare('INSERT INTO supervisor_cycles (id, started_at, cycle_number) VALUES (?, ?, ?)') as any,
+    insertCycle: db.prepare('INSERT INTO supervisor_cycles (id, started_at, cycle_number, cycle_type) VALUES (?, ?, ?, ?)') as any,
     completeCycle: db.prepare('UPDATE supervisor_cycles SET completed_at = ?, cost_usd = ?, tokens_in = ?, tokens_out = ?, num_turns = ?, actions_taken = ?, observations = ?, reasoning = ? WHERE id = ?') as any,
     failCycle: db.prepare('UPDATE supervisor_cycles SET completed_at = ?, error = ? WHERE id = ?') as any,
     getLatest: db.prepare('SELECT * FROM supervisor_cycles ORDER BY started_at DESC LIMIT 1') as any,
