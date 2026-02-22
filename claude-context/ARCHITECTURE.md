@@ -255,10 +255,15 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 | POST | /api/approvals/:id/deny | Deny operation |
 | GET | /api/conversations | List conversation threads |
 | POST | /api/conversations | Create new thread |
+| GET | /api/conversations/grouped | List conversations grouped by temporal period |
+| GET | /api/conversations/search | FTS5 full-text search with context |
+| POST | /api/conversations/search/semantic | Semantic search by Haiku (ranked) |
 | GET | /api/conversations/:id | Get thread with messages |
 | POST | /api/conversations/:id/messages | Add message to thread |
-| POST | /api/conversations/:id/resolve | Mark conversation resolved |
+| POST | /api/conversations/:id/resolve | Mark conversation resolved, trigger cataloguing |
 | POST | /api/conversations/:id/reopen | Reopen resolved conversation |
+| POST | /api/conversations/:id/catalogue | Manually trigger cataloguing for conversation |
+| POST | /api/conversations/recatalogue-all | Backfill summaries for all uncatalogued conversations |
 | WS | /ws | WebSocket push (prompts + terminal + tasks + approvals + conversations) |
 | GET | / | Serve web UI |
 | GET | /admin | Admin console (desktop-optimised) |
@@ -400,15 +405,22 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 
 - **Conversation threads**: Async strategic discussion between Darron and supervisor
 - **Database schema**:
-  - `conversations` table: id, title, status (open/resolved), created_at, updated_at
-  - `conversation_messages` table: id, conversation_id, role (human/supervisor), content, created_at
+  - `conversations` table: id, title, status (open/resolved), summary, topics, key_moments, created_at, updated_at
+  - `conversation_messages` table: id, conversation_id, role (human/supervisor/leo), content, created_at
+  - `conversation_messages_fts` virtual table: FTS5 full-text index for message search
+  - `conversation_tags` table: id, conversation_id, tag, created_at
 - **API endpoints**:
-  - `GET /api/conversations` — list all threads
+  - `GET /api/conversations` — list all threads with message counts
   - `POST /api/conversations` — create thread
   - `GET /api/conversations/:id` — get thread with messages
-  - `POST /api/conversations/:id/messages` — add message
-  - `POST /api/conversations/:id/resolve` — mark resolved
+  - `POST /api/conversations/:id/messages` — add message (broadcasts via WebSocket)
+  - `POST /api/conversations/:id/resolve` — mark resolved, triggers auto-cataloguing
   - `POST /api/conversations/:id/reopen` — reopen thread
+  - `GET /api/conversations/grouped` — conversations grouped by temporal period (today/this_week/last_week/this_month/older)
+  - `GET /api/conversations/search?q=...&limit=...` — FTS5 text search with context window
+  - `POST /api/conversations/search/semantic` — semantic search using Haiku (ranks conversations by relevance)
+  - `POST /api/conversations/:id/catalogue` — manually trigger cataloguing for a conversation
+  - `POST /api/conversations/recatalogue-all` — backfill summaries/tags for all uncatalogued resolved conversations
 - **Supervisor integration**:
   - Supervisor observes pending conversations in system state
   - New action type: `respond_conversation` with conversation_id and response_content
@@ -417,6 +429,283 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 - **WebSocket broadcasts**:
   - `conversation_message` event when new message posted
   - Real-time updates in admin UI
+
+### Level 13: Conversation Cataloguing & Search (Complete)
+
+**Full-text search and intelligent cataloguing for conversation discovery and analysis.**
+
+#### Auto-Cataloguing Service
+
+**Purpose**: Automatically extract metadata (summary, topics, tags, key moments) from conversations using Claude Haiku for cost efficiency.
+
+**Trigger points**:
+- Automatic: When conversation is marked as resolved (`POST /:id/resolve`)
+- Manual: Direct endpoint call (`POST /:id/catalogue`)
+- Bulk: Backfill endpoint for uncatalogued conversations (`POST /recatalogue-all`)
+
+**Implementation** (`services/cataloguing.ts`):
+
+```typescript
+// Core function: catalogueConversation(conversationId)
+// Fetches conversation and messages, builds transcript
+// Calls Claude Haiku with analysis prompt
+// Parses JSON response with structure:
+{
+  "summary": "2-3 sentence distillation of conversation",
+  "topics": ["topic1", "topic2", "topic3"],
+  "tags": ["tag1", "tag2", "tag3"],
+  "key_moments": "Notable quotes or decisions (optional)"
+}
+// Updates conversations table: summary, topics columns
+// Deletes old tags and inserts new ones in conversation_tags table
+// Logs result with counts
+```
+
+**Cost efficiency**: Uses Claude Haiku (most economical model) since cataloguing doesn't require complex reasoning — just extractive analysis.
+
+**Error handling**: Failures are logged but don't block conversation flow (non-critical enhancement).
+
+#### FTS5 Full-Text Search System
+
+**Architecture**: SQLite FTS5 virtual table with automatic trigger-based index population.
+
+**Schema**:
+```sql
+-- Virtual FTS5 table for indexed search
+CREATE VIRTUAL TABLE conversation_messages_fts USING fts5(
+    id UNINDEXED,
+    conversation_id UNINDEXED,
+    content,
+    tokenize='porter unicode61'  -- Stemming + Unicode support
+);
+
+-- Automatic index population on INSERT
+CREATE TRIGGER conversation_messages_ai
+AFTER INSERT ON conversation_messages
+BEGIN
+    INSERT INTO conversation_messages_fts(id, conversation_id, content)
+    VALUES (new.id, new.conversation_id, new.content);
+END;
+
+-- Similar triggers for UPDATE and DELETE maintain index consistency
+```
+
+**Initialization**: One-time bulk population of existing messages (only if FTS5 table is empty), then automatic via triggers.
+
+**Search endpoint** (`GET /api/conversations/search?q=...&limit=...`):
+
+```javascript
+// Request
+GET /api/conversations/search?q=authentication%20bug&limit=10
+
+// Response
+{
+  "success": true,
+  "results": [
+    {
+      "conversation_id": "conv-123",
+      "conversation_title": "Auth system refactor",
+      "conversation_status": "resolved",
+      "matched_message": {
+        "id": "msg-456",
+        "role": "human",
+        "content": "Found authentication bug in login flow",
+        "snippet": "Found <mark>authentication bug</mark> in login...",
+        "created_at": "2026-02-20T15:30:00Z"
+      },
+      "context_messages": [
+        { "id": "msg-455", "role": "supervisor", "content": "...", "created_at": "..." },
+        { "id": "msg-456", "role": "human", "content": "...", "created_at": "..." },
+        { "id": "msg-457", "role": "supervisor", "content": "...", "created_at": "..." }
+      ],
+      "created_at": "2026-02-20T15:30:00Z"
+    }
+  ],
+  "query": "authentication bug",
+  "count": 1
+}
+```
+
+**Features**:
+- FTS5 query syntax support (boolean operators, phrase searches, etc.)
+- Context window: returns 2 messages before and after matched message
+- Snippet highlighting with `<mark>` tags showing matched terms
+- Configurable result limit (0-100)
+- Graceful error handling for invalid FTS5 syntax
+
+#### Semantic Search with Haiku
+
+**Purpose**: Rank catalogued conversations by semantic relevance to natural language queries.
+
+**Endpoint** (`POST /api/conversations/search/semantic`):
+
+```javascript
+// Request
+POST /api/conversations/search/semantic
+{
+  "query": "How do we handle user authentication?",
+  "limit": 10
+}
+
+// Response
+{
+  "success": true,
+  "results": [
+    {
+      "conversation_id": "conv-789",
+      "conversation_title": "Authentication architecture",
+      "conversation_status": "resolved",
+      "summary": "Discussed JWT vs session-based auth, decided on JWT with refresh tokens",
+      "topics": ["authentication", "security", "architecture"],
+      "relevance_score": 95,
+      "relevance_reason": "Directly addresses JWT implementation and session management",
+      "messages": [/* full conversation messages */],
+      "created_at": "2026-02-15T10:00:00Z",
+      "updated_at": "2026-02-15T14:30:00Z"
+    }
+  ],
+  "query": "How do we handle user authentication?",
+  "count": 1
+}
+```
+
+**Implementation**:
+- Fetches all catalogued conversations (those with non-null summaries)
+- Builds prompt with query + list of summaries + topics
+- Calls Claude Haiku to rank by semantic relevance
+- Haiku returns JSON array of conversation IDs with scores (0-100) and reasoning
+- Client fetches full conversation details and messages for top results
+
+#### Temporal Grouping
+
+**Purpose**: Organise conversations by recency for timeline-based navigation.
+
+**Endpoint** (`GET /api/conversations/grouped`):
+
+```javascript
+// Response
+{
+  "success": true,
+  "periods": {
+    "today": {
+      "count": 3,
+      "label": "Today",
+      "conversations": [/* 3 conversations updated today */]
+    },
+    "this_week": {
+      "count": 5,
+      "label": "This Week",
+      "conversations": [/* 5 conversations from last 7 days */]
+    },
+    "last_week": {
+      "count": 2,
+      "label": "Last Week",
+      "conversations": [/* ... */]
+    },
+    "this_month": {
+      "count": 1,
+      "label": "This Month",
+      "conversations": [/* ... */]
+    },
+    "older": {
+      "count": 12,
+      "label": "Older",
+      "conversations": [/* ... */]
+    }
+  }
+}
+```
+
+**Grouping logic**:
+- Today: same calendar day
+- This week: last 7 days (excluding today)
+- Last week: 7-14 days ago
+- This month: same calendar month (excluding this week)
+- Older: everything else
+
+#### UI Integration
+
+**Admin Console** (desktop):
+- Conversations module with side-by-side layout
+- Left sidebar: temporal navigation (Today/This Week/Last Week/This Month/Older)
+- Search bar: both text (FTS5) and semantic (Haiku-powered)
+- Conversation list: displays title, message count, last updated time, summary preview, topic tags
+- Click to expand: full thread view with all messages
+
+**Command Centre** (mobile):
+- Conversations tab with search functionality
+- Swipeable temporal periods for quick navigation
+- Summary and topics displayed inline
+- Full conversation view on tap
+- Real-time updates via WebSocket (`conversation_message` event)
+
+#### Database Schema Details
+
+```sql
+-- Conversations table
+CREATE TABLE conversations (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  status TEXT DEFAULT 'open',  -- 'open' or 'resolved'
+  summary TEXT,                 -- Auto-generated by Haiku (2-3 sentences)
+  topics TEXT,                  -- JSON array of 3-5 topics
+  key_moments TEXT,             -- Optional: notable quotes/decisions
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Conversation messages table
+CREATE TABLE conversation_messages (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  role TEXT NOT NULL,           -- 'human', 'leo' (async), 'supervisor', or other
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+);
+
+-- Tags table for fine-grained classification
+CREATE TABLE conversation_tags (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+  UNIQUE(conversation_id, tag)
+);
+
+-- FTS5 virtual table (auto-synced by triggers)
+CREATE VIRTUAL TABLE conversation_messages_fts USING fts5(
+  id UNINDEXED,
+  conversation_id UNINDEXED,
+  content,
+  tokenize='porter unicode61'
+);
+```
+
+#### Example Queries
+
+**Text search for "bug" with context**:
+```bash
+curl -s "http://localhost:3847/api/conversations/search?q=bug&limit=5"
+```
+
+**Semantic search for "authentication strategies"**:
+```bash
+curl -s -X POST http://localhost:3847/api/conversations/search/semantic \
+  -H "Content-Type: application/json" \
+  -d '{"query": "authentication strategies", "limit": 10}'
+```
+
+**Backfill summaries for existing conversations**:
+```bash
+curl -s -X POST http://localhost:3847/api/conversations/recatalogue-all
+```
+
+**Temporal grouping for sidebar navigation**:
+```bash
+curl -s "http://localhost:3847/api/conversations/grouped"
+```
 
 ## Security Considerations
 
@@ -442,4 +731,4 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 
 ---
 
-*Last updated: 2026-02-21*
+*Last updated: 2026-02-22 — Added Level 13: Conversation Cataloguing & Search documentation*
