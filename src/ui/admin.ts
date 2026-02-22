@@ -1731,41 +1731,45 @@ async function loadConversations(content: HTMLElement): Promise<void> {
             `;
         }
 
-        // Build HTML with three-column layout: temporal sidebar | thread list | thread detail
+        // Build HTML with two-column layout: thread list | thread detail
         let html = `<div class="fade-in conversation-container">
             <div class="conversation-layout">
-                <!-- Temporal Sidebar -->
-                <div class="temporal-sidebar">
-                    <div class="temporal-header">
-                        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);padding:8px 10px">When</div>
-                    </div>
-                    <div class="temporal-periods">`;
+                <!-- Thread List -->
+                <div class="thread-list-panel">
+                    <!-- Period Filter Bar -->
+                    <div class="period-filter-bar">`;
 
         // Add "All" button
         const allCount = Object.values(periods).reduce((sum, p: any) => sum + (p.count || 0), 0);
         const isAllActive = selectedConversationPeriod === 'all';
-        html += `<button class="temporal-period-btn ${isAllActive ? 'active' : ''}" onclick="filterConversationsByPeriod('all')" title="All conversations">
-            <span class="period-label">All</span>
+        html += `<button class="period-filter-btn ${isAllActive ? 'active' : ''}" onclick="filterConversationsByPeriod('all')" title="All conversations">
+            <span>All</span>
             <span class="period-badge">${allCount}</span>
         </button>`;
 
         // Add period buttons
         const periodOrder = ['today', 'this_week', 'last_week', 'this_month', 'older'];
+        const periodLabels: Record<string, string> = {
+            'today': 'Today',
+            'this_week': 'This Week',
+            'last_week': 'Last Week',
+            'this_month': 'This Month',
+            'older': 'Older'
+        };
         for (const period of periodOrder) {
             const p = periods[period];
             if (!p) continue;
             const isActive = selectedConversationPeriod === period;
-            html += `<button class="temporal-period-btn ${isActive ? 'active' : ''}" onclick="filterConversationsByPeriod('${period}')" title="${p.label}">
-                <span class="period-label">${p.label}</span>
+            const label = periodLabels[period] || p.label;
+            html += `<button class="period-filter-btn ${isActive ? 'active' : ''}" onclick="filterConversationsByPeriod('${period}')" title="${label}">
+                <span>${label}</span>
                 <span class="period-badge">${p.count}</span>
             </button>`;
         }
 
         html += `</div>
-                </div>
 
-                <!-- Thread List -->
-                <div class="thread-list-panel">
+                    <!-- Search Bar -->
                     <div style="padding:8px;border-bottom:1px solid var(--border-subtle)">
                         <div style="display:flex;gap:6px;align-items:center">
                             <input type="text" id="conversationSearchInput" class="form-input" placeholder="Search conversations..." style="flex:1;font-size:12px;padding:6px 10px" onkeyup="performConversationSearch(this.value, event)">
@@ -1872,7 +1876,7 @@ async function loadConversations(content: HTMLElement): Promise<void> {
 
 (window as any).filterConversationsByPeriod = async function(period: string) {
     selectedConversationPeriod = period;
-    const content = document.getElementById('moduleContent');
+    const content = document.getElementById('mainContent');
     if (content) {
         // Smooth transition
         content.style.opacity = '0.5';
