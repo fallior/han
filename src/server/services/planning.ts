@@ -40,9 +40,22 @@ const planningQueue: Array<{
 }> = [];
 
 // ── Concurrent pipeline slots ────────────────────────────────
-// 2 normal task slots + 1 dedicated remediation slot = 3 concurrent agents
-const MAX_NORMAL_SLOTS = 2;
-const MAX_REMEDIATION_SLOTS = 1;
+// Configurable via config.json: supervisor.max_agent_slots, reserve_slots, remediation_slots
+// Default: 8 total, 2 reserve (for priority >= 8 / remediation), 1 dedicated remediation
+const _slotConfig = (() => {
+    try {
+        const cfgPath = path.join(CLAUDE_REMOTE_DIR, 'config.json');
+        if (fs.existsSync(cfgPath)) {
+            const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+            return cfg.supervisor || {};
+        }
+    } catch { /* use defaults */ }
+    return {};
+})();
+const MAX_AGENT_SLOTS = _slotConfig.max_agent_slots || 8;
+const RESERVE_SLOTS = _slotConfig.reserve_slots || 2;
+const REMEDIATION_SLOTS = _slotConfig.remediation_slots || 1;
+const NORMAL_CAPACITY = MAX_AGENT_SLOTS - RESERVE_SLOTS;
 
 interface RunningSlot {
     taskId: string;
@@ -1813,28 +1826,70 @@ export function detectAndRecoverGhostTasks(): number {
 
 /**
  * Main scheduler entry point — called on interval.
- * Fills available pipeline slots: 2 normal + 1 remediation.
+ * 3-tier slot filling: remediation → normal capacity → reserve (high-priority only).
  */
 export async function runNextTask(): Promise<void> {
-    // Count current slot usage
-    const normalRunning = [...runningSlots.values()].filter(s => !s.isRemediation).length;
+    const totalRunning = runningSlots.size;
     const remediationRunning = [...runningSlots.values()].filter(s => s.isRemediation).length;
+    const normalRunning = totalRunning - remediationRunning;
 
-    // Try to fill remediation slot
-    if (remediationRunning < MAX_REMEDIATION_SLOTS) {
+    // 1. Fill dedicated remediation slots
+    if (remediationRunning < REMEDIATION_SLOTS) {
         const remTask = getNextPendingTask(true);
         if (remTask) {
             executeTask(remTask, true); // fire-and-forget
         }
     }
 
-    // Try to fill normal slots
-    const normalAvailable = MAX_NORMAL_SLOTS - normalRunning;
+    // 2. Fill normal capacity slots (up to NORMAL_CAPACITY)
+    const normalAvailable = NORMAL_CAPACITY - normalRunning;
     for (let i = 0; i < normalAvailable; i++) {
         const task = getNextPendingTask(false);
         if (!task) break;
         executeTask(task, false); // fire-and-forget
     }
+
+    // 3. Dip into reserve for high-priority tasks (priority >= 8)
+    const currentTotal = runningSlots.size;
+    if (currentTotal < MAX_AGENT_SLOTS) {
+        const reserveAvailable = MAX_AGENT_SLOTS - currentTotal;
+        for (let i = 0; i < reserveAvailable; i++) {
+            const task = getNextHighPriorityTask();
+            if (!task) break;
+            executeTask(task, false); // fire-and-forget
+        }
+    }
+}
+
+/**
+ * Get the next pending non-remediation task with priority >= 8.
+ * Only these tasks justify dipping into reserve capacity.
+ */
+function getNextHighPriorityTask(): any | null {
+    const pending = taskStmts.listByStatus.all('pending') as any[];
+    if (pending.length === 0) return null;
+
+    const candidates = pending.filter(task => {
+        if (runningSlots.has(task.id)) return false;
+        if (task.is_remediation) return false;
+        if ((task.priority || 5) < 8) return false;
+        // Check dependencies
+        if (!task.depends_on) return true;
+        try {
+            const depIds = JSON.parse(task.depends_on);
+            if (!Array.isArray(depIds) || depIds.length === 0) return true;
+            return depIds.every((id: string) => {
+                const dep = taskStmts.get.get(id) as any;
+                return dep && (dep.status === 'done' || dep.status === 'cancelled');
+            });
+        } catch { return true; }
+    });
+
+    if (candidates.length === 0) return null;
+
+    // Sort by priority descending
+    candidates.sort((a, b) => (b.priority || 5) - (a.priority || 5));
+    return candidates[0];
 }
 
 /**
@@ -1851,7 +1906,7 @@ async function executeTask(task: any, isRemediation: boolean): Promise<void> {
     taskStmts.updateStatus.run('running', new Date().toISOString(), task.id);
     broadcastTaskUpdate(taskStmts.get.get(task.id));
 
-    console.log(`[${slotLabel}] Starting: ${task.title} (${task.id}) — slots: ${runningSlots.size}/${MAX_NORMAL_SLOTS + MAX_REMEDIATION_SLOTS}`);
+    console.log(`[${slotLabel}] Starting: ${task.title} (${task.id}) — slots: ${runningSlots.size}/${MAX_AGENT_SLOTS} (capacity: ${NORMAL_CAPACITY} normal + ${RESERVE_SLOTS} reserve)`);
 
     // Create task execution log (mirrors claude-logged format)
     const taskLog = createTaskLogger(task);
@@ -2062,7 +2117,7 @@ async function executeTask(task: any, isRemediation: boolean): Promise<void> {
         }
     } finally {
         runningSlots.delete(task.id);
-        console.log(`[${slotLabel}] Slot freed. Active: ${runningSlots.size}/${MAX_NORMAL_SLOTS + MAX_REMEDIATION_SLOTS}`);
+        console.log(`[${slotLabel}] Slot freed. Active: ${runningSlots.size}/${MAX_AGENT_SLOTS}`);
         broadcastTaskUpdate(taskStmts.get.get(task.id));
 
         // Update goal progress on completion

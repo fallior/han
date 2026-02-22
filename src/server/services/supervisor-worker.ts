@@ -340,7 +340,11 @@ function buildStateSnapshot(): string {
     // Running tasks
     try {
         const running = taskStmts.listByStatus.all('running') as any[];
-        parts.push(`## Running Tasks (${running.length}/3 slots)`);
+        const slotConfig = loadConfig().supervisor || {};
+        const totalSlots = slotConfig.max_agent_slots || 8;
+        const reserveSlots = slotConfig.reserve_slots || 2;
+        const normalCap = totalSlots - reserveSlots;
+        parts.push(`## Running Tasks (${running.length}/${totalSlots} slots, ${normalCap} normal + ${reserveSlots} reserve)`);
         if (running.length === 0) {
             parts.push('No tasks currently running.');
         } else {
