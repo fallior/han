@@ -274,6 +274,18 @@ db.exec(`CREATE TABLE IF NOT EXISTS conversation_messages (
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 )`);
 
+// Conversation tags table
+db.exec(`CREATE TABLE IF NOT EXISTS conversation_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+)`);
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_conversation_tags_conversation ON conversation_tags(conversation_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_conversation_tags_tag ON conversation_tags(tag)`);
+
 // Supervisor cycles table
 db.exec(`CREATE TABLE IF NOT EXISTS supervisor_cycles (
     id TEXT PRIMARY KEY,
@@ -318,6 +330,32 @@ if (!supervisorCyclesCols.includes('cycle_type')) {
     console.log('[DB] Adding cycle_type column to supervisor_cycles...');
     db.exec(`ALTER TABLE supervisor_cycles ADD COLUMN cycle_type TEXT DEFAULT 'supervisor'`);
     console.log('[DB] Migration complete: cycle_type column added');
+}
+
+// Conversation cataloguing columns on conversations table
+const conversationCols = (db.pragma("table_info('conversations')") as any[]).map((col: any) => col.name);
+if (!conversationCols.includes('summary')) {
+    console.log('[DB] Adding cataloguing columns to conversations...');
+    db.exec(`ALTER TABLE conversations ADD COLUMN summary TEXT`);
+    db.exec(`ALTER TABLE conversations ADD COLUMN topics TEXT`);
+    db.exec(`ALTER TABLE conversations ADD COLUMN key_moments TEXT`);
+    console.log('[DB] Migration complete: cataloguing columns added');
+}
+
+// FTS5 virtual table for conversation messages
+// Note: FTS5 tables can't be checked with pragma table_info, so we use a try-catch approach
+try {
+    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS conversation_messages_fts USING fts5(
+        id UNINDEXED,
+        conversation_id UNINDEXED,
+        content,
+        tokenize='porter unicode61'
+    )`);
+    console.log('[DB] FTS5 virtual table created or already exists');
+} catch (err: any) {
+    if (!err.message.includes('already exists')) {
+        console.error('[DB] Error creating FTS5 table:', err.message);
+    }
 }
 
 // ── Prepared statements ─────────────────────────────────────
@@ -454,6 +492,9 @@ export const conversationStmts = {
     insert: db.prepare('INSERT INTO conversations (id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)') as any,
     updateStatus: db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?') as any,
     updateTimestamp: db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?') as any,
+    updateSummary: db.prepare('UPDATE conversations SET summary = ?, updated_at = ? WHERE id = ?') as any,
+    updateTopics: db.prepare('UPDATE conversations SET topics = ?, updated_at = ? WHERE id = ?') as any,
+    getWithSummary: db.prepare('SELECT * FROM conversations WHERE id = ? AND summary IS NOT NULL') as any,
 };
 
 export const conversationMessageStmts = {
@@ -461,6 +502,13 @@ export const conversationMessageStmts = {
     insert: db.prepare('INSERT INTO conversation_messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)') as any,
     getPending: db.prepare(`SELECT cm.* FROM conversation_messages cm JOIN conversations c ON cm.conversation_id = c.id WHERE c.status = 'open' AND cm.role IN ('human', 'leo') AND NOT EXISTS (SELECT 1 FROM conversation_messages cm2 WHERE cm2.conversation_id = cm.conversation_id AND cm2.role = 'supervisor' AND cm2.created_at > cm.created_at) ORDER BY cm.created_at ASC`) as any,
     getLastSupervisorResponse: db.prepare('SELECT created_at FROM conversation_messages WHERE conversation_id = ? AND role = \'supervisor\' ORDER BY created_at DESC LIMIT 1') as any,
+};
+
+export const conversationTagStmts = {
+    insert: db.prepare('INSERT INTO conversation_tags (conversation_id, tag, created_at) VALUES (?, ?, ?)') as any,
+    getByConversation: db.prepare('SELECT * FROM conversation_tags WHERE conversation_id = ? ORDER BY created_at ASC') as any,
+    getAll: db.prepare('SELECT DISTINCT tag FROM conversation_tags ORDER BY tag ASC') as any,
+    deleteByConversation: db.prepare('DELETE FROM conversation_tags WHERE conversation_id = ?') as any,
 };
 
 // ── Helper functions ────────────────────────────────────────
