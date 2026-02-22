@@ -1261,7 +1261,8 @@ export async function runSupervisorCycle(): Promise<{
     }
 
     supervisorStmts.insertCycle.run(cycleId, startedAt, cycleNumber, cycleType);
-    console.log(`[Supervisor] Cycle #${cycleNumber} starting (type: ${cycleType}, idle: ${isIdle})`);
+    const typeLabel = cycleType === 'personal' ? `[Supervisor] Personal cycle #${cycleNumber} starting` : `[Supervisor] Cycle #${cycleNumber} starting`;
+    console.log(typeLabel);
 
     const abort = new AbortController();
     runningCycleAbort = abort;
@@ -1403,7 +1404,7 @@ export async function runSupervisorCycle(): Promise<{
         }
 
         // Log to daily session file
-        logCycleToSession(cycleNumber, output, actionSummaries, totalCost);
+        logCycleToSession(cycleNumber, output, actionSummaries, totalCost, cycleType);
 
         // Complete DB record
         supervisorStmts.completeCycle.run(
@@ -1418,13 +1419,15 @@ export async function runSupervisorCycle(): Promise<{
             cycleId
         );
 
-        console.log(`[Supervisor] Cycle #${cycleNumber} complete — ${output.observations?.length || 0} observations, ${actionSummaries.length} actions, $${totalCost.toFixed(4)}`);
+        const completeLabel = cycleType === 'personal' ? `[Supervisor] Personal cycle #${cycleNumber} complete` : `[Supervisor] Cycle #${cycleNumber} complete`;
+        console.log(`${completeLabel} — ${output.observations?.length || 0} observations, ${actionSummaries.length} actions, $${totalCost.toFixed(4)}`);
 
         // Broadcast cycle completion
         broadcastFn?.({
             type: 'supervisor_cycle',
             cycleId,
             cycleNumber,
+            cycle_type: cycleType,
             observations: output.observations || [],
             actions: actionSummaries,
             reasoning: output.reasoning || '',
@@ -1449,15 +1452,16 @@ export async function runSupervisorCycle(): Promise<{
 
 // ── Session logging ──────────────────────────────────────────
 
-function logCycleToSession(cycleNumber: number, output: SupervisorOutput, actionSummaries: string[], cost: number): void {
+function logCycleToSession(cycleNumber: number, output: SupervisorOutput, actionSummaries: string[], cost: number, cycleType: 'supervisor' | 'personal' = 'supervisor'): void {
     try {
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         const sessionFile = path.join(SESSIONS_DIR, `${dateStr}.md`);
 
         const timeStr = now.toISOString();
+        const typeLabel = cycleType === 'personal' ? '(Personal)' : '(Supervisor)';
         const lines = [
-            `\n### Cycle #${cycleNumber} — ${timeStr} ($${cost.toFixed(4)})`,
+            `\n### Cycle #${cycleNumber} — ${typeLabel} — ${timeStr} ($${cost.toFixed(4)})`,
             `**Observations:** ${(output.observations || []).join('; ')}`,
             `**Actions:** ${actionSummaries.join('; ')}`,
             `**Reasoning:** ${(output.reasoning || '').slice(0, 200)}`,
