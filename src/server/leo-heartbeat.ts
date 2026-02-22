@@ -338,7 +338,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
             allowDangerouslySkipPermissions: true,
             env: cleanEnv,
             persistSession: false,
-            tools: ['Read', 'Glob', 'Grep'],
+            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
@@ -416,7 +416,7 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
             allowDangerouslySkipPermissions: true,
             env: cleanEnv,
             persistSession: false,
-            tools: ['Read', 'Glob', 'Grep'],
+            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
@@ -471,7 +471,7 @@ Spend a few minutes exploring, then output a brief summary of what you found or 
             allowDangerouslySkipPermissions: true,
             env: cleanEnv,
             persistSession: false,
-            tools: ['Read', 'Glob', 'Grep'],
+            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
