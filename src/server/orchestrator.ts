@@ -443,15 +443,27 @@ export function recommendModel(
             return { model: null, confidence: 'none', reason: 'No model meets threshold', stats: byModel };
         }
 
-        // Sort by avg cost ascending (cheapest first)
-        candidates.sort((a, b) => a.avgCost - b.avgCost);
+        // Category-aware sorting: complex tasks prioritize success rate, simple tasks prioritize cost
+        const complexCategories = ['architecture', 'bugfix'];
+        let sortStrategy: string;
+
+        if (complexCategories.includes(taskType)) {
+            // Sort by success rate descending (best success first), then cost ascending as tiebreaker
+            candidates.sort((a, b) => b.successRate - a.successRate || a.avgCost - b.avgCost);
+            sortStrategy = 'success-weighted';
+        } else {
+            // Simple categories (docs, config, test, etc.) and default: cheapest first
+            candidates.sort((a, b) => a.avgCost - b.avgCost);
+            sortStrategy = 'cost-weighted';
+        }
+
         const best = candidates[0];
         const confidence: 'high' | 'low' = best.count >= 10 ? 'high' : 'low';
 
         return {
             model: best.model,
             confidence,
-            reason: `${best.model} has ${(best.successRate * 100).toFixed(0)}% success rate over ${best.count} tasks (${scope} scope, avg $${best.avgCost.toFixed(4)})`,
+            reason: `${best.model} has ${(best.successRate * 100).toFixed(0)}% success rate over ${best.count} tasks (${scope} scope, avg $${best.avgCost.toFixed(4)}, ${sortStrategy})`,
             stats: byModel
         };
     } catch (err: unknown) {
