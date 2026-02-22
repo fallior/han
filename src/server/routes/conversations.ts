@@ -48,6 +48,103 @@ router.post('/', (req: Request, res: Response) => {
 });
 
 /**
+ * GET /search -- Full-text search across conversation messages
+ * Query params:
+ *   - q: search term (required)
+ *   - limit: max results (default 20)
+ *   - mode: 'text' (default, FTS5 search)
+ */
+router.get('/search', (req: Request, res: Response) => {
+    try {
+        const { q, limit = '20', mode = 'text' } = req.query;
+
+        if (!q || typeof q !== 'string') {
+            return res.status(400).json({ success: false, error: 'query parameter "q" is required' });
+        }
+
+        if (mode !== 'text') {
+            return res.status(400).json({ success: false, error: 'only mode=text is currently supported' });
+        }
+
+        const resultLimit = Math.min(parseInt(limit as string, 10) || 20, 100);
+
+        // FTS5 search query
+        const searchStmt = db.prepare(`
+            SELECT
+                fts.id,
+                cm.conversation_id,
+                cm.role,
+                cm.content,
+                cm.created_at,
+                c.title as conversation_title,
+                c.status as conversation_status
+            FROM conversation_messages_fts fts
+            JOIN conversation_messages cm ON fts.id = cm.id
+            JOIN conversations c ON cm.conversation_id = c.id
+            WHERE fts.content MATCH ?
+            ORDER BY rank
+            LIMIT ?
+        `) as any;
+
+        let matches;
+        try {
+            matches = searchStmt.all(q, resultLimit);
+        } catch (ftsErr: any) {
+            // Handle FTS5 query syntax errors gracefully
+            return res.status(400).json({
+                success: false,
+                error: `Invalid FTS5 query syntax: ${ftsErr.message}`
+            });
+        }
+
+        // For each match, fetch 2 messages before and after for context
+        const contextWindow = 2;
+        const getContextStmt = db.prepare(`
+            SELECT id, role, content, created_at
+            FROM conversation_messages
+            WHERE conversation_id = ?
+            ORDER BY created_at ASC
+        `) as any;
+
+        const results = matches.map((match: any) => {
+            // Get all messages for this conversation (could optimize with pagination later)
+            const allMessages = getContextStmt.all(match.conversation_id);
+
+            // Find the index of the matched message
+            const matchIndex = allMessages.findIndex((msg: any) => msg.id === match.id);
+
+            // Extract context: 2 before and 2 after
+            const startIdx = Math.max(0, matchIndex - contextWindow);
+            const endIdx = Math.min(allMessages.length, matchIndex + contextWindow + 1);
+            const contextMessages = allMessages.slice(startIdx, endIdx);
+
+            return {
+                conversation_id: match.conversation_id,
+                conversation_title: match.conversation_title,
+                conversation_status: match.conversation_status,
+                matched_message: {
+                    id: match.id,
+                    role: match.role,
+                    content: match.content,
+                    created_at: match.created_at
+                },
+                context_messages: contextMessages,
+                created_at: match.created_at
+            };
+        });
+
+        res.json({
+            success: true,
+            results,
+            query: q,
+            count: results.length
+        });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * GET /:id -- Get a single conversation with all its messages
  */
 router.get('/:id', (req: Request<{ id: string }>, res: Response) => {
@@ -202,103 +299,6 @@ router.post('/recatalogue-all', async (req: Request, res: Response) => {
             .catch(err =>
                 console.error('[Routes] Error in recatalogue-all:', err.message)
             );
-    } catch (err: any) {
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
-
-/**
- * GET /search -- Full-text search across conversation messages
- * Query params:
- *   - q: search term (required)
- *   - limit: max results (default 20)
- *   - mode: 'text' (default, FTS5 search)
- */
-router.get('/search', (req: Request, res: Response) => {
-    try {
-        const { q, limit = '20', mode = 'text' } = req.query;
-
-        if (!q || typeof q !== 'string') {
-            return res.status(400).json({ success: false, error: 'query parameter "q" is required' });
-        }
-
-        if (mode !== 'text') {
-            return res.status(400).json({ success: false, error: 'only mode=text is currently supported' });
-        }
-
-        const resultLimit = Math.min(parseInt(limit as string, 10) || 20, 100);
-
-        // FTS5 search query
-        const searchStmt = db.prepare(`
-            SELECT
-                fts.id,
-                cm.conversation_id,
-                cm.role,
-                cm.content,
-                cm.created_at,
-                c.title as conversation_title,
-                c.status as conversation_status
-            FROM conversation_messages_fts fts
-            JOIN conversation_messages cm ON fts.id = cm.id
-            JOIN conversations c ON cm.conversation_id = c.id
-            WHERE fts.content MATCH ?
-            ORDER BY rank
-            LIMIT ?
-        `) as any;
-
-        let matches;
-        try {
-            matches = searchStmt.all(q, resultLimit);
-        } catch (ftsErr: any) {
-            // Handle FTS5 query syntax errors gracefully
-            return res.status(400).json({
-                success: false,
-                error: `Invalid FTS5 query syntax: ${ftsErr.message}`
-            });
-        }
-
-        // For each match, fetch 2 messages before and after for context
-        const contextWindow = 2;
-        const getContextStmt = db.prepare(`
-            SELECT id, role, content, created_at
-            FROM conversation_messages
-            WHERE conversation_id = ?
-            ORDER BY created_at ASC
-        `) as any;
-
-        const results = matches.map((match: any) => {
-            // Get all messages for this conversation (could optimize with pagination later)
-            const allMessages = getContextStmt.all(match.conversation_id);
-
-            // Find the index of the matched message
-            const matchIndex = allMessages.findIndex((msg: any) => msg.id === match.id);
-
-            // Extract context: 2 before and 2 after
-            const startIdx = Math.max(0, matchIndex - contextWindow);
-            const endIdx = Math.min(allMessages.length, matchIndex + contextWindow + 1);
-            const contextMessages = allMessages.slice(startIdx, endIdx);
-
-            return {
-                conversation_id: match.conversation_id,
-                conversation_title: match.conversation_title,
-                conversation_status: match.conversation_status,
-                matched_message: {
-                    id: match.id,
-                    role: match.role,
-                    content: match.content,
-                    created_at: match.created_at
-                },
-                context_messages: contextMessages,
-                created_at: match.created_at
-            };
-        });
-
-        res.json({
-            success: true,
-            results,
-            query: q,
-            count: results.length
-        });
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
     }

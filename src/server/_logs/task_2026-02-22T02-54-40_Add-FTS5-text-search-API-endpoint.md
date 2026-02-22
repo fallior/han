@@ -190,3 +190,39 @@ Hmm, I'm getting a "Conversation not found" error. The issue is that the `/searc
 
 I found the issue! The `/search` route (line 167) is defined **after** the `/:id` route (line 53). In Express, routes are matched in order, so `/search` is being treated as an `:id` parameter. I need to move the `/search` route **before** the `/:id` route.
 
+### Tool Use: Edit <sub>2026-02-22 02:56:00</sub>
+
+```json
+{
+  "replace_all": false,
+  "file_path": "/home/darron/Projects/clauderemote/src/server/routes/conversations.ts",
+  "old_string": "});\n\n/**\n * GET /:id -- Get a single conversation with all its messages\n */\nrouter.get('/:id', (req: Request<{ id: string }>, res: Response) => {\n    try {\n        const conversation = conversationStmts.get.get(req.params.id);\n        if (!conversation) return res.status(404).json({ success: false, error: 'Conversation not found' });\n\n        const messages = conversationMessageStmts.list.all(req.params.id);\n        res.json({ success: true, conversation, messages });\n    } catch (err: any) {\n        res.status(500).json({ success: false, error: err.message });\n    }\n});",
+  "new_string": "});\n\n/**\n * GET /search -- Full-text search across conversation messages\n * Query params:\n *   - q: search term (required)\n *   - limit: max results (default 20)\n *   - mode: 'text' (default, FTS5 search)\n */\nrouter.get('/search', (req: Request, res: Response) => {\n    try {\n        const { q, limit = '20', mode = 'text' } = req.query;\n\n        if (!q || typeof q !== 'string') {\n            return res.status(400).json({ success: false, error: 'query parameter \"q\" is required' });\n        }\n\n        if (mode !== 'text') {\n            return res.status(400).json({ success: false, error: 'only mode=text is currently supported' });\n        }\n\n        const resultLimit = Math.min(parseInt(limit as string, 10) || 20, 100);\n\n        // FTS5 search query\n        const searchStmt = db.prepare(`\n            SELECT\n                fts.id,\n                cm.conversation_id,\n                cm.role,\n                cm.content,\n                cm.created_at,\n                c.title as conversation_title,\n                c.status as conversation_status\n            FROM conversation_messages_fts fts\n            JOIN conversation_messages cm ON fts.id = cm.id\n            JOIN conversations c ON cm.conversation_id = c
+```
+
+## Assistant <sub>2026-02-22 02:56:02</sub>
+
+Now I need to remove the duplicate `/search` route that was at the end of the file:
+
+### Tool Use: Edit <sub>2026-02-22 02:56:10</sub>
+
+```json
+{
+  "replace_all": false,
+  "file_path": "/home/darron/Projects/clauderemote/src/server/routes/conversations.ts",
+  "old_string": "/**\n * GET /search -- Full-text search across conversation messages\n * Query params:\n *   - q: search term (required)\n *   - limit: max results (default 20)\n *   - mode: 'text' (default, FTS5 search)\n */\nrouter.get('/search', (req: Request, res: Response) => {\n    try {\n        const { q, limit = '20', mode = 'text' } = req.query;\n\n        if (!q || typeof q !== 'string') {\n            return res.status(400).json({ success: false, error: 'query parameter \"q\" is required' });\n        }\n\n        if (mode !== 'text') {\n            return res.status(400).json({ success: false, error: 'only mode=text is currently supported' });\n        }\n\n        const resultLimit = Math.min(parseInt(limit as string, 10) || 20, 100);\n\n        // FTS5 search query\n        const searchStmt = db.prepare(`\n            SELECT\n                fts.id,\n                cm.conversation_id,\n                cm.role,\n                cm.content,\n                cm.created_at,\n                c.title as conversation_title,\n                c.status as conversation_status\n            FROM conversation_messages_fts fts\n            JOIN conversation_messages cm ON fts.id = cm.id\n            JOIN conversations c ON cm.conversation_id = c.id\n            WHERE fts.content MATCH ?\n            ORDER BY rank\n            LIMIT ?\n        `) as any;\n\n        let matches;\n        try {\n            matches = searchStmt.all(q, resultLimit);\n        } catch (ftsErr: any) {\n            // Handle FTS5 query syntax errors gracefully\n            return res.status(400).json({\n                success: false,\n                error: `Invalid FTS5 query syntax: ${ftsErr.message}`\n            });\n        }\n\n        // For each match, fetch 2 messages before and after for context\n        const contextWindow = 2;\n        const getContextStmt = db.pr
+```
+
+## Assistant <sub>2026-02-22 02:56:12</sub>
+
+Now let me restart the server to apply the changes:
+
+### Tool Use: Bash <sub>2026-02-22 02:56:14</sub>
+
+```json
+{
+  "command": "pkill -f \"tsx server.ts\" && sleep 2 && nohup npx tsx server.ts > /tmp/clauderemote-server.log 2>&1 &",
+  "description": "Restart the server"
+}
+```
+
