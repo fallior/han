@@ -358,6 +358,40 @@ try {
     }
 }
 
+// FTS5 triggers for automatic index population
+db.exec(`CREATE TRIGGER IF NOT EXISTS conversation_messages_ai
+    AFTER INSERT ON conversation_messages
+    BEGIN
+        INSERT INTO conversation_messages_fts(id, conversation_id, content)
+        VALUES (new.id, new.conversation_id, new.content);
+    END`);
+
+db.exec(`CREATE TRIGGER IF NOT EXISTS conversation_messages_au
+    AFTER UPDATE ON conversation_messages
+    BEGIN
+        UPDATE conversation_messages_fts
+        SET content = new.content
+        WHERE id = old.id;
+    END`);
+
+db.exec(`CREATE TRIGGER IF NOT EXISTS conversation_messages_ad
+    AFTER DELETE ON conversation_messages
+    BEGIN
+        DELETE FROM conversation_messages_fts
+        WHERE id = old.id;
+    END`);
+
+// One-time population of FTS5 table (only if empty)
+const ftsCount = db.prepare('SELECT COUNT(*) as count FROM conversation_messages_fts').get() as { count: number };
+const messagesCount = db.prepare('SELECT COUNT(*) as count FROM conversation_messages').get() as { count: number };
+
+if (ftsCount.count === 0 && messagesCount.count > 0) {
+    console.log(`[DB] Populating FTS5 table with ${messagesCount.count} existing messages...`);
+    db.exec(`INSERT INTO conversation_messages_fts(id, conversation_id, content)
+        SELECT id, conversation_id, content FROM conversation_messages`);
+    console.log('[DB] FTS5 population complete');
+}
+
 // ── Prepared statements ─────────────────────────────────────
 
 export const taskStmts = {
@@ -512,6 +546,24 @@ export const conversationTagStmts = {
 };
 
 // ── Helper functions ────────────────────────────────────────
+
+/**
+ * Manually populate the FTS5 conversation_messages_fts table from conversation_messages.
+ * This is useful for rebuilding the index if it becomes corrupted or for admin operations.
+ * @returns Number of messages indexed
+ */
+export function populateConversationMessagesFts(): number {
+    // Clear existing FTS data
+    db.exec('DELETE FROM conversation_messages_fts');
+
+    // Repopulate from conversation_messages
+    db.exec(`INSERT INTO conversation_messages_fts(id, conversation_id, content)
+        SELECT id, conversation_id, content FROM conversation_messages`);
+
+    const result = db.prepare('SELECT COUNT(*) as count FROM conversation_messages_fts').get() as { count: number };
+    console.log(`[DB] FTS5 repopulated with ${result.count} messages`);
+    return result.count;
+}
 
 /**
  * Parse the infrastructure registry TOML file into project objects.
