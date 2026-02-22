@@ -2994,6 +2994,8 @@
 
         let conversationSearchActive = false;
         let conversationSearchQuery = '';
+        let selectedPeriod = 'today'; // Track selected temporal period
+        let allConversationsByPeriod: Record<string, any> = {}; // Cache grouped conversations
 
         function initConversationSearch() {
             const searchBar = document.createElement('div');
