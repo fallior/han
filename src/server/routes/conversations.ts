@@ -4,6 +4,7 @@ import { generateId } from '../services/planning';
 import { broadcast } from '../ws';
 import { runSupervisorCycle } from '../services/supervisor';
 import { catalogueConversation, catalogueAllUncatalogued } from '../services/cataloguing';
+import { callLLM } from '../orchestrator';
 
 const router = Router();
 
@@ -302,6 +303,119 @@ router.post('/recatalogue-all', async (req: Request, res: Response) => {
                 console.error('[Routes] Error in recatalogue-all:', err.message)
             );
     } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /search/semantic -- AI-powered semantic search across conversations
+ * Body:
+ *   - query: search query (required)
+ *   - limit: max results (default 10, max 50)
+ */
+router.post('/search/semantic', async (req: Request, res: Response) => {
+    try {
+        const { query, limit = 10 } = req.body;
+
+        if (!query || typeof query !== 'string' || query.trim() === '') {
+            return res.status(400).json({ success: false, error: 'query is required' });
+        }
+
+        const resultLimit = Math.min(parseInt(String(limit), 10) || 10, 50);
+
+        // Fetch all conversations that have summaries (catalogued conversations)
+        const cataloguedConversations = db.prepare(`
+            SELECT id, title, summary, topics
+            FROM conversations
+            WHERE summary IS NOT NULL
+            ORDER BY updated_at DESC
+        `).all() as Array<{ id: string; title: string; summary: string | null; topics: string | null }>;
+
+        if (cataloguedConversations.length === 0) {
+            return res.json({
+                success: true,
+                results: [],
+                query,
+                count: 0,
+                message: 'No catalogued conversations found. Run cataloguing first.'
+            });
+        }
+
+        // Build prompt for Claude Haiku to rank conversations by semantic relevance
+        const systemPrompt = `You are a conversation search assistant. Given a user query and a list of conversations with their summaries, rank the conversations by semantic relevance to the query.
+
+Return a JSON array of conversation IDs ranked by relevance (most relevant first), with a relevance score (0-100) and a brief reasoning for each match.
+
+Format: [{"conversation_id": "...", "relevance_score": 95, "reasoning": "..."}, ...]
+
+Only include conversations that are actually relevant to the query. If no conversations match, return an empty array.`;
+
+        const conversationList = cataloguedConversations.map((c, idx) => {
+            const topics = c.topics ? JSON.parse(c.topics) : [];
+            return `${idx + 1}. ID: ${c.id}
+   Title: ${c.title}
+   Summary: ${c.summary || 'No summary'}
+   Topics: ${topics.join(', ') || 'None'}`;
+        }).join('\n\n');
+
+        const userPrompt = `User query: "${query}"
+
+Conversations to rank:
+
+${conversationList}
+
+Return JSON array of relevant conversations ranked by relevance.`;
+
+        // Call LLM to get ranked results
+        let rankedResults: Array<{ conversation_id: string; relevance_score: number; reasoning: string }>;
+        try {
+            const llmResult = await callLLM<Array<{ conversation_id: string; relevance_score: number; reasoning: string }>>(
+                systemPrompt,
+                userPrompt,
+                { timeout: 30000 }
+            );
+            rankedResults = Array.isArray(llmResult.response) ? llmResult.response : [];
+        } catch (llmErr: any) {
+            console.error('[Routes] Semantic search LLM call failed:', llmErr.message);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to perform semantic search',
+                details: llmErr.message
+            });
+        }
+
+        // Limit results
+        const topResults = rankedResults.slice(0, resultLimit);
+
+        // Fetch full conversation details and messages for top results
+        const results = topResults.map(result => {
+            const conversation = conversationStmts.get.get(result.conversation_id);
+            if (!conversation) return null;
+
+            const messages = conversationMessageStmts.list.all(result.conversation_id);
+
+            return {
+                conversation_id: conversation.id,
+                conversation_title: conversation.title,
+                conversation_status: conversation.status,
+                summary: conversation.summary,
+                topics: conversation.topics ? JSON.parse(conversation.topics) : [],
+                relevance_score: result.relevance_score,
+                relevance_reason: result.reasoning,
+                messages,
+                created_at: conversation.created_at,
+                updated_at: conversation.updated_at
+            };
+        }).filter(r => r !== null);
+
+        res.json({
+            success: true,
+            results,
+            query,
+            count: results.length
+        });
+    } catch (err: any) {
+        console.error('[Routes] Semantic search error:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
