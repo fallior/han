@@ -2489,6 +2489,10 @@
             } catch { showToast('Connection error', true); }
         }
 
+        // Preserve functions for onclick handlers (prevent tree-shaking)
+        (window as any).approveProposal = approveProposal;
+        (window as any).rejectProposal = rejectProposal;
+
         // ── Command Centre ─────────────────────────────────────
 
         function switchCommandSubTab(tab: string) {
