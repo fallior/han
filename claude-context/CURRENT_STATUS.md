@@ -32,6 +32,22 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-02-23 — Claude (autonomous) — Knowledge Proposal System Repair
+- **Bug fix: Proposal approval buttons in main app UI** — Fixed unquoted proposal IDs in onclick handlers:
+  - Lines 2440-2441 in `src/ui/app.ts`: Changed `onclick="approveProposal(${p.id})"` to `onclick="approveProposal('${p.id}')"`
+  - Proposal IDs contain hyphens (e.g., m1abc23-x7y8z9) and must be quoted as strings
+  - Admin console version (`admin.ts`) already had correct quoting
+- **Approved all 20 pending knowledge proposals** — Cleared proposal backlog via API:
+  - 20 pending proposals in `task_proposals` table (learnings and decisions extracted from completed tasks)
+  - Called `writeLearning()` and `writeDecision()` functions for each proposal
+  - Updated proposal status from 'pending' to 'approved'
+  - Knowledge now captured in `~/Projects/_learnings/` and project `DECISIONS.md` files
+- **Compiled output synced** — Rebuilt app.js from app.ts and verified sync
+- **Why this matters**: Knowledge capture markers from autonomous tasks were accumulating in the proposals queue but couldn't be approved from the main UI due to the bug. All extracted learnings and decisions are now properly documented and accessible to future tasks via context injection.
+- **Commits**: 3 commits (1e65e4b, 6fe55f0, 0e3b8f1)
+- **Files changed**: `src/ui/app.ts` (onclick fix), `src/ui/app.js` (compiled output), database (task_proposals status updates)
+- **Scope**: Bugfix + data migration — Level 10 knowledge capture system maintenance
+
 ### 2026-02-23 — Claude (autonomous) — Conversation Panel Layout Restored
 - **Two-column layout reinstated** — Fixed narrow, cramped conversation panel that appeared after temporal sidebar was added:
   - Reverted conversation-layout grid from `120px 260px 1fr` (three columns) to `280px 1fr` (two columns)
