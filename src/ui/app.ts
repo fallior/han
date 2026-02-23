@@ -2437,8 +2437,8 @@
                         <div style="font-size:10px;color:var(--text-muted);">Project: ${(p.project_path || '').split('/').pop()}</div>
                         ${detail}
                         <div class="dash-proposal-actions">
-                            <button class="bridge-btn" style="flex:1;padding:6px;font-size:11px;" onclick="approveProposal(${p.id})">Approve</button>
-                            <button class="bridge-btn bridge-btn-secondary" style="flex:1;padding:6px;font-size:11px;" onclick="rejectProposal(${p.id})">Reject</button>
+                            <button class="bridge-btn" style="flex:1;padding:6px;font-size:11px;" onclick="approveProposal('${p.id}')">Approve</button>
+                            <button class="bridge-btn bridge-btn-secondary" style="flex:1;padding:6px;font-size:11px;" onclick="rejectProposal('${p.id}')">Reject</button>
                         </div>
                     </div>`;
                 }
