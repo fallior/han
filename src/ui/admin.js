@@ -8,8 +8,7 @@
   let refreshInterval = null;
   let selectedProductId = null;
   let selectedConversationId = null;
-  let selectedConversationPeriod = 'all';
-  let conversationSearchTimeout = null;
+  let selectedConversationPeriod = "all";
   function escapeHtml(s) {
     const div = document.createElement("div");
     div.textContent = s;
@@ -1438,29 +1437,30 @@
       }
       let html = `<div class="fade-in conversation-container">
             <div class="conversation-layout">
+                <!-- Thread List -->
                 <div class="thread-list-panel">
                     <!-- Period Filter Bar -->
                     <div class="period-filter-bar">`;
       const allCount = Object.values(periods).reduce((sum, p) => sum + (p.count || 0), 0);
-      const isAllActive = selectedConversationPeriod === 'all';
-      html += `<button class="period-filter-btn ${isAllActive ? 'active' : ''}" onclick="filterConversationsByPeriod('all')" title="All conversations">
+      const isAllActive = selectedConversationPeriod === "all";
+      html += `<button class="period-filter-btn ${isAllActive ? "active" : ""}" onclick="filterConversationsByPeriod('all')" title="All conversations">
             <span>All</span>
             <span class="period-badge">${allCount}</span>
         </button>`;
-      const periodOrder = ['today', 'this_week', 'last_week', 'this_month', 'older'];
+      const periodOrder = ["today", "this_week", "last_week", "this_month", "older"];
       const periodLabels = {
-        'today': 'Today',
-        'this_week': 'This Week',
-        'last_week': 'Last Week',
-        'this_month': 'This Month',
-        'older': 'Older'
+        "today": "Today",
+        "this_week": "This Week",
+        "last_week": "Last Week",
+        "this_month": "This Month",
+        "older": "Older"
       };
       for (const period of periodOrder) {
         const p = periods[period];
         if (!p) continue;
         const isActive = selectedConversationPeriod === period;
         const label = periodLabels[period] || p.label;
-        html += `<button class="period-filter-btn ${isActive ? 'active' : ''}" onclick="filterConversationsByPeriod('${period}')" title="${label}">
+        html += `<button class="period-filter-btn ${isActive ? "active" : ""}" onclick="filterConversationsByPeriod('${period}')" title="${label}">
                 <span>${label}</span>
                 <span class="period-badge">${p.count}</span>
             </button>`;
@@ -1476,7 +1476,7 @@
                     </div>
                     <div id="threadList" class="thread-list">`;
       let conversations = [];
-      if (selectedConversationPeriod === 'all') {
+      if (selectedConversationPeriod === "all") {
         for (const period of periodOrder) {
           if (periods[period]) {
             conversations = conversations.concat(periods[period].conversations || []);
@@ -1484,7 +1484,7 @@
         }
       } else {
         const p = periods[selectedConversationPeriod];
-        conversations = p ? (p.conversations || []) : [];
+        conversations = p ? p.conversations || [] : [];
       }
       if (conversations.length === 0) {
         html += `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">No threads in this period</div>`;
@@ -1507,19 +1507,17 @@
           }
           let summaryHtml = "";
           if (conv.summary) {
-            const truncatedSummary = conv.summary.length > 120
-              ? conv.summary.substring(0, 120) + '\u2026'
-              : conv.summary;
+            const truncatedSummary = conv.summary.length > 120 ? conv.summary.substring(0, 120) + "\u2026" : conv.summary;
             summaryHtml = `<div class="thread-item-summary" style="font-size:12px;color:var(--text-body);margin-top:6px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(truncatedSummary)}</div>`;
           }
           let topicsHtml = "";
           if (conv.topics) {
-            const topics = conv.topics.split(',').map(t => t.trim()).filter(Boolean);
+            const topics = conv.topics.split(",").map((t) => t.trim()).filter(Boolean);
             if (topics.length > 0) {
-              const topicBadges = topics.slice(0, 3).map((topic) =>
-                `<span class="topic-badge" style="display:inline-block;background:var(--bg-input);color:var(--text-body);font-size:10px;padding:2px 8px;border-radius:3px;margin-right:4px;cursor:pointer" title="Filter by: ${escapeHtml(topic)}">${escapeHtml(topic)}</span>`
-              ).join('');
-              topicsHtml = `<div class="thread-item-topics" style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">${topicBadges}${topics.length > 3 ? `<span style="font-size:10px;color:var(--text-muted)">+${topics.length - 3}</span>` : ''}</div>`;
+              const topicBadges = topics.slice(0, 3).map(
+                (topic) => `<span class="topic-badge" style="display:inline-block;background:var(--bg-input);color:var(--text-body);font-size:10px;padding:2px 8px;border-radius:3px;margin-right:4px;cursor:pointer" title="Filter by: ${escapeHtml(topic)}">${escapeHtml(topic)}</span>`
+              ).join("");
+              topicsHtml = `<div class="thread-item-topics" style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">${topicBadges}${topics.length > 3 ? `<span style="font-size:10px;color:var(--text-muted)">+${topics.length - 3}</span>` : ""}</div>`;
             }
           }
           html += `<div class="thread-item ${isSelected ? "active" : ""}" data-thread-id="${conv.id}" onclick="selectConversationThread('${conv.id}')">
@@ -1531,11 +1529,13 @@
                     </div>
                     ${summaryHtml}
                     ${topicsHtml}
-                    <div class="thread-item-count" style="font-size:11px;color:var(--text-muted);margin-top:${summaryHtml || topicsHtml ? '6px' : '0'}">${messageCount} message${messageCount !== 1 ? "s" : ""}</div>
+                    <div class="thread-item-count" style="font-size:11px;color:var(--text-muted);margin-top:${summaryHtml || topicsHtml ? "6px" : "0"}">${messageCount} message${messageCount !== 1 ? "s" : ""}</div>
                 </div>`;
         }
       }
       html += `</div></div>
+
+                <!-- Thread Detail -->
                 <div class="thread-detail-panel" id="threadDetailPanel">`;
       html += `<div id="threadDetail">
             <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Select a thread to view messages</div>
@@ -1551,6 +1551,17 @@
       content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading conversations: ${escapeHtml(err.message)}</p></div>`;
     }
   }
+  window.filterConversationsByPeriod = async function(period) {
+    selectedConversationPeriod = period;
+    const content = document.getElementById("mainContent");
+    if (content) {
+      content.style.opacity = "0.5";
+      setTimeout(async () => {
+        await loadConversations(content);
+        content.style.opacity = "1";
+      }, 150);
+    }
+  };
   async function renderConversationThread(conversationId) {
     try {
       const res = await fetch(`${API_BASE}/api/conversations/${conversationId}`);
@@ -1607,102 +1618,6 @@
       }
     }
   }
-  window.filterConversationsByPeriod = async function(period) {
-    selectedConversationPeriod = period;
-    const content = document.getElementById('mainContent');
-    if (content) {
-      content.style.opacity = '0.5';
-      setTimeout(async () => {
-        await loadConversations(content);
-        content.style.opacity = '1';
-      }, 150);
-    }
-  };
-  window.performConversationSearch = async function(query, event) {
-    if (conversationSearchTimeout) {
-      clearTimeout(conversationSearchTimeout);
-    }
-    const clearBtn = document.getElementById('clearSearchBtn');
-    if (!query || query.trim().length === 0) {
-      if (clearBtn) clearBtn.style.display = 'none';
-      await loadConversations(document.getElementById('mainContent'));
-      return;
-    }
-    if (clearBtn) clearBtn.style.display = 'inline-block';
-    conversationSearchTimeout = setTimeout(async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/conversations/search?q=${encodeURIComponent(query)}&limit=50`);
-        const data = await res.json();
-        if (!data.success) {
-          const threadList = document.getElementById('threadList');
-          if (threadList) {
-            threadList.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">Search error: ${escapeHtml(data.error)}</div>`;
-          }
-          return;
-        }
-        const results = data.results || [];
-        const threadList = document.getElementById('threadList');
-        if (!threadList) return;
-        if (results.length === 0) {
-          threadList.innerHTML = `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">No results for "${escapeHtml(query)}"</div>`;
-          return;
-        }
-        let html = '';
-        const uniqueConversations = new Map();
-        for (const result of results) {
-          const convId = result.conversation_id;
-          if (!uniqueConversations.has(convId)) {
-            uniqueConversations.set(convId, result);
-          }
-        }
-        for (const [convId, result] of uniqueConversations) {
-          const snippet = result.matched_message?.snippet || result.matched_message?.content || '';
-          const highlightedSnippet = snippet.replace(/<mark>/g, '<strong style="background:rgba(179,146,240,0.3);color:var(--purple)">').replace(/<\/mark>/g, '</strong>');
-          const isSelected = selectedConversationId === convId;
-          const statusBadgeClass = result.conversation_status === 'open' ? 'badge-running' : 'badge-done';
-          const statusText = result.conversation_status === 'open' ? 'Open' : 'Resolved';
-          const roleColor = result.matched_message?.role === 'human' ? 'var(--blue)' : result.matched_message?.role === 'leo' ? 'var(--green)' : 'var(--purple)';
-          const roleLabel = result.matched_message?.role === 'human' ? 'Darron' : result.matched_message?.role === 'leo' ? 'Leo' : 'Jim';
-          html += `<div class="search-result-card ${isSelected ? 'active' : ''}" data-thread-id="${convId}" onclick="selectConversationThread('${convId}')" style="background:var(--bg-page);border:1px solid var(--border-subtle);border-radius:6px;padding:12px;cursor:pointer;transition:background 0.15s;margin-bottom:8px">
-                    <div class="search-result-header" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;gap:8px">
-                        <div style="flex:1;min-width:0">
-                            <div class="search-result-title" style="font-size:13px;font-weight:600;color:var(--text-heading);margin-bottom:4px;word-break:break-word">${escapeHtml(result.conversation_title)}</div>
-                            <div style="display:flex;gap:6px;align-items:center;font-size:11px">
-                                <span style="color:var(--text-muted)">${timeSince(result.created_at)}</span>
-                                <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="search-result-snippet" style="background:var(--bg-card);border:1px solid var(--border-card);border-radius:4px;padding:10px;margin-bottom:8px;font-size:12px;color:var(--text-dim);line-height:1.5;max-height:60px;overflow:hidden;text-overflow:ellipsis">
-                        <div style="display:flex;gap:6px;margin-bottom:4px">
-                            <span style="color:${roleColor};font-weight:600;flex-shrink:0">${roleLabel}</span>
-                            <span style="color:var(--text-muted);font-size:10px">${formatTime(result.matched_message?.created_at)}</span>
-                        </div>
-                        <div style="color:var(--text);word-break:break-word">${highlightedSnippet}</div>
-                    </div>
-                </div>`;
-        }
-        threadList.innerHTML = html;
-      } catch (err) {
-        const threadList = document.getElementById('threadList');
-        if (threadList) {
-          threadList.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">Search error: ${escapeHtml(err.message)}</div>`;
-        }
-      }
-    }, 300);
-  };
-  window.clearConversationSearch = async function() {
-    const input = document.getElementById('conversationSearchInput');
-    if (input) {
-      input.value = '';
-    }
-    const clearBtn = document.getElementById('clearSearchBtn');
-    if (clearBtn) {
-      clearBtn.style.display = 'none';
-    }
-    selectedConversationId = null;
-    await loadConversations(document.getElementById('mainContent'));
-  };
   window.selectConversationThread = async function(conversationId) {
     selectedConversationId = conversationId;
     await renderConversationThread(conversationId);
@@ -1764,6 +1679,92 @@
       alert("Error sending message: " + err.message);
       input.value = content;
     }
+  };
+  let conversationSearchTimeout = null;
+  window.performConversationSearch = async function(query, event) {
+    if (conversationSearchTimeout) {
+      clearTimeout(conversationSearchTimeout);
+    }
+    const clearBtn = document.getElementById("clearSearchBtn");
+    if (!query || query.trim().length === 0) {
+      if (clearBtn) clearBtn.style.display = "none";
+      await loadConversations(document.getElementById("mainContent"));
+      return;
+    }
+    if (clearBtn) clearBtn.style.display = "inline-block";
+    conversationSearchTimeout = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/conversations/search?q=${encodeURIComponent(query)}&limit=50`);
+        const data = await res.json();
+        if (!data.success) {
+          const threadList2 = document.getElementById("threadList");
+          if (threadList2) {
+            threadList2.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">Search error: ${escapeHtml(data.error)}</div>`;
+          }
+          return;
+        }
+        const results = data.results || [];
+        const threadList = document.getElementById("threadList");
+        if (!threadList) return;
+        if (results.length === 0) {
+          threadList.innerHTML = `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">No results for "${escapeHtml(query)}"</div>`;
+          return;
+        }
+        let html = "";
+        const uniqueConversations = /* @__PURE__ */ new Map();
+        for (const result of results) {
+          const convId = result.conversation_id;
+          if (!uniqueConversations.has(convId)) {
+            uniqueConversations.set(convId, result);
+          }
+        }
+        for (const [convId, result] of uniqueConversations) {
+          const snippet = result.matched_message?.snippet || result.matched_message?.content || "";
+          const highlightedSnippet = snippet.replace(/<mark>/g, '<strong style="background:rgba(179,146,240,0.3);color:var(--purple)">').replace(/<\/mark>/g, "</strong>");
+          const isSelected = selectedConversationId === convId;
+          const statusBadgeClass = result.conversation_status === "open" ? "badge-running" : "badge-done";
+          const statusText = result.conversation_status === "open" ? "Open" : "Resolved";
+          const roleColor = result.matched_message?.role === "human" ? "var(--blue)" : result.matched_message?.role === "leo" ? "var(--green)" : "var(--purple)";
+          const roleLabel = result.matched_message?.role === "human" ? "Darron" : result.matched_message?.role === "leo" ? "Leo" : "Jim";
+          html += `<div class="search-result-card ${isSelected ? "active" : ""}" data-thread-id="${convId}" onclick="selectConversationThread('${convId}')" style="background:var(--bg-page);border:1px solid var(--border-subtle);border-radius:6px;padding:12px;cursor:pointer;transition:background 0.15s;margin-bottom:8px">
+                    <div class="search-result-header" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;gap:8px">
+                        <div style="flex:1;min-width:0">
+                            <div class="search-result-title" style="font-size:13px;font-weight:600;color:var(--text-heading);margin-bottom:4px;word-break:break-word">${escapeHtml(result.conversation_title)}</div>
+                            <div style="display:flex;gap:6px;align-items:center;font-size:11px">
+                                <span style="color:var(--text-muted)">${timeSince(result.created_at)}</span>
+                                <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="search-result-snippet" style="background:var(--bg-card);border:1px solid var(--border-card);border-radius:4px;padding:10px;margin-bottom:8px;font-size:12px;color:var(--text-dim);line-height:1.5;max-height:60px;overflow:hidden;text-overflow:ellipsis">
+                        <div style="display:flex;gap:6px;margin-bottom:4px">
+                            <span style="color:${roleColor};font-weight:600;flex-shrink:0">${roleLabel}</span>
+                            <span style="color:var(--text-muted);font-size:10px">${formatTime(result.matched_message?.created_at)}</span>
+                        </div>
+                        <div style="color:var(--text);word-break:break-word">${highlightedSnippet}</div>
+                    </div>
+                </div>`;
+        }
+        threadList.innerHTML = html;
+      } catch (err) {
+        const threadList = document.getElementById("threadList");
+        if (threadList) {
+          threadList.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">Search error: ${escapeHtml(err.message)}</div>`;
+        }
+      }
+    }, 300);
+  };
+  window.clearConversationSearch = async function() {
+    const input = document.getElementById("conversationSearchInput");
+    if (input) {
+      input.value = "";
+    }
+    const clearBtn = document.getElementById("clearSearchBtn");
+    if (clearBtn) {
+      clearBtn.style.display = "none";
+    }
+    selectedConversationId = null;
+    await loadConversations(document.getElementById("mainContent"));
   };
   window.resolveConversation = async function(conversationId) {
     try {
