@@ -198,6 +198,25 @@ claude-remote/
 5. **Retry ladder triggered**: Ghost task re-enters queue and follows escalating retry ladder (reset → Sonnet diagnostic → Opus diagnostic → human escalation)
 6. **Supervisor integration**: cancel_task action checks `getAbortForTask()` to distinguish live agents from ghosts, enabling autonomous cancellation of ghost-running tasks
 
+### Memory Bank Truncation (enforceTokenCap)
+
+**Purpose**: Keep supervisor memory banks bounded to prevent context window bloat.
+
+**Implementation** (`supervisor-worker.ts:enforceTokenCap`):
+1. Called after every memory bank write (identity.md, active-context.md, patterns.md, self-reflection.md)
+2. Extracts header (preamble before first cycle/section)
+3. Calculates tail size: `maxTailChars = (cap * 4) - header.length - 50`
+4. Writes: header + tail + truncation marker
+5. Target: ~6KB per file (~1500 tokens)
+
+**Heading detection** (DEC-022, fixed 2026-02-26):
+- Primary: searches for H2 (`\n## `) to find header boundary
+- Fallback: searches for H3 (`\n### `) when H2 not found or too deep
+- Guard: `Math.max(0, maxTailChars)` prevents negative arithmetic
+- Handles both H2 and H3 heading structures robustly
+
+**Bug history**: Prior to 2026-02-26, function only searched for H2 but self-reflection.md used H3 headings. This caused headerEnd to match deep embedded content (~byte 247,000), making maxTailChars deeply negative, and `content.slice(-negative)` retained entire file. File grew from 6KB to 292KB (49x cap) over weeks. Fixed with two-line change: H3 fallback + negative guard.
+
 ## Key Patterns
 
 ### State File Format

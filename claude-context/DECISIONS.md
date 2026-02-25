@@ -51,6 +51,7 @@ When you make a significant technical or design decision:
 | DEC-019 | Ghost Task Detection with Periodic Check | Accepted | 2026-02-22 |
 | DEC-020 | Cancelled Tasks Satisfy Dependencies | **Settled** | 2026-02-22 |
 | DEC-021 | Category-Aware Model Selection Strategy | Accepted | 2026-02-23 |
+| DEC-022 | enforceTokenCap H3 Fallback and Negative Guard | **Settled** | 2026-02-26 |
 
 ---
 
@@ -1232,6 +1233,105 @@ We chose **Option 1: Add task category field and use category-aware routing**.
 - `recommendModel()` function (orchestrator.ts:420-469)
 - `decomposeGoal()` function (planning.ts:280-580)
 - DEC-017: Escalating Retry Ladder (avoided by routing correctly upfront)
+
+---
+
+### DEC-022: enforceTokenCap H3 Fallback and Negative Guard
+
+**Date**: 2026-02-26
+**Author**: Claude (autonomous)
+**Status**: Settled
+
+#### Context
+
+The `enforceTokenCap()` function in `supervisor-worker.ts` was supposed to keep Leo's self-reflection.md file at ~6KB (1500 tokens) by truncating to a header + recent tail. However, the file grew uncontrollably to 292KB (49x the intended size), growing ~6.5KB per supervisor cycle instead of staying bounded.
+
+The root cause was a two-part bug:
+1. The function searched for H2 headings (`\n## `) to find the header boundary, but self-reflection.md uses H3 headings (`### Cycle #N`)
+2. When no H2 was found near the top, it matched an H2 deep in embedded exploration summaries at ~byte 247,000
+3. This made the "header" 247KB long, causing `maxTailChars = (cap * 4) - 247000 - 50` to go deeply negative
+4. `content.slice(-negativeNumber)` converted the negative to positive, retaining nearly the entire file
+5. Each cycle appended new content but failed to truncate, causing unbounded growth
+
+This was traced during personal exploration by heartbeat Leo and documented in `~/.claude-remote/memory/enforceTokenCap-fix.md`.
+
+#### Options Considered
+
+1. **Add H3 fallback and negative guard (chosen)**
+   - ✅ Minimal code change (2 lines)
+   - ✅ Handles both H2 and H3 heading styles
+   - ✅ Prevents negative maxTailChars regardless of header size
+   - ✅ Preserves existing logic for well-formed files
+   - ✅ Self-documenting via conditional structure
+   - ❌ Requires understanding both failure modes
+
+2. **Rewrite to use regex for any heading level**
+   - ✅ More generic — handles H1-H6
+   - ❌ Larger code change
+   - ❌ Regex overhead for simple search
+   - ❌ Over-engineered for known heading structure
+
+3. **Force H2 headings in self-reflection.md**
+   - ✅ Avoids code change
+   - ❌ Requires rewriting Leo's memory structure
+   - ❌ Doesn't protect against future heading changes
+   - ❌ Fragile — depends on memory format consistency
+
+4. **Remove truncation entirely, rely on manual cleanup**
+   - ✅ Simplest code
+   - ❌ Loses automatic memory management
+   - ❌ Requires manual intervention as files grow
+   - ❌ Defeats purpose of automated supervisor
+
+#### Decision
+
+We chose **Option 1: Add H3 fallback and negative guard**. Two changes in `supervisor-worker.ts` lines 930-933:
+
+```typescript
+// Change 1: H3 fallback when H2 not found or too deep
+let headerEnd = content.indexOf('\n## ', 100);
+if (headerEnd < 0 || headerEnd > cap * 4) {
+    headerEnd = content.indexOf('\n### ', 100);
+}
+const header = headerEnd > 0 && headerEnd < cap * 4
+    ? content.slice(0, headerEnd)
+    : content.slice(0, 200);
+
+// Change 2: Negative guard
+const maxTailChars = Math.max(0, (cap * 4) - header.length - 50);
+const tail = maxTailChars > 0 ? content.slice(-maxTailChars) : '';
+```
+
+Both changes are necessary:
+- H3 fallback handles files using H3 structure (prevents matching deep H2s)
+- Negative guard protects against pathological cases where header > cap (prevents negative slice)
+
+Also manually truncated self-reflection.md from 11KB to 6KB to remove accumulated bloat.
+
+#### Consequences
+
+**Positive:**
+- Self-reflection.md now correctly truncates to ~6KB per cycle
+- Handles both H2 and H3 heading structures
+- Guards against negative maxTailChars in all cases
+- Memory banks remain bounded (prevents context window bloat)
+- Verified with supervisor cycle test: file size stable
+
+**Negative:**
+- None identified
+
+**Why Settled:**
+- This bug caused 49x file growth and went undetected for weeks
+- The fix addresses the root cause (heading mismatch) and guards against the symptom (negative math)
+- Changing this logic without understanding both failure modes risks reintroducing unbounded growth
+- Memory management is critical for long-running supervisor — bounded files are non-negotiable
+
+#### Related
+
+- `src/server/services/supervisor-worker.ts` — enforceTokenCap function (lines 896-911, fixed at 930-933)
+- `~/.claude-remote/memory/enforceTokenCap-fix.md` — Full bug analysis and fix specification
+- `~/.claude-remote/memory/leo/self-reflection.md` — Affected file (manually truncated post-fix)
+- Supervisor cycle mechanism (Level 8) — Calls enforceTokenCap after every memory bank write
 
 ---
 

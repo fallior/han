@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-23 (Autonomous) by Claude
+> Last updated: 2026-02-26 (Autonomous) by Claude
 
 ## Current Stage
 
@@ -31,6 +31,22 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-26 — Claude (autonomous) — enforceTokenCap Bug Fix Complete
+- **Fixed critical memory truncation bug** in `supervisor-worker.ts:enforceTokenCap()` (lines 930-933):
+  - **Root cause**: self-reflection.md uses H3 headings (`### Cycle #N`) but function only searched for H2 headings
+  - H2 search matched deep embedded content at ~byte 247,000, making "header" nearly entire file
+  - maxTailChars calculation went deeply negative: `(cap * 4) - 247000 - 50`
+  - `content.slice(-negative)` retained entire file due to negative-to-positive conversion
+  - File grew ~6.5KB per cycle instead of truncating to 6KB cap (reached 292KB, 49x intended size)
+- **Two-line fix applied**:
+  1. H3 fallback: `if (headerEnd < 0 || headerEnd > cap * 4) { headerEnd = content.indexOf('\n### ', 100); }`
+  2. Negative guard: `const maxTailChars = Math.max(0, (cap * 4) - header.length - 50);`
+- **Manual cleanup**: Truncated self-reflection.md from 11KB/103 lines to 6KB/100 lines (preserved curated Cycle #503 content)
+- **Verified**: Ran supervisor cycle test — file size stable, no uncontrolled growth
+- **Impact**: Prevents Leo's memory banks from unbounded growth, maintains 6KB cap (1500 token cap)
+- **Commits**: 5 commits (fe0adce, 0ac4a6d, b1d49ad, 1f38acf, e6b78f5)
+- **Files changed**: `src/server/services/supervisor-worker.ts` (enforceTokenCap function), `~/.claude-remote/memory/leo/self-reflection.md` (manual truncation)
 
 ### 2026-02-26 — Planning Agent — enforceTokenCap Bug Fix
 - **Fixed critical truncation bug** in `supervisor-worker.ts:enforceTokenCap()` (lines 930-933):
