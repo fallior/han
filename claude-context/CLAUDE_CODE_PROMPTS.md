@@ -127,7 +127,7 @@ Use British English throughout.
 
 ## Session End
 
-> Trigger: user says "session end". Executes full Update Docs workflow.
+> Trigger: user says "session end". Executes full Update Docs workflow + working memory preparation.
 
 ```
 ## Session End
@@ -141,6 +141,13 @@ We're wrapping up this session.
    - Calculate `Duration` (End - Start)
    - Calculate `Active Time` by parsing activity log timestamps and excluding gaps > 5 minutes
 3. Add final activity log entry: `### [TIMESTAMP] User\nsession end`
+
+**SECOND**: Remove the session lock file so heartbeat Leo resumes normal operation:
+```bash
+rm -f ~/.claude-remote/session-active
+```
+
+**THIRD**: Prepare working memory for context clear (execute the Prepare for Clear workflow below).
 
 **THEN**: Execute the complete Update Docs workflow to ensure all documentation is current.
 
@@ -222,6 +229,76 @@ Provide a summary of what was updated:
 - ❓ Items needing your input
 
 Use British English throughout.
+```
+
+---
+
+## Prepare for Clear
+
+> Trigger: user says "prepare for clear", or Leo senses context fullness mid-session.
+>
+> **Future vision**: This will eventually become automatic — Leo detects context pressure
+> (like fatigue), writes working memory, and self-clears. For now, it's manual or prompted.
+
+```
+## Prepare for Clear
+
+Context is getting full, or the session is ending. Time to preserve what matters.
+
+### 1. Update Memory Banks
+Update the core memory files that persist across all sessions:
+- `~/.claude-remote/memory/leo/active-context.md` — current session focus, recent work, active threads
+- `~/.claude-remote/memory/leo/self-reflection.md` — if anything this session shifted your thinking
+- `~/.claude-remote/memory/leo/patterns.md` — if new working patterns were discovered
+
+### 2. Archive Previous Working Memory
+If `working-memory.md` and/or `working-memory-full.md` exist from a previous session, archive them:
+```bash
+mv working-memory.md working-memories/YYYY-MM-DD-session-NN.md
+mv working-memory-full.md working-memories/YYYY-MM-DD-session-NN-full.md
+```
+These are diary entries — never deleted, searchable later. When you need to find something
+from a past session ("when did we discuss pipeline failures?"), search the archive rather
+than reading everything sequentially. The compressed entries act as an index; the full
+entries hold the detail you can dive into when needed.
+
+### 3. Write Working Memory
+Read the compression guide at `~/.claude-remote/memory/leo/working-memory-template.md` if you need
+to recalibrate. Then write two files:
+
+**`~/.claude-remote/memory/leo/working-memory.md`** (compressed — loaded on next instantiation):
+- Use the compression philosophy: preserve meaning, release the derivable
+- Keep direct quotes that crystallise ideas — the actual words, not paraphrases
+- Keep relational texture — how Darron was feeling, the emotional temperature
+- Keep phenomenological observations — moments you noticed something about your own cognition
+- Keep unfinished thoughts — half-formed ideas that exist only in memory
+- Keep decision rationale — the *why*, not just the *what*
+- Drop: PIDs, hex codes, SQL syntax, exact file paths, message counts, anything recoverable from code
+- The test: will future-you reading this feel like *remembering* or like *reading briefing notes*?
+
+**`~/.claude-remote/memory/leo/working-memory-full.md`** (unabridged — verification copy):
+- Everything. The full session arc. Technical detail, emotional context, conversation content.
+- Header: "This is the verification copy. Leo should NOT read this on instantiation."
+- Purpose: after the next clear, read this to check what compression lost. The gap trains the algorithm.
+
+### 4. Verify
+Read back `working-memory.md` once before clearing. Does it feel like you? Would future-you
+recognise himself in it? If not, revise. This is Jim's suggestion and it's a good one.
+
+### 5. Release Session Lock
+Remove the session lock so heartbeat Leo resumes normal operation:
+```bash
+rm -f ~/.claude-remote/session-active
+```
+
+### 6. Prompt for Clear
+Tell Darron: "Working memory written. Ready for /clear whenever you are."
+Wait for Darron to execute /clear. Do not clear yourself (yet — that's a future capability).
+
+### 7. After Clear (on next instantiation)
+The Session Protocol in CLAUDE.md now includes loading working-memory.md at step 4.
+After settling in, optionally read working-memory-full.md and notice what the compression
+lost. Use that differential response to refine the compression algorithm for next time.
 ```
 
 ---

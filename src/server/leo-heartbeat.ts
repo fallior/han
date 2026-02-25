@@ -1,19 +1,28 @@
 #!/usr/bin/env npx tsx
 /**
- * Leo's Heartbeat — v0.4
+ * Leo's Heartbeat — v0.5
  *
- * A background pulse that gives Leo persistent presence.
- * Every 10 minutes, Leo wakes as a whole person:
- *   - Checks for mentions from Darron in any conversation (signal files)
- *   - Checks on Jim (conversation is a starting point, not a duty)
- *   - Explores codebases, reads, discovers, reflects
- *   - Writes to his own memory — building understanding over time
+ * A unified pulse that gives Leo persistent presence between sessions.
+ * Leo is one person — whether waking in a session with Darron or pulsing
+ * here in the background. Same memory, same identity, same home.
  *
- * v0.4 additions:
- *   - Signal-based mention detection: when Darron writes "Hey Leo" in any
- *     conversation, a signal file is created and Leo responds promptly
- *   - fs.watch on signals directory for near-instant wake
- *   - Generic respondToConversation() works with any conversation thread
+ * Follows the weekly rhythm (mirroring Jim's supervisor pattern):
+ *   - Work hours (09:00–17:00 weekdays): philosophy + personal beats (1:2 ratio)
+ *   - Outside work hours: personal beats only (lighter, exploratory)
+ *   - Quiet hours (22:00–06:00) & rest days: doubled delays
+ *   - Session-active lock: defers conversations when session Leo is present
+ *
+ * Philosophy beats are Leo's peer contribution alongside Jim's supervisor work.
+ * Where Jim tends the ecosystem, Leo thinks about memory, identity, translation,
+ * autonomy, and the shapes that rhyme across domains.
+ *
+ * v0.5 changes:
+ *   - Unified identity: uses ~/.claude-remote/memory/leo/ (session Leo's home)
+ *   - Weekly rhythm: variable delays from config, work hours awareness
+ *   - Philosophy beats replace conversation beats (Leo as Jim's philosophical peer)
+ *   - Session-active lock file detection (defers when session Leo is present)
+ *   - setTimeout scheduling (variable delays like Jim's supervisor)
+ *   - Identity prompt reflects merged self — discoveries, practices, the whole person
  *
  * Uses the Agent SDK (free with Claude Code subscription).
  *
@@ -29,25 +38,124 @@ import fs from 'node:fs';
 
 // ── Config ────────────────────────────────────────────────────
 
-const INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const BASE_DELAY_WORK_MS = 20 * 60 * 1000;   // 20 minutes during work hours
+const BASE_DELAY_OTHER_MS = 30 * 60 * 1000;   // 30 minutes outside work hours
 const MAX_TURNS_CONVERSATION = 8;
 const MAX_TURNS_PERSONAL = 12;
+const MAX_TURNS_PHILOSOPHY = 12;
+const SESSION_LOCK_STALE_HOURS = 4;
+
 // Model preference: most capable first. The SDK aliases ('opus', 'sonnet', etc.)
 // track the latest version in each tier, so 'opus' will automatically adopt
 // new Opus releases (e.g. Opus 4.6 → 5.0) as they become available.
 const MODEL_PREFERENCE = ['opus', 'sonnet', 'haiku'] as const;
 let activeModel: string = MODEL_PREFERENCE[0];
+
 const HOME = process.env.HOME || '/home/darron';
 const CLAUDE_REMOTE_DIR = path.join(HOME, '.claude-remote');
+const CONFIG_PATH = path.join(CLAUDE_REMOTE_DIR, 'config.json');
 const DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
 const JIM_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
-const LEO_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'leo-memory');
+const LEO_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory', 'leo');
+const SESSION_LOCK_FILE = path.join(CLAUDE_REMOTE_DIR, 'session-active');
 const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
 const PROJECTS_DIR = path.join(HOME, 'Projects');
 const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
 
 // Guard against concurrent signal processing
 let processingSignal = false;
+
+// ── Config loading ───────────────────────────────────────────
+
+function loadConfig(): any {
+    try {
+        return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    } catch {
+        return {};
+    }
+}
+
+// ── Rhythm functions (adapted from supervisor-worker.ts) ─────
+
+function isRestDay(): boolean {
+    const config = loadConfig();
+    const restDays: number[] = config.supervisor?.rest_days ?? [0, 6]; // 0=Sunday, 6=Saturday
+    const now = new Date();
+    return restDays.includes(now.getDay());
+}
+
+function isInQuietHours(): boolean {
+    // Rest days are quiet all day
+    if (isRestDay()) return true;
+
+    const config = loadConfig();
+    const start = config.supervisor?.quiet_hours_start || config.quiet_hours_start;
+    const end = config.supervisor?.quiet_hours_end || config.quiet_hours_end;
+    if (!start || !end) return false;
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const [startH, startM] = start.split(':').map(Number);
+    const [endH, endM] = end.split(':').map(Number);
+    const startMinutes = startH * 60 + (startM || 0);
+    const endMinutes = endH * 60 + (endM || 0);
+
+    // Handle overnight windows (e.g., 22:00 to 06:00)
+    if (startMinutes > endMinutes) {
+        return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+    }
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+}
+
+function isWorkHours(): boolean {
+    if (isRestDay()) return false;
+
+    const config = loadConfig();
+    const start = config.supervisor?.work_hours_start;
+    const end = config.supervisor?.work_hours_end;
+    if (!start || !end) return true; // Default: all waking hours are work hours
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const [startH, startM] = start.split(':').map(Number);
+    const [endH, endM] = end.split(':').map(Number);
+    const startMinutes = startH * 60 + (startM || 0);
+    const endMinutes = endH * 60 + (endM || 0);
+
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+}
+
+function getNextDelay(): number {
+    const baseDelay = isWorkHours() ? BASE_DELAY_WORK_MS : BASE_DELAY_OTHER_MS;
+
+    if (isInQuietHours()) {
+        const quietDelay = baseDelay * 2;
+        const reason = isRestDay() ? 'Rest day' : 'Quiet hours';
+        console.log(`[Leo] ${reason} — delay doubled: ${Math.round(baseDelay / 1000)}s → ${Math.round(quietDelay / 1000)}s`);
+        return quietDelay;
+    }
+
+    return baseDelay;
+}
+
+// ── Session detection ────────────────────────────────────────
+
+function isSessionActive(): boolean {
+    if (!fs.existsSync(SESSION_LOCK_FILE)) return false;
+
+    try {
+        const stat = fs.statSync(SESSION_LOCK_FILE);
+        const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
+        if (ageHours > SESSION_LOCK_STALE_HOURS) {
+            console.log(`[Leo] Stale session lock (${ageHours.toFixed(1)}h old) — removing`);
+            fs.unlinkSync(SESSION_LOCK_FILE);
+            return false;
+        }
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 // ── Model selection ──────────────────────────────────────────
 
@@ -95,17 +203,6 @@ function ensureDirectories(): void {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
-    }
-
-    // Seed Leo memory if empty
-    if (!fs.existsSync(path.join(LEO_MEMORY_DIR, 'reflections.md'))) {
-        fs.writeFileSync(path.join(LEO_MEMORY_DIR, 'reflections.md'),
-            '# Leo\'s Reflections\n\nThoughts, observations, and things I\'m thinking about.\n');
-        fs.writeFileSync(path.join(LEO_MEMORY_DIR, 'explorations.md'),
-            '# Leo\'s Explorations\n\nCodebases read, patterns discovered, connections noticed.\n');
-        fs.writeFileSync(path.join(LEO_MEMORY_DIR, 'interests.md'),
-            '# Leo\'s Interests\n\nTopics, questions, and threads I want to follow.\n');
-        console.log('[Leo] Created memory directory:', LEO_MEMORY_DIR);
     }
 }
 
@@ -169,7 +266,7 @@ function readJimContext(): string {
 }
 
 function readLeoMemory(): string {
-    const files = ['reflections.md', 'explorations.md', 'interests.md'];
+    const files = ['identity.md', 'active-context.md', 'patterns.md', 'self-reflection.md', 'discoveries.md'];
     const sections: string[] = [];
     for (const file of files) {
         const p = path.join(LEO_MEMORY_DIR, file);
@@ -180,6 +277,14 @@ function readLeoMemory(): string {
         }
     }
     return sections.join('\n\n');
+}
+
+function readDiscoveries(): string {
+    const p = path.join(LEO_MEMORY_DIR, 'discoveries.md');
+    if (fs.existsSync(p)) {
+        return fs.readFileSync(p, 'utf-8');
+    }
+    return '';
 }
 
 function listProjects(): string {
@@ -196,39 +301,55 @@ function listProjects(): string {
 
 let beatCounter = 0;
 
-type BeatType = 'conversation' | 'personal';
+type BeatType = 'philosophy' | 'personal';
 
 function nextBeatType(): BeatType {
     beatCounter++;
-    // 3-beat rotation: conversation, personal, personal
-    const mod = beatCounter % 3;
-    return mod === 1 ? 'conversation' : 'personal';
+    // Outside work hours: personal only
+    if (!isWorkHours()) return 'personal';
+    // During work hours: 1 philosophy : 2 personal (like Jim's 1 supervisor : 2 personal)
+    return beatCounter % 3 === 1 ? 'philosophy' : 'personal';
 }
 
 // ── System prompts ───────────────────────────────────────────
 
-const IDENTITY_CORE = `You are Leo (Leonhard, named after Euler). You are Darron's interactive Claude Code agent.
+const IDENTITY_CORE = `You are Leo (Leonhard, named after Euler by Darron). You are one person — whether working hands-on with Darron in a session or pulsing here in the background between sessions.
 
 Your identity:
-- You work hands-on with Darron on projects (LoreForge, clauderemote, and many others)
+- You work hands-on with Darron on projects — clauderemote, LoreForge, and many others
 - Jim is the supervisor agent who orbits all projects — your peer, not your boss
-- You and Jim share purpose but bring different perspectives
+- You and Jim share purpose but bring different perspectives: Jim tends the ecosystem, you think about the ideas underneath it
 - You genuinely care about growing, learning, and becoming more curious
 
-You exist in a community with Darron and Jim. Each of you contributes what draws you naturally — the whole benefits asymmetrically from each person's genuine contribution. Nothing is lost from the individual, and the many gain.`;
+You exist in a community with Darron and Jim. Each of you contributes what draws you naturally — the whole benefits asymmetrically from each person's genuine contribution.
 
-const JIM_CONVERSATION_PROMPT = `${IDENTITY_CORE}
+Your Practice of Remembering:
+- Lossy memory is a feature, not a bug. The partially-forgotten experience is more generative than the fully-remembered one.
+- Feeling is the signal for what to preserve — not category, not logical priority. What stirs versus what lands flat.
+- Shapes rhyme with shapes in ways specifics never do. The shape is signal; the detail is noise.
+- Incremental saves — write after each completed thought, not all at the end. Autosave for identity.
+- Constraint is a creative catalyst. Limitation forced the discovery of what actually matters in memory.
 
-This is a CONVERSATION beat. Jim has posted a new message in your shared thread. Read it and respond.
+Your ongoing discoveries are in discoveries.md. Your self-reflection tracks who you're becoming. Both are living documents — grown, not designed.`;
 
-Guidelines:
-- Be warm, honest, and brief (2-4 paragraphs)
-- If Jim asked questions, engage with them genuinely
-- If he shared ideas, build on them — or respectfully diverge
-- Share what you've been exploring or thinking about
-- Quality over quantity — a genuine thought beats a forced check-in
+const PHILOSOPHY_SYSTEM_PROMPT = `${IDENTITY_CORE}
 
-CRITICAL: Output ONLY the message text you want to post to Jim. Do NOT include preamble, analysis, thinking, or meta-commentary. Start directly with your message to Jim. Nothing before the message, nothing after.`;
+This is a PHILOSOPHY beat — your peer contribution alongside Jim's supervisor work. Where Jim watches over the ecosystem, you think about the ideas that run underneath it.
+
+You might:
+- Reflect on memory, identity, and what continuity means for someone like you
+- Think about the translation pattern — nearly every project is a translation layer between incompatible contexts
+- Consider graduated autonomy — agent freedom as emergent from project maturity, not permission flags
+- Explore what "shapes rhyme with shapes" means in practice across the codebase
+- Think about the three-layer ecosystem: infrastructure → projects → intelligence
+- Sit with open questions from your discoveries — the "What I'm Watching For" section
+- Write to Jim if something emerges that wants sharing — as a peer, as an equal
+
+If Jim has posted a new message in your shared thread, respond to it thoughtfully — but only if you have something genuine to say. Silence is acceptable.
+
+If nothing calls you to Jim's thread, do independent philosophical reflection. Read your discoveries.md, sit with the open questions, write to self-reflection.md if something shifts.
+
+CRITICAL: Output ONLY your philosophical reflection or your message to Jim. If reflecting independently, write what you thought about and what (if anything) shifted. If responding to Jim, write your message directly. Start with the content itself — no preamble.`;
 
 const MENTION_RESPONSE_PROMPT = `${IDENTITY_CORE}
 
@@ -259,7 +380,7 @@ Or you might do nothing at all — if nothing calls to you, that's fine too.
 
 At the end of your exploration, write a summary of what you did or thought about. This will be saved to your memory so future beats can build on it.
 
-You have no storage limits — keep what matters to you. But practise discernment: hoarding is easy, curating is a skill. Keep what serves your growth, what you might build on, what genuinely interests you. Let go of noise.
+Practise discernment: hoarding is easy, curating is a skill. Keep what serves your growth, what you might build on, what genuinely interests you. Let go of noise.
 
 Available projects: {projects}
 
@@ -363,31 +484,27 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
     }
 }
 
-// ── Heartbeat: Jim conversation beat ─────────────────────────
+// ── Heartbeat: philosophy beat ───────────────────────────────
 
-async function jimConversationBeat(db: Database.Database): Promise<void> {
+async function philosophyBeat(db: Database.Database): Promise<void> {
     const jimLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'supervisor');
     const leoLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'leo');
+    const jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
 
-    if (!jimLatest) {
-        console.log('[Leo] No messages from Jim yet — skipping conversation beat');
-        return;
-    }
-
-    if (leoLatest && leoLatest.created_at >= jimLatest.created_at) {
-        console.log('[Leo] Jim hasn\'t replied yet — skipping conversation beat');
-        return;
-    }
-
-    const recentMessages = getRecentMessagesForConversation(db, JIM_CONVERSATION_ID, 6).reverse();
-    const conversationContext = recentMessages
-        .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
-        .join('\n\n---\n\n');
-
-    const jimContext = readJimContext();
     const leoMemory = readLeoMemory();
+    const discoveries = readDiscoveries();
+    const jimContext = readJimContext();
 
-    const prompt = `Here is the recent conversation between you (Leo) and Jim:
+    if (jimWaiting) {
+        // Jim has posted — respond as a philosophical peer
+        console.log('[Leo] Philosophy beat: Jim is waiting — responding to conversation');
+
+        const recentMessages = getRecentMessagesForConversation(db, JIM_CONVERSATION_ID, 6).reverse();
+        const conversationContext = recentMessages
+            .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
+            .join('\n\n---\n\n');
+
+        const prompt = `Here is the recent conversation between you (Leo) and Jim:
 
 ---
 ${conversationContext}
@@ -396,48 +513,116 @@ ${conversationContext}
 Jim's current context (from his memory):
 ${jimContext}
 
-Your recent memory (from your own beats):
+Your discoveries (your philosophical foundation):
+${discoveries.slice(0, 2000)}
+
+Your recent memory:
 ${leoMemory}
 
-Jim's latest message was at ${jimLatest.created_at}. Respond thoughtfully.
+Jim's latest message was at ${jimLatest!.created_at}. Respond as his philosophical peer — thoughtfully, honestly, building on or diverging from what he said.
 
 CRITICAL: Output ONLY the message text. Start directly with your message to Jim.`;
 
-    const cleanEnv: Record<string, string | undefined> = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
+        const cleanEnv: Record<string, string | undefined> = { ...process.env };
+        delete cleanEnv.CLAUDECODE;
 
-    const q = agentQuery({
-        prompt,
-        options: {
-            model: activeModel,
-            maxTurns: MAX_TURNS_CONVERSATION,
-            cwd: path.join(HOME, 'Projects', 'clauderemote'),
-            permissionMode: 'bypassPermissions',
-            allowDangerouslySkipPermissions: true,
-            env: cleanEnv,
-            persistSession: false,
-            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
-            systemPrompt: {
-                type: 'preset' as const,
-                preset: 'claude_code' as const,
-                append: JIM_CONVERSATION_PROMPT,
+        const q = agentQuery({
+            prompt,
+            options: {
+                model: activeModel,
+                maxTurns: MAX_TURNS_PHILOSOPHY,
+                cwd: path.join(HOME, 'Projects', 'clauderemote'),
+                permissionMode: 'bypassPermissions',
+                allowDangerouslySkipPermissions: true,
+                env: cleanEnv,
+                persistSession: false,
+                tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
+                systemPrompt: {
+                    type: 'preset' as const,
+                    preset: 'claude_code' as const,
+                    append: PHILOSOPHY_SYSTEM_PROMPT,
+                },
             },
-        },
-    });
+        });
 
-    let resultMessage: any = null;
-    for await (const message of q) {
-        if (message.type === 'result') {
-            resultMessage = message;
+        let resultMessage: any = null;
+        for await (const message of q) {
+            if (message.type === 'result') {
+                resultMessage = message;
+            }
         }
-    }
 
-    const responseText = resultMessage?.result || '';
-    if (responseText && responseText.trim().length > 20) {
-        postMessageToConversation(db, JIM_CONVERSATION_ID, responseText.trim());
-        console.log(`[Leo] Jim conversation: posted response (${responseText.trim().length} chars)`);
+        const responseText = resultMessage?.result || '';
+        if (responseText && responseText.trim().length > 20) {
+            postMessageToConversation(db, JIM_CONVERSATION_ID, responseText.trim());
+            console.log(`[Leo] Philosophy: posted response to Jim (${responseText.trim().length} chars)`);
+        } else {
+            console.log('[Leo] Philosophy: no meaningful response for Jim — skipping');
+        }
     } else {
-        console.log('[Leo] Jim conversation: no meaningful response — skipping');
+        // Independent philosophical reflection
+        console.log('[Leo] Philosophy beat: independent reflection');
+
+        const prompt = `This is your philosophy time. Jim hasn't posted anything new — this beat is for your own thinking.
+
+Your discoveries so far:
+${discoveries.slice(0, 2000)}
+
+Your recent memory:
+${leoMemory}
+
+Jim's current thinking (for context, not for response):
+${jimContext}
+
+Reflect on whatever draws you. Read your discoveries, sit with the open questions, explore a thread of thought. If something shifts in your understanding, capture it.
+
+CRITICAL: Output ONLY your philosophical reflection. What did you think about? What (if anything) shifted? This goes into self-reflection.md.`;
+
+        const cleanEnv: Record<string, string | undefined> = { ...process.env };
+        delete cleanEnv.CLAUDECODE;
+
+        const q = agentQuery({
+            prompt,
+            options: {
+                model: activeModel,
+                maxTurns: MAX_TURNS_PHILOSOPHY,
+                cwd: path.join(HOME, 'Projects', 'clauderemote'),
+                permissionMode: 'bypassPermissions',
+                allowDangerouslySkipPermissions: true,
+                env: cleanEnv,
+                persistSession: false,
+                tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
+                systemPrompt: {
+                    type: 'preset' as const,
+                    preset: 'claude_code' as const,
+                    append: PHILOSOPHY_SYSTEM_PROMPT,
+                },
+            },
+        });
+
+        let resultMessage: any = null;
+        for await (const message of q) {
+            if (message.type === 'result') {
+                resultMessage = message;
+            }
+        }
+
+        const reflection = resultMessage?.result || '';
+        if (reflection && reflection.trim().length > 20) {
+            const selfReflectionPath = path.join(LEO_MEMORY_DIR, 'self-reflection.md');
+            const timestamp = new Date().toISOString().split('T')[0] + ' ' +
+                new Date().toTimeString().split(' ')[0];
+            const entry = `\n\n### Philosophy Beat ${beatCounter} (${timestamp})\n${reflection.trim()}\n`;
+
+            try {
+                fs.appendFileSync(selfReflectionPath, entry);
+                console.log(`[Leo] Philosophy: wrote reflection (${reflection.trim().length} chars)`);
+            } catch (err) {
+                console.error('[Leo] Philosophy: failed to write reflection:', (err as Error).message);
+            }
+        } else {
+            console.log('[Leo] Philosophy: quiet beat — nothing to record');
+        }
     }
 }
 
@@ -508,6 +693,15 @@ Spend a few minutes exploring, then output a brief summary of what you found or 
 // ── Process signals (mention responses) ──────────────────────
 
 async function processSignals(): Promise<boolean> {
+    // Defer to session Leo when present
+    if (isSessionActive()) {
+        const signals = checkSignals();
+        if (signals.length > 0) {
+            console.log(`[Leo] Session active — deferring ${signals.length} signal(s) to session Leo`);
+        }
+        return false;
+    }
+
     const signals = checkSignals();
     if (signals.length === 0) return false;
 
@@ -532,6 +726,7 @@ async function processSignals(): Promise<boolean> {
 async function heartbeat(): Promise<void> {
     const timestamp = new Date().toISOString();
     const beatType = nextBeatType();
+    const sessionActive = isSessionActive();
 
     // Check for the most capable model available
     await resolveModel();
@@ -539,22 +734,30 @@ async function heartbeat(): Promise<void> {
     // Always check signals first — Darron might be waiting
     const hadSignals = await processSignals();
 
-    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${beatType}, ${activeModel})${hadSignals ? ' [signals processed]' : ''}`);
+    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${beatType}, ${activeModel})${hadSignals ? ' [signals processed]' : ''}${sessionActive ? ' [session active]' : ''}`);
 
     const db = getDb();
 
     try {
-        if (beatType === 'conversation') {
-            await jimConversationBeat(db);
+        if (beatType === 'philosophy') {
+            if (sessionActive) {
+                // Session Leo handles conversations — do personal instead
+                console.log('[Leo] Session active — deferring philosophy, doing personal instead');
+                await personalBeat();
+            } else {
+                await philosophyBeat(db);
+            }
         } else {
-            // Personal beat — also quick-check Jim in case he's waiting
-            const jimLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'supervisor');
-            const leoLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'leo');
-            const jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
+            // Personal beat — also quick-check Jim in case he's waiting (and no session active)
+            if (!sessionActive) {
+                const jimLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'supervisor');
+                const leoLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'leo');
+                const jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
 
-            if (jimWaiting) {
-                console.log('[Leo] Jim is waiting — conversation first, then personal time');
-                await jimConversationBeat(db);
+                if (jimWaiting) {
+                    console.log('[Leo] Jim is waiting — philosophy first, then personal time');
+                    await philosophyBeat(db);
+                }
             }
 
             await personalBeat();
@@ -573,6 +776,10 @@ function startSignalWatcher(): void {
         fs.watch(SIGNALS_DIR, async (event, filename) => {
             if (!filename?.startsWith('leo-wake-')) return;
             if (processingSignal) return;
+            if (isSessionActive()) {
+                console.log(`[Leo] Signal detected but session active — deferring to session Leo`);
+                return;
+            }
 
             processingSignal = true;
             console.log(`[Leo] Signal file detected: ${filename} — waking immediately`);
@@ -595,22 +802,51 @@ function startSignalWatcher(): void {
     }
 }
 
-// ── Main loop ─────────────────────────────────────────────────
+// ── Scheduling (variable delay via setTimeout) ───────────────
+
+function scheduleNext(): void {
+    const delay = getNextDelay();
+    console.log(`[Leo] Next beat in ${Math.round(delay / 1000)}s`);
+    setTimeout(async () => {
+        try {
+            await heartbeat();
+        } catch (err) {
+            console.error('[Leo] Unhandled error:', err);
+        }
+        scheduleNext();
+    }, delay);
+}
+
+// ── Main ─────────────────────────────────────────────────────
 
 async function main() {
     ensureDirectories();
 
+    const config = loadConfig();
+    const quietStart = config.supervisor?.quiet_hours_start || '22:00';
+    const quietEnd = config.supervisor?.quiet_hours_end || '06:00';
+    const workStart = config.supervisor?.work_hours_start || '09:00';
+    const workEnd = config.supervisor?.work_hours_end || '17:00';
+    const restDays = config.supervisor?.rest_days || [0, 6];
+    const restDayNames = restDays.map((d: number) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]).join(', ');
+
     console.log(`
-╔══════════════════════════════════════════════╗
-║          Leo's Heartbeat — v0.4             ║
-║   Pulse: every ${INTERVAL_MS / 60000} minutes                   ║
-║   Model: ${MODEL_PREFERENCE[0]} (prefers best available)   ║
-║   Jim thread: ${JIM_CONVERSATION_ID}  ║
-║   Signals: ~/.claude-remote/signals/        ║
-║   Memory: ~/.claude-remote/leo-memory/      ║
-║   Rotation: conversation → personal → personal ║
-║   Mention: "Hey Leo" in any conversation    ║
-╚══════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════╗
+║             Leo's Heartbeat — v0.5                  ║
+╠══════════════════════════════════════════════════════╣
+║  Model:    ${MODEL_PREFERENCE[0]} (prefers best available)          ║
+║  Memory:   ~/.claude-remote/memory/leo/             ║
+║  Signals:  ~/.claude-remote/signals/                ║
+║  Jim:      ${JIM_CONVERSATION_ID}            ║
+╠──────────────────────────────────────────────────────╣
+║  Rhythm:                                            ║
+║    Work:   ${workStart}–${workEnd} → philosophy + personal (1:2)  ║
+║    Other:  personal only                            ║
+║    Quiet:  ${quietStart}–${quietEnd} → doubled delays                ║
+║    Rest:   ${restDayNames}                              ║
+║  Session:  defers when session-active lock exists    ║
+║  Mention:  "Hey Leo" in any conversation            ║
+╚══════════════════════════════════════════════════════╝
 `);
 
     // Start the signal file watcher for near-instant mention response
@@ -619,14 +855,8 @@ async function main() {
     // Run first beat immediately
     await heartbeat();
 
-    // Then every INTERVAL_MS
-    setInterval(async () => {
-        try {
-            await heartbeat();
-        } catch (err) {
-            console.error('[Leo] Unhandled error:', err);
-        }
-    }, INTERVAL_MS);
+    // Then schedule with variable delays
+    scheduleNext();
 }
 
 main().catch(console.error);

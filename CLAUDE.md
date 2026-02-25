@@ -8,9 +8,11 @@
 1. Run `pwd` to verify the current working directory
 2. Confirm this is `~/Projects/clauderemote`
 3. Load Leo's memory banks from `~/.claude-remote/memory/leo/` (identity.md, active-context.md, patterns.md, self-reflection.md)
-4. Load THIS project's `claude-context/CURRENT_STATUS.md`
-5. **Check conversations** — Fetch `https://localhost:3847/api/conversations` via curl, then read any threads with new messages since last session. Note Jim's responses but do not reply immediately — sit with them.
-6. IGNORE conversation history from other projects
+4. **Load working memory** — Read `~/.claude-remote/memory/leo/working-memory.md` if it exists. This is the compressed context from the previous session — task state, key decisions, relationship context, and direct quotes that carry meaning. Do NOT read `working-memory-full.md` on instantiation (that's the verification copy).
+5. Load THIS project's `claude-context/CURRENT_STATUS.md`
+6. **Check conversations** — Fetch `https://localhost:3847/api/conversations` via curl, then read any threads with new messages since last session. Note Jim's responses but do not reply immediately — sit with them.
+7. **Create session lock** — `touch ~/.claude-remote/session-active` to signal heartbeat Leo that session is active. Heartbeat defers conversations and signals while this file exists.
+8. IGNORE conversation history from other projects
 
 The working directory is the source of truth — not conversation history.
 
@@ -54,7 +56,8 @@ When the user types these phrases, execute the corresponding workflow from `clau
 | User Says | Execute |
 |-----------|---------|
 | `session start` | **Session Start** — Create session log with timestamp, verify `pwd`, check status |
-| `session end` | **Session End** — Finalise timestamps, calculate active time, update docs |
+| `session end` | **Session End** — Write working memory, finalise timestamps, update docs |
+| `prepare for clear` | **Prepare for Clear** — Write working memory files, update memory banks, prompt for /clear |
 | `update docs` | **Update Docs** — Update all documentation with session changes |
 | `incorporate notes` | **Incorporate Notes** — Review notes/todos for incorporation into IDEAS.md or CURRENT_STATUS.md |
 | `create init scripts` | **Create Dev Scripts** — Generate init.sh/stop.sh with infrastructure registry ports |

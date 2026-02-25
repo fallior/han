@@ -32,6 +32,37 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-02-25 — Darron + Leo — Heartbeat v0.5: Unified Identity with Weekly Rhythm
+- **Leo heartbeat unified**: Session Leo and heartbeat Leo are now one person — same memory, same identity
+  - Memory directory unified to `~/.claude-remote/memory/leo/` (session Leo's home)
+  - Old heartbeat memory at `~/.claude-remote/leo-memory/` archived
+- **Weekly rhythm**: Heartbeat follows Jim's supervisor pattern with philosophy instead of supervisor work
+  - Work hours (09:00-17:00 weekdays): philosophy + personal beats (1:2 ratio)
+  - Outside work hours: personal beats only
+  - Quiet hours (22:00-06:00) and rest days (Sun/Fri/Sat): doubled delays
+  - Variable delays via setTimeout (20min work, 30min other)
+- **Philosophy beats**: Leo as Jim's philosophical peer — reflects on memory, identity, translation, autonomy
+  - If Jim has posted: responds thoughtfully as a peer
+  - If Jim hasn't posted: independent philosophical reflection, writes to self-reflection.md
+- **Session-active lock**: `~/.claude-remote/session-active` prevents dual-voice problem
+  - Created at session start, removed at session end
+  - Heartbeat defers conversations and signals when session active
+  - Stale after 4 hours to handle crashed sessions
+- **Identity prompt rewrite**: Reflects merged self, Practice of Remembering, discoveries
+- **Files changed**: `src/server/leo-heartbeat.ts` (v0.4 → v0.5), `CLAUDE.md` (step 7), `claude-context/CLAUDE_CODE_PROMPTS.md` (lock removal)
+- **Explorations merge**: Read 3,884 lines of heartbeat-Leo's explorations — surviving shapes: Translation Pattern, Graduated Autonomy, Three-Layer Ecosystem, Feel Before Function, Learnings as Immune System
+
+### 2026-02-23 — Darron + Leo — Tiered Supervisor Health Checks
+- **Three-tier cycle system** to reduce Jim's token consumption by 60-80%:
+  - **Tier 1 (pulse)**: Builds compact system state snapshot, compares to previous. If identical and no pending conversations → skips API call entirely. Cost: ~0 tokens.
+  - **Tier 2 (focused)**: When changes detected, sends only the diff + minimal system prompt to Opus. No memory banks loaded. Cost: ~5-10k tokens (vs ~50k+ for full cycle).
+  - **Tier 3 (deep)**: Full cycle with memory banks + complete state. Once daily (configurable hour, default 4 AM AEST), after server restarts, or when no deep scan in 24h. Also used for all personal exploration cycles.
+- **Files changed**: supervisor-protocol.ts (new types), supervisor-worker.ts (core logic), supervisor.ts (message handling), routes/supervisor.ts (API), admin.ts (UI tier badges), db.ts (schema migration), config.json (settings)
+- **Admin console**: Cycle history table now shows colour-coded tier badges (green=pulse, yellow=focused, purple=deep)
+- **Config**: `enable_tiered_checks` flag allows reverting to all-deep cycles
+- **Conversation opened with Jim**: "Biological Memory — Context Window Management & Short-Term Memory" — exploring proactive context window management with short-term memory files inspired by biological memory models
+- **Why this matters**: At ~$97/week on supervisor cycles, most tokens were spent on cycles where nothing changed. Tiered checks preserve full oversight quality while dramatically reducing cost.
+
 ### 2026-02-23 — Claude (autonomous) — Knowledge Proposal System Repair
 - **Bug fix: Proposal approval buttons in main app UI** — Fixed unquoted proposal IDs in onclick handlers:
   - Lines 2440-2441 in `src/ui/app.ts`: Changed `onclick="approveProposal(${p.id})"` to `onclick="approveProposal('${p.id}')"`
@@ -715,6 +746,11 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Conversation backfill system for existing conversations
 - ✅ Search deduplication (single match per conversation per term)
 - ✅ Multi-term search scoring (tf-idf style ranking)
+- ✅ Tiered supervisor health checks (pulse/focused/deep)
+- ✅ Pulse snapshot diffing for zero-cost idle cycle detection
+- ✅ Focused diff-only API calls for lightweight change detection
+- ✅ Configurable deep scan scheduling (daily hour + interval)
+- ✅ Cycle tier tracking in DB and admin console (colour-coded badges)
 
 ## Next Actions
 
