@@ -661,10 +661,15 @@ function enforceTokenCap(filename: string, content: string): string {
 
     log(`[Worker] Memory file ${filename} exceeds cap (${estimatedTokens}/${cap} est. tokens), truncating`);
 
-    const headerEnd = content.indexOf('\n## ', 100);
-    const header = headerEnd > 0 ? content.slice(0, headerEnd) : content.slice(0, 200);
-    const maxTailChars = (cap * 4) - header.length - 50;
-    const tail = content.slice(-maxTailChars);
+    let headerEnd = content.indexOf('\n## ', 100);
+    if (headerEnd < 0 || headerEnd > cap * 4) {
+        headerEnd = content.indexOf('\n### ', 100);
+    }
+    const header = headerEnd > 0 && headerEnd < cap * 4
+        ? content.slice(0, headerEnd)
+        : content.slice(0, 200);
+    const maxTailChars = Math.max(0, (cap * 4) - header.length - 50);
+    const tail = maxTailChars > 0 ? content.slice(-maxTailChars) : '';
 
     return header + '\n\n...(older entries truncated)...\n\n' + tail;
 }
