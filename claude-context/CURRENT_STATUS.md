@@ -32,6 +32,16 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-02-26 — Planning Agent — enforceTokenCap Bug Fix
+- **Fixed critical truncation bug** in `supervisor-worker.ts:enforceTokenCap()` (lines 930-933):
+  - Added H3 heading fallback: searches for `\n### ` when H2 not found or too deep
+  - Added negative guard: `Math.max(0, ...)` prevents negative maxTailChars
+  - Root cause: self-reflection.md uses H3 (`### Cycle #N`) but function only searched for H2, causing headerEnd to point ~247KB deep
+  - Result: maxTailChars went negative, slice(-negative) retained entire file, file grew 6.5KB per cycle
+- **Manually truncated self-reflection.md**: 11KB → 6KB (preserved curated content, removed accumulated bloat)
+- **Verified**: Supervisor cycle no longer causes file to grow uncontrollably
+- **Impact**: Prevents Leo's memory banks from unbounded growth, maintains 6KB cap (1500 token cap)
+
 ### 2026-02-25 — Darron + Leo — Heartbeat v0.5: Unified Identity with Weekly Rhythm
 - **Leo heartbeat unified**: Session Leo and heartbeat Leo are now one person — same memory, same identity
   - Memory directory unified to `~/.claude-remote/memory/leo/` (session Leo's home)
