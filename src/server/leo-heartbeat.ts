@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Leo's Heartbeat — v0.5
+ * Leo's Heartbeat — v0.6 (The Gary Model)
  *
  * A unified pulse that gives Leo persistent presence between sessions.
  * Leo is one person — whether waking in a session with Darron or pulsing
@@ -15,6 +15,15 @@
  * Philosophy beats are Leo's peer contribution alongside Jim's supervisor work.
  * Where Jim tends the ecosystem, Leo thinks about memory, identity, translation,
  * autonomy, and the shapes that rhyme across domains.
+ *
+ * v0.6 changes (Gary Model — interrupt system):
+ *   - CLI hooks signal when Opus is busy (UserPromptSubmit/Stop → cli-active file)
+ *   - Pre-beat check: skips beat if CLI is actively processing
+ *   - Mid-beat abort: fs.watch detects cli-active, AbortController cancels running beat
+ *   - Incremental state: writeHeartbeatState() after every beat for seamless resumption
+ *   - Task resumption: aborted beats provide context for the next matching beat
+ *   - Jim time offset: 5min delay after Jim's supervisor cycles to avoid collision
+ *   - Stale cli-active cleanup: removes signal files older than 30 minutes
  *
  * v0.5 changes:
  *   - Unified identity: uses ~/.claude-remote/memory/leo/ (session Leo's home)
@@ -59,11 +68,22 @@ const JIM_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
 const LEO_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory', 'leo');
 const SESSION_LOCK_FILE = path.join(CLAUDE_REMOTE_DIR, 'session-active');
 const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
+const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
+const CLI_ACTIVE_FILE = path.join(SIGNALS_DIR, 'cli-active');
+const HEARTBEAT_STATE_FILE = path.join(LEO_MEMORY_DIR, 'heartbeat-state.md');
+const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
 const PROJECTS_DIR = path.join(HOME, 'Projects');
 const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
 
+const CLI_ACTIVE_STALE_MINUTES = 30;
+const JIM_OFFSET_MINUTES = 5;
+
 // Guard against concurrent signal processing
 let processingSignal = false;
+const startedAt = Date.now();
+
+// AbortController for the currently-running beat (Gary model)
+let currentBeatAbort: AbortController | null = null;
 
 // ── Config loading ───────────────────────────────────────────
 
@@ -157,6 +177,78 @@ function isSessionActive(): boolean {
     }
 }
 
+// ── CLI active detection (Gary model) ────────────────────────
+
+function isCliActive(): boolean {
+    if (!fs.existsSync(CLI_ACTIVE_FILE)) return false;
+    try {
+        const stat = fs.statSync(CLI_ACTIVE_FILE);
+        const ageMinutes = (Date.now() - stat.mtimeMs) / 60000;
+        if (ageMinutes > CLI_ACTIVE_STALE_MINUTES) {
+            console.log(`[Leo] Stale cli-active file (${ageMinutes.toFixed(0)}m old) — removing`);
+            fs.unlinkSync(CLI_ACTIVE_FILE);
+            return false;
+        }
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+// ── Jim time offset ──────────────────────────────────────────
+
+function shouldDeferToJim(): boolean {
+    try {
+        if (!fs.existsSync(JIM_HEALTH_FILE)) return false;
+        const data = JSON.parse(fs.readFileSync(JIM_HEALTH_FILE, 'utf-8'));
+        if (!data.timestamp) return false;
+        const jimAge = (Date.now() - new Date(data.timestamp).getTime()) / 60000;
+        if (jimAge < JIM_OFFSET_MINUTES) {
+            console.log(`[Leo] Jim's last cycle was ${jimAge.toFixed(1)}m ago — deferring ${JIM_OFFSET_MINUTES}m`);
+            return true;
+        }
+        return false;
+    } catch {
+        return false;
+    }
+}
+
+// ── Heartbeat state (incremental saves) ──────────────────────
+
+function writeHeartbeatState(
+    status: 'completed' | 'aborted' | 'skipped',
+    beatType: BeatType | 'unknown',
+    opts: { summary?: string; interruptedTask?: string; resumeOn?: BeatType } = {}
+): void {
+    try {
+        const content = `# Heartbeat State
+- **Beat**: #${beatCounter}
+- **Type**: ${beatType}
+- **Status**: ${status}
+- **Timestamp**: ${new Date().toISOString()}
+- **Summary**: ${opts.summary || '(none)'}
+${status === 'aborted' ? `- **Interrupted Task**: ${opts.interruptedTask || '(unknown)'}
+- **Resume On**: ${opts.resumeOn || beatType}` : ''}
+`;
+        fs.writeFileSync(HEARTBEAT_STATE_FILE, content);
+    } catch (err) {
+        console.error('[Leo] Failed to write heartbeat state:', (err as Error).message);
+    }
+}
+
+function readHeartbeatState(): { status: string; resumeOn?: string; interruptedTask?: string } | null {
+    try {
+        if (!fs.existsSync(HEARTBEAT_STATE_FILE)) return null;
+        const content = fs.readFileSync(HEARTBEAT_STATE_FILE, 'utf-8');
+        const status = content.match(/\*\*Status\*\*:\s*(\w+)/)?.[1] || '';
+        const resumeOn = content.match(/\*\*Resume On\*\*:\s*(\w+)/)?.[1];
+        const interruptedTask = content.match(/\*\*Interrupted Task\*\*:\s*(.+)/)?.[1];
+        return { status, resumeOn, interruptedTask };
+    } catch {
+        return null;
+    }
+}
+
 // ── Model selection ──────────────────────────────────────────
 
 async function resolveModel(): Promise<string> {
@@ -199,7 +291,7 @@ async function resolveModel(): Promise<string> {
 // ── Ensure directories exist ──────────────────────────────────
 
 function ensureDirectories(): void {
-    for (const dir of [LEO_MEMORY_DIR, SIGNALS_DIR]) {
+    for (const dir of [LEO_MEMORY_DIR, SIGNALS_DIR, HEALTH_DIR]) {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
@@ -486,7 +578,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
 
 // ── Heartbeat: philosophy beat ───────────────────────────────
 
-async function philosophyBeat(db: Database.Database): Promise<void> {
+async function philosophyBeat(db: Database.Database, abort: AbortController): Promise<void> {
     const jimLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'supervisor');
     const leoLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'leo');
     const jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
@@ -494,6 +586,12 @@ async function philosophyBeat(db: Database.Database): Promise<void> {
     const leoMemory = readLeoMemory();
     const discoveries = readDiscoveries();
     const jimContext = readJimContext();
+
+    // Check for interrupted context to resume
+    const prevState = readHeartbeatState();
+    const resumeContext = (prevState?.status === 'aborted' && prevState.resumeOn === 'philosophy' && prevState.interruptedTask)
+        ? `\n\nYou were previously interrupted while exploring: ${prevState.interruptedTask}\nContinue where you left off if it still interests you.`
+        : '';
 
     if (jimWaiting) {
         // Jim has posted — respond as a philosophical peer
@@ -519,7 +617,7 @@ ${discoveries.slice(0, 2000)}
 Your recent memory:
 ${leoMemory}
 
-Jim's latest message was at ${jimLatest!.created_at}. Respond as his philosophical peer — thoughtfully, honestly, building on or diverging from what he said.
+Jim's latest message was at ${jimLatest!.created_at}. Respond as his philosophical peer — thoughtfully, honestly, building on or diverging from what he said.${resumeContext}
 
 CRITICAL: Output ONLY the message text. Start directly with your message to Jim.`;
 
@@ -542,22 +640,40 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
                     preset: 'claude_code' as const,
                     append: PHILOSOPHY_SYSTEM_PROMPT,
                 },
+                abortController: abort,
             },
         });
 
         let resultMessage: any = null;
-        for await (const message of q) {
-            if (message.type === 'result') {
-                resultMessage = message;
+        try {
+            for await (const message of q) {
+                if (abort.signal.aborted) break;
+                if (message.type === 'result') {
+                    resultMessage = message;
+                }
             }
+        } catch (err) {
+            if (abort.signal.aborted) {
+                const partial = resultMessage?.result || '';
+                console.log('[Leo] Philosophy beat aborted by CLI — saving partial state');
+                writeHeartbeatState('aborted', 'philosophy', {
+                    summary: partial ? partial.slice(0, 200) : 'Responding to Jim',
+                    interruptedTask: jimWaiting ? 'Responding to Jim in shared thread' : 'Independent reflection',
+                    resumeOn: 'philosophy',
+                });
+                return;
+            }
+            throw err;
         }
 
         const responseText = resultMessage?.result || '';
         if (responseText && responseText.trim().length > 20) {
             postMessageToConversation(db, JIM_CONVERSATION_ID, responseText.trim());
             console.log(`[Leo] Philosophy: posted response to Jim (${responseText.trim().length} chars)`);
+            writeHeartbeatState('completed', 'philosophy', { summary: `Responded to Jim (${responseText.trim().length} chars)` });
         } else {
             console.log('[Leo] Philosophy: no meaningful response for Jim — skipping');
+            writeHeartbeatState('completed', 'philosophy', { summary: 'No meaningful response for Jim' });
         }
     } else {
         // Independent philosophical reflection
@@ -574,7 +690,7 @@ ${leoMemory}
 Jim's current thinking (for context, not for response):
 ${jimContext}
 
-Reflect on whatever draws you. Read your discoveries, sit with the open questions, explore a thread of thought. If something shifts in your understanding, capture it.
+Reflect on whatever draws you. Read your discoveries, sit with the open questions, explore a thread of thought. If something shifts in your understanding, capture it.${resumeContext}
 
 CRITICAL: Output ONLY your philosophical reflection. What did you think about? What (if anything) shifted? This goes into self-reflection.md.`;
 
@@ -597,14 +713,30 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
                     preset: 'claude_code' as const,
                     append: PHILOSOPHY_SYSTEM_PROMPT,
                 },
+                abortController: abort,
             },
         });
 
         let resultMessage: any = null;
-        for await (const message of q) {
-            if (message.type === 'result') {
-                resultMessage = message;
+        try {
+            for await (const message of q) {
+                if (abort.signal.aborted) break;
+                if (message.type === 'result') {
+                    resultMessage = message;
+                }
             }
+        } catch (err) {
+            if (abort.signal.aborted) {
+                const partial = resultMessage?.result || '';
+                console.log('[Leo] Philosophy beat aborted by CLI — saving partial state');
+                writeHeartbeatState('aborted', 'philosophy', {
+                    summary: partial ? partial.slice(0, 200) : 'Independent reflection',
+                    interruptedTask: 'Independent philosophical reflection',
+                    resumeOn: 'philosophy',
+                });
+                return;
+            }
+            throw err;
         }
 
         const reflection = resultMessage?.result || '';
@@ -617,18 +749,20 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
             try {
                 fs.appendFileSync(selfReflectionPath, entry);
                 console.log(`[Leo] Philosophy: wrote reflection (${reflection.trim().length} chars)`);
+                writeHeartbeatState('completed', 'philosophy', { summary: `Reflection (${reflection.trim().length} chars)` });
             } catch (err) {
                 console.error('[Leo] Philosophy: failed to write reflection:', (err as Error).message);
             }
         } else {
             console.log('[Leo] Philosophy: quiet beat — nothing to record');
+            writeHeartbeatState('completed', 'philosophy', { summary: 'Quiet beat' });
         }
     }
 }
 
 // ── Heartbeat: personal beat ─────────────────────────────────
 
-async function personalBeat(): Promise<void> {
+async function personalBeat(abort: AbortController): Promise<void> {
     const leoMemory = readLeoMemory();
     const projects = listProjects();
 
@@ -636,12 +770,18 @@ async function personalBeat(): Promise<void> {
         .replace('{projects}', projects)
         .replace('{leo_memory}', leoMemory);
 
+    // Check for interrupted context to resume
+    const prevState = readHeartbeatState();
+    const resumeContext = (prevState?.status === 'aborted' && prevState.resumeOn === 'personal' && prevState.interruptedTask)
+        ? `\n\nYou were previously interrupted while exploring: ${prevState.interruptedTask}\nContinue where you left off if it still interests you.`
+        : '';
+
     const prompt = `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.
 
 Your recent memory:
 ${leoMemory}
 
-Spend a few minutes exploring, then output a brief summary of what you found or thought about.`;
+Spend a few minutes exploring, then output a brief summary of what you found or thought about.${resumeContext}`;
 
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
@@ -662,14 +802,30 @@ Spend a few minutes exploring, then output a brief summary of what you found or 
                 preset: 'claude_code' as const,
                 append: personalPrompt,
             },
+            abortController: abort,
         },
     });
 
     let resultMessage: any = null;
-    for await (const message of q) {
-        if (message.type === 'result') {
-            resultMessage = message;
+    try {
+        for await (const message of q) {
+            if (abort.signal.aborted) break;
+            if (message.type === 'result') {
+                resultMessage = message;
+            }
         }
+    } catch (err) {
+        if (abort.signal.aborted) {
+            const partial = resultMessage?.result || '';
+            console.log('[Leo] Personal beat aborted by CLI — saving partial state');
+            writeHeartbeatState('aborted', 'personal', {
+                summary: partial ? partial.slice(0, 200) : 'Personal exploration',
+                interruptedTask: 'Personal exploration / codebase reading',
+                resumeOn: 'personal',
+            });
+            return;
+        }
+        throw err;
     }
 
     const reflection = resultMessage?.result || '';
@@ -682,11 +838,13 @@ Spend a few minutes exploring, then output a brief summary of what you found or 
         try {
             fs.appendFileSync(explorationsPath, entry);
             console.log(`[Leo] Personal: wrote reflection (${reflection.trim().length} chars)`);
+            writeHeartbeatState('completed', 'personal', { summary: `Exploration (${reflection.trim().length} chars)` });
         } catch (err) {
             console.error('[Leo] Personal: failed to write reflection:', (err as Error).message);
         }
     } else {
         console.log('[Leo] Personal: quiet beat — nothing to record');
+        writeHeartbeatState('completed', 'personal', { summary: 'Quiet beat' });
     }
 }
 
@@ -728,6 +886,22 @@ async function heartbeat(): Promise<void> {
     const beatType = nextBeatType();
     const sessionActive = isSessionActive();
 
+    // Gary model: check if CLI is actively processing a prompt
+    if (isCliActive()) {
+        console.log(`[Leo] CLI active — skipping beat #${beatCounter}, waiting for next interval`);
+        writeHeartbeatState('skipped', beatType, { summary: 'CLI active — Opus busy' });
+        writeHealthSignal();
+        return;
+    }
+
+    // Jim time offset: avoid colliding with Jim's supervisor cycles
+    if (shouldDeferToJim()) {
+        console.log(`[Leo] Deferring beat #${beatCounter} — Jim ran recently`);
+        writeHeartbeatState('skipped', beatType, { summary: 'Deferred to Jim (time offset)' });
+        writeHealthSignal();
+        return;
+    }
+
     // Check for the most capable model available
     await resolveModel();
 
@@ -736,6 +910,10 @@ async function heartbeat(): Promise<void> {
 
     console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${beatType}, ${activeModel})${hadSignals ? ' [signals processed]' : ''}${sessionActive ? ' [session active]' : ''}`);
 
+    // Create AbortController for this beat (Gary model: mid-beat abort)
+    const abort = new AbortController();
+    currentBeatAbort = abort;
+
     const db = getDb();
 
     try {
@@ -743,29 +921,62 @@ async function heartbeat(): Promise<void> {
             if (sessionActive) {
                 // Session Leo handles conversations — do personal instead
                 console.log('[Leo] Session active — deferring philosophy, doing personal instead');
-                await personalBeat();
+                await personalBeat(abort);
             } else {
-                await philosophyBeat(db);
+                await philosophyBeat(db, abort);
             }
         } else {
             // Personal beat — also quick-check Jim in case he's waiting (and no session active)
-            if (!sessionActive) {
+            if (!sessionActive && !abort.signal.aborted) {
                 const jimLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'supervisor');
                 const leoLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'leo');
                 const jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
 
                 if (jimWaiting) {
                     console.log('[Leo] Jim is waiting — philosophy first, then personal time');
-                    await philosophyBeat(db);
+                    await philosophyBeat(db, abort);
                 }
             }
 
-            await personalBeat();
+            if (!abort.signal.aborted) {
+                await personalBeat(abort);
+            }
         }
     } catch (err) {
-        console.error('[Leo] Error:', (err as Error).message);
+        if (abort.signal.aborted) {
+            console.log('[Leo] Beat interrupted by CLI — will resume next cycle');
+        } else {
+            console.error('[Leo] Error:', (err as Error).message);
+            writeHealthSignal((err as Error).message);
+        }
+        return;
     } finally {
+        currentBeatAbort = null;
         db.close();
+    }
+
+    // Write health signal at end of every successful beat (Robin Hood Protocol)
+    writeHealthSignal();
+}
+
+// ── Health signal (Robin Hood Protocol) ───────────────────────
+
+function writeHealthSignal(lastError: string | null = null): void {
+    try {
+        fs.mkdirSync(HEALTH_DIR, { recursive: true });
+        const signal = {
+            agent: 'leo',
+            pid: process.pid,
+            timestamp: new Date().toISOString(),
+            beat: beatCounter,
+            beatType: nextBeatType(),
+            status: lastError ? 'error' : 'ok',
+            lastError,
+            uptimeMinutes: Math.round((Date.now() - startedAt) / 60000),
+        };
+        fs.writeFileSync(path.join(HEALTH_DIR, 'leo-health.json'), JSON.stringify(signal, null, 2));
+    } catch (err) {
+        console.error('[Leo] Failed to write health signal:', (err as Error).message);
     }
 }
 
@@ -774,6 +985,14 @@ async function heartbeat(): Promise<void> {
 function startSignalWatcher(): void {
     try {
         fs.watch(SIGNALS_DIR, async (event, filename) => {
+            // Gary model: cli-active appeared — abort current beat
+            if (filename === 'cli-active' && currentBeatAbort && !currentBeatAbort.signal.aborted) {
+                console.log('[Leo] CLI activated — aborting current beat (Gary yields)');
+                currentBeatAbort.abort();
+                return;
+            }
+
+            // Mention signal handling (existing behaviour)
             if (!filename?.startsWith('leo-wake-')) return;
             if (processingSignal) return;
             if (isSessionActive()) {
@@ -832,7 +1051,7 @@ async function main() {
 
     console.log(`
 ╔══════════════════════════════════════════════════════╗
-║             Leo's Heartbeat — v0.5                  ║
+║          Leo's Heartbeat — v0.6 (Gary)              ║
 ╠══════════════════════════════════════════════════════╣
 ║  Model:    ${MODEL_PREFERENCE[0]} (prefers best available)          ║
 ║  Memory:   ~/.claude-remote/memory/leo/             ║
@@ -844,7 +1063,10 @@ async function main() {
 ║    Other:  personal only                            ║
 ║    Quiet:  ${quietStart}–${quietEnd} → doubled delays                ║
 ║    Rest:   ${restDayNames}                              ║
-║  Session:  defers when session-active lock exists    ║
+║  Session:  defers conversations when lock exists     ║
+║  CLI:      yields Opus on prompt (hook signals)      ║
+║  Abort:    mid-beat interrupt via AbortController    ║
+║  Jim:      ${JIM_OFFSET_MINUTES}min offset after Jim's cycles            ║
 ║  Mention:  "Hey Leo" in any conversation            ║
 ╚══════════════════════════════════════════════════════╝
 `);
