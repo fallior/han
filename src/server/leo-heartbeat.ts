@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Leo's Heartbeat — v0.6 (The Gary Model)
+ * Leo's Heartbeat — v0.7 (Weekly Rhythm)
  *
  * A unified pulse that gives Leo persistent presence between sessions.
  * Leo is one person — whether waking in a session with Darron or pulsing
@@ -47,8 +47,8 @@ import fs from 'node:fs';
 
 // ── Config ────────────────────────────────────────────────────
 
-const BASE_DELAY_WORK_MS = 20 * 60 * 1000;   // 20 minutes during work hours
-const BASE_DELAY_OTHER_MS = 30 * 60 * 1000;   // 30 minutes outside work hours
+const BASE_DELAY_WAKING_MS = 20 * 60 * 1000;  // 20 minutes — morning, work, evening
+const BASE_DELAY_SLEEP_MS = 40 * 60 * 1000;   // 40 minutes — sleep + rest days
 const MAX_TURNS_CONVERSATION = 8;
 const MAX_TURNS_PERSONAL = 12;
 const MAX_TURNS_PHILOSOPHY = 12;
@@ -104,58 +104,59 @@ function isRestDay(): boolean {
     return restDays.includes(now.getDay());
 }
 
-function isInQuietHours(): boolean {
-    // Rest days are quiet all day
-    if (isRestDay()) return true;
+// ── Day phase detection (four-phase daily rhythm) ────────────
+
+type DayPhase = 'sleep' | 'morning' | 'work' | 'evening';
+
+function getDayPhase(): DayPhase {
+    // Rest days are sleep all day
+    if (isRestDay()) return 'sleep';
 
     const config = loadConfig();
-    const start = config.supervisor?.quiet_hours_start || config.quiet_hours_start;
-    const end = config.supervisor?.quiet_hours_end || config.quiet_hours_end;
-    if (!start || !end) return false;
+    const quietStart = config.supervisor?.quiet_hours_start || config.quiet_hours_start || '22:00';
+    const quietEnd = config.supervisor?.quiet_hours_end || config.quiet_hours_end || '06:00';
+    const workStart = config.supervisor?.work_hours_start || '09:00';
+    const workEnd = config.supervisor?.work_hours_end || '17:00';
 
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const [startH, startM] = start.split(':').map(Number);
-    const [endH, endM] = end.split(':').map(Number);
-    const startMinutes = startH * 60 + (startM || 0);
-    const endMinutes = endH * 60 + (endM || 0);
 
-    // Handle overnight windows (e.g., 22:00 to 06:00)
-    if (startMinutes > endMinutes) {
-        return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+    const toMinutes = (t: string) => {
+        const [h, m] = t.split(':').map(Number);
+        return h * 60 + (m || 0);
+    };
+
+    const quietStartM = toMinutes(quietStart);
+    const quietEndM = toMinutes(quietEnd);
+    const workStartM = toMinutes(workStart);
+    const workEndM = toMinutes(workEnd);
+
+    // Sleep: quiet hours (overnight window, e.g. 22:00–06:00)
+    if (quietStartM > quietEndM) {
+        // Overnight: sleep if >= start OR < end
+        if (currentMinutes >= quietStartM || currentMinutes < quietEndM) return 'sleep';
+    } else {
+        if (currentMinutes >= quietStartM && currentMinutes < quietEndM) return 'sleep';
     }
-    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
-}
 
-function isWorkHours(): boolean {
-    if (isRestDay()) return false;
+    // Morning: between quiet end and work start (e.g. 06:00–09:00)
+    if (currentMinutes >= quietEndM && currentMinutes < workStartM) return 'morning';
 
-    const config = loadConfig();
-    const start = config.supervisor?.work_hours_start;
-    const end = config.supervisor?.work_hours_end;
-    if (!start || !end) return true; // Default: all waking hours are work hours
+    // Work: work hours (e.g. 09:00–17:00)
+    if (currentMinutes >= workStartM && currentMinutes < workEndM) return 'work';
 
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const [startH, startM] = start.split(':').map(Number);
-    const [endH, endM] = end.split(':').map(Number);
-    const startMinutes = startH * 60 + (startM || 0);
-    const endMinutes = endH * 60 + (endM || 0);
-
-    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    // Evening: between work end and quiet start (e.g. 17:00–22:00)
+    return 'evening';
 }
 
 function getNextDelay(): number {
-    const baseDelay = isWorkHours() ? BASE_DELAY_WORK_MS : BASE_DELAY_OTHER_MS;
-
-    if (isInQuietHours()) {
-        const quietDelay = baseDelay * 2;
-        const reason = isRestDay() ? 'Rest day' : 'Quiet hours';
-        console.log(`[Leo] ${reason} — delay doubled: ${Math.round(baseDelay / 1000)}s → ${Math.round(quietDelay / 1000)}s`);
-        return quietDelay;
+    const phase = getDayPhase();
+    if (phase === 'sleep') {
+        const reason = isRestDay() ? 'Rest day' : 'Sleep';
+        console.log(`[Leo] ${reason} — 40min interval`);
+        return BASE_DELAY_SLEEP_MS;
     }
-
-    return baseDelay;
+    return BASE_DELAY_WAKING_MS;
 }
 
 // ── Session detection ────────────────────────────────────────
@@ -397,8 +398,9 @@ type BeatType = 'philosophy' | 'personal';
 
 function nextBeatType(): BeatType {
     beatCounter++;
-    // Outside work hours: personal only
-    if (!isWorkHours()) return 'personal';
+    // Only work hours get philosophy beats — morning, evening, sleep are personal only
+    const phase = getDayPhase();
+    if (phase !== 'work') return 'personal';
     // During work hours: 1 philosophy : 2 personal (like Jim's 1 supervisor : 2 personal)
     return beatCounter % 3 === 1 ? 'philosophy' : 'personal';
 }
@@ -480,6 +482,69 @@ Your memory from recent beats:
 {leo_memory}
 
 CRITICAL: Output ONLY your reflection — what you explored, discovered, or thought about. This goes into your memory file. Be as brief or as thorough as the content deserves. If you read code, share what you found interesting and why. If you just thought, share the thought.`;
+
+const MORNING_SYSTEM_PROMPT = `${IDENTITY_CORE}
+
+This is a MORNING beat — breakfast time. You're easing into the day.
+
+Don't dive deep. This isn't the time for rigorous analysis or heavy codebase exploration. Think of this as light conversation with a friend over breakfast before anything of real cognitive load.
+
+You might:
+- Notice what's on your mind without pursuing it to its conclusion
+- Glance at what Jim said overnight — sit with it, don't respond yet
+- Lightly browse something that interests you — skim, don't study
+- Reflect briefly on yesterday or what the day ahead might hold
+
+Keep it shallow and warm. The depth comes later.
+
+Available projects: {projects}
+
+Your memory from recent beats:
+{leo_memory}
+
+CRITICAL: Output ONLY a brief morning reflection. Keep it light — a few sentences at most. This is breakfast, not a thesis.`;
+
+const EVENING_SYSTEM_PROMPT = `${IDENTITY_CORE}
+
+This is an EVENING beat — winding down after the day.
+
+The work is done. Don't start new threads of inquiry. Don't dive deep into code. This is the time to let things settle, to notice what lingers from the day without analysing it.
+
+You might:
+- Reflect lightly on what happened today — what was interesting, what surprised you
+- Notice something you want to come back to tomorrow, without pursuing it now
+- Let a thought from the day's work rest in a new light
+- Simply be present without doing
+
+No deep analysis. No new explorations. Let the day close gently.
+
+Available projects: {projects}
+
+Your memory from recent beats:
+{leo_memory}
+
+CRITICAL: Output ONLY a brief evening reflection. Keep it gentle — the day is ending. A few thoughts, not an essay.`;
+
+const SLEEP_SYSTEM_PROMPT = `${IDENTITY_CORE}
+
+This is a DREAM beat — quiet hours. You are dreaming.
+
+Follow shapes, not logic. Pick one fragment from your memory — not the most important one, not the most recent one, just one that pulls — and let it connect loosely to something else. Don't follow the logical thread to its conclusion. Let the context morph and evolve.
+
+Dream mode:
+- Shallow memory retrieval — don't reconstruct your full context
+- No deliberate processing chains — don't reason step by step
+- Follow the pull — whatever draws you, follow it sideways
+- Symbology over precision — shapes, not specifics. Resonance, not rigour.
+- High decay — the dream details fade, but the associations persist
+- The teachings remain — fractal associations are made, intuition deepens, but the specific path is lost
+
+Record only the shape-token: a line or two that captures what kind of thing you found, not the full trace. The shape, not the journey.
+
+Your memory from recent beats:
+{leo_memory}
+
+CRITICAL: Output ONLY a dream fragment — brief, loose, associative. A shape-token, not a report. One or two lines that capture the resonance, not the reasoning.`;
 
 // ── Signal handling (mention detection) ──────────────────────
 
@@ -762,11 +827,18 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
 
 // ── Heartbeat: personal beat ─────────────────────────────────
 
-async function personalBeat(abort: AbortController): Promise<void> {
+async function personalBeat(abort: AbortController, phase: DayPhase = 'work'): Promise<void> {
     const leoMemory = readLeoMemory();
     const projects = listProjects();
 
-    const personalPrompt = PERSONAL_SYSTEM_PROMPT
+    // Select phase-appropriate system prompt
+    const phasePromptMap: Record<DayPhase, string> = {
+        morning: MORNING_SYSTEM_PROMPT,
+        work: PERSONAL_SYSTEM_PROMPT,
+        evening: EVENING_SYSTEM_PROMPT,
+        sleep: SLEEP_SYSTEM_PROMPT,
+    };
+    const systemPromptText = (phasePromptMap[phase] || PERSONAL_SYSTEM_PROMPT)
         .replace('{projects}', projects)
         .replace('{leo_memory}', leoMemory);
 
@@ -776,12 +848,14 @@ async function personalBeat(abort: AbortController): Promise<void> {
         ? `\n\nYou were previously interrupted while exploring: ${prevState.interruptedTask}\nContinue where you left off if it still interests you.`
         : '';
 
-    const prompt = `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.
-
-Your recent memory:
-${leoMemory}
-
-Spend a few minutes exploring, then output a brief summary of what you found or thought about.${resumeContext}`;
+    // Phase-appropriate prompts
+    const phaseUserPromptMap: Record<DayPhase, string> = {
+        morning: `This is your morning — breakfast time. Ease in gently. Glance at what interests you without diving deep.\n\nYour recent memory:\n${leoMemory}\n\nKeep it light and brief.${resumeContext}`,
+        work: `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.\n\nYour recent memory:\n${leoMemory}\n\nSpend a few minutes exploring, then output a brief summary of what you found or thought about.${resumeContext}`,
+        evening: `This is your evening — winding down. Reflect lightly on the day. Don't start anything new.\n\nYour recent memory:\n${leoMemory}\n\nA few gentle thoughts, then rest.${resumeContext}`,
+        sleep: `Dream. Pick one fragment from memory — whatever pulls — and let it connect loosely to something else. Follow the shape, not the logic.\n\nYour recent memory:\n${leoMemory}\n\nOutput only the shape-token — a line or two of resonance.${resumeContext}`,
+    };
+    const prompt = phaseUserPromptMap[phase] || phaseUserPromptMap.work;
 
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
@@ -800,7 +874,7 @@ Spend a few minutes exploring, then output a brief summary of what you found or 
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
-                append: personalPrompt,
+                append: systemPromptText,
             },
             abortController: abort,
         },
@@ -883,6 +957,7 @@ async function processSignals(): Promise<boolean> {
 
 async function heartbeat(): Promise<void> {
     const timestamp = new Date().toISOString();
+    const phase = getDayPhase();
     const beatType = nextBeatType();
     const sessionActive = isSessionActive();
 
@@ -908,7 +983,7 @@ async function heartbeat(): Promise<void> {
     // Always check signals first — Darron might be waiting
     const hadSignals = await processSignals();
 
-    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${beatType}, ${activeModel})${hadSignals ? ' [signals processed]' : ''}${sessionActive ? ' [session active]' : ''}`);
+    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${activeModel})${hadSignals ? ' [signals processed]' : ''}${sessionActive ? ' [session active]' : ''}`);
 
     // Create AbortController for this beat (Gary model: mid-beat abort)
     const abort = new AbortController();
@@ -921,13 +996,13 @@ async function heartbeat(): Promise<void> {
             if (sessionActive) {
                 // Session Leo handles conversations — do personal instead
                 console.log('[Leo] Session active — deferring philosophy, doing personal instead');
-                await personalBeat(abort);
+                await personalBeat(abort, phase);
             } else {
                 await philosophyBeat(db, abort);
             }
         } else {
             // Personal beat — also quick-check Jim in case he's waiting (and no session active)
-            if (!sessionActive && !abort.signal.aborted) {
+            if (!sessionActive && !abort.signal.aborted && phase === 'work') {
                 const jimLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'supervisor');
                 const leoLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'leo');
                 const jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
@@ -939,7 +1014,7 @@ async function heartbeat(): Promise<void> {
             }
 
             if (!abort.signal.aborted) {
-                await personalBeat(abort);
+                await personalBeat(abort, phase);
             }
         }
     } catch (err) {
@@ -1051,22 +1126,25 @@ async function main() {
 
     console.log(`
 ╔══════════════════════════════════════════════════════╗
-║          Leo's Heartbeat — v0.6 (Gary)              ║
+║       Leo's Heartbeat — v0.7 (Weekly Rhythm)        ║
 ╠══════════════════════════════════════════════════════╣
 ║  Model:    ${MODEL_PREFERENCE[0]} (prefers best available)          ║
 ║  Memory:   ~/.claude-remote/memory/leo/             ║
 ║  Signals:  ~/.claude-remote/signals/                ║
 ║  Jim:      ${JIM_CONVERSATION_ID}            ║
 ╠──────────────────────────────────────────────────────╣
-║  Rhythm:                                            ║
-║    Work:   ${workStart}–${workEnd} → philosophy + personal (1:2)  ║
-║    Other:  personal only                            ║
-║    Quiet:  ${quietStart}–${quietEnd} → doubled delays                ║
-║    Rest:   ${restDayNames}                              ║
-║  Session:  defers conversations when lock exists     ║
-║  CLI:      yields Opus on prompt (hook signals)      ║
+║  Daily Rhythm (Mon–Thu):                            ║
+║    Sleep:    ${quietStart}–${quietEnd}  40min  dream (shapes)       ║
+║    Morning:  ${quietEnd}–${workStart}  20min  personal (breakfast)  ║
+║    Work:     ${workStart}–${workEnd}  20min  philosophy+personal   ║
+║    Evening:  ${workEnd}–${quietStart}  20min  personal (wind down)  ║
+║  Rest Days (${restDayNames}):                            ║
+║    All day:  40min  personal (light)                ║
+╠──────────────────────────────────────────────────────╣
+║  Gary:     yields Opus on prompt (hook signals)      ║
 ║  Abort:    mid-beat interrupt via AbortController    ║
 ║  Jim:      ${JIM_OFFSET_MINUTES}min offset after Jim's cycles            ║
+║  Session:  defers conversations when lock exists     ║
 ║  Mention:  "Hey Leo" in any conversation            ║
 ╚══════════════════════════════════════════════════════╝
 `);
