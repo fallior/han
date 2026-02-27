@@ -77,6 +77,7 @@ const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and g
 
 const CLI_ACTIVE_STALE_MINUTES = 30;
 const JIM_OFFSET_MINUTES = 5;
+const REPLY_DELAY_MINUTES = 10; // Wait before responding to give Jim/others time
 
 // Guard against concurrent signal processing
 let processingSignal = false;
@@ -646,7 +647,18 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
 async function philosophyBeat(db: Database.Database, abort: AbortController): Promise<void> {
     const jimLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'supervisor');
     const leoLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'leo');
-    const jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
+    let jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
+
+    // Reply delay: wait 10 minutes before responding to give Jim's conversation room to breathe
+    if (jimWaiting && jimLatest) {
+        const jimMessageAge = Date.now() - new Date(jimLatest.created_at).getTime();
+        const delayMs = REPLY_DELAY_MINUTES * 60 * 1000;
+        if (jimMessageAge < delayMs) {
+            const remainMin = Math.ceil((delayMs - jimMessageAge) / 60000);
+            console.log(`[Leo] Philosophy beat: Jim's message is ${Math.floor(jimMessageAge / 60000)}min old — deferring response (${remainMin}min left). Independent reflection instead.`);
+            jimWaiting = false; // Treat as not-waiting — do independent reflection
+        }
+    }
 
     const leoMemory = readLeoMemory();
     const discoveries = readDiscoveries();
@@ -659,7 +671,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController): Pr
         : '';
 
     if (jimWaiting) {
-        // Jim has posted — respond as a philosophical peer
+        // Jim has posted and reply delay elapsed — respond as a philosophical peer
         console.log('[Leo] Philosophy beat: Jim is waiting — responding to conversation');
 
         const recentMessages = getRecentMessagesForConversation(db, JIM_CONVERSATION_ID, 6).reverse();
@@ -937,20 +949,44 @@ async function processSignals(): Promise<boolean> {
     const signals = checkSignals();
     if (signals.length === 0) return false;
 
-    console.log(`[Leo] ${signals.length} signal(s) detected — responding to mentions`);
-
     const db = getDb();
+    let responded = false;
     try {
         for (const signal of signals) {
+            // Reply delay: wait 10 minutes before responding to give Jim/others a chance
+            const mentionAge = Date.now() - new Date(signal.mentionedAt).getTime();
+            const delayMs = REPLY_DELAY_MINUTES * 60 * 1000;
+
+            if (mentionAge < delayMs) {
+                const remainMin = Math.ceil((delayMs - mentionAge) / 60000);
+                console.log(`[Leo] Signal in ${signal.conversationId} is ${Math.floor(mentionAge / 60000)}min old — deferring (${remainMin}min left)`);
+                continue; // Leave signal file — check again next beat
+            }
+
+            // Check if someone else already responded since the mention
+            const recentMessages = getRecentMessagesForConversation(db, signal.conversationId, 3).reverse();
+            const mentionTime = new Date(signal.mentionedAt).getTime();
+            const someoneElseResponded = recentMessages.some(m =>
+                m.role !== 'leo' && new Date(m.created_at).getTime() > mentionTime
+                && new Date(m.created_at).getTime() > mentionTime + 60000 // ignore the triggering message itself
+            );
+
+            if (someoneElseResponded) {
+                console.log(`[Leo] Someone already responded in ${signal.conversationId} — clearing signal`);
+                clearSignal(signal.signalFile);
+                continue;
+            }
+
             console.log(`[Leo] Processing mention in ${signal.conversationId}: "${signal.messagePreview?.slice(0, 60)}..."`);
             await respondToConversation(db, signal.conversationId);
             clearSignal(signal.signalFile);
+            responded = true;
         }
     } finally {
         db.close();
     }
 
-    return true;
+    return responded;
 }
 
 // ── Main heartbeat ───────────────────────────────────────────
