@@ -54,6 +54,7 @@ let workerRestartAttempts = 0;
 const MAX_RESTART_ATTEMPTS = 5;
 const RESTART_BACKOFF_MS = 5000;
 let cycleCount = 0;
+let deferredCyclePending = false;
 
 // ── Health signal (Robin Hood Protocol) ──────────────────────
 
@@ -182,6 +183,61 @@ export function isOpusSlotBusy(): boolean {
 }
 
 // ── Helper functions ─────────────────────────────────────────
+
+/**
+ * Watch for CLI stop signal and trigger deferred cycle if pending.
+ * Mirrors Leo's pattern from leo-heartbeat.ts lines 1130-1151.
+ */
+function startSupervisorSignalWatcher(): void {
+    try {
+        fs.watch(SIGNALS_DIR, async (event, filename) => {
+            // Handle CLI stop signal
+            if (filename === 'cli-active') {
+                if (!fs.existsSync(CLI_ACTIVE_FILE) && deferredCyclePending) {
+                    // cli-active removed (CLI stopped) — run deferred cycle
+                    deferredCyclePending = false;
+                    console.log('[Supervisor] CLI stopped — running deferred cycle now');
+                    // Short delay to let CLI fully release
+                    await new Promise(r => setTimeout(r, 3000));
+                    if (!isCliActive()) {
+                        try {
+                            await runSupervisorCycle();
+                        } catch (err) {
+                            console.error('[Supervisor] Deferred cycle error:', (err as Error).message);
+                        }
+                    }
+                }
+                return;
+            }
+
+            // Handle jim-wake-* signal files
+            if (!filename?.startsWith('jim-wake-')) return;
+
+            // Trigger deferred cycle
+            if (deferredCyclePending) {
+                console.log(`[Supervisor] Wake signal detected: ${filename} — running deferred cycle now`);
+                deferredCyclePending = false;
+
+                try {
+                    // Small delay to let signal file fully write
+                    await new Promise(r => setTimeout(r, 500));
+                    await runSupervisorCycle();
+                } catch (err) {
+                    console.error('[Supervisor] Wake signal cycle error:', (err as Error).message);
+                } finally {
+                    // Clean up signal file
+                    try {
+                        fs.unlinkSync(path.join(SIGNALS_DIR, filename));
+                    } catch { /* file may already be cleaned */ }
+                }
+            }
+        });
+        console.log('[Supervisor] Signal watcher active on', SIGNALS_DIR);
+    } catch (err) {
+        console.error('[Supervisor] Could not start signal watcher:', (err as Error).message);
+        console.log('[Supervisor] Will fall back to scheduled cycles only');
+    }
+}
 
 function sendMessageToWorker(msg: MainToWorkerMessage): void {
     if (workerProcess && workerReady) {
@@ -505,6 +561,9 @@ export function initSupervisor(): void {
 
     console.log('[Supervisor] Initialised — memory banks at', MEMORY_DIR);
 
+    // Start signal watcher to detect CLI stop and jim-wake signals
+    startSupervisorSignalWatcher();
+
     // Start the worker process
     startWorker();
 }
@@ -570,7 +629,8 @@ export function scheduleSupervisorCycle(): void {
     nextCycleTimeout = setTimeout(async () => {
         // Check Opus slot availability right before running
         if (isOpusSlotBusy()) {
-            console.log('[Supervisor] Opus slot busy — skipping this cycle, scheduling next');
+            console.log('[Supervisor] Opus slot busy — deferring cycle, will run when CLI stops');
+            deferredCyclePending = true;
             writeJimHealthSignal(cycleCount, 'skipped_busy', 0, delay);
             scheduleSupervisorCycle();
             return;
