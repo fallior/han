@@ -84,6 +84,10 @@ const startedAt = Date.now();
 // AbortController for the currently-running beat (Gary model)
 let currentBeatAbort: AbortController | null = null;
 
+// Deferred beat: set when a beat is skipped due to CLI active.
+// The signal watcher triggers the beat when cli-active is removed.
+let deferredBeatPending = false;
+
 // ── Config loading ───────────────────────────────────────────
 
 function loadConfig(): any {
@@ -260,6 +264,27 @@ function readHeartbeatState(): { status: string; resumeOn?: string; interruptedT
     }
 }
 
+// ── Shared working memory (short-term thread) ────────────────
+//
+// Both session Leo and heartbeat Leo read and write working-memory.md.
+// This is the shared short-term memory that makes the transition between
+// heartbeat and session feel like switching tasks, not switching identities.
+
+const WORKING_MEMORY_FILE = path.join(LEO_MEMORY_DIR, 'working-memory.md');
+
+function appendWorkingMemory(beatType: string, phase: string, summary: string): void {
+    try {
+        const timestamp = new Date().toISOString().split('T')[0] + ' ' +
+            new Date().toTimeString().split(' ')[0];
+        const brief = summary.length > 120 ? summary.slice(0, 120) + '...' : summary;
+        const entry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${brief}\n`;
+        fs.appendFileSync(WORKING_MEMORY_FILE, entry);
+        console.log(`[Leo] Working memory: appended ${beatType} entry (${brief.length} chars)`);
+    } catch (err) {
+        console.error('[Leo] Failed to append working memory:', (err as Error).message);
+    }
+}
+
 // ── Model selection ──────────────────────────────────────────
 
 async function resolveModel(): Promise<string> {
@@ -369,7 +394,7 @@ function readJimContext(): string {
 }
 
 function readLeoMemory(): string {
-    const files = ['identity.md', 'active-context.md', 'patterns.md', 'self-reflection.md', 'discoveries.md'];
+    const files = ['identity.md', 'active-context.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory.md'];
     const sections: string[] = [];
     for (const file of files) {
         const p = path.join(LEO_MEMORY_DIR, file);
@@ -757,6 +782,7 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
             postMessageToConversation(db, JIM_CONVERSATION_ID, responseText.trim());
             console.log(`[Leo] Philosophy: posted response to Jim (${responseText.trim().length} chars)`);
             writeHeartbeatState('completed', 'philosophy', { summary: `Responded to Jim (${responseText.trim().length} chars)` });
+            appendWorkingMemory('philosophy', 'work', `Responded to Jim: ${responseText.trim()}`);
         } else {
             console.log('[Leo] Philosophy: no meaningful response for Jim — skipping');
             writeHeartbeatState('completed', 'philosophy', { summary: 'No meaningful response for Jim' });
@@ -836,6 +862,7 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
                 fs.appendFileSync(selfReflectionPath, entry);
                 console.log(`[Leo] Philosophy: wrote reflection (${reflection.trim().length} chars)`);
                 writeHeartbeatState('completed', 'philosophy', { summary: `Reflection (${reflection.trim().length} chars)` });
+                appendWorkingMemory('philosophy', 'work', reflection.trim());
             } catch (err) {
                 console.error('[Leo] Philosophy: failed to write reflection:', (err as Error).message);
             }
@@ -934,6 +961,7 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work'): P
             fs.appendFileSync(explorationsPath, entry);
             console.log(`[Leo] Personal: wrote reflection (${reflection.trim().length} chars)`);
             writeHeartbeatState('completed', 'personal', { summary: `Exploration (${reflection.trim().length} chars)` });
+            appendWorkingMemory('personal', phase, reflection.trim());
         } catch (err) {
             console.error('[Leo] Personal: failed to write reflection:', (err as Error).message);
         }
@@ -1008,11 +1036,13 @@ async function heartbeat(): Promise<void> {
 
     // Gary model: check if CLI is actively processing a prompt
     if (isCliActive()) {
-        console.log(`[Leo] CLI active — skipping beat #${beatCounter}, waiting for next interval`);
-        writeHeartbeatState('skipped', beatType, { summary: 'CLI active — Opus busy' });
+        console.log(`[Leo] CLI active — deferring beat #${beatCounter} (will resume when CLI stops)`);
+        writeHeartbeatState('skipped', beatType, { summary: 'CLI active — deferred' });
         writeHealthSignal(null, beatType);
+        deferredBeatPending = true;
         return;
     }
+    deferredBeatPending = false;
 
     // Check for the most capable model available
     await resolveModel();
@@ -1098,10 +1128,27 @@ function writeHealthSignal(lastError: string | null = null, beatType?: BeatType)
 function startSignalWatcher(): void {
     try {
         fs.watch(SIGNALS_DIR, async (event, filename) => {
-            // Gary model: cli-active appeared — abort current beat
-            if (filename === 'cli-active' && currentBeatAbort && !currentBeatAbort.signal.aborted) {
-                console.log('[Leo] CLI activated — aborting current beat (Gary yields)');
-                currentBeatAbort.abort();
+            if (filename === 'cli-active') {
+                if (fs.existsSync(CLI_ACTIVE_FILE)) {
+                    // cli-active appeared — abort current beat (Gary yields)
+                    if (currentBeatAbort && !currentBeatAbort.signal.aborted) {
+                        console.log('[Leo] CLI activated — aborting current beat (Gary yields)');
+                        currentBeatAbort.abort();
+                    }
+                } else if (deferredBeatPending) {
+                    // cli-active removed (Stop hook fired) — run deferred beat
+                    deferredBeatPending = false;
+                    console.log('[Leo] CLI stopped — running deferred beat now');
+                    // Short delay to let the CLI fully release
+                    await new Promise(r => setTimeout(r, 3000));
+                    if (!isCliActive()) {
+                        try {
+                            await heartbeat();
+                        } catch (err) {
+                            console.error('[Leo] Deferred beat error:', (err as Error).message);
+                        }
+                    }
+                }
                 return;
             }
 
