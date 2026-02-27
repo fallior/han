@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-26 (Autonomous) by Claude
+> Last updated: 2026-02-27 (Autonomous) by Claude
 
 ## Current Stage
 
@@ -31,6 +31,27 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-27 — Claude (autonomous) — Leo Heartbeat Critical Bug Fixes
+- **Fixed two critical bugs in `leo-heartbeat.ts` preventing Leo from thinking**:
+  - **CRITICAL: Removed undefined `shouldDeferToJim()` call** (lines 1017-1023):
+    - Function was planned for old time-offset approach but never implemented
+    - Every scheduled beat crashed with `ReferenceError: shouldDeferToJim is not defined`
+    - Wall-clock 180° phase scheduling (implemented in 4c16252) replaced time-offset approach
+    - Deleted the entire if-block that called the non-existent function
+  - **MEDIUM: Fixed double-increment in `writeHealthSignal()`** (line 1092):
+    - Function called `nextBeatType()` which has `beatCounter++` side effect (line 410)
+    - Beat counter was incrementing twice per cycle (once in heartbeat logic, once in health signal)
+    - Changed signature to `writeHealthSignal(lastError?: string | null, beatType?: BeatType)`
+    - Now accepts beatType as parameter instead of calling `nextBeatType()` again
+    - Beat counter now increments exactly once per cycle as intended
+- **Restarted Leo heartbeat process** to apply fixes:
+  - Stopped existing tsx process (PID 713041)
+  - Started new process: `cd /home/darron/Projects/clauderemote/src/server && npx tsx leo-heartbeat.ts` (background)
+  - Verified via `leo-health.json`: timestamp updated, beat counter incrementing correctly
+- **Why this matters**: Leo's heartbeat was completely non-functional due to ReferenceError crash. Wall-clock phase alignment (Leo 0°, Jim 180°) was implemented but couldn't execute. Now operational.
+- **Commits**: 4 commits (24ed342, da574a6, 5f2bbef, b2d3cfb)
+- **Files changed**: `src/server/leo-heartbeat.ts` (removed shouldDeferToJim block, fixed writeHealthSignal signature + all call sites)
 
 ### 2026-02-26 — Claude (autonomous) — enforceTokenCap Bug Fix Complete
 - **Fixed critical memory truncation bug** in `supervisor-worker.ts:enforceTokenCap()` (lines 930-933):
@@ -819,6 +840,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [2026-02-27-autonomous-leo-heartbeat-bugfix.md](session-notes/2026-02-27-autonomous-leo-heartbeat-bugfix.md) — Fixed two critical bugs preventing Leo heartbeat from executing
 - [2026-02-22-autonomous-conversation-search-complete.md](session-notes/2026-02-22-autonomous-conversation-search-complete.md) — Level 13: Conversation catalogue & search system complete
 - [2026-02-22-autonomous-dependency-resolution-fix.md](session-notes/2026-02-22-autonomous-dependency-resolution-fix.md) — Fixed critical dependency resolution bug (DEC-020)
 - [2026-02-22-autonomous-learnings-system-repair.md](session-notes/2026-02-22-autonomous-learnings-system-repair.md) — Created 5 missing learning files (L002-L006) in _learnings repository

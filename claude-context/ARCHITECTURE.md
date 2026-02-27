@@ -758,4 +758,4 @@ curl -s "http://localhost:3847/api/conversations/grouped"
 
 ---
 
-*Last updated: 2026-02-22 — Added Level 13: Conversation Cataloguing & Search documentation*
+*Last updated: 2026-02-27 — Leo heartbeat bug fixes (removed shouldDeferToJim, fixed double-increment)*
