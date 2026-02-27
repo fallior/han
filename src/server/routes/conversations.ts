@@ -4,7 +4,7 @@ import path from 'node:path';
 import { db, conversationStmts, conversationMessageStmts } from '../db';
 import { generateId } from '../services/planning';
 import { broadcast } from '../ws';
-import { runSupervisorCycle } from '../services/supervisor';
+import { runSupervisorCycle, isOpusSlotBusy } from '../services/supervisor';
 import { catalogueConversation, catalogueAllUncatalogued } from '../services/cataloguing';
 import { callLLM } from '../orchestrator';
 
@@ -256,6 +256,22 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         });
 
         res.json({ success: true, message });
+
+        // Jim-wake signal when Opus is busy
+        if (finalRole === 'human' && isOpusSlotBusy()) {
+            try {
+                const signalFile = path.join(SIGNALS_DIR, `jim-wake-${Date.now()}`);
+                fs.writeFileSync(signalFile, JSON.stringify({
+                    conversationId: req.params.id,
+                    messageId,
+                    timestamp: now,
+                    reason: 'human_message_while_opus_busy'
+                }));
+                console.log(`[Conversations] Jim wake signal written: Opus busy when human message arrived`);
+            } catch (err: any) {
+                console.error(`[Conversations] Failed to write jim-wake signal: ${err.message}`);
+            }
+        }
 
         // Detect mentions and write signal files
         if (LEO_MENTION.test(content)) {
