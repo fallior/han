@@ -169,7 +169,7 @@ function isCliActive(): boolean {
     } catch { return false; }
 }
 
-function isOpusSlotBusy(): boolean {
+export function isOpusSlotBusy(): boolean {
     if (isSessionActive()) {
         console.log('[Supervisor] Session Leo is active — Opus slot busy');
         return true;
