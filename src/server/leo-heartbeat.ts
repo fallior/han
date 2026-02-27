@@ -1010,7 +1010,7 @@ async function heartbeat(): Promise<void> {
     if (isCliActive()) {
         console.log(`[Leo] CLI active — skipping beat #${beatCounter}, waiting for next interval`);
         writeHeartbeatState('skipped', beatType, { summary: 'CLI active — Opus busy' });
-        writeHealthSignal();
+        writeHealthSignal(null, beatType);
         return;
     }
 
@@ -1059,7 +1059,7 @@ async function heartbeat(): Promise<void> {
             console.log('[Leo] Beat interrupted by CLI — will resume next cycle');
         } else {
             console.error('[Leo] Error:', (err as Error).message);
-            writeHealthSignal((err as Error).message);
+            writeHealthSignal((err as Error).message, beatType);
         }
         return;
     } finally {
@@ -1068,12 +1068,12 @@ async function heartbeat(): Promise<void> {
     }
 
     // Write health signal at end of every successful beat (Robin Hood Protocol)
-    writeHealthSignal();
+    writeHealthSignal(null, beatType);
 }
 
 // ── Health signal (Robin Hood Protocol) ───────────────────────
 
-function writeHealthSignal(lastError: string | null = null): void {
+function writeHealthSignal(lastError: string | null = null, beatType?: BeatType): void {
     try {
         fs.mkdirSync(HEALTH_DIR, { recursive: true });
         const signal = {
@@ -1081,7 +1081,7 @@ function writeHealthSignal(lastError: string | null = null): void {
             pid: process.pid,
             timestamp: new Date().toISOString(),
             beat: beatCounter,
-            beatType: nextBeatType(),
+            beatType: beatType ?? 'unknown',
             status: lastError ? 'error' : 'ok',
             lastError,
             uptimeMinutes: Math.round((Date.now() - startedAt) / 60000),
