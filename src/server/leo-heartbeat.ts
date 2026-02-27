@@ -1014,14 +1014,6 @@ async function heartbeat(): Promise<void> {
         return;
     }
 
-    // Jim time offset: avoid colliding with Jim's supervisor cycles
-    if (shouldDeferToJim()) {
-        console.log(`[Leo] Deferring beat #${beatCounter} — Jim ran recently`);
-        writeHeartbeatState('skipped', beatType, { summary: 'Deferred to Jim (time offset)' });
-        writeHealthSignal();
-        return;
-    }
-
     // Check for the most capable model available
     await resolveModel();
 
