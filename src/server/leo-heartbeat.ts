@@ -71,12 +71,10 @@ const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
 const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
 const CLI_ACTIVE_FILE = path.join(SIGNALS_DIR, 'cli-active');
 const HEARTBEAT_STATE_FILE = path.join(LEO_MEMORY_DIR, 'heartbeat-state.md');
-const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
 const PROJECTS_DIR = path.join(HOME, 'Projects');
 const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
 
 const CLI_ACTIVE_STALE_MINUTES = 30;
-const JIM_OFFSET_MINUTES = 5;
 const REPLY_DELAY_MINUTES = 10; // Wait before responding to give Jim/others time
 
 // Guard against concurrent signal processing
@@ -150,14 +148,18 @@ function getDayPhase(): DayPhase {
     return 'evening';
 }
 
-function getNextDelay(): number {
+function getCurrentPeriodMs(): number {
     const phase = getDayPhase();
-    if (phase === 'sleep') {
+    return phase === 'sleep' ? BASE_DELAY_SLEEP_MS : BASE_DELAY_WAKING_MS;
+}
+
+function getNextDelay(): number {
+    const periodMs = getCurrentPeriodMs();
+    if (periodMs === BASE_DELAY_SLEEP_MS) {
         const reason = isRestDay() ? 'Rest day' : 'Sleep';
         console.log(`[Leo] ${reason} — 40min interval`);
-        return BASE_DELAY_SLEEP_MS;
     }
-    return BASE_DELAY_WAKING_MS;
+    return periodMs;
 }
 
 // ── Session detection ────────────────────────────────────────
@@ -197,22 +199,29 @@ function isCliActive(): boolean {
     }
 }
 
-// ── Jim time offset ──────────────────────────────────────────
+// ── Wall-clock phase alignment (180° with Jim) ──────────────
+//
+// Both Leo and Jim follow the same four-phase daily rhythm and share
+// the same period. Scheduling is deterministic via wall clock:
+//   Leo fires at: epoch mod period == 0        (phase 0°)
+//   Jim fires at: epoch mod period == period/2  (phase 180°)
+// No health-file coordination needed.
 
-function shouldDeferToJim(): boolean {
-    try {
-        if (!fs.existsSync(JIM_HEALTH_FILE)) return false;
-        const data = JSON.parse(fs.readFileSync(JIM_HEALTH_FILE, 'utf-8'));
-        if (!data.timestamp) return false;
-        const jimAge = (Date.now() - new Date(data.timestamp).getTime()) / 60000;
-        if (jimAge < JIM_OFFSET_MINUTES) {
-            console.log(`[Leo] Jim's last cycle was ${jimAge.toFixed(1)}m ago — deferring ${JIM_OFFSET_MINUTES}m`);
-            return true;
-        }
-        return false;
-    } catch {
-        return false;
-    }
+/**
+ * Calculate delay until next wall-clock-aligned beat.
+ * Leo is at phase 0: fires when epoch_ms mod period == 0.
+ */
+function getWallClockDelay(): number {
+    const periodMs = getCurrentPeriodMs();
+    const now = Date.now();
+    const remainder = now % periodMs;
+    let delay = periodMs - remainder;
+    // If we're within 30s of a boundary, skip to next period
+    if (delay < 30000) delay += periodMs;
+    const phase = getDayPhase();
+    const phaseLabel = phase === 'sleep' ? (isRestDay() ? 'rest' : 'sleep') : phase;
+    console.log(`[Leo] Wall-clock: ${phaseLabel} phase, period ${periodMs / 60000}min, next beat in ${Math.round(delay / 1000)}s (${Math.round(delay / 60000)}min)`);
+    return delay;
 }
 
 // ── Heartbeat state (incremental saves) ──────────────────────
@@ -1084,6 +1093,7 @@ function writeHealthSignal(lastError: string | null = null): void {
             status: lastError ? 'error' : 'ok',
             lastError,
             uptimeMinutes: Math.round((Date.now() - startedAt) / 60000),
+            nextDelayMs: getNextDelay(), // So Jim can calculate 180° phase offset
         };
         fs.writeFileSync(path.join(HEALTH_DIR, 'leo-health.json'), JSON.stringify(signal, null, 2));
     } catch (err) {
@@ -1135,8 +1145,7 @@ function startSignalWatcher(): void {
 // ── Scheduling (variable delay via setTimeout) ───────────────
 
 function scheduleNext(): void {
-    const delay = getNextDelay();
-    console.log(`[Leo] Next beat in ${Math.round(delay / 1000)}s`);
+    const delay = getWallClockDelay();
     setTimeout(async () => {
         try {
             await heartbeat();
@@ -1179,7 +1188,7 @@ async function main() {
 ╠──────────────────────────────────────────────────────╣
 ║  Gary:     yields Opus on prompt (hook signals)      ║
 ║  Abort:    mid-beat interrupt via AbortController    ║
-║  Jim:      ${JIM_OFFSET_MINUTES}min offset after Jim's cycles            ║
+║  Phase:    0° (wall-clock aligned, Jim at 180°)      ║
 ║  Session:  defers conversations when lock exists     ║
 ║  Mention:  "Hey Leo" in any conversation            ║
 ╚══════════════════════════════════════════════════════╝

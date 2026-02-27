@@ -41,11 +41,145 @@ let pendingCycleResolve: ((result: CycleCompleteMessage['result'] | null) => voi
 const MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
 const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
 const SESSIONS_DIR = path.join(MEMORY_DIR, 'sessions');
+const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
+const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
+const SESSION_LOCK_FILE = path.join(CLAUDE_REMOTE_DIR, 'session-active');
+const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
+const CLI_ACTIVE_FILE = path.join(SIGNALS_DIR, 'cli-active');
+const SESSION_LOCK_STALE_HOURS = 4;
+const CLI_ACTIVE_STALE_MINUTES = 30;
 
 // Worker restart backoff
 let workerRestartAttempts = 0;
 const MAX_RESTART_ATTEMPTS = 5;
 const RESTART_BACKOFF_MS = 5000;
+let cycleCount = 0;
+
+// ── Health signal (Robin Hood Protocol) ──────────────────────
+
+function writeJimHealthSignal(cycleNumber: number, tier: string, costUsd: number, nextDelayMs: number, lastError: string | null = null): void {
+    try {
+        fs.mkdirSync(HEALTH_DIR, { recursive: true });
+        const signal = {
+            agent: 'jim',
+            pid: process.pid,
+            timestamp: new Date().toISOString(),
+            cycle: cycleNumber,
+            tier,
+            status: lastError ? 'error' : 'ok',
+            lastError,
+            costUsd,
+            nextDelayMs, // So Leo can calculate 180° phase offset
+            uptimeMinutes: Math.round(process.uptime() / 60),
+        };
+        fs.writeFileSync(JIM_HEALTH_FILE, JSON.stringify(signal, null, 2));
+    } catch (err) {
+        console.error('[Supervisor] Failed to write health signal:', (err as Error).message);
+    }
+}
+
+// ── Four-phase daily rhythm (shared with Leo) ────────────────
+//
+// Both Jim and Leo follow the same rhythm and period. Scheduling is
+// deterministic via wall clock:
+//   Leo fires at: epoch mod period == 0        (phase 0°)
+//   Jim fires at: epoch mod period == period/2  (phase 180°)
+
+const BASE_DELAY_WAKING_MS = 20 * 60 * 1000;  // 20 minutes — morning, work, evening
+const BASE_DELAY_SLEEP_MS = 40 * 60 * 1000;   // 40 minutes — sleep + rest days
+
+type DayPhase = 'sleep' | 'morning' | 'work' | 'evening';
+
+function isRestDay(): boolean {
+    const config = loadConfig();
+    const restDays: number[] = config.supervisor?.rest_days ?? [0, 6];
+    return restDays.includes(new Date().getDay());
+}
+
+function getDayPhase(): DayPhase {
+    if (isRestDay()) return 'sleep';
+    const config = loadConfig();
+    const quietStart = config.supervisor?.quiet_hours_start || config.quiet_hours_start || '22:00';
+    const quietEnd = config.supervisor?.quiet_hours_end || config.quiet_hours_end || '06:00';
+    const workStart = config.supervisor?.work_hours_start || '09:00';
+    const workEnd = config.supervisor?.work_hours_end || '17:00';
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const toMinutes = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); };
+
+    const quietStartM = toMinutes(quietStart);
+    const quietEndM = toMinutes(quietEnd);
+    const workStartM = toMinutes(workStart);
+    const workEndM = toMinutes(workEnd);
+
+    if (quietStartM > quietEndM) {
+        if (currentMinutes >= quietStartM || currentMinutes < quietEndM) return 'sleep';
+    } else {
+        if (currentMinutes >= quietStartM && currentMinutes < quietEndM) return 'sleep';
+    }
+    if (currentMinutes >= quietEndM && currentMinutes < workStartM) return 'morning';
+    if (currentMinutes >= workStartM && currentMinutes < workEndM) return 'work';
+    return 'evening';
+}
+
+function getCurrentPeriodMs(): number {
+    return getDayPhase() === 'sleep' ? BASE_DELAY_SLEEP_MS : BASE_DELAY_WAKING_MS;
+}
+
+/**
+ * Calculate delay until next wall-clock-aligned cycle.
+ * Jim is at phase 180°: fires when epoch_ms mod period == period/2.
+ */
+function getWallClockDelay(): number {
+    const periodMs = getCurrentPeriodMs();
+    const offsetMs = Math.floor(periodMs / 2); // 180° offset
+    const now = Date.now();
+    const remainder = (now - offsetMs) % periodMs;
+    // remainder could be negative if offsetMs > now%periodMs, normalise
+    const normRemainder = ((remainder % periodMs) + periodMs) % periodMs;
+    let delay = periodMs - normRemainder;
+    // If within 30s of boundary, skip to next period
+    if (delay < 30000) delay += periodMs;
+    const phase = getDayPhase();
+    const phaseLabel = phase === 'sleep' ? (isRestDay() ? 'rest' : 'sleep') : phase;
+    console.log(`[Supervisor] Wall-clock: ${phaseLabel} phase, period ${periodMs / 60000}min, next cycle in ${Math.round(delay / 1000)}s (${Math.round(delay / 60000)}min)`);
+    return delay;
+}
+
+// ── Session/CLI detection (Opus concurrency guard) ───────────
+
+function isSessionActive(): boolean {
+    if (!fs.existsSync(SESSION_LOCK_FILE)) return false;
+    try {
+        const stat = fs.statSync(SESSION_LOCK_FILE);
+        const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
+        if (ageHours > SESSION_LOCK_STALE_HOURS) return false;
+        return true;
+    } catch { return false; }
+}
+
+function isCliActive(): boolean {
+    if (!fs.existsSync(CLI_ACTIVE_FILE)) return false;
+    try {
+        const stat = fs.statSync(CLI_ACTIVE_FILE);
+        const ageMinutes = (Date.now() - stat.mtimeMs) / 60000;
+        if (ageMinutes > CLI_ACTIVE_STALE_MINUTES) return false;
+        return true;
+    } catch { return false; }
+}
+
+function isOpusSlotBusy(): boolean {
+    if (isSessionActive()) {
+        console.log('[Supervisor] Session Leo is active — Opus slot busy');
+        return true;
+    }
+    if (isCliActive()) {
+        console.log('[Supervisor] CLI is active — Opus slot busy');
+        return true;
+    }
+    return false;
+}
 
 // ── Helper functions ─────────────────────────────────────────
 
@@ -431,14 +565,31 @@ export async function runSupervisorCycle(): Promise<{
 export function scheduleSupervisorCycle(): void {
     if (!supervisorEnabled || supervisorPaused) return;
 
-    runSupervisorCycle().then(result => {
-        const delay = result?.nextDelayMs || 5 * 60 * 1000; // Default to 5 minutes
-        console.log(`[Supervisor] Next cycle in ${Math.round(delay / 1000)}s`);
-        nextCycleTimeout = setTimeout(scheduleSupervisorCycle, delay);
-    }).catch(err => {
-        console.error('[Supervisor] Cycle error:', err.message);
-        nextCycleTimeout = setTimeout(scheduleSupervisorCycle, 5 * 60 * 1000);
-    });
+    const delay = getWallClockDelay();
+
+    nextCycleTimeout = setTimeout(async () => {
+        // Check Opus slot availability right before running
+        if (isOpusSlotBusy()) {
+            console.log('[Supervisor] Opus slot busy — skipping this cycle, scheduling next');
+            writeJimHealthSignal(cycleCount, 'skipped_busy', 0, delay);
+            scheduleSupervisorCycle();
+            return;
+        }
+
+        try {
+            const result = await runSupervisorCycle();
+            cycleCount++;
+            if (result) {
+                writeJimHealthSignal(cycleCount, 'complete', result.costUsd, delay);
+            }
+        } catch (err: any) {
+            cycleCount++;
+            console.error('[Supervisor] Cycle error:', err.message);
+            writeJimHealthSignal(cycleCount, 'error', 0, delay, err.message);
+        }
+
+        scheduleSupervisorCycle();
+    }, delay);
 }
 
 // ── Control ──────────────────────────────────────────────────
