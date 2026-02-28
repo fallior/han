@@ -32,6 +32,28 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-02-28 — Claude (autonomous) — Context Injection Pipeline Fixes Complete
+- **Fixed 5 context injection bugs** in `src/server/services/context.ts`:
+  1. **ADR filter expansion** (line 45): Changed regex from `/\*\*Status\*\*:\s*Settled/i` to `/\*\*Status\*\*:\s*(Settled|Accepted)/i`
+     - Now matches both 'Settled' and 'Accepted' status ADRs
+     - Previously 0 of 131 ADRs reached task agents because they all used 'Accepted' status
+  2. **CLAUDE.md truncation increase** (line 292): Raised maxChars from 3000 to 6000
+     - clauderemote and hodgic now receive full session protocol boilerplate without truncation
+     - Previously these projects got 0 useful content due to 3000-char budget being consumed by boilerplate
+  3. **Learnings selection bias fix** (line 141): Sort by severity (HIGH before MEDIUM) before slicing, increased cap from 5 to 10
+     - HIGH-severity learnings now prioritised regardless of INDEX.md position
+     - Cloudflare learnings for licences project are now correctly selected
+  4. **Bun detection gap** (depMap ~line 64): Added `'@types/bun': ['Bun']` to depMap, removed dead `'bun:sqlite'` entry
+     - 7 Bun projects now correctly detected
+     - Built-in imports never appear in package.json, so `bun:sqlite` was never matched
+  5. **Monorepo tech detection** (lines 66-79): Added glob scanning for `packages/*/package.json`
+     - contempire's Hono, Clerk, and Zod dependencies now detected from workspace packages
+     - Uses `fs.readdirSync()` to find package directories
+- **Impact**: Task agents now receive complete, accurate context — settled decisions visible, HIGH-severity learnings prioritised, tech stacks correctly detected
+- **Commits**: 10 commits (b25d3cc, 5b5bcef, 6dd8c06, 73e3b1b, b960468, 30f2d7c, c0858e2, 9a8efa3, 794f3b6, and docs updates)
+- **Files changed**: `src/server/services/context.ts` (all 5 fixes implemented and tested)
+- **Testing**: Verified via context extraction — ADRs now include both statuses, CLAUDE.md fully captured, HIGH learnings sorted first, Bun projects detected, monorepo deps found
+
 ### 2026-02-28 — Claude (autonomous) — Jim-Wake Handler Guard Fixed (Prevents Cycle Hang on Busy Opus)
 - **Fixed critical bug in jim-wake signal handler** (supervisor.ts ~line 224):
   - **Root cause**: Handler fired deferred cycle without checking if Opus slot was busy

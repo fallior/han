@@ -53,6 +53,7 @@ When you make a significant technical or design decision:
 | DEC-021 | Category-Aware Model Selection Strategy | Accepted | 2026-02-23 |
 | DEC-022 | enforceTokenCap H3 Fallback and Negative Guard | **Settled** | 2026-02-26 |
 | DEC-023 | Deferred Cycle Pattern via fs.watch (Gary Model) | Accepted | 2026-02-28 |
+| DEC-024 | Context Injection Pipeline Tuning | Accepted | 2026-02-28 |
 
 ---
 
@@ -1446,6 +1447,92 @@ Tested with manual verification:
 3. Removed cli-active file manually
 4. Confirmed watcher fired deferred cycle within 3 seconds
 5. Checked signal file cleanup (jim-wake files removed after processing)
+
+---
+
+### DEC-024: Context Injection Pipeline Tuning
+
+**Date**: 2026-02-28
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+The context injection system (`buildTaskContext()`) assembles ecosystem context for autonomous task agents. Five bugs were discovered that prevented agents from receiving complete and accurate context:
+
+1. **ADR filter**: Only matched "Settled" status, but all 131 ADRs in the ecosystem used "Accepted"
+2. **CLAUDE.md truncation**: 3000-char limit caused projects with long session protocols (clauderemote, hodgic) to get 0 useful content
+3. **Learnings selection**: Position-based slicing caused HIGH-severity learnings to be missed when they appeared after position 5
+4. **Bun detection**: `bun:sqlite` entry never matched because built-in imports don't appear in package.json
+5. **Monorepo tech detection**: Workspace packages in `packages/*/package.json` weren't scanned
+
+These bugs resulted in autonomous tasks operating with incomplete information, leading to re-implementing already-decided patterns, repeating known mistakes, and receiving irrelevant learnings.
+
+#### Options Considered
+
+**For each bug:**
+
+1. **ADR Filter**:
+   - Option A: Change all ADR statuses to "Settled" (❌ breaks convention, requires mass edit)
+   - **Option B: Accept both "Settled" and "Accepted"** (✅ backwards compatible, minimal change)
+
+2. **CLAUDE.md Truncation**:
+   - Option A: Split session protocol into separate file (❌ complicates structure)
+   - **Option B: Double the character limit to 6000** (✅ simple, effective)
+
+3. **Learnings Selection**:
+   - Option A: Reorder INDEX.md manually (❌ fragile, requires ongoing maintenance)
+   - **Option B: Sort by severity before slicing + increase cap to 10** (✅ algorithmic fix, more capacity)
+
+4. **Bun Detection**:
+   - Option A: Check for `bun.lockb` file (❌ doesn't work for projects using npm)
+   - **Option B: Match `@types/bun` package** (✅ reliable signal for Bun projects)
+
+5. **Monorepo Tech Detection**:
+   - Option A: Require manual tech stack in CLAUDE.md (❌ defeats automation purpose)
+   - **Option B: Scan workspace packages automatically** (✅ correct, complete detection)
+
+#### Decision
+
+Implemented all five fixes (Option B in each case) because they address root causes with minimal code changes and maintain backwards compatibility:
+
+1. **ADR filter**: Changed regex to `/\*\*Status\*\*:\s*(Settled|Accepted)/i`
+2. **CLAUDE.md truncation**: Increased from 3000 to 6000 chars
+3. **Learnings selection**: Sort by severity (HIGH first), then slice to 10 (was 5)
+4. **Bun detection**: Added `'@types/bun': ['Bun']`, removed `'bun:sqlite'`
+5. **Monorepo scanning**: Added `fs.readdirSync()` loop for `packages/*/package.json`
+
+All changes isolated to `src/server/services/context.ts`.
+
+#### Consequences
+
+**Positive:**
+- Task agents now receive complete settled decisions (131 ADRs vs 0)
+- Full session protocols captured for all projects
+- HIGH-severity learnings always prioritised regardless of INDEX.md order
+- Bun projects correctly detected (7 projects benefit)
+- Monorepo dependencies discovered (contempire's Hono, Clerk, Zod now detected)
+- Improved context quality leads to better task outcomes
+
+**Negative:**
+- Slightly larger context payload (minimal impact, well within token budgets)
+- More learnings per task (10 vs 5) — acceptable tradeoff for relevance
+
+**Trade-offs:**
+- CLAUDE.md 6000-char limit may still be insufficient for some projects — can increase further if needed
+- Monorepo scanning assumes `packages/` convention — won't detect non-standard layouts (acceptable — can extend if needed)
+
+**Implementation notes:**
+- All fixes tested via manual context extraction verification
+- Zero breaking changes — purely additive or corrective
+- Maintains backwards compatibility with existing ADR statuses
+
+#### Related
+
+- Level 10 Phase A: Ecosystem-Aware Context Injection (foundation for this work)
+- `buildTaskContext()` function (context.ts:220-330)
+- ADR extraction, tech detection, learnings filtering
+- DEC-021: Category-Aware Model Selection (benefits from improved context)
 
 ---
 

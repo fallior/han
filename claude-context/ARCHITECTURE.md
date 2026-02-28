@@ -768,4 +768,40 @@ curl -s "http://localhost:3847/api/conversations/grouped"
 
 ---
 
-*Last updated: 2026-02-27 — Leo heartbeat bug fixes (removed shouldDeferToJim, fixed double-increment)*
+## Context Injection Pipeline Quality (Level 10 Tuning)
+
+**Date**: 2026-02-28
+**Status**: Complete
+
+The `buildTaskContext()` function in `src/server/services/context.ts` assembles ~3500-token context for every autonomous task. Five quality bugs were discovered and fixed:
+
+### 1. ADR Filter Expansion (Line 45)
+- **Before**: Regex `/\*\*Status\*\*:\s*Settled/i` matched only "Settled" status
+- **After**: Regex `/\*\*Status\*\*:\s*(Settled|Accepted)/i` matches both
+- **Impact**: 0 of 131 ADRs → all 131 ADRs now injected into task context
+
+### 2. CLAUDE.md Truncation Increase (Line 292)
+- **Before**: 3000-character limit
+- **After**: 6000-character limit
+- **Impact**: Projects with long session protocols (clauderemote, hodgic) now get full instructions instead of 0 useful content
+
+### 3. Learnings Selection Bias Fix (Line 141)
+- **Before**: Position-based slicing from INDEX.md (first 5 learnings)
+- **After**: Sort by severity (HIGH before MEDIUM), then slice to top 10
+- **Impact**: HIGH-severity learnings always prioritised regardless of INDEX.md order
+
+### 4. Bun Detection Gap (DepMap ~Line 64)
+- **Before**: `'bun:sqlite': ['SQLite', 'Bun']` never matched (built-in imports don't appear in package.json)
+- **After**: `'@types/bun': ['Bun']` reliably detects Bun projects
+- **Impact**: 7 Bun projects now correctly tagged with Bun tech stack
+
+### 5. Monorepo Tech Detection (Lines 66-79)
+- **Before**: Only scanned root `package.json` and `src/server/package.json`
+- **After**: Also scans `packages/*/package.json` via `fs.readdirSync()` loop
+- **Impact**: Monorepo workspace dependencies (contempire's Hono, Clerk, Zod) now detected
+
+**Result**: Task agents now receive complete, accurate context. Settled decisions visible. HIGH-severity learnings prioritised. Tech stacks correctly detected. See DEC-024 for decision record.
+
+---
+
+*Last updated: 2026-02-28 — Context injection pipeline quality fixes (5 bugs fixed)*
