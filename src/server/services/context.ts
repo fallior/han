@@ -138,7 +138,9 @@ export function getRelevantLearnings(techStack: string[]): Array<{ id: string; s
         if (seen.has(l.id)) return false;
         seen.add(l.id);
         return true;
-    }).slice(0, 5);
+    })
+    .sort((a, b) => (a.severity === 'HIGH' ? 0 : 1) - (b.severity === 'HIGH' ? 0 : 1))
+    .slice(0, 10);
 }
 
 /**
