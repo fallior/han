@@ -60,13 +60,30 @@ export function detectProjectTechStack(projectPath: string): string[] {
         'react-dom': ['React'],
         'drizzle-orm': ['Drizzle ORM'],
         'ws': ['WebSocket'],
-        'hono': ['Bun'],
+        'hono': ['Hono', 'Bun'],
         'elysia': ['Bun'],
+        'zod': ['Zod'],
+        '@clerk/backend': ['Clerk'],
+        '@clerk/clerk-react': ['Clerk'],
+        'postgres': ['PostgreSQL'],
     };
-    const pkgPaths = [
+    const pkgPaths: string[] = [
         path.join(projectPath, 'package.json'),
         path.join(projectPath, 'src', 'server', 'package.json'),
     ];
+
+    // Detect monorepo sub-packages in packages/*/package.json
+    const packagesDir = path.join(projectPath, 'packages');
+    try {
+        if (fs.existsSync(packagesDir)) {
+            for (const entry of fs.readdirSync(packagesDir, { withFileTypes: true })) {
+                if (entry.isDirectory()) {
+                    pkgPaths.push(path.join(packagesDir, entry.name, 'package.json'));
+                }
+            }
+        }
+    } catch { /* skip */ }
+
     for (const pkgPath of pkgPaths) {
         try {
             if (!fs.existsSync(pkgPath)) continue;
