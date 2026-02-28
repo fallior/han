@@ -221,11 +221,16 @@ function startSupervisorSignalWatcher(): void {
                 try {
                     // Small delay to let signal file fully write
                     await new Promise(r => setTimeout(r, 500));
+                    if (isOpusSlotBusy()) {
+                        console.log('[Supervisor] Wake signal but Opus busy — staying deferred');
+                        deferredCyclePending = true;
+                        return;
+                    }
                     await runSupervisorCycle();
                 } catch (err) {
                     console.error('[Supervisor] Wake signal cycle error:', (err as Error).message);
                 } finally {
-                    // Clean up signal file
+                    // Clean up signal file whether cycle ran or was skipped
                     try {
                         fs.unlinkSync(path.join(SIGNALS_DIR, filename));
                     } catch { /* file may already be cleaned */ }
