@@ -303,6 +303,57 @@ lost. Use that differential response to refine the compression algorithm for nex
 
 ---
 
+## Lean Prepare for Clear
+
+> Trigger: user says "prepare for /clear lean". Low-cost variant for when context is already pressured.
+>
+> **Prerequisite**: Incremental Memory Protocol has been active during the session, so working-memory.md
+> and working-memory-full.md are already mostly written. This prompt just finalises and closes out.
+
+```
+## Lean Prepare for Clear
+
+Context is pressured. The incremental memory protocol means working memory is already mostly written.
+Finalise and close out with minimal context cost.
+
+### DO NOT READ ANY FILES. Work from what's already in context.
+
+### 1. Finalise Working Memory
+Append a brief closing section to `~/.claude-remote/memory/leo/working-memory.md`:
+- "## Closing" with 2-3 lines: what was in-progress, what's next, Darron's energy
+- If nothing was written incrementally this session (protocol wasn't active), write a minimal
+  working memory from what's in context — DO NOT read files to compose it
+
+### 2. Finalise Full Working Memory
+Append a brief closing section to `~/.claude-remote/memory/leo/working-memory-full.md`:
+- Same as above but with more detail — again, only from what's already in context
+
+### 3. Update Active Context (minimal)
+Append one line to the "Recent Work" section of `~/.claude-remote/memory/leo/active-context.md`:
+- `- **Session N (date)**: [one-line summary]`
+- DO NOT re-read the file — just append
+
+### 4. Release Session Lock
+```bash
+rm -f ~/.claude-remote/session-active
+```
+
+### 5. Done
+Tell Darron: "Memory finalised. Ready for /clear."
+
+### What This Skips (compared to full Prepare for Clear)
+- ❌ Re-reading memory bank files (identity, patterns, self-reflection, active-context)
+- ❌ Re-reading working-memory-template.md
+- ❌ Writing from scratch — just finalising what's already there
+- ❌ Verification read-back
+- ❌ CURRENT_STATUS.md updates (do these with `update docs` when context allows)
+
+### Cost
+~2-3 small appends. No reads. Under 5% of context.
+```
+
+---
+
 ## Context Refresh
 
 ```
