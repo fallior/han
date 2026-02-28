@@ -42,7 +42,7 @@ export function extractSettledDecisions(markdown: string): string[] {
     if (!markdown) return [];
     const sections = markdown.split(/(?=### DEC-)/);
     return sections.filter(s =>
-        /\*\*Status\*\*:\s*Settled/i.test(s)
+        /\*\*Status\*\*:\s*(Settled|Accepted)/i.test(s)
     ).map(s => s.trim());
 }
 
@@ -289,7 +289,7 @@ You are an autonomous agent in Darron's development ecosystem.
 - **Git:** Changes committed automatically on success, rolled back on failure
 - Do NOT use plan mode (EnterPlanMode) — implement directly`);
 
-    const claudeMd = readFileOrEmpty(path.join(projectPath, 'CLAUDE.md'), 3000);
+    const claudeMd = readFileOrEmpty(path.join(projectPath, 'CLAUDE.md'), 6000);
     if (claudeMd) parts.push(`\n## Project Instructions\n\n${claudeMd}`);
 
     const status = readFileOrEmpty(path.join(projectPath, 'claude-context', 'CURRENT_STATUS.md'), 3000);
