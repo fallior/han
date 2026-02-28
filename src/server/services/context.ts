@@ -54,7 +54,7 @@ export function detectProjectTechStack(projectPath: string): string[] {
     const depMap: Record<string, string[]> = {
         'express': ['Express', 'Node.js'],
         'better-sqlite3': ['SQLite'],
-        'bun:sqlite': ['SQLite', 'Bun'],
+        '@types/bun': ['Bun'],
         '@anthropic-ai/claude-agent-sdk': ['Claude Agent SDK'],
         'react': ['React'],
         'react-dom': ['React'],
