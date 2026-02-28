@@ -455,12 +455,13 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 - **Deferred cycle pattern (Gary Model)**:
   - `startSupervisorSignalWatcher()` watches `~/.claude-remote/signals/` directory via fs.watch
   - Two detection patterns:
-    - **CLI stop**: When `cli-active` file removed → runs deferred cycle after 3s delay
-    - **Wake signal**: When `jim-wake-{timestamp}` file created → runs deferred cycle immediately
+    - **CLI stop**: When `cli-active` file removed → runs deferred cycle after 3s delay (with `!isCliActive()` guard)
+    - **Wake signal**: When `jim-wake-{timestamp}` file created → runs deferred cycle immediately (with `isOpusSlotBusy()` guard, fixed 2026-02-28)
   - Conversations route writes jim-wake signal when human message arrives and Opus is busy
   - Eliminates 20-minute wait for conversation responses when Leo's CLI is active
   - Mirrors Leo's heartbeat fs.watch pattern for symmetry
   - `isOpusSlotBusy()` exported for use in conversation route
+  - **Guard protection**: Both handlers check resource availability before firing cycles to prevent hangs (cycle #882 hung for 10+ hours before jim-wake guard was added)
 - **WebSocket broadcasts**:
   - `conversation_message` event when new message posted
   - Real-time updates in admin UI
