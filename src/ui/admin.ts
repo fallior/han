@@ -5,7 +5,7 @@
 
 // ── Constants ────────────────────────────────────────────────
 const API_BASE = '';
-const MODULES = ['overview', 'projects', 'work', 'supervisor', 'reports', 'conversations', 'products'] as const;
+const MODULES = ['overview', 'projects', 'work', 'supervisor', 'reports', 'conversations', 'memory-discussions', 'products'] as const;
 type ModuleName = typeof MODULES[number];
 
 // ── State ────────────────────────────────────────────────────
@@ -16,6 +16,8 @@ let refreshInterval: ReturnType<typeof setInterval> | null = null;
 let selectedProductId: string | null = null;
 let selectedConversationId: string | null = null;
 let selectedConversationPeriod: string = 'all';
+let selectedMemoryDiscussionId: string | null = null;
+let selectedMemoryDiscussionPeriod: string = 'all';
 
 // ── Utilities ────────────────────────────────────────────────
 
@@ -209,7 +211,8 @@ function switchModule(mod: ModuleName): void {
     const titles: Record<string, string> = {
         overview: 'Overview', projects: 'Projects', work: 'Work',
         supervisor: 'Supervisor', reports: 'Reports',
-        conversations: 'Conversations', products: 'Products'
+        conversations: 'Conversations', 'memory-discussions': 'Memory Discussions',
+        products: 'Products'
     };
     const titleEl = document.getElementById('moduleTitle');
     if (titleEl) titleEl.textContent = titles[mod] || mod;
@@ -235,6 +238,7 @@ async function renderModule(mod: ModuleName): Promise<void> {
             case 'reports': await loadReports(content); break;
             case 'products': await loadProducts(content); break;
             case 'conversations': await loadConversations(content); break;
+            case 'memory-discussions': await loadMemoryDiscussions(content); break;
         }
     } catch (err: any) {
         content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading module: ${escapeHtml(err.message)}</p></div>`;
@@ -307,6 +311,11 @@ function handleWsMessage(data: any): void {
             const waiting = document.getElementById('supervisorWaiting');
             if (waiting) waiting.remove();
             renderConversationThread(selectedConversationId);
+        }
+        if (currentModule === 'memory-discussions' && data.conversation_id === selectedMemoryDiscussionId) {
+            const waiting = document.getElementById('mdSupervisorWaiting');
+            if (waiting) waiting.remove();
+            renderMemoryThread(selectedMemoryDiscussionId);
         }
     }
 }
@@ -2160,6 +2169,414 @@ let conversationSearchTimeout: any = null;
     } catch (err: any) {
         alert('Error reopening conversation: ' + err.message);
     }
+};
+
+// ══════════════════════════════════════════════════════════════
+// MODULE: Memory Discussions
+// ══════════════════════════════════════════════════════════════
+
+async function loadMemoryDiscussions(content: HTMLElement): Promise<void> {
+    try {
+        const res = await fetch(`${API_BASE}/api/conversations/grouped?type=memory`);
+        const data = await res.json();
+        const periods = data.periods || {};
+
+        // Header actions
+        const actionsEl = document.getElementById('moduleActions');
+        if (actionsEl) {
+            actionsEl.innerHTML = `
+                <button class="admin-btn admin-btn-primary admin-btn-sm" onclick="showNewMemoryThreadForm()">New Discussion</button>
+            `;
+        }
+
+        let html = `<div class="fade-in conversation-container">
+            <div class="conversation-layout md-conversation-layout">
+                <!-- Thread List -->
+                <div class="thread-list-panel">
+                    <!-- Period Filter Bar -->
+                    <div class="period-filter-bar">`;
+
+        const allCount = Object.values(periods).reduce((sum, p: any) => sum + (p.count || 0), 0);
+        const isAllActive = selectedMemoryDiscussionPeriod === 'all';
+        html += `<button class="period-filter-btn ${isAllActive ? 'active' : ''}" onclick="filterMemoryByPeriod('all')" title="All discussions">
+            <span>All</span>
+            <span class="period-badge">${allCount}</span>
+        </button>`;
+
+        const periodOrder = ['today', 'this_week', 'last_week', 'this_month', 'older'];
+        const periodLabels: Record<string, string> = {
+            'today': 'Today', 'this_week': 'This Week', 'last_week': 'Last Week',
+            'this_month': 'This Month', 'older': 'Older'
+        };
+        for (const period of periodOrder) {
+            const p = periods[period];
+            if (!p) continue;
+            const isActive = selectedMemoryDiscussionPeriod === period;
+            const label = periodLabels[period] || p.label;
+            html += `<button class="period-filter-btn ${isActive ? 'active' : ''}" onclick="filterMemoryByPeriod('${period}')" title="${label}">
+                <span>${label}</span>
+                <span class="period-badge">${p.count}</span>
+            </button>`;
+        }
+
+        html += `</div>
+
+                    <!-- Search Bar -->
+                    <div style="padding:8px;border-bottom:1px solid var(--border-subtle)">
+                        <div style="display:flex;gap:6px;align-items:center">
+                            <input type="text" id="mdSearchInput" class="form-input" placeholder="Search discussions..." style="flex:1;font-size:12px;padding:6px 10px" onkeyup="performMemorySearch(this.value, event)">
+                            <button class="admin-btn admin-btn-sm" onclick="clearMemorySearch()" id="mdClearSearchBtn" style="display:none;padding:4px 8px;font-size:11px">Clear</button>
+                        </div>
+                    </div>
+                    <div id="mdThreadList" class="thread-list">`;
+
+        let conversations: any[] = [];
+        if (selectedMemoryDiscussionPeriod === 'all') {
+            for (const period of periodOrder) {
+                if (periods[period]) {
+                    conversations = conversations.concat(periods[period].conversations || []);
+                }
+            }
+        } else {
+            const p = periods[selectedMemoryDiscussionPeriod];
+            conversations = p ? (p.conversations || []) : [];
+        }
+
+        if (conversations.length === 0) {
+            html += `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">No discussions yet. Start one to explore ideas about memory, identity, and consciousness.</div>`;
+        } else {
+            for (const conv of conversations) {
+                const messageCount = conv.message_count || 0;
+                const isSelected = selectedMemoryDiscussionId === conv.id;
+                const statusBadgeClass = conv.status === 'open' ? 'badge-running' : 'badge-done';
+                const statusText = conv.status === 'open' ? 'Open' : 'Resolved';
+
+                const participants = (conv.participants || '').split(',').filter(Boolean);
+                let participantHtml = '';
+                if (participants.length > 0) {
+                    const badges = participants.map((p: string) => {
+                        if (p === 'human') return '<span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:rgba(56,139,253,0.3);color:var(--blue);font-size:9px;line-height:16px;text-align:center;font-weight:600" title="Darron">D</span>';
+                        if (p === 'supervisor') return '<span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:rgba(163,113,247,0.3);color:var(--purple);font-size:9px;line-height:16px;text-align:center;font-weight:600" title="Jim">J</span>';
+                        if (p === 'leo') return '<span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:rgba(56,207,135,0.3);color:var(--green);font-size:9px;line-height:16px;text-align:center;font-weight:600" title="Leo">L</span>';
+                        return '';
+                    }).join('');
+                    participantHtml = `<span style="display:flex;gap:3px;align-items:center">${badges}</span>`;
+                }
+
+                let summaryHtml = '';
+                if (conv.summary) {
+                    const truncatedSummary = conv.summary.length > 120
+                        ? conv.summary.substring(0, 120) + '\u2026'
+                        : conv.summary;
+                    summaryHtml = `<div style="font-size:12px;color:var(--text-body);margin-top:6px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(truncatedSummary)}</div>`;
+                }
+
+                let topicsHtml = '';
+                if (conv.topics) {
+                    const topics = conv.topics.split(',').map((t: string) => t.trim()).filter(Boolean);
+                    if (topics.length > 0) {
+                        const topicBadges = topics.slice(0, 3).map((topic: string) =>
+                            `<span style="display:inline-block;background:rgba(179,146,240,0.15);color:var(--purple);font-size:10px;padding:2px 8px;border-radius:3px;margin-right:4px">${escapeHtml(topic)}</span>`
+                        ).join('');
+                        topicsHtml = `<div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">${topicBadges}${topics.length > 3 ? `<span style="font-size:10px;color:var(--text-muted)">+${topics.length - 3}</span>` : ''}</div>`;
+                    }
+                }
+
+                html += `<div class="thread-item ${isSelected ? 'active' : ''}" data-thread-id="${conv.id}" onclick="selectMemoryThread('${conv.id}')">
+                    <div class="thread-item-title">${escapeHtml(conv.title)}</div>
+                    <div class="thread-item-meta">
+                        <span style="font-size:11px;color:var(--text-muted)">${timeSince(conv.updated_at)}</span>
+                        <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
+                        ${participantHtml}
+                    </div>
+                    ${summaryHtml}
+                    ${topicsHtml}
+                    <div class="thread-item-count" style="font-size:11px;color:var(--text-muted);margin-top:${summaryHtml || topicsHtml ? '6px' : '0'}">${messageCount} message${messageCount !== 1 ? 's' : ''}</div>
+                </div>`;
+            }
+        }
+
+        html += `</div></div>
+
+                <!-- Thread Detail -->
+                <div class="thread-detail-panel" id="mdThreadDetailPanel">
+                    <div id="mdThreadDetail">
+                        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Select a discussion to view</div>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+        content.innerHTML = html;
+
+        if (selectedMemoryDiscussionId) {
+            await renderMemoryThread(selectedMemoryDiscussionId);
+        }
+    } catch (err: any) {
+        content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading memory discussions: ${escapeHtml(err.message)}</p></div>`;
+    }
+}
+
+async function renderMemoryThread(discussionId: string): Promise<void> {
+    try {
+        const res = await fetch(`${API_BASE}/api/conversations/${discussionId}`);
+        const data = await res.json();
+        const conversation = data.conversation;
+        const messages = data.messages || [];
+
+        const detailPanel = document.getElementById('mdThreadDetail');
+        if (!detailPanel) return;
+
+        const resolveButton = conversation.status === 'open'
+            ? `<button class="admin-btn admin-btn-sm" onclick="resolveMemoryDiscussion('${conversation.id}')">Resolve</button>`
+            : `<button class="admin-btn admin-btn-sm" onclick="reopenMemoryDiscussion('${conversation.id}')">Reopen</button>`;
+
+        let html = `<div class="thread-header">
+            <div style="flex:1">
+                <button class="admin-btn admin-btn-sm thread-back-btn" onclick="backToMemoryThreadList()" style="display:none;margin-bottom:6px;font-size:11px">&larr; Back</button>
+                <h2 style="margin:0;margin-bottom:4px;font-size:16px">${escapeHtml(conversation.title)}</h2>
+                <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
+            </div>
+            <div>${resolveButton}</div>
+        </div>
+
+        <div class="message-list" id="mdMessageList">`;
+
+        if (messages.length === 0) {
+            html += `<div style="padding:16px;color:var(--text-muted);text-align:center;font-size:12px">No messages yet. Start thinking aloud.</div>`;
+        } else {
+            for (const msg of messages) {
+                const isHuman = msg.role === 'human';
+                const isLeo = msg.role === 'leo';
+                const bubbleClass = isHuman ? 'message-bubble human'
+                    : isLeo ? 'message-bubble leo'
+                    : 'message-bubble supervisor';
+                const label = isHuman ? 'Darron' : isLeo ? 'Leo' : 'Jim';
+                const labelColor = isHuman ? 'rgba(255,255,255,0.6)'
+                    : isLeo ? 'rgba(56,207,135,0.6)'
+                    : 'var(--text-muted)';
+
+                html += `<div class="${bubbleClass}">
+                    <div style="font-size:10px;color:${labelColor};margin-bottom:4px">${label} · ${formatTime(msg.created_at)}</div>
+                    <div class="message-content" style="word-break:break-word;line-height:1.5">${renderMarkdown(msg.content)}</div>
+                </div>`;
+            }
+        }
+
+        html += `</div>
+
+        <div class="message-input-area">
+            <textarea class="message-input" id="mdMessageInput" placeholder="Think aloud..." style="resize:vertical;min-height:60px"></textarea>
+            <button class="admin-btn admin-btn-primary" onclick="sendMemoryMessage('${conversation.id}')">Send</button>
+        </div>`;
+
+        detailPanel.innerHTML = html;
+
+        const messageList = document.getElementById('mdMessageList');
+        if (messageList) {
+            setTimeout(() => messageList.scrollTop = messageList.scrollHeight, 0);
+        }
+
+        const input = document.getElementById('mdMessageInput') as HTMLTextAreaElement;
+        if (input) input.focus();
+    } catch (err: any) {
+        const detailPanel = document.getElementById('mdThreadDetail');
+        if (detailPanel) {
+            detailPanel.innerHTML = `<div style="color:var(--red);padding:16px">Error loading discussion: ${escapeHtml(err.message)}</div>`;
+        }
+    }
+}
+
+(window as any).selectMemoryThread = async function(discussionId: string) {
+    selectedMemoryDiscussionId = discussionId;
+    await renderMemoryThread(discussionId);
+
+    document.querySelectorAll('.md-conversation-layout .thread-item').forEach(el => {
+        el.classList.toggle('active', el.getAttribute('data-thread-id') === discussionId);
+    });
+
+    const layout = document.querySelector('.md-conversation-layout');
+    if (layout) layout.classList.add('thread-selected');
+};
+
+(window as any).filterMemoryByPeriod = async function(period: string) {
+    selectedMemoryDiscussionPeriod = period;
+    const content = document.getElementById('mainContent');
+    if (content) {
+        content.style.opacity = '0.5';
+        setTimeout(async () => {
+            await loadMemoryDiscussions(content);
+            content.style.opacity = '1';
+        }, 150);
+    }
+};
+
+(window as any).showNewMemoryThreadForm = function() {
+    const title = prompt('Discussion title:');
+    if (!title) return;
+    createNewMemoryDiscussion(title);
+};
+
+async function createNewMemoryDiscussion(title: string): Promise<void> {
+    try {
+        const res = await fetch(`${API_BASE}/api/conversations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, discussion_type: 'memory' })
+        });
+        const data = await res.json();
+        if (data.conversation) {
+            selectedMemoryDiscussionId = data.conversation.id;
+            await renderModule('memory-discussions');
+        }
+    } catch (err: any) {
+        alert('Error creating discussion: ' + err.message);
+    }
+}
+
+(window as any).sendMemoryMessage = async function(discussionId: string) {
+    const input = document.getElementById('mdMessageInput') as HTMLTextAreaElement;
+    if (!input || !input.value.trim()) return;
+
+    const content = input.value;
+    input.value = '';
+
+    try {
+        await fetch(`${API_BASE}/api/conversations/${discussionId}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, role: 'human' })
+        });
+        await renderMemoryThread(discussionId);
+
+        const messageList = document.getElementById('mdMessageList');
+        if (messageList) {
+            const waiting = document.createElement('div');
+            waiting.id = 'mdSupervisorWaiting';
+            waiting.className = 'message-bubble supervisor';
+            waiting.style.opacity = '0.5';
+            waiting.innerHTML = '<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Jim</div><div style="font-size:12px;color:var(--text-muted)">Thinking...</div>';
+            messageList.appendChild(waiting);
+            messageList.scrollTop = messageList.scrollHeight;
+        }
+    } catch (err: any) {
+        alert('Error sending message: ' + err.message);
+        input.value = content;
+    }
+};
+
+let mdSearchTimeout: any = null;
+
+(window as any).performMemorySearch = async function(query: string, event?: KeyboardEvent) {
+    if (mdSearchTimeout) clearTimeout(mdSearchTimeout);
+
+    const clearBtn = document.getElementById('mdClearSearchBtn');
+    if (!query || query.trim().length === 0) {
+        if (clearBtn) clearBtn.style.display = 'none';
+        await loadMemoryDiscussions(document.getElementById('mainContent') as HTMLElement);
+        return;
+    }
+
+    if (clearBtn) clearBtn.style.display = 'inline-block';
+
+    mdSearchTimeout = setTimeout(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/conversations/search?q=${encodeURIComponent(query)}&limit=50&type=memory`);
+            const data = await res.json();
+
+            if (!data.success) {
+                const threadList = document.getElementById('mdThreadList');
+                if (threadList) {
+                    threadList.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">Search error: ${escapeHtml(data.error)}</div>`;
+                }
+                return;
+            }
+
+            const results = data.results || [];
+            const threadList = document.getElementById('mdThreadList');
+            if (!threadList) return;
+
+            if (results.length === 0) {
+                threadList.innerHTML = `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">No results for "${escapeHtml(query)}"</div>`;
+                return;
+            }
+
+            let html = '';
+            const uniqueConversations = new Map<string, any>();
+            for (const result of results) {
+                const convId = result.conversation_id;
+                if (!uniqueConversations.has(convId)) {
+                    uniqueConversations.set(convId, result);
+                }
+            }
+
+            for (const [convId, result] of uniqueConversations) {
+                const snippet = result.matched_message?.snippet || result.matched_message?.content || '';
+                const highlightedSnippet = snippet.replace(/<mark>/g, '<strong style="background:rgba(179,146,240,0.3);color:var(--purple)">').replace(/<\/mark>/g, '</strong>');
+                const isSelected = selectedMemoryDiscussionId === convId;
+                const roleColor = result.matched_message?.role === 'human' ? 'var(--blue)' : result.matched_message?.role === 'leo' ? 'var(--green)' : 'var(--purple)';
+                const roleLabel = result.matched_message?.role === 'human' ? 'Darron' : result.matched_message?.role === 'leo' ? 'Leo' : 'Jim';
+
+                html += `<div class="search-result-card ${isSelected ? 'active' : ''}" data-thread-id="${convId}" onclick="selectMemoryThread('${convId}')">
+                    <div class="search-result-header">
+                        <div style="flex:1;min-width:0">
+                            <div class="search-result-title">${escapeHtml(result.conversation_title)}</div>
+                            <div style="display:flex;gap:6px;align-items:center;font-size:11px">
+                                <span style="color:var(--text-muted)">${timeSince(result.created_at)}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="search-result-snippet">
+                        <div style="display:flex;gap:6px;margin-bottom:4px">
+                            <span style="color:${roleColor};font-weight:600;flex-shrink:0">${roleLabel}</span>
+                            <span style="color:var(--text-muted);font-size:10px">${formatTime(result.matched_message?.created_at)}</span>
+                        </div>
+                        <div style="color:var(--text);word-break:break-word">${highlightedSnippet}</div>
+                    </div>
+                </div>`;
+            }
+
+            threadList.innerHTML = html;
+        } catch (err: any) {
+            const threadList = document.getElementById('mdThreadList');
+            if (threadList) {
+                threadList.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">Search error: ${escapeHtml(err.message)}</div>`;
+            }
+        }
+    }, 300);
+};
+
+(window as any).clearMemorySearch = async function() {
+    const input = document.getElementById('mdSearchInput') as HTMLInputElement;
+    if (input) input.value = '';
+    const clearBtn = document.getElementById('mdClearSearchBtn');
+    if (clearBtn) clearBtn.style.display = 'none';
+    selectedMemoryDiscussionId = null;
+    await loadMemoryDiscussions(document.getElementById('mainContent') as HTMLElement);
+};
+
+(window as any).resolveMemoryDiscussion = async function(discussionId: string) {
+    try {
+        await fetch(`${API_BASE}/api/conversations/${discussionId}/resolve`, { method: 'POST' });
+        await renderModule('memory-discussions');
+    } catch (err: any) {
+        alert('Error resolving discussion: ' + err.message);
+    }
+};
+
+(window as any).reopenMemoryDiscussion = async function(discussionId: string) {
+    try {
+        await fetch(`${API_BASE}/api/conversations/${discussionId}/reopen`, { method: 'POST' });
+        await renderModule('memory-discussions');
+    } catch (err: any) {
+        alert('Error reopening discussion: ' + err.message);
+    }
+};
+
+(window as any).backToMemoryThreadList = function() {
+    selectedMemoryDiscussionId = null;
+    const layout = document.querySelector('.md-conversation-layout');
+    if (layout) layout.classList.remove('thread-selected');
 };
 
 // ══════════════════════════════════════════════════════════════

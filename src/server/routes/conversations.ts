@@ -25,12 +25,26 @@ const listWithCounts = db.prepare(`
     ORDER BY c.updated_at DESC
 `) as any;
 
+const listWithCountsByType = db.prepare(`
+    SELECT c.*, COUNT(cm.id) as message_count,
+        GROUP_CONCAT(DISTINCT cm.role) as participants
+    FROM conversations c
+    LEFT JOIN conversation_messages cm ON c.id = cm.conversation_id
+    WHERE c.discussion_type = ?
+    GROUP BY c.id
+    ORDER BY c.updated_at DESC
+`) as any;
+
 /**
  * GET / -- List all conversations
+ * Query params: ?type=memory (filters by discussion_type)
  */
 router.get('/', (req: Request, res: Response) => {
     try {
-        const conversations = listWithCounts.all();
+        const type = req.query.type as string | undefined;
+        const conversations = type
+            ? listWithCountsByType.all(type)
+            : listWithCounts.all().filter((c: any) => !c.discussion_type || c.discussion_type === 'general');
         res.json({ success: true, conversations });
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
@@ -39,15 +53,17 @@ router.get('/', (req: Request, res: Response) => {
 
 /**
  * POST / -- Create a new conversation
+ * Body: { title, discussion_type? } — discussion_type defaults to 'general'
  */
 router.post('/', (req: Request, res: Response) => {
     try {
-        const { title } = req.body;
+        const { title, discussion_type } = req.body;
         if (!title) return res.status(400).json({ success: false, error: 'title is required' });
 
         const id = generateId();
         const now = new Date().toISOString();
-        conversationStmts.insert.run(id, title, 'open', now, now);
+        const type = discussion_type || 'general';
+        conversationStmts.insertWithType.run(id, title, 'open', now, now, type);
 
         const conversation = conversationStmts.get.get(id);
         res.json({ success: true, conversation });
@@ -58,11 +74,15 @@ router.post('/', (req: Request, res: Response) => {
 
 /**
  * GET /grouped -- List conversations grouped by temporal period
+ * Query params: ?type=memory (filters by discussion_type)
  * Returns: { periods: { 'today': { count, conversations }, 'this_week': {...}, ... } }
  */
 router.get('/grouped', (req: Request, res: Response) => {
     try {
-        const conversations = listWithCounts.all() as any[];
+        const type = req.query.type as string | undefined;
+        const conversations = type
+            ? listWithCountsByType.all(type) as any[]
+            : (listWithCounts.all() as any[]).filter((c: any) => !c.discussion_type || c.discussion_type === 'general');
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -117,7 +137,7 @@ router.get('/grouped', (req: Request, res: Response) => {
  */
 router.get('/search', (req: Request, res: Response) => {
     try {
-        const { q, limit = '20', mode = 'text' } = req.query;
+        const { q, limit = '20', mode = 'text', type } = req.query;
 
         if (!q || typeof q !== 'string') {
             return res.status(400).json({ success: false, error: 'query parameter "q" is required' });
@@ -129,7 +149,8 @@ router.get('/search', (req: Request, res: Response) => {
 
         const resultLimit = Math.min(parseInt(limit as string, 10) || 20, 100);
 
-        // FTS5 search query with snippet highlighting
+        // FTS5 search query with snippet highlighting, optionally filtered by discussion_type
+        const typeFilter = type ? `AND (c.discussion_type = ?)` : `AND (c.discussion_type IS NULL OR c.discussion_type = 'general')`;
         const searchStmt = db.prepare(`
             SELECT
                 fts.id,
@@ -144,13 +165,16 @@ router.get('/search', (req: Request, res: Response) => {
             JOIN conversation_messages cm ON fts.id = cm.id
             JOIN conversations c ON cm.conversation_id = c.id
             WHERE fts.content MATCH ?
+            ${typeFilter}
             ORDER BY rank
             LIMIT ?
         `) as any;
 
         let matches;
         try {
-            matches = searchStmt.all(q, resultLimit);
+            matches = type
+                ? searchStmt.all(q, type, resultLimit)
+                : searchStmt.all(q, resultLimit);
         } catch (ftsErr: any) {
             // Handle FTS5 query syntax errors gracefully
             return res.status(400).json({

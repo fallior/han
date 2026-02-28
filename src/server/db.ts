@@ -342,6 +342,13 @@ if (!conversationCols.includes('summary')) {
     console.log('[DB] Migration complete: cataloguing columns added');
 }
 
+// Memory Discussions — discussion_type column on conversations
+if (!conversationCols.includes('discussion_type')) {
+    console.log('[DB] Adding discussion_type column to conversations...');
+    db.exec(`ALTER TABLE conversations ADD COLUMN discussion_type TEXT DEFAULT 'general'`);
+    console.log('[DB] Migration complete: discussion_type column added');
+}
+
 // FTS5 virtual table for conversation messages
 // Note: FTS5 tables can't be checked with pragma table_info, so we use a try-catch approach
 try {
@@ -524,6 +531,7 @@ export const conversationStmts = {
     list: db.prepare('SELECT * FROM conversations ORDER BY updated_at DESC') as any,
     get: db.prepare('SELECT * FROM conversations WHERE id = ?') as any,
     insert: db.prepare('INSERT INTO conversations (id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)') as any,
+    insertWithType: db.prepare('INSERT INTO conversations (id, title, status, created_at, updated_at, discussion_type) VALUES (?, ?, ?, ?, ?, ?)') as any,
     updateStatus: db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?') as any,
     updateTimestamp: db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?') as any,
     updateSummary: db.prepare('UPDATE conversations SET summary = ?, updated_at = ? WHERE id = ?') as any,

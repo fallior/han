@@ -1520,6 +1520,30 @@
             }
         }
 
+        /* ─── Memory Discussions Accent ─── */
+        .md-conversation-layout .thread-list-panel {
+            border-right-color: rgba(179, 146, 240, 0.2);
+        }
+
+        .md-conversation-layout .thread-item.active {
+            border-color: var(--purple);
+            box-shadow: 0 0 0 1px var(--purple);
+        }
+
+        .md-conversation-layout .period-filter-btn.active {
+            background: rgba(179, 146, 240, 0.15);
+            color: var(--purple);
+            border-color: var(--purple);
+        }
+
+        .md-conversation-layout .period-filter-btn.active .period-badge {
+            background: var(--purple);
+        }
+
+        .sidebar-item[data-module="memory-discussions"].active {
+            color: var(--purple);
+        }
+
         /* ─── Search Results ─── */
         .search-result-card {
             background: var(--bg-page);
@@ -1626,6 +1650,10 @@
                     <span class="sidebar-icon"><svg viewBox="0 0 20 20"><path d="M3 4h10a2 2 0 012 2v4a2 2 0 01-2 2H8l-3 3v-3H3a1 1 0 01-1-1V5a1 1 0 011-1z"/><path d="M7 14h6a2 2 0 002-2V8" opacity="0.5"/></svg></span>
                     <span class="sidebar-label">Conversations</span>
                 </a>
+                <a class="sidebar-item" data-module="memory-discussions" href="#memory-discussions">
+                    <span class="sidebar-icon"><svg viewBox="0 0 20 20"><path d="M10 2C6 2 3 5 3 8.5c0 2.5 1.5 4.5 3.5 5.5L6 17l2.5-2c.5.1 1 .1 1.5.1 4 0 7-3 7-6.5S14 2 10 2z"/><circle cx="7" cy="8.5" r="1" fill="currentColor" stroke="none"/><circle cx="10" cy="8.5" r="1" fill="currentColor" stroke="none"/><circle cx="13" cy="8.5" r="1" fill="currentColor" stroke="none"/></svg></span>
+                    <span class="sidebar-label">Memory</span>
+                </a>
                 <a class="sidebar-item" data-module="products" href="#products">
                     <span class="sidebar-icon"><svg viewBox="0 0 20 20"><path d="M4 4h12l1 3H3l1-3zM3 7h14v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/><path d="M8 7v-3M12 7v-3"/></svg></span>
                     <span class="sidebar-label">Products</span>
@@ -1661,6 +1689,6 @@
         </footer>
     </div>
 
-    <script src="admin.js?v=7"></script>
+    <script src="admin.js?v=8"></script>
 </body>
 </html>
