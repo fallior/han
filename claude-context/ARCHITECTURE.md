@@ -452,6 +452,15 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
   - New action type: `respond_conversation` with conversation_id and response_content
   - Queries for unanswered human messages: messages where no supervisor message exists with later timestamp
   - Responds thoughtfully with strategic insight, not just task status
+- **Deferred cycle pattern (Gary Model)**:
+  - `startSupervisorSignalWatcher()` watches `~/.claude-remote/signals/` directory via fs.watch
+  - Two detection patterns:
+    - **CLI stop**: When `cli-active` file removed → runs deferred cycle after 3s delay
+    - **Wake signal**: When `jim-wake-{timestamp}` file created → runs deferred cycle immediately
+  - Conversations route writes jim-wake signal when human message arrives and Opus is busy
+  - Eliminates 20-minute wait for conversation responses when Leo's CLI is active
+  - Mirrors Leo's heartbeat fs.watch pattern for symmetry
+  - `isOpusSlotBusy()` exported for use in conversation route
 - **WebSocket broadcasts**:
   - `conversation_message` event when new message posted
   - Real-time updates in admin UI

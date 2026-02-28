@@ -52,6 +52,7 @@ When you make a significant technical or design decision:
 | DEC-020 | Cancelled Tasks Satisfy Dependencies | **Settled** | 2026-02-22 |
 | DEC-021 | Category-Aware Model Selection Strategy | Accepted | 2026-02-23 |
 | DEC-022 | enforceTokenCap H3 Fallback and Negative Guard | **Settled** | 2026-02-26 |
+| DEC-023 | Deferred Cycle Pattern via fs.watch (Gary Model) | Accepted | 2026-02-28 |
 
 ---
 
@@ -1332,6 +1333,117 @@ Also manually truncated self-reflection.md from 11KB to 6KB to remove accumulate
 - `~/.claude-remote/memory/enforceTokenCap-fix.md` — Full bug analysis and fix specification
 - `~/.claude-remote/memory/leo/self-reflection.md` — Affected file (manually truncated post-fix)
 - Supervisor cycle mechanism (Level 8) — Calls enforceTokenCap after every memory bank write
+
+---
+
+### DEC-023: Deferred Cycle Pattern via fs.watch (Gary Model)
+
+**Date**: 2026-02-28
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Jim's supervisor has a `deferredCyclePending` flag that gets set when a cycle tries to run while Opus is busy (Leo's CLI session is active). The flag was being set correctly (supervisor.ts line 577), but there was no mechanism to detect when Leo's CLI stopped and trigger the deferred cycle. This meant Darron's messages in conversation threads could wait up to 20 minutes (until the next scheduled supervisor cycle) even though Opus became available much sooner.
+
+Leo's heartbeat already had a solution: fs.watch on the signals directory to detect when cli-active file is removed, triggering deferred beats immediately. This pattern was proven and working.
+
+#### Options Considered
+
+1. **fs.watch signal detection (Gary Model)**
+   - ✅ Event-driven — immediate response when CLI stops
+   - ✅ Zero polling overhead — no CPU/memory cost
+   - ✅ Pattern proven — Leo's heartbeat uses it successfully
+   - ✅ Symmetric design — both agents use same pattern
+   - ✅ Supports multiple trigger sources (cli-active removal + explicit wake signals)
+   - ❌ Requires fs.watch understanding and error handling
+
+2. **Polling check in scheduled cycles**
+   - ✅ Simple to implement
+   - ❌ Still subject to scheduling delays (up to 20 minutes)
+   - ❌ Doesn't actually solve the problem
+   - ❌ Polling overhead (constant CPU usage)
+
+3. **Periodic fast polling when deferred cycle pending**
+   - ✅ Could reduce wait time to ~30 seconds
+   - ❌ High polling frequency wastes resources
+   - ❌ Still has delay (not immediate)
+   - ❌ More complex logic (start/stop polling loop)
+
+4. **Opus concurrency queue with callbacks**
+   - ✅ Programmatic approach
+   - ❌ Large refactor of supervisor architecture
+   - ❌ Introduces callback complexity
+   - ❌ Doesn't leverage existing signals infrastructure
+
+#### Decision
+
+We chose **fs.watch signal detection (Gary Model)** because it mirrors Leo's proven pattern and provides immediate event-driven response with zero polling overhead.
+
+**Implementation:**
+
+1. **`startSupervisorSignalWatcher()` function** in supervisor.ts:
+   - Watches `~/.claude-remote/signals/` directory
+   - Detects two event types:
+     - `cli-active` file removal → waits 3s → runs deferred cycle
+     - `jim-wake-{timestamp}` file creation → runs deferred cycle immediately
+   - Called from `initSupervisor()` during worker process initialisation
+   - Error handling with try/catch and logging
+
+2. **jim-wake signal writing** in conversations.ts:
+   - Imported `isOpusSlotBusy()` from supervisor.ts
+   - When human message arrives and Opus is busy → writes timestamped signal file
+   - Signal triggers immediate deferred cycle via watcher
+   - Belt-and-suspenders approach for reliability
+
+3. **Export `isOpusSlotBusy()`** from supervisor.ts:
+   - Allows other modules to check Opus availability
+   - Used by conversations route to decide when to write wake signals
+   - Checks both CLI active and session active states
+
+**Why "Gary Model"**: Named after the fs.watch pattern Leo developed in his heartbeat. Gary = fs.watch-based event detection for resource availability.
+
+#### Consequences
+
+**Positive:**
+- Deferred cycles run within 3 seconds of CLI stop (vs up to 20 minutes before)
+- Zero polling overhead — event-driven only
+- Symmetric design with Leo's heartbeat (same pattern, easier to understand)
+- Multiple trigger paths (cli-active removal + explicit wake) provide robustness
+- Human messages get immediate supervisor responses after CLI stops
+- Pattern proven and working in Leo's heartbeat
+
+**Negative:**
+- Slightly more complex than polling (fs.watch API, event handling)
+- Requires understanding file-based signalling
+- Signal file cleanup needed (handled in watcher)
+
+**Trade-offs:**
+- More upfront complexity for better runtime efficiency
+- Event-driven vs polling: immediate response vs simpler code
+- Chose immediate response — wait time is user-facing pain point
+
+**Implementation notes:**
+- 3-second delay after CLI stop mirrors Leo's pattern (prevents race conditions)
+- jim-wake signals cleaned up after processing (prevents accumulation)
+- Watcher runs independently — doesn't block supervisor cycles
+- Error logging for debugging watcher issues
+
+#### Related
+
+- Leo's heartbeat: `src/server/leo-heartbeat.ts` lines 1130-1140 (reference implementation)
+- Supervisor cycles: `src/server/services/supervisor.ts` (deferred cycle logic)
+- Conversations route: `src/server/routes/conversations.ts` (wake signal writing)
+- DEC-018: Conversations as Strategic Async Discussion Channel (beneficiary of this pattern)
+
+#### Verification
+
+Tested with manual verification:
+1. Started supervisor worker process
+2. Verified `deferredCyclePending` set when cycle runs while Opus busy
+3. Removed cli-active file manually
+4. Confirmed watcher fired deferred cycle within 3 seconds
+5. Checked signal file cleanup (jim-wake files removed after processing)
 
 ---
 

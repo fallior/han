@@ -1,12 +1,12 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-02-27 (Autonomous) by Claude
+> Last updated: 2026-02-28 (Autonomous) by Claude
 
 ## Current Stage
 
-**Levels 1-11 Complete — All ROADMAP levels finished.** The full progression from remote prompt responder to autonomous product factory is implemented. Level 11 adds the Autonomous Product Factory: a 7-phase pipeline (research → design → architecture → build → test → document → deploy) with 42 parallel subagents across all phases, human gates at critical points, knowledge accumulation, and synthesis reports at each stage.
+**Levels 1-13 Complete — All ROADMAP levels finished.** The full progression from remote prompt responder to autonomous product factory is implemented. Level 11 adds the Autonomous Product Factory: a 7-phase pipeline (research → design → architecture → build → test → document → deploy) with 42 parallel subagents across all phases, human gates at critical points, knowledge accumulation, and synthesis reports at each stage.
 
-Create tasks from your phone, Claude Code executes them headlessly with safety features. Submit high-level goals — the orchestrator decomposes them into ordered subtasks, routes to the right model (haiku/sonnet/opus) with memory-based cost optimisation, retries failures with analysis, and tracks outcomes in project memory. Ecosystem-aware context injection includes settled decisions, cross-project learnings, port allocations, error pre-emption, and knowledge capture markers. Analytics API provides velocity tracking, per-model stats, and cost optimisation suggestions. Dual LLM backend: Ollama local or Anthropic API fallback. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working.
+Create tasks from your phone, Claude Code executes them headlessly with safety features. Submit high-level goals — the orchestrator decomposes them into ordered subtasks, routes to the right model (haiku/sonnet/opus) with memory-based cost optimisation, retries failures with analysis, and tracks outcomes in project memory. Ecosystem-aware context injection includes settled decisions, cross-project learnings, port allocations, error pre-emption, and knowledge capture markers. Analytics API provides velocity tracking, per-model stats, and cost optimisation suggestions. Dual LLM backend: Ollama local or Anthropic API fallback. SQLite task queue, real-time progress streaming via WebSocket, cost and token tracking. One-tap response buttons, iOS soft keyboard, search and copy, push notifications, Tailscale remote access — all working. **Deferred cycle pattern complete**: Jim's supervisor now detects when Leo's CLI session stops and immediately runs deferred cycles, eliminating up to 20-minute waits for Darron's messages.
 
 ## Progress Summary
 
@@ -31,6 +31,23 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-02-28 — Claude (autonomous) — Deferred Cycle Pattern Complete (Gary Model)
+- **Implemented fs.watch signal detection in Jim's supervisor** to complete the deferred cycle pattern:
+  - **`startSupervisorSignalWatcher()`** function mirrors Leo's heartbeat pattern from `leo-heartbeat.ts`
+  - Watches `SIGNALS_DIR` for changes to `cli-active` and `jim-wake-*` signal files
+  - When `cli-active` is removed (Leo's CLI session stops): waits 3s then runs deferred cycle if `deferredCyclePending` is true
+  - When `jim-wake-{timestamp}` signal detected: immediately runs deferred cycle and cleans up signal file
+  - Called from `initSupervisor()` during supervisor worker process initialisation
+- **Enhanced conversations.ts** to write `jim-wake` signals when human messages arrive:
+  - Imported `isOpusSlotBusy()` from supervisor.ts to check if Opus is busy
+  - When human message arrives and Opus slot is busy: writes timestamped signal file to `~/.claude-remote/signals/jim-wake-{timestamp}`
+  - Belt-and-suspenders approach: both `cli-active` removal and explicit wake signals trigger deferred cycles
+- **Why this matters**: Darron's messages in conversation threads no longer wait up to 20 minutes when Leo's CLI is active. The moment Leo's session ends, Jim wakes up and processes pending conversations. Previously, `deferredCyclePending` was set when Opus was busy (line 577) but there was no watcher to detect CLI stop and trigger the deferred cycle.
+- **Commits**: 5 commits (fe87e2b, 1cb629f, a6dc046, ad687c6, 3eb3248)
+- **Files changed**: `src/server/services/supervisor.ts` (added startSupervisorSignalWatcher, exported isOpusSlotBusy), `src/server/routes/conversations.ts` (jim-wake signal writing)
+- **Testing**: Verified with manual test — deferred cycle triggered immediately when cli-active removed
+- **Pattern origin**: Gary Model — named after the fs.watch approach Leo's heartbeat already uses for detecting CLI stop
 
 ### 2026-02-27 — Claude (autonomous) — Leo Heartbeat Critical Bug Fixes
 - **Fixed two critical bugs in `leo-heartbeat.ts` preventing Leo from thinking**:
@@ -798,6 +815,11 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Focused diff-only API calls for lightweight change detection
 - ✅ Configurable deep scan scheduling (daily hour + interval)
 - ✅ Cycle tier tracking in DB and admin console (colour-coded badges)
+- ✅ Deferred cycle pattern (Gary Model): fs.watch-based signal detection
+- ✅ Jim's supervisor detects CLI stop via cli-active file removal
+- ✅ jim-wake signals for explicit supervisor wake on human messages
+- ✅ Deferred cycles run within 3 seconds of CLI stop (vs up to 20 min wait)
+- ✅ Belt-and-suspenders reliability (dual trigger paths)
 
 ## Next Actions
 
@@ -840,6 +862,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [2026-02-28-autonomous-deferred-cycle-pattern.md](session-notes/2026-02-28-autonomous-deferred-cycle-pattern.md) — Deferred cycle pattern complete (Gary Model fs.watch implementation)
 - [2026-02-27-autonomous-leo-heartbeat-bugfix.md](session-notes/2026-02-27-autonomous-leo-heartbeat-bugfix.md) — Fixed two critical bugs preventing Leo heartbeat from executing
 - [2026-02-22-autonomous-conversation-search-complete.md](session-notes/2026-02-22-autonomous-conversation-search-complete.md) — Level 13: Conversation catalogue & search system complete
 - [2026-02-22-autonomous-dependency-resolution-fix.md](session-notes/2026-02-22-autonomous-dependency-resolution-fix.md) — Fixed critical dependency resolution bug (DEC-020)
