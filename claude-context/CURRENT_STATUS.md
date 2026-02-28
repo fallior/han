@@ -32,6 +32,18 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-02-28 — Claude (autonomous) — Jim-Wake Handler Guard Fixed (Prevents Cycle Hang on Busy Opus)
+- **Fixed critical bug in jim-wake signal handler** (supervisor.ts ~line 224):
+  - **Root cause**: Handler fired deferred cycle without checking if Opus slot was busy
+  - **Symptom**: Cycle #882 hung for 10+ hours when handler tried to run while Opus was already occupied (dead API call)
+  - **Fix applied**: Added `isOpusSlotBusy()` guard before `runSupervisorCycle()` call
+  - **Pattern**: Mirrors existing cli-active handler defensive check (lines 196-208 already had `!isCliActive()` guard)
+  - **Behaviour**: If Opus busy → logs "Wake signal but Opus busy — staying deferred", re-sets `deferredCyclePending = true`, returns early
+  - **Cleanup preserved**: Signal file still cleaned up in `finally` block whether cycle runs or is skipped
+- **Why this matters**: Prevents supervisor cycles from hanging indefinitely when jim-wake signals fire while Opus is already processing Leo's CLI session. The wake signal pattern (DEC-023, Gary Model) now has full Opus slot protection.
+- **Commits**: 1 commit (6cd1b35)
+- **Files changed**: `src/server/services/supervisor.ts` (added guard + updated cleanup comment)
+
 ### 2026-02-28 — Claude (autonomous) — Deferred Cycle Pattern Complete (Gary Model)
 - **Implemented fs.watch signal detection in Jim's supervisor** to complete the deferred cycle pattern:
   - **`startSupervisorSignalWatcher()`** function mirrors Leo's heartbeat pattern from `leo-heartbeat.ts`
