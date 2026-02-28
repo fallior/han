@@ -1385,10 +1385,11 @@ We chose **fs.watch signal detection (Gary Model)** because it mirrors Leo's pro
 1. **`startSupervisorSignalWatcher()` function** in supervisor.ts:
    - Watches `~/.claude-remote/signals/` directory
    - Detects two event types:
-     - `cli-active` file removal → waits 3s → runs deferred cycle
-     - `jim-wake-{timestamp}` file creation → runs deferred cycle immediately
+     - `cli-active` file removal → waits 3s → checks `!isCliActive()` → runs deferred cycle
+     - `jim-wake-{timestamp}` file creation → checks `isOpusSlotBusy()` → runs deferred cycle immediately (guard added 2026-02-28)
    - Called from `initSupervisor()` during worker process initialisation
    - Error handling with try/catch and logging
+   - **Guard protection**: Both handlers check resource availability before firing cycles to prevent hangs
 
 2. **jim-wake signal writing** in conversations.ts:
    - Imported `isOpusSlotBusy()` from supervisor.ts
@@ -1428,6 +1429,7 @@ We chose **fs.watch signal detection (Gary Model)** because it mirrors Leo's pro
 - jim-wake signals cleaned up after processing (prevents accumulation)
 - Watcher runs independently — doesn't block supervisor cycles
 - Error logging for debugging watcher issues
+- **Bug fix (2026-02-28)**: Added `isOpusSlotBusy()` guard to jim-wake handler — handler was firing cycles without checking Opus availability, causing cycle #882 to hang for 10+ hours. Now mirrors cli-active handler's defensive pattern.
 
 #### Related
 
