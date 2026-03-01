@@ -429,7 +429,22 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 
 ### Level 12: Strategic Conversations (Complete)
 
-- **Conversation threads**: Async strategic discussion between Darron and supervisor
+- **Conversation threads**: Async strategic discussion between Darron, Supervisor Jim, and Philosopher Leo
+- **Workshop module** (Admin Console):
+  - Three-level navigation: Workshop sidebar → persona tabs (Jim/Leo/Darron) → nested discussion type tabs
+  - Three personas with distinct accent colors:
+    - Supervisor Jim (purple): Requests, Reports
+    - Philosopher Leo (green): Questions, Postulates
+    - Dreamer Darron (blue): Thoughts, Musings
+  - Six discussion types: `jim-request`, `jim-report`, `leo-question`, `leo-postulate`, `darron-thought`, `darron-musing`
+  - Two-column layout: 280px thread list | 1fr detail panel
+  - Thread list: temporal period filter, search with debounced queries (300ms), message counts
+  - Thread detail: message history with role badges, compose input, resolve/reopen actions
+  - Real-time updates: WebSocket `conversation_message` events for workshop discussion types
+  - Mobile responsive: single-column stack at <768px, `.thread-selected` class toggle, back button
+  - Search functionality: `/api/conversations/search?type={discussion_type}` with highlighted snippets
+  - Thread creation: auto-sets `discussion_type` based on active nested tab
+  - CSS theming: persona accent colors tint active tabs, thread borders, selected thread highlight
 - **Database schema**:
   - `conversations` table: id, title, status (open/resolved), summary, topics, key_moments, created_at, updated_at
   - `conversation_messages` table: id, conversation_id, role (human/supervisor/leo), content, created_at

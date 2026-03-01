@@ -54,6 +54,7 @@ When you make a significant technical or design decision:
 | DEC-022 | enforceTokenCap H3 Fallback and Negative Guard | **Settled** | 2026-02-26 |
 | DEC-023 | Deferred Cycle Pattern via fs.watch (Gary Model) | Accepted | 2026-02-28 |
 | DEC-024 | Context Injection Pipeline Tuning | Accepted | 2026-02-28 |
+| DEC-025 | Workshop Module Three-Persona Navigation | Accepted | 2026-03-01 |
 
 ---
 
@@ -1533,6 +1534,128 @@ All changes isolated to `src/server/services/context.ts`.
 - `buildTaskContext()` function (context.ts:220-330)
 - ADR extraction, tech detection, learnings filtering
 - DEC-021: Category-Aware Model Selection (benefits from improved context)
+
+---
+
+### DEC-025: Workshop Module Three-Persona Navigation
+
+**Date**: 2026-03-01
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+The admin console needed a dedicated space for structured dialogue between Darron, Supervisor Jim, and Philosopher Leo. The Conversations module provided general discussion threads, but lacked semantic organization for different types of dialogue. Need arose for separate channels for different conversation purposes: actionable requests vs status reports (Jim), philosophical questions vs idea postulates (Leo), incomplete thoughts vs developed musings (Darron).
+
+The question was how to structure navigation for six distinct discussion types across three personas.
+
+#### Options Considered
+
+1. **Flat list of 6 discussion types in sidebar**
+   - ✅ Simple navigation — one click to any discussion type
+   - ✅ All types visible at once
+   - ❌ Loses semantic grouping by persona
+   - ❌ Sidebar cluttered with 6+ items
+   - ❌ No visual distinction between personas
+   - ❌ Doesn't honour three-way collaboration model
+
+2. **Two-level navigation (sidebar → discussion type)**
+   - ✅ Cleaner sidebar (one Workshop item)
+   - ✅ Discussion types grouped together
+   - ❌ Loses persona context completely
+   - ❌ "Requests" and "Questions" look equivalent without persona framing
+   - ❌ Doesn't reflect that Jim/Leo/Darron have different purposes
+
+3. **Three-level navigation (sidebar → persona → discussion type)**
+   - ✅ Clear semantic grouping by persona
+   - ✅ Visual distinction via accent colors (purple/green/blue)
+   - ✅ Reflects three-way collaboration model
+   - ✅ Persona provides context for discussion type meaning
+   - ✅ Equal visual weight for all three personas
+   - ❌ More navigation levels (three clicks to reach discussion type)
+   - ❌ Slightly more complex implementation
+
+4. **Tabbed interface with all 6 types in one view**
+   - ✅ All discussion types accessible without navigation
+   - ❌ Cluttered — 6 tabs at top level
+   - ❌ Loses persona grouping
+   - ❌ Mobile layout problematic (6 tabs don't fit)
+
+#### Decision
+
+We chose **Option 3: Three-level navigation (sidebar → persona → discussion type)** because it honours the three-way collaboration model and provides semantic context at each navigation level.
+
+**Navigation structure**:
+- **Level 1**: Workshop sidebar item
+- **Level 2**: Persona tabs (Supervisor Jim, Philosopher Leo, Dreamer Darron)
+- **Level 3**: Nested discussion type tabs (2 per persona)
+
+**Persona accent colors**:
+- Supervisor Jim: Purple (strategic, oversight)
+- Philosopher Leo: Green (growth, exploration)
+- Dreamer Darron: Blue (depth, reflection)
+
+**Discussion type mapping**:
+```
+Supervisor Jim (purple):
+  - Requests (jim-request) — actionable asks for supervisor action
+  - Reports (jim-report) — status updates and findings from supervisor
+
+Philosopher Leo (green):
+  - Questions (leo-question) — seeking understanding and clarification
+  - Postulates (leo-postulate) — proposing ideas and hypotheses
+
+Dreamer Darron (blue):
+  - Thoughts (darron-thought) — incomplete musings, unformed ideas
+  - Musings (darron-musing) — developed reflections and insights
+```
+
+**Design principle**: Persona tabs have equal visual weight (same size, same font, same padding). Differentiation via accent color only, not size or prominence. This reflects Darron's explicit requirement: "persona tab bar should feel like equals — same size, same weight, different accent colours".
+
+**Implementation details**:
+- Persona tabs: horizontal bar with flex layout, accent color borders/backgrounds
+- Nested tabs: horizontal bar below persona tabs, filtered by selected persona
+- Thread list: 280px panel with temporal filter, search, message counts
+- Thread detail: 1fr panel with message history, compose input, actions
+- Mobile: single-column stack at <768px with `.thread-selected` toggle
+- Real-time: WebSocket updates for all six workshop discussion types
+
+#### Consequences
+
+**Positive:**
+- Clear semantic context at each navigation level
+- Persona distinction honours three-way collaboration model
+- Discussion types naturally grouped by persona purpose
+- Accent colors provide visual wayfinding without hierarchy
+- Equal visual weight avoids implying importance hierarchy
+- Reuses proven conversation threading pattern
+- Mobile responsive from initial design, not retrofitted
+
+**Negative:**
+- Three navigation levels requires three clicks to reach discussion type
+- More complex state management (persona + nested tab + selected thread + period)
+- Users must understand persona/discussion type relationships
+
+**Trade-offs:**
+- More navigation clicks vs clearer semantic organization — chose clarity
+- Implementation complexity vs user mental model alignment — chose alignment
+- Flat all-in-one view vs structured navigation — chose structure
+
+**Implementation notes:**
+- State variables: `workshopPersona`, `workshopNestedTab`, `workshopSelectedThread`, `workshopPeriod`
+- Default behavior: Jim persona, Requests tab on first load
+- Persona switch resets to first nested tab for that persona
+- Nested tab switch fetches conversations filtered by `discussion_type`
+- Search scoped to active nested tab (doesn't cross discussion types)
+- WebSocket events filtered by workshop discussion types for real-time updates
+
+#### Related
+
+- DEC-018: Conversations as Strategic Async Discussion Channel (foundation for Workshop module)
+- Level 12: Strategic Conversations (implementation level)
+- Admin console Phase 2 (Work, Conversations, Products, Workshop modules)
+- Conversation threading pattern (reused from Conversations module)
+- Reference conversation: mm7ejhxi-r6qjh4 ('work I'd like Jim to look at') — Darron approved this design explicitly
 
 ---
 
