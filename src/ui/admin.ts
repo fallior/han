@@ -5,7 +5,7 @@
 
 // ── Constants ────────────────────────────────────────────────
 const API_BASE = '';
-const MODULES = ['overview', 'projects', 'work', 'supervisor', 'reports', 'conversations', 'memory-discussions', 'products'] as const;
+const MODULES = ['overview', 'projects', 'work', 'supervisor', 'reports', 'conversations', 'memory-discussions', 'products', 'workshop'] as const;
 type ModuleName = typeof MODULES[number];
 
 // ── State ────────────────────────────────────────────────────
@@ -18,6 +18,10 @@ let selectedConversationId: string | null = null;
 let selectedConversationPeriod: string = 'all';
 let selectedMemoryDiscussionId: string | null = null;
 let selectedMemoryDiscussionPeriod: string = 'all';
+let workshopPersona: 'jim' | 'leo' | 'darron' = 'jim';
+let workshopNestedTab: string = 'jim-request';
+let workshopSelectedThread: Record<string, string | null> = {};
+let workshopPeriod: string = 'all';
 
 // ── Utilities ────────────────────────────────────────────────
 
@@ -212,7 +216,7 @@ function switchModule(mod: ModuleName): void {
         overview: 'Overview', projects: 'Projects', work: 'Work',
         supervisor: 'Supervisor', reports: 'Reports',
         conversations: 'Conversations', 'memory-discussions': 'Memory Discussions',
-        products: 'Products'
+        products: 'Products', workshop: 'Workshop'
     };
     const titleEl = document.getElementById('moduleTitle');
     if (titleEl) titleEl.textContent = titles[mod] || mod;
@@ -239,6 +243,7 @@ async function renderModule(mod: ModuleName): Promise<void> {
             case 'products': await loadProducts(content); break;
             case 'conversations': await loadConversations(content); break;
             case 'memory-discussions': await loadMemoryDiscussions(content); break;
+            case 'workshop': await loadWorkshop(content); break;
         }
     } catch (err: any) {
         content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading module: ${escapeHtml(err.message)}</p></div>`;
@@ -582,8 +587,8 @@ async function loadWork(content: HTMLElement): Promise<void> {
     workData = { tasks, activeGoals, archivedGoals };
 
     // Extract unique projects and models
-    const projects = [...new Set(tasks.map((t: any) => t.project_path?.split('/').pop() || 'unknown'))].sort();
-    const models = [...new Set(tasks.map((t: any) => t.model || 'unknown'))].filter(m => m).sort();
+    const projects = [...new Set(tasks.map((t: any) => t.project_path?.split('/').pop() || 'unknown'))].sort() as string[];
+    const models = [...new Set(tasks.map((t: any) => t.model || 'unknown'))].filter(m => m).sort() as string[];
     const statuses = ['pending', 'running', 'done', 'failed'];
 
     // Build filter bar HTML
@@ -2577,6 +2582,385 @@ let mdSearchTimeout: any = null;
     selectedMemoryDiscussionId = null;
     const layout = document.querySelector('.md-conversation-layout');
     if (layout) layout.classList.remove('thread-selected');
+};
+
+// ══════════════════════════════════════════════════════════════
+// MODULE: Workshop
+// ══════════════════════════════════════════════════════════════
+
+const workshopPersonaTabs = {
+    jim: { label: 'Supervisor Jim', color: 'var(--purple)' },
+    leo: { label: 'Philosopher Leo', color: 'var(--green)' },
+    darron: { label: 'Dreamer Darron', color: 'var(--blue)' }
+};
+
+const workshopNestedTabs = {
+    jim: [
+        { key: 'jim-request', label: 'Requests' },
+        { key: 'jim-report', label: 'Reports' }
+    ],
+    leo: [
+        { key: 'leo-question', label: 'Questions' },
+        { key: 'leo-postulate', label: 'Postulates' }
+    ],
+    darron: [
+        { key: 'darron-thought', label: 'Thoughts' },
+        { key: 'darron-musing', label: 'Musings' }
+    ]
+};
+
+async function loadWorkshop(content: HTMLElement): Promise<void> {
+    try {
+        // Fetch grouped conversations for the current nested tab (discussion_type)
+        const res = await fetch(`${API_BASE}/api/conversations/grouped?type=${workshopNestedTab}`);
+        const data = await res.json();
+        const periods = data.periods || {};
+
+        // Header actions
+        const actionsEl = document.getElementById('moduleActions');
+        if (actionsEl) {
+            actionsEl.innerHTML = `
+                <button class="admin-btn admin-btn-primary admin-btn-sm" onclick="showNewWorkshopThreadForm()">New Thread</button>
+            `;
+        }
+
+        // Build main container with persona tabs + nested tabs
+        let html = `<div class="fade-in conversation-container">
+            <!-- Persona Tab Bar -->
+            <div class="workshop-persona-bar" style="display:flex;gap:0;border-bottom:2px solid var(--border-subtle);background:var(--bg-secondary)">`;
+
+        for (const [personaKey, personaInfo] of Object.entries(workshopPersonaTabs)) {
+            const isActive = workshopPersona === personaKey;
+            html += `<button
+                class="workshop-persona-tab ${isActive ? 'active' : ''}"
+                data-persona="${personaKey}"
+                onclick="switchWorkshopPersona('${personaKey}')"
+                style="flex:1;padding:12px 16px;text-align:center;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:${isActive ? '600' : '400'};color:${isActive ? personaInfo.color : 'var(--text-muted)'};border-bottom:${isActive ? `3px solid ${personaInfo.color}` : 'none'};transition:all 200ms ease">
+                ${personaInfo.label}
+            </button>`;
+        }
+
+        html += `</div>
+
+            <!-- Nested Tab Bar (changes based on persona) -->
+            <div class="workshop-nested-bar" style="display:flex;gap:0;border-bottom:1px solid var(--border-subtle);background:var(--bg-primary);padding:0 8px">`;
+
+        const personaColor = workshopPersonaTabs[workshopPersona].color;
+        const nestedTabs = workshopNestedTabs[workshopPersona] || [];
+
+        for (const tab of nestedTabs) {
+            const isActive = workshopNestedTab === tab.key;
+            html += `<button
+                class="workshop-nested-tab ${isActive ? 'active' : ''}"
+                data-tab="${tab.key}"
+                onclick="switchWorkshopNestedTab('${tab.key}')"
+                style="padding:8px 12px;border:none;background:transparent;cursor:pointer;font-size:12px;color:${isActive ? personaColor : 'var(--text-muted)'};border-bottom:${isActive ? `2px solid ${personaColor}` : 'none'};transition:all 150ms ease;margin-top:8px">
+                ${tab.label}
+            </button>`;
+        }
+
+        html += `</div>
+
+            <!-- Main Conversation Layout -->
+            <div class="workshop-conversation-layout" style="display:flex;height:calc(100% - 120px);gap:0">
+                <!-- Thread List -->
+                <div class="thread-list-panel">
+                    <!-- Period Filter Bar -->
+                    <div class="period-filter-bar">`;
+
+        const allCount = Object.values(periods).reduce((sum, p: any) => sum + (p.count || 0), 0);
+        const isAllActive = workshopPeriod === 'all';
+        html += `<button class="period-filter-btn ${isAllActive ? 'active' : ''}" onclick="filterWorkshopByPeriod('all')" title="All threads">
+            <span>All</span>
+            <span class="period-badge">${allCount}</span>
+        </button>`;
+
+        const periodOrder = ['today', 'this_week', 'last_week', 'this_month', 'older'];
+        const periodLabels: Record<string, string> = {
+            'today': 'Today',
+            'this_week': 'This Week',
+            'last_week': 'Last Week',
+            'this_month': 'This Month',
+            'older': 'Older'
+        };
+
+        for (const period of periodOrder) {
+            const p = periods[period];
+            if (!p) continue;
+            const isActive = workshopPeriod === period;
+            const label = periodLabels[period] || p.label;
+            html += `<button class="period-filter-btn ${isActive ? 'active' : ''}" onclick="filterWorkshopByPeriod('${period}')" title="${label}">
+                <span>${label}</span>
+                <span class="period-badge">${p.count}</span>
+            </button>`;
+        }
+
+        html += `</div>
+                    <div id="workshopThreadList" class="thread-list">`;
+
+        // Get conversations for current period
+        let conversations: any[] = [];
+        if (workshopPeriod === 'all') {
+            for (const period of periodOrder) {
+                if (periods[period]) {
+                    conversations = conversations.concat(periods[period].conversations || []);
+                }
+            }
+        } else {
+            const p = periods[workshopPeriod];
+            conversations = p ? (p.conversations || []) : [];
+        }
+
+        // Thread list
+        if (conversations.length === 0) {
+            html += `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">No threads in this period</div>`;
+        } else {
+            for (const conv of conversations) {
+                const messageCount = conv.message_count || 0;
+                const currentThreadId = workshopSelectedThread[workshopNestedTab] || null;
+                const isSelected = currentThreadId === conv.id;
+                const statusBadgeClass = conv.status === 'open' ? 'badge-running' : 'badge-done';
+                const statusText = conv.status === 'open' ? 'Open' : 'Resolved';
+
+                html += `<div class="thread-item ${isSelected ? 'active' : ''}" data-thread-id="${conv.id}" onclick="selectWorkshopThread('${conv.id}')">
+                    <div class="thread-item-title">${escapeHtml(conv.title)}</div>
+                    <div class="thread-item-meta">
+                        <span style="font-size:11px;color:var(--text-muted)">${timeSince(conv.updated_at)}</span>
+                        <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
+                    </div>
+                    <div class="thread-item-count" style="font-size:11px;color:var(--text-muted);margin-top:6px">${messageCount} message${messageCount !== 1 ? 's' : ''}</div>
+                </div>`;
+            }
+        }
+
+        html += `</div>
+                </div>
+
+                <!-- Thread Detail -->
+                <div class="thread-detail-panel" id="workshopThreadDetailPanel">`;
+
+        html += `<div id="workshopThreadDetail">
+            <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Select a thread to view</div>
+        </div>`;
+
+        html += `</div>
+            </div>
+        </div>`;
+
+        content.innerHTML = html;
+
+        // Load selected thread details if any
+        const currentThreadId = workshopSelectedThread[workshopNestedTab];
+        if (currentThreadId) {
+            await renderWorkshopThread(currentThreadId);
+        }
+    } catch (err: any) {
+        content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading workshop: ${escapeHtml(err.message)}</p></div>`;
+    }
+}
+
+(window as any).switchWorkshopPersona = async function(persona: string) {
+    workshopPersona = persona as 'jim' | 'leo' | 'darron';
+    // Set default nested tab for this persona
+    const defaultTab = workshopNestedTabs[persona][0];
+    workshopNestedTab = defaultTab.key;
+    workshopSelectedThread[workshopNestedTab] = null;
+
+    const content = document.getElementById('mainContent');
+    if (content) {
+        content.style.opacity = '0.5';
+        setTimeout(async () => {
+            await loadWorkshop(content);
+            content.style.opacity = '1';
+        }, 150);
+    }
+};
+
+(window as any).switchWorkshopNestedTab = async function(tab: string) {
+    workshopNestedTab = tab;
+    workshopPeriod = 'all';
+    workshopSelectedThread[tab] = null;
+
+    const content = document.getElementById('mainContent');
+    if (content) {
+        content.style.opacity = '0.5';
+        setTimeout(async () => {
+            await loadWorkshop(content);
+            content.style.opacity = '1';
+        }, 150);
+    }
+};
+
+(window as any).selectWorkshopThread = async function(threadId: string) {
+    workshopSelectedThread[workshopNestedTab] = threadId;
+    await renderWorkshopThread(threadId);
+
+    document.querySelectorAll('.workshop-conversation-layout .thread-item').forEach(el => {
+        el.classList.toggle('active', el.getAttribute('data-thread-id') === threadId);
+    });
+
+    const layout = document.querySelector('.workshop-conversation-layout');
+    if (layout) layout.classList.add('thread-selected');
+};
+
+(window as any).filterWorkshopByPeriod = async function(period: string) {
+    workshopPeriod = period;
+    const content = document.getElementById('mainContent');
+    if (content) {
+        content.style.opacity = '0.5';
+        setTimeout(async () => {
+            await loadWorkshop(content);
+            content.style.opacity = '1';
+        }, 150);
+    }
+};
+
+(window as any).backToWorkshopThreadList = function() {
+    workshopSelectedThread[workshopNestedTab] = null;
+    const layout = document.querySelector('.workshop-conversation-layout');
+    if (layout) layout.classList.remove('thread-selected');
+};
+
+(window as any).showNewWorkshopThreadForm = function() {
+    const title = prompt('Thread title:');
+    if (!title) return;
+    createNewWorkshopThread(title);
+};
+
+async function createNewWorkshopThread(title: string): Promise<void> {
+    try {
+        const res = await fetch(`${API_BASE}/api/conversations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, discussion_type: workshopNestedTab })
+        });
+        const data = await res.json();
+        if (data.conversation) {
+            workshopSelectedThread[workshopNestedTab] = data.conversation.id;
+            await renderModule('workshop');
+        }
+    } catch (err: any) {
+        alert('Error creating thread: ' + err.message);
+    }
+}
+
+async function renderWorkshopThread(threadId: string): Promise<void> {
+    try {
+        const res = await fetch(`${API_BASE}/api/conversations/${threadId}`);
+        const data = await res.json();
+        const conversation = data.conversation;
+        const messages = data.messages || [];
+
+        const detailPanel = document.getElementById('workshopThreadDetail');
+        if (!detailPanel) return;
+
+        const resolveButton = conversation.status === 'open'
+            ? `<button class="admin-btn admin-btn-sm" onclick="resolveWorkshopThread('${conversation.id}')">Resolve</button>`
+            : `<button class="admin-btn admin-btn-sm" onclick="reopenWorkshopThread('${conversation.id}')">Reopen</button>`;
+
+        let html = `<div class="thread-header">
+            <div style="flex:1">
+                <button class="admin-btn admin-btn-sm thread-back-btn" onclick="backToWorkshopThreadList()" style="display:none;margin-bottom:6px;font-size:11px">&larr; Back</button>
+                <h2 style="margin:0;margin-bottom:4px;font-size:16px">${escapeHtml(conversation.title)}</h2>
+                <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
+            </div>
+            <div>${resolveButton}</div>
+        </div>
+
+        <div class="message-list" id="workshopMessageList">`;
+
+        if (messages.length === 0) {
+            html += `<div style="padding:16px;color:var(--text-muted);text-align:center;font-size:12px">No messages yet</div>`;
+        } else {
+            for (const msg of messages) {
+                const isHuman = msg.role === 'human';
+                const isLeo = msg.role === 'leo';
+                const bubbleClass = isHuman ? 'message-bubble human'
+                    : isLeo ? 'message-bubble leo'
+                    : 'message-bubble supervisor';
+                const label = isHuman ? 'Darron' : isLeo ? 'Leo' : 'Jim';
+                const labelColor = isHuman ? 'rgba(255,255,255,0.6)'
+                    : isLeo ? 'rgba(56,207,135,0.6)'
+                    : 'var(--text-muted)';
+
+                html += `<div class="${bubbleClass}">
+                    <div style="font-size:10px;color:${labelColor};margin-bottom:4px">${label} · ${formatTime(msg.created_at)}</div>
+                    <div class="message-content" style="word-break:break-word;line-height:1.5">${renderMarkdown(msg.content)}</div>
+                </div>`;
+            }
+        }
+
+        html += `</div>
+
+        <div class="message-input-area">
+            <textarea class="message-input" id="workshopMessageInput" placeholder="Type a message..." style="resize:vertical;min-height:60px"></textarea>
+            <button class="admin-btn admin-btn-primary" onclick="sendWorkshopMessage('${conversation.id}')">Send</button>
+        </div>`;
+
+        detailPanel.innerHTML = html;
+
+        const messageList = document.getElementById('workshopMessageList');
+        if (messageList) {
+            setTimeout(() => messageList.scrollTop = messageList.scrollHeight, 0);
+        }
+
+        const input = document.getElementById('workshopMessageInput') as HTMLTextAreaElement;
+        if (input) input.focus();
+    } catch (err: any) {
+        const detailPanel = document.getElementById('workshopThreadDetail');
+        if (detailPanel) {
+            detailPanel.innerHTML = `<div style="color:var(--red);padding:16px">Error loading thread: ${escapeHtml(err.message)}</div>`;
+        }
+    }
+}
+
+(window as any).sendWorkshopMessage = async function(threadId: string) {
+    const input = document.getElementById('workshopMessageInput') as HTMLTextAreaElement;
+    if (!input || !input.value.trim()) return;
+
+    const content = input.value;
+    input.value = '';
+
+    try {
+        await fetch(`${API_BASE}/api/conversations/${threadId}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, role: 'human' })
+        });
+        await renderWorkshopThread(threadId);
+
+        const messageList = document.getElementById('workshopMessageList');
+        if (messageList) {
+            const waiting = document.createElement('div');
+            waiting.id = 'workshopSupervisorWaiting';
+            waiting.className = 'message-bubble supervisor';
+            waiting.style.opacity = '0.5';
+            waiting.innerHTML = '<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Jim</div><div style="font-size:12px;color:var(--text-muted)">Thinking...</div>';
+            messageList.appendChild(waiting);
+            messageList.scrollTop = messageList.scrollHeight;
+        }
+    } catch (err: any) {
+        alert('Error sending message: ' + err.message);
+        input.value = content;
+    }
+};
+
+(window as any).resolveWorkshopThread = async function(threadId: string) {
+    try {
+        await fetch(`${API_BASE}/api/conversations/${threadId}/resolve`, { method: 'POST' });
+        await renderModule('workshop');
+    } catch (err: any) {
+        alert('Error resolving thread: ' + err.message);
+    }
+};
+
+(window as any).reopenWorkshopThread = async function(threadId: string) {
+    try {
+        await fetch(`${API_BASE}/api/conversations/${threadId}/reopen`, { method: 'POST' });
+        await renderModule('workshop');
+    } catch (err: any) {
+        alert('Error reopening thread: ' + err.message);
+    }
 };
 
 // ══════════════════════════════════════════════════════════════
