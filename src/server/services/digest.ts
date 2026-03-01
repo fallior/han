@@ -22,6 +22,16 @@ export function generateDailyDigest(since: Date): { id: string; task_count: numb
             commits: string[];
             failures: Array<{ title: string; error: string }>;
         }> = [];
+        const tasksArray: Array<{
+            id: string;
+            title: string;
+            status: string;
+            project: string;
+            result: string | null;
+            cost: number;
+            commit_sha: string | null;
+            completed_at: string;
+        }> = [];
         let totalCompleted = 0;
         let totalFailed = 0;
         let totalCost = 0;
@@ -52,6 +62,20 @@ export function generateDailyDigest(since: Date): { id: string; task_count: numb
                 commits,
                 failures: failed.map((t: any) => ({ title: t.title, error: (t.error || '').slice(0, 200) })),
             });
+
+            // Capture per-task metadata for UI expansion
+            for (const task of tasks) {
+                tasksArray.push({
+                    id: task.id,
+                    title: task.title,
+                    status: task.status,
+                    project: proj.name,
+                    result: task.result || null,
+                    cost: task.cost_usd || 0,
+                    commit_sha: task.commit_sha || null,
+                    completed_at: task.completed_at,
+                });
+            }
         }
 
         // Skip if no activity
@@ -69,6 +93,7 @@ export function generateDailyDigest(since: Date): { id: string; task_count: numb
                 projects_active: projectData.length,
             },
             projects: projectData,
+            tasks: tasksArray,
         };
 
         // Build markdown text

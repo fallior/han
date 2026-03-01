@@ -135,7 +135,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS weekly_reports (
     report_json TEXT NOT NULL,
     task_count INTEGER DEFAULT 0,
     total_cost REAL DEFAULT 0,
-    viewed_at TEXT
+    viewed_at TEXT,
+    report_tasks_json TEXT
 )`);
 
 db.exec(`CREATE TABLE IF NOT EXISTS products (
