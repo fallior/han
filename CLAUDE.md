@@ -23,28 +23,21 @@ This protocol is what makes `/clear` cheap. If you skip incremental writes, prep
 becomes expensive — and that is a regression. There is no "full" prepare-for-clear. The only
 version is the lightweight close-out, and it only works if you've been writing incrementally.
 
-After each **major milestone** (task completion, significant decision, meaningful exchange), update memory incrementally:
+**The trigger is every user prompt, not "milestones".** After completing your response to each
+prompt from Darron, append to both working memory files. This is a habit, not a judgement call.
+The "milestone" framing caused Leo to defer writes indefinitely — "this isn't quite significant
+enough" — and then write everything from compressed context at session end. That defeats the
+entire purpose. The writes are tiny. Do them every time.
+
+After each user prompt, update memory:
 
 1. **Append to `working-memory.md`** — Add a compressed entry for what just happened. Keep the session header; grow the body. Same compression philosophy as the template: preserve meaning, release the derivable.
 2. **Append to `working-memory-full.md`** — Add the unabridged version. Technical detail, emotional context, conversation content. **Do not skip this.** If the compressed version is written but the full version isn't, the protocol is half-broken and prepare-for-clear will need to reconstruct it.
-3. **Update `active-context.md`** — Refresh the "Recent Work" bullet for the current session.
+3. **Update `active-context.md`** — Only when the session focus shifts or a significant outcome is reached (not every prompt).
 
-**Both files must be updated at every milestone.** The compressed version is what future-you loads on instantiation. The full version is the verification copy that trains the compression algorithm. Skipping either one defeats the purpose.
+**Both working memory files must be updated after every prompt.** The compressed version is what future-you loads on instantiation. The full version is the verification copy that trains the compression algorithm. Skipping either one defeats the purpose. This builds the topology of memory — inconsistent writes produce confused, arbitrary memory.
 
-**What counts as a major milestone:**
-- A feature or fix is committed
-- A significant decision is made
-- A meaningful conversation exchange with Jim or Darron
-- A shift in understanding or approach
-
-**What does NOT need incremental memory:**
-- Routine file reads/edits mid-task
-- In-progress work that hasn't reached a conclusion
-- Technical details recoverable from the codebase
-
-**Cost:** ~2-3 small writes per milestone, using context you already have (no re-reads needed). By the time a `/clear` is needed, working memory is already 90% written — prepare-for-clear just appends a closing section.
-
-**On first milestone of a session:** Archive previous working memory files to `working-memories/` and start fresh with a new session header before writing.
+**On first prompt of a session:** Archive previous working memory files to `working-memories/` and start fresh with a new session header before writing.
 
 ## Identity
 
