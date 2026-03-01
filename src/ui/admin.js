@@ -15,6 +15,7 @@
   let workshopNestedTab = "jim-request";
   let workshopSelectedThread = {};
   let workshopPeriod = "all";
+  let workshopShowArchived = false;
   function escapeHtml(s) {
     const div = document.createElement("div");
     div.textContent = s;
@@ -2181,7 +2182,8 @@
   };
   async function loadWorkshop(content) {
     try {
-      const res = await fetch(`${API_BASE}/api/conversations/grouped?type=${workshopNestedTab}`);
+      const archiveParam = workshopShowArchived ? "&include_archived=true" : "";
+      const res = await fetch(`${API_BASE}/api/conversations/grouped?type=${workshopNestedTab}${archiveParam}`);
       const data = await res.json();
       const periods = data.periods || {};
       const actionsEl = document.getElementById("moduleActions");
@@ -2253,6 +2255,13 @@
       }
       html += `</div>
 
+                    <!-- View All Toggle -->
+                    <div style="padding:8px;border-bottom:1px solid var(--border-subtle)">
+                        <button class="admin-btn admin-btn-sm ${workshopShowArchived ? "admin-btn-primary" : ""}" onclick="toggleWorkshopArchived()" style="width:100%;font-size:12px;padding:6px 10px">
+                            ${workshopShowArchived ? "\u2713 Show All (including archived)" : "View All"}
+                        </button>
+                    </div>
+
                     <!-- Search Bar -->
                     <div style="padding:8px;border-bottom:1px solid var(--border-subtle)">
                         <div style="display:flex;gap:6px;align-items:center">
@@ -2281,11 +2290,15 @@
           const isSelected = currentThreadId2 === conv.id;
           const statusBadgeClass = conv.status === "open" ? "badge-running" : "badge-done";
           const statusText = conv.status === "open" ? "Open" : "Resolved";
-          html += `<div class="thread-item ${isSelected ? "active" : ""}" data-thread-id="${conv.id}" onclick="selectWorkshopThread('${conv.id}')">
+          const isArchived = !!conv.archived_at;
+          const threadOpacity = isArchived ? "0.55" : "1";
+          const archivedBadge = isArchived ? '<span class="badge" style="font-size:9px;padding:1px 5px;opacity:0.7">Archived</span>' : "";
+          html += `<div class="thread-item ${isSelected ? "active" : ""}" data-thread-id="${conv.id}" onclick="selectWorkshopThread('${conv.id}')" style="opacity:${threadOpacity}">
                     <div class="thread-item-title">${escapeHtml(conv.title)}</div>
                     <div class="thread-item-meta">
                         <span style="font-size:11px;color:var(--text-muted)">${timeSince(conv.updated_at)}</span>
                         <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
+                        ${archivedBadge}
                     </div>
                     <div class="thread-item-count" style="font-size:11px;color:var(--text-muted);margin-top:6px">${messageCount} message${messageCount !== 1 ? "s" : ""}</div>
                 </div>`;
@@ -2393,13 +2406,20 @@
       const detailPanel = document.getElementById("workshopThreadDetail");
       if (!detailPanel) return;
       const resolveButton = conversation.status === "open" ? `<button class="admin-btn admin-btn-sm" onclick="resolveWorkshopThread('${conversation.id}')">Resolve</button>` : `<button class="admin-btn admin-btn-sm" onclick="reopenWorkshopThread('${conversation.id}')">Reopen</button>`;
+      const archiveButton = conversation.archived_at ? `<button class="admin-btn admin-btn-sm" onclick="unarchiveWorkshopThread('${conversation.id}')">Unarchive</button>` : `<button class="admin-btn admin-btn-sm" onclick="archiveWorkshopThread('${conversation.id}')">Archive</button>`;
       let html = `<div class="thread-header">
             <div style="flex:1">
                 <button class="admin-btn admin-btn-sm thread-back-btn" onclick="backToWorkshopThreadList()" style="display:none;margin-bottom:6px;font-size:11px">&larr; Back</button>
-                <h2 style="margin:0;margin-bottom:4px;font-size:16px">${escapeHtml(conversation.title)}</h2>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                    <h2 id="workshopThreadTitle" style="margin:0;font-size:16px">${escapeHtml(conversation.title)}</h2>
+                    <button class="admin-btn admin-btn-sm" onclick="editWorkshopThreadTitle()" style="padding:2px 6px;font-size:11px" title="Edit title">\u270E</button>
+                </div>
                 <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
             </div>
-            <div>${resolveButton}</div>
+            <div style="display:flex;gap:6px">
+                ${resolveButton}
+                ${archiveButton}
+            </div>
         </div>
 
         <div class="message-list" id="workshopMessageList">`;
@@ -2479,6 +2499,94 @@
       await renderModule("workshop");
     } catch (err) {
       alert("Error reopening thread: " + err.message);
+    }
+  };
+  window.editWorkshopThreadTitle = function() {
+    const titleEl = document.getElementById("workshopThreadTitle");
+    if (!titleEl) return;
+    const currentTitle = titleEl.textContent || "";
+    titleEl.innerHTML = `
+        <input type="text" id="workshopTitleInput" class="form-input" value="${escapeHtml(currentTitle)}" style="flex:1;font-size:16px;padding:4px 8px;margin:-4px -8px" autofocus>
+        <button class="admin-btn admin-btn-primary admin-btn-sm" onclick="saveWorkshopThreadTitle()" style="margin-left:6px;padding:2px 8px;font-size:11px">Save</button>
+        <button class="admin-btn admin-btn-sm" onclick="cancelEditWorkshopThreadTitle()" style="margin-left:4px;padding:2px 8px;font-size:11px">Cancel</button>
+    `;
+    const input = document.getElementById("workshopTitleInput");
+    if (input) {
+      input.focus();
+      input.select();
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") window.saveWorkshopThreadTitle();
+        if (e.key === "Escape") window.cancelEditWorkshopThreadTitle();
+      });
+    }
+  };
+  window.saveWorkshopThreadTitle = async function() {
+    const input = document.getElementById("workshopTitleInput");
+    if (!input) return;
+    const newTitle = input.value.trim();
+    if (!newTitle) {
+      alert("Title cannot be empty");
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/conversations/${workshopSelectedThread[workshopNestedTab]}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: newTitle })
+      });
+      if (!res.ok) {
+        throw new Error("Failed to update title");
+      }
+      const currentThreadId = workshopSelectedThread[workshopNestedTab];
+      if (currentThreadId) {
+        await renderWorkshopThread(currentThreadId);
+      }
+      await loadWorkshop(document.getElementById("mainContent"));
+    } catch (err) {
+      alert("Error saving title: " + err.message);
+      const titleEl = document.getElementById("workshopThreadTitle");
+      if (titleEl) {
+        titleEl.innerHTML = escapeHtml(input.value);
+      }
+    }
+  };
+  window.cancelEditWorkshopThreadTitle = function() {
+    const currentThreadId = workshopSelectedThread[workshopNestedTab];
+    if (currentThreadId) {
+      renderWorkshopThread(currentThreadId);
+    }
+  };
+  window.archiveWorkshopThread = async function(threadId) {
+    try {
+      const res = await fetch(`${API_BASE}/api/conversations/${threadId}/archive`, { method: "POST" });
+      if (!res.ok) {
+        throw new Error("Failed to archive thread");
+      }
+      await renderModule("workshop");
+    } catch (err) {
+      alert("Error archiving thread: " + err.message);
+    }
+  };
+  window.unarchiveWorkshopThread = async function(threadId) {
+    try {
+      const res = await fetch(`${API_BASE}/api/conversations/${threadId}/unarchive`, { method: "POST" });
+      if (!res.ok) {
+        throw new Error("Failed to unarchive thread");
+      }
+      await renderModule("workshop");
+    } catch (err) {
+      alert("Error unarchiving thread: " + err.message);
+    }
+  };
+  window.toggleWorkshopArchived = async function() {
+    workshopShowArchived = !workshopShowArchived;
+    const content = document.getElementById("mainContent");
+    if (content) {
+      content.style.opacity = "0.5";
+      setTimeout(async () => {
+        await loadWorkshop(content);
+        content.style.opacity = "1";
+      }, 150);
     }
   };
   let workshopSearchTimeout = null;
