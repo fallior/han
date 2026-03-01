@@ -37,14 +37,21 @@ const listWithCountsByType = db.prepare(`
 
 /**
  * GET / -- List all conversations
- * Query params: ?type=memory (filters by discussion_type)
+ * Query params: ?type=memory (filters by discussion_type), ?include_archived=true (includes archived)
  */
 router.get('/', (req: Request, res: Response) => {
     try {
         const type = req.query.type as string | undefined;
-        const conversations = type
+        const includeArchived = req.query.include_archived === 'true';
+        let conversations = type
             ? listWithCountsByType.all(type)
             : listWithCounts.all().filter((c: any) => !c.discussion_type || c.discussion_type === 'general');
+
+        // Filter out archived conversations unless explicitly requested
+        if (!includeArchived) {
+            conversations = conversations.filter((c: any) => !c.archived_at);
+        }
+
         res.json({ success: true, conversations });
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
@@ -74,15 +81,22 @@ router.post('/', (req: Request, res: Response) => {
 
 /**
  * GET /grouped -- List conversations grouped by temporal period
- * Query params: ?type=memory (filters by discussion_type)
+ * Query params: ?type=memory (filters by discussion_type), ?include_archived=true (includes archived)
  * Returns: { periods: { 'today': { count, conversations }, 'this_week': {...}, ... } }
  */
 router.get('/grouped', (req: Request, res: Response) => {
     try {
         const type = req.query.type as string | undefined;
-        const conversations = type
+        const includeArchived = req.query.include_archived === 'true';
+        let conversations = type
             ? listWithCountsByType.all(type) as any[]
             : (listWithCounts.all() as any[]).filter((c: any) => !c.discussion_type || c.discussion_type === 'general');
+
+        // Filter out archived conversations unless explicitly requested
+        if (!includeArchived) {
+            conversations = conversations.filter((c: any) => !c.archived_at);
+        }
+
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -264,6 +278,11 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         conversationMessageStmts.insert.run(messageId, req.params.id, finalRole, content, now);
         conversationStmts.updateTimestamp.run(now, req.params.id);
 
+        // Auto-reactivate archived conversation on new message
+        if (conversation.archived_at) {
+            conversationStmts.unarchive.run(now, req.params.id);
+        }
+
         const message = {
             id: messageId,
             conversation_id: req.params.id,
@@ -371,6 +390,64 @@ router.post('/:id/reopen', (req: Request<{ id: string }>, res: Response) => {
 
         const now = new Date().toISOString();
         conversationStmts.updateStatus.run('open', now, req.params.id);
+
+        const updated = conversationStmts.get.get(req.params.id);
+        res.json({ success: true, conversation: updated });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * PATCH /:id -- Update conversation title
+ * Body: { title }
+ */
+router.patch('/:id', (req: Request<{ id: string }>, res: Response) => {
+    try {
+        const { title } = req.body;
+        if (!title) return res.status(400).json({ success: false, error: 'title is required' });
+
+        const conversation = conversationStmts.get.get(req.params.id);
+        if (!conversation) return res.status(404).json({ success: false, error: 'Conversation not found' });
+
+        const now = new Date().toISOString();
+        conversationStmts.updateTitle.run(title, now, req.params.id);
+
+        const updated = conversationStmts.get.get(req.params.id);
+        res.json({ success: true, conversation: updated });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /:id/archive -- Archive a conversation
+ */
+router.post('/:id/archive', (req: Request<{ id: string }>, res: Response) => {
+    try {
+        const conversation = conversationStmts.get.get(req.params.id);
+        if (!conversation) return res.status(404).json({ success: false, error: 'Conversation not found' });
+
+        const now = new Date().toISOString();
+        conversationStmts.archive.run(now, now, req.params.id);
+
+        const updated = conversationStmts.get.get(req.params.id);
+        res.json({ success: true, conversation: updated });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /:id/unarchive -- Unarchive a conversation
+ */
+router.post('/:id/unarchive', (req: Request<{ id: string }>, res: Response) => {
+    try {
+        const conversation = conversationStmts.get.get(req.params.id);
+        if (!conversation) return res.status(404).json({ success: false, error: 'Conversation not found' });
+
+        const now = new Date().toISOString();
+        conversationStmts.unarchive.run(now, req.params.id);
 
         const updated = conversationStmts.get.get(req.params.id);
         res.json({ success: true, conversation: updated });

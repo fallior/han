@@ -349,6 +349,13 @@ if (!conversationCols.includes('discussion_type')) {
     console.log('[DB] Migration complete: discussion_type column added');
 }
 
+// Archive feature — archived_at column on conversations
+if (!conversationCols.includes('archived_at')) {
+    console.log('[DB] Adding archived_at column to conversations...');
+    db.exec(`ALTER TABLE conversations ADD COLUMN archived_at TEXT`);
+    console.log('[DB] Migration complete: archived_at column added');
+}
+
 // FTS5 virtual table for conversation messages
 // Note: FTS5 tables can't be checked with pragma table_info, so we use a try-catch approach
 try {
@@ -537,6 +544,9 @@ export const conversationStmts = {
     updateSummary: db.prepare('UPDATE conversations SET summary = ?, updated_at = ? WHERE id = ?') as any,
     updateTopics: db.prepare('UPDATE conversations SET topics = ?, updated_at = ? WHERE id = ?') as any,
     getWithSummary: db.prepare('SELECT * FROM conversations WHERE id = ? AND summary IS NOT NULL') as any,
+    updateTitle: db.prepare('UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?') as any,
+    archive: db.prepare('UPDATE conversations SET archived_at = ?, updated_at = ? WHERE id = ?') as any,
+    unarchive: db.prepare('UPDATE conversations SET archived_at = NULL, updated_at = ? WHERE id = ?') as any,
 };
 
 export const conversationMessageStmts = {
