@@ -38,6 +38,7 @@
  * Usage:
  *   Runs as a systemd user service (leo-heartbeat.service)
  *   Or manually: cd ~/Projects/clauderemote/src/server && npx tsx leo-heartbeat.ts
+ *   Agent instantiation directory: ~/.claude-remote/agents/Leo/
  */
 
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
@@ -71,6 +72,7 @@ const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
 const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
 const CLI_ACTIVE_FILE = path.join(SIGNALS_DIR, 'cli-active');
 const HEARTBEAT_STATE_FILE = path.join(LEO_MEMORY_DIR, 'heartbeat-state.md');
+const LEO_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Leo');
 const PROJECTS_DIR = path.join(HOME, 'Projects');
 const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
 
@@ -298,7 +300,7 @@ async function resolveModel(): Promise<string> {
                 options: {
                     model,
                     maxTurns: 1,
-                    cwd: path.join(HOME, 'Projects', 'clauderemote'),
+                    cwd: LEO_AGENT_DIR,
                     permissionMode: 'bypassPermissions',
                     allowDangerouslySkipPermissions: true,
                     env: cleanEnv,
@@ -327,7 +329,7 @@ async function resolveModel(): Promise<string> {
 // ── Ensure directories exist ──────────────────────────────────
 
 function ensureDirectories(): void {
-    for (const dir of [LEO_MEMORY_DIR, SIGNALS_DIR, HEALTH_DIR]) {
+    for (const dir of [LEO_MEMORY_DIR, SIGNALS_DIR, HEALTH_DIR, LEO_AGENT_DIR]) {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
@@ -646,7 +648,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
         options: {
             model: activeModel,
             maxTurns: MAX_TURNS_CONVERSATION,
-            cwd: path.join(HOME, 'Projects', 'clauderemote'),
+            cwd: LEO_AGENT_DIR,
             permissionMode: 'bypassPermissions',
             allowDangerouslySkipPermissions: true,
             env: cleanEnv,
@@ -740,7 +742,7 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
             options: {
                 model: activeModel,
                 maxTurns: MAX_TURNS_PHILOSOPHY,
-                cwd: path.join(HOME, 'Projects', 'clauderemote'),
+                cwd: LEO_AGENT_DIR,
                 permissionMode: 'bypassPermissions',
                 allowDangerouslySkipPermissions: true,
                 env: cleanEnv,
@@ -814,7 +816,7 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
             options: {
                 model: activeModel,
                 maxTurns: MAX_TURNS_PHILOSOPHY,
-                cwd: path.join(HOME, 'Projects', 'clauderemote'),
+                cwd: LEO_AGENT_DIR,
                 permissionMode: 'bypassPermissions',
                 allowDangerouslySkipPermissions: true,
                 env: cleanEnv,
@@ -913,7 +915,7 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work'): P
         options: {
             model: activeModel,
             maxTurns: MAX_TURNS_PERSONAL,
-            cwd: path.join(HOME, 'Projects'),
+            cwd: LEO_AGENT_DIR,
             permissionMode: 'bypassPermissions',
             allowDangerouslySkipPermissions: true,
             env: cleanEnv,

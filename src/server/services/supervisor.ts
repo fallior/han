@@ -42,6 +42,7 @@ const MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
 const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
 const SESSIONS_DIR = path.join(MEMORY_DIR, 'sessions');
 const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
+const JIM_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Jim');
 const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
 const SESSION_LOCK_FILE = path.join(CLAUDE_REMOTE_DIR, 'session-active');
 const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
@@ -543,7 +544,7 @@ export function initSupervisor(): void {
     }
 
     // Create directories
-    for (const dir of [MEMORY_DIR, PROJECTS_DIR, SESSIONS_DIR]) {
+    for (const dir of [MEMORY_DIR, PROJECTS_DIR, SESSIONS_DIR, JIM_AGENT_DIR]) {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }

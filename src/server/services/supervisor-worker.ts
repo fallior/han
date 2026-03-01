@@ -69,6 +69,7 @@ const MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
 const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
 const SESSIONS_DIR = path.join(MEMORY_DIR, 'sessions');
 const TASKS_DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
+const JIM_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Jim');
 
 // Token caps for memory files
 const MEMORY_TOKEN_CAPS: Record<string, number> = {
@@ -1033,7 +1034,7 @@ async function runSupervisorCycle(): Promise<void> {
             options: {
                 model,
                 maxTurns,
-                cwd: CLAUDE_REMOTE_DIR,
+                cwd: JIM_AGENT_DIR,
                 permissionMode: 'bypassPermissions',
                 allowDangerouslySkipPermissions: true,
                 env: cleanEnv,
