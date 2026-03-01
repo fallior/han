@@ -1544,7 +1544,154 @@
             color: var(--purple);
         }
 
-        /* ─── Search Results ─── */
+        /* ─── Workshop Tab Infrastructure ─── */
+
+        /* Persona Tab Bar */
+        .workshop-persona-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border-subtle);
+            background: var(--bg-card);
+            flex-shrink: 0;
+        }
+
+        .persona-tab {
+            flex: 1;
+            padding: 10px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            text-align: center;
+            color: var(--text-dim);
+            transition: color 0.15s, border-color 0.15s, background 0.15s;
+            background: var(--bg-card);
+        }
+
+        .persona-tab:hover {
+            background: var(--bg-card-hover);
+            color: var(--text);
+        }
+
+        .persona-tab-jim.active {
+            color: var(--purple);
+            border-bottom-color: var(--purple);
+        }
+
+        .persona-tab-leo.active {
+            color: var(--green);
+            border-bottom-color: var(--green);
+        }
+
+        .persona-tab-darron.active {
+            color: var(--blue);
+            border-bottom-color: var(--blue);
+        }
+
+        /* Nested Tab Bar */
+        .workshop-nested-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border-subtle);
+            background: var(--bg-page);
+            flex-shrink: 0;
+            padding: 0 8px;
+        }
+
+        .nested-tab {
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            color: var(--text-dim);
+            transition: color 0.15s, border-color 0.15s;
+            background: none;
+            border: none;
+        }
+
+        .nested-tab:hover {
+            color: var(--text);
+        }
+
+        .nested-tab.active {
+            border-bottom-color: currentColor;
+        }
+
+        /* Inherit persona colour for active nested tabs */
+        .workshop-layout-jim .nested-tab.active {
+            color: var(--purple);
+        }
+
+        .workshop-layout-leo .nested-tab.active {
+            color: var(--green);
+        }
+
+        .workshop-layout-darron .nested-tab.active {
+            color: var(--blue);
+        }
+
+        /* Workshop Layout Accent Tinting - Jim (Purple) */
+        .workshop-layout-jim .thread-list-panel {
+            border-right-color: rgba(179, 146, 240, 0.2);
+        }
+
+        .workshop-layout-jim .thread-item.active {
+            border-color: var(--purple);
+            box-shadow: 0 0 0 1px var(--purple);
+        }
+
+        .workshop-layout-jim .period-filter-btn.active {
+            background: rgba(179, 146, 240, 0.15);
+            color: var(--purple);
+            border-color: var(--purple);
+        }
+
+        .workshop-layout-jim .period-filter-btn.active .period-badge {
+            background: var(--purple);
+        }
+
+        /* Workshop Layout Accent Tinting - Leo (Green) */
+        .workshop-layout-leo .thread-list-panel {
+            border-right-color: rgba(63, 185, 80, 0.2);
+        }
+
+        .workshop-layout-leo .thread-item.active {
+            border-color: var(--green);
+            box-shadow: 0 0 0 1px var(--green);
+        }
+
+        .workshop-layout-leo .period-filter-btn.active {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--green);
+            border-color: var(--green);
+        }
+
+        .workshop-layout-leo .period-filter-btn.active .period-badge {
+            background: var(--green);
+        }
+
+        /* Workshop Layout Accent Tinting - Darron (Blue) */
+        .workshop-layout-darron .thread-list-panel {
+            border-right-color: rgba(88, 166, 255, 0.2);
+        }
+
+        .workshop-layout-darron .thread-item.active {
+            border-color: var(--blue);
+            box-shadow: 0 0 0 1px var(--blue);
+        }
+
+        .workshop-layout-darron .period-filter-btn.active {
+            background: rgba(88, 166, 255, 0.15);
+            color: var(--blue);
+            border-color: var(--blue);
+        }
+
+        .workshop-layout-darron .period-filter-btn.active .period-badge {
+            background: var(--blue);
+        }
+
+        /* Search Results ─── */
         .search-result-card {
             background: var(--bg-page);
             border: 1px solid var(--border-subtle);
@@ -1636,6 +1783,10 @@
                 <a class="sidebar-item" data-module="work" href="#work">
                     <span class="sidebar-icon"><svg viewBox="0 0 20 20"><path d="M3 4h14M3 8h14M3 12h10M3 16h6"/><path d="M15 12l2 2 4-4" stroke-width="2"/></svg></span>
                     <span class="sidebar-label">Work</span>
+                </a>
+                <a class="sidebar-item" data-module="workshop" href="#workshop">
+                    <span class="sidebar-icon"><svg viewBox="0 0 20 20"><path d="M3 6h14M5 6v8a2 2 0 002 2h6a2 2 0 002-2V6M7 6v-2a1 1 0 011-1h4a1 1 0 011 1v2M9 10h2M8 14h4"/></svg></span>
+                    <span class="sidebar-label">Workshop</span>
                 </a>
                 <a class="sidebar-item" data-module="supervisor" href="#supervisor">
                     <span class="sidebar-icon"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"/><path d="M10 3v2M10 15v2M3 10h2M15 10h2M5.05 5.05l1.41 1.41M13.54 13.54l1.41 1.41M5.05 14.95l1.41-1.41M13.54 6.46l1.41-1.41"/></svg></span>
