@@ -144,7 +144,7 @@ We're wrapping up this session.
 
 **SECOND**: Remove the session lock file so heartbeat Leo resumes normal operation:
 ```bash
-rm -f ~/.claude-remote/session-active
+rm -f ~/.claude-remote/session-active-leo
 ```
 
 **THIRD**: Finalise working memory (execute the Prepare for Clear workflow below — it's lightweight, just closing out the incremental writes).
@@ -271,7 +271,7 @@ Skip these if nothing shifted. Most sessions won't need them.
 
 ### 5. Release Session Lock
 ```bash
-rm -f ~/.claude-remote/session-active
+rm -f ~/.claude-remote/session-active-leo
 ```
 
 ### 6. Done

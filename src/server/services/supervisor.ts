@@ -44,10 +44,8 @@ const SESSIONS_DIR = path.join(MEMORY_DIR, 'sessions');
 const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
 const JIM_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Jim');
 const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
-const SESSION_LOCK_FILE = path.join(CLAUDE_REMOTE_DIR, 'session-active');
 const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
 const CLI_ACTIVE_FILE = path.join(SIGNALS_DIR, 'cli-active');
-const SESSION_LOCK_STALE_HOURS = 4;
 const CLI_ACTIVE_STALE_MINUTES = 30;
 
 // Worker restart backoff
@@ -151,16 +149,6 @@ function getWallClockDelay(): number {
 
 // ── Session/CLI detection (Opus concurrency guard) ───────────
 
-function isSessionActive(): boolean {
-    if (!fs.existsSync(SESSION_LOCK_FILE)) return false;
-    try {
-        const stat = fs.statSync(SESSION_LOCK_FILE);
-        const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
-        if (ageHours > SESSION_LOCK_STALE_HOURS) return false;
-        return true;
-    } catch { return false; }
-}
-
 function isCliActive(): boolean {
     if (!fs.existsSync(CLI_ACTIVE_FILE)) return false;
     try {
@@ -172,10 +160,9 @@ function isCliActive(): boolean {
 }
 
 export function isOpusSlotBusy(): boolean {
-    if (isSessionActive()) {
-        console.log('[Supervisor] Session Leo is active — Opus slot busy');
-        return true;
-    }
+    // Jim no longer defers to session Leo — they run in separate agent
+    // directories so there's no shared state to conflict over.
+    // Only defer if CLI is actively processing (Opus slot contention).
     if (isCliActive()) {
         console.log('[Supervisor] CLI is active — Opus slot busy');
         return true;
