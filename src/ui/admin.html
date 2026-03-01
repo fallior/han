@@ -1757,6 +1757,18 @@
                 display: none;
             }
 
+            .workshop-conversation-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .workshop-conversation-layout.thread-selected .thread-list-panel {
+                display: none;
+            }
+
+            .workshop-conversation-layout:not(.thread-selected) .thread-detail-panel {
+                display: none;
+            }
+
             .thread-back-btn {
                 display: inline-block !important;
             }
