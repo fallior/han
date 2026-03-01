@@ -407,6 +407,14 @@ if (ftsCount.count === 0 && messagesCount.count > 0) {
     console.log('[DB] FTS5 population complete');
 }
 
+// Per-task metadata in weekly reports
+const weeklyReportCols = (db.pragma("table_info('weekly_reports')") as any[]).map((col: any) => col.name);
+if (!weeklyReportCols.includes('report_tasks_json')) {
+    console.log('[DB] Adding per-task metadata to weekly reports...');
+    db.exec(`ALTER TABLE weekly_reports ADD COLUMN report_tasks_json TEXT`);
+    console.log('[DB] Migration complete: report_tasks_json column added');
+}
+
 // ── Prepared statements ─────────────────────────────────────
 
 export const taskStmts = {
@@ -482,7 +490,7 @@ export const maintenanceStmts = {
 };
 
 export const weeklyReportStmts = {
-    insert: db.prepare('INSERT INTO weekly_reports (id, generated_at, week_start, week_end, report_text, report_json, task_count, total_cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?)') as any,
+    insert: db.prepare('INSERT INTO weekly_reports (id, generated_at, week_start, week_end, report_text, report_json, report_tasks_json, task_count, total_cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)') as any,
     getLatest: db.prepare('SELECT * FROM weekly_reports ORDER BY generated_at DESC LIMIT 1') as any,
     getById: db.prepare('SELECT * FROM weekly_reports WHERE id = ?') as any,
     list: db.prepare('SELECT id, generated_at, week_start, week_end, task_count, total_cost, viewed_at FROM weekly_reports ORDER BY generated_at DESC LIMIT 20') as any,

@@ -18,6 +18,7 @@ export function getISOWeek(date: Date): string {
 
 /**
  * Generate a weekly progress report aggregating 7 days of activity across all projects.
+ * Captures per-task metadata (id, title, result, project, cost, commit_sha, completed_at) grouped by project.
  * Returns the report object or null if no activity in the period.
  */
 export function generateWeeklyReport(weekStart: Date): { id: string; task_count: number; total_cost: number; report_text: string } | null {
@@ -42,6 +43,18 @@ export function generateWeeklyReport(weekStart: Date): { id: string; task_count:
         // All tasks in the period (for daily breakdown)
         const allTasks: any[] = [];
 
+        // Per-task metadata grouped by project
+        const projectTasks: Record<string, Array<{
+            id: string;
+            title: string;
+            result: string | null;
+            project: string;
+            cost: number;
+            commit_sha: string | null;
+            completed_at: string;
+            status: string;
+        }>> = {};
+
         for (const proj of projects) {
             const tasks = db.prepare(
                 "SELECT * FROM tasks WHERE project_path = ? AND completed_at > ? AND status IN ('done', 'failed') ORDER BY completed_at ASC"
@@ -58,6 +71,18 @@ export function generateWeeklyReport(weekStart: Date): { id: string; task_count:
             const goalsCompleted = (db.prepare(
                 "SELECT COUNT(*) as count FROM goals WHERE project_path = ? AND completed_at > ? AND status = 'completed'"
             ).get(proj.path, periodStart) as any).count;
+
+            // Build per-task metadata for this project
+            projectTasks[proj.name] = tasks.map((t: any) => ({
+                id: t.id,
+                title: t.title,
+                result: t.result || null,
+                project: proj.name,
+                cost: t.cost_usd || 0,
+                commit_sha: t.commit_sha || null,
+                completed_at: t.completed_at,
+                status: t.status,
+            }));
 
             totalCompleted += done.length;
             totalFailed += failed.length;
@@ -118,6 +143,25 @@ export function generateWeeklyReport(weekStart: Date): { id: string; task_count:
             velocity: { this_week: totalCompleted, prev_week: prevWeekCount, trend },
         };
 
+        // Build per-task metadata structure
+        const reportTasksJson = {
+            generated_at: periodEnd,
+            week_start: periodStart,
+            week_end: periodEnd,
+            summary: {
+                total_tasks: allTasks.length,
+                completed: totalCompleted,
+                failed: totalFailed,
+                total_cost: totalCost,
+            },
+            projects: Object.entries(projectTasks).map(([projectName, tasks]) => ({
+                name: projectName,
+                task_count: tasks.length,
+                cost: tasks.reduce((sum, t) => sum + t.cost, 0),
+                tasks: tasks,
+            })),
+        };
+
         // Build markdown text
         const weekOfStr = new Date(periodStart).toLocaleDateString();
         const lines: string[] = [
@@ -150,7 +194,7 @@ export function generateWeeklyReport(weekStart: Date): { id: string; task_count:
         const reportText = lines.join('\n');
         const id = generateId();
 
-        weeklyReportStmts.insert.run(id, periodEnd, periodStart, periodEnd, reportText, JSON.stringify(reportJson), totalCompleted + totalFailed, totalCost);
+        weeklyReportStmts.insert.run(id, periodEnd, periodStart, periodEnd, reportText, JSON.stringify(reportJson), JSON.stringify(reportTasksJson), totalCompleted + totalFailed, totalCost);
 
         return { id, task_count: totalCompleted + totalFailed, total_cost: totalCost, report_text: reportText };
     } catch (err: any) {
