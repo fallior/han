@@ -1,22 +1,21 @@
 "use strict";
 (() => {
-  // src/ui/admin.ts
-  var API_BASE = "";
-  var MODULES = ["overview", "projects", "work", "supervisor", "reports", "conversations", "memory-discussions", "products", "workshop"];
-  var currentModule = "overview";
-  var ws = null;
-  var chartInstances = {};
-  var refreshInterval = null;
-  var selectedProductId = null;
-  var selectedConversationId = null;
-  var selectedConversationPeriod = "all";
-  var selectedMemoryDiscussionId = null;
-  var selectedMemoryDiscussionPeriod = "all";
-  var workshopPersona = "jim";
-  var workshopNestedTab = "jim-request";
-  var workshopSelectedThread = {};
-  var workshopPeriod = "all";
-  var workshopShowArchived = false;
+  const API_BASE = "";
+  const MODULES = ["overview", "projects", "work", "supervisor", "reports", "conversations", "memory-discussions", "products", "workshop"];
+  let currentModule = "overview";
+  let ws = null;
+  let chartInstances = {};
+  let refreshInterval = null;
+  let selectedProductId = null;
+  let selectedConversationId = null;
+  let selectedConversationPeriod = "all";
+  let selectedMemoryDiscussionId = null;
+  let selectedMemoryDiscussionPeriod = "all";
+  let workshopPersona = "jim";
+  let workshopNestedTab = "jim-request";
+  let workshopSelectedThread = {};
+  let workshopPeriod = "all";
+  let workshopShowArchived = false;
   function escapeHtml(s) {
     const div = document.createElement("div");
     div.textContent = s;
@@ -200,7 +199,7 @@
       content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading module: ${escapeHtml(err.message)}</p></div>`;
     }
   }
-  var wsRetryDelay = 1e3;
+  let wsRetryDelay = 1e3;
   function connectWebSocket() {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${location.host}/ws`;
@@ -474,8 +473,8 @@
         </div>`;
     }).join("");
   }
-  var workFilters = { project: "", status: "", model: "" };
-  var workData = null;
+  let workFilters = { project: "", status: "", model: "" };
+  let workData = null;
   async function loadWork(content) {
     const [tasksRes, activeGoalsRes, archivedGoalsRes] = await Promise.all([
       fetch(`${API_BASE}/api/tasks`),
@@ -539,6 +538,7 @@
                     <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-subtle)">
                         <div style="margin-bottom:6px"><strong style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Description</strong></div>
                         <div style="font-size:12px;color:var(--text-dim);line-height:1.5">${escapeHtml((task.description || "\u2014").substring(0, 200))}</div>
+                        ${task.result ? `<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border-subtle)"><div style="margin-bottom:6px"><strong style="font-size:11px;color:var(--text-muted);text-transform:uppercase">Result</strong></div><div style="font-size:12px;color:var(--text-dim);line-height:1.5">${renderMarkdown(task.result)}</div></div>` : ""}
                         ${task.error ? `<div style="margin-top:8px;padding:6px 8px;background:rgba(248, 81, 73, 0.1);border-radius:4px;border-left:2px solid var(--red)"><strong style="font-size:11px;color:var(--red);text-transform:uppercase">Error</strong><div style="font-size:11px;color:var(--text-dim);margin-top:2px">${escapeHtml(task.error.substring(0, 150))}</div></div>` : ""}
                         ${task.log_file ? `<div style="margin-top:6px"><a href="#" onclick="viewTaskLog('${task.id}', event)" style="font-size:12px;color:var(--blue)">View Log</a></div>` : ""}
                         ${task.commit_sha ? `<div style="margin-top:6px;font-size:11px;color:var(--text-muted)"><strong>Commit:</strong> ${escapeHtml(task.commit_sha.slice(0, 8))}</div>` : ""}
@@ -687,7 +687,7 @@
     event.stopPropagation();
     alert(`Log viewer for task ${taskId} would open here`);
   };
-  var selectedProject = null;
+  let selectedProject = null;
   async function loadProjects(content) {
     const [ecosystemRes, portfolioRes] = await Promise.all([
       fetch(`${API_BASE}/api/ecosystem`),
@@ -1713,7 +1713,7 @@
       input.value = content;
     }
   };
-  var conversationSearchTimeout = null;
+  let conversationSearchTimeout = null;
   window.performConversationSearch = async function(query, event) {
     if (conversationSearchTimeout) {
       clearTimeout(conversationSearchTimeout);
@@ -2064,7 +2064,7 @@
       input.value = content;
     }
   };
-  var mdSearchTimeout = null;
+  let mdSearchTimeout = null;
   window.performMemorySearch = async function(query, event) {
     if (mdSearchTimeout) clearTimeout(mdSearchTimeout);
     const clearBtn = document.getElementById("mdClearSearchBtn");
@@ -2162,12 +2162,12 @@
     const layout = document.querySelector(".md-conversation-layout");
     if (layout) layout.classList.remove("thread-selected");
   };
-  var workshopPersonaTabs = {
+  const workshopPersonaTabs = {
     jim: { label: "Supervisor Jim", color: "var(--purple)" },
     leo: { label: "Philosopher Leo", color: "var(--green)" },
     darron: { label: "Dreamer Darron", color: "var(--blue)" }
   };
-  var workshopNestedTabs = {
+  const workshopNestedTabs = {
     jim: [
       { key: "jim-request", label: "Requests" },
       { key: "jim-report", label: "Reports" }
@@ -2590,7 +2590,7 @@
       }, 150);
     }
   };
-  var workshopSearchTimeout = null;
+  let workshopSearchTimeout = null;
   window.performWorkshopSearch = async function(query, event) {
     if (workshopSearchTimeout) clearTimeout(workshopSearchTimeout);
     const clearBtn = document.getElementById("workshopClearSearchBtn");
