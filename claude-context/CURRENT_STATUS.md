@@ -32,6 +32,29 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-01 — Claude (autonomous) — Workshop Thread Management Features Complete
+- **Thread title editing and archive features implemented** (4 commits: b5f167b, bb78234, a73d234, 14f4ecf):
+  - **Database migration**: Added `archived_at TEXT` column to conversations table
+  - **API endpoints**: Three new endpoints in conversations.ts
+    - `PATCH /api/conversations/:id` — Update conversation title
+    - `POST /api/conversations/:id/archive` — Archive conversation (sets archived_at timestamp)
+    - `POST /api/conversations/:id/unarchive` — Unarchive conversation (clears archived_at)
+    - `POST /api/conversations/:id/messages` — Auto-reactivates archived threads when message sent
+    - `GET /api/conversations?include_archived=true` — Modified to exclude archived by default
+    - `GET /api/conversations/grouped?include_archived=true` — Modified to exclude archived by default
+  - **UI implementation** (admin.ts Workshop module):
+    - Inline title editing: Click edit button → input field appears → Enter/Save confirms, Esc/Cancel reverts
+    - Archive/Unarchive button in thread header with confirm prompt
+    - "View All" / "Active Only" toggle in thread list panel (horizontal pill buttons)
+    - Archived threads shown with muted grey background when View All active
+    - Archived badge displayed on thread items when visible
+    - State management: `workshopShowArchived` tracks toggle, `workshopEditingThreadId` tracks edit mode
+  - **Functions added**: `editWorkshopThreadTitle`, `saveWorkshopThreadTitle`, `cancelEditWorkshopThreadTitle`, `archiveWorkshopThread`, `unarchiveWorkshopThread`, `toggleWorkshopArchived`
+  - **Build**: Compiled admin.ts → admin.js (116 lines added), bumped cache version in admin.html
+- **Why this matters**: Workshop threads can now be renamed to reflect evolving discussions, and completed threads can be archived to keep active list focused while preserving access to historical context.
+- **Commits**: 4 commits from goal mm7q091r-ow6j7k (Add modify-title and archive features to Workshop threads)
+- **Files changed**: `src/server/db.ts` (migration), `src/server/routes/conversations.ts` (API endpoints), `src/ui/admin.ts` (UI logic), `src/ui/admin.js` (compiled), `src/ui/admin.html` (cache version), task logs
+
 ### 2026-03-01 — Claude (autonomous) — Workshop Module Complete
 - **Admin console Workshop module implemented** (5 commits: 4e2de4a, 08a5f20, c983f42, 2a1426e, 52aa3f9, 95abb87):
   - **Three-persona navigation**: Supervisor Jim (purple), Philosopher Leo (green), Dreamer Darron (blue)
@@ -859,6 +882,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Conversation panel: Integrated period filter bar (horizontal pills at top of thread list)
 - ✅ Products module: Product pipeline visualisation with phase timeline
 - ✅ Workshop module: Three-persona navigation (Jim purple, Leo green, Darron blue) with six nested discussion types, conversation threading, search, real-time updates, mobile-responsive
+- ✅ Workshop thread management: Inline title editing, archive/unarchive with auto-reactivation on new message, View All toggle, archived thread styling
 - ✅ Supervisor responds to pending conversation threads automatically
 - ✅ TypeScript build system for admin console (admin.ts → admin.js)
 - ✅ Ghost task detection and auto-recovery (5-minute periodic check)

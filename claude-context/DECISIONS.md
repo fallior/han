@@ -55,6 +55,7 @@ When you make a significant technical or design decision:
 | DEC-023 | Deferred Cycle Pattern via fs.watch (Gary Model) | Accepted | 2026-02-28 |
 | DEC-024 | Context Injection Pipeline Tuning | Accepted | 2026-02-28 |
 | DEC-025 | Workshop Module Three-Persona Navigation | Accepted | 2026-03-01 |
+| DEC-026 | Auto-Reactivate Archived Threads on New Message | Accepted | 2026-03-01 |
 
 ---
 
@@ -1656,6 +1657,94 @@ Dreamer Darron (blue):
 - Admin console Phase 2 (Work, Conversations, Products, Workshop modules)
 - Conversation threading pattern (reused from Conversations module)
 - Reference conversation: mm7ejhxi-r6qjh4 ('work I'd like Jim to look at') — Darron approved this design explicitly
+
+---
+
+### DEC-026: Auto-Reactivate Archived Threads on New Message
+
+**Date**: 2026-03-01
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Workshop conversations can be archived to keep the active list focused on ongoing work. The question arose: what happens when someone posts a new message to an archived thread? Should it remain archived (message invisible in active view) or should it automatically reactivate (assume the thread is active again)?
+
+Similar patterns exist in email (archived threads that reappear in inbox when replied to) and issue trackers (closed issues that reopen when new comments arrive).
+
+#### Options Considered
+
+1. **Auto-reactivate on new message**
+   - ✅ Intuitive — sending a message implies active discussion
+   - ✅ Prevents "lost" messages in archived threads
+   - ✅ Matches email client behaviour (Gmail, Outlook)
+   - ✅ No manual reactivation needed
+   - ❌ Could reactivate threads user wanted to keep archived
+
+2. **Keep archived, require manual reactivation**
+   - ✅ Explicit control — user decides when to reactivate
+   - ✅ Preserves archive state
+   - ❌ New messages invisible in active view
+   - ❌ Easy to forget to reactivate
+   - ❌ Friction — extra click needed before sending
+
+3. **Prompt user when sending to archived thread**
+   - ✅ Explicit choice each time
+   - ❌ Extra modal/prompt friction
+   - ❌ Interrupts message flow
+   - ❌ Annoying for common case (reactivation wanted)
+
+#### Decision
+
+We chose **Option 1: Auto-reactivate on new message** because posting a message to an archived thread is a strong signal that the discussion is active again.
+
+**Implementation:**
+- Modified `POST /api/conversations/:id/messages` endpoint in conversations.ts
+- When message added, check if conversation has `archived_at` set
+- If archived, clear `archived_at` before inserting message
+- Update `updated_at` timestamp as usual
+- Thread immediately appears in active view after message sent
+
+**API behaviour:**
+```typescript
+// In conversations.ts POST /:id/messages handler
+if (conversation.archived_at) {
+    conversationStmts.updateArchived.run(null, id); // Clear archived_at
+}
+```
+
+This applies regardless of who sends the message (human, Leo, Jim) — any new message reactivates.
+
+#### Consequences
+
+**Positive:**
+- Natural workflow — post message, thread becomes active
+- No lost messages in archived state
+- Matches familiar email patterns
+- Zero friction for common case
+- Prevents confusion ("Where did my message go?")
+
+**Negative:**
+- User can't post a "final note" to archived thread without reactivating it
+- If user wants thread to stay archived despite new message, must manually re-archive after
+
+**Trade-offs:**
+- Automatic vs explicit: chose automatic because common case is reactivation
+- Could add "Send without reactivating" option in future if needed
+- Current implementation optimises for 95% case (reactivation desired)
+
+**Implementation notes:**
+- Archive check happens before message insert (clean separation)
+- Works consistently across all discussion types (general, workshop personas)
+- No special UI needed — behaviour is implicit and discoverable
+- If reactivation undesired, user can re-archive in one click
+
+#### Related
+
+- DEC-025: Workshop Module Three-Persona Navigation (provides context for thread management)
+- DEC-018: Conversations as Strategic Async Discussion Channel (foundation)
+- Conversations API: `POST /api/conversations/:id/messages` (implementation location)
+- Archive API: `POST /api/conversations/:id/archive` (complementary feature)
 
 ---
 

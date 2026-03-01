@@ -278,9 +278,12 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 | GET | /api/conversations/search | FTS5 full-text search with context |
 | POST | /api/conversations/search/semantic | Semantic search by Haiku (ranked) |
 | GET | /api/conversations/:id | Get thread with messages |
-| POST | /api/conversations/:id/messages | Add message to thread |
+| PATCH | /api/conversations/:id | Update thread title |
+| POST | /api/conversations/:id/messages | Add message to thread (auto-reactivates if archived) |
 | POST | /api/conversations/:id/resolve | Mark conversation resolved, trigger cataloguing |
 | POST | /api/conversations/:id/reopen | Reopen resolved conversation |
+| POST | /api/conversations/:id/archive | Archive conversation (sets archived_at timestamp) |
+| POST | /api/conversations/:id/unarchive | Unarchive conversation (clears archived_at) |
 | POST | /api/conversations/:id/catalogue | Manually trigger cataloguing for conversation |
 | POST | /api/conversations/recatalogue-all | Backfill summaries for all uncatalogued conversations |
 | WS | /ws | WebSocket push (prompts + terminal + tasks + approvals + conversations) |
@@ -438,26 +441,32 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
     - Dreamer Darron (blue): Thoughts, Musings
   - Six discussion types: `jim-request`, `jim-report`, `leo-question`, `leo-postulate`, `darron-thought`, `darron-musing`
   - Two-column layout: 280px thread list | 1fr detail panel
-  - Thread list: temporal period filter, search with debounced queries (300ms), message counts
-  - Thread detail: message history with role badges, compose input, resolve/reopen actions
+  - Thread list: temporal period filter, search with debounced queries (300ms), message counts, View All/Active Only toggle
+  - Thread detail: message history with role badges, inline title editing, archive/unarchive button, compose input, resolve/reopen actions
+  - Inline title editing: Click edit → input field → Enter/Save confirms, Esc/Cancel reverts
+  - Archive management: Archive button in thread header, View All toggle shows archived threads with muted styling, archived badge on thread items
+  - Auto-reactivation: Sending message to archived thread automatically unarchives it (DEC-026)
   - Real-time updates: WebSocket `conversation_message` events for workshop discussion types
   - Mobile responsive: single-column stack at <768px, `.thread-selected` class toggle, back button
   - Search functionality: `/api/conversations/search?type={discussion_type}` with highlighted snippets
   - Thread creation: auto-sets `discussion_type` based on active nested tab
   - CSS theming: persona accent colors tint active tabs, thread borders, selected thread highlight
 - **Database schema**:
-  - `conversations` table: id, title, status (open/resolved), summary, topics, key_moments, created_at, updated_at
+  - `conversations` table: id, title, status (open/resolved), summary, topics, key_moments, archived_at, created_at, updated_at
   - `conversation_messages` table: id, conversation_id, role (human/supervisor/leo), content, created_at
   - `conversation_messages_fts` virtual table: FTS5 full-text index for message search
   - `conversation_tags` table: id, conversation_id, tag, created_at
 - **API endpoints**:
-  - `GET /api/conversations` — list all threads with message counts
+  - `GET /api/conversations` — list all threads with message counts (excludes archived by default, use `?include_archived=true` to show)
   - `POST /api/conversations` — create thread
   - `GET /api/conversations/:id` — get thread with messages
-  - `POST /api/conversations/:id/messages` — add message (broadcasts via WebSocket)
+  - `PATCH /api/conversations/:id` — update thread title
+  - `POST /api/conversations/:id/messages` — add message (broadcasts via WebSocket, auto-reactivates if archived)
   - `POST /api/conversations/:id/resolve` — mark resolved, triggers auto-cataloguing
   - `POST /api/conversations/:id/reopen` — reopen thread
-  - `GET /api/conversations/grouped` — conversations grouped by temporal period (today/this_week/last_week/this_month/older)
+  - `POST /api/conversations/:id/archive` — archive conversation (sets archived_at timestamp)
+  - `POST /api/conversations/:id/unarchive` — unarchive conversation (clears archived_at)
+  - `GET /api/conversations/grouped` — conversations grouped by temporal period (today/this_week/last_week/this_month/older), excludes archived by default
   - `GET /api/conversations/search?q=...&limit=...` — FTS5 text search with context window
   - `POST /api/conversations/search/semantic` — semantic search using Haiku (ranks conversations by relevance)
   - `POST /api/conversations/:id/catalogue` — manually trigger cataloguing for a conversation
