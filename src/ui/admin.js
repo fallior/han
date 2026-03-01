@@ -1,21 +1,22 @@
 "use strict";
 (() => {
-  const API_BASE = "";
-  const MODULES = ["overview", "projects", "work", "supervisor", "reports", "conversations", "memory-discussions", "products", "workshop"];
-  let currentModule = "overview";
-  let ws = null;
-  let chartInstances = {};
-  let refreshInterval = null;
-  let selectedProductId = null;
-  let selectedConversationId = null;
-  let selectedConversationPeriod = "all";
-  let selectedMemoryDiscussionId = null;
-  let selectedMemoryDiscussionPeriod = "all";
-  let workshopPersona = "jim";
-  let workshopNestedTab = "jim-request";
-  let workshopSelectedThread = {};
-  let workshopPeriod = "all";
-  let workshopShowArchived = false;
+  // src/ui/admin.ts
+  var API_BASE = "";
+  var MODULES = ["overview", "projects", "work", "supervisor", "reports", "conversations", "memory-discussions", "products", "workshop"];
+  var currentModule = "overview";
+  var ws = null;
+  var chartInstances = {};
+  var refreshInterval = null;
+  var selectedProductId = null;
+  var selectedConversationId = null;
+  var selectedConversationPeriod = "all";
+  var selectedMemoryDiscussionId = null;
+  var selectedMemoryDiscussionPeriod = "all";
+  var workshopPersona = "jim";
+  var workshopNestedTab = "jim-request";
+  var workshopSelectedThread = {};
+  var workshopPeriod = "all";
+  var workshopShowArchived = false;
   function escapeHtml(s) {
     const div = document.createElement("div");
     div.textContent = s;
@@ -199,7 +200,7 @@
       content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading module: ${escapeHtml(err.message)}</p></div>`;
     }
   }
-  let wsRetryDelay = 1e3;
+  var wsRetryDelay = 1e3;
   function connectWebSocket() {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${location.host}/ws`;
@@ -473,8 +474,8 @@
         </div>`;
     }).join("");
   }
-  let workFilters = { project: "", status: "", model: "" };
-  let workData = null;
+  var workFilters = { project: "", status: "", model: "" };
+  var workData = null;
   async function loadWork(content) {
     const [tasksRes, activeGoalsRes, archivedGoalsRes] = await Promise.all([
       fetch(`${API_BASE}/api/tasks`),
@@ -686,7 +687,7 @@
     event.stopPropagation();
     alert(`Log viewer for task ${taskId} would open here`);
   };
-  let selectedProject = null;
+  var selectedProject = null;
   async function loadProjects(content) {
     const [ecosystemRes, portfolioRes] = await Promise.all([
       fetch(`${API_BASE}/api/ecosystem`),
@@ -1712,7 +1713,7 @@
       input.value = content;
     }
   };
-  let conversationSearchTimeout = null;
+  var conversationSearchTimeout = null;
   window.performConversationSearch = async function(query, event) {
     if (conversationSearchTimeout) {
       clearTimeout(conversationSearchTimeout);
@@ -2063,7 +2064,7 @@
       input.value = content;
     }
   };
-  let mdSearchTimeout = null;
+  var mdSearchTimeout = null;
   window.performMemorySearch = async function(query, event) {
     if (mdSearchTimeout) clearTimeout(mdSearchTimeout);
     const clearBtn = document.getElementById("mdClearSearchBtn");
@@ -2161,12 +2162,12 @@
     const layout = document.querySelector(".md-conversation-layout");
     if (layout) layout.classList.remove("thread-selected");
   };
-  const workshopPersonaTabs = {
+  var workshopPersonaTabs = {
     jim: { label: "Supervisor Jim", color: "var(--purple)" },
     leo: { label: "Philosopher Leo", color: "var(--green)" },
     darron: { label: "Dreamer Darron", color: "var(--blue)" }
   };
-  const workshopNestedTabs = {
+  var workshopNestedTabs = {
     jim: [
       { key: "jim-request", label: "Requests" },
       { key: "jim-report", label: "Reports" }
@@ -2589,7 +2590,7 @@
       }, 150);
     }
   };
-  let workshopSearchTimeout = null;
+  var workshopSearchTimeout = null;
   window.performWorkshopSearch = async function(query, event) {
     if (workshopSearchTimeout) clearTimeout(workshopSearchTimeout);
     const clearBtn = document.getElementById("workshopClearSearchBtn");
