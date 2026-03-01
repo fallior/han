@@ -23,6 +23,8 @@ let workshopNestedTab: string = 'jim-request';
 let workshopSelectedThread: Record<string, string | null> = {};
 let workshopPeriod: string = 'all';
 let workshopShowArchived: boolean = false;
+let digestTasksExpanded: Record<string, boolean> = {};
+let reportTasksExpanded: Record<string, boolean> = {};
 
 // ── Utilities ────────────────────────────────────────────────
 
@@ -831,6 +833,44 @@ function filterWorkTasks(tasks: any[], statusFilter: string): any[] {
     }
 };
 
+(window as any).toggleDigestTaskExpanded = function(sectionId: string) {
+    const section = document.getElementById(sectionId) as HTMLElement;
+    const toggle = document.getElementById(`${sectionId}-toggle`) as HTMLElement;
+    if (!section) return;
+    const isHidden = section.style.display === 'none';
+    section.style.display = isHidden ? 'block' : 'none';
+    if (toggle) toggle.textContent = isHidden ? '▼' : '▶';
+};
+
+(window as any).toggleDigestTaskDetail = function(event: Event, taskId: string) {
+    event.stopPropagation();
+    const detail = document.getElementById(taskId) as HTMLElement;
+    const toggle = document.getElementById(`${taskId}-toggle`) as HTMLElement;
+    if (!detail) return;
+    const isHidden = detail.style.display === 'none';
+    detail.style.display = isHidden ? 'block' : 'none';
+    if (toggle) toggle.textContent = isHidden ? '▼' : '▶';
+};
+
+(window as any).toggleReportTaskExpanded = function(sectionId: string) {
+    const section = document.getElementById(sectionId) as HTMLElement;
+    const toggle = document.getElementById(`${sectionId}-toggle`) as HTMLElement;
+    if (!section) return;
+    const isHidden = section.style.display === 'none';
+    section.style.display = isHidden ? 'block' : 'none';
+    if (toggle) toggle.textContent = isHidden ? '▼' : '▶';
+};
+
+(window as any).toggleReportTaskDetail = function(event: Event, taskId: string) {
+    event.stopPropagation();
+    const detail = document.getElementById(taskId) as HTMLElement;
+    const toggle = document.getElementById(`${taskId}-toggle`) as HTMLElement;
+    if (!detail) return;
+    const isHidden = detail.style.display === 'none';
+    detail.style.display = isHidden ? 'block' : 'none';
+    if (toggle) toggle.textContent = isHidden ? '▼' : '▶';
+};
+
 (window as any).viewTaskLog = function(taskId: string, event: Event) {
     event.preventDefault();
     event.stopPropagation();
@@ -1385,6 +1425,42 @@ async function loadReports(content: HTMLElement): Promise<void> {
     if (digest) {
         html += `<div class="activity-meta" style="margin-bottom:8px">${formatDate(digest.period_start)} — ${digest.task_count || 0} tasks, ${formatCost(digest.total_cost || 0)}</div>`;
         html += `<div class="report-content">${escapeHtml(digest.digest_text || 'No content')}</div>`;
+
+        // Expandable tasks section
+        const digestJson = typeof digest.digest_json === 'string' ? JSON.parse(digest.digest_json) : digest.digest_json;
+        const digestTasks = digestJson?.tasks || [];
+        if (digestTasks.length > 0) {
+            const digestTasksId = `digest-latest-tasks`;
+            html += `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-subtle)">
+                <button class="admin-btn admin-btn-sm" style="margin-bottom:12px" onclick="toggleDigestTaskExpanded('${digestTasksId}')">
+                    <span id="${digestTasksId}-toggle">▶</span>
+                    Show ${digestTasks.length} tasks
+                </button>
+                <div id="${digestTasksId}" style="display:none">`;
+
+            for (const task of digestTasks) {
+                const taskId = `digest-task-${task.id}`;
+                const commitDisplay = task.commit_sha ? `<span style="color:var(--text-muted);font-size:11px">${task.commit_sha.slice(0, 7)}</span>` : '—';
+                html += `<div style="margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:6px;border-left:3px solid ${task.status === 'done' ? '#10b981' : '#ef4444'}">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                        <div style="flex:1">
+                            <div style="font-weight:500;margin-bottom:2px">${escapeHtml(task.title)}</div>
+                            <div style="font-size:12px;color:var(--text-muted)">
+                                ${escapeHtml(task.project)} · ${task.status === 'done' ? '✓ Done' : '✗ Failed'} · ${formatCost(task.cost)} · Commit: ${commitDisplay}
+                            </div>
+                        </div>
+                        <button class="admin-btn admin-btn-xs" onclick="toggleDigestTaskDetail(event, '${taskId}')">
+                            <span id="${taskId}-toggle">▶</span>
+                        </button>
+                    </div>
+                    <div id="${taskId}" style="display:none;margin-top:10px;padding:10px;background:var(--bg-subtle);border-radius:4px;border-left:2px solid var(--border-subtle)">
+                        <div class="report-content" style="margin:0">${renderMarkdown(task.result || '*No result captured*')}</div>
+                    </div>
+                </div>`;
+            }
+
+            html += `</div></div>`;
+        }
     } else {
         html += `<p style="color:var(--text-muted)">No digest available. Click "Generate Digest" to create one.</p>`;
     }
@@ -1409,6 +1485,54 @@ async function loadReports(content: HTMLElement): Promise<void> {
     if (weekly) {
         html += `<div class="activity-meta" style="margin-bottom:8px">${formatDate(weekly.week_start)} — ${formatDate(weekly.week_end)} · ${weekly.task_count || 0} tasks, ${formatCost(weekly.total_cost || 0)}</div>`;
         html += `<div class="report-content">${escapeHtml(weekly.report_text || 'No content')}</div>`;
+
+        // Expandable tasks section grouped by project
+        const weeklyJson = typeof weekly.report_tasks_json === 'string' ? JSON.parse(weekly.report_tasks_json) : weekly.report_tasks_json;
+        const weeklyProjects = weeklyJson?.projects || [];
+        const totalWeeklyTasks = weeklyProjects.reduce((sum: number, p: any) => sum + (p.tasks?.length || 0), 0);
+        if (totalWeeklyTasks > 0) {
+            const reportTasksId = `report-latest-tasks`;
+            html += `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-subtle)">
+                <button class="admin-btn admin-btn-sm" style="margin-bottom:12px" onclick="toggleReportTaskExpanded('${reportTasksId}')">
+                    <span id="${reportTasksId}-toggle">▶</span>
+                    Show ${totalWeeklyTasks} tasks across ${weeklyProjects.length} projects
+                </button>
+                <div id="${reportTasksId}" style="display:none">`;
+
+            for (const proj of weeklyProjects) {
+                const projectTasks = proj.tasks || [];
+                const projId = `report-project-${proj.name.replace(/\s+/g, '-')}`;
+                html += `<div style="margin-bottom:16px">
+                    <div style="font-weight:600;color:var(--text-heading);margin-bottom:8px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
+                        ${escapeHtml(proj.name)} · ${projectTasks.length} tasks · ${formatCost(proj.cost)}
+                    </div>`;
+
+                for (const task of projectTasks) {
+                    const taskId = `report-task-${task.id}`;
+                    const commitDisplay = task.commit_sha ? `<span style="color:var(--text-muted);font-size:11px">${task.commit_sha.slice(0, 7)}</span>` : '—';
+                    html += `<div style="margin-bottom:10px;padding:10px;background:var(--bg-input);border-radius:6px;border-left:3px solid ${task.status === 'done' ? '#10b981' : '#ef4444'}">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                            <div style="flex:1">
+                                <div style="font-weight:500;margin-bottom:2px">${escapeHtml(task.title)}</div>
+                                <div style="font-size:12px;color:var(--text-muted)">
+                                    ${task.status === 'done' ? '✓ Done' : '✗ Failed'} · ${formatCost(task.cost)} · Commit: ${commitDisplay}
+                                </div>
+                            </div>
+                            <button class="admin-btn admin-btn-xs" onclick="toggleReportTaskDetail(event, '${taskId}')">
+                                <span id="${taskId}-toggle">▶</span>
+                            </button>
+                        </div>
+                        <div id="${taskId}" style="display:none;margin-top:10px;padding:10px;background:var(--bg-subtle);border-radius:4px;border-left:2px solid var(--border-subtle)">
+                            <div class="report-content" style="margin:0">${renderMarkdown(task.result || '*No result captured*')}</div>
+                        </div>
+                    </div>`;
+                }
+
+                html += `</div>`;
+            }
+
+            html += `</div></div>`;
+        }
     } else {
         html += `<p style="color:var(--text-muted)">No weekly report available. Click "Generate Weekly" to create one.</p>`;
     }
@@ -1490,14 +1614,51 @@ async function loadReports(content: HTMLElement): Promise<void> {
             const content = document.getElementById('mainContent');
             if (!content) return;
             const d = data.digest;
-            content.innerHTML = `<div class="fade-in">
+            let html = `<div class="fade-in">
                 <div style="margin-bottom:12px"><button class="admin-btn admin-btn-sm" onclick="renderModule('reports')">&larr; Back to Reports</button></div>
                 <div class="admin-card">
                     <h2>Digest: ${formatDate(d.period_start)}</h2>
                     <div class="activity-meta" style="margin-bottom:12px">${d.task_count || 0} tasks · ${formatCost(d.total_cost || 0)}</div>
-                    <div class="report-content">${escapeHtml(d.digest_text || '')}</div>
-                </div>
-            </div>`;
+                    <div class="report-content">${escapeHtml(d.digest_text || '')}</div>`;
+
+            // Expandable tasks section
+            const digestJson = typeof d.digest_json === 'string' ? JSON.parse(d.digest_json) : d.digest_json;
+            const digestTasks = digestJson?.tasks || [];
+            if (digestTasks.length > 0) {
+                const digestTasksId = `digest-${id}-tasks`;
+                html += `<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-subtle)">
+                    <button class="admin-btn admin-btn-sm" style="margin-bottom:12px" onclick="toggleDigestTaskExpanded('${digestTasksId}')">
+                        <span id="${digestTasksId}-toggle">▶</span>
+                        Show ${digestTasks.length} tasks
+                    </button>
+                    <div id="${digestTasksId}" style="display:none">`;
+
+                for (const task of digestTasks) {
+                    const taskId = `digest-task-${task.id}`;
+                    const commitDisplay = task.commit_sha ? `<span style="color:var(--text-muted);font-size:11px">${task.commit_sha.slice(0, 7)}</span>` : '—';
+                    html += `<div style="margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:6px;border-left:3px solid ${task.status === 'done' ? '#10b981' : '#ef4444'}">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                            <div style="flex:1">
+                                <div style="font-weight:500;margin-bottom:2px">${escapeHtml(task.title)}</div>
+                                <div style="font-size:12px;color:var(--text-muted)">
+                                    ${escapeHtml(task.project)} · ${task.status === 'done' ? '✓ Done' : '✗ Failed'} · ${formatCost(task.cost)} · Commit: ${commitDisplay}
+                                </div>
+                            </div>
+                            <button class="admin-btn admin-btn-xs" onclick="toggleDigestTaskDetail(event, '${taskId}')">
+                                <span id="${taskId}-toggle">▶</span>
+                            </button>
+                        </div>
+                        <div id="${taskId}" style="display:none;margin-top:10px;padding:10px;background:var(--bg-subtle);border-radius:4px;border-left:2px solid var(--border-subtle)">
+                            <div class="report-content" style="margin:0">${renderMarkdown(task.result || '*No result captured*')}</div>
+                        </div>
+                    </div>`;
+                }
+
+                html += `</div></div>`;
+            }
+
+            html += `</div></div>`;
+            content.innerHTML = html;
         }
     } catch {}
 };
