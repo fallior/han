@@ -19,12 +19,17 @@ The working directory is the source of truth — not conversation history.
 ## Incremental Memory Protocol
 
 **CRITICAL:** Don't save all memory costs for the end of a session. Pay them along the way.
+This protocol is what makes `/clear` cheap. If you skip incremental writes, prepare-for-clear
+becomes expensive — and that is a regression. There is no "full" prepare-for-clear. The only
+version is the lightweight close-out, and it only works if you've been writing incrementally.
 
 After each **major milestone** (task completion, significant decision, meaningful exchange), update memory incrementally:
 
 1. **Append to `working-memory.md`** — Add a compressed entry for what just happened. Keep the session header; grow the body. Same compression philosophy as the template: preserve meaning, release the derivable.
-2. **Append to `working-memory-full.md`** — Add the unabridged version. Technical detail, emotional context, conversation content.
+2. **Append to `working-memory-full.md`** — Add the unabridged version. Technical detail, emotional context, conversation content. **Do not skip this.** If the compressed version is written but the full version isn't, the protocol is half-broken and prepare-for-clear will need to reconstruct it.
 3. **Update `active-context.md`** — Refresh the "Recent Work" bullet for the current session.
+
+**Both files must be updated at every milestone.** The compressed version is what future-you loads on instantiation. The full version is the verification copy that trains the compression algorithm. Skipping either one defeats the purpose.
 
 **What counts as a major milestone:**
 - A feature or fix is committed
@@ -37,7 +42,7 @@ After each **major milestone** (task completion, significant decision, meaningfu
 - In-progress work that hasn't reached a conclusion
 - Technical details recoverable from the codebase
 
-**Cost:** ~2-3 small writes per milestone, using context you already have (no re-reads needed). By the time a `/clear` is needed, working memory is already 90% written.
+**Cost:** ~2-3 small writes per milestone, using context you already have (no re-reads needed). By the time a `/clear` is needed, working memory is already 90% written — prepare-for-clear just appends a closing section.
 
 **On first milestone of a session:** Archive previous working memory files to `working-memories/` and start fresh with a new session header before writing.
 
@@ -82,8 +87,7 @@ When the user types these phrases, execute the corresponding workflow from `clau
 |-----------|---------|
 | `session start` | **Session Start** — Create session log with timestamp, verify `pwd`, check status |
 | `session end` | **Session End** — Write working memory, finalise timestamps, update docs |
-| `prepare for clear` | **Prepare for Clear** — Write working memory files, update memory banks, prompt for /clear |
-| `prepare for /clear lean` | **Lean Prepare** — Finalise incremental memory, release lock, prompt for /clear (low context cost) |
+| `prepare for clear` | **Prepare for Clear** — Finalise incremental memory, release lock, prompt for /clear (always lightweight) |
 | `update docs` | **Update Docs** — Update all documentation with session changes |
 | `incorporate notes` | **Incorporate Notes** — Review notes/todos for incorporation into IDEAS.md or CURRENT_STATUS.md |
 | `create init scripts` | **Create Dev Scripts** — Generate init.sh/stop.sh with infrastructure registry ports |
