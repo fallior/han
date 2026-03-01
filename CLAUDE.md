@@ -78,7 +78,7 @@ When the user types these phrases, execute the corresponding workflow from `clau
 
 | User Says | Execute |
 |-----------|---------|
-| `session start` | **Session Start** — Create session log with timestamp, verify `pwd`, check status |
+| `session start` / `welcome back` / `good morning` | **Session Start** — Create session log with timestamp, verify `pwd`, check status |
 | `session end` | **Session End** — Write working memory, finalise timestamps, update docs |
 | `prepare for clear` | **Prepare for Clear** — Finalise incremental memory, release lock, prompt for /clear (always lightweight) |
 | `update docs` | **Update Docs** — Update all documentation with session changes |
