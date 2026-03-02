@@ -490,6 +490,36 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
   - `conversation_message` event when new message posted
   - Real-time updates in admin UI
 
+### Robin Hood Protocol: Mutual Health Monitoring (Complete)
+
+**Purpose**: Leo and Jim monitor each other's health and automatically resurrect failed processes.
+
+**Health signals** (`~/.claude-remote/health/`):
+- `leo-health.json` — Written by Leo every beat (agent, pid, timestamp, beat, beatType, status, lastError, uptimeMinutes)
+- `jim-health.json` — Written by Jim every cycle (agent, pid, timestamp, cycle, tier, status, lastError, serverPid, uptimeMinutes)
+- `resurrection-log.jsonl` — Shared log of all resurrection attempts from both agents
+
+**Leo's health monitoring** (`leo-heartbeat.ts`):
+- `checkJimHealth()` called at start of every beat
+- Staleness thresholds: <40min OK, 40-90min stale (PID check), >90min down
+- Resurrection: `systemctl --user restart claude-remote-server.service`
+- 10s verification wait, 1-hour cooldown, ntfy escalation on failure
+
+**Jim's health monitoring** (`supervisor.ts`):
+- `checkLeoHealth()` called at start of every supervisor cycle
+- Staleness thresholds: <45min OK, 45-90min stale (PID check), >90min down
+- Resurrection: `systemctl --user restart leo-heartbeat.service`
+- 10s verification wait, 1-hour cooldown, ntfy escalation on failure
+
+**Split-brain prevention**:
+- PID-alive check via `kill -0` before resurrection attempt
+- Cooldown enforcement (shared resurrection log)
+- Staggered checks (Leo checks at beat start, Jim checks at cycle start)
+
+**systemd units** (`~/.config/systemd/user/`):
+- `claude-remote-server.service` — Supervisor + server (resurrected by Leo)
+- `leo-heartbeat.service` — Leo's heartbeat (resurrected by Jim)
+
 ### Level 13: Conversation Cataloguing & Search (Complete)
 
 **Full-text search and intelligent cataloguing for conversation discovery and analysis.**

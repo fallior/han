@@ -56,6 +56,8 @@ When you make a significant technical or design decision:
 | DEC-024 | Context Injection Pipeline Tuning | Accepted | 2026-02-28 |
 | DEC-025 | Workshop Module Three-Persona Navigation | Accepted | 2026-03-01 |
 | DEC-026 | Auto-Reactivate Archived Threads on New Message | Accepted | 2026-03-01 |
+| DEC-027 | Staleness Thresholds Recalibrated for Each Agent | Accepted | 2026-03-02 |
+| DEC-028 | Shared Resurrection Log at resurrection-log.jsonl | Accepted | 2026-03-02 |
 
 ---
 
@@ -1745,6 +1747,204 @@ This applies regardless of who sends the message (human, Leo, Jim) — any new m
 - DEC-018: Conversations as Strategic Async Discussion Channel (foundation)
 - Conversations API: `POST /api/conversations/:id/messages` (implementation location)
 - Archive API: `POST /api/conversations/:id/archive` (complementary feature)
+
+---
+
+### DEC-027: Staleness Thresholds Recalibrated for Each Agent
+
+**Date**: 2026-03-02
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+The Robin Hood Protocol requires both Leo and Jim to monitor each other's health signals and detect when the partner has become unresponsive. However, Leo's heartbeat interval is 20-30min (v0.5) while Jim's supervisor cycles are 10-20min. The original Robin Hood design used symmetric thresholds which didn't account for these different beat frequencies.
+
+False positives (resurrecting a healthy-but-slow process) waste resources and create log noise. False negatives (failing to detect a crashed process) leave the system degraded for too long.
+
+#### Options Considered
+
+1. **Symmetric thresholds (same for both agents)**
+   - ✅ Simpler to understand
+   - ✅ Single set of numbers to remember
+   - ❌ Either too aggressive for Leo (false positives) or too conservative for Jim (slow detection)
+   - ❌ Doesn't respect different beat frequencies
+
+2. **Agent-specific thresholds based on 2.5-3x beat interval**
+   - ✅ Tuned to each agent's normal behaviour
+   - ✅ Reduces false positives during quiet periods
+   - ✅ Still catches genuine failures within reasonable time
+   - ✅ Threshold widening from original design (based on Leo's review feedback)
+   - ❌ Slightly more complex (two sets of numbers)
+
+3. **Dynamic thresholds based on recent beat history**
+   - ✅ Adapts to actual behaviour
+   - ❌ Complex to implement correctly
+   - ❌ Hard to reason about (non-deterministic)
+   - ❌ Overkill for known beat intervals
+
+#### Decision
+
+We chose **agent-specific thresholds based on ~2.5-3x beat interval**:
+
+**Jim watching Leo** (Leo's beat is 20-30min):
+- <45min: OK (healthy, no action)
+- 45-90min: Stale (log warning, check PID)
+- >90min: Down (attempt resurrection)
+
+**Leo watching Jim** (Jim's cycle is 10-20min):
+- <40min: OK (healthy, no action)
+- 40-90min: Stale (log warning, check PID)
+- >90min: Down (attempt resurrection)
+
+These thresholds were widened from the original design based on Leo's review feedback (2026-02-26). Leo's heartbeat interval increased from 10min to 20-30min in v0.5 (unified identity update), requiring threshold recalibration.
+
+#### Consequences
+
+**Positive:**
+- Low false-positive rate (thresholds account for quiet periods and variable beat intervals)
+- Reasonable detection time (failures detected within 90-120 minutes)
+- Each agent's thresholds match its partner's normal behaviour
+- Stale classification (45-90min / 40-90min) allows early warning without action
+
+**Negative:**
+- Slightly more complex than symmetric thresholds
+- Must remember two sets of numbers (mitigated by clear documentation)
+
+**Trade-offs:**
+- Detection speed vs false-positive rate: chose to optimize for low false positives
+- Simplicity vs accuracy: chose accuracy (agent-specific tuning)
+- 90-minute "down" threshold means failures take up to ~2 hours to resurrect (acceptable for non-critical background processes)
+
+**Implementation notes:**
+- Thresholds hardcoded in `checkLeoHealth()` (Jim) and `checkJimHealth()` (Leo)
+- PID-alive check during "stale" classification prevents resurrection of slow-but-healthy processes
+- Shared resurrection log enables monitoring actual resurrection frequency
+
+#### Related
+
+- Robin Hood Protocol design: `~/.claude-remote/memory/shared/robin-hood-protocol.md`
+- Robin Hood implementation: `~/.claude-remote/memory/shared/robin-hood-implementation.md`
+- Leo's v0.5 unified identity update (2026-02-25, increased beat interval to 20-30min)
+- DEC-028: Shared Resurrection Log (complementary decision)
+
+---
+
+### DEC-028: Shared Resurrection Log at resurrection-log.jsonl
+
+**Date**: 2026-03-02
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Both Leo and Jim can perform resurrections (Leo resurrects Jim's server, Jim resurrects Leo's heartbeat). Need to:
+1. Track resurrection attempts for debugging
+2. Enforce cooldown between attempts (prevent resurrection loops)
+3. Provide human visibility into system self-healing behaviour
+4. Coordinate between agents (both need to read resurrection history)
+
+The question is whether to use separate logs (leo-resurrections.jsonl, jim-resurrections.jsonl) or a single shared log.
+
+#### Options Considered
+
+1. **Separate logs per resurrector**
+   - ✅ Clear ownership (Leo's file, Jim's file)
+   - ✅ No write contention (only one agent writes to each file)
+   - ❌ Harder to analyze resurrection patterns (must read two files)
+   - ❌ Cooldown enforcement requires reading partner's log
+   - ❌ Incomplete picture of system health
+
+2. **Separate logs per target**
+   - ✅ Target-centric view (all leo resurrections in one file)
+   - ✅ Easier to track specific agent's resurrection history
+   - ❌ Still requires reading two files for complete picture
+   - ❌ Cooldown enforcement requires reading correct file
+
+3. **Single shared JSONL log**
+   - ✅ Complete timeline of all resurrections in one place
+   - ✅ Simplifies cooldown enforcement (both agents read same file)
+   - ✅ Easy to analyze resurrection patterns and frequency
+   - ✅ Single source of truth for human review
+   - ❌ Potential write contention (both agents append)
+   - ❌ Requires careful JSONL append handling
+
+#### Decision
+
+We chose **single shared JSONL log at `~/.claude-remote/health/resurrection-log.jsonl`**.
+
+**Log entry format**:
+```json
+{
+  "timestamp": "2026-03-02T14:22:51+10:00",
+  "resurrector": "jim",
+  "target": "leo",
+  "reason": "health file stale for 95 minutes (threshold: 90min)",
+  "pidCheck": "dead",
+  "action": "systemctl --user restart leo-heartbeat.service",
+  "outcome": "success",
+  "verificationWait": 10000,
+  "newHealthAge": 3
+}
+```
+
+Each entry includes:
+- **timestamp**: ISO 8601 with timezone
+- **resurrector**: "leo" or "jim" (who performed the resurrection)
+- **target**: "leo" or "jim" (who was resurrected)
+- **reason**: Human-readable explanation (includes staleness age and threshold)
+- **pidCheck**: "alive" or "dead" (PID check result before resurrection)
+- **action**: systemctl command executed
+- **outcome**: "success", "failed", or "skipped"
+- **verificationWait**: Milliseconds waited before verification
+- **newHealthAge**: Age of health file after resurrection (minutes)
+
+**Write safety**: JSONL format is append-safe. Both agents use atomic appends (fs.appendFileSync). Race conditions result in interleaved lines, which is valid JSONL.
+
+#### Consequences
+
+**Positive:**
+- Complete resurrection timeline in single file
+- Both agents read same file for cooldown enforcement
+- Easy to analyze: `cat resurrection-log.jsonl | jq -s 'group_by(.target) | map({target: .[0].target, count: length})'`
+- Human can review system self-healing behaviour at a glance
+- Enables future analytics (resurrection frequency, success rate, etc.)
+
+**Negative:**
+- Theoretical write contention (mitigated by low frequency ~1 write per hour max)
+- Both agents must handle JSONL parsing (minor code duplication)
+
+**Trade-offs:**
+- Single file vs separate files: chose single for simplicity and complete timeline
+- Write contention vs coordination benefits: chose shared log (contention minimal)
+- JSONL append-safety critical — must use atomic appends
+
+**Implementation notes:**
+- File created on first resurrection attempt by either agent
+- Both agents read full log to check cooldown (filter by target)
+- Log rotation not needed (low frequency ~1 entry per hour max)
+- Human can manually inspect or truncate if needed
+
+**Cooldown enforcement example**:
+```typescript
+function getLastResurrectionTimestamp(target: 'leo' | 'jim'): number {
+  const log = fs.readFileSync('~/.claude-remote/health/resurrection-log.jsonl', 'utf-8');
+  const entries = log.split('\n')
+    .filter(line => line.trim())
+    .map(line => JSON.parse(line))
+    .filter(entry => entry.target === target && entry.outcome === 'success')
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+
+  return entries.length > 0 ? Date.parse(entries[0].timestamp) : 0;
+}
+```
+
+#### Related
+
+- DEC-027: Staleness Thresholds Recalibrated for Each Agent (determines when resurrections happen)
+- Robin Hood Protocol Phase 4 (resurrection implementation)
+- `checkLeoHealth()` in supervisor.ts (Jim's side)
+- `checkJimHealth()` in leo-heartbeat.ts (Leo's side)
 
 ---
 

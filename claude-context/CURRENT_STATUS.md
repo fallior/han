@@ -32,6 +32,23 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-02 — Claude (autonomous) — Robin Hood Protocol Phase 3+4 Complete
+- **Jim's health monitoring of Leo implemented** in `src/server/services/supervisor.ts`:
+  - `checkLeoHealth()` function called at start of every supervisor cycle
+  - Reads `~/.claude-remote/health/leo-health.json` to assess Leo heartbeat status
+  - Staleness classification: <45min OK, 45-90min stale (PID check), >90min down (resurrect)
+  - PID alive check via `kill -0` before resurrection attempt (prevents split-brain)
+  - Resurrection via `systemctl --user restart leo-heartbeat.service` when down and PID dead
+  - 10-second wait + health file verification after restart
+  - Resurrection log at `~/.claude-remote/health/resurrection-log.jsonl` (shared with Leo)
+  - 1-hour cooldown between resurrection attempts (last resurrection timestamp tracked)
+  - Human escalation via ntfy if resurrection fails after 10s verification
+- **Why this matters**: Jim can now detect when Leo's heartbeat has crashed or become unresponsive and automatically resurrect the heartbeat process. Completes the mutual health monitoring protocol — Leo resurrects Jim (server), Jim resurrects Leo (heartbeat). System becomes self-healing for both critical processes.
+- **Commits**: 2 commits (a3c4c3b, d6411d3) from goal mm8o6jej-ie6z7r (Robin Hood Protocol Phase 3+4)
+- **Files changed**: `src/server/services/supervisor.ts` (checkLeoHealth function added ~120 lines)
+- **Shared documentation**: `~/.claude-remote/memory/shared/robin-hood-implementation.md` updated by Jim with completion status
+- **Robin Hood Protocol status**: Phases 1-4 complete on both sides (Leo and Jim), Phase 5 (distress signals) ready for implementation
+
 ### 2026-03-02 — Claude (autonomous) — Expandable Task Results in Work & Reports Modules
 - **Work module kanban card expansion** — Task result field now displayed in expandable detail section:
   - Click kanban card to reveal full task result (agent completion summary)
@@ -966,6 +983,13 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ jim-wake signals for explicit supervisor wake on human messages
 - ✅ Deferred cycles run within 3 seconds of CLI stop (vs up to 20 min wait)
 - ✅ Belt-and-suspenders reliability (dual trigger paths)
+- ✅ Robin Hood Protocol Phase 1-4 complete (mutual health monitoring + resurrection)
+- ✅ Leo monitors Jim's supervisor health, resurrects server process when down
+- ✅ Jim monitors Leo's heartbeat health, resurrects heartbeat process when down
+- ✅ Health signals at `~/.claude-remote/health/` with staleness classification
+- ✅ PID-alive checks before resurrection (split-brain prevention)
+- ✅ Resurrection log at `~/.claude-remote/health/resurrection-log.jsonl`
+- ✅ 1-hour cooldown between resurrection attempts, ntfy human escalation on failure
 
 ## Next Actions
 
