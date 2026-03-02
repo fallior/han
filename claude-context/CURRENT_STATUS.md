@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-03-01 (Autonomous) by Claude
+> Last updated: 2026-03-02 (Autonomous) by Claude
 
 ## Current Stage
 
@@ -31,6 +31,19 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-03-02 — Claude (autonomous) — Dependency Ghost-Task Blocker Fixed
+- **Bug fix in orchestrator dependency checks** — Failed tasks now correctly treated as terminal status:
+  - Modified `planning.ts` at lines 1497 and 1883 to include `|| dep.status === 'failed'`
+  - Previously: Only 'done' and 'cancelled' allowed dependents to proceed
+  - Now: 'failed' (retry-exhausted) tasks also unblock their dependents
+  - **Impact**: Eliminates permanent goal pipeline stalls caused by ghost tasks
+- **Why this matters**: Tasks that exhausted all retry attempts (status 'failed') would permanently block their dependents from ever executing, requiring manual supervisor intervention to cancel the ghost task. This was a critical flaw in the orchestrator's dependency resolution — every retry-exhausted task became a bottleneck. With this 2-line fix, the goal pipeline treats failed tasks the same as cancelled tasks: their dependents can proceed, and the orchestrator can continue making progress.
+- **Consistency improvement**: These two locations now match the terminal-status pattern already used elsewhere in the codebase (lines 643, 702 in planning.ts).
+- **Files changed**: `src/server/services/planning.ts` (2 lines modified in dependency checks)
+- **Commits**: 2 commits (881e172, bdb3dbe) from goal mm8tjx46-fdxbs6 (Dependency Ghost-Task Blocker Fix)
+- **Cost**: $0.2188 (Sonnet)
+- **Task**: mm8tl5xt-fjgwet
 
 ### 2026-03-02 — Claude (autonomous) — Robin Hood Protocol Phase 3+4 Complete
 - **Jim's health monitoring of Leo implemented** in `src/server/services/supervisor.ts`:
@@ -1032,6 +1045,11 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [2026-03-02-autonomous-dependency-terminal-status-fix.md](session-notes/2026-03-02-autonomous-dependency-terminal-status-fix.md) — Fixed critical dependency blocker: failed tasks now terminal
+- [2026-03-02-autonomous-robin-hood-phase3-4.md](session-notes/2026-03-02-autonomous-robin-hood-phase3-4.md) — Robin Hood Protocol Phase 3+4: Jim's health monitoring of Leo
+- [2026-03-02-autonomous-expandable-task-results.md](session-notes/2026-03-02-autonomous-expandable-task-results.md) — Expandable task results in Work & Reports modules
+- [2026-03-01-autonomous-workshop-thread-management.md](session-notes/2026-03-01-autonomous-workshop-thread-management.md) — Workshop thread management features
+- [2026-03-01-autonomous-workshop-module.md](session-notes/2026-03-01-autonomous-workshop-module.md) — Workshop module complete with three-persona navigation
 - [2026-02-28-autonomous-deferred-cycle-pattern.md](session-notes/2026-02-28-autonomous-deferred-cycle-pattern.md) — Deferred cycle pattern complete (Gary Model fs.watch implementation)
 - [2026-02-27-autonomous-leo-heartbeat-bugfix.md](session-notes/2026-02-27-autonomous-leo-heartbeat-bugfix.md) — Fixed two critical bugs preventing Leo heartbeat from executing
 - [2026-02-22-autonomous-conversation-search-complete.md](session-notes/2026-02-22-autonomous-conversation-search-complete.md) — Level 13: Conversation catalogue & search system complete
