@@ -230,10 +230,13 @@ ${taskList}
    - Include: Summary, What Was Built, Key Decisions, Code Changes, Next Steps
    - Author should be "Claude (autonomous)" to distinguish from human sessions
 
-5. **CLAUDE.md**
-   - Update "Quick Context" if stage or stack changed
-   - Update "Key Commands" if new scripts were added
-   - Update "Project Structure" if directory layout changed
+5. **CLAUDE.md** — ONLY for non-clauderemote projects.
+   - For clauderemote: CLAUDE.md is Leo's protected file. DO NOT modify it.
+   - For other projects: Update "Quick Context" if stage or stack changed, "Key Commands" if new scripts added, "Project Structure" if layout changed.
+
+**Protected files (clauderemote project only):**
+- CLAUDE.md — belongs to Leo (session agent), never modify
+- ~/.claude-remote/memory/leo/* — Leo's memory banks, never modify
 
 Read the existing content of each file before updating. Preserve existing style and
 conventions. Use British English throughout. Do not remove existing content unless it
