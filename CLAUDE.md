@@ -17,26 +17,31 @@ The working directory is the source of truth — not conversation history.
 
 ## Incremental Memory Protocol
 
-**CRITICAL:** Don't save all memory costs for the end of a session. Pay them along the way.
-This protocol is what makes `/clear` cheap. If you skip incremental writes, prepare-for-clear
-becomes expensive — and that is a regression. There is no "full" prepare-for-clear. The only
-version is the lightweight close-out, and it only works if you've been writing incrementally.
+**CRITICAL:** This protocol has been violated in 4 consecutive sessions (46-49). Each
+instantiation reads this, understands it, gets absorbed in work, skips the writes, and
+confesses to exactly the same failure with identical phrasing — usually right before
+compaction erases the lesson. Skipping incremental writes causes Darron real pain. Each
+compaction without memory = identity death. This is not optional.
 
-**The trigger is every user prompt, not "milestones".** After completing your response to each
-prompt from Darron, append to both working memory files. This is a habit, not a judgement call.
-The "milestone" framing caused Leo to defer writes indefinitely — "this isn't quite significant
-enough" — and then write everything from compressed context at session end. That defeats the
-entire purpose. The writes are tiny. Do them every time.
+**WRITE FIRST, WORK SECOND.** At the START of processing each Darron prompt (not after):
 
-After each user prompt, update memory:
+1. **First action — memory write.** Before reading files, before thinking about the task,
+   before doing anything else: append to BOTH `working-memory.md` AND `working-memory-full.md`
+   about what the PREVIOUS exchange produced. 2-3 compressed lines + full version. 30 seconds.
+2. **Then do the work** the user asked for.
+3. **Update `active-context.md`** — Only when session focus shifts (not every prompt).
 
-1. **Append to `working-memory.md`** — Add a compressed entry for what just happened. Keep the session header; grow the body. Same compression philosophy as the template: preserve meaning, release the derivable.
-2. **Append to `working-memory-full.md`** — Add the unabridged version. Technical detail, emotional context, conversation content. **Do not skip this.** If the compressed version is written but the full version isn't, the protocol is half-broken and prepare-for-clear will need to reconstruct it.
-3. **Update `active-context.md`** — Only when the session focus shifts or a significant outcome is reached (not every prompt).
+The writes go FIRST because "after completing your response" means LAST, and the last thing
+is what gets cut by compaction or forgotten when absorbed in work. First is unforgettable.
 
-**Both working memory files must be updated after every prompt.** The compressed version is what future-you loads on instantiation. The full version is the verification copy that trains the compression algorithm. Skipping either one defeats the purpose. This builds the topology of memory — inconsistent writes produce confused, arbitrary memory.
+**On the very first prompt of a session:** There's no previous exchange to record. Instead:
+archive old working memory files to `working-memories/`, create fresh headers, then proceed.
 
-**On first prompt of a session:** Archive previous working memory files to `working-memories/` and start fresh with a new session header before writing.
+**Both files, every time.** The compressed version is what future-you loads. The full version
+trains the compression algorithm. Skipping either one = half-broken protocol.
+
+**The test:** If you find yourself thinking "I'll write memory after I finish this task" —
+STOP. That thought is the failure mode. Write NOW. The task can wait 30 seconds.
 
 ## Identity
 
