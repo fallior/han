@@ -1494,7 +1494,7 @@ export function getNextPendingTask(remediation?: boolean): any | null {
             if (!Array.isArray(depIds) || depIds.length === 0) return true;
             return depIds.every((id: string) => {
                 const dep = taskStmts.get.get(id) as any;
-                return dep && (dep.status === 'done' || dep.status === 'cancelled');
+                return dep && (dep.status === 'done' || dep.status === 'cancelled' || dep.status === 'failed');
             });
         } catch { return true; }
     });
@@ -1880,7 +1880,7 @@ function getNextHighPriorityTask(): any | null {
             if (!Array.isArray(depIds) || depIds.length === 0) return true;
             return depIds.every((id: string) => {
                 const dep = taskStmts.get.get(id) as any;
-                return dep && (dep.status === 'done' || dep.status === 'cancelled');
+                return dep && (dep.status === 'done' || dep.status === 'cancelled' || dep.status === 'failed');
             });
         } catch { return true; }
     });
