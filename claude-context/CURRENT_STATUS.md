@@ -32,6 +32,53 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-02 — Claude (autonomous) — Expandable Task Results in Work & Reports Modules
+- **Work module kanban card expansion** — Task result field now displayed in expandable detail section:
+  - Click kanban card to reveal full task result (agent completion summary)
+  - Result section has dedicated styling: strong "Result" label, markdown-formatted content
+  - Styled with border separator from task metadata, proper spacing and contrast
+  - Works for any task with `result` field populated by agent completion
+- **Reports module expandable items** — Digest and weekly report items now expand to show per-task breakdowns:
+  - **Digest report expansion**: Click digest item → reveals full task breakdown with result text
+  - **Weekly report expansion**: Click report item → reveals task-by-task breakdown showing what was done, results
+  - **Problem-solved display**: Each task result shows agent's analysis of work completed
+  - **Markdown formatting**: Result text rendered with proper headers, code blocks, bold/italic, lists
+- **Acceptance criteria met**:
+  - ✅ Tasks expandable to show detailed result field
+  - ✅ Markdown formatting applied to result content
+  - ✅ Work module displays task results (agent completion summary)
+  - ✅ Reports module shows per-task breakdowns with results
+  - ✅ Click-to-expand pattern consistent across modules
+  - ✅ Existing layout preserved — expansion adds depth without redesign
+  - ✅ Both desktop (admin console) and mobile-compatible
+- **Implementation details**:
+  - **Files changed**:
+    - `src/ui/admin.ts` (logic):
+      - Work module: Added task result display to kanban card content (line ~667)
+      - Reports module: Digest and weekly report items include `report.per_task_details` array (lines ~1457, 1526, 1652)
+      - Result rendering via `renderMarkdown()` utility function
+    - `src/ui/admin.html` (CSS):
+      - `.task-card-expanded` — expanded card styling with result section
+      - `.task-card-result` — result content container with proper spacing
+      - `.report-item-expanded` — expandable report items with background/border treatment
+      - `.report-content` — markdown result content styling
+    - `src/ui/admin.js` (compiled output) — TypeScript compiled to JavaScript
+  - **Database**: No schema changes — task result already exists in task object
+  - **API**: Digest and weekly report generation enhanced to preserve per-task details via `per_task_details` array
+  - **Cache version**: Bumped in admin.html to force client refresh
+- **Why this matters**: Provides visibility into what autonomous agents accomplished without clicking through to full task logs. Teams can quickly scan reports to understand outcomes, problems solved, and work completed across phases. Satisfies goal requirement to show task results in Work module and per-task breakdowns in Reports without disrupting existing clean layout.
+- **Files changed**: `src/ui/admin.ts` (expansion logic), `src/ui/admin.html` (CSS styling), `src/ui/admin.js` (compiled), `src/server/services/digest.ts` (per-task details preservation), `src/server/services/reporting.ts` (weekly report per-task details)
+- **Commits**: 5 commits (f6725d0, a1364c1, 68b2d32, d239b13, 324e0d7) from goal mm7td039-vt9qhr (Expand Work & Reports modules for task visibility)
+- **Known limitations**:
+  - Expansion limited to a single task at a time (not accordion-style multi-expand) — keeps UI simple
+  - Result field must be populated by agent — older completed tasks may lack results (graceful fallback: "*No result captured*")
+  - Large result text (>5000 chars) displayed in full (no truncation) — may cause scroll on mobile
+- **Testing done**:
+  - Work module: Created test tasks, verified kanban cards expand/collapse
+  - Digest: Generated test digest, verified per-task details show on expansion
+  - Weekly report: Generated test report, verified task breakdown display
+  - Markdown rendering: Headers, code blocks, bold/italic all render correctly
+
 ### 2026-03-01 — Claude (autonomous) — Workshop Thread Management Features Complete
 - **Thread title editing and archive features implemented** (4 commits: b5f167b, bb78234, a73d234, 14f4ecf):
   - **Database migration**: Added `archived_at TEXT` column to conversations table
@@ -884,6 +931,9 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Workshop module: Three-persona navigation (Jim purple, Leo green, Darron blue) with six nested discussion types, conversation threading, search, real-time updates, mobile-responsive
 - ✅ Workshop thread management: Inline title editing, archive/unarchive with auto-reactivation on new message, View All toggle, archived thread styling
 - ✅ Supervisor responds to pending conversation threads automatically
+- ✅ Expandable task results in Work module (click kanban card to reveal agent completion summary)
+- ✅ Expandable per-task breakdowns in Reports module (digest and weekly reports show detailed results on expansion)
+- ✅ Markdown formatting for expanded result content (headers, code, bold/italic, lists)
 - ✅ TypeScript build system for admin console (admin.ts → admin.js)
 - ✅ Ghost task detection and auto-recovery (5-minute periodic check)
 - ✅ Ghost tasks auto-reset to 'pending' with retry_count incremented
