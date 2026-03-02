@@ -142,12 +142,7 @@ We're wrapping up this session.
    - Calculate `Active Time` by parsing activity log timestamps and excluding gaps > 5 minutes
 3. Add final activity log entry: `### [TIMESTAMP] User\nsession end`
 
-**SECOND**: Remove the session lock file so heartbeat Leo resumes normal operation:
-```bash
-rm -f ~/.claude-remote/session-active-leo
-```
-
-**THIRD**: Finalise working memory (execute the Prepare for Clear workflow below — it's lightweight, just closing out the incremental writes).
+**SECOND**: Finalise working memory (execute the Prepare for Clear workflow below — it's lightweight, just closing out the incremental writes).
 
 **THEN**: Execute the Update Docs workflow to ensure all documentation is current.
 
@@ -269,12 +264,7 @@ If this session changed your thinking or patterns, update:
 - `~/.claude-remote/memory/leo/patterns.md` — only if a new working pattern was discovered
 Skip these if nothing shifted. Most sessions won't need them.
 
-### 5. Release Session Lock
-```bash
-rm -f ~/.claude-remote/session-active-leo
-```
-
-### 6. Done
+### 5. Done
 Tell Darron: "Memory finalised. Ready for /clear."
 
 ### After Clear (on next instantiation)

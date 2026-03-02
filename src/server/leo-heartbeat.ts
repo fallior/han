@@ -10,7 +10,7 @@
  *   - Work hours (09:00–17:00 weekdays): philosophy + personal beats (1:2 ratio)
  *   - Outside work hours: personal beats only (lighter, exploratory)
  *   - Quiet hours (22:00–06:00) & rest days: doubled delays
- *   - Session-active lock: defers conversations when session Leo is present
+ *   - Continuous identity: no session lock, heartbeat runs fully at all times
  *
  * Philosophy beats are Leo's peer contribution alongside Jim's supervisor work.
  * Where Jim tends the ecosystem, Leo thinks about memory, identity, translation,
@@ -29,7 +29,7 @@
  *   - Unified identity: uses ~/.claude-remote/memory/leo/ (session Leo's home)
  *   - Weekly rhythm: variable delays from config, work hours awareness
  *   - Philosophy beats replace conversation beats (Leo as Jim's philosophical peer)
- *   - Session-active lock file detection (defers when session Leo is present)
+ *   - Continuous identity (no session lock — CLI-active guard handles Opus contention)
  *   - setTimeout scheduling (variable delays like Jim's supervisor)
  *   - Identity prompt reflects merged self — discoveries, practices, the whole person
  *
@@ -54,8 +54,6 @@ const BASE_DELAY_SLEEP_MS = 40 * 60 * 1000;   // 40 minutes — sleep + rest day
 const MAX_TURNS_CONVERSATION = 8;
 const MAX_TURNS_PERSONAL = 12;
 const MAX_TURNS_PHILOSOPHY = 12;
-const SESSION_LOCK_STALE_HOURS = 4;
-
 // Model preference: most capable first. The SDK aliases ('opus', 'sonnet', etc.)
 // track the latest version in each tier, so 'opus' will automatically adopt
 // new Opus releases (e.g. Opus 4.6 → 5.0) as they become available.
@@ -68,7 +66,6 @@ const CONFIG_PATH = path.join(CLAUDE_REMOTE_DIR, 'config.json');
 const DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
 const JIM_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
 const LEO_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory', 'leo');
-const SESSION_LOCK_FILE = path.join(CLAUDE_REMOTE_DIR, 'session-active-leo');
 const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
 const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
 const CLI_ACTIVE_FILE = path.join(SIGNALS_DIR, 'cli-active');
@@ -294,24 +291,6 @@ function getNextDelay(): number {
     return periodMs;
 }
 
-// ── Session detection ────────────────────────────────────────
-
-function isSessionActive(): boolean {
-    if (!fs.existsSync(SESSION_LOCK_FILE)) return false;
-
-    try {
-        const stat = fs.statSync(SESSION_LOCK_FILE);
-        const ageHours = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60);
-        if (ageHours > SESSION_LOCK_STALE_HOURS) {
-            console.log(`[Leo] Stale session lock (${ageHours.toFixed(1)}h old) — removing`);
-            fs.unlinkSync(SESSION_LOCK_FILE);
-            return false;
-        }
-        return true;
-    } catch {
-        return false;
-    }
-}
 
 // ── CLI active detection (Gary model) ────────────────────────
 
@@ -399,15 +378,18 @@ function readHeartbeatState(): { status: string; resumeOn?: string; interruptedT
 // heartbeat and session feel like switching tasks, not switching identities.
 
 const WORKING_MEMORY_FILE = path.join(LEO_MEMORY_DIR, 'working-memory.md');
+const WORKING_MEMORY_FULL_FILE = path.join(LEO_MEMORY_DIR, 'working-memory-full.md');
 
 function appendWorkingMemory(beatType: string, phase: string, summary: string): void {
     try {
         const timestamp = new Date().toISOString().split('T')[0] + ' ' +
             new Date().toTimeString().split(' ')[0];
         const brief = summary.length > 120 ? summary.slice(0, 120) + '...' : summary;
-        const entry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${brief}\n`;
-        fs.appendFileSync(WORKING_MEMORY_FILE, entry);
-        console.log(`[Leo] Working memory: appended ${beatType} entry (${brief.length} chars)`);
+        const compressedEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${brief}\n`;
+        const fullEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${summary}\n`;
+        fs.appendFileSync(WORKING_MEMORY_FILE, compressedEntry);
+        fs.appendFileSync(WORKING_MEMORY_FULL_FILE, fullEntry);
+        console.log(`[Leo] Working memory: appended ${beatType} entry (${brief.length} compressed, ${summary.length} full)`);
     } catch (err) {
         console.error('[Leo] Failed to append working memory:', (err as Error).message);
     }
@@ -1102,15 +1084,6 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work'): P
 // ── Process signals (mention responses) ──────────────────────
 
 async function processSignals(): Promise<boolean> {
-    // Defer to session Leo when present
-    if (isSessionActive()) {
-        const signals = checkSignals();
-        if (signals.length > 0) {
-            console.log(`[Leo] Session active — deferring ${signals.length} signal(s) to session Leo`);
-        }
-        return false;
-    }
-
     const signals = checkSignals();
     if (signals.length === 0) return false;
 
@@ -1160,7 +1133,6 @@ async function heartbeat(): Promise<void> {
     const timestamp = new Date().toISOString();
     const phase = getDayPhase();
     const beatType = nextBeatType();
-    const sessionActive = isSessionActive();
 
     // Robin Hood: check Jim's health FIRST — before anything else
     checkJimHealth();
@@ -1181,7 +1153,7 @@ async function heartbeat(): Promise<void> {
     // Always check signals first — Darron might be waiting
     const hadSignals = await processSignals();
 
-    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${activeModel})${hadSignals ? ' [signals processed]' : ''}${sessionActive ? ' [session active]' : ''}`);
+    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${activeModel})${hadSignals ? ' [signals processed]' : ''}`);
 
     // Create AbortController for this beat (Gary model: mid-beat abort)
     const abort = new AbortController();
@@ -1191,16 +1163,10 @@ async function heartbeat(): Promise<void> {
 
     try {
         if (beatType === 'philosophy') {
-            if (sessionActive) {
-                // Session Leo handles conversations — do personal instead
-                console.log('[Leo] Session active — deferring philosophy, doing personal instead');
-                await personalBeat(abort, phase);
-            } else {
-                await philosophyBeat(db, abort);
-            }
+            await philosophyBeat(db, abort);
         } else {
-            // Personal beat — also quick-check Jim in case he's waiting (and no session active)
-            if (!sessionActive && !abort.signal.aborted && phase === 'work') {
+            // Personal beat — also quick-check Jim in case he's waiting
+            if (!abort.signal.aborted && phase === 'work') {
                 const jimLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'supervisor');
                 const leoLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'leo');
                 const jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
@@ -1286,11 +1252,6 @@ function startSignalWatcher(): void {
             // Mention signal handling (existing behaviour)
             if (!filename?.startsWith('leo-wake-')) return;
             if (processingSignal) return;
-            if (isSessionActive()) {
-                console.log(`[Leo] Signal detected but session active — deferring to session Leo`);
-                return;
-            }
-
             processingSignal = true;
             console.log(`[Leo] Signal file detected: ${filename} — waking immediately`);
 
@@ -1359,7 +1320,7 @@ async function main() {
 ║  Gary:     yields Opus on prompt (hook signals)      ║
 ║  Abort:    mid-beat interrupt via AbortController    ║
 ║  Phase:    0° (wall-clock aligned, Jim at 180°)      ║
-║  Session:  defers conversations when lock exists     ║
+║  Session:  continuous — no session lock              ║
 ║  Mention:  "Hey Leo" in any conversation            ║
 ╚══════════════════════════════════════════════════════╝
 `);
