@@ -26,6 +26,23 @@ let workshopShowArchived: boolean = false;
 let digestTasksExpanded: Record<string, boolean> = {};
 let reportTasksExpanded: Record<string, boolean> = {};
 
+// ── Unread tracking ─────────────────────────────────────────
+
+function markThreadRead(conversationId: string): void {
+    localStorage.setItem(`lastRead:${conversationId}`, new Date().toISOString());
+}
+
+function hasUnread(conversationId: string, updatedAt: string): boolean {
+    const lastRead = localStorage.getItem(`lastRead:${conversationId}`);
+    if (!lastRead) return true; // Never opened = unread
+    return new Date(updatedAt) > new Date(lastRead);
+}
+
+function unreadDot(conversationId: string, updatedAt: string): string {
+    if (!hasUnread(conversationId, updatedAt)) return '';
+    return '<span class="unread-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:6px;flex-shrink:0"></span>';
+}
+
 // ── Utilities ────────────────────────────────────────────────
 
 function escapeHtml(s: string): string {
@@ -2028,7 +2045,7 @@ async function loadConversations(content: HTMLElement): Promise<void> {
                 }
 
                 html += `<div class="thread-item ${isSelected ? 'active' : ''}" data-thread-id="${conv.id}" onclick="selectConversationThread('${conv.id}')">
-                    <div class="thread-item-title">${escapeHtml(conv.title)}</div>
+                    <div class="thread-item-title" style="display:flex;align-items:center">${unreadDot(conv.id, conv.updated_at)}${escapeHtml(conv.title)}</div>
                     <div class="thread-item-meta">
                         <span style="font-size:11px;color:var(--text-muted)">${timeSince(conv.updated_at)}</span>
                         <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
@@ -2156,6 +2173,7 @@ async function renderConversationThread(conversationId: string): Promise<void> {
 
 (window as any).selectConversationThread = async function(conversationId: string) {
     selectedConversationId = conversationId;
+    markThreadRead(conversationId);
     await renderConversationThread(conversationId);
 
     // Update active state
@@ -2466,7 +2484,7 @@ async function loadMemoryDiscussions(content: HTMLElement): Promise<void> {
                 }
 
                 html += `<div class="thread-item ${isSelected ? 'active' : ''}" data-thread-id="${conv.id}" onclick="selectMemoryThread('${conv.id}')">
-                    <div class="thread-item-title">${escapeHtml(conv.title)}</div>
+                    <div class="thread-item-title" style="display:flex;align-items:center">${unreadDot(conv.id, conv.updated_at)}${escapeHtml(conv.title)}</div>
                     <div class="thread-item-meta">
                         <span style="font-size:11px;color:var(--text-muted)">${timeSince(conv.updated_at)}</span>
                         <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
@@ -2572,6 +2590,7 @@ async function renderMemoryThread(discussionId: string): Promise<void> {
 
 (window as any).selectMemoryThread = async function(discussionId: string) {
     selectedMemoryDiscussionId = discussionId;
+    markThreadRead(discussionId);
     await renderMemoryThread(discussionId);
 
     document.querySelectorAll('.md-conversation-layout .thread-item').forEach(el => {
@@ -2920,7 +2939,7 @@ async function loadWorkshop(content: HTMLElement): Promise<void> {
                 const archivedBadge = isArchived ? '<span class="badge" style="font-size:9px;padding:1px 5px;opacity:0.7">Archived</span>' : '';
 
                 html += `<div class="thread-item ${isSelected ? 'active' : ''}" data-thread-id="${conv.id}" onclick="selectWorkshopThread('${conv.id}')" style="opacity:${threadOpacity}">
-                    <div class="thread-item-title">${escapeHtml(conv.title)}</div>
+                    <div class="thread-item-title" style="display:flex;align-items:center">${unreadDot(conv.id, conv.updated_at)}${escapeHtml(conv.title)}</div>
                     <div class="thread-item-meta">
                         <span style="font-size:11px;color:var(--text-muted)">${timeSince(conv.updated_at)}</span>
                         <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
@@ -2991,6 +3010,7 @@ async function loadWorkshop(content: HTMLElement): Promise<void> {
 
 (window as any).selectWorkshopThread = async function(threadId: string) {
     workshopSelectedThread[workshopNestedTab] = threadId;
+    markThreadRead(threadId);
     await renderWorkshopThread(threadId);
 
     document.querySelectorAll('.workshop-conversation-layout .thread-item').forEach(el => {

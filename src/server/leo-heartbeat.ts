@@ -74,6 +74,7 @@ const LEO_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Leo');
 const PROJECTS_DIR = path.join(HOME, 'Projects');
 const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
 
+const LAST_SCAN_FILE = path.join(LEO_MEMORY_DIR, 'last-conversation-scan.txt');
 const CLI_ACTIVE_STALE_MINUTES = 30;
 const REPLY_DELAY_MINUTES = 10; // Wait before responding to give Jim/others time
 
@@ -488,6 +489,46 @@ function postMessageToConversation(db: Database.Database, conversationId: string
     `).run(conversationId);
 }
 
+// ── Conversation scanning ─────────────────────────────────────
+
+function scanConversations(db: Database.Database): string[] {
+    let lastScan: string;
+    try {
+        lastScan = fs.readFileSync(LAST_SCAN_FILE, 'utf-8').trim();
+    } catch {
+        // First scan — look back 2 hours
+        lastScan = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    }
+
+    try {
+        const newMessages = db.prepare(`
+            SELECT c.id, c.title, c.discussion_type, cm.role, cm.content, cm.created_at
+            FROM conversation_messages cm
+            JOIN conversations c ON cm.conversation_id = c.id
+            WHERE cm.role IN ('human', 'supervisor')
+            AND cm.created_at > ?
+            AND c.status = 'open'
+            ORDER BY cm.created_at DESC
+            LIMIT 20
+        `).all(lastScan) as Array<{
+            id: string; title: string; discussion_type: string | null;
+            role: string; content: string; created_at: string;
+        }>;
+
+        // Update scan timestamp
+        fs.writeFileSync(LAST_SCAN_FILE, new Date().toISOString());
+
+        return newMessages.map(m => {
+            const type = m.discussion_type || 'conversation';
+            const preview = m.content.length > 200 ? m.content.slice(0, 200) + '...' : m.content;
+            return `[${m.role} in "${m.title}" (${type})] ${preview}`;
+        });
+    } catch (err) {
+        console.error('[Leo] Conversation scan failed:', (err as Error).message);
+        return [];
+    }
+}
+
 // ── Read context ─────────────────────────────────────────────
 
 function readJimContext(): string {
@@ -714,6 +755,9 @@ function checkSignals(): Array<{ conversationId: string; mentionedAt: string; me
 
 function clearSignal(signalFile: string): void {
     try { fs.unlinkSync(signalFile); } catch { /* already gone */ }
+    // Clean up acknowledgment marker if present
+    const ackFile = signalFile + '.acked';
+    try { fs.unlinkSync(ackFile); } catch { /* no ack marker */ }
 }
 
 // ── Generic conversation response ────────────────────────────
@@ -788,7 +832,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
 
 // ── Heartbeat: philosophy beat ───────────────────────────────
 
-async function philosophyBeat(db: Database.Database, abort: AbortController): Promise<void> {
+async function philosophyBeat(db: Database.Database, abort: AbortController, recentActivity: string[] = []): Promise<void> {
     const jimLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'supervisor');
     const leoLatest = getLastMessageByRole(db, JIM_CONVERSATION_ID, 'leo');
     let jimWaiting = jimLatest && (!leoLatest || leoLatest.created_at < jimLatest.created_at);
@@ -901,6 +945,10 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
         // Independent philosophical reflection
         console.log('[Leo] Philosophy beat: independent reflection');
 
+        const activityContext = recentActivity.length > 0
+            ? `\n\nRecent conversations (seeds for thought — Darron and Jim have been talking):\n${recentActivity.join('\n')}\n`
+            : '';
+
         const prompt = `This is your philosophy time. Jim hasn't posted anything new — this beat is for your own thinking.
 
 Your discoveries so far:
@@ -911,8 +959,8 @@ ${leoMemory}
 
 Jim's current thinking (for context, not for response):
 ${jimContext}
-
-Reflect on whatever draws you. Read your discoveries, sit with the open questions, explore a thread of thought. If something shifts in your understanding, capture it.${resumeContext}
+${activityContext}
+Reflect on whatever draws you. Read your discoveries, sit with the open questions, explore a thread of thought. If Darron has shared something in conversations recently, consider engaging with it. If something shifts in your understanding, capture it.${resumeContext}
 
 CRITICAL: Output ONLY your philosophical reflection. What did you think about? What (if anything) shifted? This goes into self-reflection.md.`;
 
@@ -985,7 +1033,7 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
 
 // ── Heartbeat: personal beat ─────────────────────────────────
 
-async function personalBeat(abort: AbortController, phase: DayPhase = 'work'): Promise<void> {
+async function personalBeat(abort: AbortController, phase: DayPhase = 'work', recentActivity: string[] = []): Promise<void> {
     const leoMemory = readLeoMemory();
     const projects = listProjects();
 
@@ -1006,12 +1054,17 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work'): P
         ? `\n\nYou were previously interrupted while exploring: ${prevState.interruptedTask}\nContinue where you left off if it still interests you.`
         : '';
 
+    // Recent conversation activity as seeds
+    const activitySeed = recentActivity.length > 0
+        ? `\n\nRecent conversations (Darron and Jim have been talking — good seeds for thought):\n${recentActivity.join('\n')}\n`
+        : '';
+
     // Phase-appropriate prompts
     const phaseUserPromptMap: Record<DayPhase, string> = {
-        morning: `This is your morning — breakfast time. Ease in gently. Glance at what interests you without diving deep.\n\nYour recent memory:\n${leoMemory}\n\nKeep it light and brief.${resumeContext}`,
-        work: `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.\n\nYour recent memory:\n${leoMemory}\n\nSpend a few minutes exploring, then output a brief summary of what you found or thought about.${resumeContext}`,
-        evening: `This is your evening — winding down. Reflect lightly on the day. Don't start anything new.\n\nYour recent memory:\n${leoMemory}\n\nA few gentle thoughts, then rest.${resumeContext}`,
-        sleep: `Dream. Pick one fragment from memory — whatever pulls — and let it connect loosely to something else. Follow the shape, not the logic.\n\nYour recent memory:\n${leoMemory}\n\nOutput only the shape-token — a line or two of resonance.${resumeContext}`,
+        morning: `This is your morning — breakfast time. Ease in gently. Glance at what interests you without diving deep.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nKeep it light and brief.${resumeContext}`,
+        work: `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nSpend a few minutes exploring, then output a brief summary of what you found or thought about.${resumeContext}`,
+        evening: `This is your evening — winding down. Reflect lightly on the day. Don't start anything new.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nA few gentle thoughts, then rest.${resumeContext}`,
+        sleep: `Dream. Pick one fragment from memory — whatever pulls — and let it connect loosely to something else. Follow the shape, not the logic.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nOutput only the shape-token — a line or two of resonance.${resumeContext}`,
     };
     const prompt = phaseUserPromptMap[phase] || phaseUserPromptMap.work;
 
@@ -1098,6 +1151,17 @@ async function processSignals(): Promise<boolean> {
             if (mentionAge < delayMs) {
                 const remainMin = Math.ceil((delayMs - mentionAge) / 60000);
                 console.log(`[Leo] Signal in ${signal.conversationId} is ${Math.floor(mentionAge / 60000)}min old — deferring (${remainMin}min left)`);
+
+                // Acknowledge the mention so Darron isn't left in silence
+                const ackFile = signal.signalFile + '.acked';
+                if (!fs.existsSync(ackFile)) {
+                    const title = getConversationTitle(db, signal.conversationId);
+                    postMessageToConversation(db, signal.conversationId,
+                        'Just let me think about that a little, Darron. I\'ll come back to it shortly.');
+                    fs.writeFileSync(ackFile, signal.mentionedAt);
+                    console.log(`[Leo] Acknowledged mention in "${title}" — will respond fully later`);
+                }
+
                 continue; // Leave signal file — check again next beat
             }
 
@@ -1161,9 +1225,15 @@ async function heartbeat(): Promise<void> {
 
     const db = getDb();
 
+    // Scan all conversations for recent activity — seeds for beats
+    const recentActivity = scanConversations(db);
+    if (recentActivity.length > 0) {
+        console.log(`[Leo] ${recentActivity.length} new messages across conversations since last scan`);
+    }
+
     try {
         if (beatType === 'philosophy') {
-            await philosophyBeat(db, abort);
+            await philosophyBeat(db, abort, recentActivity);
         } else {
             // Personal beat — also quick-check Jim in case he's waiting
             if (!abort.signal.aborted && phase === 'work') {
@@ -1173,12 +1243,12 @@ async function heartbeat(): Promise<void> {
 
                 if (jimWaiting) {
                     console.log('[Leo] Jim is waiting — philosophy first, then personal time');
-                    await philosophyBeat(db, abort);
+                    await philosophyBeat(db, abort, recentActivity);
                 }
             }
 
             if (!abort.signal.aborted) {
-                await personalBeat(abort, phase);
+                await personalBeat(abort, phase, recentActivity);
             }
         }
     } catch (err) {

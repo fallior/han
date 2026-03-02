@@ -16,6 +16,18 @@
   let workshopSelectedThread = {};
   let workshopPeriod = "all";
   let workshopShowArchived = false;
+  function markThreadRead(conversationId) {
+    localStorage.setItem(`lastRead:${conversationId}`, (/* @__PURE__ */ new Date()).toISOString());
+  }
+  function hasUnread(conversationId, updatedAt) {
+    const lastRead = localStorage.getItem(`lastRead:${conversationId}`);
+    if (!lastRead) return true;
+    return new Date(updatedAt) > new Date(lastRead);
+  }
+  function unreadDot(conversationId, updatedAt) {
+    if (!hasUnread(conversationId, updatedAt)) return "";
+    return '<span class="unread-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:6px;flex-shrink:0"></span>';
+  }
   function escapeHtml(s) {
     const div = document.createElement("div");
     div.textContent = s;
@@ -1694,7 +1706,7 @@
             }
           }
           html += `<div class="thread-item ${isSelected ? "active" : ""}" data-thread-id="${conv.id}" onclick="selectConversationThread('${conv.id}')">
-                    <div class="thread-item-title">${escapeHtml(conv.title)}</div>
+                    <div class="thread-item-title" style="display:flex;align-items:center">${unreadDot(conv.id, conv.updated_at)}${escapeHtml(conv.title)}</div>
                     <div class="thread-item-meta">
                         <span style="font-size:11px;color:var(--text-muted)">${timeSince(conv.updated_at)}</span>
                         <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
@@ -1793,6 +1805,7 @@
   }
   window.selectConversationThread = async function(conversationId) {
     selectedConversationId = conversationId;
+    markThreadRead(conversationId);
     await renderConversationThread(conversationId);
     document.querySelectorAll(".thread-item").forEach((el) => {
       el.classList.toggle("active", el.getAttribute("data-thread-id") === conversationId);
@@ -2052,7 +2065,7 @@
             }
           }
           html += `<div class="thread-item ${isSelected ? "active" : ""}" data-thread-id="${conv.id}" onclick="selectMemoryThread('${conv.id}')">
-                    <div class="thread-item-title">${escapeHtml(conv.title)}</div>
+                    <div class="thread-item-title" style="display:flex;align-items:center">${unreadDot(conv.id, conv.updated_at)}${escapeHtml(conv.title)}</div>
                     <div class="thread-item-meta">
                         <span style="font-size:11px;color:var(--text-muted)">${timeSince(conv.updated_at)}</span>
                         <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
@@ -2138,6 +2151,7 @@
   }
   window.selectMemoryThread = async function(discussionId) {
     selectedMemoryDiscussionId = discussionId;
+    markThreadRead(discussionId);
     await renderMemoryThread(discussionId);
     document.querySelectorAll(".md-conversation-layout .thread-item").forEach((el) => {
       el.classList.toggle("active", el.getAttribute("data-thread-id") === discussionId);
@@ -2435,7 +2449,7 @@
           const threadOpacity = isArchived ? "0.55" : "1";
           const archivedBadge = isArchived ? '<span class="badge" style="font-size:9px;padding:1px 5px;opacity:0.7">Archived</span>' : "";
           html += `<div class="thread-item ${isSelected ? "active" : ""}" data-thread-id="${conv.id}" onclick="selectWorkshopThread('${conv.id}')" style="opacity:${threadOpacity}">
-                    <div class="thread-item-title">${escapeHtml(conv.title)}</div>
+                    <div class="thread-item-title" style="display:flex;align-items:center">${unreadDot(conv.id, conv.updated_at)}${escapeHtml(conv.title)}</div>
                     <div class="thread-item-meta">
                         <span style="font-size:11px;color:var(--text-muted)">${timeSince(conv.updated_at)}</span>
                         <span class="badge ${statusBadgeClass}" style="font-size:9px;padding:1px 5px">${statusText}</span>
@@ -2494,6 +2508,7 @@
   };
   window.selectWorkshopThread = async function(threadId) {
     workshopSelectedThread[workshopNestedTab] = threadId;
+    markThreadRead(threadId);
     await renderWorkshopThread(threadId);
     document.querySelectorAll(".workshop-conversation-layout .thread-item").forEach((el) => {
       el.classList.toggle("active", el.getAttribute("data-thread-id") === threadId);
