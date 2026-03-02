@@ -202,7 +202,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - **Philosophy beats**: Leo as Jim's philosophical peer — reflects on memory, identity, translation, autonomy
   - If Jim has posted: responds thoughtfully as a peer
   - If Jim hasn't posted: independent philosophical reflection, writes to self-reflection.md
-- **Session-active lock**: `~/.claude-remote/session-active` prevents dual-voice problem
+- **Session-active lock**: `~/.claude-remote/session-active-leo` prevents dual-voice problem
   - Created at session start, removed at session end
   - Heartbeat defers conversations and signals when session active
   - Stale after 4 hours to handle crashed sessions

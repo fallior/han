@@ -82,7 +82,7 @@ function cleanPid() {
     try { if (fs.readFileSync(PID_FILE, 'utf8').trim() === String(process.pid)) fs.unlinkSync(PID_FILE); } catch {}
 }
 process.on('exit', cleanPid);
-process.on('SIGINT', () => { cleanPid(); process.exit(0); });
+process.on('SIGINT', () => { cleanPid(); process.exit(130); }); // 128 + 2 (SIGINT)
 
 // ── Middleware ────────────────────────────────────────────
 
@@ -270,6 +270,7 @@ server.listen(Number(PORT), '0.0.0.0', () => {
 });
 
 process.on('SIGTERM', () => {
+    console.log('[Server] SIGTERM received — shutting down');
     cleanPid();
     stopSupervisor();
     stopHeartbeat();
@@ -281,6 +282,9 @@ process.on('SIGTERM', () => {
     abortAllTasks();
     try { db.close(); } catch {}
     wss.close();
-    server.close();
-    process.exit(0);
+    server.close(() => {
+        // Exit with non-zero so systemd Restart=always knows this was a signal death,
+        // not a clean "I'm done" exit. 143 = 128 + 15 (SIGTERM).
+        process.exit(143);
+    });
 });
