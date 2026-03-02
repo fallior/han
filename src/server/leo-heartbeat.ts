@@ -45,6 +45,7 @@ import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -89,6 +90,131 @@ let currentBeatAbort: AbortController | null = null;
 // Deferred beat: set when a beat is skipped due to CLI active.
 // The signal watcher triggers the beat when cli-active is removed.
 let deferredBeatPending = false;
+
+// ── Robin Hood Protocol — mutual health checks ──────────────
+
+const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
+const RESURRECTION_LOG = path.join(HEALTH_DIR, 'resurrection-log.jsonl');
+const RESURRECTION_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+
+function checkJimHealth(): void {
+    try {
+        // Read Jim's health file
+        let jimHealth: any;
+        try {
+            jimHealth = JSON.parse(fs.readFileSync(JIM_HEALTH_FILE, 'utf-8'));
+        } catch {
+            console.log('[Robin Hood] Jim health file not found — unknown state (may not have run yet)');
+            return;
+        }
+
+        const ageMs = Date.now() - new Date(jimHealth.timestamp).getTime();
+        const ageMin = Math.round(ageMs / 60000);
+
+        // Normal — Jim reported in recently
+        if (ageMin < 40) {
+            console.log(`[Robin Hood] Jim OK (cycle #${jimHealth.cycle ?? '?'}, ${ageMin}min ago)`);
+            return;
+        }
+
+        // Stale — Jim hasn't reported in a while
+        if (ageMin < 90) {
+            console.log(`[Robin Hood] Jim STALE — last seen ${ageMin}min ago (cycle #${jimHealth.cycle ?? '?'})`);
+            if (jimHealth.pid) {
+                try {
+                    process.kill(jimHealth.pid, 0);
+                    console.log(`[Robin Hood] Jim process ${jimHealth.pid} is alive — may be in a long cycle`);
+                } catch {
+                    console.log(`[Robin Hood] Jim process ${jimHealth.pid} is DEAD — stale but under threshold`);
+                }
+            }
+            return;
+        }
+
+        // Down — Jim hasn't reported in over 90 minutes
+        console.log(`[Robin Hood] Jim DOWN — last seen ${ageMin}min ago (cycle #${jimHealth.cycle ?? '?'})`);
+
+        // PID alive check — if process is alive but not reporting, don't resurrect (prevents split-brain)
+        if (jimHealth.pid) {
+            try {
+                process.kill(jimHealth.pid, 0);
+                console.log(`[Robin Hood] Jim process ${jimHealth.pid} is alive but not reporting — possible hang`);
+                return;
+            } catch {
+                console.log(`[Robin Hood] Jim process ${jimHealth.pid} is DEAD — attempting resurrection`);
+            }
+        }
+
+        // Cooldown check — don't resurrect more than once per hour
+        try {
+            const logContent = fs.readFileSync(RESURRECTION_LOG, 'utf-8').trim();
+            const lines = logContent.split('\n').filter(Boolean);
+            if (lines.length > 0) {
+                const lastEntry = JSON.parse(lines[lines.length - 1]);
+                const lastAttemptAge = Date.now() - new Date(lastEntry.timestamp).getTime();
+                if (lastAttemptAge < RESURRECTION_COOLDOWN_MS) {
+                    const cooldownRemain = Math.round((RESURRECTION_COOLDOWN_MS - lastAttemptAge) / 60000);
+                    console.log(`[Robin Hood] Resurrection cooldown active — ${cooldownRemain}min remaining`);
+                    return;
+                }
+            }
+        } catch {
+            // No resurrection log yet — proceed
+        }
+
+        // Attempt resurrection
+        console.log('[Robin Hood] Resurrecting Jim via systemctl --user restart claude-remote-server.service');
+        let success = false;
+        try {
+            execSync('systemctl --user restart claude-remote-server.service', { timeout: 30000 });
+
+            // Verify via systemctl is-active — faster than waiting for a full cycle to update health file
+            execSync('sleep 3');
+            try {
+                const status = execSync('systemctl --user is-active claude-remote-server.service', { timeout: 5000 }).toString().trim();
+                if (status === 'active') {
+                    console.log('[Robin Hood] Jim RESURRECTED — service active');
+                    success = true;
+                } else {
+                    console.log(`[Robin Hood] Resurrection FAILED — service status: ${status}`);
+                }
+            } catch {
+                console.log('[Robin Hood] Resurrection FAILED — service not active after restart');
+            }
+        } catch (err) {
+            console.error('[Robin Hood] Resurrection FAILED:', (err as Error).message);
+        }
+
+        // Log the resurrection attempt
+        const logEntry = {
+            timestamp: new Date().toISOString(),
+            resurrector: 'leo',
+            target: 'jim',
+            reason: `Health file ${ageMin}min stale, PID dead`,
+            success,
+        };
+        try {
+            fs.appendFileSync(RESURRECTION_LOG, JSON.stringify(logEntry) + '\n');
+        } catch (err) {
+            console.error('[Robin Hood] Failed to write resurrection log:', (err as Error).message);
+        }
+
+        // If resurrection failed, send ntfy notification for human escalation
+        if (!success) {
+            try {
+                const config = loadConfig();
+                if (config.ntfy_topic) {
+                    execSync(`curl -s -d "Robin Hood: Failed to resurrect Jim (server). Last seen ${ageMin}min ago. Manual intervention needed." -H "Title: Robin Hood Alert" -H "Priority: urgent" -H "Tags: warning" https://ntfy.sh/${config.ntfy_topic}`, { timeout: 10000 });
+                    console.log('[Robin Hood] Human escalation notification sent via ntfy');
+                }
+            } catch {
+                console.error('[Robin Hood] Failed to send ntfy notification');
+            }
+        }
+    } catch (err) {
+        console.error('[Robin Hood] Health check error:', (err as Error).message);
+    }
+}
 
 // ── Config loading ───────────────────────────────────────────
 
@@ -1035,6 +1161,9 @@ async function heartbeat(): Promise<void> {
     const phase = getDayPhase();
     const beatType = nextBeatType();
     const sessionActive = isSessionActive();
+
+    // Robin Hood: check Jim's health FIRST — before anything else
+    checkJimHealth();
 
     // Gary model: check if CLI is actively processing a prompt
     if (isCliActive()) {

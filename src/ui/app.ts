@@ -515,6 +515,11 @@
             mobileInput.style.height = 'auto'; // reset height
             mobileInput.focus(); // keep keyboard open
 
+            // Copy to clipboard as safety net — if send fails, user can paste manually
+            if (text && navigator.clipboard) {
+                navigator.clipboard.writeText(text).catch(() => {});
+            }
+
             try {
                 if (currentPrompt) {
                     // Prompt mode: send full response via /api/respond
