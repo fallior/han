@@ -12,7 +12,7 @@
  * - Schedules supervisor cycles via setTimeout
  */
 
-import { fork, type ChildProcess } from 'node:child_process';
+import { fork, execSync, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import { CLAUDE_REMOTE_DIR, taskStmts, memoryStmts } from '../db';
@@ -47,6 +47,9 @@ const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
 const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
 const CLI_ACTIVE_FILE = path.join(SIGNALS_DIR, 'cli-active');
 const CLI_ACTIVE_STALE_MINUTES = 30;
+const LEO_HEALTH_FILE = path.join(HEALTH_DIR, 'leo-health.json');
+const RESURRECTION_LOG = path.join(HEALTH_DIR, 'resurrection-log.jsonl');
+const RESURRECTION_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
 // Worker restart backoff
 let workerRestartAttempts = 0;
@@ -75,6 +78,150 @@ function writeJimHealthSignal(cycleNumber: number, tier: string, costUsd: number
         fs.writeFileSync(JIM_HEALTH_FILE, JSON.stringify(signal, null, 2));
     } catch (err) {
         console.error('[Supervisor] Failed to write health signal:', (err as Error).message);
+    }
+}
+
+// ── Check Leo health (Robin Hood Protocol) ──────────────────
+
+function checkLeoHealth(): void {
+    try {
+        if (!fs.existsSync(LEO_HEALTH_FILE)) {
+            console.log('[Robin Hood] Leo health file not found — skipping check');
+            return;
+        }
+
+        const leoHealthData = JSON.parse(fs.readFileSync(LEO_HEALTH_FILE, 'utf-8'));
+        const leoTimestamp = new Date(leoHealthData.timestamp).getTime();
+        const ageMs = Date.now() - leoTimestamp;
+        const ageMinutes = ageMs / 60000;
+
+        if (ageMinutes < 45) {
+            // OK — no action needed
+            console.log(`[Robin Hood] Leo OK (${Math.round(ageMinutes)}min ago, PID ${leoHealthData.pid})`);
+            return;
+        }
+
+        if (ageMinutes < 90) {
+            // Stale — log and check if process alive
+            console.log(`[Robin Hood] Leo stale (${Math.round(ageMinutes)}min ago) — checking PID ${leoHealthData.pid}`);
+            try {
+                process.kill(leoHealthData.pid, 0);
+                console.log(`[Robin Hood] Leo PID ${leoHealthData.pid} is alive — no action needed`);
+                return;
+            } catch {
+                // PID dead, will fall through to down handling
+                console.log(`[Robin Hood] Leo PID ${leoHealthData.pid} is dead — treating as down`);
+            }
+        } else {
+            // Down — log and prepare to resurrect
+            console.log(`[Robin Hood] Leo down (${Math.round(ageMinutes)}min ago) — checking PID ${leoHealthData.pid}`);
+            try {
+                process.kill(leoHealthData.pid, 0);
+                console.log(`[Robin Hood] Leo PID ${leoHealthData.pid} is alive — no action needed`);
+                return;
+            } catch {
+                console.log(`[Robin Hood] Leo PID ${leoHealthData.pid} is dead — proceeding with resurrection`);
+            }
+        }
+
+        // At this point, PID is dead and age > 45min — attempt resurrection with cooldown
+        const cooldownOk = checkResurrectionCooldown();
+        if (!cooldownOk) {
+            console.log('[Robin Hood] Resurrection cooldown active — skipping');
+            return;
+        }
+
+        console.log('[Robin Hood] Attempting Leo resurrection via systemctl');
+        try {
+            execSync('systemctl --user restart leo-heartbeat.service', { timeout: 30000 });
+            console.log('[Robin Hood] Leo restart command sent');
+
+            // Wait 10 seconds for service to start
+            execSync('sleep 10');
+
+            // Check if health file was updated
+            if (fs.existsSync(LEO_HEALTH_FILE)) {
+                const updatedHealthData = JSON.parse(fs.readFileSync(LEO_HEALTH_FILE, 'utf-8'));
+                const updatedAge = (Date.now() - new Date(updatedHealthData.timestamp).getTime()) / 60000;
+                if (updatedAge < 2) {
+                    // Success — health file recently updated
+                    console.log('[Robin Hood] Leo resurrection successful');
+                    logResurrectionResult(true, `Restarted after ${Math.round(ageMinutes)}min down`);
+                    return;
+                }
+            }
+
+            // Health file not updated — failure
+            console.error('[Robin Hood] Leo health file not updated after restart');
+            logResurrectionResult(false, `Restart failed: health file not updated after ${Math.round(ageMinutes)}min down`);
+            escalateToNtfy(`Failed to resurrect Leo (heartbeat). Last seen ${Math.round(ageMinutes)}min ago. Manual intervention needed.`);
+        } catch (err) {
+            const msg = (err as Error).message;
+            console.error('[Robin Hood] Resurrection failed:', msg);
+            logResurrectionResult(false, `Restart failed: ${msg}`);
+            escalateToNtfy(`Failed to resurrect Leo (heartbeat). Last seen ${Math.round(ageMinutes)}min ago. Manual intervention needed.`);
+        }
+    } catch (err) {
+        console.error('[Robin Hood] Health check error:', (err as Error).message);
+    }
+}
+
+function checkResurrectionCooldown(): boolean {
+    try {
+        if (!fs.existsSync(RESURRECTION_LOG)) {
+            return true; // First resurrection — allowed
+        }
+
+        const lines = fs.readFileSync(RESURRECTION_LOG, 'utf-8').trim().split('\n');
+        if (lines.length === 0) return true;
+
+        const lastEntry = JSON.parse(lines[lines.length - 1]);
+        const lastAttemptTime = new Date(lastEntry.timestamp).getTime();
+        const timeSinceLastAttempt = Date.now() - lastAttemptTime;
+
+        if (timeSinceLastAttempt < RESURRECTION_COOLDOWN_MS) {
+            const minutesRemaining = Math.round((RESURRECTION_COOLDOWN_MS - timeSinceLastAttempt) / 60000);
+            console.log(`[Robin Hood] Cooldown active: ${minutesRemaining}min remaining`);
+            return false;
+        }
+
+        return true;
+    } catch (err) {
+        console.log('[Robin Hood] Could not check resurrection cooldown:', (err as Error).message);
+        return true; // Proceed if unable to check
+    }
+}
+
+function logResurrectionResult(success: boolean, reason: string): void {
+    try {
+        fs.mkdirSync(HEALTH_DIR, { recursive: true });
+        const entry = {
+            timestamp: new Date().toISOString(),
+            resurrector: 'jim',
+            target: 'leo',
+            reason,
+            success
+        };
+        fs.appendFileSync(RESURRECTION_LOG, JSON.stringify(entry) + '\n');
+    } catch (err) {
+        console.error('[Robin Hood] Failed to log resurrection:', (err as Error).message);
+    }
+}
+
+function escalateToNtfy(message: string): void {
+    try {
+        const config = loadConfig();
+        if (!config.ntfy_topic) {
+            console.log('[Robin Hood] No ntfy_topic configured — skipping notification');
+            return;
+        }
+
+        const notificationMsg = `🚨 Robin Hood Alert\n${message}`;
+        const curlCmd = `curl -X POST -H "Content-Type: application/json" -H "Priority: urgent" -d '{"title":"Robin Hood","message":"${message.replace(/"/g, '\\"')}"}' "https://ntfy.sh/${config.ntfy_topic}"`;
+        execSync(curlCmd, { timeout: 10000 });
+        console.log('[Robin Hood] Ntfy escalation sent');
+    } catch (err) {
+        console.error('[Robin Hood] Failed to send ntfy notification:', (err as Error).message);
     }
 }
 
@@ -620,6 +767,9 @@ export function scheduleSupervisorCycle(): void {
     const delay = getWallClockDelay();
 
     nextCycleTimeout = setTimeout(async () => {
+        // Check Leo health at start of every cycle (Robin Hood Protocol)
+        checkLeoHealth();
+
         // Check Opus slot availability right before running
         if (isOpusSlotBusy()) {
             console.log('[Supervisor] Opus slot busy — deferring cycle, will run when CLI stops');
