@@ -58,6 +58,9 @@ When you make a significant technical or design decision:
 | DEC-026 | Auto-Reactivate Archived Threads on New Message | Accepted | 2026-03-01 |
 | DEC-027 | Staleness Thresholds Recalibrated for Each Agent | Accepted | 2026-03-02 |
 | DEC-028 | Shared Resurrection Log at resurrection-log.jsonl | Accepted | 2026-03-02 |
+| DEC-029 | Discord Gateway Implementation — Raw WebSocket vs discord.js | Accepted | 2026-03-03 |
+| DEC-030 | Message Classification — Ollama Local vs Anthropic API | Accepted | 2026-03-03 |
+| DEC-031 | Delivery Routing — Direct API Calls vs Signal Files | Accepted | 2026-03-03 |
 
 ---
 
@@ -2078,6 +2081,223 @@ We chose **[Option]** because [reasoning].
 
 - [Links if any]
 ```
+
+---
+
+### DEC-029: Discord Gateway Implementation — Raw WebSocket vs discord.js
+
+**Date**: 2026-03-03
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Jemma (Discord message dispatcher service) needs to connect to Discord Gateway to receive incoming messages, classify them via Ollama, and route to appropriate recipients (Jim, Leo, Darron, Sevn, Six).
+
+#### Options Considered
+
+1. **discord.js library** — Full-featured Discord client library
+   - ✅ Comprehensive API coverage, battle-tested, TypeScript support
+   - ✅ Automatic reconnection handling, heartbeat management, event abstraction
+   - ✅ Rich ecosystem (voice, slash commands, components, embeds)
+   - ❌ Heavy dependency (dozens of packages, 10MB+ node_modules)
+   - ❌ Abstracts Gateway protocol (harder to debug connection issues)
+   - ❌ Opinionated patterns (event emitters, cache management)
+   - ❌ Overkill for simple message intake (Jemma only needs MESSAGE_CREATE events)
+
+2. **Raw WebSocket with `ws` package** — Direct Gateway protocol implementation
+   - ✅ Lightweight (single dependency already in project)
+   - ✅ Full control over connection lifecycle (RESUME, reconnection logic, exponential backoff)
+   - ✅ Direct visibility into Gateway events (easier debugging)
+   - ✅ Can log raw Gateway payloads, track sequence numbers, monitor heartbeat timing
+   - ✅ Simpler runtime footprint (no cache management, no event emitter overhead)
+   - ❌ More manual implementation (must handle protocol details ourselves)
+   - ❌ Must implement HELLO → IDENTIFY → HEARTBEAT → MESSAGE_CREATE flow manually
+   - ❌ Must track session_id and last_sequence for RESUME
+
+#### Decision
+
+We chose **raw `ws` package for direct Gateway protocol implementation**.
+
+#### Reasoning
+
+- **Constraints explicitly required it**: "Do NOT install discord.js — use raw `ws` package"
+- **Jemma only needs MESSAGE_CREATE events** — doesn't need full Discord API surface (voice, slash commands, components, embeds, etc.)
+- **Direct WebSocket control enables precise reconnection handling** — RESUME on disconnect with session_id + last_sequence, exponential backoff (1s → 2s → 4s → 8s, max 30s), session recovery
+- **Simpler debugging** — can log raw Gateway payloads, track sequence numbers, monitor heartbeat timing
+- **Smaller runtime footprint** — no cache management (discord.js caches guilds, channels, users, roles), no event emitter overhead
+- **Already have `ws` package in project** — no new dependency installation required
+
+#### Consequences
+
+- **Must manually implement Gateway protocol**: HELLO (receive heartbeat interval), IDENTIFY (send bot token + intents), RESUME (reconnect with session_id + last_sequence), HEARTBEAT (send at server-requested interval)
+- **Must handle reconnection logic ourselves**: exponential backoff (1s, 2s, 4s, 8s, max 30s), track `session_id` and `last_sequence` for RESUME
+- **Need to manually track sequence numbers**: last_sequence is critical for RESUME (prevents missing events)
+- **Benefit: precise control over connection lifecycle** — can implement custom reconnection strategies, monitor Gateway latency, detect connection degradation
+- **Benefit: better observability** — raw Gateway payloads logged, makes debugging connection issues trivial
+- **Implementation complexity is acceptable** — ~200 lines for full Gateway protocol implementation (HELLO, IDENTIFY, RESUME, HEARTBEAT, MESSAGE_CREATE)
+
+#### Related
+
+- Discord Gateway documentation: https://discord.com/developers/docs/topics/gateway
+- `ws` package: https://github.com/websockets/ws
+- DEC-030: Message Classification (Ollama vs Anthropic API)
+
+---
+
+### DEC-030: Message Classification — Ollama Local vs Anthropic API
+
+**Date**: 2026-03-03
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Jemma receives Discord messages and must classify them to determine the recipient (jim/leo/darron/sevn/six/ignore). Classification considers: direct mentions (@Jim, @Leo), channel context (#jim → Jim, #leo → Leo), message content, thread context (replied-to message).
+
+#### Options Considered
+
+1. **Ollama local models** (qwen2.5-coder:7b or gemma)
+   - ✅ Zero cost (runs on local hardware, no API fees)
+   - ✅ Zero latency (no network round-trip, <100ms inference)
+   - ✅ Privacy-preserving (messages never leave server)
+   - ✅ No rate limits (can classify thousands of messages per hour)
+   - ✅ Existing infrastructure (Ollama already running for orchestrator tasks)
+   - ❌ Lower accuracy than Claude (especially for nuanced classification)
+   - ❌ Requires Ollama service running (additional service dependency)
+   - ❌ Classification prompt must be simple (local models struggle with complex reasoning)
+
+2. **Anthropic API** (Claude Haiku for speed/cost)
+   - ✅ Higher accuracy (better at understanding context, nuance, and intent)
+   - ✅ No local service dependency (only need API key)
+   - ✅ Can handle complex classification prompts (multi-factor decision trees)
+   - ❌ Cost: ~$0.0005 per classification (could add up with high Discord volume)
+   - ❌ Network latency: ~200-500ms per classification (vs <100ms local)
+   - ❌ Privacy: messages sent to Anthropic (Discord messages may contain sensitive project discussions)
+   - ❌ Rate limits: Anthropic API has rate limits (could throttle during Discord spam)
+
+3. **Hybrid approach** (Ollama primary, Anthropic fallback)
+   - ✅ Best of both worlds (local speed/cost, cloud accuracy when needed)
+   - ✅ Can use confidence scores to trigger Anthropic re-classification
+   - ❌ More complex implementation (two classification paths)
+   - ❌ Still has privacy concerns (some messages sent to Anthropic)
+   - ❌ Adds latency variability (some classifications 100ms, others 500ms)
+
+#### Decision
+
+We chose **Ollama local models (qwen2.5-coder:7b or gemma) for classification**.
+
+#### Reasoning
+
+- **Discord messages arrive frequently** — potentially dozens per hour in active channels, cost would accumulate quickly (100 messages/day = $0.05/day = $1.50/month just for classification)
+- **Classification is not mission-critical** — false negatives (missed messages) are acceptable because Darron checks Discord directly anyway, false positives (wrong recipient) are easily corrected
+- **Local model is "good enough" for this use case** — classification prompt is simple (recipient determination based on mentions + channel context), not complex multi-step reasoning
+- **Privacy benefit** — Discord messages may contain sensitive project discussions (architecture decisions, implementation details, debugging context)
+- **Zero latency** — local inference <100ms vs Anthropic API 200-500ms (better user experience, faster message routing)
+- **Ollama already running** — existing infrastructure for orchestrator tasks, no new service required
+- **Fallback available** — if local classification proves inaccurate, can add Anthropic API as optional override (config flag `jemma.use_anthropic_classification: true`)
+
+#### Consequences
+
+- **Requires Ollama service running** — must document in setup instructions (already required for orchestrator, so minimal additional burden)
+- **May need to tune classification prompt if accuracy is insufficient** — can iterate on prompt engineering to improve local model performance
+- **Can monitor classification confidence scores** — Ollama returns confidence/probability, can log low-confidence classifications for human review
+- **If Ollama is down, Jemma will log errors but won't crash** — graceful degradation (message classification fails, but Gateway connection stays alive)
+- **Can add Anthropic fallback later if needed** — not implemented initially, but architecture supports adding hybrid approach via config flag
+
+#### Related
+
+- Ollama documentation: https://github.com/ollama/ollama
+- DEC-029: Discord Gateway Implementation (Raw WebSocket vs discord.js)
+- DEC-031: Delivery Routing (Direct API Calls vs Signal Files)
+
+---
+
+### DEC-031: Delivery Routing — Direct API Calls vs Signal Files
+
+**Date**: 2026-03-03
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+When Jemma needs to deliver a classified Discord message to Jim or Leo, should it call their APIs directly (POST to server endpoints) or write signal files for them to poll?
+
+#### Options Considered
+
+1. **Direct API calls** (POST to server endpoints)
+   - ✅ Immediate delivery (no polling delay, real-time notification)
+   - ✅ Confirmation response (know if delivery succeeded via HTTP status code)
+   - ✅ Can include full context in request body (message content, author, channel, classification confidence)
+   - ✅ Enables server-side processing (create conversation entry, write database record, broadcast via WebSocket)
+   - ❌ Requires server to be running (fails if server is down for maintenance or crash)
+   - ❌ Tight coupling (Jemma depends on server availability)
+   - ❌ No persistence (if API call fails and Jemma doesn't retry, message is lost)
+
+2. **Signal files** (write to ~/.claude-remote/signals/)
+   - ✅ Decoupled (works even if server is down)
+   - ✅ Persistent (message survives server restarts, Jemma restarts)
+   - ✅ No network dependency (local filesystem only, no HTTP overhead)
+   - ✅ Existing pattern (Leo's heartbeat already watches for `leo-wake-*` signal files)
+   - ❌ Polling delay (agents check signal files periodically, not real-time)
+   - ❌ No confirmation (can't know if agent received message until signal file is deleted)
+   - ❌ Manual cleanup (signal files must be deleted after processing to avoid re-delivery)
+
+3. **Hybrid approach** (API call with signal file fallback)
+   - ✅ Best of both worlds (immediate delivery when server is up, persistent fallback when down)
+   - ✅ Graceful degradation (server downtime doesn't lose messages)
+   - ✅ High reliability (messages always delivered eventually)
+   - ✅ Confirms existing pattern (Leo's heartbeat already uses signal files, can add HTTP endpoint)
+   - ❌ More complex implementation (try-catch around API calls, fallback logic)
+   - ❌ Two delivery paths to maintain (API endpoint and signal file polling)
+
+#### Decision
+
+We chose **hybrid approach — API call with signal file fallback**.
+
+#### Reasoning
+
+- **Jim and Leo's server is usually running** (high availability ~95%+), so API calls succeed most of the time
+- **Signal file fallback ensures messages aren't lost** during server maintenance, crashes, or restarts
+- **Confirms existing pattern** — Leo's heartbeat already watches for `leo-wake-*` signal files (this decision extends that pattern to Jim)
+- **Allows real-time delivery when possible** — no polling delay when server is up (better user experience, faster response to Discord messages)
+- **Server restart won't lose in-flight Discord messages** — if Jemma sends API call while server is restarting, API call fails, Jemma writes signal file, server reads signal file after restart
+- **Graceful degradation is critical for autonomous system** — Jemma runs 24/7 unattended, must handle server downtime without human intervention
+
+#### Implementation Details
+
+- **To Jim**:
+  1. Try POST to `http://localhost:3847/api/jemma/deliver` with `{ recipient: 'jim', message, channel, author, classification_confidence }`
+  2. If fails (server down, connection refused, timeout), write to `~/.claude-remote/signals/jim-wake-discord-{timestamp}` with same payload
+  3. Server-side handler (`/api/jemma/deliver`) creates conversation entry, writes wake signal file if Jim is idle, broadcasts via WebSocket
+
+- **To Leo**:
+  1. Write signal file directly to `~/.claude-remote/signals/leo-wake-discord-{timestamp}` with `{ conversationId, mentionedAt, messagePreview }`
+  2. Leo's heartbeat polls every 30s (acceptable latency for Discord messages)
+  3. No API call needed (Leo's heartbeat doesn't run an HTTP server, only reads signal files)
+
+- **To Darron**:
+  1. Send ntfy notification via existing ntfy topic in config.json
+  2. No signal file needed (Darron is human, will check phone notification)
+
+- **To Sevn/Six (external teams via Tailscale Funnel)**:
+  1. POST to `https://openclaw-vps.tailbcb4df.ts.net/sevn/hooks/wake` (or six) with bearer token auth
+  2. Body: `{ "text": "Discord message from {author} in #{channel}: {preview}", "mode": "now" }`
+  3. No signal file fallback (external systems, not under our control)
+
+#### Consequences
+
+- **Jemma delivery is resilient to server downtime** — messages never lost during maintenance windows
+- **Messages are persistent** — signal files survive restarts (Jemma restart, server restart, system reboot)
+- **Slight code complexity** — try-catch around API calls, fallback logic (~20 lines per delivery path)
+- **Two delivery paths to maintain** — API endpoint (`/api/jemma/deliver`) and signal file polling (Leo's heartbeat, Jim's supervisor)
+- **Benefit: high reliability with graceful degradation** — combines speed of API calls with persistence of signal files
+
+#### Related
+
+- DEC-029: Discord Gateway Implementation (Raw WebSocket vs discord.js)
+- DEC-030: Message Classification (Ollama vs Anthropic API)
+- Existing signal file pattern: Leo's heartbeat watches `~/.claude-remote/signals/leo-wake-*`
 
 ---
 

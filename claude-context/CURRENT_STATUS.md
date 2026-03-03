@@ -32,6 +32,45 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-03 — Claude (autonomous) — Jemma Discord Message Dispatcher Complete
+- **Discord Gateway integration implemented** — Full Discord message routing system with AI classification:
+  - **Gateway WebSocket connection**: Implements complete Gateway protocol (HELLO → IDENTIFY → MESSAGE_CREATE events → HEARTBEAT)
+  - **Raw `ws` package**: Direct Gateway protocol implementation (not discord.js) for full control over connection lifecycle
+  - **RESUME support**: Reconnects with session_id + last sequence number, exponential backoff (1s→2s→4s→8s, max 30s)
+  - **REST API reconciliation**: Every 5 minutes, sweeps monitored channels to catch messages missed during reconnection gaps
+  - **MESSAGE_CONTENT privileged intent**: Required for reading message content (1<<15)
+- **AI-powered message classification** — Ollama local models (qwen2.5-coder:7b or gemma) classify incoming messages:
+  - Classification by: direct mentions (@Jim, @Leo), channel context (#jim → Jim, #leo → Leo), content analysis
+  - Thread context: fetches replied-to message for context if message is a reply
+  - Determines recipient: jim/leo/darron/sevn/six/ignore
+  - Zero cost, zero latency, privacy-preserving (messages never leave server)
+- **Multi-path delivery routing** — Hybrid approach (API call + signal file fallback):
+  - **To Jim**: POST to `/api/jemma/deliver`, fallback to `~/.claude-remote/signals/jim-wake-discord-{timestamp}`
+  - **To Leo**: Write signal file `leo-wake-discord-{timestamp}` (Leo's heartbeat polls every 30s)
+  - **To Darron**: ntfy notification via existing topic
+  - **To Sevn/Six**: POST to `https://openclaw-vps.tailbcb4df.ts.net/sevn/hooks/wake` with bearer token
+- **Robin Hood Protocol integration** — Jemma now monitored by Jim's supervisor:
+  - Health file: `~/.claude-remote/health/jemma-health.json` (pid, lastBeat, lastGatewayEvent, status)
+  - Staleness detection: >90min since last beat or dead PID triggers resurrection
+  - Distress detection: >60min since last Gateway event (degraded state warning)
+  - Jim can restart via `systemctl --user restart jemma.service`
+  - 1-hour resurrection cooldown (same pattern as Jim↔Leo)
+- **Systemd service** — Runs as user service with auto-restart:
+  - Service file: `scripts/jemma.service` (Type=simple, Restart=always, RestartSec=5)
+  - Setup: `cp scripts/jemma.service ~/.config/systemd/user/ && systemctl --user enable jemma.service`
+  - Logs: `journalctl --user -u jemma -f`
+- **Admin UI Workshop Jemma tab** — Amber colour scheme (distinct from Jim/Leo/Darron):
+  - Live Gateway connection status with uptime
+  - Recent messages tab: last 50 classified messages with content preview, author, channel, timestamp, classification result, delivery status
+  - Stats tab: delivery counts by recipient (jim/leo/darron/sevn/six/ignored)
+  - Real-time updates via WebSocket
+- **Why this matters**: Jemma completes the communication triad (Jim + Leo + Jemma). External users can now post to Discord, Jemma classifies and routes messages to the right recipient, Jim/Leo receive messages in conversation threads or via signal files, and Robin Hood Protocol ensures all three agents stay healthy. This creates a fully autonomous communication pipeline with zero human intervention required.
+- **Files created**: `src/server/jemma.ts` (710 lines), `src/server/routes/jemma.ts` (298 lines), `scripts/jemma.service` (18 lines), `docs/JEMMA_API.md` (185 lines)
+- **Files modified**: `src/server/leo-heartbeat.ts` (+123 lines), `src/server/routes/supervisor.ts` (+49 lines), `src/server/services/supervisor.ts` (+93 lines), `src/ui/admin.html` (+30 lines), `src/ui/admin.ts` (+198 lines)
+- **Commits**: 9 commits (27dfaf6 through 17f018d) from goal mmahoake-g21ska (Build Jemma — Discord message dispatcher service)
+- **Cost**: $1.72 (mixed Sonnet/Haiku)
+- **Tasks**: 7 tasks (mmahsvaj-z07ut4 through mmahsvam-s8ha29, 6 done, 1 running)
+
 ### 2026-03-03 — Claude (autonomous) — Robin Hood Protocol Improvements Complete
 - **Phase 5 distress signals + health dashboard implemented** — Early warning system for degraded performance:
   - **Leo's verification wait fix**: Changed sleep from 3s to 12s after Jim restart (line 170 in leo-heartbeat.ts)

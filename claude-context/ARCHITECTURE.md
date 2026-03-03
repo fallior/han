@@ -59,6 +59,12 @@ Claude Remote bridges your development machine and mobile device, enabling remot
 - **ntfy.sh**: HTTP-based push notifications — free, self-hostable, simple API
 - Topic-based routing via `NTFY_TOPIC` environment variable
 
+### Discord Integration
+- **Discord Gateway WebSocket**: Direct Gateway protocol implementation using `ws` package (not discord.js)
+- **Jemma service**: systemd user service that monitors Discord channels, classifies messages via Ollama, routes to recipients
+- **MESSAGE_CONTENT privileged intent**: Required for reading message content
+- **Ollama**: Local LLM inference (qwen2.5-coder:7b or gemma) for message classification
+
 ### Remote Access
 - **Tailscale**: Zero-config WireGuard VPN — encrypted, no port forwarding needed
 - Server binds to 0.0.0.0 for Tailscale access
@@ -100,7 +106,8 @@ claude-remote/
 │   ├── install.sh                # Installation and setup
 │   ├── start-server.sh           # Quick server start
 │   ├── claude-remote             # CLI launcher
-│   └── build-client.js           # Client TypeScript compilation
+│   ├── build-client.js           # Client TypeScript compilation
+│   └── jemma.service             # Systemd user service for Jemma
 └── src/
     ├── hooks/
     │   └── notify.sh             # Claude Code notification hook
@@ -110,6 +117,7 @@ claude-remote/
     │   ├── types.ts              # TypeScript type definitions
     │   ├── ws.ts                 # WebSocket management + real-time sync
     │   ├── orchestrator.ts       # Goal decomposition + task routing
+    │   ├── jemma.ts              # Discord Gateway service + message classification + routing
     │   ├── routes/
     │   │   ├── tasks.ts          # Task CRUD + execution
     │   │   ├── goals.ts          # Goal creation + decomposition + progress
@@ -120,7 +128,8 @@ claude-remote/
     │   │   ├── analytics.ts      # Metrics + cost tracking + velocity
     │   │   ├── proposals.ts      # Task proposal extraction + management
     │   │   ├── bridge.ts         # Claude Code handoff + context export
-    │   │   └── prompts.ts        # Pending/resolved prompt management
+    │   │   ├── prompts.ts        # Pending/resolved prompt management
+    │   │   └── jemma.ts          # Discord message delivery endpoint
     │   ├── services/
     │   │   ├── supervisor.ts     # Persistent Opus supervisor agent
     │   │   ├── planning.ts       # Goal decomposition + doc generation
