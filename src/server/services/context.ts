@@ -143,7 +143,7 @@ export function getRelevantLearnings(techStack: string[]): Array<{ id: string; s
                 const idTableMatch = indexContent.match(new RegExp(`\\| ${id} \\| \\w+ \\| \\[.+?\\]\\((.+?)\\)`));
                 if (idTableMatch) {
                     const learningPath = path.join(os.homedir(), 'Projects', '_learnings', idTableMatch[1]);
-                    content = readFileOrEmpty(learningPath, 500);
+                    content = readFileOrEmpty(learningPath, 2000);
                 }
             }
             learnings.push({ id, severity, summary, content });
