@@ -663,7 +663,9 @@ function handleShutdown(): void {
     ws.close(1000, 'Service shutdown');
   }
   writeHealthFile('ok');
-  process.exit(0);
+  // Exit with 143 (128 + 15 = SIGTERM) so systemd Restart=always knows this was
+  // a signal death, not a clean "I'm done" exit. Same as main server.
+  process.exit(143);
 }
 
 // ── Main ──────────────────────────────────────────────────────────
