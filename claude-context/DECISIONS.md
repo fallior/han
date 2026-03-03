@@ -63,6 +63,7 @@ When you make a significant technical or design decision:
 | DEC-031 | Delivery Routing — Direct API Calls vs Signal Files | Accepted | 2026-03-03 |
 | DEC-032 | Shell Command Execution — execFileSync for Untrusted Input | **Settled** | 2026-03-03 |
 | DEC-033 | Agent Health File Schema Consistency | **Settled** | 2026-03-03 |
+| DEC-034 | Bearer Token Authentication with Localhost Bypass | Accepted | 2026-03-04 |
 
 ---
 
@@ -2532,6 +2533,136 @@ const health = {
 - Health file field mismatch fix commit: 66696be
 - DEC-027: Staleness Thresholds Recalibrated for Each Agent
 - DEC-028: Shared Resurrection Log at resurrection-log.jsonl
+
+---
+
+### DEC-034: Bearer Token Authentication with Localhost Bypass
+
+**Date**: 2026-03-04
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+The clauderemote server exposes APIs and an admin console via Tailscale remote access. Previously, there was no authentication — anyone with access to the Tailscale network could access all endpoints. This posed a security risk, especially with autonomous agents having write access to projects.
+
+However, the system has internal agents (Leo heartbeat, Jemma, Jim supervisor) that communicate via localhost HTTP/WebSocket. Requiring authentication for these internal agents would add complexity and potential failure points.
+
+#### Options Considered
+
+1. **Global authentication for all requests**
+   - ✅ Simple implementation
+   - ❌ Requires internal agents to manage tokens
+   - ❌ Adds complexity to Leo/Jim/Jemma code
+   - ❌ Risk of internal communication breaking if token misconfigured
+
+2. **Localhost bypass + remote authentication** (chosen)
+   - ✅ Internal agents work without modification (localhost = trusted)
+   - ✅ Remote access secured with Bearer token
+   - ✅ Single middleware, single config field
+   - ✅ Auth can be disabled by leaving token empty
+   - ❌ Assumes localhost is trusted (reasonable for single-user system)
+
+3. **IP whitelist + authentication**
+   - ✅ More granular control
+   - ❌ More complex configuration
+   - ❌ Requires maintaining IP list
+   - ❌ Breaks when IPs change
+
+4. **OAuth/JWT with session management**
+   - ✅ Industry standard for web apps
+   - ❌ Massive overkill for single-user system
+   - ❌ Requires session storage, token refresh, etc.
+   - ❌ Complicates mobile/WebSocket clients
+
+#### Decision
+
+**Implemented localhost bypass + Bearer token authentication** with these characteristics:
+
+- **Localhost detection**: Requests from 127.0.0.1, ::1, ::ffff:127.0.0.1 bypass auth entirely
+- **Bearer token**: Non-localhost requests require `Authorization: Bearer <token>` header
+- **WebSocket support**: Token via query param (`?token=...`) or `Sec-WebSocket-Protocol` header
+- **Configuration-driven**: Single `server_auth_token` field in config.json
+- **Fail-open**: If `server_auth_token` is empty/missing, auth is disabled (allows first-time setup)
+- **Route-selective**: Applied only to `/api/*` and `/admin` routes — root `/` and `/quick` remain public
+
+#### Implementation
+
+**Middleware** (`src/server/middleware/auth.ts`):
+```typescript
+export function authMiddleware(req, res, next) {
+  // 1. Localhost always passes
+  if (isLocalhost(req)) { next(); return; }
+
+  // 2. Load config
+  const token = loadConfig().server_auth_token;
+  if (!token) { next(); return; }  // Auth disabled
+
+  // 3. Validate Bearer token
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Missing or invalid Authorization header' });
+    return;
+  }
+
+  const clientToken = authHeader.slice(7);
+  if (clientToken !== token) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  next();
+}
+```
+
+**Server integration** (`src/server/server.ts` lines 97-98):
+```typescript
+app.use('/api', authMiddleware);
+app.use('/admin', authMiddleware);
+```
+
+**WebSocket authentication** (`src/server/ws.ts`):
+- Checks `req.socket.remoteAddress` for localhost
+- Validates token from `req.url` query param or `Sec-WebSocket-Protocol` header
+- Rejects with code 1008 (policy violation) if auth fails
+
+#### Consequences
+
+**Positive**:
+- ✅ Remote access now secured — Tailscale network access ≠ API access
+- ✅ Internal agents (Leo, Jim, Jemma) unaffected — zero code changes needed
+- ✅ Simple implementation — 84 lines for middleware, 2 lines for integration
+- ✅ Mobile clients can authenticate via query param (no header manipulation needed)
+- ✅ Easy to disable — set `server_auth_token` to empty string
+- ✅ Config reloaded on each request — no server restart needed to change token
+
+**Negative**:
+- ⚠️ Localhost is assumed trusted — malicious local processes can bypass auth
+- ⚠️ Single token for all users — not suitable for multi-user scenarios
+- ⚠️ Token in query params logged by proxies/browsers — use header in production
+- ⚠️ No rate limiting — brute force attacks possible (mitigated by Tailscale network boundary)
+
+**Future considerations**:
+- Could add rate limiting middleware in future
+- Could add support for multiple tokens with different scopes
+- Could add token rotation/expiry if needed
+- For now, simplicity > complexity — single token is sufficient
+
+#### Testing
+
+23/23 test cases passed (100% coverage):
+- 7 HTTP authentication scenarios (localhost bypass, remote auth, token validation)
+- 8 WebSocket scenarios (localhost bypass, query param, header, invalid tokens)
+- 4 route protection tests (protected /api /admin, unprotected / /quick)
+- 4 internal agent communication tests (Leo, Jim, Jemma, WebSocket)
+
+Full test report: `AUTH_TEST_REPORT.md`
+
+#### Related
+
+- L012: Agent SDK fails with CLAUDECODE env var (nested session detection)
+- DEC-004: Remote Access — Tailscale (network layer security)
+- Commits: b9b2344, 1d4c2f0, c2878f1, e9528c4, 07170ba
 
 ---
 

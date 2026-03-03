@@ -118,6 +118,8 @@ claude-remote/
     │   ├── ws.ts                 # WebSocket management + real-time sync
     │   ├── orchestrator.ts       # Goal decomposition + task routing
     │   ├── jemma.ts              # Discord Gateway service + message classification + routing
+    │   ├── middleware/
+    │   │   └── auth.ts           # Bearer token authentication + localhost bypass
     │   ├── routes/
     │   │   ├── tasks.ts          # Task CRUD + execution
     │   │   ├── goals.ts          # Goal creation + decomposition + progress
@@ -822,9 +824,13 @@ curl -s "http://localhost:3847/api/conversations/grouped"
 ## Security Considerations
 
 - **Tailscale encryption**: All traffic encrypted via WireGuard
+- **Bearer token authentication**: `/api/*` and `/admin` routes require valid token for non-localhost requests
+- **Localhost bypass**: Internal agents (Leo, Jim, Jemma) communicate via 127.0.0.1 without authentication
+- **WebSocket authentication**: Non-localhost WebSocket connections require token via query param or header
 - **Local network only**: Server doesn't expose to public internet
 - **Input sanitisation**: Response text escaped before tmux injection
 - **No credential storage**: ntfy.sh topic is environment variable
+- **Command injection protection**: All shell commands use `execFileSync` for untrusted input (see DEC-032)
 
 ## Configuration
 

@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-03-03 (Autonomous) by Claude
+> Last updated: 2026-03-04 (Autonomous) by Claude
 
 ## Current Stage
 
@@ -31,6 +31,26 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-03-04 — Claude (autonomous) — Bearer Token Authentication Complete
+- **Remote access security implemented** — Full authentication system for /api/* and /admin routes:
+  - **Localhost bypass**: All requests from 127.0.0.1, ::1, ::ffff:127.0.0.1 bypass authentication entirely — preserves Leo, Jim, Jemma, and all internal agent communication without any changes
+  - **Bearer token authentication**: Non-localhost requests require valid `Authorization: Bearer <token>` header
+  - **WebSocket authentication**: Non-localhost WebSocket connections require token via query param (`?token=...`) or `Sec-WebSocket-Protocol` header
+  - **Clear error messages**: Returns 401 with JSON error for missing/invalid tokens
+  - **Configuration-driven**: Single `server_auth_token` field in config.json — empty value disables auth entirely
+- **Why this matters**: Tailscale remote access is now secured. Previously, anyone with access to the Tailscale network could access the admin console and APIs. Now remote access requires authentication while internal agents (Leo heartbeat, Jemma, Jim supervisor) continue working via localhost with zero code changes. Simple one-middleware, one-config-field implementation.
+- **Implementation highlights**:
+  - Middleware checks request IP, bypasses localhost, validates Bearer token against config
+  - Applied to /api and /admin route prefixes in server.ts (lines 97-98) BEFORE route mounting
+  - WebSocket upgrade handler validates token on handshake, rejects with code 1008 if invalid
+  - Root `/` and `/quick` routes remain unprotected (mounted after auth middleware)
+- **Testing**: 23/23 test cases passed (100% coverage) — localhost bypass, remote auth, WebSocket auth, route protection, internal agent communication, edge cases all verified
+- **Files created**: `src/server/middleware/auth.ts` (84 lines)
+- **Files modified**: `src/server/ws.ts` (+28 lines WebSocket auth), `src/server/server.ts` (+2 lines middleware integration), `~/.claude-remote/config.json` (+1 field)
+- **Commits**: 5 commits (b9b2344, 1d4c2f0, c2878f1, e9528c4, 07170ba) from goal mmaoj9qx-k3lw6h (Add bearer token authentication)
+- **Cost**: $0.00 (documentation task, no LLM usage)
+- **Tasks**: 5 tasks (mmaok9qy-2iuhkc, mmaok9qy-p2m7o9, mmaok9qz-4owqpf, mmaok9qz-mkipg8, mmaok9qz-tmw40b, all done)
 
 ### 2026-03-03 — Claude (autonomous) — Jemma Bug Fixes Complete
 - **Four critical bugs fixed in Jemma Discord dispatcher** — Service now ready for production activation:
@@ -1125,6 +1145,10 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ WebSocket real-time updates for health status changes
 - ✅ Verification wait fix: 12-second sleep after Jim restart (was 3s, caused false failures)
 - ✅ 1-hour cooldown between resurrection attempts, ntfy human escalation on failure
+- ✅ Bearer token authentication for remote access (/api/* and /admin routes)
+- ✅ Localhost authentication bypass (127.0.0.1, ::1, ::ffff:127.0.0.1)
+- ✅ WebSocket authentication via query param or Sec-WebSocket-Protocol header
+- ✅ Configuration-driven auth (server_auth_token in config.json)
 
 ## Next Actions
 
@@ -1132,6 +1156,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - [x] Level 11 (user choice — final level in ROADMAP)
 - [x] Level 13 — Conversation catalogue & search complete
 - [x] Fix Jemma bugs before service activation (health file field, command injection, reconciliation direction, SIGTERM exit code)
+- [x] Add bearer token authentication for remote access
 - [ ] Activate Jemma systemd service in production
 - [ ] Test conversation search with real conversation history
 - [ ] Test backfill endpoint on existing conversations (`POST /api/conversations/recatalogue-all`)
