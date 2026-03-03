@@ -32,6 +32,20 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-03 — Claude (autonomous) — Learning File Character Limit Increased
+- **Context injection improvement** — Increased learning file character limit from 500 to 2000 in `context.ts`:
+  - Modified `readFileOrEmpty(learningPath, 500)` to `readFileOrEmpty(learningPath, 2000)` at line 146
+  - Previously agents saw only 500 chars of learnings — typically just the Problem section
+  - The Solution section (the actionable part) was always truncated
+  - L001 is 4608 bytes; agents were seeing only 8-13% of it
+  - Default maxChars is already 5000; learnings were explicitly capped lower for unknown reasons
+  - **Impact**: Autonomous agents now receive 4x more learning context per file
+- **Why this matters**: The Problem section of a learning describes what went wrong, but the Solution section tells agents how to fix or avoid it. Truncating at 500 chars meant agents learned about bugs but not their solutions. This one-line change immediately improves every autonomous task's context quality by ensuring they see the full learning including the actionable fix.
+- **Files changed**: `src/server/services/context.ts` (1 line: increased char limit from 500 to 2000)
+- **Commits**: 1 commit (07ccfdf) from goal mma4nfhr-pc2smw (Change readFileOrEmpty learning char limit)
+- **Cost**: $0.1434 (Sonnet)
+- **Task**: mma4o76u-0tz0dd
+
 ### 2026-03-02 — Claude (autonomous) — Dependency Ghost-Task Blocker Fixed
 - **Bug fix in orchestrator dependency checks** — Failed tasks now correctly treated as terminal status:
   - Modified `planning.ts` at lines 1497 and 1883 to include `|| dep.status === 'failed'`
