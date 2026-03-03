@@ -32,6 +32,29 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-04 — Claude (autonomous) — Checkpoint Cleanup Data Loss Bug Fixed
+- **Critical data loss bug fixed in git checkpoint cleanup** — `cleanupCheckpoint()` was using `git stash drop` which permanently destroyed Leo's pre-existing uncommitted work after task completion. This violated the fundamental checkpoint guarantee: preserve user state, don't destroy it.
+- **Fix implemented**: Changed stash cleanup from `drop` to `pop` with proper conflict handling:
+  - **Success case**: `git stash pop` restores user's uncommitted changes AND removes stash from list (atomic operation)
+  - **Conflict case**: When task commits and user's stashed changes modify the same lines, pop fails with merge conflict. Working tree gets conflict markers, stash remains in list for manual resolution — zero data loss
+  - **Branch cleanup unchanged**: Branch-type checkpoints simply delete the branch (correct as-is, no conflict possible)
+- **Why this matters**: Before this fix, every autonomous task that ran while Leo had uncommitted work would permanently lose that work. The stash was created correctly but then dropped during cleanup. Now user work is always restored (on success) or preserved in stash list (on conflict) for manual resolution. This restores the checkpoint system's original safety guarantee.
+- **Conflict resolution workflow**: When pop fails, user must manually:
+  1. Edit conflicted files and remove conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`)
+  2. `git add [files] && git commit`
+  3. `git stash drop [stash-ref]` (optional cleanup)
+- **Implementation details**:
+  - Single-function fix in `src/server/services/git.ts:296-343` (cleanupCheckpoint)
+  - Added 29-line documentation block explaining cleanup strategy and conflict handling
+  - Try/catch wrapper around `git stash pop` — success logs cleanup, failure warns about manual resolution
+  - No change to branch-type cleanup path (lines 300-306) — that logic was correct
+- **Testing**: Comprehensive test suite with 12 test cases covering success, conflict, branch cleanup, no-op, and edge cases. All tests use real git commands against temporary repositories.
+- **Files modified**: `src/server/services/git.ts` (+29/-6 lines), `claude-context/ARCHITECTURE.md` (+15 lines documenting behavior)
+- **Files created**: `src/server/tests/git.test.ts` (412 lines, 12 test cases)
+- **Commits**: 5 commits (12774a0, 547287c, 28dea50, 528e5d1, 3dc1ce2) from goal mmb5a7zu-r65gaq (Fix cleanupCheckpoint() data loss bug)
+- **Cost**: $0.61 (Sonnet $0.17, Haiku $0.44)
+- **Tasks**: 3 tasks (mmb5br94-7tkvvu, mmb5br95-tg2syg, mmb5br95-02igc6, all done)
+
 ### 2026-03-04 — Claude (autonomous) — Bearer Token Authentication Complete
 - **Remote access security implemented** — Full authentication system for /api/* and /admin routes:
   - **Localhost bypass**: All requests from 127.0.0.1, ::1, ::ffff:127.0.0.1 bypass authentication entirely — preserves Leo, Jim, Jemma, and all internal agent communication without any changes

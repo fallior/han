@@ -64,6 +64,7 @@ When you make a significant technical or design decision:
 | DEC-032 | Shell Command Execution — execFileSync for Untrusted Input | **Settled** | 2026-03-03 |
 | DEC-033 | Agent Health File Schema Consistency | **Settled** | 2026-03-03 |
 | DEC-034 | Bearer Token Authentication with Localhost Bypass | Accepted | 2026-03-04 |
+| DEC-035 | Stash Checkpoint Cleanup — Pop Instead of Drop | **Settled** | 2026-03-04 |
 
 ---
 
@@ -2663,6 +2664,105 @@ Full test report: `AUTH_TEST_REPORT.md`
 - L012: Agent SDK fails with CLAUDECODE env var (nested session detection)
 - DEC-004: Remote Access — Tailscale (network layer security)
 - Commits: b9b2344, 1d4c2f0, c2878f1, e9528c4, 07170ba
+
+---
+
+### DEC-035: Stash Checkpoint Cleanup — Pop Instead of Drop
+
+**Date**: 2026-03-04
+**Author**: Claude (autonomous)
+**Status**: **Settled**
+
+#### Context
+
+When autonomous tasks run with uncommitted work present, `createCheckpoint()` stashes the changes, the task executes and commits, then `cleanupCheckpoint()` must restore the user's original work. The original implementation used `git stash drop`, which **permanently destroyed the user's pre-existing uncommitted work** — violating the fundamental checkpoint guarantee.
+
+This was a critical data loss bug affecting Leo's (session agent) workflow. Every autonomous task that completed would erase Leo's uncommitted work that existed before the task started.
+
+#### Options Considered
+
+1. **Keep using `git stash drop`**
+   - ✅ Simple one-liner
+   - ✅ Removes stash from list (cleanup goal achieved)
+   - ❌ **Destroys user work permanently — unacceptable data loss**
+   - ❌ Defeats the entire purpose of creating a checkpoint
+
+2. **Use `git stash apply` then conditionally drop**
+   - ✅ Restores changes
+   - ✅ Can check exit code before dropping
+   - ❌ Two-step operation — easy to get wrong
+   - ❌ Must manually track whether to drop or not
+   - ❌ Complex error handling (what if apply succeeds but drop fails?)
+
+3. **Use `git stash pop` with try/catch** ✅
+   - ✅ Single atomic operation
+   - ✅ Restores changes AND removes stash on success
+   - ✅ On conflict, stash automatically remains in list (built-in safety)
+   - ✅ Simple error handling — catch means conflict, log and continue
+   - ✅ Matches exactly what we need: restore if possible, preserve if not
+
+#### Decision
+
+**Use `git stash pop` wrapped in try/catch.** This is the correct primitive for our use case.
+
+**Implementation** (git.ts:321-335):
+```typescript
+try {
+    // Pop applies the stash and removes it from stash list
+    execFileSync('git', ['stash', 'pop', match[1]], {
+        cwd: projectPath,
+        stdio: 'ignore'
+    });
+    console.log(`[Git] Cleaned up checkpoint stash: ${checkpointRef}`);
+} catch (err: any) {
+    // Pop failed: merge conflict between task commits and user's stashed changes
+    // Leave stash in place — user must resolve manually to preserve data
+    console.warn(`[Git] Stash pop had conflicts — leaving stash in place for manual resolution`);
+}
+```
+
+**Behavior:**
+- **Success case**: Changes restored to working tree, stash removed from list — clean state
+- **Conflict case**: Working tree has conflict markers, stash remains in `git stash list` for inspection/recovery — zero data loss
+- **Manual resolution**: User edits files, removes markers, commits, optionally drops stash
+
+#### Consequences
+
+**Positive:**
+- ✅ Zero data loss in all scenarios — user work always preserved or restored
+- ✅ Simple implementation — single command, atomic behavior
+- ✅ Git's conflict handling is battle-tested — we leverage it instead of reimplementing
+- ✅ Clear user feedback — conflict markers in working tree, warning in logs
+- ✅ Checkpoint system works as originally intended
+
+**Negative:**
+- ❌ User must manually resolve conflicts (unavoidable — can't programmatically choose "theirs" or "ours")
+- ❌ Conflict state visible in working tree (acceptable — better than silent data loss)
+
+**Why not auto-resolve conflicts?**
+- Auto-keeping task's version discards user work → defeats purpose of checkpoint
+- Auto-keeping user's version discards task work → defeats purpose of task
+- Only manual resolution preserves both — no algorithm can know user's intent
+
+**This decision is marked Settled** because data loss bugs cause real pain and this solution was carefully reasoned through. The choice between pop/apply/drop is straightforward once the requirement is clear: **never destroy user data**.
+
+#### Testing
+
+Comprehensive test suite (`src/server/tests/git.test.ts`) with 12 test cases:
+- Stash pop success (clean restore)
+- Stash pop conflict (preserves stash)
+- Branch cleanup (unchanged, works correctly)
+- No-op cases (null ref, type='none')
+- Edge cases and error scenarios
+
+All tests use real git commands against temporary repositories to verify actual behavior.
+
+#### Related
+
+- DEC-010: Git Checkpoint Strategy (branch vs stash) — established when to use each type
+- This decision fixes the cleanup half of the checkpoint lifecycle
+- Commits: 12774a0, 547287c, 28dea50, 528e5d1, 3dc1ce2
+- Session note: `claude-context/session-notes/2026-03-04-autonomous-checkpoint-cleanup-fix.md`
 
 ---
 
