@@ -41,6 +41,7 @@ import analyticsRouter from './routes/analytics';
 import proposalsRouter from './routes/proposals';
 import supervisorRouter from './routes/supervisor';
 import conversationsRouter from './routes/conversations';
+import jemmaRouter from './routes/jemma';
 
 // ── Single instance lock ─────────────────────────────────
 
@@ -122,6 +123,7 @@ app.use('/api/supervisor', supervisorRouter);
 app.use('/api/goals', goalsRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/conversations', conversationsRouter);
+app.use('/api/jemma', jemmaRouter);
 app.use('/api', portfolioRouter);
 
 // Serve the UI
