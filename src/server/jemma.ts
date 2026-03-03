@@ -315,8 +315,14 @@ function deliverToDarron(message: any, classification: ClassificationResult): vo
     if (!config.ntfy_topic) return;
 
     const ntfyMsg = `Discord — ${message.author.username}: ${message.content.slice(0, 100)}`;
-    execSync(`curl -s -d "${ntfyMsg}" -H "Title: Discord Message" https://ntfy.sh/${config.ntfy_topic}`, {
+    execFileSync('curl', [
+      '-s',
+      '-d', ntfyMsg,
+      '-H', 'Title: Discord Message',
+      `https://ntfy.sh/${config.ntfy_topic}`
+    ], {
       timeout: 5000,
+      stdio: 'ignore'
     });
 
     console.log(`[Jemma] Notified Darron (${message.author.username})`);
