@@ -34,7 +34,7 @@
 import WebSocket from 'ws';
 import path from 'node:path';
 import fs from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 
 // ── Configuration ─────────────────────────────────────────────────
 
