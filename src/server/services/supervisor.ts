@@ -171,6 +171,91 @@ function checkLeoHealth(): void {
     }
 }
 
+// ── Check Jemma health (Robin Hood Protocol) ──────────────
+
+function checkJemmaHealth(): void {
+    try {
+        if (!fs.existsSync(JEMMA_HEALTH_FILE)) {
+            console.log('[Robin Hood] Jemma health file not found — skipping check');
+            return;
+        }
+
+        const jemmaHealthData = JSON.parse(fs.readFileSync(JEMMA_HEALTH_FILE, 'utf-8'));
+        const jemmaTimestamp = new Date(jemmaHealthData.timestamp).getTime();
+        const ageMs = Date.now() - jemmaTimestamp;
+        const ageMinutes = ageMs / 60000;
+
+        if (ageMinutes < 10) {
+            // OK — no action needed
+            console.log(`[Robin Hood] Jemma OK (${Math.round(ageMinutes)}min ago, PID ${jemmaHealthData.pid})`);
+            return;
+        }
+
+        if (ageMinutes < 20) {
+            // Stale — log and check if process alive
+            console.log(`[Robin Hood] Jemma stale (${Math.round(ageMinutes)}min ago) — checking PID ${jemmaHealthData.pid}`);
+            try {
+                process.kill(jemmaHealthData.pid, 0);
+                console.log(`[Robin Hood] Jemma PID ${jemmaHealthData.pid} is alive — no action needed`);
+                return;
+            } catch {
+                // PID dead, will fall through to down handling
+                console.log(`[Robin Hood] Jemma PID ${jemmaHealthData.pid} is dead — treating as down`);
+            }
+        } else {
+            // Down — log and prepare to resurrect
+            console.log(`[Robin Hood] Jemma down (${Math.round(ageMinutes)}min ago) — checking PID ${jemmaHealthData.pid}`);
+            try {
+                process.kill(jemmaHealthData.pid, 0);
+                console.log(`[Robin Hood] Jemma PID ${jemmaHealthData.pid} is alive — no action needed`);
+                return;
+            } catch {
+                console.log(`[Robin Hood] Jemma PID ${jemmaHealthData.pid} is dead — proceeding with resurrection`);
+            }
+        }
+
+        // At this point, PID is dead and age > 10min — attempt resurrection with cooldown
+        const cooldownOk = checkResurrectionCooldown();
+        if (!cooldownOk) {
+            console.log('[Robin Hood] Resurrection cooldown active — skipping');
+            return;
+        }
+
+        console.log('[Robin Hood] Attempting Jemma resurrection via systemctl');
+        try {
+            execSync('systemctl --user restart jemma.service', { timeout: 30000 });
+            console.log('[Robin Hood] Jemma restart command sent');
+
+            // Wait 5 seconds for service to start
+            execSync('sleep 5');
+
+            // Check if health file was updated
+            if (fs.existsSync(JEMMA_HEALTH_FILE)) {
+                const updatedHealthData = JSON.parse(fs.readFileSync(JEMMA_HEALTH_FILE, 'utf-8'));
+                const updatedAge = (Date.now() - new Date(updatedHealthData.timestamp).getTime()) / 60000;
+                if (updatedAge < 1) {
+                    // Success — health file recently updated
+                    console.log('[Robin Hood] Jemma resurrection successful');
+                    logResurrectionResult(true, `Restarted after ${Math.round(ageMinutes)}min down`, 'jemma');
+                    return;
+                }
+            }
+
+            // Health file not updated — failure
+            console.error('[Robin Hood] Jemma health file not updated after restart');
+            logResurrectionResult(false, `Restart failed: health file not updated after ${Math.round(ageMinutes)}min down`, 'jemma');
+            escalateToNtfy(`Failed to resurrect Jemma (Discord service). Last seen ${Math.round(ageMinutes)}min ago. Manual intervention needed.`);
+        } catch (err) {
+            const msg = (err as Error).message;
+            console.error('[Robin Hood] Jemma resurrection failed:', msg);
+            logResurrectionResult(false, `Restart failed: ${msg}`, 'jemma');
+            escalateToNtfy(`Failed to resurrect Jemma (Discord service). Last seen ${Math.round(ageMinutes)}min ago. Manual intervention needed.`);
+        }
+    } catch (err) {
+        console.error('[Robin Hood] Jemma health check error:', (err as Error).message);
+    }
+}
+
 function checkResurrectionCooldown(): boolean {
     try {
         if (!fs.existsSync(RESURRECTION_LOG)) {
@@ -197,13 +282,13 @@ function checkResurrectionCooldown(): boolean {
     }
 }
 
-function logResurrectionResult(success: boolean, reason: string): void {
+function logResurrectionResult(success: boolean, reason: string, target: string = 'leo'): void {
     try {
         fs.mkdirSync(HEALTH_DIR, { recursive: true });
         const entry = {
             timestamp: new Date().toISOString(),
             resurrector: 'jim',
-            target: 'leo',
+            target,
             reason,
             success
         };
@@ -842,8 +927,9 @@ export function scheduleSupervisorCycle(): void {
     const delay = getWallClockDelay();
 
     nextCycleTimeout = setTimeout(async () => {
-        // Check Leo health at start of every cycle (Robin Hood Protocol)
+        // Check Leo and Jemma health at start of every cycle (Robin Hood Protocol)
         checkLeoHealth();
+        checkJemmaHealth();
 
         // Check Opus slot availability right before running
         if (isOpusSlotBusy()) {

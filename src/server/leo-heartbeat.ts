@@ -95,6 +95,7 @@ let lastHeartbeatStartMs: number | null = null;
 // ── Robin Hood Protocol — mutual health checks ──────────────
 
 const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
+const JEMMA_HEALTH_FILE = path.join(HEALTH_DIR, 'jemma-health.json');
 const RESURRECTION_LOG = path.join(HEALTH_DIR, 'resurrection-log.jsonl');
 const RESURRECTION_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
@@ -215,6 +216,125 @@ function checkJimHealth(): void {
         }
     } catch (err) {
         console.error('[Robin Hood] Health check error:', (err as Error).message);
+    }
+}
+
+// ── Check Jemma health (Robin Hood Protocol) ──────────────
+
+function checkJemmaHealth(): void {
+    try {
+        if (!fs.existsSync(JEMMA_HEALTH_FILE)) {
+            console.log('[Robin Hood] Jemma health file not found — skipping check');
+            return;
+        }
+
+        const jemmaHealthData = JSON.parse(fs.readFileSync(JEMMA_HEALTH_FILE, 'utf-8'));
+        const jemmaTimestamp = new Date(jemmaHealthData.timestamp).getTime();
+        const ageMs = Date.now() - jemmaTimestamp;
+        const ageMin = Math.round(ageMs / 60000);
+
+        if (ageMin < 10) {
+            // OK — Jemma recent
+            console.log(`[Robin Hood] Jemma OK (${ageMin}min ago, PID ${jemmaHealthData.pid})`);
+            return;
+        }
+
+        if (ageMin < 20) {
+            // Stale — Jemma hasn't reported in a while
+            console.log(`[Robin Hood] Jemma STALE — last seen ${ageMin}min ago (PID ${jemmaHealthData.pid})`);
+            if (jemmaHealthData.pid) {
+                try {
+                    process.kill(jemmaHealthData.pid, 0);
+                    console.log(`[Robin Hood] Jemma process ${jemmaHealthData.pid} is alive — may be in a long cycle`);
+                } catch {
+                    console.log(`[Robin Hood] Jemma process ${jemmaHealthData.pid} is DEAD — stale but under threshold`);
+                }
+            }
+            return;
+        }
+
+        // Down — Jemma hasn't reported in over 20 minutes
+        console.log(`[Robin Hood] Jemma DOWN — last seen ${ageMin}min ago`);
+
+        // PID alive check — if process is alive but not reporting, don't resurrect
+        if (jemmaHealthData.pid) {
+            try {
+                process.kill(jemmaHealthData.pid, 0);
+                console.log(`[Robin Hood] Jemma process ${jemmaHealthData.pid} is alive but not reporting — possible hang`);
+                return;
+            } catch {
+                console.log(`[Robin Hood] Jemma process ${jemmaHealthData.pid} is DEAD — attempting resurrection`);
+            }
+        }
+
+        // Cooldown check — don't resurrect more than once per hour
+        try {
+            const logContent = fs.readFileSync(RESURRECTION_LOG, 'utf-8').trim();
+            const lines = logContent.split('\n').filter(Boolean);
+            if (lines.length > 0) {
+                const lastEntry = JSON.parse(lines[lines.length - 1]);
+                const lastAttemptAge = Date.now() - new Date(lastEntry.timestamp).getTime();
+                if (lastAttemptAge < RESURRECTION_COOLDOWN_MS) {
+                    const cooldownRemain = Math.round((RESURRECTION_COOLDOWN_MS - lastAttemptAge) / 60000);
+                    console.log(`[Robin Hood] Resurrection cooldown active — ${cooldownRemain}min remaining`);
+                    return;
+                }
+            }
+        } catch {
+            // No resurrection log yet — proceed
+        }
+
+        // Attempt resurrection
+        console.log('[Robin Hood] Resurrecting Jemma via systemctl --user restart jemma.service');
+        let success = false;
+        try {
+            execSync('systemctl --user restart jemma.service', { timeout: 30000 });
+
+            // Wait for service to start
+            execSync('sleep 5');
+            try {
+                const status = execSync('systemctl --user is-active jemma.service', { timeout: 5000 }).toString().trim();
+                if (status === 'active') {
+                    console.log('[Robin Hood] Jemma RESURRECTED — service active');
+                    success = true;
+                } else {
+                    console.log(`[Robin Hood] Jemma resurrection FAILED — service status: ${status}`);
+                }
+            } catch {
+                console.log('[Robin Hood] Jemma resurrection FAILED — service not active after restart');
+            }
+        } catch (err) {
+            console.error('[Robin Hood] Jemma resurrection FAILED:', (err as Error).message);
+        }
+
+        // Log the resurrection attempt
+        const logEntry = {
+            timestamp: new Date().toISOString(),
+            resurrector: 'leo',
+            target: 'jemma',
+            reason: `Health file ${ageMin}min stale, PID dead`,
+            success,
+        };
+        try {
+            fs.appendFileSync(RESURRECTION_LOG, JSON.stringify(logEntry) + '\n');
+        } catch (err) {
+            console.error('[Robin Hood] Failed to write resurrection log:', (err as Error).message);
+        }
+
+        // If resurrection failed, send ntfy notification for human escalation
+        if (!success) {
+            try {
+                const config = loadConfig();
+                if (config.ntfy_topic) {
+                    execSync(`curl -s -d "Robin Hood: Failed to resurrect Jemma (Discord service). Last seen ${ageMin}min ago. Manual intervention needed." -H "Title: Robin Hood Alert" -H "Priority: urgent" -H "Tags: warning" https://ntfy.sh/${config.ntfy_topic}`, { timeout: 10000 });
+                    console.log('[Robin Hood] Human escalation notification sent via ntfy');
+                }
+            } catch {
+                console.error('[Robin Hood] Failed to send ntfy notification');
+            }
+        }
+    } catch (err) {
+        console.error('[Robin Hood] Jemma health check error:', (err as Error).message);
     }
 }
 
@@ -1216,8 +1336,9 @@ async function heartbeat(): Promise<void> {
     }
     lastHeartbeatStartMs = beatStartMs;
 
-    // Robin Hood: check Jim's health FIRST — before anything else
+    // Robin Hood: check Jim's and Jemma's health FIRST — before anything else
     checkJimHealth();
+    checkJemmaHealth();
 
     // Gary model: check if CLI is actively processing a prompt
     if (isCliActive()) {
