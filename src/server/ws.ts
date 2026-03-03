@@ -6,6 +6,9 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server as HTTPServer } from 'http';
 import type { Server as HTTPSServer } from 'https';
+import type { IncomingMessage } from 'http';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -79,6 +82,28 @@ interface AliveWebSocket extends WebSocket {
     isAlive: boolean;
 }
 
+// ── Authentication helpers ────────────────────────────────
+
+/**
+ * Check if request is from localhost
+ */
+function isLocalhost(req: IncomingMessage): boolean {
+    const remoteAddress = req.socket.remoteAddress || '';
+    return remoteAddress === '127.0.0.1' || remoteAddress === '::1' || remoteAddress === '::ffff:127.0.0.1';
+}
+
+/**
+ * Load config to get server_auth_token
+ */
+function loadConfig(): any {
+    try {
+        const cfgPath = path.join(process.env.HOME || '', '.claude-remote', 'config.json');
+        return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    } catch {
+        return {};
+    }
+}
+
 // ── Module state ──────────────────────────────────────────
 
 let wss: WebSocketServer | null = null;
@@ -105,6 +130,7 @@ export function broadcast(data: Record<string, unknown>): void {
 /**
  * Create the WebSocket server bound to an existing HTTP(S) server.
  * Sets up connection handling and heartbeat ping/pong.
+ * Authenticates non-localhost connections via query parameter or Sec-WebSocket-Protocol header.
  */
 export function createWebSocketServer(
     httpServer: HTTPServer | HTTPSServer,
@@ -112,8 +138,41 @@ export function createWebSocketServer(
 ): WebSocketServer {
     wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
-    // Connection handling
-    wss.on('connection', (ws: AliveWebSocket) => {
+    // Connection handling with authentication
+    wss.on('connection', (ws: AliveWebSocket, request: IncomingMessage) => {
+        // Check authentication for non-localhost connections
+        if (!isLocalhost(request)) {
+            const config = loadConfig();
+            const serverToken = config.server_auth_token;
+
+            // If token is configured, verify the connection has it
+            if (serverToken) {
+                let tokenValid = false;
+
+                // Check for token in query parameter (?token=xxx)
+                const url = new URL(request.url || '', 'http://localhost');
+                const queryToken = url.searchParams.get('token');
+                if (queryToken === serverToken) {
+                    tokenValid = true;
+                }
+
+                // Check for token in Sec-WebSocket-Protocol header as fallback
+                if (!tokenValid) {
+                    const wsProtocolHeader = request.headers['sec-websocket-protocol'];
+                    if (wsProtocolHeader === serverToken) {
+                        tokenValid = true;
+                    }
+                }
+
+                // Close connection if token is missing or invalid
+                if (!tokenValid) {
+                    console.log('WebSocket connection rejected: unauthorized');
+                    ws.close(1008, 'Unauthorized');
+                    return;
+                }
+            }
+        }
+
         console.log('WebSocket client connected');
 
         // Send current state immediately
