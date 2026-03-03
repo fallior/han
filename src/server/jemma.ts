@@ -143,7 +143,7 @@ function writeHealthFile(status: 'ok' | 'error', lastError?: string): void {
   try {
     const health = {
       pid: process.pid,
-      lastBeat: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
       lastGatewayEvent: lastGatewayEventTimestamp
         ? new Date(lastGatewayEventTimestamp).toISOString()
         : null,
@@ -465,8 +465,8 @@ async function reconcileMessages(): Promise<void> {
 
       const messages: any[] = await res.json();
       if (messages.length > 0) {
-        // Update last seen ID
-        lastSeenMessageId[channelId] = messages[messages.length - 1].id;
+        // Update last seen ID (messages[0] is newest, Discord returns reverse chronological)
+        lastSeenMessageId[channelId] = messages[0].id;
 
         // Process messages
         for (const msg of messages) {
