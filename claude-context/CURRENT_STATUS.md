@@ -32,6 +32,18 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-03 — Claude (autonomous) — Jemma Bug Fixes Complete
+- **Four critical bugs fixed in Jemma Discord dispatcher** — Service now ready for production activation:
+  - **Health file field mismatch** (highest priority): Changed `lastBeat` to `timestamp` in jemma.ts:146 writeHealthFile() function. Three consumers (supervisor.ts:184, routes/supervisor.ts:445, admin.ts:1182) were reading `timestamp` but Jemma was writing `lastBeat`, causing health checks to fail. Now consistent with Leo and Jim health file format.
+  - **Command injection vulnerability** (security): Replaced `execSync` with `execFileSync` for ntfy notifications (jemma.ts:318). Previous implementation embedded unsanitised Discord message content in shell string — a message containing `"; rm -rf / #` would execute. Now uses array-based argument passing (same safe pattern used in routes/jemma.ts:57).
+  - **Reconciliation lastSeenMessageId wrong direction**: Fixed jemma.ts:469 to store `messages[0].id` (newest) instead of `messages[messages.length - 1].id` (oldest). Discord's GET /messages?after=X returns newest first, so storing oldest ID caused re-processing every 5 minutes.
+  - **SIGTERM exit code**: Changed process.exit(0) to process.exit(143) in jemma.ts:674 for proper systemd signal handling. Exit code 143 (128 + 15 = SIGTERM) tells systemd this was a signal death, not a clean exit, allowing Restart=always to work correctly.
+- **Why this matters**: Jemma is now production-ready. All four bugs were caught before service activation — health monitoring works correctly, command injection vulnerability eliminated, no duplicate message processing, and systemd restarts work properly. This completes the communication triad (Jim + Leo + Jemma) with Robin Hood Protocol supervision.
+- **Files modified**: `src/server/jemma.ts` (4 separate fixes, 1-line to 3-line changes)
+- **Commits**: 5 commits (f663a3e, 66696be, b261f71, f7fe2a5, b98e6ac, cf66f28) from goal mmajtvaz-851axc (Fix three bugs in Jemma)
+- **Cost**: $1.55 (all Sonnet)
+- **Tasks**: 4 tasks (mmajvjfz-razgjn, mmajvjg0-vcuatz, mmajvjg0-1ljdis, mmajvjg0-r0tiph, all done)
+
 ### 2026-03-03 — Claude (autonomous) — Jemma Discord Message Dispatcher Complete
 - **Discord Gateway integration implemented** — Full Discord message routing system with AI classification:
   - **Gateway WebSocket connection**: Implements complete Gateway protocol (HELLO → IDENTIFY → MESSAGE_CREATE events → HEARTBEAT)
@@ -1119,6 +1131,8 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ### Immediate (Next Session)
 - [x] Level 11 (user choice — final level in ROADMAP)
 - [x] Level 13 — Conversation catalogue & search complete
+- [x] Fix Jemma bugs before service activation (health file field, command injection, reconciliation direction, SIGTERM exit code)
+- [ ] Activate Jemma systemd service in production
 - [ ] Test conversation search with real conversation history
 - [ ] Test backfill endpoint on existing conversations (`POST /api/conversations/recatalogue-all`)
 - [ ] Test daily digest generation (`POST /api/digest/generate`)

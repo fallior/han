@@ -61,6 +61,8 @@ When you make a significant technical or design decision:
 | DEC-029 | Discord Gateway Implementation — Raw WebSocket vs discord.js | Accepted | 2026-03-03 |
 | DEC-030 | Message Classification — Ollama Local vs Anthropic API | Accepted | 2026-03-03 |
 | DEC-031 | Delivery Routing — Direct API Calls vs Signal Files | Accepted | 2026-03-03 |
+| DEC-032 | Shell Command Execution — execFileSync for Untrusted Input | **Settled** | 2026-03-03 |
+| DEC-033 | Agent Health File Schema Consistency | **Settled** | 2026-03-03 |
 
 ---
 
@@ -2298,6 +2300,238 @@ We chose **hybrid approach — API call with signal file fallback**.
 - DEC-029: Discord Gateway Implementation (Raw WebSocket vs discord.js)
 - DEC-030: Message Classification (Ollama vs Anthropic API)
 - Existing signal file pattern: Leo's heartbeat watches `~/.claude-remote/signals/leo-wake-*`
+
+---
+
+### DEC-032: Shell Command Execution — execFileSync for Untrusted Input
+
+**Date**: 2026-03-03
+**Author**: Claude (autonomous)
+**Status**: **Settled**
+
+#### Context
+
+When executing shell commands with user-controlled or external input (Discord messages, web requests, file uploads, etc.), how should we safely pass arguments to avoid command injection vulnerabilities?
+
+#### The Vulnerability
+
+A command injection vulnerability was discovered in Jemma's ntfy notification code (jemma.ts:318):
+
+```typescript
+// VULNERABLE CODE (before fix)
+execSync(`curl -s -d "${ntfyMsg}" -H "Title: Discord Message" https://ntfy.sh/${config.ntfy_topic}`);
+```
+
+If a Discord message contained `"; rm -rf / #`, the shell would execute arbitrary commands:
+
+```bash
+curl -s -d "Discord — alice: "; rm -rf / #" -H "Title: Discord Message" https://ntfy.sh/topic
+```
+
+This executes `rm -rf /` — catastrophic data loss.
+
+#### Options Considered
+
+1. **execSync with string interpolation** (status quo)
+   - ✅ Simple syntax (template literals, easy to read)
+   - ❌ **DANGEROUS** — shell interprets special characters (`;`, `|`, `&`, `$`, backticks, etc.)
+   - ❌ Requires manual escaping of all user input (error-prone, easy to forget)
+   - ❌ No safe escaping function in Node.js standard library (must use third-party library or write custom escaper)
+
+2. **execSync with manual shell escaping**
+   - ✅ Could work if done correctly
+   - ❌ Very error-prone (must escape `;`, `|`, `&`, `$`, backticks, quotes, newlines, null bytes, etc.)
+   - ❌ Platform-dependent (bash vs sh vs zsh have different escaping rules)
+   - ❌ No standard library function for this in Node.js (must implement yourself or use library)
+   - ❌ One mistake = security vulnerability
+
+3. **execFileSync with array arguments**
+   - ✅ **SAFE** — no shell interpretation, arguments passed directly to the binary
+   - ✅ No escaping needed (special characters are literal data, not shell syntax)
+   - ✅ Platform-independent (works identically on Linux, macOS, Windows)
+   - ✅ Built-in Node.js standard library function (no dependencies)
+   - ✅ Already used correctly elsewhere in codebase (routes/jemma.ts:57)
+   - ❌ Slightly more verbose (array syntax instead of template literal)
+
+#### Decision
+
+We chose **execFileSync with array arguments** as the **MANDATORY** pattern for all shell command execution with untrusted input.
+
+#### Safe Pattern (REQUIRED)
+
+```typescript
+import { execFileSync } from 'node:child_process';
+
+// CORRECT — safe against command injection
+const ntfyMsg = `Discord — ${message.author.username}: ${message.content.slice(0, 100)}`;
+execFileSync('curl', [
+  '-s',
+  '-d', ntfyMsg,  // ntfyMsg is data, not code — no shell interpretation
+  '-H', 'Title: Discord Message',
+  `https://ntfy.sh/${config.ntfy_topic}`
+], { encoding: 'utf-8' });
+```
+
+Even if `ntfyMsg` contains `"; rm -rf / #"`, it's passed as **literal data** to curl's `-d` flag — no shell execution.
+
+#### Reasoning
+
+- **Security is non-negotiable** — command injection vulnerabilities can cause data loss, system compromise, or arbitrary code execution
+- **execFileSync is safer by default** — no shell interpretation means no special character handling needed
+- **This pattern is already proven in our codebase** — routes/jemma.ts:57 correctly uses `execFileSync('curl', [...args])`
+- **Node.js documentation recommends this approach** — https://nodejs.org/api/child_process.html#child_processexecfilesyncfile-args-options
+- **Defense in depth** — even if input validation fails, execFileSync prevents injection
+
+#### Implementation Rules
+
+**MANDATORY for all code in this project:**
+
+1. **When executing shell commands with ANY external/user-controlled input:**
+   - ✅ **Use `execFileSync(command, [args], options)` or `execFile(command, [args], callback)`**
+   - ❌ **NEVER use `execSync()` or `exec()` with string interpolation**
+
+2. **External/user-controlled input includes:**
+   - Discord messages, Slack messages, webhooks, API requests
+   - File uploads, filenames, file contents
+   - Environment variables from untrusted sources
+   - Database values that originated from user input
+   - Anything from the network or external systems
+
+3. **Trusted input (ONLY these exceptions):**
+   - Hardcoded strings in code (e.g., `execSync('ls -la')`)
+   - Configuration files controlled by sysadmin (not user-editable)
+   - Data from authenticated, authorized admin-only APIs
+
+4. **When in doubt, use execFileSync** — it's always safer
+
+#### Consequences
+
+- **All shell command execution with untrusted input must use execFileSync** — this is a security requirement, not a suggestion
+- **Code reviews must check for execSync usage** — any new `execSync()` calls with interpolated variables should be flagged
+- **Autonomous agents must follow this pattern** — when generating code that executes shell commands, use execFileSync by default
+- **Existing code must be audited** — grep for `execSync` and verify all uses are safe (hardcoded strings only)
+
+#### Related
+
+- Command injection fix commit: cf66f28
+- OWASP Top 10 — A03:2021 Injection: https://owasp.org/Top10/A03_2021-Injection/
+- Node.js child_process documentation: https://nodejs.org/api/child_process.html
+
+---
+
+### DEC-033: Agent Health File Schema Consistency
+
+**Date**: 2026-03-03
+**Author**: Claude (autonomous)
+**Status**: **Settled**
+
+#### Context
+
+Jim, Leo, and Jemma all write health files to `~/.claude-remote/health/{agent}-health.json` for Robin Hood Protocol monitoring. These health files are read by the supervisor (Jim's supervisor cycle, health API endpoint, admin UI). Field names must be consistent across all agents.
+
+#### The Bug
+
+Jemma's health file used `lastBeat` (line 146 in jemma.ts) but three consumers read `timestamp`:
+
+1. `src/server/services/supervisor.ts:184` — Jim's supervisor health check for Jemma
+2. `src/server/routes/supervisor.ts:445` — `/api/supervisor/health` endpoint
+3. `src/ui/admin.ts:1182` — Admin UI health panel display
+
+This caused Jemma health monitoring to fail — supervisor thought Jemma was stale even when it was healthy.
+
+#### Options Considered
+
+1. **Keep `lastBeat`, update all consumers to read `lastBeat`**
+   - ✅ Minimal code change (update 3 consumers instead of 1 producer)
+   - ❌ Inconsistent with Jim and Leo health files (they use `timestamp`)
+   - ❌ Breaks existing convention (most recent agent wins)
+   - ❌ Requires updating multiple files (supervisor.ts, routes/supervisor.ts, admin.ts)
+
+2. **Change Jemma to use `timestamp`, keep consumers unchanged**
+   - ✅ **Consistent with Jim and Leo** (all agents use same field name)
+   - ✅ Minimal code change (1 line in jemma.ts)
+   - ✅ Follows established convention (Jim and Leo were first, Jemma should follow)
+   - ✅ No consumer code changes needed (already reading `timestamp`)
+   - ❌ None
+
+3. **Support both `lastBeat` and `timestamp` in consumers (fallback)**
+   - ✅ Backward compatible (works with both field names)
+   - ❌ Code complexity (every consumer needs fallback logic: `health.timestamp || health.lastBeat`)
+   - ❌ Perpetuates inconsistency (doesn't solve the root problem)
+   - ❌ Future agents might use either field name (confusion)
+
+#### Decision
+
+We chose **option 2: Change Jemma to use `timestamp`** to match Jim and Leo.
+
+#### Reasoning
+
+- **Consistency is critical for maintainability** — all agents should use the same schema
+- **Jim and Leo set the precedent** — they were implemented first, Jemma should follow their pattern
+- **Minimal code change** — 1 line in jemma.ts vs 3+ lines across multiple files
+- **No consumer changes needed** — consumers already expect `timestamp`, so changing Jemma fixes the bug with zero consumer changes
+- **Future-proof** — new agents (Sevn, Six, etc.) will use `timestamp` by default
+
+#### Required Schema (MANDATORY)
+
+All agent health files **MUST** use this schema:
+
+```typescript
+interface AgentHealth {
+  pid: number;                    // Process ID of the agent
+  timestamp: string;              // ISO 8601 timestamp of last health write (NOT lastBeat, NOT updatedAt)
+  status: 'ok' | 'error';        // Current status
+  lastError: string | null;      // Last error message (if status is 'error')
+  uptimeMinutes: number;         // Minutes since agent started
+
+  // Agent-specific fields (optional, but use consistent names)
+  lastCycle?: string;            // ISO 8601 timestamp (Jim only)
+  lastGatewayEvent?: string;     // ISO 8601 timestamp (Jemma only)
+  lastBeat?: string;             // DEPRECATED — use timestamp instead
+}
+```
+
+**Field naming rules:**
+
+1. **`timestamp`** — **MANDATORY** — last health file write time (ISO 8601 string)
+2. **`pid`** — **MANDATORY** — process ID (number)
+3. **`status`** — **MANDATORY** — 'ok' or 'error' (string literal)
+4. **`lastError`** — **MANDATORY** — error message or null (string | null)
+5. **`uptimeMinutes`** — **MANDATORY** — uptime in minutes (number)
+6. Agent-specific fields are allowed but must use consistent names across consumers
+
+#### Implementation
+
+Fixed in commit 66696be (jemma.ts line 146):
+
+```typescript
+// BEFORE (broken)
+const health = {
+  pid: process.pid,
+  lastBeat: new Date().toISOString(),  // ❌ Wrong field name
+  // ...
+};
+
+// AFTER (fixed)
+const health = {
+  pid: process.pid,
+  timestamp: new Date().toISOString(),  // ✅ Consistent with Jim and Leo
+  // ...
+};
+```
+
+#### Consequences
+
+- **All future agents must use `timestamp`** — this is the standard field name
+- **`lastBeat` is DEPRECATED** — do not use this field name in new code
+- **Health file schema is now settled** — changing field names requires explicit discussion (status: **Settled**)
+- **Robin Hood Protocol now works correctly for Jemma** — supervisor can detect staleness and trigger resurrection
+
+#### Related
+
+- Health file field mismatch fix commit: 66696be
+- DEC-027: Staleness Thresholds Recalibrated for Each Agent
+- DEC-028: Shared Resurrection Log at resurrection-log.jsonl
 
 ---
 
