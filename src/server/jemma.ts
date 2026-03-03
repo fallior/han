@@ -8,9 +8,27 @@
  *
  * Runs as a systemd user service (jemma.service).
  *
- * Usage:
+ * Setup:
+ *   1. Copy service file to systemd user directory:
+ *      cp scripts/jemma.service ~/.config/systemd/user/
+ *   2. Reload systemd daemon:
+ *      systemctl --user daemon-reload
+ *   3. Enable service to start on login:
+ *      systemctl --user enable jemma.service
+ *   4. Start the service:
+ *      systemctl --user start jemma.service
+ *   5. Monitor logs in real-time:
+ *      journalctl --user -u jemma -f
+ *
+ * Usage (direct):
  *   npx tsx src/server/jemma.ts
- *   Or as systemd service: systemctl --user start jemma.service
+ *
+ * Service management:
+ *   systemctl --user status jemma       — Check service status
+ *   systemctl --user restart jemma      — Restart service
+ *   systemctl --user stop jemma         — Stop service
+ *   systemctl --user disable jemma      — Disable on login
+ *   journalctl --user -u jemma -n 50    — View last 50 log lines
  */
 
 import WebSocket from 'ws';

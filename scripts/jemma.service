@@ -1,0 +1,18 @@
+[Unit]
+Description=Jemma — Discord message dispatcher service
+After=network.target claude-remote-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/darron/Projects/clauderemote/src/server
+ExecStart=/home/darron/Projects/clauderemote/src/server/node_modules/.bin/tsx jemma.ts
+Restart=always
+RestartSec=5
+Environment=HOME=/home/darron
+Environment=PATH=/home/darron/.nvm/versions/node/v23.9.0/bin:/usr/local/bin:/usr/bin:/bin
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jemma
+
+[Install]
+WantedBy=default.target

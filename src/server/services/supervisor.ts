@@ -48,6 +48,7 @@ const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
 const CLI_ACTIVE_FILE = path.join(SIGNALS_DIR, 'cli-active');
 const CLI_ACTIVE_STALE_MINUTES = 30;
 const LEO_HEALTH_FILE = path.join(HEALTH_DIR, 'leo-health.json');
+const JEMMA_HEALTH_FILE = path.join(HEALTH_DIR, 'jemma-health.json');
 const RESURRECTION_LOG = path.join(HEALTH_DIR, 'resurrection-log.jsonl');
 const RESURRECTION_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 const JIM_DISTRESS_FILE = path.join(HEALTH_DIR, 'jim-distress.json');
