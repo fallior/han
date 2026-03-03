@@ -2958,7 +2958,8 @@ let mdSearchTimeout: any = null;
 const workshopPersonaTabs = {
     jim: { label: 'Supervisor Jim', color: 'var(--purple)' },
     leo: { label: 'Philosopher Leo', color: 'var(--green)' },
-    darron: { label: 'Dreamer Darron', color: 'var(--blue)' }
+    darron: { label: 'Dreamer Darron', color: 'var(--blue)' },
+    jemma: { label: 'Dispatcher Jemma', color: 'var(--amber)' }
 };
 
 const workshopNestedTabs = {
@@ -2973,6 +2974,10 @@ const workshopNestedTabs = {
     darron: [
         { key: 'darron-thought', label: 'Thoughts' },
         { key: 'darron-musing', label: 'Musings' }
+    ],
+    jemma: [
+        { key: 'jemma-messages', label: 'Messages' },
+        { key: 'jemma-stats', label: 'Stats' }
     ]
 };
 
