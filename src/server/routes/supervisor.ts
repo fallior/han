@@ -436,6 +436,33 @@ router.get('/health', (_req: Request, res: Response) => {
             }
         }
 
+        // Read Jemma's health file
+        let jemma = null;
+        const jemmaPath = path.join(healthDir, 'jemma-health.json');
+        if (fs.existsSync(jemmaPath)) {
+            try {
+                const jemmaData = JSON.parse(fs.readFileSync(jemmaPath, 'utf8'));
+                const jemmaTimestamp = new Date(jemmaData.timestamp);
+                const ageMinutes = Math.floor((now.getTime() - jemmaTimestamp.getTime()) / 60000);
+
+                // Status logic: <10min = ok, 10-30min = stale, >30min = down (tighter for always-on)
+                let jemmaStatus: 'ok' | 'stale' | 'down' = 'ok';
+                if (ageMinutes > 30) jemmaStatus = 'down';
+                else if (ageMinutes > 10) jemmaStatus = 'stale';
+
+                jemma = {
+                    timestamp: jemmaData.timestamp,
+                    status: jemmaStatus,
+                    ageMinutes,
+                    pid: jemmaData.pid,
+                    gatewayConnected: jemmaData.gatewayConnected,
+                    uptimeMinutes: jemmaData.uptimeMinutes,
+                };
+            } catch (err) {
+                // Fall through if parsing fails
+            }
+        }
+
         // Read distress signals (if <1 hour old, otherwise treat as expired)
         const distress: any = {};
         const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -482,6 +509,27 @@ router.get('/health', (_req: Request, res: Response) => {
             }
         }
 
+        // Jemma's distress signal
+        const jemmaDistressPath = path.join(healthDir, 'jemma-distress.json');
+        if (fs.existsSync(jemmaDistressPath)) {
+            try {
+                const jemmaDistressData = JSON.parse(fs.readFileSync(jemmaDistressPath, 'utf8'));
+                const distressTimestamp = new Date(jemmaDistressData.timestamp);
+                const distressAgeMs = now.getTime() - distressTimestamp.getTime();
+
+                if (distressAgeMs < ONE_HOUR_MS) {
+                    distress.jemma = {
+                        timestamp: jemmaDistressData.timestamp,
+                        ageMinutes: Math.floor(distressAgeMs / 60000),
+                        reason: jemmaDistressData.reason,
+                        details: jemmaDistressData.details,
+                    };
+                }
+            } catch (err) {
+                // Fall through if parsing fails
+            }
+        }
+
         // Read resurrection log (last 20 entries)
         const resurrections: any[] = [];
         const resurrectionPath = path.join(healthDir, 'resurrection-log.jsonl');
@@ -508,6 +556,7 @@ router.get('/health', (_req: Request, res: Response) => {
             success: true,
             jim,
             leo,
+            jemma,
             distress: Object.keys(distress).length > 0 ? distress : null,
             resurrections,
             systemUptimeMinutes: Math.floor(process.uptime() / 60),

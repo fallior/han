@@ -1087,7 +1087,7 @@ function getStatusBadge(status: 'ok' | 'stale' | 'down' | 'distressed' | null): 
 }
 
 function renderHealthPanel(healthData: any): string {
-    const { jim, leo, distress = null, resurrections = [], systemUptimeMinutes = 0 } = healthData;
+    const { jim, leo, jemma, distress = null, resurrections = [], systemUptimeMinutes = 0 } = healthData;
 
     let html = `<div class="admin-card" style="margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -1129,6 +1129,21 @@ function renderHealthPanel(healthData: any): string {
                 </div>
             </div>`;
         }
+
+        if (distress.jemma) {
+            const jemmaAgeStr = formatDistressAge(distress.jemma.ageMinutes);
+            const reason = escapeHtml(distress.jemma.reason || 'Unknown issue');
+            html += `<div style="margin-bottom:12px;padding:10px 12px;background:var(--amber)15;border-left:3px solid var(--amber);border-radius:4px">
+                <div style="display:flex;align-items:flex-start;gap:8px">
+                    <span style="font-size:18px;line-height:1">⚠</span>
+                    <div>
+                        <div style="font-weight:600;color:var(--amber);font-size:12px">Jemma Degraded</div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${reason}</div>
+                        <div style="font-size:10px;color:var(--text-dim);margin-top:2px">${jemmaAgeStr}</div>
+                    </div>
+                </div>
+            </div>`;
+        }
     }
 
     html += `<div class="stat-row" style="margin-bottom:16px">`;
@@ -1159,6 +1174,21 @@ function renderHealthPanel(healthData: any): string {
             <span style="font-size:11px;color:var(--text-dim);margin-top:6px;display:block">Updated ${lastUpdateTime}</span>
             <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Beat #${leo.beat || '—'}${beatTypeLabel}</span>
             <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Uptime: ${leo.uptimeMinutes}m</span>
+        </div>`;
+    }
+
+    // Jemma's Health
+    if (jemma) {
+        const lastUpdateTime = new Date(jemma.timestamp).toLocaleString('en-AU', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const gatewayStatus = jemma.gatewayConnected ? 'Connected' : 'Disconnected';
+        // If Jemma has distress signal, show it as degraded status
+        const jemmaStatus = distress?.jemma ? 'distressed' : jemma.status;
+        html += `<div class="stat-card">
+            <span class="stat-label">Jemma Status</span>
+            <div style="margin-top:6px">${getStatusBadge(jemmaStatus)}</div>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:6px;display:block">Updated ${lastUpdateTime}</span>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Gateway: ${gatewayStatus}</span>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Uptime: ${jemma.uptimeMinutes}m</span>
         </div>`;
     }
 
@@ -2981,8 +3011,165 @@ const workshopNestedTabs = {
     ]
 };
 
+async function loadJemmaWorkshop(content: HTMLElement): Promise<void> {
+    try {
+        // Build main container with persona tabs + nested tabs
+        let html = `<div class="fade-in conversation-container workshop-layout-jemma">
+            <!-- Persona Tab Bar -->
+            <div class="workshop-persona-bar" style="display:flex;gap:0;border-bottom:2px solid var(--border-subtle);background:var(--bg-secondary)">`;
+
+        for (const [personaKey, personaInfo] of Object.entries(workshopPersonaTabs)) {
+            const isActive = workshopPersona === personaKey;
+            html += `<button
+                class="workshop-persona-tab persona-tab-${personaKey} ${isActive ? 'active' : ''}"
+                data-persona="${personaKey}"
+                onclick="switchWorkshopPersona('${personaKey}')"
+                style="flex:1;padding:12px 16px;text-align:center;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:${isActive ? '600' : '400'};color:${isActive ? personaInfo.color : 'var(--text-muted)'};border-bottom:${isActive ? `3px solid ${personaInfo.color}` : 'none'};transition:all 200ms ease">
+                ${personaInfo.label}
+            </button>`;
+        }
+
+        html += `</div>
+
+            <!-- Nested Tab Bar -->
+            <div class="workshop-nested-bar" style="display:flex;gap:0;border-bottom:1px solid var(--border-subtle);background:var(--bg-primary);padding:0 8px">`;
+
+        const personaColor = workshopPersonaTabs[workshopPersona].color;
+        const nestedTabs = workshopNestedTabs[workshopPersona] || [];
+
+        for (const tab of nestedTabs) {
+            const isActive = workshopNestedTab === tab.key;
+            html += `<button
+                class="workshop-nested-tab nested-tab ${isActive ? 'active' : ''}"
+                data-tab="${tab.key}"
+                onclick="switchWorkshopNestedTab('${tab.key}')"
+                style="padding:8px 12px;border:none;background:transparent;cursor:pointer;font-size:12px;color:${isActive ? personaColor : 'var(--text-muted)'};border-bottom:${isActive ? `2px solid ${personaColor}` : 'none'};transition:all 150ms ease;margin-top:8px">
+                ${tab.label}
+            </button>`;
+        }
+
+        html += `</div>
+
+            <!-- Jemma Content Area -->
+            <div id="jemmaContentArea" style="flex:1;overflow-y:auto;padding:16px;background:var(--bg-primary)">`;
+
+        if (workshopNestedTab === 'jemma-messages') {
+            html += await renderJemmaMessages();
+        } else if (workshopNestedTab === 'jemma-stats') {
+            html += await renderJemmaStats();
+        }
+
+        html += `</div>
+        </div>`;
+
+        content.innerHTML = html;
+    } catch (err: any) {
+        content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading Jemma workshop: ${escapeHtml(err.message)}</p></div>`;
+    }
+}
+
+async function renderJemmaMessages(): Promise<string> {
+    try {
+        const res = await fetch(`${API_BASE}/api/jemma/status`);
+        const data = await res.json();
+
+        if (!data.recent_messages || data.recent_messages.length === 0) {
+            return `<div style="padding:20px;text-align:center;color:var(--text-muted)">No recent messages</div>`;
+        }
+
+        let html = `<div style="display:grid;gap:12px">`;
+
+        for (const msg of data.recent_messages.slice(0, 50)) {
+            const confidence = Math.round(msg.confidence * 100);
+            const timestamp = new Date(msg.timestamp).toLocaleString();
+
+            html += `<div class="admin-card" style="padding:12px;border-left:3px solid var(--amber)">
+                <div style="display:flex;justify-content:space-between;align-items:start;gap:12px">
+                    <div style="flex:1">
+                        <div style="font-weight:600;font-size:12px;color:var(--text-primary)">${escapeHtml(msg.author)}</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">#${escapeHtml(msg.channel)}</div>
+                        <div style="font-size:12px;color:var(--text-primary);margin-top:6px;line-height:1.4">${escapeHtml(msg.message.substring(0, 200))}</div>
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:6px">${timestamp}</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+                        <span class="badge" style="background:var(--amber);color:#000;font-size:10px;padding:2px 6px">${msg.recipient}</span>
+                        <span style="font-size:10px;color:var(--text-muted)">${confidence}% confident</span>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        html += `</div>`;
+        return html;
+    } catch (err: any) {
+        return `<div style="padding:20px;color:var(--red);font-size:12px">Error loading messages: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+async function renderJemmaStats(): Promise<string> {
+    try {
+        const res = await fetch(`${API_BASE}/api/jemma/status`);
+        const data = await res.json();
+
+        const stats = data.delivery_stats || {};
+        const gatewayStatus = data.status || 'unknown';
+        const lastReconciliation = data.last_reconciliation ? new Date(data.last_reconciliation).toLocaleString() : 'Never';
+        const uptime = data.uptime_seconds ? Math.floor(data.uptime_seconds / 60) : 0;
+
+        let html = `<div style="display:grid;gap:16px">`;
+
+        // Connection Status
+        html += `<div class="admin-card" style="padding:16px">
+            <div style="font-weight:600;font-size:12px;color:var(--text-primary);margin-bottom:12px">Connection Status</div>
+            <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:12px">
+                <div style="padding:10px;background:var(--bg-card);border-radius:4px;border-left:3px solid var(--amber)">
+                    <div style="font-size:10px;color:var(--text-muted)">Status</div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-top:4px">${gatewayStatus === 'connected' ? '🟢 Connected' : '🔴 ' + gatewayStatus}</div>
+                </div>
+                <div style="padding:10px;background:var(--bg-card);border-radius:4px;border-left:3px solid var(--amber)">
+                    <div style="font-size:10px;color:var(--text-muted)">Uptime</div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-top:4px">${uptime} min</div>
+                </div>
+            </div>
+        </div>`;
+
+        // Delivery Stats
+        html += `<div class="admin-card" style="padding:16px">
+            <div style="font-weight:600;font-size:12px;color:var(--text-primary);margin-bottom:12px">Delivery Statistics</div>
+            <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px">`;
+
+        const recipients = ['jim', 'leo', 'darron', 'sevn', 'six', 'ignored'];
+        for (const recipient of recipients) {
+            const count = stats[recipient] || 0;
+            html += `<div style="padding:10px;background:var(--bg-card);border-radius:4px;border-left:3px solid var(--amber);text-align:center">
+                <div style="font-size:10px;color:var(--text-muted);text-transform:capitalize">${recipient}</div>
+                <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-top:4px">${count}</div>
+            </div>`;
+        }
+
+        html += `</div>
+        </div>`;
+
+        // Last Reconciliation
+        html += `<div class="admin-card" style="padding:16px">
+            <div style="font-weight:600;font-size:12px;color:var(--text-primary);margin-bottom:8px">Last Reconciliation Poll</div>
+            <div style="font-size:12px;color:var(--text-muted)">${lastReconciliation}</div>
+        </div>`;
+
+        html += `</div>`;
+        return html;
+    } catch (err: any) {
+        return `<div style="padding:20px;color:var(--red);font-size:12px">Error loading stats: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
 async function loadWorkshop(content: HTMLElement): Promise<void> {
     try {
+        // Special handling for Jemma persona
+        if (workshopPersona === 'jemma') {
+            return await loadJemmaWorkshop(content);
+        }
+
         // Fetch grouped conversations for the current nested tab (discussion_type)
         const archiveParam = workshopShowArchived ? '&include_archived=true' : '';
         const res = await fetch(`${API_BASE}/api/conversations/grouped?type=${workshopNestedTab}${archiveParam}`);
@@ -3152,7 +3339,7 @@ async function loadWorkshop(content: HTMLElement): Promise<void> {
 }
 
 (window as any).switchWorkshopPersona = async function(persona: string) {
-    workshopPersona = persona as 'jim' | 'leo' | 'darron';
+    workshopPersona = persona as 'jim' | 'leo' | 'darron' | 'jemma';
     // Set default nested tab for this persona
     const defaultTab = workshopNestedTabs[persona][0];
     workshopNestedTab = defaultTab.key;
