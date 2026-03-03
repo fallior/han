@@ -286,6 +286,7 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 | POST | /api/conversations/:id/unarchive | Unarchive conversation (clears archived_at) |
 | POST | /api/conversations/:id/catalogue | Manually trigger cataloguing for conversation |
 | POST | /api/conversations/recatalogue-all | Backfill summaries for all uncatalogued conversations |
+| GET | /api/supervisor/health | Get Robin Hood Protocol health status (Jim/Leo/resurrections/distress) |
 | WS | /ws | WebSocket push (prompts + terminal + tasks + approvals + conversations) |
 | GET | / | Serve web UI |
 | GET | /admin | Admin console (desktop-optimised) |
@@ -490,26 +491,37 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
   - `conversation_message` event when new message posted
   - Real-time updates in admin UI
 
-### Robin Hood Protocol: Mutual Health Monitoring (Complete)
+### Robin Hood Protocol: Mutual Health Monitoring (Complete — All 6 Phases)
 
-**Purpose**: Leo and Jim monitor each other's health and automatically resurrect failed processes.
+**Purpose**: Leo and Jim monitor each other's health with three-tier alerting: normal operation, degraded performance (distress), and complete failure (resurrection).
 
 **Health signals** (`~/.claude-remote/health/`):
 - `leo-health.json` — Written by Leo every beat (agent, pid, timestamp, beat, beatType, status, lastError, uptimeMinutes)
 - `jim-health.json` — Written by Jim every cycle (agent, pid, timestamp, cycle, tier, status, lastError, serverPid, uptimeMinutes)
 - `resurrection-log.jsonl` — Shared log of all resurrection attempts from both agents
+- `leo-distress.json` — Written by Leo when beat interval exceeds 2× expected max (Phase 5)
+- `jim-distress.json` — Written by Jim when cycle duration exceeds 3× median (Phase 5)
 
 **Leo's health monitoring** (`leo-heartbeat.ts`):
 - `checkJimHealth()` called at start of every beat
 - Staleness thresholds: <40min OK, 40-90min stale (PID check), >90min down
 - Resurrection: `systemctl --user restart claude-remote-server.service`
-- 10s verification wait, 1-hour cooldown, ntfy escalation on failure
+- 12s verification wait (increased from 3s to allow full Node.js/tsx server startup), 1-hour cooldown, ntfy escalation on failure
 
 **Jim's health monitoring** (`supervisor.ts`):
 - `checkLeoHealth()` called at start of every supervisor cycle
 - Staleness thresholds: <45min OK, 45-90min stale (PID check), >90min down
 - Resurrection: `systemctl --user restart leo-heartbeat.service`
 - 10s verification wait, 1-hour cooldown, ntfy escalation on failure
+
+**Distress signal detection** (Phase 5 — early warning):
+- **Jim's slow cycle detection**: Tracks last 50 cycle durations, triggers distress if actual > 3× median
+  - Example: 15min median → 45min+ triggers distress
+  - ntfy notification + distress file written + Admin UI yellow banner
+- **Leo's slow beat detection**: Phase-aware expected intervals, triggers distress if actual > 2× max
+  - Example: v0.5 phase (30min max) → 60min+ triggers distress
+  - ntfy notification + distress file written + Admin UI yellow banner
+- Distress clears automatically when next cycle/beat completes within normal bounds
 
 **Split-brain prevention**:
 - PID-alive check via `kill -0` before resurrection attempt

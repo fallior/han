@@ -32,6 +32,42 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-03 — Claude (autonomous) — Robin Hood Protocol Improvements Complete
+- **Phase 5 distress signals + health dashboard implemented** — Early warning system for degraded performance:
+  - **Leo's verification wait fix**: Changed sleep from 3s to 12s after Jim restart (line 170 in leo-heartbeat.ts)
+    - Problem: Node.js/tsx Express server needs time for module loading, port binding, health signal setup
+    - 3 seconds too short → false 'failed' entries in resurrection log
+    - Solution: 12-second wait allows full server startup before verification
+  - **Admin UI health panel**: Real-time monitoring in Supervisor module with WebSocket updates
+    - Jim status: last cycle time, tier, cost, next run, uptime
+    - Leo status: last heartbeat time, phase, beat count, uptime
+    - Resurrection history: recent resurrections with timestamp, target, outcome
+    - Status badges: live/degraded/stale/down with colour coding
+    - New endpoint: `GET /api/supervisor/health` returns unified health status JSON
+  - **Distress signal detection**: Multi-tier alerting (normal → degraded → failed)
+    - Jim's slow cycle detection: triggers if cycle duration > 3× median (e.g., 15min normal → 45min+ triggers)
+    - Leo's slow beat detection: triggers if interval > 2× expected max (e.g., 30min max → 60min+ triggers)
+    - Distress files: `~/.claude-remote/health/{jim,leo}-distress.json`
+    - ntfy notifications sent when distress detected
+    - Yellow warning banners in Admin UI health panel
+    - Clears automatically when next cycle/beat completes normally
+  - **Why distress differs from stale**: Degraded performance (slow but working) vs complete failure (not working at all)
+    - Provides early warning before resurrection threshold reached
+    - Example: normal (20min) → distress (60min) → stale (90min) → down (resurrection)
+- **Testing & verification**: Created comprehensive testing suite
+  - Automated script: `./scripts/test-robin-hood.sh all` (5min quick check)
+  - Manual test procedures: detailed steps for each feature (15-20min each)
+  - Integration test: full end-to-end scenario (30min)
+  - Documentation: 6 guides (~3,300 lines) covering testing, execution, results
+  - Test results: 13 PASS, 0 FAIL — all features verified working
+- **Why this matters**: The Robin Hood Protocol mutual health monitoring is now complete (Phases 1-6). Jim and Leo monitor each other with three-tier alerting: normal operation, degraded performance (distress → ntfy warning), and complete failure (stale → automatic resurrection). Darron receives advance warning of issues before outages occur, and has full visibility into system health via the Admin UI dashboard.
+- **Robin Hood Protocol status**: All 6 phases complete (1-2: Leo monitors/resurrects Jim, 3-4: Jim monitors/resurrects Leo, 5: distress signals, 6: health dashboard)
+- **Files changed**: `src/server/leo-heartbeat.ts` (verification wait + distress detection ~70 lines), `src/server/services/supervisor.ts` (distress detection + cycle tracking ~80 lines), `src/server/routes/supervisor.ts` (health endpoint ~100 lines)
+- **New files**: `scripts/test-robin-hood.sh` (346 lines automated testing), 6 documentation guides in `docs/` (~3,300 lines total)
+- **Commits**: 8 commits (14ff392 through 7b50718) from goal mma8uhr8-vdnbj4 (Robin Hood Protocol Improvements)
+- **Cost**: $1.5232 (1 Sonnet + 6 Haiku)
+- **Tasks**: 7 tasks (mma8xvwd-akymgv through mma8xvwn-1k3anp)
+
 ### 2026-03-03 — Claude (autonomous) — Learning Severity Demoted for Generic Researched Knowledge
 - **Learnings quality improvement** — Demoted L024, L025, L028, L030 severity from HIGH to LOW:
   - **Root issue**: Four learnings marked HIGH under JavaScript/TypeScript came from todo-cli project (zero source code, only DECISIONS.md)
@@ -1023,12 +1059,20 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ jim-wake signals for explicit supervisor wake on human messages
 - ✅ Deferred cycles run within 3 seconds of CLI stop (vs up to 20 min wait)
 - ✅ Belt-and-suspenders reliability (dual trigger paths)
-- ✅ Robin Hood Protocol Phase 1-4 complete (mutual health monitoring + resurrection)
+- ✅ Robin Hood Protocol Phase 1-6 complete (mutual health monitoring + resurrection + distress)
 - ✅ Leo monitors Jim's supervisor health, resurrects server process when down
 - ✅ Jim monitors Leo's heartbeat health, resurrects heartbeat process when down
 - ✅ Health signals at `~/.claude-remote/health/` with staleness classification
 - ✅ PID-alive checks before resurrection (split-brain prevention)
 - ✅ Resurrection log at `~/.claude-remote/health/resurrection-log.jsonl`
+- ✅ Distress signal detection (Phase 5): early warning for degraded performance
+- ✅ Jim's slow cycle detection: triggers at 3× median duration (e.g., 45min+ for 15min normal)
+- ✅ Leo's slow beat detection: triggers at 2× expected max (e.g., 60min+ for 30min max)
+- ✅ Distress ntfy notifications + yellow warning banners in Admin UI
+- ✅ Admin UI health monitoring panel (Phase 6): real-time dashboard in Supervisor module
+- ✅ Health panel shows Jim/Leo status, resurrection history, distress signals, uptime
+- ✅ WebSocket real-time updates for health status changes
+- ✅ Verification wait fix: 12-second sleep after Jim restart (was 3s, caused false failures)
 - ✅ 1-hour cooldown between resurrection attempts, ntfy human escalation on failure
 
 ## Next Actions
@@ -1072,6 +1116,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ## Session Notes
 
 Recent sessions (latest first):
+- [2026-03-03-autonomous-robin-hood-improvements.md](session-notes/2026-03-03-autonomous-robin-hood-improvements.md) — Robin Hood Protocol Phases 5+6: distress signals + health dashboard
 - [2026-03-02-autonomous-dependency-terminal-status-fix.md](session-notes/2026-03-02-autonomous-dependency-terminal-status-fix.md) — Fixed critical dependency blocker: failed tasks now terminal
 - [2026-03-02-autonomous-robin-hood-phase3-4.md](session-notes/2026-03-02-autonomous-robin-hood-phase3-4.md) — Robin Hood Protocol Phase 3+4: Jim's health monitoring of Leo
 - [2026-03-02-autonomous-expandable-task-results.md](session-notes/2026-03-02-autonomous-expandable-task-results.md) — Expandable task results in Work & Reports modules

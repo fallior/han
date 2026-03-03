@@ -1948,6 +1948,99 @@ function getLastResurrectionTimestamp(target: 'leo' | 'jim'): number {
 
 ---
 
+### DEC-029: Distress Signal Thresholds — 3× Median for Jim, 2× Maximum for Leo
+
+**Date**: 2026-03-03
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+The Robin Hood Protocol Phase 5 adds distress signals to provide early warning when Jim's supervisor cycles or Leo's heartbeat intervals become degraded. The challenge was determining the right multipliers to distinguish between:
+- **Normal variance**: Expected fluctuations due to workload, network latency, system load
+- **Degraded performance**: Abnormally slow but still functioning (distress)
+- **Complete failure**: Not functioning at all (stale → resurrection)
+
+Too low a multiplier causes false alarms. Too high misses real degradation.
+
+Jim's supervisor cycles vary significantly based on workload:
+- Light cycle (skipped_idle, skipped_busy): < 1 second
+- Normal cycle (scan tasks, no work): 5-15 minutes
+- Heavy cycle (large goal decomposition, complex planning): 20-40 minutes
+
+Leo's heartbeat intervals are more predictable:
+- Phase-based: v0.5 = 20-30 minutes, v0.6 (hypothetical) might be 5-10 minutes
+- Variance is lower: occasional delays due to CPU contention or I/O, but generally consistent
+
+#### Options Considered
+
+1. **Symmetric thresholds (same multiplier for both)**
+   - ✅ Simpler to understand and maintain
+   - ✅ Consistent policy across both agents
+   - ❌ Doesn't respect different variance characteristics
+   - ❌ Either too aggressive for Jim or too conservative for Leo
+
+2. **Fixed absolute thresholds (e.g., "trigger at 60 minutes")**
+   - ✅ Easy to reason about
+   - ❌ Doesn't adapt to different workload patterns
+   - ❌ Breaks when phase changes (e.g., Leo moves to faster beat phase)
+   - ❌ Median-based approach for Jim becomes impossible
+
+3. **Asymmetric dynamic thresholds (3× median for Jim, 2× max for Leo)**
+   - ✅ Respects variance characteristics of each agent
+   - ✅ Jim gets headroom for workload-based variance
+   - ✅ Leo triggers sooner due to predictable intervals
+   - ✅ Phase-aware for Leo (adapts to different beat frequencies)
+   - ✅ Median-based for Jim (adapts to changing workload over time)
+   - ❌ Slightly more complex (two different multipliers)
+
+#### Decision
+
+We chose **asymmetric dynamic thresholds**: 3× median cycle duration for Jim, 2× expected maximum interval for Leo.
+
+**Jim (supervisor cycles)**:
+- Tracks last 50 cycle durations in circular buffer
+- Calculates median duration (or uses 20min default if <5 cycles)
+- Triggers distress if actual cycle > 3× median
+- Example: median 15min → triggers at 45min+
+- Rationale: Supervisor workload varies significantly; 3× gives enough headroom for occasional heavy cycles while still catching genuine degradation
+
+**Leo (heartbeat intervals)**:
+- Phase-aware expected intervals (v0.5 = 20-30min)
+- Triggers distress if actual interval > 2× expected maximum
+- Example: v0.5 phase (30min max) → triggers at 60min+
+- Rationale: Heartbeat is predictable; 2× catches issues sooner without false alarms from minor delays
+
+**Timeline Example** (Leo in v0.5 phase):
+- **Normal**: 20-30 minute intervals (healthy)
+- **Distress**: 60+ minute interval (degraded, yellow warning banner + ntfy)
+- **Stale**: 90+ minute interval (failed, automatic resurrection)
+
+#### Consequences
+
+- Jim has more tolerance for workload variance (3× vs 2×)
+- Leo triggers distress earlier relative to its expected interval
+- Both systems adapt to their environment (median/phase-based)
+- False positive rate is low for both (verified in testing: 13 PASS, 0 FAIL)
+- Early warning provides 30-60 minutes between distress notification and resurrection attempt
+- Operators receive advance notice of degradation while system still functional
+
+**Implementation notes:**
+- Jim's circular buffer: 50 entries, median calculation handles even/odd counts
+- Leo's phase detection: reads current phase from health file, looks up expected interval
+- Distress signals written to `~/.claude-remote/health/{jim,leo}-distress.json`
+- ntfy notifications sent with "warning" priority and "Priority: high" header
+- Admin UI health panel displays distress as yellow warning banners
+
+#### Related
+
+- DEC-027: Staleness Thresholds Recalibrated for Each Agent (resurrection thresholds)
+- DEC-028: Shared Resurrection Log at resurrection-log.jsonl (resurrection tracking)
+- Robin Hood Protocol Phase 5: `docs/ROBIN_HOOD_README.md`
+- Testing: `scripts/test-robin-hood.sh` and `docs/ROBIN_HOOD_TEST_REPORT_2026-03-03.md`
+
+---
+
 ## Template
 
 Copy this for new decisions:
