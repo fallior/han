@@ -1060,18 +1060,118 @@ function renderProjectDetail(proj: any, pf: any): void {
 // MODULE: Supervisor
 // ══════════════════════════════════════════════════════════════
 
+function getStatusColor(status: 'ok' | 'stale' | 'down' | null): string {
+    if (!status) return 'var(--text-dim)';
+    if (status === 'ok') return 'var(--green)';
+    if (status === 'stale') return 'var(--amber)';
+    return 'var(--red)';
+}
+
+function getStatusBadge(status: 'ok' | 'stale' | 'down' | null): string {
+    if (!status) return '—';
+    const labels = { 'ok': 'Ok', 'stale': 'Stale', 'down': 'Down' };
+    const color = getStatusColor(status);
+    return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:${color}20;color:${color};font-size:11px;font-weight:600;text-transform:uppercase">${labels[status]}</span>`;
+}
+
+function renderHealthPanel(healthData: any): string {
+    const { jim, leo, resurrections = [], systemUptimeMinutes = 0 } = healthData;
+
+    let html = `<div class="admin-card" style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h2 style="margin:0">System Health</h2>
+            <button class="admin-btn admin-btn-sm" onclick="toggleHealthDetails()" style="font-size:12px">
+                <span id="healthToggle">▼</span> History
+            </button>
+        </div>
+
+        <div class="stat-row" style="margin-bottom:16px">`;
+
+    // Jim's Health
+    if (jim) {
+        const lastUpdateTime = new Date(jim.timestamp).toLocaleString('en-AU', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        html += `<div class="stat-card">
+            <span class="stat-label">Jim Status</span>
+            <div style="margin-top:6px">${getStatusBadge(jim.status)}</div>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:6px;display:block">Updated ${lastUpdateTime}</span>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Cycle #${jim.cycle || '—'}</span>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Uptime: ${jim.uptimeMinutes}m</span>
+        </div>`;
+    }
+
+    // Leo's Health
+    if (leo) {
+        const lastUpdateTime = new Date(leo.timestamp).toLocaleString('en-AU', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const beatTypeLabel = leo.beatType ? ` (${leo.beatType})` : '';
+        html += `<div class="stat-card">
+            <span class="stat-label">Leo Status</span>
+            <div style="margin-top:6px">${getStatusBadge(leo.status)}</div>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:6px;display:block">Updated ${lastUpdateTime}</span>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Beat #${leo.beat || '—'}${beatTypeLabel}</span>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Uptime: ${leo.uptimeMinutes}m</span>
+        </div>`;
+    }
+
+    // System Uptime
+    html += `<div class="stat-card">
+        <span class="stat-label">Server Uptime</span>
+        <span class="stat-value" style="font-size:16px">${systemUptimeMinutes}m</span>
+        <span style="font-size:11px;color:var(--text-dim);margin-top:6px;display:block">${Math.floor(systemUptimeMinutes / 60)}h ${systemUptimeMinutes % 60}m</span>
+    </div>`;
+
+    html += `</div>`;
+
+    // Resurrection History (collapsible)
+    if (resurrections && resurrections.length > 0) {
+        html += `<div id="healthDetails" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border-subtle)">
+            <h3 style="margin:0 0 12px 0;font-size:13px;color:var(--text-heading)">Resurrection History (Last ${Math.min(resurrections.length, 10)})</h3>
+            <table class="admin-table" style="font-size:12px">
+                <thead><tr>
+                    <th style="text-align:left">Timestamp</th>
+                    <th style="text-align:left">Resurrector</th>
+                    <th style="text-align:left">Target</th>
+                    <th style="text-align:left">Reason</th>
+                    <th style="text-align:center">Result</th>
+                </tr></thead>
+                <tbody>`;
+
+        // Show last 10 resurrections in reverse order (newest first)
+        const recentResurrections = resurrections.slice(-10).reverse();
+        for (const res of recentResurrections) {
+            const timestamp = new Date(res.timestamp).toLocaleString('en-AU', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const resultColor = res.success ? 'var(--green)' : 'var(--red)';
+            const resultLabel = res.success ? 'Success' : 'Failed';
+
+            html += `<tr>
+                <td>${escapeHtml(timestamp)}</td>
+                <td>${escapeHtml(res.resurrector || '—')}</td>
+                <td>${escapeHtml(res.target || '—')}</td>
+                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(res.reason || '—')}</td>
+                <td style="text-align:center;color:${resultColor};font-weight:600">${resultLabel}</td>
+            </tr>`;
+        }
+
+        html += `</tbody></table></div>`;
+    }
+
+    html += `</div>`;
+    return html;
+}
+
 async function loadSupervisor(content: HTMLElement): Promise<void> {
-    const [statusRes, cyclesRes, memoryRes, proposalsRes] = await Promise.all([
+    const [statusRes, cyclesRes, memoryRes, proposalsRes, healthRes] = await Promise.all([
         fetch(`${API_BASE}/api/supervisor/status`),
         fetch(`${API_BASE}/api/supervisor/cycles?limit=50`),
         fetch(`${API_BASE}/api/supervisor/memory`),
         fetch(`${API_BASE}/api/supervisor/proposals`),
+        fetch(`${API_BASE}/api/supervisor/health`),
     ]);
 
     const status = await statusRes.json();
     const cyclesData = await cyclesRes.json();
     const memoryData = await memoryRes.json();
     const proposalsData = await proposalsRes.json();
+    const healthData = await healthRes.json();
 
     const cycles = cyclesData.cycles || [];
     const proposals = proposalsData.proposals || [];
@@ -1095,6 +1195,12 @@ async function loadSupervisor(content: HTMLElement): Promise<void> {
     }
 
     let html = `<div class="fade-in">`;
+
+    // ── Health Monitoring Panel ───────────────────────────────
+    if (healthData.success && (healthData.jim || healthData.leo)) {
+        const healthHtml = renderHealthPanel(healthData);
+        html += healthHtml;
+    }
 
     // Status cards
     const supStatus = status.paused ? 'Paused' : status.enabled ? 'Running' : 'Disabled';
@@ -1315,6 +1421,20 @@ function renderProposalCard(p: any): string {
 (window as any).toggleSupervisorPause = async function() {
     await fetch(`${API_BASE}/api/supervisor/pause`, { method: 'POST' });
     setTimeout(() => renderModule('supervisor'), 500);
+};
+
+(window as any).toggleHealthDetails = function() {
+    const details = document.getElementById('healthDetails');
+    const toggle = document.getElementById('healthToggle');
+    if (!details || !toggle) return;
+
+    if (details.style.display === 'none') {
+        details.style.display = 'block';
+        toggle.textContent = '▲';
+    } else {
+        details.style.display = 'none';
+        toggle.textContent = '▼';
+    }
 };
 
 (window as any).expandCycle = function(row: HTMLElement, dataJson: string) {
