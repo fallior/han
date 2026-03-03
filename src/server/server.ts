@@ -13,6 +13,7 @@ import {
     db, CLAUDE_REMOTE_DIR, PENDING_DIR, RESOLVED_DIR, CONTEXTS_DIR,
     PID_FILE, syncRegistry
 } from './db';
+import { authMiddleware } from './middleware/auth';
 import * as orchestrator from './orchestrator';
 import { createWebSocketServer, broadcast, broadcastPrompts, broadcastTerminal as wsBroadcastTerminal, stopHeartbeat } from './ws';
 import {
@@ -91,6 +92,10 @@ app.use(express.json({ limit: '1mb' }));
 
 // Serve static UI assets (for app.js bundle)
 app.use(express.static(UI_DIR));
+
+// Apply authentication middleware to /api and /admin routes
+app.use('/api', authMiddleware);
+app.use('/admin', authMiddleware);
 
 // Ensure directories exist
 [PENDING_DIR, RESOLVED_DIR, CONTEXTS_DIR].forEach(dir => {
