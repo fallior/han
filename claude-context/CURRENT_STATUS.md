@@ -32,6 +32,19 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-03 — Claude (autonomous) — Learning Severity Demoted for Generic Researched Knowledge
+- **Learnings quality improvement** — Demoted L024, L025, L028, L030 severity from HIGH to LOW:
+  - **Root issue**: Four learnings marked HIGH under JavaScript/TypeScript came from todo-cli project (zero source code, only DECISIONS.md)
+  - **Problem**: These were generic CLI/JavaScript knowledge researched by autonomous agents, not encounter-earned from debugging real bugs
+  - **Impact**: Consumed 4 of 10 HIGH learning slots, displacing genuinely valuable encounter-earned learnings (L008 timezone gotchas, L011 day-zero trick)
+  - **Decision**: Changed severity to LOW in each file (L024, L025, L028, L030) and updated INDEX.md
+  - **Result**: HIGH slots now reserved for encounter-earned debugging knowledge that saves significant debugging time
+- **Why this matters**: Learning system prioritisation works best when HIGH severity reflects genuine pain points from debugging real bugs, not theoretical knowledge from research tasks. This recalibration ensures the 10 HIGH-severity JavaScript/TypeScript learnings shown to task agents are the most actionable, battle-tested insights.
+- **Files changed**: `~/Projects/_learnings/javascript/L024-env-var-expansion.md`, `L025-npm-run-env.md`, `L028-shebang-portability.md`, `L030-cross-spawn-shell.md` (severity field), `~/Projects/_learnings/INDEX.md` (4 entries updated)
+- **Commits**: 2 commits (1956687, 749ecb7) from goal mm9y00kp-txmf4z (Demote L024-L030 severity from HIGH to LOW)
+- **Cost**: $0.0949 (Sonnet)
+- **Task**: mm9y1zex-wgdbk6
+
 ### 2026-03-03 — Claude (autonomous) — Learning File Character Limit Increased
 - **Context injection improvement** — Increased learning file character limit from 500 to 2000 in `context.ts`:
   - Modified `readFileOrEmpty(learningPath, 500)` to `readFileOrEmpty(learningPath, 2000)` at line 146
