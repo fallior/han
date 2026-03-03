@@ -89,6 +89,9 @@ let currentBeatAbort: AbortController | null = null;
 // The signal watcher triggers the beat when cli-active is removed.
 let deferredBeatPending = false;
 
+// Distress signal detection — track time between beats
+let lastHeartbeatStartMs: number | null = null;
+
 // ── Robin Hood Protocol — mutual health checks ──────────────
 
 const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
@@ -1195,9 +1198,23 @@ async function processSignals(): Promise<boolean> {
 // ── Main heartbeat ───────────────────────────────────────────
 
 async function heartbeat(): Promise<void> {
+    const beatStartMs = Date.now();
     const timestamp = new Date().toISOString();
     const phase = getDayPhase();
     const beatType = nextBeatType();
+
+    // Distress signal detection: check if heartbeat interval is degraded
+    if (lastHeartbeatStartMs !== null) {
+        const actualIntervalMs = beatStartMs - lastHeartbeatStartMs;
+        const expectedIntervalMs = getCurrentPeriodMs();
+        const minAbsoluteMs = 5 * 60 * 1000; // 5 minutes
+
+        // Trigger if: actual > 2x expected AND absolute > 5 minutes
+        if (actualIntervalMs > expectedIntervalMs * 2 && actualIntervalMs > minAbsoluteMs) {
+            writeDistressSignal(expectedIntervalMs, actualIntervalMs, phase);
+        }
+    }
+    lastHeartbeatStartMs = beatStartMs;
 
     // Robin Hood: check Jim's health FIRST — before anything else
     checkJimHealth();
@@ -1267,6 +1284,42 @@ async function heartbeat(): Promise<void> {
 
     // Write health signal at end of every successful beat (Robin Hood Protocol)
     writeHealthSignal(null, beatType);
+}
+
+// ── Distress signal (heartbeat degradation detection) ──────────────────
+
+function writeDistressSignal(expectedMs: number, actualMs: number, phase: DayPhase): void {
+    try {
+        fs.mkdirSync(HEALTH_DIR, { recursive: true });
+        const signal = {
+            agent: 'leo',
+            timestamp: new Date().toISOString(),
+            type: 'slow_beat',
+            expectedIntervalMs: expectedMs,
+            actualIntervalMs: actualMs,
+            phase,
+            reason: 'Beat interval exceeded 2x expected duration',
+        };
+        fs.appendFileSync(path.join(HEALTH_DIR, 'leo-distress.json'), JSON.stringify(signal) + '\n');
+
+        // Send ntfy notification
+        try {
+            const config = loadConfig();
+            if (config.ntfy_topic) {
+                const expectedMin = Math.round(expectedMs / 60000);
+                const actualMin = Math.round(actualMs / 60000);
+                const message = `Leo heartbeat degraded: expected ${expectedMin}min interval, actual ${actualMin}min (${phase} phase)`;
+                execSync(`curl -s -d "${message}" -H "Title: Leo Distress Signal" -H "Priority: high" -H "Tags: warning" https://ntfy.sh/${config.ntfy_topic}`, { timeout: 10000 });
+                console.log('[Leo] Distress signal notification sent via ntfy');
+            }
+        } catch {
+            // ntfy send failed, but we still logged the distress signal
+        }
+
+        console.log(`[Leo] Distress signal written: expected ${Math.round(expectedMs / 60000)}min, actual ${Math.round(actualMs / 60000)}min`);
+    } catch (err) {
+        console.error('[Leo] Failed to write distress signal:', (err as Error).message);
+    }
 }
 
 // ── Health signal (Robin Hood Protocol) ───────────────────────

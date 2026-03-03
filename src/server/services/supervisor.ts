@@ -50,6 +50,9 @@ const CLI_ACTIVE_STALE_MINUTES = 30;
 const LEO_HEALTH_FILE = path.join(HEALTH_DIR, 'leo-health.json');
 const RESURRECTION_LOG = path.join(HEALTH_DIR, 'resurrection-log.jsonl');
 const RESURRECTION_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+const JIM_DISTRESS_FILE = path.join(HEALTH_DIR, 'jim-distress.json');
+const DISTRESS_MULTIPLIER = 3; // Trigger if cycle > 3x median duration
+const DEFAULT_MEDIAN_MS = 20 * 60 * 1000; // 20 minutes if <5 cycles
 
 // Worker restart backoff
 let workerRestartAttempts = 0;
@@ -222,6 +225,76 @@ function escalateToNtfy(message: string): void {
         console.log('[Robin Hood] Ntfy escalation sent');
     } catch (err) {
         console.error('[Robin Hood] Failed to send ntfy notification:', (err as Error).message);
+    }
+}
+
+// ── Distress signal detection (slow cycle detection) ──────────────
+
+function getMedianCycleDuration(): number {
+    try {
+        const { supervisorStmts } = require('../db');
+        const recentCycles = supervisorStmts.getRecent.all(5) as any[];
+
+        // Filter to only successful cycles (status = 'ok', not 'error')
+        const successfulCycles = recentCycles.filter((c: any) => !c.error);
+
+        if (successfulCycles.length === 0) {
+            return DEFAULT_MEDIAN_MS;
+        }
+
+        // Calculate duration for each cycle
+        const durations = successfulCycles.map((c: any) => {
+            const startedAt = new Date(c.started_at).getTime();
+            const completedAt = new Date(c.completed_at).getTime();
+            return completedAt - startedAt;
+        });
+
+        // Return median
+        durations.sort((a, b) => a - b);
+        const mid = Math.floor(durations.length / 2);
+        if (durations.length % 2 === 0) {
+            return (durations[mid - 1] + durations[mid]) / 2;
+        }
+        return durations[mid];
+    } catch (err) {
+        console.error('[Distress] Failed to get median cycle duration:', (err as Error).message);
+        return DEFAULT_MEDIAN_MS;
+    }
+}
+
+function writeDistressSignal(cycleNumber: number, expectedDurationMs: number, actualDurationMs: number): void {
+    try {
+        fs.mkdirSync(HEALTH_DIR, { recursive: true });
+        const signal = {
+            agent: 'jim',
+            timestamp: new Date().toISOString(),
+            type: 'slow_cycle',
+            cycleNumber,
+            expectedDurationMs,
+            actualDurationMs,
+            reason: 'Supervisor cycle exceeded 3x normal duration'
+        };
+        fs.writeFileSync(JIM_DISTRESS_FILE, JSON.stringify(signal, null, 2));
+        console.log(`[Distress] Slow cycle detected: ${Math.round(actualDurationMs / 1000)}s vs expected ${Math.round(expectedDurationMs / 1000)}s`);
+    } catch (err) {
+        console.error('[Distress] Failed to write distress signal:', (err as Error).message);
+    }
+}
+
+function sendDistressNtfy(expectedMinutes: number, actualMinutes: number): void {
+    try {
+        const config = loadConfig();
+        if (!config.ntfy_topic) {
+            console.log('[Distress] No ntfy_topic configured — skipping notification');
+            return;
+        }
+
+        const message = `Jim supervisor degraded: cycle took ${actualMinutes}min vs ${expectedMinutes}min typical`;
+        const curlCmd = `curl -X POST -H "Content-Type: application/json" -H "Priority: high" -d '{"title":"Jim Supervisor Degraded","message":"${message}"}' "https://ntfy.sh/${config.ntfy_topic}"`;
+        execSync(curlCmd, { timeout: 10000 });
+        console.log('[Distress] Ntfy notification sent');
+    } catch (err) {
+        console.error('[Distress] Failed to send ntfy notification:', (err as Error).message);
     }
 }
 
