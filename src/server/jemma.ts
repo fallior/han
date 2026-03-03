@@ -413,6 +413,10 @@ async function routeMessage(message: any): Promise<void> {
 
   const recipient = classification.recipient;
 
+  // Update tracking
+  updateMessageLog(message, recipient, classification.confidence);
+  updateDeliveryStats(recipient);
+
   switch (recipient) {
     case 'jim':
       await deliverToJim(message, classification);
