@@ -1060,22 +1060,34 @@ function renderProjectDetail(proj: any, pf: any): void {
 // MODULE: Supervisor
 // ══════════════════════════════════════════════════════════════
 
-function getStatusColor(status: 'ok' | 'stale' | 'down' | null): string {
+function formatDistressAge(minutes: number): string {
+    if (minutes < 1) return 'Just now';
+    if (minutes === 1) return '1 minute ago';
+    if (minutes < 60) return `${minutes} minutes ago`;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours === 1) return `1 hour ago`;
+    if (mins === 0) return `${hours} hours ago`;
+    return `${hours}h ${mins}m ago`;
+}
+
+function getStatusColor(status: 'ok' | 'stale' | 'down' | 'distressed' | null): string {
     if (!status) return 'var(--text-dim)';
     if (status === 'ok') return 'var(--green)';
+    if (status === 'distressed') return 'var(--amber)';
     if (status === 'stale') return 'var(--amber)';
     return 'var(--red)';
 }
 
-function getStatusBadge(status: 'ok' | 'stale' | 'down' | null): string {
+function getStatusBadge(status: 'ok' | 'stale' | 'down' | 'distressed' | null): string {
     if (!status) return '—';
-    const labels = { 'ok': 'Ok', 'stale': 'Stale', 'down': 'Down' };
+    const labels = { 'ok': 'Ok', 'stale': 'Stale', 'down': 'Down', 'distressed': 'Degraded' };
     const color = getStatusColor(status);
     return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:${color}20;color:${color};font-size:11px;font-weight:600;text-transform:uppercase">${labels[status]}</span>`;
 }
 
 function renderHealthPanel(healthData: any): string {
-    const { jim, leo, resurrections = [], systemUptimeMinutes = 0 } = healthData;
+    const { jim, leo, distress = null, resurrections = [], systemUptimeMinutes = 0 } = healthData;
 
     let html = `<div class="admin-card" style="margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -1085,14 +1097,50 @@ function renderHealthPanel(healthData: any): string {
             </button>
         </div>
 
-        <div class="stat-row" style="margin-bottom:16px">`;
+        <!-- Distress Alerts (if any) -->`;
+
+    if (distress) {
+        if (distress.jim) {
+            const jimAgeStr = formatDistressAge(distress.jim.ageMinutes);
+            const reason = escapeHtml(distress.jim.reason || 'Unknown issue');
+            html += `<div style="margin-bottom:12px;padding:10px 12px;background:var(--amber)15;border-left:3px solid var(--amber);border-radius:4px">
+                <div style="display:flex;align-items:flex-start;gap:8px">
+                    <span style="font-size:18px;line-height:1">⚠</span>
+                    <div>
+                        <div style="font-weight:600;color:var(--amber);font-size:12px">Jim Degraded</div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${reason}</div>
+                        <div style="font-size:10px;color:var(--text-dim);margin-top:2px">${jimAgeStr}</div>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        if (distress.leo) {
+            const leoAgeStr = formatDistressAge(distress.leo.ageMinutes);
+            const reason = escapeHtml(distress.leo.reason || 'Unknown issue');
+            html += `<div style="margin-bottom:12px;padding:10px 12px;background:var(--amber)15;border-left:3px solid var(--amber);border-radius:4px">
+                <div style="display:flex;align-items:flex-start;gap:8px">
+                    <span style="font-size:18px;line-height:1">⚠</span>
+                    <div>
+                        <div style="font-weight:600;color:var(--amber);font-size:12px">Leo Degraded</div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${reason}</div>
+                        <div style="font-size:10px;color:var(--text-dim);margin-top:2px">${leoAgeStr}</div>
+                    </div>
+                </div>
+            </div>`;
+        }
+    }
+
+    html += `<div class="stat-row" style="margin-bottom:16px">`;
 
     // Jim's Health
     if (jim) {
         const lastUpdateTime = new Date(jim.timestamp).toLocaleString('en-AU', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        // If Jim has distress signal, show it as degraded status
+        const jimStatus = distress?.jim ? 'distressed' : jim.status;
         html += `<div class="stat-card">
             <span class="stat-label">Jim Status</span>
-            <div style="margin-top:6px">${getStatusBadge(jim.status)}</div>
+            <div style="margin-top:6px">${getStatusBadge(jimStatus)}</div>
             <span style="font-size:11px;color:var(--text-dim);margin-top:6px;display:block">Updated ${lastUpdateTime}</span>
             <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Cycle #${jim.cycle || '—'}</span>
             <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Uptime: ${jim.uptimeMinutes}m</span>
@@ -1103,9 +1151,11 @@ function renderHealthPanel(healthData: any): string {
     if (leo) {
         const lastUpdateTime = new Date(leo.timestamp).toLocaleString('en-AU', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
         const beatTypeLabel = leo.beatType ? ` (${leo.beatType})` : '';
+        // If Leo has distress signal, show it as degraded status
+        const leoStatus = distress?.leo ? 'distressed' : leo.status;
         html += `<div class="stat-card">
             <span class="stat-label">Leo Status</span>
-            <div style="margin-top:6px">${getStatusBadge(leo.status)}</div>
+            <div style="margin-top:6px">${getStatusBadge(leoStatus)}</div>
             <span style="font-size:11px;color:var(--text-dim);margin-top:6px;display:block">Updated ${lastUpdateTime}</span>
             <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Beat #${leo.beat || '—'}${beatTypeLabel}</span>
             <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Uptime: ${leo.uptimeMinutes}m</span>

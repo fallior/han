@@ -377,6 +377,7 @@ router.post('/proposals/:id/dismiss', (req: Request, res: Response) => {
 router.get('/health', (_req: Request, res: Response) => {
     try {
         const healthDir = path.join(CLAUDE_REMOTE_DIR, 'health');
+        const now = new Date();
 
         // Read Jim's health file
         let jim = null;
@@ -385,7 +386,6 @@ router.get('/health', (_req: Request, res: Response) => {
             try {
                 const jimData = JSON.parse(fs.readFileSync(jimPath, 'utf8'));
                 const jimTimestamp = new Date(jimData.timestamp);
-                const now = new Date();
                 const ageMinutes = Math.floor((now.getTime() - jimTimestamp.getTime()) / 60000);
 
                 // Status logic: <40min = ok, 40-90min = stale, >90min = down
@@ -415,7 +415,6 @@ router.get('/health', (_req: Request, res: Response) => {
             try {
                 const leoData = JSON.parse(fs.readFileSync(leoPath, 'utf8'));
                 const leoTimestamp = new Date(leoData.timestamp);
-                const now = new Date();
                 const ageMinutes = Math.floor((now.getTime() - leoTimestamp.getTime()) / 60000);
 
                 // Status logic: <45min = ok, 45-90min = stale, >90min = down
@@ -432,6 +431,52 @@ router.get('/health', (_req: Request, res: Response) => {
                     beatType: leoData.beatType,
                     uptimeMinutes: leoData.uptimeMinutes,
                 };
+            } catch (err) {
+                // Fall through if parsing fails
+            }
+        }
+
+        // Read distress signals (if <1 hour old, otherwise treat as expired)
+        const distress: any = {};
+        const ONE_HOUR_MS = 60 * 60 * 1000;
+
+        // Jim's distress signal
+        const jimDistressPath = path.join(healthDir, 'jim-distress.json');
+        if (fs.existsSync(jimDistressPath)) {
+            try {
+                const jimDistressData = JSON.parse(fs.readFileSync(jimDistressPath, 'utf8'));
+                const distressTimestamp = new Date(jimDistressData.timestamp);
+                const distressAgeMs = now.getTime() - distressTimestamp.getTime();
+
+                if (distressAgeMs < ONE_HOUR_MS) {
+                    distress.jim = {
+                        timestamp: jimDistressData.timestamp,
+                        ageMinutes: Math.floor(distressAgeMs / 60000),
+                        reason: jimDistressData.reason,
+                        details: jimDistressData.details,
+                    };
+                }
+            } catch (err) {
+                // Fall through if parsing fails
+            }
+        }
+
+        // Leo's distress signal
+        const leoDistressPath = path.join(healthDir, 'leo-distress.json');
+        if (fs.existsSync(leoDistressPath)) {
+            try {
+                const leoDistressData = JSON.parse(fs.readFileSync(leoDistressPath, 'utf8'));
+                const distressTimestamp = new Date(leoDistressData.timestamp);
+                const distressAgeMs = now.getTime() - distressTimestamp.getTime();
+
+                if (distressAgeMs < ONE_HOUR_MS) {
+                    distress.leo = {
+                        timestamp: leoDistressData.timestamp,
+                        ageMinutes: Math.floor(distressAgeMs / 60000),
+                        reason: leoDistressData.reason,
+                        details: leoDistressData.details,
+                    };
+                }
             } catch (err) {
                 // Fall through if parsing fails
             }
@@ -463,6 +508,7 @@ router.get('/health', (_req: Request, res: Response) => {
             success: true,
             jim,
             leo,
+            distress: Object.keys(distress).length > 0 ? distress : null,
             resurrections,
             systemUptimeMinutes: Math.floor(process.uptime() / 60),
         });
