@@ -60,6 +60,7 @@ const MAX_RESTART_ATTEMPTS = 5;
 const RESTART_BACKOFF_MS = 5000;
 let cycleCount = 0;
 let deferredCyclePending = false;
+let currentCycleStartTime = 0; // Track cycle start for distress detection
 
 // ── Health signal (Robin Hood Protocol) ──────────────────────
 
@@ -852,10 +853,26 @@ export function scheduleSupervisorCycle(): void {
             return;
         }
 
+        // Record cycle start time for distress detection
+        currentCycleStartTime = Date.now();
+
         try {
             const result = await runSupervisorCycle();
             cycleCount++;
+
             if (result) {
+                // Check for slow cycle (distress signal)
+                const actualDurationMs = Date.now() - currentCycleStartTime;
+                const medianDurationMs = getMedianCycleDuration();
+                const threshold = medianDurationMs * DISTRESS_MULTIPLIER;
+
+                if (actualDurationMs > threshold) {
+                    const expectedMinutes = Math.round(medianDurationMs / 60000);
+                    const actualMinutes = Math.round(actualDurationMs / 60000);
+                    writeDistressSignal(cycleCount, medianDurationMs, actualDurationMs);
+                    sendDistressNtfy(expectedMinutes, actualMinutes);
+                }
+
                 writeJimHealthSignal(cycleCount, 'complete', result.costUsd, delay);
             }
         } catch (err: any) {
