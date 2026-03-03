@@ -233,7 +233,7 @@ export function cleanupCheckpoint(projectPath: string, checkpointRef: string | n
             });
             console.log(`[Git] Cleaned up checkpoint branch: ${checkpointRef}`);
         } else if (checkpointType === 'stash') {
-            // Drop the stash
+            // Pop the stash to restore pre-existing work
             const stashList = execFileSync('git', ['stash', 'list'], {
                 cwd: projectPath,
                 encoding: 'utf8',
@@ -245,11 +245,16 @@ export function cleanupCheckpoint(projectPath: string, checkpointRef: string | n
                 if (line.includes(checkpointRef)) {
                     const match = line.match(/^(stash@\{\d+\})/);
                     if (match) {
-                        execFileSync('git', ['stash', 'drop', match[1]], {
-                            cwd: projectPath,
-                            stdio: 'ignore'
-                        });
-                        console.log(`[Git] Cleaned up checkpoint stash: ${checkpointRef}`);
+                        try {
+                            execFileSync('git', ['stash', 'pop', match[1]], {
+                                cwd: projectPath,
+                                stdio: 'ignore'
+                            });
+                            console.log(`[Git] Cleaned up checkpoint stash: ${checkpointRef}`);
+                        } catch (err: any) {
+                            // Stash pop failed (likely merge conflict) — leave stash in place
+                            console.warn(`[Git] Stash pop had conflicts — leaving stash in place for manual resolution`);
+                        }
                         return;
                     }
                 }
