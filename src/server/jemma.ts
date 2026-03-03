@@ -100,6 +100,26 @@ const startedAt = Date.now();
 // Track last seen message ID per channel for reconciliation
 const lastSeenMessageId: Record<string, string> = {};
 
+// Track recent messages for admin UI
+const recentMessages: Array<{
+  timestamp: string;
+  author: string;
+  channel: string;
+  message: string;
+  recipient: string;
+  confidence: number;
+}> = [];
+
+// Track delivery statistics
+const deliveryStats: Record<string, number> = {
+  jim: 0,
+  leo: 0,
+  darron: 0,
+  sevn: 0,
+  six: 0,
+  ignored: 0,
+};
+
 // ── Utilities ─────────────────────────────────────────────────────
 
 function loadConfig(): Config {
@@ -135,6 +155,44 @@ function writeHealthFile(status: 'ok' | 'error', lastError?: string): void {
     fs.writeFileSync(HEALTH_FILE, JSON.stringify(health, null, 2));
   } catch (err) {
     console.error('[Jemma] Failed to write health file:', (err as Error).message);
+  }
+}
+
+function updateMessageLog(message: any, recipient: string, confidence: number): void {
+  try {
+    recentMessages.unshift({
+      timestamp: new Date().toISOString(),
+      author: message.author.username,
+      channel: message.channel_id,
+      message: message.content,
+      recipient,
+      confidence,
+    });
+
+    // Keep only last 100 messages
+    if (recentMessages.length > 100) {
+      recentMessages.pop();
+    }
+
+    // Write to file for persistence
+    const messagesFile = path.join(HEALTH_DIR, 'jemma-messages.json');
+    fs.writeFileSync(messagesFile, JSON.stringify({ recent: recentMessages }, null, 2));
+  } catch (err) {
+    console.error('[Jemma] Failed to update message log:', (err as Error).message);
+  }
+}
+
+function updateDeliveryStats(recipient: string): void {
+  try {
+    if (recipient in deliveryStats) {
+      deliveryStats[recipient]++;
+    }
+
+    // Write to file for persistence
+    const statsFile = path.join(HEALTH_DIR, 'jemma-stats.json');
+    fs.writeFileSync(statsFile, JSON.stringify({ delivery_stats: deliveryStats }, null, 2));
+  } catch (err) {
+    console.error('[Jemma] Failed to update delivery stats:', (err as Error).message);
   }
 }
 

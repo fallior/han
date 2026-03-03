@@ -244,24 +244,47 @@ router.post('/deliver', (req: Request, res: Response) => {
 
 /**
  * GET /status
- * Returns Jemma service health status
+ * Returns Jemma service health status, recent messages, and delivery statistics
  */
 router.get('/status', (req: Request, res: Response) => {
     try {
         const healthFile = path.join(HEALTH_DIR, 'jemma-health.json');
+        const messagesFile = path.join(HEALTH_DIR, 'jemma-messages.json');
+        const statsFile = path.join(HEALTH_DIR, 'jemma-stats.json');
 
-        if (!fs.existsSync(healthFile)) {
-            return res.json({
-                success: true,
-                status: 'unknown',
-                message: 'Jemma has not reported health yet'
-            });
+        let health: any = {};
+        let recentMessages: any[] = [];
+        let deliveryStats: Record<string, number> = {};
+
+        if (fs.existsSync(healthFile)) {
+            health = JSON.parse(fs.readFileSync(healthFile, 'utf8'));
         }
 
-        const health = JSON.parse(fs.readFileSync(healthFile, 'utf8'));
+        if (fs.existsSync(messagesFile)) {
+            try {
+                const messagesData = JSON.parse(fs.readFileSync(messagesFile, 'utf8'));
+                recentMessages = messagesData.recent || [];
+            } catch {
+                // Ignore parse errors
+            }
+        }
+
+        if (fs.existsSync(statsFile)) {
+            try {
+                const statsData = JSON.parse(fs.readFileSync(statsFile, 'utf8'));
+                deliveryStats = statsData.delivery_stats || {};
+            } catch {
+                // Ignore parse errors
+            }
+        }
+
         res.json({
             success: true,
-            status: health.status || 'unknown',
+            status: health.gatewayConnected ? 'connected' : 'disconnected',
+            uptime_seconds: health.uptimeMinutes ? health.uptimeMinutes * 60 : 0,
+            last_reconciliation: health.lastBeat || null,
+            recent_messages: recentMessages,
+            delivery_stats: deliveryStats,
             ...health
         });
     } catch (err: any) {
