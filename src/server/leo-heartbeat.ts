@@ -166,8 +166,9 @@ function checkJimHealth(): void {
         try {
             execSync('systemctl --user restart claude-remote-server.service', { timeout: 30000 });
 
-            // Verify via systemctl is-active — faster than waiting for a full cycle to update health file
-            execSync('sleep 3');
+            // Wait for Node.js/tsx Express server to fully start before verification
+            // 12s allows time for module loading, port binding, and health signal setup
+            execSync('sleep 12');
             try {
                 const status = execSync('systemctl --user is-active claude-remote-server.service', { timeout: 5000 }).toString().trim();
                 if (status === 'active') {

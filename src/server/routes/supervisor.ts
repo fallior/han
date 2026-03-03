@@ -6,6 +6,7 @@
  * GET  /memory/:file — Specific memory file
  * POST /trigger    — Manually trigger a cycle
  * POST /pause      — Pause/resume automatic cycles
+ * GET  /health     — Health status for Jim and Leo
  */
 
 import { Router, Request, Response } from 'express';
@@ -367,6 +368,104 @@ router.post('/proposals/:id/dismiss', (req: Request, res: Response) => {
         );
 
         res.json({ success: true, proposal_id: proposal.id });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// GET /health — Health status for Jim and Leo
+router.get('/health', (_req: Request, res: Response) => {
+    try {
+        const healthDir = path.join(CLAUDE_REMOTE_DIR, 'health');
+
+        // Read Jim's health file
+        let jim = null;
+        const jimPath = path.join(healthDir, 'jim-health.json');
+        if (fs.existsSync(jimPath)) {
+            try {
+                const jimData = JSON.parse(fs.readFileSync(jimPath, 'utf8'));
+                const jimTimestamp = new Date(jimData.timestamp);
+                const now = new Date();
+                const ageMinutes = Math.floor((now.getTime() - jimTimestamp.getTime()) / 60000);
+
+                // Status logic: <40min = ok, 40-90min = stale, >90min = down
+                let jimStatus: 'ok' | 'stale' | 'down' = 'ok';
+                if (ageMinutes > 90) jimStatus = 'down';
+                else if (ageMinutes > 40) jimStatus = 'stale';
+
+                jim = {
+                    timestamp: jimData.timestamp,
+                    status: jimStatus,
+                    ageMinutes,
+                    pid: jimData.pid,
+                    cycle: jimData.cycle,
+                    tier: jimData.tier,
+                    costUsd: jimData.costUsd,
+                    uptimeMinutes: jimData.uptimeMinutes,
+                };
+            } catch (err) {
+                // Fall through if parsing fails
+            }
+        }
+
+        // Read Leo's health file
+        let leo = null;
+        const leoPath = path.join(healthDir, 'leo-health.json');
+        if (fs.existsSync(leoPath)) {
+            try {
+                const leoData = JSON.parse(fs.readFileSync(leoPath, 'utf8'));
+                const leoTimestamp = new Date(leoData.timestamp);
+                const now = new Date();
+                const ageMinutes = Math.floor((now.getTime() - leoTimestamp.getTime()) / 60000);
+
+                // Status logic: <45min = ok, 45-90min = stale, >90min = down
+                let leoStatus: 'ok' | 'stale' | 'down' = 'ok';
+                if (ageMinutes > 90) leoStatus = 'down';
+                else if (ageMinutes > 45) leoStatus = 'stale';
+
+                leo = {
+                    timestamp: leoData.timestamp,
+                    status: leoStatus,
+                    ageMinutes,
+                    pid: leoData.pid,
+                    beat: leoData.beat,
+                    beatType: leoData.beatType,
+                    uptimeMinutes: leoData.uptimeMinutes,
+                };
+            } catch (err) {
+                // Fall through if parsing fails
+            }
+        }
+
+        // Read resurrection log (last 20 entries)
+        const resurrections: any[] = [];
+        const resurrectionPath = path.join(healthDir, 'resurrection-log.jsonl');
+        if (fs.existsSync(resurrectionPath)) {
+            try {
+                const content = fs.readFileSync(resurrectionPath, 'utf8');
+                const lines = content.trim().split('\n').filter((line) => line.length > 0);
+
+                // Take last 20 entries
+                const lastLines = lines.slice(-20);
+                for (const line of lastLines) {
+                    try {
+                        resurrections.push(JSON.parse(line));
+                    } catch {
+                        // Skip invalid JSON lines
+                    }
+                }
+            } catch (err) {
+                // Fall through if reading fails
+            }
+        }
+
+        res.json({
+            success: true,
+            jim,
+            leo,
+            resurrections,
+            systemUptimeMinutes: Math.floor(process.uptime() / 60),
+        });
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
     }
