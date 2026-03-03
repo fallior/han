@@ -66,14 +66,38 @@ export function hasUncommittedChanges(projectPath: string): boolean {
 }
 
 /**
- * Create a git checkpoint before task execution
+ * Create a git checkpoint before task execution.
+ *
+ * CHECKPOINT STRATEGY:
+ *
+ * Goal: Protect user's pre-existing work and enable safe rollback if task fails.
+ *
+ * If working tree is DIRTY (has uncommitted changes):
+ *   - Create a stash to preserve user's work
+ *   - Stash includes all untracked files (-u flag)
+ *   - Named with task ID for later identification
+ *   - Task executes with clean working tree
+ *   - On success: stash is popped (user's work restored on top of task commits)
+ *   - On failure: stash is popped to rollback, restoring exact pre-task state
+ *
+ * If working tree is CLEAN (no uncommitted changes):
+ *   - Create a branch as checkpoint
+ *   - Branch created at current HEAD
+ *   - Task executes normally
+ *   - On success: branch is deleted (task commits persist)
+ *   - On failure: branch is reset to (exact rollback)
+ *
+ * Why two strategies? Efficiency:
+ *   - Stash is needed when user has uncommitted work (must preserve it)
+ *   - Branch is simpler when working tree is already clean
+ *
  * Returns { ref, type } where type is 'branch', 'stash', or 'none'
  */
 export function createCheckpoint(projectPath: string, taskId: string): Checkpoint {
     const isDirty = hasUncommittedChanges(projectPath);
 
     if (isDirty) {
-        // Dirty working tree — create stash
+        // Dirty working tree — create stash to preserve user's work
         const stashMessage = `claude-remote checkpoint ${taskId}`;
         try {
             execFileSync('git', ['stash', 'push', '-u', '-m', stashMessage], {
@@ -87,7 +111,7 @@ export function createCheckpoint(projectPath: string, taskId: string): Checkpoin
             return { ref: null, type: 'none' };
         }
     } else {
-        // Clean working tree — create branch
+        // Clean working tree — create branch as checkpoint
         const branchName = `claude-remote/checkpoint-${taskId}`;
         try {
             execFileSync('git', ['branch', branchName], {
@@ -104,7 +128,26 @@ export function createCheckpoint(projectPath: string, taskId: string): Checkpoin
 }
 
 /**
- * Rollback to a git checkpoint after task failure
+ * Rollback to a git checkpoint after task failure or cancellation.
+ *
+ * PURPOSE: Undo all changes made by the task and restore working tree
+ * to exact state before task execution.
+ *
+ * BRANCH ROLLBACK:
+ *   - git reset --hard [checkpoint-branch]
+ *   - Restores entire working tree to checkpoint state
+ *   - Discards all task changes (both staged and unstaged)
+ *
+ * STASH ROLLBACK:
+ *   - git reset --hard (discard any task changes)
+ *   - git stash pop [stash-ref] (restore user's original work)
+ *   - Ensures user's pre-task state is fully restored
+ *   - Pop is safe here because failure handling is strict
+ *
+ * Note: This function is called on task FAILURE. On success,
+ * cleanupCheckpoint() is called instead (pops stash safely with conflict handling).
+ *
+ * See cleanupCheckpoint() and ARCHITECTURE.md for full checkpoint lifecycle.
  */
 export function rollbackCheckpoint(projectPath: string, checkpointRef: string | null, checkpointType: string): void {
     if (!checkpointRef || checkpointType === 'none') return;
@@ -123,7 +166,7 @@ export function rollbackCheckpoint(projectPath: string, checkpointRef: string | 
                 if (line.includes(checkpointRef)) {
                     const match = line.match(/^(stash@\{\d+\})/);
                     if (match) {
-                        // Reset working tree and apply stash
+                        // Discard task changes and restore user's original work
                         execFileSync('git', ['reset', '--hard'], {
                             cwd: projectPath,
                             stdio: 'ignore'
@@ -138,7 +181,7 @@ export function rollbackCheckpoint(projectPath: string, checkpointRef: string | 
                 }
             }
         } else if (checkpointType === 'branch') {
-            // Reset to the branch
+            // Reset to the branch (exact rollback)
             execFileSync('git', ['reset', '--hard', checkpointRef], {
                 cwd: projectPath,
                 stdio: 'ignore'
@@ -219,21 +262,50 @@ export function commitTaskChanges(projectPath: string, task: Task): CommitResult
 }
 
 /**
- * Clean up a git checkpoint after successful task completion
+ * Clean up a git checkpoint after successful task completion.
+ *
+ * CHECKPOINT CLEANUP STRATEGY:
+ *
+ * Branch checkpoints (created for clean working trees):
+ *   - Simply delete the branch — task changes are persisted in commits
+ *   - No merge/conflict possible because branch was created before any changes
+ *
+ * Stash checkpoints (created for dirty working trees):
+ *   - Use `git stash pop` to restore user's pre-existing uncommitted work
+ *   - Pop applies stash AND removes it from stash list
+ *   - Critical: Pop happens AFTER task commits, so user's work is restored on top
+ *
+ * CONFLICT HANDLING:
+ *
+ *   When task commits and user's stashed changes both modify the same lines,
+ *   `git stash pop` fails with a merge conflict. In this case:
+ *
+ *   1. Working tree is left with conflict markers (<<<<<<<, =======, >>>>>>>)
+ *   2. Stash is NOT dropped — it remains in stash list for inspection
+ *   3. User must manually resolve:
+ *      - Edit conflicted files
+ *      - Remove conflict markers
+ *      - git add [files] && git commit
+ *      - git stash drop [stash-ref] (optional cleanup)
+ *
+ *   This approach ensures NO DATA LOSS. The alternative (stash drop) would
+ *   discard user's work if pop fails — unacceptable.
+ *
+ * See claude-context/ARCHITECTURE.md "Git Checkpoint Behavior" for full details.
  */
 export function cleanupCheckpoint(projectPath: string, checkpointRef: string | null, checkpointType: string): void {
     if (!checkpointRef || checkpointType === 'none') return;
 
     try {
         if (checkpointType === 'branch') {
-            // Delete the checkpoint branch
+            // Delete the checkpoint branch (task changes are already committed)
             execFileSync('git', ['branch', '-D', checkpointRef], {
                 cwd: projectPath,
                 stdio: 'ignore'
             });
             console.log(`[Git] Cleaned up checkpoint branch: ${checkpointRef}`);
         } else if (checkpointType === 'stash') {
-            // Pop the stash to restore pre-existing work
+            // Restore user's pre-existing work by popping the stash
             const stashList = execFileSync('git', ['stash', 'list'], {
                 cwd: projectPath,
                 encoding: 'utf8',
@@ -246,14 +318,20 @@ export function cleanupCheckpoint(projectPath: string, checkpointRef: string | n
                     const match = line.match(/^(stash@\{\d+\})/);
                     if (match) {
                         try {
+                            // Pop applies the stash and removes it from stash list
                             execFileSync('git', ['stash', 'pop', match[1]], {
                                 cwd: projectPath,
                                 stdio: 'ignore'
                             });
                             console.log(`[Git] Cleaned up checkpoint stash: ${checkpointRef}`);
                         } catch (err: any) {
-                            // Stash pop failed (likely merge conflict) — leave stash in place
+                            // Pop failed: merge conflict between task commits and user's stashed changes
+                            // Leave stash in place — user must resolve manually to preserve data
                             console.warn(`[Git] Stash pop had conflicts — leaving stash in place for manual resolution`);
+                            // User can resolve by:
+                            // 1. Edit conflicted files and remove conflict markers
+                            // 2. git add . && git commit
+                            // 3. git stash drop [stash-ref] for cleanup
                         }
                         return;
                     }

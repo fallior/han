@@ -285,6 +285,82 @@ All 12 levels complete — from MVP prompt responder to full autonomous developm
 
 **DocAssist** — Mandatory documentation task appended to every goal. Ensures CURRENT_STATUS.md, ARCHITECTURE.md, and session notes stay current as the system evolves.
 
+## Git Checkpoint Behavior
+
+Every autonomous task is protected by automatic git checkpoints that enable safe rollback on failure while preserving your pre-existing work.
+
+### How Checkpoints Work
+
+**Before each task executes:**
+- If your working tree has uncommitted changes → creates a **stash** to preserve them
+- If your working tree is clean → creates a **branch** as a recovery point
+
+**On task success:**
+- Branch checkpoint → deleted (task changes persist in commits)
+- Stash checkpoint → **popped** to restore your original work on top of task commits
+
+**On task failure:**
+- Both checkpoint types → automatically rolled back to restore exact pre-task state
+
+### Conflict Scenario: Stash Pop Conflicts
+
+**When it happens:** Your task makes commits that modify the same lines as your stashed changes. When the system tries to restore your work, git can't automatically merge the changes.
+
+**What happens:**
+1. Your working tree is left with conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`)
+2. Your stash is **NOT dropped** — it remains available in `git stash list`
+3. You see the warning: `[Git] Stash pop had conflicts — leaving stash in place for manual resolution`
+
+**How to resolve:**
+
+```bash
+# 1. See what's conflicted
+git status
+
+# 2. Edit the conflicted files and remove conflict markers
+# Choose which version to keep, or combine both changes
+
+# 3. Commit your resolution
+git add [resolved-files]
+git commit -m "Resolve stash conflicts after task completion"
+
+# 4. Clean up the stash (optional)
+git stash drop "stash@{0}"
+```
+
+**Why this approach?** It guarantees NO DATA LOSS. Your work is never silently discarded, even if the merge is complex. You have full control over how to resolve conflicts.
+
+### Data Protection Guarantees
+
+| Scenario | Outcome |
+|----------|---------|
+| Task succeeds, stash pops cleanly | ✅ Your work restored, no user action needed |
+| Task succeeds, stash has conflicts | ✅ Conflicts marked, stash left in place for manual resolution |
+| Task fails | ✅ Rollback to pre-task state, all work preserved |
+| Server crashes during task | ✅ Checkpoint in database, recovery on restart |
+
+### Troubleshooting
+
+**Check active checkpoints:**
+```bash
+git stash list | grep "claude-remote checkpoint"
+git branch | grep "claude-remote/checkpoint"
+```
+
+**Inspect a stash:**
+```bash
+git stash show -p "stash@{0}"
+```
+
+**See task checkpoint details:**
+```bash
+# From project database
+sqlite3 ~/.claude-remote/tasks.db \
+  "SELECT id, title, checkpoint_ref, checkpoint_type, status FROM tasks WHERE project_path = '$(pwd)' ORDER BY created_at DESC LIMIT 5;"
+```
+
+For complete details, see **ARCHITECTURE.md** → "Git Checkpoint Behavior" section.
+
 ## Three-Way Collaboration
 
 Claude Remote implements a unique three-way collaboration model:

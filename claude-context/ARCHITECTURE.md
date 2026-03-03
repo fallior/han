@@ -385,6 +385,7 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
   - Rollback on task failure or cancellation
   - Cleanup on successful completion
   - Stored in database: checkpoint_ref, checkpoint_type, checkpoint_created_at
+  - See **Git Checkpoint Behavior** section below for detailed lifecycle and conflict handling
 - **Approval gates**:
   - Three modes: `bypass` (fully autonomous), `edits_only` (approve dangerous tools), `approve_all` (approve every tool)
   - Dangerous tools: Bash, Write, Edit, NotebookEdit
@@ -501,6 +502,210 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 - **WebSocket broadcasts**:
   - `conversation_message` event when new message posted
   - Real-time updates in admin UI
+
+## Git Checkpoint Behavior
+
+**Purpose**: Protect against data loss by creating recovery points before task execution, enabling safe rollback on failure while preserving user's pre-existing work.
+
+### Checkpoint Lifecycle
+
+#### Phase 1: Checkpoint Creation (Before Task Execution)
+
+When a task is about to execute, `createCheckpoint()` is called:
+
+1. **Dirty check**: Calls `hasUncommittedChanges()` to detect working tree state
+2. **Branch checkpoint** (clean working tree):
+   - Creates a git branch named `claude-remote/checkpoint-{taskId}`
+   - Stores: `{ ref: "claude-remote/checkpoint-{taskId}", type: "branch" }`
+   - Purpose: Quick rollback point if task makes commits
+3. **Stash checkpoint** (dirty working tree):
+   - Creates a git stash with message `claude-remote checkpoint {taskId}`
+   - Stores: `{ ref: "claude-remote checkpoint {taskId}", type: "stash" }`
+   - Purpose: Preserve user's uncommitted work before task execution
+4. **Database storage**:
+   - Saves `checkpoint_ref` and `checkpoint_type` to tasks table
+   - Enables recovery even after server restart
+
+#### Phase 2: Task Execution
+
+Task runs autonomously. Two outcomes possible:
+
+- **Success**: Checkpoint cleanup happens (Phase 4)
+- **Failure/Cancellation**: Checkpoint rollback happens (Phase 3)
+
+#### Phase 3: Rollback (On Task Failure or Cancellation)
+
+If task fails or is cancelled before completion, `rollbackCheckpoint()` is called:
+
+**Branch rollback**:
+```bash
+git reset --hard [checkpoint-branch]
+```
+- Discards all task changes
+- Restores repository to exact state before task
+
+**Stash rollback**:
+```bash
+git reset --hard           # Discard task changes
+git stash pop [stash-ref]  # Restore user's original work
+```
+- Ensures user's uncommitted work is restored
+- Uses `stash pop` (removes stash after applying)
+
+#### Phase 4: Cleanup (On Task Success)
+
+After successful task completion, `cleanupCheckpoint()` is called:
+
+**Branch cleanup**:
+```bash
+git branch -D [checkpoint-branch]
+```
+- Deletes the checkpoint branch (no longer needed)
+- Task changes persist in commits on current branch
+
+**Stash cleanup** (safe pop with conflict handling):
+```bash
+git stash pop [stash-ref]  # Attempt to restore user's work
+```
+- **SUCCESS**: Stash popped cleanly, user's work is restored on top of task commits
+- **CONFLICT**: Merge conflict between task's commits and user's stashed changes
+  - Error caught, logged, stash **left in place**
+  - No automatic drop — user manually resolves
+  - See "Conflict Resolution" section below
+
+### Conflict Scenario: When Stash Pop Fails
+
+#### Why Conflicts Happen
+
+A merge conflict occurs when:
+1. Task commits modified the same lines as user's stashed changes
+2. Git cannot automatically determine which version to keep
+3. Example:
+   ```
+   User's stashed work:    Adds feature X to function foo()
+   Task's commits:         Refactors foo() to use new pattern
+   Result:                 Merge conflict in foo()
+   ```
+
+#### Behavior on Conflict
+
+When `git stash pop` fails:
+
+1. **Conflict state left in working tree**:
+   - Files with conflicts marked with `<<<<<<<`, `=======`, `>>>>>>>`
+   - User must resolve manually
+2. **Stash preserved** (NOT dropped):
+   - Original stash remains in stash list
+   - Can be inspected with `git stash show -p [stash-ref]`
+3. **Log message**:
+   ```
+   [Git] Stash pop had conflicts — leaving stash in place for manual resolution
+   ```
+
+#### Resolution Steps for Users
+
+If you see the warning above, follow these steps:
+
+**Step 1: Examine conflicts**
+```bash
+git status
+# Shows: "both added", "both modified" etc. in conflict files
+```
+
+**Step 2: Review changes**
+```bash
+# See what the stash wanted to add
+git stash show -p
+
+# See what the task committed
+git diff HEAD~[N]  # where N is number of task commits
+```
+
+**Step 3: Resolve conflicts**
+- Edit conflicted files
+- Remove conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`)
+- Keep whichever version makes sense (often both)
+- Example resolution:
+  ```javascript
+  // BEFORE (conflicted)
+  <<<<<<< HEAD
+  function foo(x) {
+    return x * 2;  // Task's new implementation
+  }
+  =======
+  function foo(x) {
+    return newPattern(x);  // User's stashed change
+  }
+  >>>>>>>
+
+  // AFTER (resolved)
+  function foo(x) {
+    return newPattern(x * 2);  // Combined approach
+  }
+  ```
+
+**Step 4: Complete the merge**
+```bash
+git add [resolved-files]
+git commit -m "Resolve stash conflicts after task completion"
+```
+
+**Step 5: Drop the stash** (optional, for cleanup)
+```bash
+# After conflicts are resolved and committed, you can drop the stash
+git stash drop [stash-ref]
+
+# Or drop by name
+git stash drop "stash@{0}"
+```
+
+### Data Protection Guarantees
+
+| Scenario | Checkpoint Type | Outcome | Data Loss Risk |
+|----------|-----------------|---------|-----------------|
+| Task succeeds, clean pop | Stash | User work restored on top of commits | ✅ None |
+| Task succeeds, conflict | Stash | Stash left in place, user resolves | ✅ None (manual required) |
+| Task fails | Any | Rollback to checkpoint, user work preserved | ✅ None |
+| Server crash during task | Any | Checkpoint in DB, recovered on restart | ✅ None |
+
+### Implementation Details
+
+**Code location**: `src/server/services/git.ts`
+
+**Key functions**:
+- `createCheckpoint(projectPath, taskId)` — Lines 72-104
+- `rollbackCheckpoint(projectPath, checkpointRef, checkpointType)` — Lines 109-151
+- `cleanupCheckpoint(projectPath, checkpointRef, checkpointType)` — Lines 224-266
+
+**Critical design decision** (resolved 2026-03-04):
+- **Question**: Should we use `stash drop` or `stash pop` on success?
+- **Answer**: Use `stash pop` with try/catch
+  - Reason: Pop restores user's work, drop discards it
+  - Conflicts are caught and left for manual resolution
+  - Prevents silent data loss from conflicting changes
+
+### Monitoring & Debugging
+
+**Check checkpoint status**:
+```bash
+# See all stashes (including checkpoints)
+git stash list | grep "claude-remote checkpoint"
+
+# Show what's in a stash
+git stash show -p "stash@{0}"
+
+# See checkpoint branches
+git branch | grep "claude-remote/checkpoint"
+```
+
+**Inspect task checkpoint in database**:
+```sql
+SELECT id, title, checkpoint_ref, checkpoint_type, status
+FROM tasks
+WHERE project_path = '/path/to/project'
+ORDER BY created_at DESC
+LIMIT 5;
+```
 
 ### Robin Hood Protocol: Mutual Health Monitoring (Complete — All 6 Phases)
 
