@@ -37,6 +37,7 @@ let nextCycleTimeout: ReturnType<typeof setTimeout> | null = null;
 let workerProcess: ChildProcess | null = null;
 let workerReady = false;
 let pendingCycleResolve: ((result: CycleCompleteMessage['result'] | null) => void) | null = null;
+let cycleInProgress = false;
 
 const MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
 const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
@@ -875,6 +876,12 @@ export async function runSupervisorCycle(): Promise<{
         return null;
     }
 
+    // Guard against overlapping cycles
+    if (cycleInProgress) {
+        console.log('[Supervisor] Cycle already in progress — skipping');
+        return null;
+    }
+
     // Send run_cycle message to worker and await response
     return new Promise<{
         cycleId: string;
@@ -885,6 +892,7 @@ export async function runSupervisorCycle(): Promise<{
     } | null>((resolve) => {
         // Set up timeout (2 hours — generous safety net, cycles can run long)
         const timeout = setTimeout(() => {
+            cycleInProgress = false;
             pendingCycleResolve = null;
             console.error('[Supervisor] Cycle timeout after 2 hours');
             resolve(null);
@@ -892,6 +900,7 @@ export async function runSupervisorCycle(): Promise<{
 
         // Set up promise resolver
         pendingCycleResolve = (result) => {
+            cycleInProgress = false;
             clearTimeout(timeout);
             if (!result) {
                 resolve(null);
@@ -908,7 +917,8 @@ export async function runSupervisorCycle(): Promise<{
             });
         };
 
-        // Send message to worker
+        // Mark cycle as in progress and send message to worker
+        cycleInProgress = true;
         sendMessageToWorker({ type: 'run_cycle' });
     });
 }
