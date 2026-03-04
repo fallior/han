@@ -32,6 +32,17 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-05 — Claude (autonomous) — Discord Conversation Fragmentation Fixed
+- **Fixed Discord conversation fragmentation and channelName display in routes/jemma.ts** — Two critical bugs resolved in a single focused change:
+  - **Bug 1: Conversation fragmentation (See/Act gap #16)**: The prepared statement `findOpenDiscordConv` existed at line 17 but had zero call sites. Every Discord message created a new conversation instead of appending to existing ones. Fixed by checking for existing open Discord conversation before creating new one (lines 155-171) — searches for `%#${channel}%` pattern, reuses existing conversation if found, only creates new one if none exists. Added timestamp update (line 180) to maintain sort order in UI after inserting message.
+  - **Bug 2: channelName not consumed**: Jemma sends `channelName` in delivery payload but routes/jemma.ts didn't destructure it (line 118). Conversation titles showed numeric channel IDs instead of human-readable names. Fixed by adding `channelName` to destructuring and using it in conversation title with fallback: `Discord: ${author} in #${channelName || channel}` (line 165).
+- **Why this matters**: Eliminates conversation fragmentation — multiple Discord messages from the same channel now correctly append to a single conversation thread instead of creating separate conversations. UI shows readable channel names (`#general`, `#jim`) instead of numeric IDs (`#1478239128654053427`). Fixes See/Act gap #16 where a prepared statement was defined but never used.
+- **Files modified**: `src/server/routes/jemma.ts` (+21/-11 lines)
+- **Scope adherence**: Only modified routes/jemma.ts as specified — did NOT touch conversations.ts (manually refined by Darron) or jemma.ts (Jemma service file)
+- **Commits**: 2 commits (a6493df, 5c758d0) from goal mmchtme5-g090l4 (Fix Discord conversation-per-message fragmentation and channelName consumption)
+- **Cost**: $0.24 (Sonnet)
+- **Tasks**: 1 task (mmchv9i6-mua9ux, done)
+
 ### 2026-03-05 — Claude (autonomous) — Ecosystem Map References Added
 - **Added ecosystem map references to Leo's heartbeat and project CLAUDE.md files** — Fulfils Darron's request from 'Map of Home' conversation on March 4:
   - **Leo's heartbeat CLAUDE.md** (`~/.claude-remote/agents/Leo/CLAUDE.md`): Added reference under Memory section (line 17) — "Ecosystem map: `~/.claude-remote/memory/shared/ecosystem-map.md` — Map of our garden. Where to find files, services, databases, and how the team connects."
