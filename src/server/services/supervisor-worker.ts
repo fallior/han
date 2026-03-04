@@ -29,6 +29,7 @@ import type {
     BroadcastMessage,
     LogMessage
 } from './supervisor-protocol';
+import { postToDiscord, resolveChannelName, loadDiscordConfig } from './discord-utils';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -182,6 +183,7 @@ function initDatabase(): void {
 
     conversationStmts = {
         updateTimestamp: workerDb.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?'),
+        get: workerDb.prepare('SELECT * FROM conversations WHERE id = ?'),
     };
 
     conversationMessageStmts = {
@@ -919,6 +921,28 @@ function executeActions(actions: SupervisorAction[], cycleId: string): string[] 
 
                     summaries.push(`respond_conversation: responded to ${action.conversation_id}`);
                     log(`[Worker] Responded to conversation ${action.conversation_id}`);
+
+                    // Post to Discord if this is a Discord conversation
+                    try {
+                        const conversation = conversationStmts.get.get(action.conversation_id) as any;
+                        if (conversation && conversation.discussion_type === 'discord') {
+                            // Extract channelId from conversation metadata or title
+                            // Title format: "Discord: {author} in #{channelName}"
+                            const titleMatch = conversation.title?.match(/#(\S+)/);
+                            if (titleMatch && titleMatch[1]) {
+                                const channelName = titleMatch[1];
+                                const posted = await postToDiscord('jim', channelName, action.response_content);
+                                if (posted) {
+                                    log(`[Worker] Posted Jim response to Discord #${channelName}`);
+                                } else {
+                                    log(`[Worker] Failed to post to Discord #${channelName}`);
+                                }
+                            }
+                        }
+                    } catch (err: any) {
+                        log(`[Worker] Error posting to Discord: ${err.message}`);
+                    }
+
                     break;
                 }
 
