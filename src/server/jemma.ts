@@ -225,14 +225,19 @@ function updateDeliveryStats(recipient: string): void {
   }
 }
 
-function buildClassificationPrompt(message: any): string {
+function resolveChannelName(channelId: string): string {
   const config = loadConfig();
   const idToName = Object.entries(config.discord?.channels || {}).reduce(
     (acc, [name, id]) => ({ ...acc, [id as string]: name }),
     {} as Record<string, string>
   );
-  const channelName = idToName[message.channel_id] || message.channel_id;
-  const channelDisplay = idToName[message.channel_id]
+  return idToName[channelId] || channelId;
+}
+
+function buildClassificationPrompt(message: any): string {
+  const config = loadConfig();
+  const channelName = resolveChannelName(message.channel_id);
+  const channelDisplay = channelName !== message.channel_id
     ? `#${channelName} (${message.channel_id})`
     : message.channel_id;
 
