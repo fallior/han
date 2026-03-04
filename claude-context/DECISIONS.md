@@ -3027,4 +3027,121 @@ A shorter timeout (e.g., 30min) would abort legitimate work. 2 hours is a genero
 
 ---
 
+### DEC-039: Admin UI Dispatch Resilience — Signal File Fallback
+
+**Date**: 2026-03-04
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Human messages posted to the admin UI (Workshop conversations) need to wake Jim's supervisor for timely response. After refactor 6eb66be centralised ALL dispatch logic through Jemma's admin WebSocket client, we discovered a single point of failure:
+
+**Primary path (via Jemma):**
+```
+Human posts message
+  → conversations.ts stores message + broadcasts via WebSocket
+  → Jemma's admin WS client receives broadcast
+  → Jemma classifies message (rule-based: mention > tab type > default)
+  → Jemma writes leo-wake or jim-wake signal file
+  → Agent wakes and responds
+```
+
+**Problem**: When Jemma's WebSocket connection drops (network blip, process restart, Jemma crash), human messages are stored and broadcast but never trigger a wake signal. Jim doesn't see them until the next scheduled cycle (up to 20 minutes).
+
+We needed a lightweight fallback that ensures Jim wakes for human messages without reintroducing the over-responding behaviour that prompted the Jemma centralisation.
+
+#### Options Considered
+
+1. **Call runSupervisorCycle() directly from conversations.ts** ❌
+   - ❌ **This was the original problem** — caused over-responding (Jim replied to every message, including Leo's messages, leading to conversation loops)
+   - ❌ Spawns Agent SDK subprocess on every human message (even if Jim is already mid-cycle)
+   - ❌ No guard against cycle overlap
+   - ❌ Bypasses all of Jemma's classification logic
+   - Why we moved away from this: DEC-023 and commit 6eb66be
+
+2. **Retry WebSocket broadcast with exponential backoff**
+   - ✅ Could detect if Jemma didn't receive broadcast
+   - ❌ Doesn't help if Jemma process is down (no listener)
+   - ❌ Adds retry complexity to conversations route
+   - ❌ Increases message POST latency (user waits for retries)
+   - ❌ Still doesn't guarantee Jemma will wake Jim
+
+3. **Write jim-wake signal file directly as fallback** ✅
+   - ✅ **Idempotent** — writing signal file multiple times is safe
+   - ✅ **No side effects** — doesn't spawn processes or trigger cycles directly
+   - ✅ **Deferred cycle pattern handles it** — Jim's fs.watch on signals/ dir will see the file and wake
+   - ✅ **Preserves Jemma's centralisation** — primary path still goes through Jemma
+   - ✅ **Lightweight** — single fs.writeFileSync call, ~14 lines with try/catch
+   - ✅ **No cycle overlap** — supervisor-worker.ts already has cycleInProgress guard (DEC-038)
+   - ❌ Doesn't include Jemma's classification (always wakes Jim, even for Leo-directed messages)
+   - ✅ **Acceptable trade-off** — when Jemma is down, waking Jim for all human messages is safer than missing messages entirely
+
+#### Decision
+
+**Write jim-wake signal file directly from conversations.ts as a fallback after broadcasting via WebSocket.**
+
+The conversations route continues to broadcast for Jemma (primary path), but also writes a jim-wake signal file immediately after storing the message. This ensures Jim wakes even if Jemma is down, while preserving Jemma's classification benefits when Jemma is healthy.
+
+**Implementation** (`src/server/routes/conversations.ts:302-317`):
+```typescript
+if (finalRole === 'human') {
+    // Lightweight fallback: write jim-wake signal so Jim wakes
+    // even if Jemma's admin WebSocket is down.
+    // Do NOT call runSupervisorCycle() directly — that caused over-responding.
+    try {
+        const signalFile = path.join(SIGNALS_DIR, 'jim-wake');
+        fs.writeFileSync(signalFile, JSON.stringify({
+            conversationId: req.params.id,
+            messageId,
+            timestamp: now,
+            reason: 'human_message_fallback'
+        }));
+    } catch (err: any) {
+        console.error(`[Conversations] Failed to write jim-wake signal: ${err.message}`);
+    }
+}
+```
+
+**Why signal file instead of direct cycle call:**
+- Signal files are **idempotent** — can be written multiple times without harm
+- They don't spawn processes or trigger immediate work
+- The deferred cycle pattern (DEC-023) watches signals/ directory and wakes Jim appropriately
+- Supervisor already has cycle overlap protection (DEC-038) to prevent multiple concurrent cycles
+
+#### Consequences
+
+**Positive:**
+- **Resilience**: Human messages always wake Jim, even when Jemma is down
+- **No over-responding**: Signal file approach doesn't bypass Jemma's classification or trigger duplicate cycles
+- **Minimal code**: 14-line fallback (try/catch wrapper around signal write)
+- **Preserves separation of concerns**: Jemma remains the intelligent dispatcher; conversations route just ensures basic wake signal
+- **Fast user experience**: No retry delays (signal write is instant)
+
+**Negative:**
+- **Reduced classification accuracy when Jemma is down**: All human messages wake Jim (no distinction between Jim-directed vs Leo-directed)
+  - **Mitigation**: Acceptable trade-off — when Jemma is down, waking Jim for all messages is safer than missing Jim-directed messages
+  - Jim's conversation analysis can still decide not to respond after reading the message
+- **Duplicate signal files**: Both Jemma (when healthy) and conversations route write jim-wake signals
+  - **Mitigation**: Signal files are timestamped, and Jim's wake handler is idempotent (processing same conversation twice is safe)
+
+**Behaviour in different scenarios:**
+
+| Scenario | Primary Path (Jemma) | Fallback Path | Result |
+|----------|---------------------|---------------|--------|
+| Jemma healthy | ✅ Classifies + writes signal | ✅ Writes jim-wake | Both paths work, duplicate signals OK |
+| Jemma WS dropped | ❌ No listener | ✅ Writes jim-wake | Fallback ensures wake |
+| Jemma process down | ❌ Not running | ✅ Writes jim-wake | Fallback ensures wake |
+| Leo-directed message (Jemma healthy) | ✅ Writes leo-wake | ✅ Writes jim-wake | Both agents wake (Jim can ignore after reading) |
+| Leo-directed message (Jemma down) | ❌ No classification | ✅ Writes jim-wake | Jim wakes (sub-optimal but safe) |
+
+#### Related
+
+- **DEC-023**: Deferred Cycle Pattern via fs.watch — established the signal file watching pattern
+- **DEC-038**: Supervisor Cycle Overlap Protection — prevents duplicate cycles when both Jemma and fallback trigger
+- **Commit 6eb66be**: Centralised admin UI dispatch through Jemma (removed original direct cycle calls)
+- **Commit 150a180**: Added jim-wake signal fallback
+
+---
+
 *Decisions are valuable historical context — record them while the reasoning is fresh!*

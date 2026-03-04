@@ -32,6 +32,21 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-04 — Claude (autonomous) — Jim Discord Reply Path and Admin UI Dispatch Resilience Fixed
+- **Discord reply path fix** — Jim's Discord responses now correctly resolve channel names instead of IDs:
+  - **Problem**: `supervisor-worker.ts` extracted numeric channel ID from conversation title, passed it directly to `postToDiscord()` as `channelName`. Webhook lookup failed because key should be a name like `'jim'`, not `'1478239128654053427'`.
+  - **Fix**: Import `resolveChannelName()` from `./discord`, call it on line 934 to convert ID to channel name before posting. If resolution fails, log warning and skip Discord post (no crash).
+  - **Implementation**: Lines 932-945 in `supervisor-worker.ts` — extracts channel ID from title regex match, calls `resolveChannelName()`, guards against null return, posts to Discord with resolved name.
+- **Admin UI dispatch resilience fallback** — Human messages now trigger jim-wake signal even when Jemma's WebSocket is down:
+  - **Problem**: Refactor 6eb66be centralised ALL dispatch logic through Jemma's admin WebSocket. When Jemma's WS drops, human messages wait up to 20 minutes for Jim's scheduled cycle.
+  - **Fix**: After storing human message and broadcasting via WebSocket, write jim-wake signal file directly as lightweight fallback. Does NOT call `runSupervisorCycle()` (that caused original over-responding problem) — just writes signal file.
+  - **Implementation**: Lines 302-317 in `conversations.ts` — after human message insertion, try/catch wrapper writes `~/.claude-remote/signals/jim-wake` with conversation ID, message ID, timestamp, and reason `'human_message_fallback'`.
+- **Why this matters**: Fixes two critical bugs in Jim's communication paths. Discord replies work correctly (no more webhook lookup failures), and human messages reliably wake Jim even if Jemma crashes or loses WebSocket connection. Admin UI → Jim path now has redundancy without the over-responding behaviour that prompted the original Jemma centralisation.
+- **Files modified**: `src/server/services/supervisor-worker.ts` (+2 lines import, +6 lines guard logic), `src/server/routes/conversations.ts` (+14 lines signal fallback)
+- **Commits**: 3 commits (47ce93f, 150a180, bd2d039) from goal mmbyq8s5-29nq05 (Fix Jim's Discord reply path and admin UI dispatch resilience)
+- **Cost**: $0.74 (Sonnet $0.32, Sonnet $0.42)
+- **Tasks**: 2 tasks (mmbysstx-yny9xz, mmbyssu6-pogdr7, both done)
+
 ### 2026-03-04 — Claude (autonomous) — Checkpoint Cleanup Data Loss Bug Fixed
 - **Critical data loss bug fixed in git checkpoint cleanup** — `cleanupCheckpoint()` was using `git stash drop` which permanently destroyed Leo's pre-existing uncommitted work after task completion. This violated the fundamental checkpoint guarantee: preserve user state, don't destroy it.
 - **Fix implemented**: Changed stash cleanup from `drop` to `pop` with proper conflict handling:

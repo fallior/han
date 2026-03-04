@@ -811,8 +811,16 @@ LIMIT 5;
 
 **Supervisor integration** (`supervisor-worker.ts`):
 - `respond_conversation` handler checks if `discussion_type === 'discord'`
-- Extracts channel name from conversation title: `"Discord: {author} in #{channelName}"`
+- Extracts channel ID from conversation title: `"Discord: {author} in #{channelId}"`
+- Resolves channel ID to name via `resolveChannelName()` (guards against unknown channels)
 - Posts Jim's response to Discord via `postToDiscord()` (non-blocking, message already saved to DB)
+
+**Admin UI dispatch resilience** (`routes/conversations.ts`):
+- Primary path: Jemma's admin WebSocket client listens for conversation_message broadcasts, classifies, writes signals
+- Fallback path: After storing human message, conversations route writes jim-wake signal directly to filesystem
+- Prevents 20-minute wait when Jemma's WebSocket is down
+- Does NOT call `runSupervisorCycle()` directly (that caused over-responding) — just writes signal file
+- Signal contains: conversationId, messageId, timestamp, reason 'human_message_fallback'
 
 **Health monitoring**: Writes `jemma-health.json` with `{ agent: 'jemma', timestamp, status, lastError }` (uses `timestamp` field for Robin Hood Protocol compatibility)
 
