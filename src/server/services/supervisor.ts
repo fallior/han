@@ -46,8 +46,6 @@ const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
 const JIM_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Jim');
 const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
 const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
-const CLI_BUSY_FILE = path.join(SIGNALS_DIR, 'cli-busy');
-const CLI_BUSY_STALE_MINUTES = 5;
 const LEO_HEALTH_FILE = path.join(HEALTH_DIR, 'leo-health.json');
 const JEMMA_HEALTH_FILE = path.join(HEALTH_DIR, 'jemma-health.json');
 const RESURRECTION_LOG = path.join(HEALTH_DIR, 'resurrection-log.jsonl');
@@ -452,27 +450,6 @@ function getWallClockDelay(): number {
     const phaseLabel = phase === 'sleep' ? (isRestDay() ? 'rest' : 'sleep') : phase;
     console.log(`[Supervisor] Wall-clock: ${phaseLabel} phase, period ${periodMs / 60000}min, next cycle in ${Math.round(delay / 1000)}s (${Math.round(delay / 60000)}min)`);
     return delay;
-}
-
-// ── Opus slot check (optimistic concurrency) ────────────────
-// Checks the cli-busy signal file written by UserPromptSubmit hook.
-// Shared mechanism with Leo's heartbeat (same file, same staleness).
-
-export function isOpusSlotBusy(): boolean {
-    if (!fs.existsSync(CLI_BUSY_FILE)) return false;
-    try {
-        const stat = fs.statSync(CLI_BUSY_FILE);
-        const ageMinutes = (Date.now() - stat.mtimeMs) / 60000;
-        if (ageMinutes > CLI_BUSY_STALE_MINUTES) {
-            console.log(`[Supervisor] Stale cli-busy file (${ageMinutes.toFixed(0)}m old) — removing`);
-            try { fs.unlinkSync(CLI_BUSY_FILE); } catch { /* race */ }
-            return false;
-        }
-        console.log('[Supervisor] CLI is busy — Opus slot in use');
-        return true;
-    } catch {
-        return false;
-    }
 }
 
 // ── Helper functions ─────────────────────────────────────────
