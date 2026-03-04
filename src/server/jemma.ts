@@ -821,6 +821,7 @@ function connectAdminWs(): void {
   adminWs.on('message', (data: Buffer) => {
     try {
       const event = JSON.parse(data.toString());
+      console.log(`[Jemma] Admin WS event: ${event.type}`);
       if (event.type !== 'conversation_message') return;
 
       const msg = event.message;
