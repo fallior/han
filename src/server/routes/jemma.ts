@@ -115,6 +115,7 @@ router.post('/deliver', (req: Request, res: Response) => {
             recipient,
             message,
             channel,
+            channelName,
             author,
             classification_confidence,
             conversation_id
@@ -151,23 +152,32 @@ router.post('/deliver', (req: Request, res: Response) => {
                 let convId = conversation_id;
 
                 if (!convId) {
-                    // Create new conversation if none specified
-                    convId = generateId();
-                    const now = new Date().toISOString();
-                    conversationStmts.insertWithType.run(
-                        convId,
-                        `Discord: ${author} in #${channel}`,
-                        'open',
-                        now,
-                        now,
-                        'discord'
-                    );
+                    // Try to find existing open Discord conversation for this channel
+                    const existing = findOpenDiscordConv.get(`%#${channel}%`) as { id: string } | undefined;
+                    if (existing) {
+                        convId = existing.id;
+                    } else {
+                        // Create new conversation only if none exists
+                        convId = generateId();
+                        const now = new Date().toISOString();
+                        conversationStmts.insertWithType.run(
+                            convId,
+                            `Discord: ${author} in #${channelName || channel}`,
+                            'open',
+                            now,
+                            now,
+                            'discord'
+                        );
+                    }
                 }
 
                 // Insert message into conversation
                 const msgId = generateId();
                 const now = new Date().toISOString();
                 conversationMessageStmts.insert.run(msgId, convId, 'human', message, now);
+
+                // Update conversation timestamp to maintain sort order
+                conversationStmts.updateTimestamp.run(now, convId);
 
                 // Write signal file to wake Jim
                 writeSignalFile('jim-wake', {
