@@ -145,6 +145,7 @@ See `~/Projects/_learnings/INDEX.md` for full index.
 
 ## Quick Context
 
+- **Ecosystem Map**: `~/.claude-remote/memory/shared/ecosystem-map.md` — Living map of the ecosystem for orientation
 - **Stage**: All levels (1-13) complete
 - **Stack**: Node.js + Express + SQLite + Agent SDK + Ollama + tmux + ntfy.sh + WebSocket + TypeScript
 - **Status**: Feature-complete (all ROADMAP levels implemented + admin console Phase 2 + conversation search)
