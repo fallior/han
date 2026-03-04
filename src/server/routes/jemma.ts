@@ -70,41 +70,13 @@ function sendNtfyNotification(title: string, message: string): void {
 /**
  * Write a signal file for Jim or Leo wake-up
  */
-export function writeSignalFile(signalName: string, data?: Record<string, unknown>): void {
+function writeSignalFile(signalName: string, data?: Record<string, unknown>): void {
     const filepath = path.join(SIGNALS_DIR, signalName);
 
     if (data) {
         fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
     } else {
         fs.writeFileSync(filepath, '');
-    }
-}
-
-// ── Admin UI dispatch (rule-based, no LLM) ──────────────────
-
-export function classifyAdminMessage(discussionType: string | null, content: string): 'leo' | 'jim' {
-    // Priority 1: Explicit name mention overrides tab
-    if (/\b(hey\s+leo|@leo|leo[,:])\b/i.test(content)) return 'leo';
-    if (/\b(hey\s+jim|@jim|jim[,:])\b/i.test(content)) return 'jim';
-    // Priority 2: Tab-based routing
-    if (discussionType === 'leo-question' || discussionType === 'leo-postulate') return 'leo';
-    if (discussionType === 'jim-request' || discussionType === 'jim-report') return 'jim';
-    // Default: Jim handles general/memory/untyped
-    return 'jim';
-}
-
-export async function dispatchAdminMessage(
-    recipient: 'leo' | 'jim', conversationId: string, messageId: string,
-    content: string, timestamp: string
-): Promise<void> {
-    if (recipient === 'leo') {
-        writeSignalFile('leo-wake', { conversationId, mentionedAt: timestamp, messagePreview: content.slice(0, 200) });
-        console.log(`[Dispatch] Leo wake signal written for ${conversationId}`);
-    } else {
-        writeSignalFile('jim-wake', { conversationId, messageId, timestamp, reason: 'admin_ui_dispatch' });
-        const { runSupervisorCycle } = await import('../services/supervisor');
-        runSupervisorCycle().catch(() => {});
-        console.log(`[Dispatch] Jim wake signal + supervisor cycle for ${conversationId}`);
     }
 }
 
