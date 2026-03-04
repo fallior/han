@@ -29,7 +29,7 @@ import type {
     BroadcastMessage,
     LogMessage
 } from './supervisor-protocol';
-import { postToDiscord, resolveChannelName, loadDiscordConfig } from './discord-utils';
+import { postToDiscord } from './discord';
 
 // ── Types ────────────────────────────────────────────────────
 
