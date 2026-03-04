@@ -5,6 +5,61 @@
         const WS_RECONNECT_MAX = 30000;
         const API_BASE = '';
 
+        // ── Auth ─────────────────────────────────────────────────
+        // Wrap global fetch to inject Bearer token for remote access
+        const _originalFetch = window.fetch.bind(window);
+        window.fetch = function(input, init) {
+            const token = localStorage.getItem('claude-remote-auth-token');
+            if (token) {
+                init = init || {};
+                const headers = new Headers(init.headers || {});
+                if (!headers.has('Authorization')) {
+                    headers.set('Authorization', `Bearer ${token}`);
+                }
+                init.headers = headers;
+            }
+            return _originalFetch(input, init).then(res => {
+                if (res.status === 401) {
+                    showAuthPrompt();
+                }
+                return res;
+            });
+        };
+
+        function showAuthPrompt() {
+            if (document.getElementById('authOverlay')) return;
+            const overlay = document.createElement('div');
+            overlay.id = 'authOverlay';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:center;justify-content:center';
+            overlay.innerHTML = `
+                <div style="background:var(--bg-secondary, #1e1e2e);border:1px solid var(--border-subtle, #333);border-radius:12px;padding:32px;max-width:400px;width:90%">
+                    <h2 style="margin:0 0 8px 0;font-size:18px;color:var(--text-primary, #cdd6f4)">Authentication Required</h2>
+                    <p style="margin:0 0 16px 0;font-size:13px;color:var(--text-muted, #a6adc8)">Enter your bearer token to access Claude Remote.</p>
+                    <input type="password" id="authTokenInput" placeholder="Bearer token" style="width:100%;padding:10px 12px;border:1px solid var(--border-subtle, #333);border-radius:8px;background:var(--bg-primary, #11111b);color:var(--text-primary, #cdd6f4);font-size:14px;box-sizing:border-box;margin-bottom:12px" />
+                    <button onclick="submitAuthToken()" style="width:100%;padding:10px;border:none;border-radius:8px;background:var(--blue, #89b4fa);color:#11111b;font-weight:600;font-size:14px;cursor:pointer">Connect</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            setTimeout(() => {
+                const input = document.getElementById('authTokenInput');
+                if (input) {
+                    input.focus();
+                    input.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') window.submitAuthToken();
+                    });
+                }
+            }, 50);
+        }
+
+        window.submitAuthToken = function() {
+            const input = document.getElementById('authTokenInput');
+            if (!input || !input.value.trim()) return;
+            localStorage.setItem('claude-remote-auth-token', input.value.trim());
+            const overlay = document.getElementById('authOverlay');
+            if (overlay) overlay.remove();
+            location.reload();
+        };
+
         let currentPrompt = null;
         let pollTimer = null;
         let isSending = false;
@@ -151,7 +206,10 @@
 
         function connectWebSocket() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${location.host}/ws`;
+            const token = localStorage.getItem('claude-remote-auth-token');
+            const wsUrl = token
+                ? `${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}`
+                : `${protocol}//${location.host}/ws`;
 
             try {
                 ws = new WebSocket(wsUrl);
