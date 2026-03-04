@@ -75,6 +75,36 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - **Cost**: $0.00 (documentation task, no LLM usage)
 - **Tasks**: 5 tasks (mmaok9qy-2iuhkc, mmaok9qy-p2m7o9, mmaok9qz-4owqpf, mmaok9qz-mkipg8, mmaok9qz-tmw40b, all done)
 
+### 2026-03-04 — Claude (autonomous) — Jemma Classification and Jim Discord Integration Complete
+- **Jemma classification system enhanced with channel and username context** — Classification prompt now includes human-readable channel names and real names mapped from Discord usernames:
+  - **Channel name injection**: Reversed config.json channel map (#channel-name → channel-id) to show `#general (123456)` instead of bare channel ID. Helps classifier understand channel context for routing decisions.
+  - **Username mapping**: Added `config.discord.username_map` lookup to display `Darron (@fallior)` instead of just Discord username. Classifier now sees real identity for better context-aware routing to Jim/Leo/Darron.
+  - **Implementation**: Modified `buildClassificationPrompt()` in jemma.ts:207-244 to construct enriched author and channel displays using config lookups. Prompt now includes: `Author: {realName} (@{username})` and `Channel: #{channelName} ({channelId})`.
+- **Discord message role changed from 'discord' to 'human'** — Messages inserted into conversation threads now use `role='human'` instead of `role='discord'`. This allows Jim's pending conversation query to see them (query only fetches human/supervisor/leo roles). Previously Discord messages were invisible to Jim's analysis phase, breaking the conversation flow.
+  - Modified: `src/server/jemma.ts:535` (message insertion), `src/server/routes/jemma.ts:230` (manual delivery endpoint)
+- **Jim's supervisor responses now post back to Discord** — Full Discord integration for respond_conversation action:
+  - **New discord-utils.ts module**: Created `postToDiscord()`, `resolveChannelName()`, and `loadDiscordConfig()` helper functions (129 lines)
+  - **2000-character splitting**: Long Jim responses automatically split into multiple Discord messages (Discord limit)
+  - **Retry logic**: Exponential backoff (1s → 2s → 4s) with 2 retry attempts for network resilience
+  - **Conversation type detection**: In supervisor-worker.ts respond_conversation handler, checks if `discussion_type === 'discord'`, extracts channel name from conversation title (`"Discord: {author} in #{channelName}"`), resolves webhook URL via config, and posts response
+  - **Non-blocking**: Discord post failures are logged but don't fail the action (message already saved to DB for manual recovery)
+  - Modified: `src/server/services/supervisor-worker.ts:925-950` (respond_conversation handler integration)
+- **Cycle overlap protection added to Jim's supervisor** — Prevents race condition where deferred cycles or manual triggers could start a second cycle while one is already running:
+  - **cycleInProgress flag**: Boolean guard in `src/server/services/supervisor.ts:40,910-913,925,933,951` prevents overlapping `runSupervisorCycle()` calls
+  - **2-hour timeout**: Safety net clears flag if cycle hangs (generous timeout since Agent SDK cycles can run very long)
+  - **Early exit**: Returns null immediately if cycle already in progress with console log
+  - **Why this matters**: Jim's deferred cycle pattern (fs.watch triggers on cli-free signal) could fire while a scheduled cycle was running. Without guard, two cycles would spawn competing Agent SDK subprocesses, corrupt DB state, and waste API tokens. Now cycles are strictly serialised.
+- **Why this matters**: Full Discord ↔ Jim communication loop now functional. Darron/humans can message Jim via Discord (#jim channel), Jemma routes to conversation thread with full channel/username context, Jim sees messages (role=human), formulates response, and supervisor posts back to Discord automatically. Completes the three-agent ecosystem (Leo + Jim + Jemma) with external communication via Discord Gateway.
+- **Files created**: `src/server/services/discord-utils.ts` (129 lines)
+- **Files modified**:
+  - `src/server/jemma.ts` (+24 lines: channel name reversal, username mapping, classification prompt enhancement)
+  - `src/server/routes/jemma.ts` (+2 lines: role='human' in manual delivery)
+  - `src/server/services/supervisor-worker.ts` (+24 lines: Discord posting in respond_conversation)
+  - `src/server/services/supervisor.ts` (+13 lines: cycleInProgress guard)
+- **Commits**: 5 commits (110f307, 9608af7, 80dc1db, 934d34b, 45a3db1) from goal mmbnht0t-n9ho4z
+- **Cost**: $1.65 (Haiku $0.15, Sonnet $1.50)
+- **Tasks**: 5 tasks (mmbnjscl-kxpjag, mmbnjscu-j50r5e, mmbnjscv-lausn5, mmbnjscv-0u6ksn, mmbnjscv-ghz2jd, all done)
+
 ### 2026-03-03 — Claude (autonomous) — Jemma Bug Fixes Complete
 - **Four critical bugs fixed in Jemma Discord dispatcher** — Service now ready for production activation:
   - **Health file field mismatch** (highest priority): Changed `lastBeat` to `timestamp` in jemma.ts:146 writeHealthFile() function. Three consumers (supervisor.ts:184, routes/supervisor.ts:445, admin.ts:1182) were reading `timestamp` but Jemma was writing `lastBeat`, causing health checks to fail. Now consistent with Leo and Jim health file format.

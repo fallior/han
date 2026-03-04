@@ -65,6 +65,9 @@ When you make a significant technical or design decision:
 | DEC-033 | Agent Health File Schema Consistency | **Settled** | 2026-03-03 |
 | DEC-034 | Bearer Token Authentication with Localhost Bypass | Accepted | 2026-03-04 |
 | DEC-035 | Stash Checkpoint Cleanup — Pop Instead of Drop | **Settled** | 2026-03-04 |
+| DEC-036 | Discord Message Role Mapping — Human vs Discord | Accepted | 2026-03-04 |
+| DEC-037 | Discord Posting Error Handling — Non-Blocking | Accepted | 2026-03-04 |
+| DEC-038 | Supervisor Cycle Overlap Protection — Boolean Guard | Accepted | 2026-03-04 |
 
 ---
 
@@ -2763,6 +2766,264 @@ All tests use real git commands against temporary repositories to verify actual 
 - This decision fixes the cleanup half of the checkpoint lifecycle
 - Commits: 12774a0, 547287c, 28dea50, 528e5d1, 3dc1ce2
 - Session note: `claude-context/session-notes/2026-03-04-autonomous-checkpoint-cleanup-fix.md`
+
+---
+
+### DEC-036: Discord Message Role Mapping — Human vs Discord
+
+**Date**: 2026-03-04
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Discord messages are routed by Jemma into conversation threads for Jim to respond to. Jim's pending conversation query fetches messages with `role IN ('human','supervisor','leo')`. When Discord messages were inserted with `role='discord'`, they were invisible to Jim's analysis phase, breaking the conversation flow.
+
+We needed Discord messages to be visible to Jim while preserving the audit trail of message source (Discord vs web interface vs direct agent communication).
+
+#### Options Considered
+
+1. **Add 'discord' to Jim's pending query role filter**
+   - ✅ Makes Discord messages visible to Jim
+   - ❌ Pollutes role semantics (role should indicate participant type, not source)
+   - ❌ Would need to modify query in multiple places
+   - ❌ Future role-based filtering becomes more complex
+
+2. **Keep role='discord', modify Jim's query**
+   - ✅ Preserves distinct role type
+   - ❌ More invasive change to supervisor logic
+   - ❌ Every new message source would require query modification
+   - ❌ Harder to reason about which roles are "conversation participants" vs "message sources"
+
+3. **Use role='human', preserve source in author field** ✅
+   - ✅ Minimal change (two lines in Jemma)
+   - ✅ Leverages existing role semantics (human = external conversation participant)
+   - ✅ Jim's existing pending query works without modification
+   - ✅ Future role-based filtering continues to work as expected
+   - ✅ Source preserved in `author` field: `'discord:fallior'` vs `'human'` vs `'leo'`
+   - ✅ Clear separation of concerns: role = participant type, author = specific identity
+
+#### Decision
+
+**Use `role='human'` for Discord messages, preserve source in `author='discord:{username}'` field.**
+
+The role field represents the conversation participant type (human, supervisor, leo). The author field represents the specific identity and source (discord:fallior, human, leo). This maintains clean role semantics while preserving full audit trail.
+
+#### Consequences
+
+**Positive:**
+- Discord messages now visible to Jim's pending conversation analysis
+- No changes required to supervisor logic
+- Role semantics remain clean and consistent
+- Author field provides full audit trail (can distinguish Discord vs web vs direct agent messages)
+- Future message sources (email, Slack, SMS) can follow same pattern: role=human, author={source}:{id}
+
+**Negative:**
+- Discord messages appear as 'human' in UI (but author field shows source)
+- Slightly less obvious at a glance that message came from Discord (need to check author field)
+
+**Implementation:**
+- `src/server/jemma.ts:535` — Changed `role='discord'` to `role='human'` (automatic delivery)
+- `src/server/routes/jemma.ts:230` — Changed `role='discord'` to `role='human'` (manual delivery endpoint)
+- Author field format: `'discord:{discord_username}'` (e.g., `'discord:fallior'`)
+
+#### Related
+
+- Jemma Discord integration (goal mmbnht0t-n9ho4z)
+- Jim's supervisor pending query logic (services/supervisor-worker.ts)
+- Commit: 80dc1db
+
+---
+
+### DEC-037: Discord Posting Error Handling — Non-Blocking
+
+**Date**: 2026-03-04
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+When Jim's supervisor responds to Discord conversations via the `respond_conversation` action, the response must be posted back to Discord via webhook. Webhook posting can fail for multiple reasons:
+- Network errors
+- Discord API rate limits
+- Misconfigured webhook URL in config.json
+- Discord server downtime
+
+We needed to decide: should webhook posting failure cause the entire `respond_conversation` action to fail, or should it be best-effort with logging?
+
+#### Options Considered
+
+1. **Blocking — fail action if Discord post fails**
+   - ✅ Guarantees Discord delivery or explicit failure
+   - ✅ Errors are immediately visible
+   - ❌ **Would lose Jim's response from DB if webhook misconfigured** (action fails before DB write)
+   - ❌ Supervisor cycle fails due to external dependency (Discord API)
+   - ❌ Manual recovery more difficult (response not in DB to retry)
+
+2. **Retry indefinitely until success**
+   - ✅ Guarantees eventual delivery
+   - ❌ Could hang supervisor cycle for hours/days if Discord is down
+   - ❌ Wastes supervisor budget on retry loops
+   - ❌ Delays subsequent cycle work
+
+3. **Non-blocking — save first, post best-effort, log failure** ✅
+   - ✅ Jim's response always preserved in conversation DB
+   - ✅ Supervisor cycle continues regardless of Discord status
+   - ✅ Manual recovery possible via admin console (response in DB, can manually re-post)
+   - ✅ Webhook configuration issues don't block Jim's core function
+   - ✅ Discord delivery is enhancement, not hard requirement
+   - ❌ Silent failures possible if logs not monitored
+   - ❌ Manual intervention needed to retry failed posts
+
+#### Decision
+
+**Non-blocking: Save message to DB first, attempt Discord post with retry, log failure but don't fail the action.**
+
+The `respond_conversation` action saves Jim's response to the conversation_messages table, then attempts to post to Discord. If posting fails, error is logged but action reports success. Jim's response is safely preserved in the database for manual recovery.
+
+**Rationale:**
+- Data preservation > delivery guarantee
+- Supervisor's primary responsibility is strategic oversight and conversation response, not Discord API reliability
+- Failed Discord posts can be recovered manually (response in DB, admin console can view/copy)
+- Webhook failures are often transient (network blips) or configuration issues (easy to diagnose from logs)
+
+#### Consequences
+
+**Positive:**
+- Jim never loses responses due to Discord API issues
+- Supervisor cycle doesn't block on external dependencies
+- Manual recovery path exists (admin console shows Jim's response)
+- Easier to diagnose webhook configuration problems (clear log message)
+
+**Negative:**
+- Requires log monitoring to catch failed Discord posts
+- No automatic retry mechanism (manual admin intervention needed)
+- User might not see Jim's response in Discord immediately (depends on monitoring)
+
+**Implementation details:**
+- **Location**: `src/server/services/supervisor-worker.ts:925-950`
+- **Sequence**:
+  1. Save message to conversation_messages table
+  2. Broadcast WebSocket update (message visible in admin console)
+  3. Check if conversation.discussion_type === 'discord'
+  4. Extract channel name from conversation title
+  5. Resolve webhook URL from config
+  6. Call `postToDiscord()` with try/catch
+  7. Log success/failure
+  8. Return from action (success regardless of Discord result)
+- **Retry logic**: `postToDiscord()` has built-in retry (2 attempts with exponential backoff 1s → 2s → 4s)
+- **Error messages**: Clear logs like `[Discord] Failed to post chunk 1/3 after 3 attempts: {error}`
+
+#### Related
+
+- DEC-031: Delivery Routing (Direct API Calls vs Signal Files) — established direct webhook posting pattern
+- `src/server/services/discord-utils.ts` — Discord posting implementation
+- Commits: 934d34b (wire postToDiscord), 45a3db1 (integration)
+
+---
+
+### DEC-038: Supervisor Cycle Overlap Protection — Boolean Guard
+
+**Date**: 2026-03-04
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Jim's supervisor uses two cycle triggers:
+1. **Scheduled cycles**: Adaptive timing (20min default)
+2. **Deferred cycles**: fs.watch on cli-free signal (runs when Leo's CLI session stops)
+
+Without protection, these triggers could fire simultaneously, starting two supervisor cycles in parallel. This causes:
+- **Competing Agent SDK subprocesses** spawned by both cycles
+- **Corrupted database state** (both cycles reading/writing conversations, goals, tasks)
+- **Wasted API tokens** (duplicate work, both cycles analysing same state)
+- **Race conditions** in pending conversation queries (both cycles see same pending messages, both respond)
+
+We needed a lightweight mechanism to serialize cycle execution without complex locking infrastructure.
+
+#### Options Considered
+
+1. **File-based lock (`/tmp/supervisor-cycle.lock`)**
+   - ✅ Works across process boundaries
+   - ✅ Survives process restarts (with stale lock cleanup)
+   - ❌ File I/O overhead on every cycle check
+   - ❌ Stale lock handling complexity (PID checks, lock expiry)
+   - ❌ Overkill for single-process supervisor
+
+2. **Database lock row (`supervisor_state` table)**
+   - ✅ Leverages existing SQLite infrastructure
+   - ✅ Transactional semantics
+   - ❌ DB round-trip on every cycle check
+   - ❌ Adds schema complexity
+   - ❌ Lock cleanup still needed on crash
+   - ❌ Overkill for single-process supervisor
+
+3. **In-memory boolean flag with timeout** ✅
+   - ✅ Zero overhead (simple boolean check)
+   - ✅ No file I/O or DB queries
+   - ✅ Timeout provides safety net for hung cycles
+   - ✅ Trivial implementation (6 lines of code)
+   - ✅ Sufficient for single-process supervisor
+   - ❌ Doesn't survive process restart (acceptable — restart clears state anyway)
+   - ❌ Not suitable for multi-process supervisor (not needed)
+
+#### Decision
+
+**Use in-memory `cycleInProgress` boolean flag with 2-hour timeout safety net.**
+
+The supervisor service maintains a single boolean flag. `runSupervisorCycle()` checks the flag, returns early if true, sets flag before starting cycle, clears flag on completion/timeout.
+
+**Why 2 hours?** Agent SDK cycles can legitimately run very long:
+- Complex codebase exploration (multiple Read/Grep/Glob operations)
+- Extended reasoning (multi-step strategic analysis)
+- Large goal decomposition (planning 10+ tasks)
+- Conversation response drafting (reading full thread history, formulating nuanced response)
+
+A shorter timeout (e.g., 30min) would abort legitimate work. 2 hours is a generous safety net that catches truly hung cycles without interrupting normal operation.
+
+#### Consequences
+
+**Positive:**
+- Prevents all cycle overlap scenarios (deferred + scheduled, manual trigger + scheduled, etc.)
+- Zero performance overhead
+- Simple implementation (easy to understand, easy to debug)
+- Timeout prevents permanent deadlock if cycle hangs
+- Early exit provides clear console log when overlap is prevented
+
+**Negative:**
+- Doesn't persist across process restarts (acceptable — restart clears all state)
+- Not suitable for hypothetical multi-process supervisor (not currently needed)
+- Timeout value is conservative (but safety is priority over aggressive scheduling)
+
+**Implementation:**
+- **Flag declaration**: `src/server/services/supervisor.ts:40`
+  ```typescript
+  let cycleInProgress = false;
+  ```
+- **Guard check**: `src/server/services/supervisor.ts:910-913`
+  ```typescript
+  if (cycleInProgress) {
+      console.log('[Supervisor] Cycle already in progress — skipping');
+      return null;
+  }
+  ```
+- **Flag lifecycle**:
+  - Set true when sending run_cycle message to worker (line 951)
+  - Cleared on cycle completion via pendingCycleResolve callback (lines 933, 946)
+  - Cleared on 2-hour timeout (line 925)
+
+**Observed behaviour:**
+- Deferred cycle triggers are now correctly skipped when scheduled cycle is running
+- Console logs show `[Supervisor] Cycle already in progress — skipping` when overlap is prevented
+- No API token waste on duplicate work
+- No database corruption from concurrent cycles
+
+#### Related
+
+- DEC-023: Deferred Cycle Pattern via fs.watch (Gary Model) — established the dual-trigger system that made overlap possible
+- Robin Hood Protocol health monitoring — depends on stable supervisor state (no corruption from concurrent cycles)
+- Commit: 45a3db1
 
 ---
 

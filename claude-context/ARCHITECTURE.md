@@ -786,6 +786,59 @@ LIMIT 5;
 - `claude-remote-server.service` — Supervisor + server (resurrected by Leo)
 - `leo-heartbeat.service` — Leo's heartbeat (resurrected by Jim)
 
+### Jemma: Discord Message Dispatcher (Complete)
+
+**Purpose**: Route Discord messages to the appropriate agent (Jim/Leo/Darron) using AI classification, and deliver agent responses back to Discord.
+
+**Architecture**:
+- **Gateway integration**: Raw WebSocket connection to Discord Gateway API (not discord.js)
+- **Message flow**: Discord → Jemma (classify) → Conversation thread → Jim/Leo → Discord
+- **Classification**: Ollama local models or Claude Haiku API classify messages by channel, mentions, and content
+
+**Message Classification** (`jemma.ts:buildClassificationPrompt`):
+- **Channel name injection**: Reverses config.json channel map to show `#general (123456)` instead of bare ID
+- **Username mapping**: Uses `config.discord.username_map` to show `Darron (@fallior)` for better context
+- **Prompt includes**: Message content, enriched author display, enriched channel display
+- **Classification result**: `{ recipient: 'jim|leo|darron|sevn|six|ignore', confidence: 0-1, reasoning: '...' }`
+
+**Message delivery**:
+- **Inbound**: Messages inserted into conversation threads with `role='human'` (changed from 'discord' for Jim visibility)
+- **Outbound**: Jim's supervisor respond_conversation action posts back to Discord via webhooks
+- **Discord utilities** (`services/discord-utils.ts`):
+  - `postToDiscord()`: Webhook posting with 2000-char splitting and exponential backoff retry (1s → 2s → 4s)
+  - `resolveChannelName()`: Reverses channel ID to name using config
+  - `loadDiscordConfig()`: Reads ~/.claude-remote/config.json
+
+**Supervisor integration** (`supervisor-worker.ts`):
+- `respond_conversation` handler checks if `discussion_type === 'discord'`
+- Extracts channel name from conversation title: `"Discord: {author} in #{channelName}"`
+- Posts Jim's response to Discord via `postToDiscord()` (non-blocking, message already saved to DB)
+
+**Health monitoring**: Writes `jemma-health.json` with `{ agent: 'jemma', timestamp, status, lastError }` (uses `timestamp` field for Robin Hood Protocol compatibility)
+
+### Jim's Supervisor Cycle Protection
+
+**Purpose**: Prevent overlapping supervisor cycles that would corrupt DB state and waste API tokens.
+
+**Problem**: Jim's deferred cycle pattern (fs.watch on cli-free signal) can trigger while a scheduled 20-minute cycle is already running, causing:
+- Competing Agent SDK subprocesses
+- Corrupted conversation/goal/task state (both cycles writing to same tables)
+- Wasted API costs (duplicate work)
+
+**Solution** (`services/supervisor.ts`):
+- **cycleInProgress flag**: Boolean guard checked at start of `runSupervisorCycle()`
+- **Early exit**: Returns null immediately if cycle already in progress
+- **2-hour timeout**: Safety net clears flag if cycle hangs (generous since Agent SDK cycles can run very long)
+- **Flag lifecycle**:
+  - Set true when sending run_cycle message to worker
+  - Cleared on cycle completion (success or failure)
+  - Cleared on timeout
+
+**Code locations**:
+- `supervisor.ts:40` — Flag declaration
+- `supervisor.ts:910-913` — Guard check with early return
+- `supervisor.ts:925,933,951` — Flag set/clear logic
+
 ### Level 13: Conversation Cataloguing & Search (Complete)
 
 **Full-text search and intelligent cataloguing for conversation discovery and analysis.**
