@@ -148,6 +148,26 @@ function ensureDirectories(): void {
   }
 }
 
+function loadLastSeen(): void {
+  try {
+    if (fs.existsSync(LAST_SEEN_FILE)) {
+      const data = JSON.parse(fs.readFileSync(LAST_SEEN_FILE, 'utf-8'));
+      Object.assign(lastSeenMessageId, data);
+      console.log(`[Jemma] Loaded lastSeenMessageId for ${Object.keys(data).length} channels`);
+    }
+  } catch (err) {
+    console.warn('[Jemma] Failed to load lastSeenMessageId:', (err as Error).message);
+  }
+}
+
+function saveLastSeen(): void {
+  try {
+    fs.writeFileSync(LAST_SEEN_FILE, JSON.stringify(lastSeenMessageId, null, 2));
+  } catch (err) {
+    console.warn('[Jemma] Failed to save lastSeenMessageId:', (err as Error).message);
+  }
+}
+
 function writeHealthFile(status: 'ok' | 'error', lastError?: string): void {
   try {
     const health = {
@@ -557,6 +577,7 @@ async function reconcileMessages(): Promise<void> {
       if (messages.length > 0) {
         // Update last seen ID (messages[0] is newest, Discord returns reverse chronological)
         lastSeenMessageId[channelId] = messages[0].id;
+        saveLastSeen();
 
         // Only route messages we haven't already processed (routeMessage handles dedup)
         let newCount = 0;
@@ -878,6 +899,7 @@ function handleShutdown(): void {
   if (adminReconnectTimer) {
     clearTimeout(adminReconnectTimer);
   }
+  saveLastSeen();
   writeHealthFile('ok');
   // Exit with 143 (128 + 15 = SIGTERM) so systemd Restart=always knows this was
   // a signal death, not a clean "I'm done" exit. Same as main server.
@@ -888,6 +910,7 @@ function handleShutdown(): void {
 
 async function main(): Promise<void> {
   ensureDirectories();
+  loadLastSeen();
   writeHealthFile('ok');
 
   console.log(`
