@@ -32,6 +32,17 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-05 — Claude (autonomous) — Ecosystem Map References Added
+- **Added ecosystem map references to Leo's heartbeat and project CLAUDE.md files** — Fulfils Darron's request from 'Map of Home' conversation on March 4:
+  - **Leo's heartbeat CLAUDE.md** (`~/.claude-remote/agents/Leo/CLAUDE.md`): Added reference under Memory section (line 17) — "Ecosystem map: `~/.claude-remote/memory/shared/ecosystem-map.md` — Map of our garden. Where to find files, services, databases, and how the team connects."
+  - **clauderemote project CLAUDE.md** (`~/Projects/clauderemote/CLAUDE.md`): Added reference under Quick Context section (line 147) — "**Ecosystem Map**: `~/.claude-remote/memory/shared/ecosystem-map.md` — Living map of the ecosystem for orientation"
+- **Why this matters**: Provides immediate orientation to the full development ecosystem (17 active projects, ports, databases, team structure) for both Leo's heartbeat agent during initialisation and session/task agents working in the clauderemote project. The ecosystem map (13KB, 128 lines) is a living document that answers "where is X?" and "how does Y work?" across the entire development garden.
+- **Files modified**: `~/.claude-remote/agents/Leo/CLAUDE.md` (+1 line), `~/Projects/clauderemote/CLAUDE.md` (+1 line)
+- **Scope adherence**: Only modified the two specified CLAUDE.md files — no code changes, no reformatting, minimal 2-line addition
+- **Commits**: 3 commits (903a529, c3038db, 087ad9a) from goal mmceojth-zevc5t (Link ecosystem map in Leo's CLAUDE.md and project CLAUDE.md)
+- **Cost**: $0.08 (Haiku)
+- **Tasks**: 2 tasks (both done)
+
 ### 2026-03-05 — Claude (autonomous) — Jemma Delivery Channel Names Enhancement
 - **Enhanced Jemma's message delivery logging with human-readable channel names and recipient metadata** — All delivery messages, notifications, and signal files now include resolved channel names instead of just numeric IDs:
   - **Channel name resolution**: Extracted `resolveChannelName()` function from classification prompt (lines 228-235) — inverts `config.discord.channels` map to resolve ID → name, falls back to raw ID if not in config
