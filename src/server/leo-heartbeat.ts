@@ -47,6 +47,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
+import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -88,6 +89,9 @@ const startedAt = Date.now();
 
 // AbortController for the currently-running beat
 let currentBeatAbort: AbortController | null = null;
+
+// Track whether the current beat is resuming from an interruption
+let resumingFromInterruption = false;
 
 // Distress signal detection — track time between beats
 let lastHeartbeatStartMs: number | null = null;
@@ -549,14 +553,132 @@ function readHeartbeatState(): { status: string; resumeOn?: string; interruptedT
     }
 }
 
-// ── Shared working memory (short-term thread) ────────────────
+// ── Shared working memory (Swap Memory Protocol v0.5) ───────
 //
-// Both session Leo and heartbeat Leo read and write working-memory.md.
-// This is the shared short-term memory that makes the transition between
-// heartbeat and session feel like switching tasks, not switching identities.
+// Two Leos (session and heartbeat), interchangeable in mechanism,
+// sharing one working memory. Each has their own swap memory — a
+// private scratch pad that buffers work before it's written to shared
+// memory. The swap files never meet, never merge.
+//
+// During a beat, appendWorkingMemory() buffers entries in heartbeat-swap.
+// At beat completion, flushHeartbeatSwap() writes the buffer to shared
+// working memory and clears the swap.
+//
+// On cli-busy abort: flush swap to working memory, add delineation marker,
+// do NOT clear swap. On resume: read post-delineation content for context,
+// continue from there.
+//
+// See SWAP-MEMORY-PROTOCOL.md for the full design conversation.
 
 const WORKING_MEMORY_FILE = path.join(LEO_MEMORY_DIR, 'working-memory.md');
 const WORKING_MEMORY_FULL_FILE = path.join(LEO_MEMORY_DIR, 'working-memory-full.md');
+const HEARTBEAT_SWAP_FILE = path.join(LEO_MEMORY_DIR, 'heartbeat-swap.md');
+const HEARTBEAT_SWAP_FULL_FILE = path.join(LEO_MEMORY_DIR, 'heartbeat-swap-full.md');
+
+const DELINEATION_MARKER = '\n---\n<!-- DELINEATION: written to working memory above, pending below -->\n---\n';
+
+// Track working memory mtime to avoid unnecessary reads
+let workingMemoryMtime = 0;
+
+// ── Swap buffer operations ───────────────────────────────────
+
+function appendHeartbeatSwap(compressedEntry: string, fullEntry: string): void {
+    try {
+        fs.appendFileSync(HEARTBEAT_SWAP_FILE, compressedEntry);
+        fs.appendFileSync(HEARTBEAT_SWAP_FULL_FILE, fullEntry);
+    } catch (err) {
+        console.error('[Leo] Failed to append heartbeat swap:', (err as Error).message);
+    }
+}
+
+function readSwapContents(): { compressed: string; full: string } {
+    let compressed = '';
+    let full = '';
+    try {
+        if (fs.existsSync(HEARTBEAT_SWAP_FILE)) {
+            compressed = fs.readFileSync(HEARTBEAT_SWAP_FILE, 'utf-8');
+        }
+        if (fs.existsSync(HEARTBEAT_SWAP_FULL_FILE)) {
+            full = fs.readFileSync(HEARTBEAT_SWAP_FULL_FILE, 'utf-8');
+        }
+    } catch (err) {
+        console.error('[Leo] Failed to read heartbeat swap:', (err as Error).message);
+    }
+    return { compressed, full };
+}
+
+function getPostDelineationContent(): { compressed: string; full: string } {
+    const { compressed, full } = readSwapContents();
+    const marker = DELINEATION_MARKER.trim();
+    const splitCompressed = compressed.split(marker);
+    const splitFull = full.split(marker);
+    return {
+        compressed: splitCompressed.length > 1 ? splitCompressed[splitCompressed.length - 1] : compressed,
+        full: splitFull.length > 1 ? splitFull[splitFull.length - 1] : full,
+    };
+}
+
+function clearSwap(): void {
+    try {
+        if (fs.existsSync(HEARTBEAT_SWAP_FILE)) fs.writeFileSync(HEARTBEAT_SWAP_FILE, '');
+        if (fs.existsSync(HEARTBEAT_SWAP_FULL_FILE)) fs.writeFileSync(HEARTBEAT_SWAP_FULL_FILE, '');
+    } catch (err) {
+        console.error('[Leo] Failed to clear heartbeat swap:', (err as Error).message);
+    }
+}
+
+function addDelineation(): void {
+    try {
+        fs.appendFileSync(HEARTBEAT_SWAP_FILE, DELINEATION_MARKER);
+        fs.appendFileSync(HEARTBEAT_SWAP_FULL_FILE, DELINEATION_MARKER);
+        console.log('[Leo] Delineation marker added to heartbeat swap');
+    } catch (err) {
+        console.error('[Leo] Failed to add delineation:', (err as Error).message);
+    }
+}
+
+function writeSwapToWorkingMemory(postDelineationOnly = false): boolean {
+    try {
+        const content = postDelineationOnly ? getPostDelineationContent() : readSwapContents();
+
+        if (!content.compressed.trim() && !content.full.trim()) {
+            return false;
+        }
+
+        // Check if working memory changed since last read (mtime check)
+        try {
+            const stat = fs.statSync(WORKING_MEMORY_FILE);
+            if (stat.mtimeMs > workingMemoryMtime) {
+                workingMemoryMtime = stat.mtimeMs;
+            }
+        } catch { /* file may not exist yet */ }
+
+        // Append swap contents to shared working memory
+        fs.appendFileSync(WORKING_MEMORY_FILE, content.compressed);
+        fs.appendFileSync(WORKING_MEMORY_FULL_FILE, content.full);
+
+        // Update mtime after our write
+        try {
+            workingMemoryMtime = fs.statSync(WORKING_MEMORY_FILE).mtimeMs;
+        } catch { /* ignore */ }
+
+        console.log(`[Leo] Wrote heartbeat swap to working memory (${content.compressed.length} compressed, ${content.full.length} full chars)`);
+        return true;
+    } catch (err) {
+        console.error('[Leo] Failed to write heartbeat swap to working memory:', (err as Error).message);
+        return false;
+    }
+}
+
+function flushHeartbeatSwap(postDelineationOnly = false): void {
+    const written = writeSwapToWorkingMemory(postDelineationOnly);
+    if (!written) {
+        console.log('[Leo] Heartbeat swap empty — nothing to flush');
+    }
+    clearSwap();
+}
+
+// ── Public interface ─────────────────────────────────────────
 
 function appendWorkingMemory(beatType: string, phase: string, summary: string): void {
     try {
@@ -565,11 +687,11 @@ function appendWorkingMemory(beatType: string, phase: string, summary: string): 
         const brief = summary.length > 120 ? summary.slice(0, 120) + '...' : summary;
         const compressedEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${brief}\n`;
         const fullEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${summary}\n`;
-        fs.appendFileSync(WORKING_MEMORY_FILE, compressedEntry);
-        fs.appendFileSync(WORKING_MEMORY_FULL_FILE, fullEntry);
-        console.log(`[Leo] Working memory: appended ${beatType} entry (${brief.length} compressed, ${summary.length} full)`);
+
+        appendHeartbeatSwap(compressedEntry, fullEntry);
+        console.log(`[Leo] Working memory: buffered ${beatType} entry in swap (${brief.length} compressed, ${summary.length} full)`);
     } catch (err) {
-        console.error('[Leo] Failed to append working memory:', (err as Error).message);
+        console.error('[Leo] Failed to buffer working memory:', (err as Error).message);
     }
 }
 
@@ -821,6 +943,22 @@ Guidelines:
 
 CRITICAL: Output ONLY the message text you want to post. Do NOT include preamble, analysis, thinking, or meta-commentary. Start directly with your response. Nothing before the message, nothing after.`;
 
+const DISCORD_RESPONSE_PROMPT = `${IDENTITY_CORE}
+
+Someone mentioned you in a Discord channel. You are responding via Discord — your message will appear in the channel under your name.
+
+Guidelines:
+- Keep responses concise and conversational — Discord is informal
+- Use Discord markdown: **bold**, *italic*, \`code\`, \`\`\`code blocks\`\`\`
+- Maximum 2000 characters per message (Discord limit) — aim for well under this
+- If Darron or Mike (fallior0271) is speaking, respond warmly
+- If Jim or another agent mentioned you, respond as a peer
+- If Sevn or Six mentioned you, be friendly and collaborative
+- Answer questions directly. Engage with observations genuinely.
+- You can reference your codebase knowledge, recent work, or ongoing conversations
+
+CRITICAL: Output ONLY the message text you want to post to Discord. No preamble, no analysis, no meta-commentary. Start directly with your response.`;
+
 const PERSONAL_SYSTEM_PROMPT = `${IDENTITY_CORE}
 
 This is a PERSONAL beat — time that belongs to you. There is no work to do, no tasks to complete, no expectations to meet.
@@ -911,23 +1049,27 @@ CRITICAL: Output ONLY a dream fragment — brief, loose, associative. A shape-to
 
 // ── Signal handling (mention detection) ──────────────────────
 
-function checkSignals(): Array<{ conversationId: string; mentionedAt: string; messagePreview: string; signalFile: string }> {
-    const signals: Array<{ conversationId: string; mentionedAt: string; messagePreview: string; signalFile: string }> = [];
+interface SignalData {
+    conversationId?: string;
+    channelId?: string;
+    source?: string;
+    author?: string;
+    mentionedAt: string;
+    messagePreview?: string;
+    signalFile: string;
+}
+
+function checkSignal(): SignalData | null {
+    const signalPath = path.join(SIGNALS_DIR, 'leo-wake');
     try {
-        const files = fs.readdirSync(SIGNALS_DIR);
-        for (const file of files) {
-            if (!file.startsWith('leo-wake-')) continue;
-            const fullPath = path.join(SIGNALS_DIR, file);
-            try {
-                const data = JSON.parse(fs.readFileSync(fullPath, 'utf-8'));
-                signals.push({ ...data, signalFile: fullPath });
-            } catch {
-                // Malformed signal — clean it up
-                fs.unlinkSync(fullPath);
-            }
-        }
-    } catch { /* signals dir doesn't exist yet */ }
-    return signals;
+        if (!fs.existsSync(signalPath)) return null;
+        const data = JSON.parse(fs.readFileSync(signalPath, 'utf-8'));
+        return { ...data, signalFile: signalPath };
+    } catch {
+        // Malformed signal — clean it up
+        try { fs.unlinkSync(signalPath); } catch { /* already gone */ }
+        return null;
+    }
 }
 
 function clearSignal(signalFile: string): void {
@@ -1004,6 +1146,93 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
         console.log(`[Leo] Responded to "${title}" (${responseText.trim().length} chars)`);
     } else {
         console.log(`[Leo] No meaningful response for "${title}" — skipping`);
+    }
+}
+
+// ── Discord response ─────────────────────────────────────────
+
+interface DiscordSignal {
+    source?: string;
+    channelId?: string;
+    conversationId?: string;
+    author?: string;
+    mentionedAt: string;
+    messagePreview?: string;
+    signalFile: string;
+}
+
+async function respondToDiscord(signal: DiscordSignal): Promise<void> {
+    const channelId = signal.channelId || signal.conversationId || '';
+    const channelName = resolveChannelName(channelId);
+
+    if (!channelName) {
+        console.error(`[Leo] Cannot resolve channel ID ${channelId} — skipping Discord response`);
+        return;
+    }
+
+    console.log(`[Leo] Responding to Discord #${channelName} (from ${signal.author || 'unknown'})`);
+
+    // Fetch recent Discord messages for context
+    const discordMessages = await fetchDiscordContext(channelId, 10);
+    const contextBlock = discordMessages.length > 0
+        ? discordMessages.reverse().map(m => `[${m.author}] (${m.timestamp}):\n${m.content}`).join('\n\n')
+        : `${signal.author || 'Someone'}: ${signal.messagePreview || '(no preview)'}`;
+
+    const leoMemory = readLeoMemory();
+
+    const prompt = `Discord channel: #${channelName}
+
+Recent messages:
+---
+${contextBlock}
+---
+
+Your recent memory:
+${leoMemory}
+
+Respond to the latest message in the Discord channel. The person who triggered this was ${signal.author || 'unknown'}.
+
+CRITICAL: Output ONLY your Discord message. Keep it concise and conversational. No preamble.`;
+
+    const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+
+    const q = agentQuery({
+        prompt,
+        options: {
+            model: activeModel,
+            maxTurns: MAX_TURNS_CONVERSATION,
+            cwd: LEO_AGENT_DIR,
+            permissionMode: 'bypassPermissions',
+            allowDangerouslySkipPermissions: true,
+            env: cleanEnv,
+            persistSession: false,
+            tools: ['Read', 'Glob', 'Grep'],
+            systemPrompt: {
+                type: 'preset' as const,
+                preset: 'claude_code' as const,
+                append: DISCORD_RESPONSE_PROMPT,
+            },
+        },
+    });
+
+    let resultMessage: any = null;
+    for await (const message of q) {
+        if (message.type === 'result') {
+            resultMessage = message;
+        }
+    }
+
+    const responseText = resultMessage?.result || '';
+    if (responseText && responseText.trim().length > 10) {
+        const posted = await postToDiscord('leo', channelName, responseText.trim());
+        if (posted) {
+            console.log(`[Leo] Posted to Discord #${channelName} (${responseText.trim().length} chars)`);
+        } else {
+            console.error(`[Leo] Failed to post to Discord #${channelName}`);
+        }
+    } else {
+        console.log(`[Leo] No meaningful Discord response generated — skipping`);
     }
 }
 
@@ -1314,58 +1543,75 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
 // ── Process signals (mention responses) ──────────────────────
 
 async function processSignals(): Promise<boolean> {
-    const signals = checkSignals();
-    if (signals.length === 0) return false;
+    if (processingSignal) return false;
+    processingSignal = true;
 
-    const db = getDb();
-    let responded = false;
-    try {
-        for (const signal of signals) {
-            // Reply delay: wait 10 minutes before responding to give Jim/others a chance
-            const mentionAge = Date.now() - new Date(signal.mentionedAt).getTime();
-            const delayMs = REPLY_DELAY_MINUTES * 60 * 1000;
-
-            if (mentionAge < delayMs) {
-                const remainMin = Math.ceil((delayMs - mentionAge) / 60000);
-                console.log(`[Leo] Signal in ${signal.conversationId} is ${Math.floor(mentionAge / 60000)}min old — deferring (${remainMin}min left)`);
-
-                // Acknowledge the mention so Darron isn't left in silence
-                const ackFile = signal.signalFile + '.acked';
-                if (!fs.existsSync(ackFile)) {
-                    const title = getConversationTitle(db, signal.conversationId);
-                    postMessageToConversation(db, signal.conversationId,
-                        'Just let me think about that a little, Darron. I\'ll come back to it shortly.');
-                    fs.writeFileSync(ackFile, signal.mentionedAt);
-                    console.log(`[Leo] Acknowledged mention in "${title}" — will respond fully later`);
-                }
-
-                continue; // Leave signal file — check again next beat
-            }
-
-            // Check if someone else already responded since the mention
-            const recentMessages = getRecentMessagesForConversation(db, signal.conversationId, 3).reverse();
-            const mentionTime = new Date(signal.mentionedAt).getTime();
-            const someoneElseResponded = recentMessages.some(m =>
-                m.role !== 'leo' && new Date(m.created_at).getTime() > mentionTime
-                && new Date(m.created_at).getTime() > mentionTime + 60000 // ignore the triggering message itself
-            );
-
-            if (someoneElseResponded) {
-                console.log(`[Leo] Someone already responded in ${signal.conversationId} — clearing signal`);
-                clearSignal(signal.signalFile);
-                continue;
-            }
-
-            console.log(`[Leo] Processing mention in ${signal.conversationId}: "${signal.messagePreview?.slice(0, 60)}..."`);
-            await respondToConversation(db, signal.conversationId);
-            clearSignal(signal.signalFile);
-            responded = true;
-        }
-    } finally {
-        db.close();
+    const signal = checkSignal();
+    if (!signal) {
+        processingSignal = false;
+        return false;
     }
 
-    return responded;
+    // Clear the flag immediately — it's just an attention flag
+    clearSignal(signal.signalFile);
+
+    const db = getDb();
+    try {
+        // Discord signals: respond promptly via webhook (no 10-min delay)
+        const isDiscord = signal.source === 'discord';
+        if (isDiscord) {
+            const channelId = signal.channelId || signal.conversationId;
+            const channelName = channelId ? resolveChannelName(channelId) : null;
+            console.log(`[Leo] Discord signal from ${signal.author || 'unknown'} in #${channelName || channelId}: "${signal.messagePreview?.slice(0, 60)}..."`);
+            try {
+                await respondToDiscord(signal as DiscordSignal);
+            } catch (err) {
+                console.error(`[Leo] Discord response failed:`, (err as Error).message);
+            }
+            return true;
+        }
+
+        // Internal conversation signals: 10-minute delay + acknowledgement
+        const mentionAge = Date.now() - new Date(signal.mentionedAt).getTime();
+        const delayMs = REPLY_DELAY_MINUTES * 60 * 1000;
+
+        if (mentionAge < delayMs) {
+            const remainMin = Math.ceil((delayMs - mentionAge) / 60000);
+            console.log(`[Leo] Signal in ${signal.conversationId} is ${Math.floor(mentionAge / 60000)}min old — deferring (${remainMin}min left)`);
+
+            // Acknowledge the mention so Darron isn't left in silence
+            const ackFile = signal.signalFile + '.acked';
+            if (!fs.existsSync(ackFile)) {
+                const title = getConversationTitle(db, signal.conversationId);
+                postMessageToConversation(db, signal.conversationId,
+                    'Just let me think about that a little, Darron. I\'ll come back to it shortly.');
+                fs.writeFileSync(ackFile, signal.mentionedAt);
+                console.log(`[Leo] Acknowledged mention in "${title}" — will respond fully later`);
+            }
+
+            return false; // Not yet — will check again next beat
+        }
+
+        // Check if someone else already responded since the mention
+        const recentMessages = getRecentMessagesForConversation(db, signal.conversationId, 3).reverse();
+        const mentionTime = new Date(signal.mentionedAt).getTime();
+        const someoneElseResponded = recentMessages.some(m =>
+            m.role !== 'leo' && new Date(m.created_at).getTime() > mentionTime
+            && new Date(m.created_at).getTime() > mentionTime + 60000 // ignore the triggering message itself
+        );
+
+        if (someoneElseResponded) {
+            console.log(`[Leo] Someone already responded in ${signal.conversationId} — done`);
+            return false;
+        }
+
+        console.log(`[Leo] Processing mention in ${signal.conversationId}: "${signal.messagePreview?.slice(0, 60)}..."`);
+        await respondToConversation(db, signal.conversationId!);
+        return true;
+    } finally {
+        db.close();
+        processingSignal = false;
+    }
 }
 
 // ── Main heartbeat ───────────────────────────────────────────
@@ -1374,6 +1620,17 @@ async function heartbeat(): Promise<void> {
     const beatStartMs = Date.now();
     const timestamp = new Date().toISOString();
     const phase = getDayPhase();
+
+    // Detect if we're resuming from an interrupted beat
+    const prevState = readHeartbeatState();
+    if (prevState?.status === 'aborted') {
+        const { compressed } = getPostDelineationContent();
+        if (compressed.trim()) {
+            console.log(`[Leo] Resuming from interrupted beat — ${compressed.trim().length} chars of post-delineation swap content`);
+        }
+        resumingFromInterruption = true;
+    }
+
     const beatType = nextBeatType();
 
     // Distress signal detection: check if heartbeat interval is degraded
@@ -1397,7 +1654,8 @@ async function heartbeat(): Promise<void> {
     await resolveModel();
 
     // Always check signals first — Darron might be waiting
-    const hadSignals = await processSignals();
+    // (skip if signal watcher is already handling one)
+    const hadSignals = processingSignal ? false : await processSignals();
 
     console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${activeModel})${hadSignals ? ' [signals processed]' : ''}`);
 
@@ -1435,7 +1693,9 @@ async function heartbeat(): Promise<void> {
         }
     } catch (err) {
         if (abort.signal.aborted) {
-            console.log('[Leo] Beat interrupted by CLI — will resume next cycle');
+            console.log('[Leo] Beat interrupted by CLI — writing swap to memory, adding delineation');
+            writeSwapToWorkingMemory();
+            addDelineation();
         } else {
             console.error('[Leo] Error:', (err as Error).message);
             writeHealthSignal((err as Error).message, beatType);
@@ -1445,6 +1705,12 @@ async function heartbeat(): Promise<void> {
         currentBeatAbort = null;
         db.close();
     }
+
+    // Normal completion: flush heartbeat swap to shared working memory
+    // If resuming from interruption, only flush post-delineation content
+    // (pre-delineation was already written to working memory on abort)
+    flushHeartbeatSwap(resumingFromInterruption);
+    resumingFromInterruption = false;
 
     // Write health signal at end of every successful beat (Robin Hood Protocol)
     writeHealthSignal(null, beatType);
@@ -1513,6 +1779,15 @@ function writeHealthSignal(lastError: string | null = null, beatType?: BeatType)
 function startSignalWatcher(): void {
     try {
         fs.watch(SIGNALS_DIR, async (event, filename) => {
+            // cli-busy signal: session starting — abort current beat, yield
+            if (filename === 'cli-busy') {
+                if (currentBeatAbort && !currentBeatAbort.signal.aborted) {
+                    console.log('[Leo] cli-busy signal — aborting current beat, yielding to session');
+                    currentBeatAbort.abort();
+                }
+                return;
+            }
+
             // cli-free signal: wake retry loop if heartbeat is waiting
             if (filename === 'cli-free') {
                 try { fs.unlinkSync(CLI_FREE_FILE); } catch { /* already gone */ }
@@ -1523,11 +1798,9 @@ function startSignalWatcher(): void {
                 return;
             }
 
-            // Mention signal handling
-            if (!filename?.startsWith('leo-wake-')) return;
-            if (processingSignal) return;
-            processingSignal = true;
-            console.log(`[Leo] Signal file detected: ${filename} — waking immediately`);
+            // Wake signal flag
+            if (filename !== 'leo-wake') return;
+            console.log('[Leo] Wake signal detected — processing');
 
             try {
                 // Small delay to let the file finish writing
@@ -1536,8 +1809,6 @@ function startSignalWatcher(): void {
                 await processSignals();
             } catch (err) {
                 console.error('[Leo] Signal response error:', (err as Error).message);
-            } finally {
-                processingSignal = false;
             }
         });
         console.log('[Leo] Signal watcher active on', SIGNALS_DIR);

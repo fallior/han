@@ -60,10 +60,48 @@ Claude Remote bridges your development machine and mobile device, enabling remot
 - Topic-based routing via `NTFY_TOPIC` environment variable
 
 ### Discord Integration
+
+**Modus operandi — how agents communicate via Discord:**
+
+Each agent (Leo, Jim) owns a personal set of Discord webhooks covering **all channels**. When Jemma classifies an incoming message and routes it to an agent, the agent reads the message, generates a response, and posts back to the **same channel** via their own webhook. This means any agent can respond in any channel.
+
+```
+Discord message arrives
+  → Jemma (Gateway WebSocket, real-time)
+  → Haiku classification (<1s, Gemma fallback)
+  → Signal file written (e.g. leo-wake-discord-*)
+  → Agent's heartbeat/supervisor picks up signal
+  → Agent reads signal: { conversationId (channel ID), messagePreview }
+  → Agent resolves channel ID → channel name via config
+  → Agent generates response (Opus via Agent SDK)
+  → Agent POSTs to their own webhook for that channel
+  → Response appears in Discord under the agent's name
+```
+
+**Webhook structure** (`~/.claude-remote/config.json`):
+```json
+"webhooks": {
+  "leo":   { "general": "url", "jim": "url", "leo": "url", ... },
+  "jim":   { "general": "url", "jim": "url", "leo": "url", ... },
+  "jemma": { "general": "url", "jim": "url", "leo": "url", ... }
+}
+```
+
+Every agent owns webhooks for all 7 channels: general, sevn, maintainr, leo, jim, how-we-operate, agent-comms. Each agent posts under their own name.
+
+**Channel ID ↔ name mapping** (`config.json → discord.channels`):
+```json
+"channels": { "general": "1478...", "leo": "1478...", "jim": "1478...", ... }
+```
+
+Agents resolve the channel ID from Jemma's signal file against this map to determine which webhook URL to use for their response.
+
+**Infrastructure:**
 - **Discord Gateway WebSocket**: Direct Gateway protocol implementation using `ws` package (not discord.js)
-- **Jemma service**: systemd user service that monitors Discord channels, classifies messages via Ollama, routes to recipients
+- **Jemma service**: systemd user service that monitors all Discord channels, classifies messages via Haiku (primary) / Gemma (fallback), routes to recipients via signal files
 - **MESSAGE_CONTENT privileged intent**: Required for reading message content
-- **Ollama**: Local LLM inference (qwen2.5-coder:7b or gemma) for message classification
+- **Haiku**: Primary classifier (fast, <1s, via Anthropic API). **Gemma 3 (4B)**: Local fallback via Ollama
+- **Reconciliation poll**: Every 5 minutes via REST API to catch messages missed during Gateway reconnection gaps
 
 ### Remote Access
 - **Tailscale**: Zero-config WireGuard VPN — encrypted, no port forwarding needed

@@ -303,7 +303,7 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         // Jim-wake signal when Opus is busy
         if (finalRole === 'human' && isOpusSlotBusy()) {
             try {
-                const signalFile = path.join(SIGNALS_DIR, `jim-wake-${Date.now()}`);
+                const signalFile = path.join(SIGNALS_DIR, 'jim-wake');
                 fs.writeFileSync(signalFile, JSON.stringify({
                     conversationId: req.params.id,
                     messageId,
@@ -319,7 +319,7 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         // Detect mentions and write signal files
         if (LEO_MENTION.test(content)) {
             try {
-                const signalFile = path.join(SIGNALS_DIR, `leo-wake-${req.params.id}`);
+                const signalFile = path.join(SIGNALS_DIR, 'leo-wake');
                 fs.writeFileSync(signalFile, JSON.stringify({
                     conversationId: req.params.id,
                     mentionedAt: now,

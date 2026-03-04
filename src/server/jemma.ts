@@ -354,8 +354,7 @@ async function deliverToJim(message: any, classification: ClassificationResult):
   } catch (err) {
     console.warn('[Jemma] Failed to deliver to Jim via server, writing signal file');
     try {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const signalPath = path.join(SIGNALS_DIR, `jim-wake-discord-${timestamp}`);
+      const signalPath = path.join(SIGNALS_DIR, 'jim-wake');
       fs.writeFileSync(signalPath, JSON.stringify({
         source: 'discord',
         author: message.author.username,
@@ -370,13 +369,14 @@ async function deliverToJim(message: any, classification: ClassificationResult):
 
 async function deliverToLeo(message: any, classification: ClassificationResult): Promise<void> {
   try {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const signalPath = path.join(SIGNALS_DIR, `leo-wake-discord-${timestamp}`);
+    const signalPath = path.join(SIGNALS_DIR, 'leo-wake');
 
     fs.writeFileSync(signalPath, JSON.stringify({
-      conversationId: message.channel_id,
+      source: 'discord',
+      channelId: message.channel_id,
+      author: message.author.username,
       mentionedAt: message.timestamp,
-      messagePreview: message.content.slice(0, 100),
+      messagePreview: message.content.slice(0, 200),
     }));
 
     console.log(`[Jemma] Woke Leo (${message.author.username}: ${message.content.slice(0, 40)}...)`);

@@ -71,9 +71,7 @@ function sendNtfyNotification(title: string, message: string): void {
  * Write a signal file for Jim or Leo wake-up
  */
 function writeSignalFile(signalName: string, data?: Record<string, unknown>): void {
-    const timestamp = Date.now();
-    const filename = `${signalName}-${timestamp}`;
-    const filepath = path.join(SIGNALS_DIR, filename);
+    const filepath = path.join(SIGNALS_DIR, signalName);
 
     if (data) {
         fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
@@ -167,7 +165,7 @@ router.post('/deliver', (req: Request, res: Response) => {
                 conversationMessageStmts.insert.run(msgId, convId, 'human', message, now);
 
                 // Write signal file to wake Jim
-                writeSignalFile('jim-wake-discord', {
+                writeSignalFile('jim-wake', {
                     conversationId: convId,
                     author,
                     channel,
@@ -182,10 +180,11 @@ router.post('/deliver', (req: Request, res: Response) => {
         } else if (recipient === 'leo') {
             // Write signal file to wake Leo
             try {
-                writeSignalFile('leo-wake-discord', {
+                writeSignalFile('leo-wake', {
+                    source: 'discord',
+                    channelId: channel,
                     author,
-                    channel,
-                    message: message.substring(0, 200), // Preview
+                    messagePreview: message.substring(0, 200),
                     confidence: classification_confidence,
                     mentionedAt: new Date().toISOString()
                 });
