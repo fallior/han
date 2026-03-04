@@ -204,11 +204,21 @@ function updateDeliveryStats(recipient: string): void {
 }
 
 function buildClassificationPrompt(message: any): string {
+  const config = loadConfig();
+  const idToName = Object.entries(config.discord?.channels || {}).reduce(
+    (acc, [name, id]) => ({ ...acc, [id as string]: name }),
+    {} as Record<string, string>
+  );
+  const channelName = idToName[message.channel_id] || message.channel_id;
+  const channelDisplay = idToName[message.channel_id]
+    ? `#${channelName} (${message.channel_id})`
+    : message.channel_id;
+
   return `Classify this Discord message and determine the recipient.
 
 Message Content: "${message.content}"
 Author: ${message.author.username}${message.author.bot ? ' (BOT)' : ''}
-Channel: ${message.channel_id}
+Channel: ${channelDisplay}
 
 Respond with JSON only:
 {

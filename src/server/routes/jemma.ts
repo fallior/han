@@ -164,7 +164,7 @@ router.post('/deliver', (req: Request, res: Response) => {
                 // Insert message into conversation
                 const msgId = generateId();
                 const now = new Date().toISOString();
-                conversationMessageStmts.insert.run(msgId, convId, 'discord', message, now);
+                conversationMessageStmts.insert.run(msgId, convId, 'human', message, now);
 
                 // Write signal file to wake Jim
                 writeSignalFile('jim-wake-discord', {
