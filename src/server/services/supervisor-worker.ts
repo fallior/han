@@ -730,7 +730,7 @@ function logCycleToSession(cycleNumber: number, output: SupervisorOutput, action
  * Actions that modify main process state (create_goal, cancel_task) are sent as messages.
  * Actions that only touch DB/filesystem are executed directly.
  */
-function executeActions(actions: SupervisorAction[], cycleId: string): string[] {
+async function executeActions(actions: SupervisorAction[], cycleId: string): Promise<string[]> {
     const summaries: string[] = [];
     const config = loadConfig();
     let goalsCreated = 0;
@@ -1149,7 +1149,7 @@ async function runSupervisorCycle(): Promise<void> {
         // Execute actions
         const maxActions = supervisorConfig.max_actions_per_cycle || 5;
         const limitedActions = (output.actions || []).slice(0, maxActions);
-        const actionSummaries = executeActions(limitedActions, cycleId);
+        const actionSummaries = await executeActions(limitedActions, cycleId);
 
         // Update active-context.md
         if (output.active_context_update) {
