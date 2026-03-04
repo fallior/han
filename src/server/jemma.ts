@@ -62,6 +62,7 @@ interface Config {
     server_id?: string;
     channels?: Record<string, string>;
     webhooks?: Record<string, string>;
+    username_map?: Record<string, string>;
   };
   sevn?: {
     wake_endpoint?: string;
@@ -214,10 +215,15 @@ function buildClassificationPrompt(message: any): string {
     ? `#${channelName} (${message.channel_id})`
     : message.channel_id;
 
+  const realName = config.discord?.username_map?.[message.author.username];
+  const authorDisplay = realName
+    ? `${realName} (@${message.author.username})`
+    : message.author.username;
+
   return `Classify this Discord message and determine the recipient.
 
 Message Content: "${message.content}"
-Author: ${message.author.username}${message.author.bot ? ' (BOT)' : ''}
+Author: ${authorDisplay}${message.author.bot ? ' (BOT)' : ''}
 Channel: ${channelDisplay}
 
 Respond with JSON only:
@@ -233,7 +239,8 @@ Rules:
 - Leo: direct mentions of Leo, code review/implementation
 - Darron: direct mentions of Darron, or general discussion
 - Sevn: mentions Sevn or team context
-- Six: mentions Six or specific external work`;
+- Six: mentions Six or specific external work
+- Real names are provided in the Author field — use them for better context when classifying`;
 }
 
 async function classifyWithHaiku(prompt: string): Promise<ClassificationResult> {
