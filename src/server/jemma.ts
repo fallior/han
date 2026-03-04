@@ -384,6 +384,7 @@ async function deliverToJim(message: any, classification: ClassificationResult, 
       const signalPath = path.join(SIGNALS_DIR, 'jim-wake');
       fs.writeFileSync(signalPath, JSON.stringify({
         source: 'discord',
+        recipient: 'jim',
         channelName,
         author: message.author.username,
         content: message.content,
@@ -401,6 +402,7 @@ async function deliverToLeo(message: any, classification: ClassificationResult, 
 
     fs.writeFileSync(signalPath, JSON.stringify({
       source: 'discord',
+      recipient: 'leo',
       channelId: message.channel_id,
       channelName,
       author: message.author.username,
