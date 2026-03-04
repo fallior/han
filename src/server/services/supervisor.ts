@@ -502,14 +502,18 @@ function startSupervisorSignalWatcher(): void {
                 return;
             }
 
-            // Handle jim-wake-* signal files
-            if (!filename?.startsWith('jim-wake-')) return;
+            // Handle jim-wake signal flag
+            if (filename !== 'jim-wake') return;
 
-            console.log(`[Supervisor] Wake signal detected: ${filename}`);
+            console.log('[Supervisor] Wake signal detected');
 
             try {
                 // Small delay to let signal file fully write
                 await new Promise(r => setTimeout(r, 500));
+                // Clean up signal flag immediately (before cycle — it's just a flag)
+                try {
+                    fs.unlinkSync(path.join(SIGNALS_DIR, 'jim-wake'));
+                } catch { /* already gone */ }
                 if (isOpusSlotBusy()) {
                     console.log('[Supervisor] Wake signal but Opus busy — deferring cycle');
                     deferredCyclePending = true;
@@ -520,17 +524,38 @@ function startSupervisorSignalWatcher(): void {
                 await runSupervisorCycle();
             } catch (err) {
                 console.error('[Supervisor] Wake signal cycle error:', (err as Error).message);
-            } finally {
-                // Clean up signal file whether cycle ran or was skipped
-                try {
-                    fs.unlinkSync(path.join(SIGNALS_DIR, filename));
-                } catch { /* file may already be cleaned */ }
             }
         });
         console.log('[Supervisor] Signal watcher active on', SIGNALS_DIR);
     } catch (err) {
         console.error('[Supervisor] Could not start signal watcher:', (err as Error).message);
         console.log('[Supervisor] Will fall back to scheduled cycles only');
+    }
+}
+
+// Process wake signal if it existed before the watcher started.
+// fs.watch() only fires on NEW events — a pre-existing flag is invisible to it.
+async function processExistingWakeSignals(): Promise<void> {
+    try {
+        const signalPath = path.join(SIGNALS_DIR, 'jim-wake');
+        if (!fs.existsSync(signalPath)) return;
+
+        console.log('[Supervisor] Found existing wake signal on startup');
+        // Clean up flag immediately
+        try { fs.unlinkSync(signalPath); } catch { /* already gone */ }
+
+        if (isOpusSlotBusy()) {
+            console.log('[Supervisor] Opus busy — deferring stale signal processing');
+            deferredCyclePending = true;
+        } else {
+            try {
+                await runSupervisorCycle();
+            } catch (err) {
+                console.error('[Supervisor] Stale signal cycle error:', (err as Error).message);
+            }
+        }
+    } catch (err) {
+        console.error('[Supervisor] Error processing existing wake signal:', (err as Error).message);
     }
 }
 
@@ -858,6 +883,11 @@ export function initSupervisor(): void {
 
     // Start signal watcher to detect CLI stop and jim-wake signals
     startSupervisorSignalWatcher();
+
+    // Process any wake signals that predate the watcher (e.g. from before server restart)
+    processExistingWakeSignals().catch(err =>
+        console.error('[Supervisor] Startup signal scan failed:', (err as Error).message)
+    );
 
     // Start the worker process
     startWorker();
