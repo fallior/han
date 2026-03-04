@@ -752,6 +752,113 @@ function connect(): void {
   });
 }
 
+// ── Admin UI WebSocket Client ─────────────────────────────────────
+// Connects to Claude Remote server's WebSocket, listens for human messages
+// in admin UI conversations, classifies, and writes appropriate signals.
+// Same dispatch pattern as Discord — Jemma is the single dispatcher.
+
+let adminWs: WebSocket | null = null;
+let adminReconnectTimer: NodeJS.Timeout | null = null;
+
+function classifyAdminMessage(discussionType: string | null, content: string): 'leo' | 'jim' {
+  // Priority 1: Explicit name mention overrides tab
+  if (/\b(hey\s+leo|@leo|leo[,:])\b/i.test(content)) return 'leo';
+  if (/\b(hey\s+jim|@jim|jim[,:])\b/i.test(content)) return 'jim';
+  // Priority 2: Tab-based routing
+  if (discussionType === 'leo-question' || discussionType === 'leo-postulate') return 'leo';
+  if (discussionType === 'jim-request' || discussionType === 'jim-report') return 'jim';
+  // Default: Jim handles general/memory/untyped
+  return 'jim';
+}
+
+function dispatchAdminMessage(
+  recipient: 'leo' | 'jim',
+  conversationId: string,
+  messageId: string,
+  content: string,
+  timestamp: string,
+  discussionType: string | null
+): void {
+  if (recipient === 'leo') {
+    const signalPath = path.join(SIGNALS_DIR, 'leo-wake');
+    fs.writeFileSync(signalPath, JSON.stringify({
+      source: 'admin',
+      conversationId,
+      mentionedAt: timestamp,
+      messagePreview: content.slice(0, 200),
+    }));
+    console.log(`[Jemma] Admin dispatch → Leo (${discussionType || 'general'}: ${content.slice(0, 40)})`);
+  } else {
+    const signalPath = path.join(SIGNALS_DIR, 'jim-wake');
+    fs.writeFileSync(signalPath, JSON.stringify({
+      source: 'admin',
+      conversationId,
+      messageId,
+      timestamp,
+      reason: 'admin_ui_dispatch',
+    }));
+    console.log(`[Jemma] Admin dispatch → Jim (${discussionType || 'general'}: ${content.slice(0, 40)})`);
+  }
+}
+
+function connectAdminWs(): void {
+  if (adminWs) {
+    adminWs.removeAllListeners();
+    adminWs.close();
+  }
+
+  const wsUrl = SERVER_URL.replace('https://', 'wss://') + '/ws';
+  adminWs = new WebSocket(wsUrl);
+
+  adminWs.on('open', () => {
+    console.log('[Jemma] Admin WebSocket connected');
+  });
+
+  adminWs.on('ping', () => {
+    adminWs?.pong();
+  });
+
+  adminWs.on('message', (data: Buffer) => {
+    try {
+      const event = JSON.parse(data.toString());
+      if (event.type !== 'conversation_message') return;
+
+      const msg = event.message;
+      if (!msg || msg.role !== 'human') return;
+
+      // Fetch conversation to get discussion_type
+      fetch(`${SERVER_URL}/api/conversations/${event.conversation_id}`, {
+        headers: { 'Accept': 'application/json' },
+      })
+        .then(res => res.json())
+        .then((conv: any) => {
+          const discussionType = conv?.conversation?.discussion_type
+            || conv?.discussion_type
+            || null;
+          const recipient = classifyAdminMessage(discussionType, msg.content);
+          dispatchAdminMessage(recipient, event.conversation_id, msg.id, msg.content, msg.created_at, discussionType);
+        })
+        .catch(err => {
+          // Fallback: classify without discussion_type context
+          console.warn(`[Jemma] Could not fetch conversation ${event.conversation_id}: ${(err as Error).message}`);
+          const recipient = classifyAdminMessage(null, msg.content);
+          dispatchAdminMessage(recipient, event.conversation_id, msg.id, msg.content, msg.created_at, null);
+        });
+    } catch (err) {
+      console.error('[Jemma] Admin WS message error:', (err as Error).message);
+    }
+  });
+
+  adminWs.on('error', (err) => {
+    // Silent — reconnect handles it
+  });
+
+  adminWs.on('close', () => {
+    // Reconnect after 5 seconds
+    adminReconnectTimer = setTimeout(connectAdminWs, 5000);
+  });
+}
+
 // ── Shutdown ──────────────────────────────────────────────────────
 
 function handleShutdown(): void {
@@ -761,6 +868,12 @@ function handleShutdown(): void {
   }
   if (ws) {
     ws.close(1000, 'Service shutdown');
+  }
+  if (adminWs) {
+    adminWs.close(1000, 'Service shutdown');
+  }
+  if (adminReconnectTimer) {
+    clearTimeout(adminReconnectTimer);
   }
   writeHealthFile('ok');
   // Exit with 143 (128 + 15 = SIGTERM) so systemd Restart=always knows this was
@@ -810,6 +923,9 @@ async function main(): Promise<void> {
 
   // Start Discord connection
   connect();
+
+  // Start admin UI WebSocket client
+  connectAdminWs();
 
   // Start reconciliation poll
   setInterval(reconcileMessages, RECONCILIATION_INTERVAL_MS);
