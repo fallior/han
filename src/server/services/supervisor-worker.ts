@@ -429,6 +429,7 @@ function buildStateSnapshot(): string {
             FROM conversations c
             JOIN conversation_messages cm ON c.id = cm.conversation_id
             WHERE c.status = 'open'
+            AND (c.discussion_type IS NULL OR c.discussion_type NOT IN ('leo-question', 'leo-postulate'))
             AND cm.role IN ('human', 'leo')
             AND NOT EXISTS (
                 SELECT 1 FROM conversation_messages cm2
