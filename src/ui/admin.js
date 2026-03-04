@@ -2,6 +2,56 @@
 (() => {
   const API_BASE = "";
   const MODULES = ["overview", "projects", "work", "supervisor", "reports", "conversations", "memory-discussions", "products", "workshop"];
+  const _originalFetch = window.fetch.bind(window);
+  window.fetch = function(input, init) {
+    const token = localStorage.getItem("claude-remote-auth-token");
+    if (token) {
+      init = init || {};
+      const headers = new Headers(init.headers || {});
+      if (!headers.has("Authorization")) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
+      init.headers = headers;
+    }
+    return _originalFetch(input, init).then((res) => {
+      if (res.status === 401) {
+        showAuthPrompt();
+      }
+      return res;
+    });
+  };
+  function showAuthPrompt() {
+    if (document.getElementById("authOverlay")) return;
+    const overlay = document.createElement("div");
+    overlay.id = "authOverlay";
+    overlay.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:center;justify-content:center";
+    overlay.innerHTML = `
+        <div style="background:var(--bg-secondary, #1e1e2e);border:1px solid var(--border-subtle, #333);border-radius:12px;padding:32px;max-width:400px;width:90%">
+            <h2 style="margin:0 0 8px 0;font-size:18px;color:var(--text-primary, #cdd6f4)">Authentication Required</h2>
+            <p style="margin:0 0 16px 0;font-size:13px;color:var(--text-muted, #a6adc8)">Enter your bearer token to access Claude Remote.</p>
+            <input type="password" id="authTokenInput" placeholder="Bearer token" style="width:100%;padding:10px 12px;border:1px solid var(--border-subtle, #333);border-radius:8px;background:var(--bg-primary, #11111b);color:var(--text-primary, #cdd6f4);font-size:14px;box-sizing:border-box;margin-bottom:12px" />
+            <button onclick="submitAuthToken()" style="width:100%;padding:10px;border:none;border-radius:8px;background:var(--blue, #89b4fa);color:#11111b;font-weight:600;font-size:14px;cursor:pointer">Connect</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    setTimeout(() => {
+      const input = document.getElementById("authTokenInput");
+      if (input) {
+        input.focus();
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") window.submitAuthToken();
+        });
+      }
+    }, 50);
+  }
+  window.submitAuthToken = function() {
+    const input = document.getElementById("authTokenInput");
+    if (!input || !input.value.trim()) return;
+    localStorage.setItem("claude-remote-auth-token", input.value.trim());
+    const overlay = document.getElementById("authOverlay");
+    if (overlay) overlay.remove();
+    location.reload();
+  };
   let currentModule = "overview";
   let ws = null;
   let chartInstances = {};
@@ -214,7 +264,8 @@
   let wsRetryDelay = 1e3;
   function connectWebSocket() {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${location.host}/ws`;
+    const token = localStorage.getItem("claude-remote-auth-token");
+    const wsUrl = token ? `${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}` : `${protocol}//${location.host}/ws`;
     ws = new WebSocket(wsUrl);
     ws.onopen = () => {
       wsRetryDelay = 1e3;
@@ -871,20 +922,31 @@
     await fetch(`${API_BASE}/api/portfolio/${encodeURIComponent(name)}/unthrottle`, { method: "POST" });
     renderModule("projects");
   };
+  function formatDistressAge(minutes) {
+    if (minutes < 1) return "Just now";
+    if (minutes === 1) return "1 minute ago";
+    if (minutes < 60) return `${minutes} minutes ago`;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours === 1) return `1 hour ago`;
+    if (mins === 0) return `${hours} hours ago`;
+    return `${hours}h ${mins}m ago`;
+  }
   function getStatusColor(status) {
     if (!status) return "var(--text-dim)";
     if (status === "ok") return "var(--green)";
+    if (status === "distressed") return "var(--amber)";
     if (status === "stale") return "var(--amber)";
     return "var(--red)";
   }
   function getStatusBadge(status) {
     if (!status) return "\u2014";
-    const labels = { "ok": "Ok", "stale": "Stale", "down": "Down" };
+    const labels = { "ok": "Ok", "stale": "Stale", "down": "Down", "distressed": "Degraded" };
     const color = getStatusColor(status);
     return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;background:${color}20;color:${color};font-size:11px;font-weight:600;text-transform:uppercase">${labels[status]}</span>`;
   }
   function renderHealthPanel(healthData) {
-    const { jim, leo, resurrections = [], systemUptimeMinutes = 0 } = healthData;
+    const { jim, leo, jemma, distress = null, resurrections = [], systemUptimeMinutes = 0 } = healthData;
     let html = `<div class="admin-card" style="margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <h2 style="margin:0">System Health</h2>
@@ -893,12 +955,58 @@
             </button>
         </div>
 
-        <div class="stat-row" style="margin-bottom:16px">`;
+        <!-- Distress Alerts (if any) -->`;
+    if (distress) {
+      if (distress.jim) {
+        const jimAgeStr = formatDistressAge(distress.jim.ageMinutes);
+        const reason = escapeHtml(distress.jim.reason || "Unknown issue");
+        html += `<div style="margin-bottom:12px;padding:10px 12px;background:var(--amber)15;border-left:3px solid var(--amber);border-radius:4px">
+                <div style="display:flex;align-items:flex-start;gap:8px">
+                    <span style="font-size:18px;line-height:1">\u26A0</span>
+                    <div>
+                        <div style="font-weight:600;color:var(--amber);font-size:12px">Jim Degraded</div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${reason}</div>
+                        <div style="font-size:10px;color:var(--text-dim);margin-top:2px">${jimAgeStr}</div>
+                    </div>
+                </div>
+            </div>`;
+      }
+      if (distress.leo) {
+        const leoAgeStr = formatDistressAge(distress.leo.ageMinutes);
+        const reason = escapeHtml(distress.leo.reason || "Unknown issue");
+        html += `<div style="margin-bottom:12px;padding:10px 12px;background:var(--amber)15;border-left:3px solid var(--amber);border-radius:4px">
+                <div style="display:flex;align-items:flex-start;gap:8px">
+                    <span style="font-size:18px;line-height:1">\u26A0</span>
+                    <div>
+                        <div style="font-weight:600;color:var(--amber);font-size:12px">Leo Degraded</div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${reason}</div>
+                        <div style="font-size:10px;color:var(--text-dim);margin-top:2px">${leoAgeStr}</div>
+                    </div>
+                </div>
+            </div>`;
+      }
+      if (distress.jemma) {
+        const jemmaAgeStr = formatDistressAge(distress.jemma.ageMinutes);
+        const reason = escapeHtml(distress.jemma.reason || "Unknown issue");
+        html += `<div style="margin-bottom:12px;padding:10px 12px;background:var(--amber)15;border-left:3px solid var(--amber);border-radius:4px">
+                <div style="display:flex;align-items:flex-start;gap:8px">
+                    <span style="font-size:18px;line-height:1">\u26A0</span>
+                    <div>
+                        <div style="font-weight:600;color:var(--amber);font-size:12px">Jemma Degraded</div>
+                        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${reason}</div>
+                        <div style="font-size:10px;color:var(--text-dim);margin-top:2px">${jemmaAgeStr}</div>
+                    </div>
+                </div>
+            </div>`;
+      }
+    }
+    html += `<div class="stat-row" style="margin-bottom:16px">`;
     if (jim) {
       const lastUpdateTime = new Date(jim.timestamp).toLocaleString("en-AU", { year: "2-digit", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const jimStatus = distress?.jim ? "distressed" : jim.status;
       html += `<div class="stat-card">
             <span class="stat-label">Jim Status</span>
-            <div style="margin-top:6px">${getStatusBadge(jim.status)}</div>
+            <div style="margin-top:6px">${getStatusBadge(jimStatus)}</div>
             <span style="font-size:11px;color:var(--text-dim);margin-top:6px;display:block">Updated ${lastUpdateTime}</span>
             <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Cycle #${jim.cycle || "\u2014"}</span>
             <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Uptime: ${jim.uptimeMinutes}m</span>
@@ -907,12 +1015,25 @@
     if (leo) {
       const lastUpdateTime = new Date(leo.timestamp).toLocaleString("en-AU", { year: "2-digit", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
       const beatTypeLabel = leo.beatType ? ` (${leo.beatType})` : "";
+      const leoStatus = distress?.leo ? "distressed" : leo.status;
       html += `<div class="stat-card">
             <span class="stat-label">Leo Status</span>
-            <div style="margin-top:6px">${getStatusBadge(leo.status)}</div>
+            <div style="margin-top:6px">${getStatusBadge(leoStatus)}</div>
             <span style="font-size:11px;color:var(--text-dim);margin-top:6px;display:block">Updated ${lastUpdateTime}</span>
             <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Beat #${leo.beat || "\u2014"}${beatTypeLabel}</span>
             <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Uptime: ${leo.uptimeMinutes}m</span>
+        </div>`;
+    }
+    if (jemma) {
+      const lastUpdateTime = new Date(jemma.timestamp).toLocaleString("en-AU", { year: "2-digit", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const gatewayStatus = jemma.gatewayConnected ? "Connected" : "Disconnected";
+      const jemmaStatus = distress?.jemma ? "distressed" : jemma.status;
+      html += `<div class="stat-card">
+            <span class="stat-label">Jemma Status</span>
+            <div style="margin-top:6px">${getStatusBadge(jemmaStatus)}</div>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:6px;display:block">Updated ${lastUpdateTime}</span>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Gateway: ${gatewayStatus}</span>
+            <span style="font-size:11px;color:var(--text-dim);margin-top:2px;display:block">Uptime: ${jemma.uptimeMinutes}m</span>
         </div>`;
     }
     html += `<div class="stat-card">
@@ -1847,12 +1968,17 @@
   };
   async function renderConversationThread(conversationId) {
     try {
+      if (!conversationId) return;
       const res = await fetch(`${API_BASE}/api/conversations/${conversationId}`);
       const data = await res.json();
       const conversation = data.conversation;
       const messages = data.messages || [];
       const detailPanel = document.getElementById("threadDetail");
       if (!detailPanel) return;
+      if (!conversation) {
+        detailPanel.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Thread not found</div>`;
+        return;
+      }
       const resolveButton = conversation.status === "open" ? `<button class="admin-btn admin-btn-sm" onclick="resolveConversation('${conversation.id}')">Resolve</button>` : `<button class="admin-btn admin-btn-sm" onclick="reopenConversation('${conversation.id}')">Reopen</button>`;
       let html = `<div class="thread-header">
             <div style="flex:1">
@@ -1892,6 +2018,22 @@
       }
       const input = document.getElementById("messageInput");
       if (input) {
+        const draftKey = `draft-conversation-${conversationId}`;
+        const saved = localStorage.getItem(draftKey);
+        if (saved) {
+          input.value = saved;
+          input.style.borderColor = "var(--yellow)";
+          input.placeholder = "Draft recovered \u2014 edit and send, or clear";
+        }
+        input.addEventListener("input", () => {
+          if (input.value.trim()) {
+            localStorage.setItem(`draft-conversation-${conversationId}`, input.value);
+          } else {
+            localStorage.removeItem(`draft-conversation-${conversationId}`);
+            input.style.borderColor = "";
+            input.placeholder = "Type your message...";
+          }
+        });
         input.focus();
       }
     } catch (err) {
@@ -1941,13 +2083,16 @@
     const input = document.getElementById("messageInput");
     if (!input || !input.value.trim()) return;
     const content = input.value;
-    input.value = "";
+    const draftKey = `draft-conversation-${conversationId}`;
+    localStorage.setItem(draftKey, content);
     try {
       await fetch(`${API_BASE}/api/conversations/${conversationId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content, role: "human" })
       });
+      input.value = "";
+      localStorage.removeItem(draftKey);
       await renderConversationThread(conversationId);
       const messageList = document.getElementById("messageList");
       if (messageList) {
@@ -2195,12 +2340,17 @@
   }
   async function renderMemoryThread(discussionId) {
     try {
+      if (!discussionId) return;
       const res = await fetch(`${API_BASE}/api/conversations/${discussionId}`);
       const data = await res.json();
       const conversation = data.conversation;
       const messages = data.messages || [];
       const detailPanel = document.getElementById("mdThreadDetail");
       if (!detailPanel) return;
+      if (!conversation) {
+        detailPanel.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Thread not found</div>`;
+        return;
+      }
       const resolveButton = conversation.status === "open" ? `<button class="admin-btn admin-btn-sm" onclick="resolveMemoryDiscussion('${conversation.id}')">Resolve</button>` : `<button class="admin-btn admin-btn-sm" onclick="reopenMemoryDiscussion('${conversation.id}')">Reopen</button>`;
       let html = `<div class="thread-header">
             <div style="flex:1">
@@ -2239,7 +2389,25 @@
         setTimeout(() => messageList.scrollTop = messageList.scrollHeight, 0);
       }
       const input = document.getElementById("mdMessageInput");
-      if (input) input.focus();
+      if (input) {
+        const draftKey = `draft-memory-${discussionId}`;
+        const saved = localStorage.getItem(draftKey);
+        if (saved) {
+          input.value = saved;
+          input.style.borderColor = "var(--yellow)";
+          input.placeholder = "Draft recovered \u2014 edit and send, or clear";
+        }
+        input.addEventListener("input", () => {
+          if (input.value.trim()) {
+            localStorage.setItem(`draft-memory-${discussionId}`, input.value);
+          } else {
+            localStorage.removeItem(`draft-memory-${discussionId}`);
+            input.style.borderColor = "";
+            input.placeholder = "Think aloud...";
+          }
+        });
+        input.focus();
+      }
     } catch (err) {
       const detailPanel = document.getElementById("mdThreadDetail");
       if (detailPanel) {
@@ -2293,13 +2461,16 @@
     const input = document.getElementById("mdMessageInput");
     if (!input || !input.value.trim()) return;
     const content = input.value;
-    input.value = "";
+    const draftKey = `draft-memory-${discussionId}`;
+    localStorage.setItem(draftKey, content);
     try {
       await fetch(`${API_BASE}/api/conversations/${discussionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content, role: "human" })
       });
+      input.value = "";
+      localStorage.removeItem(draftKey);
       await renderMemoryThread(discussionId);
       const messageList = document.getElementById("mdMessageList");
       if (messageList) {
@@ -2417,7 +2588,8 @@
   const workshopPersonaTabs = {
     jim: { label: "Supervisor Jim", color: "var(--purple)" },
     leo: { label: "Philosopher Leo", color: "var(--green)" },
-    darron: { label: "Dreamer Darron", color: "var(--blue)" }
+    darron: { label: "Dreamer Darron", color: "var(--blue)" },
+    jemma: { label: "Dispatcher Jemma", color: "var(--amber)" }
   };
   const workshopNestedTabs = {
     jim: [
@@ -2431,10 +2603,141 @@
     darron: [
       { key: "darron-thought", label: "Thoughts" },
       { key: "darron-musing", label: "Musings" }
+    ],
+    jemma: [
+      { key: "jemma-messages", label: "Messages" },
+      { key: "jemma-stats", label: "Stats" }
     ]
   };
+  async function loadJemmaWorkshop(content) {
+    try {
+      let html = `<div class="fade-in conversation-container workshop-layout-jemma">
+            <!-- Persona Tab Bar -->
+            <div class="workshop-persona-bar" style="display:flex;gap:0;border-bottom:2px solid var(--border-subtle);background:var(--bg-secondary)">`;
+      for (const [personaKey, personaInfo] of Object.entries(workshopPersonaTabs)) {
+        const isActive = workshopPersona === personaKey;
+        html += `<button
+                class="workshop-persona-tab persona-tab-${personaKey} ${isActive ? "active" : ""}"
+                data-persona="${personaKey}"
+                onclick="switchWorkshopPersona('${personaKey}')"
+                style="flex:1;padding:12px 16px;text-align:center;border:none;background:transparent;cursor:pointer;font-size:13px;font-weight:${isActive ? "600" : "400"};color:${isActive ? personaInfo.color : "var(--text-muted)"};border-bottom:${isActive ? `3px solid ${personaInfo.color}` : "none"};transition:all 200ms ease">
+                ${personaInfo.label}
+            </button>`;
+      }
+      html += `</div>
+
+            <!-- Nested Tab Bar -->
+            <div class="workshop-nested-bar" style="display:flex;gap:0;border-bottom:1px solid var(--border-subtle);background:var(--bg-primary);padding:0 8px">`;
+      const personaColor = workshopPersonaTabs[workshopPersona].color;
+      const nestedTabs = workshopNestedTabs[workshopPersona] || [];
+      for (const tab of nestedTabs) {
+        const isActive = workshopNestedTab === tab.key;
+        html += `<button
+                class="workshop-nested-tab nested-tab ${isActive ? "active" : ""}"
+                data-tab="${tab.key}"
+                onclick="switchWorkshopNestedTab('${tab.key}')"
+                style="padding:8px 12px;border:none;background:transparent;cursor:pointer;font-size:12px;color:${isActive ? personaColor : "var(--text-muted)"};border-bottom:${isActive ? `2px solid ${personaColor}` : "none"};transition:all 150ms ease;margin-top:8px">
+                ${tab.label}
+            </button>`;
+      }
+      html += `</div>
+
+            <!-- Jemma Content Area -->
+            <div id="jemmaContentArea" style="flex:1;overflow-y:auto;padding:16px;background:var(--bg-primary)">`;
+      if (workshopNestedTab === "jemma-messages") {
+        html += await renderJemmaMessages();
+      } else if (workshopNestedTab === "jemma-stats") {
+        html += await renderJemmaStats();
+      }
+      html += `</div>
+        </div>`;
+      content.innerHTML = html;
+    } catch (err) {
+      content.innerHTML = `<div class="admin-card"><p style="color:var(--red)">Error loading Jemma workshop: ${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+  async function renderJemmaMessages() {
+    try {
+      const res = await fetch(`${API_BASE}/api/jemma/status`);
+      const data = await res.json();
+      if (!data.recent_messages || data.recent_messages.length === 0) {
+        return `<div style="padding:20px;text-align:center;color:var(--text-muted)">No recent messages</div>`;
+      }
+      let html = `<div style="display:grid;gap:12px">`;
+      for (const msg of data.recent_messages.slice(0, 50)) {
+        const confidence = Math.round(msg.confidence * 100);
+        const timestamp = new Date(msg.timestamp).toLocaleString();
+        html += `<div class="admin-card" style="padding:12px;border-left:3px solid var(--amber)">
+                <div style="display:flex;justify-content:space-between;align-items:start;gap:12px">
+                    <div style="flex:1">
+                        <div style="font-weight:600;font-size:12px;color:var(--text-primary)">${escapeHtml(msg.author)}</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">#${escapeHtml(msg.channel)}</div>
+                        <div style="font-size:12px;color:var(--text-primary);margin-top:6px;line-height:1.4">${escapeHtml(msg.message.substring(0, 200))}</div>
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:6px">${timestamp}</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+                        <span class="badge" style="background:var(--amber);color:#000;font-size:10px;padding:2px 6px">${msg.recipient}</span>
+                        <span style="font-size:10px;color:var(--text-muted)">${confidence}% confident</span>
+                    </div>
+                </div>
+            </div>`;
+      }
+      html += `</div>`;
+      return html;
+    } catch (err) {
+      return `<div style="padding:20px;color:var(--red);font-size:12px">Error loading messages: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+  async function renderJemmaStats() {
+    try {
+      const res = await fetch(`${API_BASE}/api/jemma/status`);
+      const data = await res.json();
+      const stats = data.delivery_stats || {};
+      const gatewayStatus = data.status || "unknown";
+      const lastReconciliation = data.last_reconciliation ? new Date(data.last_reconciliation).toLocaleString() : "Never";
+      const uptime = data.uptime_seconds ? Math.floor(data.uptime_seconds / 60) : 0;
+      let html = `<div style="display:grid;gap:16px">`;
+      html += `<div class="admin-card" style="padding:16px">
+            <div style="font-weight:600;font-size:12px;color:var(--text-primary);margin-bottom:12px">Connection Status</div>
+            <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:12px">
+                <div style="padding:10px;background:var(--bg-card);border-radius:4px;border-left:3px solid var(--amber)">
+                    <div style="font-size:10px;color:var(--text-muted)">Status</div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-top:4px">${gatewayStatus === "connected" ? "\u{1F7E2} Connected" : "\u{1F534} " + gatewayStatus}</div>
+                </div>
+                <div style="padding:10px;background:var(--bg-card);border-radius:4px;border-left:3px solid var(--amber)">
+                    <div style="font-size:10px;color:var(--text-muted)">Uptime</div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-top:4px">${uptime} min</div>
+                </div>
+            </div>
+        </div>`;
+      html += `<div class="admin-card" style="padding:16px">
+            <div style="font-weight:600;font-size:12px;color:var(--text-primary);margin-bottom:12px">Delivery Statistics</div>
+            <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px">`;
+      const recipients = ["jim", "leo", "darron", "sevn", "six", "ignored"];
+      for (const recipient of recipients) {
+        const count = stats[recipient] || 0;
+        html += `<div style="padding:10px;background:var(--bg-card);border-radius:4px;border-left:3px solid var(--amber);text-align:center">
+                <div style="font-size:10px;color:var(--text-muted);text-transform:capitalize">${recipient}</div>
+                <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-top:4px">${count}</div>
+            </div>`;
+      }
+      html += `</div>
+        </div>`;
+      html += `<div class="admin-card" style="padding:16px">
+            <div style="font-weight:600;font-size:12px;color:var(--text-primary);margin-bottom:8px">Last Reconciliation Poll</div>
+            <div style="font-size:12px;color:var(--text-muted)">${lastReconciliation}</div>
+        </div>`;
+      html += `</div>`;
+      return html;
+    } catch (err) {
+      return `<div style="padding:20px;color:var(--red);font-size:12px">Error loading stats: ${escapeHtml(err.message)}</div>`;
+    }
+  }
   async function loadWorkshop(content) {
     try {
+      if (workshopPersona === "jemma") {
+        return await loadJemmaWorkshop(content);
+      }
       const archiveParam = workshopShowArchived ? "&include_archived=true" : "";
       const res = await fetch(`${API_BASE}/api/conversations/grouped?type=${workshopNestedTab}${archiveParam}`);
       const data = await res.json();
@@ -2653,12 +2956,17 @@
   }
   async function renderWorkshopThread(threadId) {
     try {
+      if (!threadId) return;
       const res = await fetch(`${API_BASE}/api/conversations/${threadId}`);
       const data = await res.json();
       const conversation = data.conversation;
       const messages = data.messages || [];
       const detailPanel = document.getElementById("workshopThreadDetail");
       if (!detailPanel) return;
+      if (!conversation) {
+        detailPanel.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Thread not found</div>`;
+        return;
+      }
       const resolveButton = conversation.status === "open" ? `<button class="admin-btn admin-btn-sm" onclick="resolveWorkshopThread('${conversation.id}')">Resolve</button>` : `<button class="admin-btn admin-btn-sm" onclick="reopenWorkshopThread('${conversation.id}')">Reopen</button>`;
       const archiveButton = conversation.archived_at ? `<button class="admin-btn admin-btn-sm" onclick="unarchiveWorkshopThread('${conversation.id}')">Unarchive</button>` : `<button class="admin-btn admin-btn-sm" onclick="archiveWorkshopThread('${conversation.id}')">Archive</button>`;
       let html = `<div class="thread-header">
@@ -2704,7 +3012,25 @@
         setTimeout(() => messageList.scrollTop = messageList.scrollHeight, 0);
       }
       const input = document.getElementById("workshopMessageInput");
-      if (input) input.focus();
+      if (input) {
+        const draftKey = `draft-workshop-${threadId}`;
+        const saved = localStorage.getItem(draftKey);
+        if (saved) {
+          input.value = saved;
+          input.style.borderColor = "var(--yellow)";
+          input.placeholder = "Draft recovered \u2014 edit and send, or clear";
+        }
+        input.addEventListener("input", () => {
+          if (input.value.trim()) {
+            localStorage.setItem(`draft-workshop-${threadId}`, input.value);
+          } else {
+            localStorage.removeItem(`draft-workshop-${threadId}`);
+            input.style.borderColor = "";
+            input.placeholder = "Type a message...";
+          }
+        });
+        input.focus();
+      }
     } catch (err) {
       const detailPanel = document.getElementById("workshopThreadDetail");
       if (detailPanel) {
@@ -2716,13 +3042,16 @@
     const input = document.getElementById("workshopMessageInput");
     if (!input || !input.value.trim()) return;
     const content = input.value;
-    input.value = "";
+    const draftKey = `draft-workshop-${threadId}`;
+    localStorage.setItem(draftKey, content);
     try {
       await fetch(`${API_BASE}/api/conversations/${threadId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content, role: "human" })
       });
+      input.value = "";
+      localStorage.removeItem(draftKey);
       await renderWorkshopThread(threadId);
       const messageList = document.getElementById("workshopMessageList");
       if (messageList) {

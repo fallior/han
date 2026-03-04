@@ -6,6 +6,63 @@
 // ── Constants ────────────────────────────────────────────────
 const API_BASE = '';
 const MODULES = ['overview', 'projects', 'work', 'supervisor', 'reports', 'conversations', 'memory-discussions', 'products', 'workshop'] as const;
+
+// ── Auth ─────────────────────────────────────────────────────
+// Wrap global fetch to inject Bearer token for remote access
+const _originalFetch = window.fetch.bind(window);
+window.fetch = function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const token = localStorage.getItem('claude-remote-auth-token');
+    if (token) {
+        init = init || {};
+        const headers = new Headers(init.headers || {});
+        if (!headers.has('Authorization')) {
+            headers.set('Authorization', `Bearer ${token}`);
+        }
+        init.headers = headers;
+    }
+    return _originalFetch(input, init).then(res => {
+        if (res.status === 401) {
+            showAuthPrompt();
+        }
+        return res;
+    });
+};
+
+function showAuthPrompt(): void {
+    // Don't show if already showing
+    if (document.getElementById('authOverlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'authOverlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `
+        <div style="background:var(--bg-secondary, #1e1e2e);border:1px solid var(--border-subtle, #333);border-radius:12px;padding:32px;max-width:400px;width:90%">
+            <h2 style="margin:0 0 8px 0;font-size:18px;color:var(--text-primary, #cdd6f4)">Authentication Required</h2>
+            <p style="margin:0 0 16px 0;font-size:13px;color:var(--text-muted, #a6adc8)">Enter your bearer token to access Claude Remote.</p>
+            <input type="password" id="authTokenInput" placeholder="Bearer token" style="width:100%;padding:10px 12px;border:1px solid var(--border-subtle, #333);border-radius:8px;background:var(--bg-primary, #11111b);color:var(--text-primary, #cdd6f4);font-size:14px;box-sizing:border-box;margin-bottom:12px" />
+            <button onclick="submitAuthToken()" style="width:100%;padding:10px;border:none;border-radius:8px;background:var(--blue, #89b4fa);color:#11111b;font-weight:600;font-size:14px;cursor:pointer">Connect</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    setTimeout(() => {
+        const input = document.getElementById('authTokenInput') as HTMLInputElement;
+        if (input) {
+            input.focus();
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') (window as any).submitAuthToken();
+            });
+        }
+    }, 50);
+}
+
+(window as any).submitAuthToken = function() {
+    const input = document.getElementById('authTokenInput') as HTMLInputElement;
+    if (!input || !input.value.trim()) return;
+    localStorage.setItem('claude-remote-auth-token', input.value.trim());
+    const overlay = document.getElementById('authOverlay');
+    if (overlay) overlay.remove();
+    // Reload the current module to retry with token
+    location.reload();
+};
 type ModuleName = typeof MODULES[number];
 
 // ── State ────────────────────────────────────────────────────
@@ -292,7 +349,10 @@ let wsRetryDelay = 1000;
 
 function connectWebSocket(): void {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${location.host}/ws`;
+    const token = localStorage.getItem('claude-remote-auth-token');
+    const wsUrl = token
+        ? `${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}`
+        : `${protocol}//${location.host}/ws`;
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
@@ -2298,6 +2358,7 @@ async function loadConversations(content: HTMLElement): Promise<void> {
 
 async function renderConversationThread(conversationId: string): Promise<void> {
     try {
+        if (!conversationId) return;
         const res = await fetch(`${API_BASE}/api/conversations/${conversationId}`);
         const data = await res.json();
         const conversation = data.conversation;
@@ -2305,6 +2366,10 @@ async function renderConversationThread(conversationId: string): Promise<void> {
 
         const detailPanel = document.getElementById('threadDetail');
         if (!detailPanel) return;
+        if (!conversation) {
+            detailPanel.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Thread not found</div>`;
+            return;
+        }
 
         const resolveButton = conversation.status === 'open'
             ? `<button class="admin-btn admin-btn-sm" onclick="resolveConversation('${conversation.id}')">Resolve</button>`
@@ -2358,9 +2423,25 @@ async function renderConversationThread(conversationId: string): Promise<void> {
             setTimeout(() => messageList.scrollTop = messageList.scrollHeight, 0);
         }
 
-        // Focus input
+        // Focus input and restore any saved draft
         const input = document.getElementById('messageInput') as HTMLTextAreaElement;
         if (input) {
+            const draftKey = `draft-conversation-${conversationId}`;
+            const saved = localStorage.getItem(draftKey);
+            if (saved) {
+                input.value = saved;
+                input.style.borderColor = 'var(--yellow)';
+                input.placeholder = 'Draft recovered — edit and send, or clear';
+            }
+            input.addEventListener('input', () => {
+                if (input.value.trim()) {
+                    localStorage.setItem(`draft-conversation-${conversationId}`, input.value);
+                } else {
+                    localStorage.removeItem(`draft-conversation-${conversationId}`);
+                    input.style.borderColor = '';
+                    input.placeholder = 'Type your message...';
+                }
+            });
             input.focus();
         }
     } catch (err: any) {
@@ -2420,7 +2501,8 @@ async function createNewConversation(title: string): Promise<void> {
     if (!input || !input.value.trim()) return;
 
     const content = input.value;
-    input.value = '';
+    const draftKey = `draft-conversation-${conversationId}`;
+    localStorage.setItem(draftKey, content);
 
     try {
         await fetch(`${API_BASE}/api/conversations/${conversationId}/messages`, {
@@ -2428,6 +2510,8 @@ async function createNewConversation(title: string): Promise<void> {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content, role: 'human' })
         });
+        input.value = '';
+        localStorage.removeItem(draftKey);
         await renderConversationThread(conversationId);
 
         // Show waiting indicator — supervisor wakes automatically on human message
@@ -2720,6 +2804,7 @@ async function loadMemoryDiscussions(content: HTMLElement): Promise<void> {
 
 async function renderMemoryThread(discussionId: string): Promise<void> {
     try {
+        if (!discussionId) return;
         const res = await fetch(`${API_BASE}/api/conversations/${discussionId}`);
         const data = await res.json();
         const conversation = data.conversation;
@@ -2727,6 +2812,10 @@ async function renderMemoryThread(discussionId: string): Promise<void> {
 
         const detailPanel = document.getElementById('mdThreadDetail');
         if (!detailPanel) return;
+        if (!conversation) {
+            detailPanel.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Thread not found</div>`;
+            return;
+        }
 
         const resolveButton = conversation.status === 'open'
             ? `<button class="admin-btn admin-btn-sm" onclick="resolveMemoryDiscussion('${conversation.id}')">Resolve</button>`
@@ -2779,7 +2868,25 @@ async function renderMemoryThread(discussionId: string): Promise<void> {
         }
 
         const input = document.getElementById('mdMessageInput') as HTMLTextAreaElement;
-        if (input) input.focus();
+        if (input) {
+            const draftKey = `draft-memory-${discussionId}`;
+            const saved = localStorage.getItem(draftKey);
+            if (saved) {
+                input.value = saved;
+                input.style.borderColor = 'var(--yellow)';
+                input.placeholder = 'Draft recovered — edit and send, or clear';
+            }
+            input.addEventListener('input', () => {
+                if (input.value.trim()) {
+                    localStorage.setItem(`draft-memory-${discussionId}`, input.value);
+                } else {
+                    localStorage.removeItem(`draft-memory-${discussionId}`);
+                    input.style.borderColor = '';
+                    input.placeholder = 'Think aloud...';
+                }
+            });
+            input.focus();
+        }
     } catch (err: any) {
         const detailPanel = document.getElementById('mdThreadDetail');
         if (detailPanel) {
@@ -2841,7 +2948,8 @@ async function createNewMemoryDiscussion(title: string): Promise<void> {
     if (!input || !input.value.trim()) return;
 
     const content = input.value;
-    input.value = '';
+    const draftKey = `draft-memory-${discussionId}`;
+    localStorage.setItem(draftKey, content);
 
     try {
         await fetch(`${API_BASE}/api/conversations/${discussionId}/messages`, {
@@ -2849,6 +2957,8 @@ async function createNewMemoryDiscussion(title: string): Promise<void> {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content, role: 'human' })
         });
+        input.value = '';
+        localStorage.removeItem(draftKey);
         await renderMemoryThread(discussionId);
 
         const messageList = document.getElementById('mdMessageList');
@@ -3426,6 +3536,7 @@ async function createNewWorkshopThread(title: string): Promise<void> {
 
 async function renderWorkshopThread(threadId: string): Promise<void> {
     try {
+        if (!threadId) return;
         const res = await fetch(`${API_BASE}/api/conversations/${threadId}`);
         const data = await res.json();
         const conversation = data.conversation;
@@ -3433,6 +3544,10 @@ async function renderWorkshopThread(threadId: string): Promise<void> {
 
         const detailPanel = document.getElementById('workshopThreadDetail');
         if (!detailPanel) return;
+        if (!conversation) {
+            detailPanel.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Thread not found</div>`;
+            return;
+        }
 
         const resolveButton = conversation.status === 'open'
             ? `<button class="admin-btn admin-btn-sm" onclick="resolveWorkshopThread('${conversation.id}')">Resolve</button>`
@@ -3495,7 +3610,25 @@ async function renderWorkshopThread(threadId: string): Promise<void> {
         }
 
         const input = document.getElementById('workshopMessageInput') as HTMLTextAreaElement;
-        if (input) input.focus();
+        if (input) {
+            const draftKey = `draft-workshop-${threadId}`;
+            const saved = localStorage.getItem(draftKey);
+            if (saved) {
+                input.value = saved;
+                input.style.borderColor = 'var(--yellow)';
+                input.placeholder = 'Draft recovered — edit and send, or clear';
+            }
+            input.addEventListener('input', () => {
+                if (input.value.trim()) {
+                    localStorage.setItem(`draft-workshop-${threadId}`, input.value);
+                } else {
+                    localStorage.removeItem(`draft-workshop-${threadId}`);
+                    input.style.borderColor = '';
+                    input.placeholder = 'Type a message...';
+                }
+            });
+            input.focus();
+        }
     } catch (err: any) {
         const detailPanel = document.getElementById('workshopThreadDetail');
         if (detailPanel) {
@@ -3509,7 +3642,8 @@ async function renderWorkshopThread(threadId: string): Promise<void> {
     if (!input || !input.value.trim()) return;
 
     const content = input.value;
-    input.value = '';
+    const draftKey = `draft-workshop-${threadId}`;
+    localStorage.setItem(draftKey, content);
 
     try {
         await fetch(`${API_BASE}/api/conversations/${threadId}/messages`, {
@@ -3517,6 +3651,8 @@ async function renderWorkshopThread(threadId: string): Promise<void> {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content, role: 'human' })
         });
+        input.value = '';
+        localStorage.removeItem(draftKey);
         await renderWorkshopThread(threadId);
 
         const messageList = document.getElementById('workshopMessageList');

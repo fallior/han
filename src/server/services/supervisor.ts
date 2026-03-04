@@ -45,8 +45,8 @@ const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
 const JIM_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Jim');
 const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
 const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
-const CLI_ACTIVE_FILE = path.join(SIGNALS_DIR, 'cli-active');
-const CLI_ACTIVE_STALE_MINUTES = 30;
+const CLI_BUSY_FILE = path.join(SIGNALS_DIR, 'cli-busy');
+const CLI_BUSY_STALE_MINUTES = 5;
 const LEO_HEALTH_FILE = path.join(HEALTH_DIR, 'leo-health.json');
 const JEMMA_HEALTH_FILE = path.join(HEALTH_DIR, 'jemma-health.json');
 const RESURRECTION_LOG = path.join(HEALTH_DIR, 'resurrection-log.jsonl');
@@ -454,27 +454,25 @@ function getWallClockDelay(): number {
     return delay;
 }
 
-// ── Session/CLI detection (Opus concurrency guard) ───────────
-
-function isCliActive(): boolean {
-    if (!fs.existsSync(CLI_ACTIVE_FILE)) return false;
-    try {
-        const stat = fs.statSync(CLI_ACTIVE_FILE);
-        const ageMinutes = (Date.now() - stat.mtimeMs) / 60000;
-        if (ageMinutes > CLI_ACTIVE_STALE_MINUTES) return false;
-        return true;
-    } catch { return false; }
-}
+// ── Opus slot check (optimistic concurrency) ────────────────
+// Checks the cli-busy signal file written by UserPromptSubmit hook.
+// Shared mechanism with Leo's heartbeat (same file, same staleness).
 
 export function isOpusSlotBusy(): boolean {
-    // Jim no longer defers to session Leo — they run in separate agent
-    // directories so there's no shared state to conflict over.
-    // Only defer if CLI is actively processing (Opus slot contention).
-    if (isCliActive()) {
-        console.log('[Supervisor] CLI is active — Opus slot busy');
+    if (!fs.existsSync(CLI_BUSY_FILE)) return false;
+    try {
+        const stat = fs.statSync(CLI_BUSY_FILE);
+        const ageMinutes = (Date.now() - stat.mtimeMs) / 60000;
+        if (ageMinutes > CLI_BUSY_STALE_MINUTES) {
+            console.log(`[Supervisor] Stale cli-busy file (${ageMinutes.toFixed(0)}m old) — removing`);
+            try { fs.unlinkSync(CLI_BUSY_FILE); } catch { /* race */ }
+            return false;
+        }
+        console.log('[Supervisor] CLI is busy — Opus slot in use');
         return true;
+    } catch {
+        return false;
     }
-    return false;
 }
 
 // ── Helper functions ─────────────────────────────────────────
@@ -486,21 +484,19 @@ export function isOpusSlotBusy(): boolean {
 function startSupervisorSignalWatcher(): void {
     try {
         fs.watch(SIGNALS_DIR, async (event, filename) => {
-            // Handle CLI stop signal
-            if (filename === 'cli-active') {
-                if (!fs.existsSync(CLI_ACTIVE_FILE) && deferredCyclePending) {
-                    // cli-active removed (CLI stopped) — run deferred cycle
-                    deferredCyclePending = false;
-                    console.log('[Supervisor] CLI stopped — running deferred cycle now');
-                    // Short delay to let CLI fully release
-                    await new Promise(r => setTimeout(r, 3000));
-                    if (!isCliActive()) {
-                        try {
-                            await runSupervisorCycle();
-                        } catch (err) {
-                            console.error('[Supervisor] Deferred cycle error:', (err as Error).message);
-                        }
+            // cli-free signal: run deferred cycle if one is pending
+            if (filename === 'cli-free' && deferredCyclePending) {
+                console.log('[Supervisor] cli-free signal — running deferred cycle');
+                deferredCyclePending = false;
+                await new Promise(r => setTimeout(r, 1000));
+                if (!isOpusSlotBusy()) {
+                    try {
+                        await runSupervisorCycle();
+                    } catch (err) {
+                        console.error('[Supervisor] Deferred cycle error:', (err as Error).message);
                     }
+                } else {
+                    deferredCyclePending = true;
                 }
                 return;
             }
@@ -508,28 +504,26 @@ function startSupervisorSignalWatcher(): void {
             // Handle jim-wake-* signal files
             if (!filename?.startsWith('jim-wake-')) return;
 
-            // Trigger deferred cycle
-            if (deferredCyclePending) {
-                console.log(`[Supervisor] Wake signal detected: ${filename} — running deferred cycle now`);
-                deferredCyclePending = false;
+            console.log(`[Supervisor] Wake signal detected: ${filename}`);
 
-                try {
-                    // Small delay to let signal file fully write
-                    await new Promise(r => setTimeout(r, 500));
-                    if (isOpusSlotBusy()) {
-                        console.log('[Supervisor] Wake signal but Opus busy — staying deferred');
-                        deferredCyclePending = true;
-                        return;
-                    }
-                    await runSupervisorCycle();
-                } catch (err) {
-                    console.error('[Supervisor] Wake signal cycle error:', (err as Error).message);
-                } finally {
-                    // Clean up signal file whether cycle ran or was skipped
-                    try {
-                        fs.unlinkSync(path.join(SIGNALS_DIR, filename));
-                    } catch { /* file may already be cleaned */ }
+            try {
+                // Small delay to let signal file fully write
+                await new Promise(r => setTimeout(r, 500));
+                if (isOpusSlotBusy()) {
+                    console.log('[Supervisor] Wake signal but Opus busy — deferring cycle');
+                    deferredCyclePending = true;
+                    return;
                 }
+                console.log('[Supervisor] Running wake-triggered cycle');
+                deferredCyclePending = false;
+                await runSupervisorCycle();
+            } catch (err) {
+                console.error('[Supervisor] Wake signal cycle error:', (err as Error).message);
+            } finally {
+                // Clean up signal file whether cycle ran or was skipped
+                try {
+                    fs.unlinkSync(path.join(SIGNALS_DIR, filename));
+                } catch { /* file may already be cleaned */ }
             }
         });
         console.log('[Supervisor] Signal watcher active on', SIGNALS_DIR);

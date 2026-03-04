@@ -10,6 +10,9 @@ Restart=always
 RestartSec=5
 Environment=HOME=/home/darron
 Environment=PATH=/home/darron/.nvm/versions/node/v23.9.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=OLLAMA_MODEL=gemma3:4b
+Environment=NODE_TLS_REJECT_UNAUTHORIZED=0
+EnvironmentFile=/home/darron/Projects/clauderemote/.env
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=jemma

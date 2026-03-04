@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Leo's Heartbeat — v0.7 (Weekly Rhythm)
+ * Leo's Heartbeat — v0.9 (Optimistic Concurrency)
  *
  * A unified pulse that gives Leo persistent presence between sessions.
  * Leo is one person — whether waking in a session with Darron or pulsing
@@ -16,14 +16,15 @@
  * Where Jim tends the ecosystem, Leo thinks about memory, identity, translation,
  * autonomy, and the shapes that rhyme across domains.
  *
- * v0.6 changes (Gary Model — interrupt system):
- *   - CLI hooks signal when Opus is busy (UserPromptSubmit/Stop → cli-active file)
- *   - Pre-beat check: skips beat if CLI is actively processing
- *   - Mid-beat abort: fs.watch detects cli-active, AbortController cancels running beat
+ * v0.8 changes (Session 58 — heartbeat always runs):
+ *   - Removed cli-active file-based locking entirely
+ *   - Heartbeat NEVER defers or aborts — the API handles concurrent requests
+ *   - The only contention guard is prompt-level (handled by the API, not file locks)
+ *
+ * v0.6 changes (Gary Model — now removed):
  *   - Incremental state: writeHeartbeatState() after every beat for seamless resumption
  *   - Task resumption: aborted beats provide context for the next matching beat
  *   - Jim time offset: 5min delay after Jim's supervisor cycles to avoid collision
- *   - Stale cli-active cleanup: removes signal files older than 30 minutes
  *
  * v0.5 changes:
  *   - Unified identity: uses ~/.claude-remote/memory/leo/ (session Leo's home)
@@ -67,30 +68,33 @@ const DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
 const JIM_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
 const LEO_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory', 'leo');
 const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
+const CLI_BUSY_FILE = path.join(SIGNALS_DIR, 'cli-busy');
+const CLI_FREE_FILE = path.join(SIGNALS_DIR, 'cli-free');
+const CLI_BUSY_STALE_MINUTES = 5;       // Ignore cli-busy files older than this
+const RETRY_INTERVAL_MS = 30 * 1000;    // 30 seconds between retries
+const RETRY_MAX_MS = 10 * 60 * 1000;    // 10 minutes max retry window
 const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
-const CLI_ACTIVE_FILE = path.join(SIGNALS_DIR, 'cli-active');
 const HEARTBEAT_STATE_FILE = path.join(LEO_MEMORY_DIR, 'heartbeat-state.md');
 const LEO_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Leo');
 const PROJECTS_DIR = path.join(HOME, 'Projects');
 const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
 
 const LAST_SCAN_FILE = path.join(LEO_MEMORY_DIR, 'last-conversation-scan.txt');
-const CLI_ACTIVE_STALE_MINUTES = 30;
 const REPLY_DELAY_MINUTES = 10; // Wait before responding to give Jim/others time
 
 // Guard against concurrent signal processing
 let processingSignal = false;
 const startedAt = Date.now();
 
-// AbortController for the currently-running beat (Gary model)
+// AbortController for the currently-running beat
 let currentBeatAbort: AbortController | null = null;
-
-// Deferred beat: set when a beat is skipped due to CLI active.
-// The signal watcher triggers the beat when cli-active is removed.
-let deferredBeatPending = false;
 
 // Distress signal detection — track time between beats
 let lastHeartbeatStartMs: number | null = null;
+
+// Optimistic concurrency: resolve function for retry-wait promise
+// When set, the signal watcher can call it to wake the retry loop early
+let retryWakeResolve: (() => void) | null = null;
 
 // ── Robin Hood Protocol — mutual health checks ──────────────
 
@@ -417,22 +421,71 @@ function getNextDelay(): number {
 }
 
 
-// ── CLI active detection (Gary model) ────────────────────────
+// ── Optimistic concurrency: CLI busy detection ───────────────
+//
+// Lighter than the old Gary Model. The heartbeat checks cli-busy ONCE
+// before firing. If busy, it retries every 30s for up to 10 minutes,
+// then gives up. The cli-free signal can wake it mid-wait.
 
-function isCliActive(): boolean {
-    if (!fs.existsSync(CLI_ACTIVE_FILE)) return false;
+function isCliBusy(): boolean {
+    if (!fs.existsSync(CLI_BUSY_FILE)) return false;
     try {
-        const stat = fs.statSync(CLI_ACTIVE_FILE);
+        const stat = fs.statSync(CLI_BUSY_FILE);
         const ageMinutes = (Date.now() - stat.mtimeMs) / 60000;
-        if (ageMinutes > CLI_ACTIVE_STALE_MINUTES) {
-            console.log(`[Leo] Stale cli-active file (${ageMinutes.toFixed(0)}m old) — removing`);
-            fs.unlinkSync(CLI_ACTIVE_FILE);
+        if (ageMinutes > CLI_BUSY_STALE_MINUTES) {
+            console.log(`[Leo] Stale cli-busy file (${ageMinutes.toFixed(0)}m old) — removing`);
+            try { fs.unlinkSync(CLI_BUSY_FILE); } catch { /* race */ }
             return false;
         }
         return true;
     } catch {
         return false;
     }
+}
+
+/**
+ * Wait for the CLI to become free, with retry.
+ * Retries every 30s for up to 10 minutes.
+ * Returns true if CLI became free, false if timed out.
+ * The signal watcher can resolve the wait early via retryWakeResolve.
+ */
+async function waitForCliFree(): Promise<boolean> {
+    const startedWaiting = Date.now();
+    let attempt = 0;
+
+    while (Date.now() - startedWaiting < RETRY_MAX_MS) {
+        attempt++;
+
+        if (!isCliBusy()) {
+            if (attempt > 1) {
+                const waitedSec = Math.round((Date.now() - startedWaiting) / 1000);
+                console.log(`[Leo] CLI free after ${waitedSec}s (${attempt} checks)`);
+            }
+            return true;
+        }
+
+        const waitedSoFar = Math.round((Date.now() - startedWaiting) / 1000);
+        const remainingSec = Math.round((RETRY_MAX_MS - (Date.now() - startedWaiting)) / 1000);
+        console.log(`[Leo] CLI busy — retry #${attempt}, waited ${waitedSoFar}s, ${remainingSec}s remaining`);
+
+        // Wait for either: 30s timeout OR cli-free signal (whichever comes first)
+        await new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+                retryWakeResolve = null;
+                resolve();
+            }, RETRY_INTERVAL_MS);
+
+            retryWakeResolve = () => {
+                clearTimeout(timer);
+                retryWakeResolve = null;
+                resolve();
+            };
+        });
+    }
+
+    const totalWaitMin = Math.round((Date.now() - startedWaiting) / 60000);
+    console.log(`[Leo] CLI busy for ${totalWaitMin}min — giving up, scheduling next cycle`);
+    return false;
 }
 
 // ── Wall-clock phase alignment (180° with Jim) ──────────────
@@ -1340,16 +1393,6 @@ async function heartbeat(): Promise<void> {
     checkJimHealth();
     checkJemmaHealth();
 
-    // Gary model: check if CLI is actively processing a prompt
-    if (isCliActive()) {
-        console.log(`[Leo] CLI active — deferring beat #${beatCounter} (will resume when CLI stops)`);
-        writeHeartbeatState('skipped', beatType, { summary: 'CLI active — deferred' });
-        writeHealthSignal(null, beatType);
-        deferredBeatPending = true;
-        return;
-    }
-    deferredBeatPending = false;
-
     // Check for the most capable model available
     await resolveModel();
 
@@ -1470,31 +1513,17 @@ function writeHealthSignal(lastError: string | null = null, beatType?: BeatType)
 function startSignalWatcher(): void {
     try {
         fs.watch(SIGNALS_DIR, async (event, filename) => {
-            if (filename === 'cli-active') {
-                if (fs.existsSync(CLI_ACTIVE_FILE)) {
-                    // cli-active appeared — abort current beat (Gary yields)
-                    if (currentBeatAbort && !currentBeatAbort.signal.aborted) {
-                        console.log('[Leo] CLI activated — aborting current beat (Gary yields)');
-                        currentBeatAbort.abort();
-                    }
-                } else if (deferredBeatPending) {
-                    // cli-active removed (Stop hook fired) — run deferred beat
-                    deferredBeatPending = false;
-                    console.log('[Leo] CLI stopped — running deferred beat now');
-                    // Short delay to let the CLI fully release
-                    await new Promise(r => setTimeout(r, 3000));
-                    if (!isCliActive()) {
-                        try {
-                            await heartbeat();
-                        } catch (err) {
-                            console.error('[Leo] Deferred beat error:', (err as Error).message);
-                        }
-                    }
+            // cli-free signal: wake retry loop if heartbeat is waiting
+            if (filename === 'cli-free') {
+                try { fs.unlinkSync(CLI_FREE_FILE); } catch { /* already gone */ }
+                if (retryWakeResolve) {
+                    console.log('[Leo] cli-free signal received — waking retry loop');
+                    retryWakeResolve();
                 }
                 return;
             }
 
-            // Mention signal handling (existing behaviour)
+            // Mention signal handling
             if (!filename?.startsWith('leo-wake-')) return;
             if (processingSignal) return;
             processingSignal = true;
@@ -1523,6 +1552,20 @@ function startSignalWatcher(): void {
 function scheduleNext(): void {
     const delay = getWallClockDelay();
     setTimeout(async () => {
+        // Optimistic concurrency: check if CLI is busy before running beat
+        if (isCliBusy()) {
+            console.log('[Leo] CLI busy at beat time — entering retry loop');
+            const cliFree = await waitForCliFree();
+            if (!cliFree) {
+                // Timed out — skip this beat, schedule next cycle
+                writeHeartbeatState('skipped', 'unknown', { summary: 'CLI busy — retry timeout (10min)' });
+                writeHealthSignal(null);
+                scheduleNext();
+                return;
+            }
+            console.log('[Leo] CLI free — proceeding with beat');
+        }
+
         try {
             await heartbeat();
         } catch (err) {
@@ -1547,7 +1590,7 @@ async function main() {
 
     console.log(`
 ╔══════════════════════════════════════════════════════╗
-║       Leo's Heartbeat — v0.7 (Weekly Rhythm)        ║
+║      Leo's Heartbeat — v0.9 (Optimistic Guard)      ║
 ╠══════════════════════════════════════════════════════╣
 ║  Model:    ${MODEL_PREFERENCE[0]} (prefers best available)          ║
 ║  Memory:   ~/.claude-remote/memory/leo/             ║
@@ -1562,7 +1605,7 @@ async function main() {
 ║  Rest Days (${restDayNames}):                            ║
 ║    All day:  40min  personal (light)                ║
 ╠──────────────────────────────────────────────────────╣
-║  Gary:     yields Opus on prompt (hook signals)      ║
+║  Guard:    optimistic concurrency (retry on busy)    ║
 ║  Abort:    mid-beat interrupt via AbortController    ║
 ║  Phase:    0° (wall-clock aligned, Jim at 180°)      ║
 ║  Session:  continuous — no session lock              ║

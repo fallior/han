@@ -88,7 +88,7 @@ interface OrchestratorStatus {
 // ── Configuration ─────────────────────────────────────────
 
 const OLLAMA_URL: string = process.env.OLLAMA_URL || 'http://localhost:11434';
-const OLLAMA_MODEL: string = process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b';
+const OLLAMA_MODEL: string = process.env.OLLAMA_MODEL || 'gemma3:4b';
 
 let ollamaAvailable = false;
 

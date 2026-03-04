@@ -36,6 +36,9 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { execSync, execFileSync } from 'node:child_process';
 
+// Allow self-signed TLS cert for localhost server connection
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 // ── Configuration ─────────────────────────────────────────────────
 
 const HOME = process.env.HOME || '/home/darron';
@@ -47,9 +50,9 @@ const HEALTH_FILE = path.join(HEALTH_DIR, 'jemma-health.json');
 
 const DISCORD_GATEWAY = 'wss://gateway.discord.gg/?v=10&encoding=json';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5-coder:7b';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b';
 
-const SERVER_URL = 'http://localhost:3847';
+const SERVER_URL = 'https://localhost:3847';
 const RECONCILIATION_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const HEARTBEAT_JITTER_MS = 1000; // 1s jitter on heartbeat interval
 
@@ -99,6 +102,10 @@ const startedAt = Date.now();
 
 // Track last seen message ID per channel for reconciliation
 const lastSeenMessageId: Record<string, string> = {};
+
+// Track processed message IDs to avoid re-classification (rolling window)
+const processedMessageIds = new Set<string>();
+const MAX_PROCESSED_IDS = 500;
 
 // Track recent messages for admin UI
 const recentMessages: Array<{
@@ -196,9 +203,8 @@ function updateDeliveryStats(recipient: string): void {
   }
 }
 
-async function callLLMForClassification(message: any): Promise<ClassificationResult> {
-  try {
-    const prompt = `Classify this Discord message and determine the recipient.
+function buildClassificationPrompt(message: any): string {
+  return `Classify this Discord message and determine the recipient.
 
 Message Content: "${message.content}"
 Author: ${message.author.username}${message.author.bot ? ' (BOT)' : ''}
@@ -218,37 +224,90 @@ Rules:
 - Darron: direct mentions of Darron, or general discussion
 - Sevn: mentions Sevn or team context
 - Six: mentions Six or specific external work`;
+}
 
-    const res = await fetch(`${OLLAMA_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        prompt,
-        stream: false,
-        format: 'json',
-      }),
-      signal: AbortSignal.timeout(5000),
-    });
+async function classifyWithHaiku(prompt: string): Promise<ClassificationResult> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('No ANTHROPIC_API_KEY');
 
-    if (!res.ok) {
-      throw new Error(`Ollama ${res.status}`);
-    }
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
 
-    const data = await res.json();
-    const result = JSON.parse(data.response);
-    return {
-      recipient: result.recipient || 'ignore',
-      confidence: result.confidence || 0,
-      reasoning: result.reasoning || 'Classification uncertain',
-    };
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Haiku API ${res.status}: ${errText}`);
+  }
+
+  const data = await res.json();
+  const raw = data.content[0].text;
+  // Strip markdown code fences if Haiku wraps the JSON
+  const text = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  const result = JSON.parse(text);
+  return {
+    recipient: result.recipient || 'ignore',
+    confidence: result.confidence || 0,
+    reasoning: result.reasoning || 'Classification uncertain',
+  };
+}
+
+async function classifyWithOllama(prompt: string): Promise<ClassificationResult> {
+  const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      prompt,
+      stream: false,
+      format: 'json',
+    }),
+    signal: AbortSignal.timeout(20000),
+  });
+
+  if (!res.ok) throw new Error(`Ollama ${res.status}`);
+
+  const data = await res.json();
+  const result = JSON.parse(data.response);
+  return {
+    recipient: result.recipient || 'ignore',
+    confidence: result.confidence || 0,
+    reasoning: result.reasoning || 'Classification uncertain',
+  };
+}
+
+async function callLLMForClassification(message: any): Promise<ClassificationResult> {
+  const prompt = buildClassificationPrompt(message);
+
+  // Try Haiku first (fast, free), fall back to Gemma (local)
+  try {
+    const result = await classifyWithHaiku(prompt);
+    console.log('[Jemma] Classified via Haiku');
+    return result;
   } catch (err) {
-    console.warn('[Jemma] Classification failed:', (err as Error).message);
-    // Default to ignore on classification failure
+    console.warn('[Jemma] Haiku classification failed:', (err as Error).message);
+  }
+
+  try {
+    const result = await classifyWithOllama(prompt);
+    console.log('[Jemma] Classified via Ollama (fallback)');
+    return result;
+  } catch (err) {
+    console.warn('[Jemma] Ollama classification failed:', (err as Error).message);
     return {
       recipient: 'ignore',
       confidence: 0,
-      reasoning: 'Classification error — defaulting to ignore',
+      reasoning: 'All classification backends failed — defaulting to ignore',
     };
   }
 }
@@ -410,14 +469,21 @@ async function routeMessage(message: any): Promise<void> {
     return;
   }
 
-  const classification = await callLLMForClassification(message);
-
-  if (classification.confidence < 0.3) {
-    console.log(`[Jemma] Low confidence classification (${classification.confidence}), ignoring`);
+  // Skip already-processed messages
+  if (processedMessageIds.has(message.id)) {
     return;
   }
 
-  const recipient = classification.recipient;
+  // Track this message as processed (rolling window)
+  processedMessageIds.add(message.id);
+  if (processedMessageIds.size > MAX_PROCESSED_IDS) {
+    const oldest = processedMessageIds.values().next().value;
+    if (oldest) processedMessageIds.delete(oldest);
+  }
+
+  const classification = await callLLMForClassification(message);
+  const recipient = classification.recipient.toLowerCase();
+  console.log(`[Jemma] Routed to ${recipient} (confidence: ${classification.confidence}, reason: ${classification.reasoning})`);
 
   // Update tracking
   updateMessageLog(message, recipient, classification.confidence);
@@ -474,20 +540,24 @@ async function reconcileMessages(): Promise<void> {
         // Update last seen ID (messages[0] is newest, Discord returns reverse chronological)
         lastSeenMessageId[channelId] = messages[0].id;
 
-        // Process messages
+        // Only route messages we haven't already processed (routeMessage handles dedup)
+        let newCount = 0;
         for (const msg of messages) {
-          const msgTime = new Date(msg.timestamp).getTime();
-          if (!lastGatewayEventTimestamp || msgTime > lastGatewayEventTimestamp) {
+          if (!processedMessageIds.has(msg.id)) {
             await routeMessage(msg);
+            newCount++;
           }
         }
 
-        console.log(`[Jemma] Reconciliation: processed ${messages.length} messages from #${name}`);
+        if (newCount > 0) {
+          console.log(`[Jemma] Reconciliation: ${newCount} new messages from #${name}`);
+        }
       }
     } catch (err) {
       console.warn(`[Jemma] Reconciliation error for #${name}:`, (err as Error).message);
     }
   }
+  console.log('[Jemma] Reconciliation complete');
 }
 
 // ── Discord Gateway Protocol ──────────────────────────────────────
@@ -550,6 +620,13 @@ function sendResume(): void {
 }
 
 async function handleGatewayMessage(data: GatewayMessage): Promise<void> {
+  // Debug: log all gateway events
+  if (data.op === 0) {
+    console.log(`[Jemma] DISPATCH event: ${data.t} (seq: ${data.s})`);
+  } else if (data.op !== 11) { // Don't log heartbeat ACKs
+    console.log(`[Jemma] Gateway op: ${data.op}`);
+  }
+
   // Update sequence number
   if (data.s !== null && data.s !== undefined) {
     lastSequence = data.s;
@@ -694,6 +771,25 @@ async function main(): Promise<void> {
 ║  Shutdown:     SIGTERM/SIGINT (graceful)
 ╚════════════════════════════════════════════════════════╝
 `);
+
+  // Warm up Gemma — preload model so first real classification isn't a cold start
+  console.log('[Jemma] Warming up Gemma...');
+  try {
+    await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt: 'Respond with just: {"recipient":"ignore","confidence":1.0,"reasoning":"warmup"}',
+        stream: false,
+        format: 'json',
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+    console.log('[Jemma] Gemma warm-up complete');
+  } catch (err) {
+    console.warn('[Jemma] Gemma warm-up failed:', (err as Error).message);
+  }
 
   // Start Discord connection
   connect();

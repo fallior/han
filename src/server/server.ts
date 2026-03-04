@@ -93,9 +93,9 @@ app.use(express.json({ limit: '1mb' }));
 // Serve static UI assets (for app.js bundle)
 app.use(express.static(UI_DIR));
 
-// Apply authentication middleware to /api and /admin routes
+// Apply authentication middleware to /api routes
+// Admin HTML page is unprotected so the JS can load and handle auth client-side
 app.use('/api', authMiddleware);
-app.use('/admin', authMiddleware);
 
 // Ensure directories exist
 [PENDING_DIR, RESOLVED_DIR, CONTEXTS_DIR].forEach(dir => {
