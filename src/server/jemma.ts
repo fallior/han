@@ -355,12 +355,13 @@ async function callLLMForClassification(message: any): Promise<ClassificationRes
   }
 }
 
-async function deliverToJim(message: any, classification: ClassificationResult): Promise<void> {
+async function deliverToJim(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
   try {
     const payload = {
       recipient: 'jim',
       message: message.content,
       channel: message.channel_id,
+      channelName,
       author: message.author.username,
       classification_confidence: classification.confidence,
     };
@@ -376,13 +377,14 @@ async function deliverToJim(message: any, classification: ClassificationResult):
       throw new Error(`Server returned ${res.status}`);
     }
 
-    console.log(`[Jemma] Delivered to Jim (${message.author.username}: ${message.content.slice(0, 40)}...)`);
+    console.log(`[Jemma] Delivered to Jim (#${channelName} — ${message.author.username}: ${message.content.slice(0, 40)}...)`);
   } catch (err) {
     console.warn('[Jemma] Failed to deliver to Jim via server, writing signal file');
     try {
       const signalPath = path.join(SIGNALS_DIR, 'jim-wake');
       fs.writeFileSync(signalPath, JSON.stringify({
         source: 'discord',
+        channelName,
         author: message.author.username,
         content: message.content,
         timestamp: message.timestamp,
@@ -393,30 +395,31 @@ async function deliverToJim(message: any, classification: ClassificationResult):
   }
 }
 
-async function deliverToLeo(message: any, classification: ClassificationResult): Promise<void> {
+async function deliverToLeo(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
   try {
     const signalPath = path.join(SIGNALS_DIR, 'leo-wake');
 
     fs.writeFileSync(signalPath, JSON.stringify({
       source: 'discord',
       channelId: message.channel_id,
+      channelName,
       author: message.author.username,
       mentionedAt: message.timestamp,
       messagePreview: message.content.slice(0, 200),
     }));
 
-    console.log(`[Jemma] Woke Leo (${message.author.username}: ${message.content.slice(0, 40)}...)`);
+    console.log(`[Jemma] Woke Leo (#${channelName} — ${message.author.username}: ${message.content.slice(0, 40)}...)`);
   } catch (err) {
     console.error('[Jemma] Failed to write Leo signal file:', (err as Error).message);
   }
 }
 
-function deliverToDarron(message: any, classification: ClassificationResult): void {
+function deliverToDarron(message: any, classification: ClassificationResult, channelName: string): void {
   try {
     const config = loadConfig();
     if (!config.ntfy_topic) return;
 
-    const ntfyMsg = `Discord — ${message.author.username}: ${message.content.slice(0, 100)}`;
+    const ntfyMsg = `#${channelName} — ${message.author.username}: ${message.content.slice(0, 100)}`;
     execFileSync('curl', [
       '-s',
       '-d', ntfyMsg,
@@ -427,13 +430,13 @@ function deliverToDarron(message: any, classification: ClassificationResult): vo
       stdio: 'ignore'
     });
 
-    console.log(`[Jemma] Notified Darron (${message.author.username})`);
+    console.log(`[Jemma] Notified Darron (#${channelName} — ${message.author.username})`);
   } catch (err) {
     console.warn('[Jemma] Failed to notify Darron:', (err as Error).message);
   }
 }
 
-async function deliverToSevn(message: any, classification: ClassificationResult): Promise<void> {
+async function deliverToSevn(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
   try {
     const config = loadConfig();
     const endpoint = config.sevn?.wake_endpoint;
@@ -451,8 +454,9 @@ async function deliverToSevn(message: any, classification: ClassificationResult)
         'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
-        text: `Discord: ${message.author.username} — ${message.content}`,
+        text: `Discord #${channelName}: ${message.author.username} — ${message.content}`,
         mode: 'now',
+        channelName,
       }),
       signal: AbortSignal.timeout(5000),
     });
@@ -461,13 +465,13 @@ async function deliverToSevn(message: any, classification: ClassificationResult)
       throw new Error(`Sevn returned ${res.status}`);
     }
 
-    console.log(`[Jemma] Routed to Sevn (${message.author.username})`);
+    console.log(`[Jemma] Routed to Sevn (#${channelName} — ${message.author.username})`);
   } catch (err) {
     console.warn('[Jemma] Failed to route to Sevn:', (err as Error).message);
   }
 }
 
-async function deliverToSix(message: any, classification: ClassificationResult): Promise<void> {
+async function deliverToSix(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
   try {
     const config = loadConfig();
     const endpoint = config.six?.wake_endpoint;
@@ -485,8 +489,9 @@ async function deliverToSix(message: any, classification: ClassificationResult):
         'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
-        text: `Discord: ${message.author.username} — ${message.content}`,
+        text: `Discord #${channelName}: ${message.author.username} — ${message.content}`,
         mode: 'now',
+        channelName,
       }),
       signal: AbortSignal.timeout(5000),
     });
@@ -495,7 +500,7 @@ async function deliverToSix(message: any, classification: ClassificationResult):
       throw new Error(`Six returned ${res.status}`);
     }
 
-    console.log(`[Jemma] Routed to Six (${message.author.username})`);
+    console.log(`[Jemma] Routed to Six (#${channelName} — ${message.author.username})`);
   } catch (err) {
     console.warn('[Jemma] Failed to route to Six:', (err as Error).message);
   }
@@ -525,6 +530,7 @@ async function routeMessage(message: any): Promise<void> {
   }
 
   const classification = await callLLMForClassification(message);
+  const channelName = resolveChannelName(message.channel_id);
   const recipient = classification.recipient.toLowerCase();
   console.log(`[Jemma] Routed to ${recipient} (confidence: ${classification.confidence}, reason: ${classification.reasoning})`);
 
@@ -534,19 +540,19 @@ async function routeMessage(message: any): Promise<void> {
 
   switch (recipient) {
     case 'jim':
-      await deliverToJim(message, classification);
+      await deliverToJim(message, classification, channelName);
       break;
     case 'leo':
-      await deliverToLeo(message, classification);
+      await deliverToLeo(message, classification, channelName);
       break;
     case 'darron':
-      deliverToDarron(message, classification);
+      deliverToDarron(message, classification, channelName);
       break;
     case 'sevn':
-      await deliverToSevn(message, classification);
+      await deliverToSevn(message, classification, channelName);
       break;
     case 'six':
-      await deliverToSix(message, classification);
+      await deliverToSix(message, classification, channelName);
       break;
     case 'ignore':
     default:
