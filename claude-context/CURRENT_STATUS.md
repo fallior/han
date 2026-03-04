@@ -32,6 +32,17 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-05 — Claude (autonomous) — Discord Conversation Title Lookup Fix
+- **Fixed Discord conversation title mismatch preventing lookup** — Follow-up fix to ensure LIKE query at line 156 matches all conversation titles:
+  - **Problem**: Initial fragmentation fix (a6493df) used title format `Discord: ${author} in #${channelName || channel}`, but when channelName is resolved (e.g., `#general`), the LIKE query searching for numeric ID (`%#1478239128654053427%`) won't match. This meant the next message from the same channel would create a new conversation instead of reusing the existing one.
+  - **Fix**: Changed conversation title format at line 165 to ALWAYS include numeric channel ID in parentheses: `Discord: ${author} in #${channelName || channel} (${channel})`. Now titles look like `Discord: user in #general (1478239128654053427)` or `Discord: user in #1478239128654053427 (1478239128654053427)`.
+  - **Why this works**: The LIKE query `%#${channel}%` now matches both old-style titles (`#1478239128654053427`) and new-style titles (`#general (1478239128654053427)`) because the numeric ID is always present.
+- **Why this matters**: Completes the fragmentation fix — ensures conversation lookup works correctly regardless of whether channelName is resolved or not. Without this, the initial fix would have only worked for the first message in a channel.
+- **Files modified**: `src/server/routes/jemma.ts` (1 line changed)
+- **Commits**: 1 commit (6245b91) from goal mmck1t7e-jnzdkt (Fix Discord conversation fragmentation title mismatch)
+- **Cost**: $0.14 (Sonnet)
+- **Tasks**: 1 task (mmck29h1-nrkv5e, done)
+
 ### 2026-03-05 — Claude (autonomous) — Discord Conversation Fragmentation Fixed
 - **Fixed Discord conversation fragmentation and channelName display in routes/jemma.ts** — Two critical bugs resolved in a single focused change:
   - **Bug 1: Conversation fragmentation (See/Act gap #16)**: The prepared statement `findOpenDiscordConv` existed at line 17 but had zero call sites. Every Discord message created a new conversation instead of appending to existing ones. Fixed by checking for existing open Discord conversation before creating new one (lines 155-171) — searches for `%#${channel}%` pattern, reuses existing conversation if found, only creates new one if none exists. Added timestamp update (line 180) to maintain sort order in UI after inserting message.
