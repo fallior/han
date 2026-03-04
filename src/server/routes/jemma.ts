@@ -7,11 +7,16 @@ import { Router, Request, Response } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { conversationStmts, conversationMessageStmts, CLAUDE_REMOTE_DIR } from '../db';
+import { db, conversationStmts, conversationMessageStmts, CLAUDE_REMOTE_DIR } from '../db';
 import { broadcast } from '../ws';
 import { generateId } from '../services/planning';
 
 const router = Router();
+
+// Prepared statement to find open Discord conversation for a channel
+const findOpenDiscordConv = db.prepare(
+    `SELECT id FROM conversations WHERE discussion_type = 'discord' AND status = 'open' AND title LIKE ? ORDER BY updated_at DESC LIMIT 1`
+);
 
 // ── Directories ──────────────────────────────────────────────
 

@@ -47,6 +47,7 @@ const CONFIG_PATH = path.join(CLAUDE_REMOTE_DIR, 'config.json');
 const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
 const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
 const HEALTH_FILE = path.join(HEALTH_DIR, 'jemma-health.json');
+const LAST_SEEN_FILE = path.join(HEALTH_DIR, 'jemma-last-seen.json');
 
 const DISCORD_GATEWAY = 'wss://gateway.discord.gg/?v=10&encoding=json';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
@@ -748,6 +749,7 @@ function connect(): void {
     } else {
       console.error('[Jemma] Max reconnection attempts exceeded');
       writeHealthFile('error', 'Max reconnection attempts exceeded');
+      process.exit(1);  // Let systemd restart fresh
     }
   });
 }

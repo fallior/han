@@ -61,7 +61,6 @@ let workerRestartAttempts = 0;
 const MAX_RESTART_ATTEMPTS = 5;
 const RESTART_BACKOFF_MS = 5000;
 let cycleCount = 0;
-let deferredCyclePending = false;
 let currentCycleStartTime = 0; // Track cycle start for distress detection
 
 // ── Health signal (Robin Hood Protocol) ──────────────────────
