@@ -162,7 +162,7 @@ router.post('/deliver', (req: Request, res: Response) => {
                         const now = new Date().toISOString();
                         conversationStmts.insertWithType.run(
                             convId,
-                            `Discord: ${author} in #${channelName || channel}`,
+                            `Discord: ${author} in #${channelName || channel} (${channel})`,
                             'open',
                             now,
                             now,
