@@ -1,20 +1,12 @@
 import { Router, Request, Response } from 'express';
-import fs from 'node:fs';
-import path from 'node:path';
 import { db, conversationStmts, conversationMessageStmts } from '../db';
 import { generateId } from '../services/planning';
 import { broadcast } from '../ws';
-import { runSupervisorCycle, isOpusSlotBusy } from '../services/supervisor';
+import { runSupervisorCycle } from '../services/supervisor';
 import { catalogueConversation, catalogueAllUncatalogued } from '../services/cataloguing';
 import { callLLM } from '../orchestrator';
 import path from 'node:path';
 import fs from 'node:fs';
-
-// ── Mention detection ────────────────────────────────────────
-const LEO_MENTION = /\b(hey\s+leo|@leo|leo[,:])\b/i;
-const JIM_MENTION = /\b(hey\s+jim|@jim|jim[,:])\b/i;
-const SIGNALS_DIR = path.join(process.env.HOME || '', '.claude-remote', 'signals');
-fs.mkdirSync(SIGNALS_DIR, { recursive: true });
 
 const router = Router();
 const HOME = process.env.HOME || '/home/darron';
@@ -305,60 +297,26 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
 
         res.json({ success: true, message });
 
-<<<<<<< Updated upstream
         // Dispatch for human messages handled by Jemma via WebSocket
         // (Jemma listens for conversation_message broadcasts, classifies, writes signals)
         if (finalRole === 'human') {
             // Lightweight fallback: write jim-wake signal so Jim wakes
             // even if Jemma's admin WebSocket is down.
             // Do NOT call runSupervisorCycle() directly — that caused over-responding.
-=======
-        // Jim-wake signal when Opus is busy
-        if (finalRole === 'human' && isOpusSlotBusy()) {
->>>>>>> Stashed changes
             try {
                 const signalFile = path.join(SIGNALS_DIR, 'jim-wake');
                 fs.writeFileSync(signalFile, JSON.stringify({
                     conversationId: req.params.id,
                     messageId,
                     timestamp: now,
-<<<<<<< Updated upstream
                     reason: 'human_message_fallback'
                 }));
-=======
-                    reason: 'human_message_while_opus_busy'
-                }));
-                console.log(`[Conversations] Jim wake signal written: Opus busy when human message arrived`);
->>>>>>> Stashed changes
             } catch (err: any) {
                 console.error(`[Conversations] Failed to write jim-wake signal: ${err.message}`);
             }
         }
 
-<<<<<<< Updated upstream
         if (finalRole === 'leo') {
-=======
-        // Detect mentions and write signal files
-        if (LEO_MENTION.test(content)) {
-            try {
-                const signalFile = path.join(SIGNALS_DIR, 'leo-wake');
-                fs.writeFileSync(signalFile, JSON.stringify({
-                    conversationId: req.params.id,
-                    mentionedAt: now,
-                    messagePreview: content.slice(0, 200),
-                }));
-                console.log(`[Mention] Leo mentioned in ${req.params.id} — signal written`);
-            } catch (err: any) {
-                console.error(`[Mention] Failed to write Leo signal: ${err.message}`);
-            }
-        }
-
-        // Wake supervisor to respond (fire and forget)
-        if (finalRole === 'human') {
-            // Immediate wake for Darron
-            runSupervisorCycle().catch(() => {});
-        } else if (finalRole === 'leo') {
->>>>>>> Stashed changes
             // Cooldown-aware wake for Leo — respect 10-min contemplation interval
             const LEO_COOLDOWN_MS = 10 * 60 * 1000;
             const lastResponse = conversationMessageStmts.getLastSupervisorResponse.get(req.params.id) as any;
