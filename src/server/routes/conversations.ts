@@ -5,8 +5,13 @@ import { broadcast } from '../ws';
 import { runSupervisorCycle } from '../services/supervisor';
 import { catalogueConversation, catalogueAllUncatalogued } from '../services/cataloguing';
 import { callLLM } from '../orchestrator';
+import path from 'node:path';
+import fs from 'node:fs';
 
 const router = Router();
+const HOME = process.env.HOME || '/home/darron';
+const CLAUDE_REMOTE_DIR = path.join(HOME, '.claude-remote');
+const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
 
 const listWithCounts = db.prepare(`
     SELECT c.*, COUNT(cm.id) as message_count,
@@ -294,6 +299,23 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
 
         // Dispatch for human messages handled by Jemma via WebSocket
         // (Jemma listens for conversation_message broadcasts, classifies, writes signals)
+        if (finalRole === 'human') {
+            // Lightweight fallback: write jim-wake signal so Jim wakes
+            // even if Jemma's admin WebSocket is down.
+            // Do NOT call runSupervisorCycle() directly — that caused over-responding.
+            try {
+                const signalFile = path.join(SIGNALS_DIR, 'jim-wake');
+                fs.writeFileSync(signalFile, JSON.stringify({
+                    conversationId: req.params.id,
+                    messageId,
+                    timestamp: now,
+                    reason: 'human_message_fallback'
+                }));
+            } catch (err: any) {
+                console.error(`[Conversations] Failed to write jim-wake signal: ${err.message}`);
+            }
+        }
+
         if (finalRole === 'leo') {
             // Cooldown-aware wake for Leo — respect 10-min contemplation interval
             const LEO_COOLDOWN_MS = 10 * 60 * 1000;

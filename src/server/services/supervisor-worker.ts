@@ -29,7 +29,7 @@ import type {
     BroadcastMessage,
     LogMessage
 } from './supervisor-protocol';
-import { postToDiscord } from './discord';
+import { postToDiscord, resolveChannelName } from './discord';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -928,15 +928,19 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
                         const conversation = conversationStmts.get.get(action.conversation_id) as any;
                         if (conversation && conversation.discussion_type === 'discord') {
                             // Extract channelId from conversation metadata or title
-                            // Title format: "Discord: {author} in #{channelName}"
+                            // Title format: "Discord: {author} in #{channelId}"
                             const titleMatch = conversation.title?.match(/#(\S+)/);
                             if (titleMatch && titleMatch[1]) {
-                                const channelName = titleMatch[1];
-                                const posted = await postToDiscord('jim', channelName, action.response_content);
-                                if (posted) {
-                                    log(`[Worker] Posted Jim response to Discord #${channelName}`);
+                                const channelName = resolveChannelName(titleMatch[1]);
+                                if (!channelName) {
+                                    log(`[Worker] Cannot resolve channel ID ${titleMatch[1]} — skipping Discord post`);
                                 } else {
-                                    log(`[Worker] Failed to post to Discord #${channelName}`);
+                                    const posted = await postToDiscord('jim', channelName, action.response_content);
+                                    if (posted) {
+                                        log(`[Worker] Posted Jim response to Discord #${channelName}`);
+                                    } else {
+                                        log(`[Worker] Failed to post to Discord #${channelName}`);
+                                    }
                                 }
                             }
                         }
