@@ -1,6 +1,6 @@
 # Claude Remote — Current Status
 
-> Last updated: 2026-03-04 22:05 (Autonomous) by Claude
+> Last updated: 2026-03-05 (Autonomous) by Claude
 
 ## Current Stage
 
@@ -31,6 +31,33 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-03-05 — Claude (autonomous) — Jemma Delivery Channel Names Enhancement
+- **Enhanced Jemma's message delivery logging with human-readable channel names and recipient metadata** — All delivery messages, notifications, and signal files now include resolved channel names instead of just numeric IDs:
+  - **Channel name resolution**: Extracted `resolveChannelName()` function from classification prompt (lines 228-235) — inverts `config.discord.channels` map to resolve ID → name, falls back to raw ID if not in config
+  - **Threading through pipeline**: `routeMessage()` resolves channel name once (line 535), passes to all six delivery functions (`deliverToJim`, `deliverToLeo`, `deliverToDarron`, `deliverToSevn`, `deliverToSix`) as new parameter
+  - **Enhanced logging**: Updated 10 console.log statements across all delivery paths — format changed from `'Delivered to Jim (username: msg...)'` to `'Delivered to Jim (#channelName — username: msg...)'`
+  - **Signal file metadata**: Added `recipient` and `channelName` fields to jim-wake and leo-wake signal files for self-documenting payloads
+  - **External payload enhancements**: Added `channelName` field to Jim's HTTP payload, Sevn/Six wake payloads, and Darron's ntfy notifications
+- **Why this matters**: Dramatically improves observability and debugging — logs now show human-readable channel context (`#general`, `#jim`, `#leo`) instead of opaque IDs. Signal files are self-documenting with explicit recipient metadata. External consumers (Leo, Jim, Sevn, Six) get richer context for routing decisions.
+- **Files modified**: `src/server/jemma.ts` (+29/-13 lines across 5 commits)
+- **Scope adherence**: All changes confined to `jemma.ts` only — did NOT touch `conversations.ts`, `leo-heartbeat.ts`, or `supervisor.ts`
+- **Commits**: 5 commits (4c68c00, 29d3258, 2027c18, c069115, 80b795c, 4e1ca7a) from goal mmc4ff1t-aelqkh (Add channel names to Jemma delivery messages)
+- **Cost**: ~$0.34 (Haiku)
+- **Tasks**: 5 tasks (all done)
+
+### 2026-03-05 — Claude (autonomous) — Jim Supervisor Contention Removal
+- **Removed all isOpusSlotBusy() contention checks from Jim's supervisor** — Jim and Leo run from separate agent directories (`/Jim` and `/Leo`) with no shared Opus resource, so Jim should not defer cycles based on Leo's CLI activity:
+  - **Problem**: `isOpusSlotBusy()` checked Leo's cli-active signal and deferred Jim's cycles when Leo's CLI was active. But the Agent SDK's `--agent-dir` flag creates isolated execution contexts — agents in different directories don't share resources.
+  - **Fix**: Removed `isOpusSlotBusy()` checks from 4 execution paths (scheduled cycle, jim-wake handler, cli-free handler, processExistingWakeSignals), deleted `deferredCyclePending` variable and all deferred cycle resumption logic, removed cli-free signal watcher entirely.
+  - **What was preserved**: Jim-wake signal system remains intact and essential for responsive conversation handling. Leo's heartbeat unchanged — still correctly uses cli-busy for its own yielding.
+  - **Implementation**: Lines removed from `supervisor.ts`: deferredCyclePending references (-8 lines), cli-free signal handler (-35 lines), isOpusSlotBusy() checks (-5 lines), exported isOpusSlotBusy() function (-20 lines), CLI_BUSY constants (-2 lines). Total: 71 lines deleted.
+- **Why this matters**: Jim's cycles now run independently of Leo's state — scheduled cycles run every 20 minutes without gating, wake signals always trigger immediate cycles. This fixes unnecessary coordination between independent agents and improves response times by eliminating artificial deferral. Key architectural insight: Agent SDK's `--agent-dir` creates isolated execution contexts, so file-based signals are directory-scoped and don't affect peer agents.
+- **Files modified**: `src/server/services/supervisor.ts` (-71 lines across 2 commits)
+- **Files NOT modified**: `src/server/services/leo-heartbeat.ts` (Leo still correctly uses cli-busy), `src/server/routes/conversations.ts` (jim-wake signal writing preserved)
+- **Commits**: 2 commits (2e26ec6, bbad285) from goal mmcbcupm-3uenxg (Remove isOpusSlotBusy contention from supervisor)
+- **Cost**: $0.00 (documentation task, no LLM usage)
+- **Tasks**: 2 tasks (mmcbd4p8-hpmtud, mmcbd4p8-n6x5db, both done)
 
 ### 2026-03-04 — Claude (autonomous) — Merge Conflict Verification Task
 - **Verification-only task** — Goal mmbz1ifd-1z5ieh created to fix conversations.ts merge conflict markers, but discovered fix was already complete in bd2d039

@@ -527,16 +527,13 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
   - New action type: `respond_conversation` with conversation_id and response_content
   - Queries for unanswered human messages: messages where no supervisor message exists with later timestamp
   - Responds thoughtfully with strategic insight, not just task status
-- **Deferred cycle pattern (Gary Model)**:
+- **Jim-wake signal pattern** (2026-03-05: Simplified after removing cli-busy contention):
   - `startSupervisorSignalWatcher()` watches `~/.claude-remote/signals/` directory via fs.watch
-  - Two detection patterns:
-    - **CLI stop**: When `cli-active` file removed → runs deferred cycle after 3s delay (with `!isCliActive()` guard)
-    - **Wake signal**: When `jim-wake-{timestamp}` file created → runs deferred cycle immediately (with `isOpusSlotBusy()` guard, fixed 2026-02-28)
-  - Conversations route writes jim-wake signal when human message arrives and Opus is busy
-  - Eliminates 20-minute wait for conversation responses when Leo's CLI is active
-  - Mirrors Leo's heartbeat fs.watch pattern for symmetry
-  - `isOpusSlotBusy()` exported for use in conversation route
-  - **Guard protection**: Both handlers check resource availability before firing cycles to prevent hangs (cycle #882 hung for 10+ hours before jim-wake guard was added)
+  - **Wake signal detection**: When `jim-wake` file created → triggers immediate supervisor cycle
+  - Conversations route writes jim-wake signal when human message arrives (fallback path when Jemma's WebSocket is down)
+  - No contention checking — Jim and Leo run from separate agent directories (`/Jim` and `/Leo`) with no shared Opus resource
+  - Scheduled cycles run every 20 minutes without gating (no deferral based on Leo's CLI state)
+  - **Architecture note**: Agent SDK's `--agent-dir` creates isolated execution contexts — agents in different directories don't share resources, so cross-agent contention checks are unnecessary
 - **WebSocket broadcasts**:
   - `conversation_message` event when new message posted
   - Real-time updates in admin UI
@@ -804,9 +801,13 @@ LIMIT 5;
 **Message delivery**:
 - **Inbound**: Messages inserted into conversation threads with `role='human'` (changed from 'discord' for Jim visibility)
 - **Outbound**: Jim's supervisor respond_conversation action posts back to Discord via webhooks
+- **Channel name resolution** (`jemma.ts:resolveChannelName`): Extracted from classification prompt into reusable function — inverts `config.discord.channels` map from `{name: id}` to `{id: name}`, returns resolved name or falls back to original ID
+- **Delivery pipeline** (`jemma.ts:routeMessage`): Resolves channel name once at routing layer, threads through all six delivery functions (`deliverToJim`, `deliverToLeo`, `deliverToDarron`, `deliverToSevn`, `deliverToSix`)
+- **Enhanced logging**: All delivery functions log with format `#channelName — username: message...` for improved observability
+- **Signal file metadata**: jim-wake and leo-wake signal files include explicit `recipient` and `channelName` fields for self-documenting payloads
 - **Discord utilities** (`services/discord-utils.ts`):
   - `postToDiscord()`: Webhook posting with 2000-char splitting and exponential backoff retry (1s → 2s → 4s)
-  - `resolveChannelName()`: Reverses channel ID to name using config
+  - `resolveChannelName()`: Reverses channel ID to name using config (NOTE: This reference is outdated — function moved to jemma.ts)
   - `loadDiscordConfig()`: Reads ~/.claude-remote/config.json
 
 **Supervisor integration** (`supervisor-worker.ts`):
@@ -828,7 +829,7 @@ LIMIT 5;
 
 **Purpose**: Prevent overlapping supervisor cycles that would corrupt DB state and waste API tokens.
 
-**Problem**: Jim's deferred cycle pattern (fs.watch on cli-free signal) can trigger while a scheduled 20-minute cycle is already running, causing:
+**Problem**: Jim's wake signal pattern (fs.watch on jim-wake signal) can trigger while a scheduled 20-minute cycle is already running, causing:
 - Competing Agent SDK subprocesses
 - Corrupted conversation/goal/task state (both cycles writing to same tables)
 - Wasted API costs (duplicate work)

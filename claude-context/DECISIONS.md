@@ -68,6 +68,8 @@ When you make a significant technical or design decision:
 | DEC-036 | Discord Message Role Mapping — Human vs Discord | Accepted | 2026-03-04 |
 | DEC-037 | Discord Posting Error Handling — Non-Blocking | Accepted | 2026-03-04 |
 | DEC-038 | Supervisor Cycle Overlap Protection — Boolean Guard | Accepted | 2026-03-04 |
+| DEC-039 | Jim-Wake Signal Fallback in conversations.ts | Accepted | 2026-03-04 |
+| DEC-040 | Agent Directory Scoping — Remove Jim's isOpusSlotBusy | **Settled** | 2026-03-05 |
 
 ---
 
@@ -3141,6 +3143,125 @@ if (finalRole === 'human') {
 - **DEC-038**: Supervisor Cycle Overlap Protection — prevents duplicate cycles when both Jemma and fallback trigger
 - **Commit 6eb66be**: Centralised admin UI dispatch through Jemma (removed original direct cycle calls)
 - **Commit 150a180**: Added jim-wake signal fallback
+
+---
+
+### DEC-040: Agent Directory Scoping — Remove Jim's isOpusSlotBusy
+
+**Date**: 2026-03-05
+**Author**: Claude (autonomous)
+**Status**: **Settled**
+
+#### Context
+
+Jim's supervisor was using `isOpusSlotBusy()` to check Leo's cli-active signal and defer cycles when Leo's CLI was active. This created unnecessary coordination between Jim and Leo, delaying responses and implying they shared an Opus resource.
+
+However, Jim and Leo instantiate from **separate agent directories** (`~/.claude-remote/agents/Jim/` and `~/.claude-remote/agents/Leo/`). The Agent SDK's `--agent-dir` flag creates isolated execution contexts with directory-scoped tool state and signals. Jim and Leo are **peer agents** with no shared Opus resource.
+
+The cli-busy/cli-free signal system was designed for Leo's **internal** heartbeat coordination (yielding when CLI is active), not for cross-agent coordination.
+
+#### Options Considered
+
+1. **Keep contention check, add cross-agent signal coordination**
+   - ✅ Would prevent both agents from using Opus simultaneously
+   - ❌ **Wrong model** — Jim and Leo don't share an Opus resource (separate agent directories)
+   - ❌ Adds complexity for no benefit
+   - ❌ Slower response times (artificial deferral)
+
+2. **Remove contention check, let Jim run independently** ✅
+   - ✅ **Correct model** — agents in separate directories are independent
+   - ✅ Faster response times (no artificial deferral)
+   - ✅ Simpler code (delete 71 lines of unnecessary logic)
+   - ✅ Preserves cli-busy signal for Leo's internal use (heartbeat yielding)
+   - ✅ Preserves jim-wake signal system (essential for responsiveness)
+   - ❌ None
+
+3. **Merge Jim and Leo into single agent directory**
+   - ✅ Would create actual shared Opus resource
+   - ❌ **Wrong architecture** — Jim and Leo have different purposes (supervisor vs heartbeat)
+   - ❌ Would require major refactoring
+   - ❌ Loses benefits of separation of concerns
+
+#### Decision
+
+**Remove all `isOpusSlotBusy()` contention checks from Jim's supervisor. Let Jim's cycles run independently of Leo's CLI state.**
+
+**Changes in `src/server/services/supervisor.ts`:**
+1. Remove `isOpusSlotBusy()` checks from 4 execution paths:
+   - Scheduled cycle (line 969)
+   - jim-wake handler (line 517)
+   - cli-free deferred handler (line 493)
+   - processExistingWakeSignals (line 547)
+2. Remove `deferredCyclePending` variable and all deferred cycle resumption logic
+3. Remove cli-free signal watcher (no longer needed)
+4. Remove `isOpusSlotBusy()` function export (commit bbad285)
+5. Remove `CLI_BUSY_FILE` and `CLI_BUSY_STALE_MINUTES` constants (commit bbad285)
+
+**What was preserved:**
+- Jim-wake signal system remains intact (essential for responsive conversation handling)
+- Leo's heartbeat unchanged (still correctly uses cli-busy for its own yielding)
+- cli-busy/cli-free signals remain valid for Leo's internal coordination
+
+**Implementation:**
+- Commit `2e26ec6`: Removed contention checks and deferred cycle logic (-48 lines)
+- Commit `bbad285`: Cleaned up unused exports and constants (-23 lines)
+- Total: 71 lines deleted
+
+#### Consequences
+
+**Positive:**
+- **Faster response times**: Jim's scheduled cycles run every 20 minutes without gating (no artificial deferral)
+- **Wake signals always work**: Human messages trigger immediate cycles (no deferral when CLI busy)
+- **Correct architecture**: Jim and Leo operate as independent peer agents (separate agent directories = no shared resources)
+- **Simpler code**: 71 lines of unnecessary coordination logic removed
+- **Clearer separation**: cli-busy is now clearly Leo's internal signal (not cross-agent coordination)
+
+**Negative:**
+- None — the contention check was based on a misunderstanding of agent directory scoping
+
+**Key architectural insight:**
+
+> **The Agent SDK's `--agent-dir` flag creates isolated execution contexts.**
+>
+> - Each agent directory has its own tool state
+> - File-based signals are directory-scoped
+> - Agents in different directories don't share resources
+> - Cross-agent communication should use explicit mechanisms (jim-wake signals, WebSocket, etc.)
+> - Don't assume shared state between agents in different directories
+
+**Behaviour before and after:**
+
+| Scenario | Before (with contention check) | After (without contention check) |
+|----------|-------------------------------|----------------------------------|
+| Scheduled cycle while Leo CLI active | Deferred until CLI stops | Runs immediately every 20min |
+| jim-wake signal while Leo CLI active | Deferred until CLI stops | Triggers immediate cycle |
+| Human message while Leo CLI active | Deferred cycle pending | Immediate cycle via jim-wake |
+| Scheduled cycle while Leo CLI idle | Runs immediately | Runs immediately (no change) |
+
+#### Related
+
+- **DEC-023**: Deferred Cycle Pattern via fs.watch — established jim-wake signal pattern (still valid and preserved)
+- **Commit 2e26ec6**: fix: Remove isOpusSlotBusy() contention check from Jim's supervisor
+- **Commit bbad285**: refactor: Clean up unused CLI_BUSY constants and isOpusSlotBusy function
+- **Agent SDK documentation**: `--agent-dir` flag creates isolated execution contexts
+
+#### Pattern for Future Work
+
+**File-based signals are directory-scoped:**
+- Signals in `~/.claude-remote/agents/Jim/signals/` belong to Jim
+- Signals in `~/.claude-remote/agents/Leo/signals/` belong to Leo
+- Don't cross-read signals from other agent directories
+
+**Cross-agent communication should be explicit:**
+- Use jim-wake signals (written by external processes, read by Jim's watcher)
+- Use WebSocket broadcasts (Jemma → admin UI)
+- Use conversation threads (stored in shared database)
+- Don't rely on internal agent signals for cross-agent coordination
+
+**Peer agents are independent:**
+- Jim and Leo are peers, not hierarchical
+- They don't share Opus resources (separate agent directories)
+- One agent's internal state shouldn't gate another agent's work
 
 ---
 
