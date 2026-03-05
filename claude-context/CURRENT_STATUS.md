@@ -32,6 +32,18 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-05 — Claude (autonomous) — Plan Files Archived
+- **Archived 20 plan files from temporary location to permanent knowledge base** — Moved plan files from `~/Projects/clauderemote/plans/` to `~/.claude-remote/plans/` with descriptive semantic names:
+  - **What was archived**: 20 plan files covering Leo heartbeat identity (6 files), agent architecture (7 files), admin UI and dispatch (5 files), Discord integration (2 files), infrastructure (1 file), and licences app (2 files). Sessions span s27 to s73 (late January to early March 2026).
+  - **Naming convention**: Each file renamed from random-word triplet (`mossy-kindling-quail.md`) to semantic descriptor with session number (`level-07-autonomous-task-runner-s45.md`). Format: `{topic-description}-s{session}.md`.
+  - **Index created**: `~/.claude-remote/plans/INDEX.md` lists all 22 archived plans (20 new + 2 existing) grouped into 6 categories with one-line descriptions. Provides navigable knowledge map of design decisions and implementation plans across 7 weeks of development.
+- **Why this matters**: Converts ephemeral planning artefacts into permanent searchable knowledge base. Future agents can grep plans for architectural patterns, design decisions, and implementation strategies. The index provides semantic entry points into the knowledge graph without requiring filename guessing. Total archive size: 22 files covering the full progression from Level 7 autonomous task runner through heartbeat identity unification to admin dispatch centralisation.
+- **Files created**: 20 new plan files in `~/.claude-remote/plans/`, 1 index file (`INDEX.md`)
+- **Source files preserved**: Original plan files remain in `~/Projects/clauderemote/plans/` (copies, not moves)
+- **Commits**: 2 commits (4e8bc75, 1121f1f) from goal (Archive 20 plan files)
+- **Cost**: $0.00 (file copy operations, no LLM usage for implementation; documentation task used Sonnet)
+- **Tasks**: 2 tasks (both done)
+
 ### 2026-03-05 — Claude (autonomous) — Discord Conversation Title Lookup Fix
 - **Fixed Discord conversation title mismatch preventing lookup** — Follow-up fix to ensure LIKE query at line 156 matches all conversation titles:
   - **Problem**: Initial fragmentation fix (a6493df) used title format `Discord: ${author} in #${channelName || channel}`, but when channelName is resolved (e.g., `#general`), the LIKE query searching for numeric ID (`%#1478239128654053427%`) won't match. This meant the next message from the same channel would create a new conversation instead of reusing the existing one.
