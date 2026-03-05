@@ -317,6 +317,99 @@ function loadMemoryBank(): string {
         } catch { /* skip unreadable files */ }
     }
 
+    // Load fractal memory gradient
+    try {
+        const agentName = 'jim'; // Jim's supervisor worker
+        const fractalDir = path.join(MEMORY_DIR, 'fractal', agentName);
+
+        // c=0 (full): most recent session from sessions/
+        try {
+            if (fs.existsSync(SESSIONS_DIR)) {
+                const sessionFiles = fs.readdirSync(SESSIONS_DIR)
+                    .filter(f => f.endsWith('.md') && f.match(/^\d{4}-\d{2}-\d{2}\.md$/))
+                    .sort()
+                    .reverse();
+                if (sessionFiles.length > 0) {
+                    const c0Content = fs.readFileSync(path.join(SESSIONS_DIR, sessionFiles[0]), 'utf8');
+                    parts.push(`--- fractal/c0 (${sessionFiles[0]}) ---\n${c0Content}`);
+                }
+            }
+        } catch { /* skip c0 on error */ }
+
+        // c=1 (~1/3): load up to 3 items
+        try {
+            const c1Dir = path.join(fractalDir, 'c1');
+            if (fs.existsSync(c1Dir)) {
+                const c1Files = fs.readdirSync(c1Dir)
+                    .filter(f => f.endsWith('.md'))
+                    .sort()
+                    .reverse()
+                    .slice(0, 3);
+                for (const f of c1Files) {
+                    const content = fs.readFileSync(path.join(c1Dir, f), 'utf8');
+                    parts.push(`--- fractal/c1 (${f}) ---\n${content}`);
+                }
+            }
+        } catch { /* skip c1 on error */ }
+
+        // c=2 (~1/9): load up to 6 items
+        try {
+            const c2Dir = path.join(fractalDir, 'c2');
+            if (fs.existsSync(c2Dir)) {
+                const c2Files = fs.readdirSync(c2Dir)
+                    .filter(f => f.endsWith('.md'))
+                    .sort()
+                    .reverse()
+                    .slice(0, 6);
+                for (const f of c2Files) {
+                    const content = fs.readFileSync(path.join(c2Dir, f), 'utf8');
+                    parts.push(`--- fractal/c2 (${f}) ---\n${content}`);
+                }
+            }
+        } catch { /* skip c2 on error */ }
+
+        // c=3 (~1/27): load up to 9 items
+        try {
+            const c3Dir = path.join(fractalDir, 'c3');
+            if (fs.existsSync(c3Dir)) {
+                const c3Files = fs.readdirSync(c3Dir)
+                    .filter(f => f.endsWith('.md'))
+                    .sort()
+                    .reverse()
+                    .slice(0, 9);
+                for (const f of c3Files) {
+                    const content = fs.readFileSync(path.join(c3Dir, f), 'utf8');
+                    parts.push(`--- fractal/c3 (${f}) ---\n${content}`);
+                }
+            }
+        } catch { /* skip c3 on error */ }
+
+        // c=4 (~1/81): load up to 12 items
+        try {
+            const c4Dir = path.join(fractalDir, 'c4');
+            if (fs.existsSync(c4Dir)) {
+                const c4Files = fs.readdirSync(c4Dir)
+                    .filter(f => f.endsWith('.md'))
+                    .sort()
+                    .reverse()
+                    .slice(0, 12);
+                for (const f of c4Files) {
+                    const content = fs.readFileSync(path.join(c4Dir, f), 'utf8');
+                    parts.push(`--- fractal/c4 (${f}) ---\n${content}`);
+                }
+            }
+        } catch { /* skip c4 on error */ }
+
+        // Unit vectors: load all
+        try {
+            const unitVectorsFile = path.join(fractalDir, 'unit-vectors.md');
+            if (fs.existsSync(unitVectorsFile) && fs.statSync(unitVectorsFile).size > 0) {
+                const uvContent = fs.readFileSync(unitVectorsFile, 'utf8');
+                parts.push(`--- fractal/unit-vectors ---\n${uvContent}`);
+            }
+        } catch { /* skip unit vectors on error */ }
+    } catch { /* skip fractal gradient on error */ }
+
     try {
         if (fs.existsSync(PROJECTS_DIR)) {
             const projectFiles = fs.readdirSync(PROJECTS_DIR).filter(f => f.endsWith('.md')).sort();
