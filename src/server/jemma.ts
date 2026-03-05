@@ -610,6 +610,7 @@ async function reconcileMessages(): Promise<void> {
     }
   }
   console.log('[Jemma] Reconciliation complete');
+  writeHealthFile('ok');
 }
 
 // ── Discord Gateway Protocol ──────────────────────────────────────
