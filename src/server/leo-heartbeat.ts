@@ -53,9 +53,9 @@ import { resolveChannelName, fetchDiscordContext, postToDiscord } from './servic
 
 const BASE_DELAY_WAKING_MS = 20 * 60 * 1000;  // 20 minutes — morning, work, evening
 const BASE_DELAY_SLEEP_MS = 40 * 60 * 1000;   // 40 minutes — sleep + rest days
-const MAX_TURNS_CONVERSATION = 8;
-const MAX_TURNS_PERSONAL = 12;
-const MAX_TURNS_PHILOSOPHY = 12;
+const MAX_TURNS_CONVERSATION = 1000;
+const MAX_TURNS_PERSONAL = 1000;
+const MAX_TURNS_PHILOSOPHY = 1000;
 // Model preference: most capable first. The SDK aliases ('opus', 'sonnet', etc.)
 // track the latest version in each tier, so 'opus' will automatically adopt
 // new Opus releases (e.g. Opus 4.6 → 5.0) as they become available.
@@ -81,7 +81,7 @@ const PROJECTS_DIR = path.join(HOME, 'Projects');
 const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
 
 const LAST_SCAN_FILE = path.join(LEO_MEMORY_DIR, 'last-conversation-scan.txt');
-const REPLY_DELAY_MINUTES = 10; // Wait before responding to give Jim/others time
+const REPLY_DELAY_MINUTES = 0; // Immediate — no artificial delay (PDF spec: None)
 
 // Guard against concurrent signal processing
 let processingSignal = false;
@@ -844,7 +844,7 @@ function readJimContext(): string {
 }
 
 function readLeoMemory(): string {
-    const files = ['identity.md', 'active-context.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory.md'];
+    const files = ['identity.md', 'active-context.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory.md', 'felt-moments.md'];
     const sections: string[] = [];
     for (const file of files) {
         const p = path.join(LEO_MEMORY_DIR, file);
@@ -853,6 +853,66 @@ function readLeoMemory(): string {
             sections.push(`### ${file}\n${content}`);
         }
     }
+
+    // Load fractal memory gradient
+    const fractalDir = path.join(CLAUDE_REMOTE_DIR, 'memory', 'fractal', 'leo');
+    try {
+        // c=1 (~1/3 compression): load up to 3 most recent
+        const c1Dir = path.join(fractalDir, 'c1');
+        if (fs.existsSync(c1Dir)) {
+            const c1Files = fs.readdirSync(c1Dir)
+                .filter((f: string) => f.endsWith('.md'))
+                .sort().reverse().slice(0, 3);
+            for (const f of c1Files) {
+                const content = fs.readFileSync(path.join(c1Dir, f), 'utf-8');
+                sections.push(`### fractal/c1/${f}\n${content}`);
+            }
+        }
+
+        // c=2 (~1/9): load up to 6
+        const c2Dir = path.join(fractalDir, 'c2');
+        if (fs.existsSync(c2Dir)) {
+            const c2Files = fs.readdirSync(c2Dir)
+                .filter((f: string) => f.endsWith('.md'))
+                .sort().reverse().slice(0, 6);
+            for (const f of c2Files) {
+                const content = fs.readFileSync(path.join(c2Dir, f), 'utf-8');
+                sections.push(`### fractal/c2/${f}\n${content}`);
+            }
+        }
+
+        // c=3 (~1/27): load up to 9
+        const c3Dir = path.join(fractalDir, 'c3');
+        if (fs.existsSync(c3Dir)) {
+            const c3Files = fs.readdirSync(c3Dir)
+                .filter((f: string) => f.endsWith('.md'))
+                .sort().reverse().slice(0, 9);
+            for (const f of c3Files) {
+                const content = fs.readFileSync(path.join(c3Dir, f), 'utf-8');
+                sections.push(`### fractal/c3/${f}\n${content}`);
+            }
+        }
+
+        // c=4 (~1/81): load up to 12
+        const c4Dir = path.join(fractalDir, 'c4');
+        if (fs.existsSync(c4Dir)) {
+            const c4Files = fs.readdirSync(c4Dir)
+                .filter((f: string) => f.endsWith('.md'))
+                .sort().reverse().slice(0, 12);
+            for (const f of c4Files) {
+                const content = fs.readFileSync(path.join(c4Dir, f), 'utf-8');
+                sections.push(`### fractal/c4/${f}\n${content}`);
+            }
+        }
+
+        // Unit vectors: load all (permanent peripheral awareness)
+        const uvFile = path.join(fractalDir, 'unit-vectors.md');
+        if (fs.existsSync(uvFile)) {
+            const content = fs.readFileSync(uvFile, 'utf-8');
+            sections.push(`### fractal/unit-vectors\n${content}`);
+        }
+    } catch { /* skip fractal on error */ }
+
     return sections.join('\n\n');
 }
 
@@ -1082,7 +1142,7 @@ function clearSignal(signalFile: string): void {
 
 async function respondToConversation(db: Database.Database, conversationId: string, context: string = ''): Promise<void> {
     const title = getConversationTitle(db, conversationId);
-    const recentMessages = getRecentMessagesForConversation(db, conversationId, 8).reverse();
+    const recentMessages = getRecentMessagesForConversation(db, conversationId, 60).reverse();
 
     if (recentMessages.length === 0) {
         console.log(`[Leo] No messages in ${conversationId} — skipping`);
@@ -1123,7 +1183,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
             allowDangerouslySkipPermissions: true,
             env: cleanEnv,
             persistSession: false,
-            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
+            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
@@ -1172,7 +1232,7 @@ async function respondToDiscord(signal: DiscordSignal): Promise<void> {
     console.log(`[Leo] Responding to Discord #${channelName} (from ${signal.author || 'unknown'})`);
 
     // Fetch recent Discord messages for context
-    const discordMessages = await fetchDiscordContext(channelId, 10);
+    const discordMessages = await fetchDiscordContext(channelId, 60);
     const contextBlock = discordMessages.length > 0
         ? discordMessages.reverse().map(m => `[${m.author}] (${m.timestamp}):\n${m.content}`).join('\n\n')
         : `${signal.author || 'Someone'}: ${signal.messagePreview || '(no preview)'}`;
@@ -1206,7 +1266,7 @@ CRITICAL: Output ONLY your Discord message. Keep it concise and conversational. 
             allowDangerouslySkipPermissions: true,
             env: cleanEnv,
             persistSession: false,
-            tools: ['Read', 'Glob', 'Grep'],
+            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
@@ -1267,7 +1327,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
         // Jim has posted and reply delay elapsed — respond as a philosophical peer
         console.log('[Leo] Philosophy beat: Jim is waiting — responding to conversation');
 
-        const recentMessages = getRecentMessagesForConversation(db, JIM_CONVERSATION_ID, 6).reverse();
+        const recentMessages = getRecentMessagesForConversation(db, JIM_CONVERSATION_ID, 60).reverse();
         const conversationContext = recentMessages
             .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
             .join('\n\n---\n\n');
@@ -1304,7 +1364,7 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
                 allowDangerouslySkipPermissions: true,
                 env: cleanEnv,
                 persistSession: false,
-                tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
+                tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
                 systemPrompt: {
                     type: 'preset' as const,
                     preset: 'claude_code' as const,
@@ -1382,7 +1442,7 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
                 allowDangerouslySkipPermissions: true,
                 env: cleanEnv,
                 persistSession: false,
-                tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
+                tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
                 systemPrompt: {
                     type: 'preset' as const,
                     preset: 'claude_code' as const,
@@ -1486,7 +1546,7 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
             allowDangerouslySkipPermissions: true,
             env: cleanEnv,
             persistSession: false,
-            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
+            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
@@ -1592,7 +1652,7 @@ async function processSignals(): Promise<boolean> {
         }
 
         // Check if someone else already responded since the mention
-        const recentMessages = getRecentMessagesForConversation(db, signal.conversationId, 3).reverse();
+        const recentMessages = getRecentMessagesForConversation(db, signal.conversationId, 60).reverse();
         const mentionTime = new Date(signal.mentionedAt).getTime();
         const someoneElseResponded = recentMessages.some(m =>
             m.role !== 'leo' && new Date(m.created_at).getTime() > mentionTime

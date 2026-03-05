@@ -35,7 +35,7 @@ export interface CycleStartedMessage {
   type: 'cycle_started';
   cycleId: string;
   cycleNumber: number;
-  cycleType: 'supervisor' | 'personal';
+  cycleType: 'supervisor' | 'personal' | 'dream';
 }
 
 export interface CycleCompleteMessage {
