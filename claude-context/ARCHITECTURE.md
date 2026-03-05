@@ -823,7 +823,15 @@ LIMIT 5;
 - Does NOT call `runSupervisorCycle()` directly (that caused over-responding) — just writes signal file
 - Signal contains: conversationId, messageId, timestamp, reason 'human_message_fallback'
 
-**Health monitoring**: Writes `jemma-health.json` with `{ agent: 'jemma', timestamp, status, lastError }` (uses `timestamp` field for Robin Hood Protocol compatibility)
+**Health monitoring**: Writes `jemma-health.json` with `{ agent: 'jemma', timestamp, status, lastError }` (uses `timestamp` field for Robin Hood Protocol compatibility). Health file updated on:
+- Startup (`main()`)
+- WebSocket READY event
+- MESSAGE_CREATE event (after message processing)
+- Reconciliation completion (every 5 minutes, prevents staleness during quiet periods)
+- WebSocket error/close handlers
+- Graceful shutdown
+
+Max health file age during normal operation: ~5 minutes (reconciliation interval)
 
 ### Jim's Supervisor Cycle Protection
 

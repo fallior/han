@@ -70,6 +70,7 @@ When you make a significant technical or design decision:
 | DEC-038 | Supervisor Cycle Overlap Protection — Boolean Guard | Accepted | 2026-03-04 |
 | DEC-039 | Jim-Wake Signal Fallback in conversations.ts | Accepted | 2026-03-04 |
 | DEC-040 | Agent Directory Scoping — Remove Jim's isOpusSlotBusy | **Settled** | 2026-03-05 |
+| DEC-041 | Health File Updates at Reconciliation Completion | Accepted | 2026-03-05 |
 
 ---
 
@@ -3262,6 +3263,118 @@ The cli-busy/cli-free signal system was designed for Leo's **internal** heartbea
 - Jim and Leo are peers, not hierarchical
 - They don't share Opus resources (separate agent directories)
 - One agent's internal state shouldn't gate another agent's work
+
+---
+
+### DEC-041: Health File Updates at Reconciliation Completion
+
+**Date**: 2026-03-05
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Jemma's health monitoring system relies on periodic timestamp updates in `~/.claude-remote/health/jemma-health.json` to prove liveness. Robin Hood (leo-heartbeat.ts) checks this file every 20 minutes and flags Jemma as DOWN/STALE if the timestamp is >10 minutes old.
+
+Jemma's `writeHealthFile()` only fired on:
+- Startup (`main()`)
+- WebSocket READY event
+- WebSocket MESSAGE_CREATE event
+- WebSocket error/close handlers
+
+The 5-minute reconciliation polling loop (lines 599-614 in `jemma.ts`) was running successfully but never updated the health file. When Discord was quiet for 10+ minutes (no MESSAGE_CREATE events), the health file timestamp would exceed Robin Hood's 10-minute staleness threshold, triggering false DOWN/STALE alerts.
+
+#### Options Considered
+
+1. **Add writeHealthFile at reconciliation completion** ✅
+   - ✅ Minimal change (1 line)
+   - ✅ Consistent with existing patterns (health updates after successful operations)
+   - ✅ No risk of over-writing during failures
+   - ✅ Maintains 5-minute update frequency
+   - ❌ None
+
+2. **Add health update at start of reconciliation loop**
+   - ✅ Would prevent staleness
+   - ❌ Would update health even if reconciliation fails
+   - ❌ Inconsistent with success-based health update pattern
+
+3. **Reduce Robin Hood's staleness threshold from 10min to 20min**
+   - ✅ Would stop false positives
+   - ❌ Doesn't address root cause (missing health updates)
+   - ❌ Would mask real failures (if Jemma actually stops working)
+
+4. **Add separate health heartbeat timer in main()**
+   - ✅ Would guarantee regular updates
+   - ❌ Architectural complexity (extra timer)
+   - ❌ Redundant when existing success paths already update health
+
+#### Decision
+
+**Add `writeHealthFile('ok')` at reconciliation completion (line 613).** This is the minimal, consistent fix that maintains the existing "health updates on successful operations" pattern.
+
+**Implementation:**
+```typescript
+// src/server/jemma.ts:612-614
+console.log('[Jemma] Reconciliation complete');
+writeHealthFile('ok');  // ← Added line
+```
+
+**Why line 613:**
+- The reconciliation loop already has all necessary try/catch wrappers and error handling
+- The completion log line is reached only after successful reconciliation
+- Adding health file write here maintains consistency with other success paths (READY, MESSAGE_CREATE)
+- Health updates happen after successful operations, not before/during
+
+#### Consequences
+
+**Positive:**
+- **Health file freshness**: Updated every 5 minutes during reconciliation polls (max age: ~5 minutes)
+- **No false alerts**: Always under Robin Hood's 10-minute staleness threshold
+- **Pattern consistency**: Matches existing "health updates on success" pattern at all other call sites
+- **Zero risk**: One line addition, no architectural changes, no new timers
+- **Minimal maintenance**: Reconciliation already exists, just adding health update
+
+**Negative:**
+- None — this addresses the root cause without side effects
+
+**Health monitoring behaviour before and after:**
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Discord active (messages every few minutes) | Health file fresh (MESSAGE_CREATE updates) | Health file fresh (same) |
+| Discord quiet >10 min | Health file STALE → false DOWN alert | Health file fresh (reconciliation updates) |
+| Reconciliation fails | No health update (correct) | No health update (unchanged) |
+| Reconciliation succeeds | No health update (bug) | Health file updated ✅ |
+
+**Max health file age:**
+- Before: Unbounded during quiet periods (could be hours)
+- After: ~5 minutes (reconciliation interval)
+
+#### Related
+
+- **Robin Hood health monitoring**: `leo-heartbeat.ts:~550-580` — reads health files, classifies staleness
+- **DEC-027**: Staleness Thresholds Recalibrated — set Jemma staleness threshold to 10 minutes
+- **DEC-033**: Agent Health File Schema Consistency — established health file format
+- **Commits**: 58a8601, 9de97a8 — added writeHealthFile at reconciliation completion
+
+#### Pattern for Future Work
+
+**Health updates should happen after successful operations:**
+- ✅ After WebSocket READY
+- ✅ After MESSAGE_CREATE processing
+- ✅ After reconciliation completion
+- ✅ At startup
+- ✅ During graceful shutdown
+
+**Don't update health during failures:**
+- ❌ Don't update at start of operation (not yet successful)
+- ❌ Don't update in error handlers (operation failed)
+- ❌ Don't update on retry attempts (may fail again)
+
+**When adding new long-running operations:**
+- Consider whether the operation proves liveness (reconciliation does, because it polls Discord API)
+- If yes, add health file update after successful completion
+- Use the same pattern: log success, then `writeHealthFile('ok')`
 
 ---
 

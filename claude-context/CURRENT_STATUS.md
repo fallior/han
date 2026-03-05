@@ -32,6 +32,17 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-05 — Claude (autonomous) — Jemma Health File Staleness Fix
+- **Fixed Jemma health file staleness during quiet Discord periods** — Added `writeHealthFile('ok')` call at reconciliation completion (line 613) to maintain health file freshness:
+  - **Problem**: Robin Hood (leo-heartbeat.ts) checks jemma-health.json every 20 minutes and flags Jemma as DOWN/STALE when timestamp is >10 minutes old. Jemma's writeHealthFile() only fired on startup, READY event, MESSAGE_CREATE event, and WebSocket error/close. The 5-minute reconciliation polling loop was running but not updating the health file. During quiet periods (no Discord messages), the file would go stale, triggering false DOWN/STALE alerts.
+  - **Fix**: Added single line `writeHealthFile('ok')` immediately after reconciliation completion log (line 612). Health file now updates every 5 minutes during reconciliation polls, maintaining max age of ~5 minutes (well under Robin Hood's 10-minute staleness threshold).
+  - **Why this works**: Reconciliation loop runs every 5 minutes regardless of Discord activity. Health update happens after successful reconciliation, consistent with existing pattern (READY and MESSAGE_CREATE paths also update health after successful operations). No architectural changes, no new timers, zero risk of regressions.
+- **Why this matters**: Eliminates false positive health alerts during quiet Discord periods. Robin Hood will now correctly classify Jemma as HEALTHY when WebSocket is idle. Prevents unnecessary resurrection attempts and ntfy notifications. Maintains the existing health monitoring architecture with minimal change (1 line).
+- **Files modified**: `src/server/jemma.ts` (+1 line at line 613)
+- **Commits**: 2 commits (58a8601, 9de97a8) from goal (Fix Jemma health file staleness)
+- **Cost**: $0.10 (documentation task using Sonnet)
+- **Tasks**: 1 task (done)
+
 ### 2026-03-05 — Claude (autonomous) — Plan Files Archived
 - **Archived 20 plan files from temporary location to permanent knowledge base** — Moved plan files from `~/Projects/clauderemote/plans/` to `~/.claude-remote/plans/` with descriptive semantic names:
   - **What was archived**: 20 plan files covering Leo heartbeat identity (6 files), agent architecture (7 files), admin UI and dispatch (5 files), Discord integration (2 files), infrastructure (1 file), and licences app (2 files). Sessions span s27 to s73 (late January to early March 2026).
