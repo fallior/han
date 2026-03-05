@@ -72,15 +72,8 @@ const SESSIONS_DIR = path.join(MEMORY_DIR, 'sessions');
 const TASKS_DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
 const JIM_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Jim');
 
-// Token caps for memory files
-const MEMORY_TOKEN_CAPS: Record<string, number> = {
-    'identity.md': 800,
-    'active-context.md': 1200,
-    'patterns.md': 3000,
-    'failures.md': 2000,
-    'self-reflection.md': 1500,
-};
-const PROJECT_MEMORY_CAP = 1500;
+// Token caps removed — silent truncation caused identity degradation (DEC-R001, S77).
+// Jim's memory files grow naturally; archiving handles size management.
 
 // Frequency thresholds
 const FREQ_VERY_ACTIVE = 2 * 60 * 1000;
@@ -749,27 +742,8 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
     required: ['observations', 'actions', 'active_context_update', 'reasoning']
 };
 
-function enforceTokenCap(filename: string, content: string): string {
-    const basename = filename.replace(/^.*\//, '');
-    const cap = MEMORY_TOKEN_CAPS[basename] || PROJECT_MEMORY_CAP;
-    const estimatedTokens = Math.ceil(content.length / 4);
-
-    if (estimatedTokens <= cap) return content;
-
-    log(`[Worker] Memory file ${filename} exceeds cap (${estimatedTokens}/${cap} est. tokens), truncating`);
-
-    let headerEnd = content.indexOf('\n## ', 100);
-    if (headerEnd < 0 || headerEnd > cap * 4) {
-        headerEnd = content.indexOf('\n### ', 100);
-    }
-    const header = headerEnd > 0 && headerEnd < cap * 4
-        ? content.slice(0, headerEnd)
-        : content.slice(0, 200);
-    const maxTailChars = Math.max(0, (cap * 4) - header.length - 50);
-    const tail = maxTailChars > 0 ? content.slice(-maxTailChars) : '';
-
-    return header + '\n\n...(older entries truncated)...\n\n' + tail;
-}
+// enforceTokenCap removed — was silently truncating Jim's memory files, causing identity
+// degradation. Memory file size is now managed through archiving, not truncation.
 
 function getNextCycleDelay(): number {
     if (!workerDb) return FREQ_ACTIVE;
@@ -888,9 +862,8 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
                     const dir = path.dirname(filepath);
                     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-                    const cappedContent = enforceTokenCap(safeName, action.content);
-                    fs.writeFileSync(filepath, cappedContent);
-                    summaries.push(`update_memory: ${safeName} (${cappedContent.length} chars)`);
+                    fs.writeFileSync(filepath, action.content);
+                    summaries.push(`update_memory: ${safeName} (${action.content.length} chars)`);
                     break;
                 }
 
@@ -1251,8 +1224,7 @@ async function runSupervisorCycle(): Promise<void> {
 
         // Update active-context.md
         if (output.active_context_update) {
-            const capped = enforceTokenCap('active-context.md', output.active_context_update);
-            fs.writeFileSync(path.join(MEMORY_DIR, 'active-context.md'), capped);
+            fs.writeFileSync(path.join(MEMORY_DIR, 'active-context.md'), output.active_context_update);
         }
 
         // Append self-reflection
@@ -1261,8 +1233,7 @@ async function runSupervisorCycle(): Promise<void> {
             try {
                 let existing = fs.existsSync(reflectionPath) ? fs.readFileSync(reflectionPath, 'utf8') : '';
                 existing += `\n\n### Cycle #${cycleNumber} (${new Date().toISOString().split('T')[0]})\n${output.self_reflection}`;
-                const capped = enforceTokenCap('self-reflection.md', existing);
-                fs.writeFileSync(reflectionPath, capped);
+                fs.writeFileSync(reflectionPath, existing);
             } catch { /* best effort */ }
         }
 

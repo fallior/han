@@ -837,7 +837,7 @@ function readJimContext(): string {
         const p = path.join(JIM_MEMORY_DIR, file);
         if (fs.existsSync(p)) {
             const content = fs.readFileSync(p, 'utf-8');
-            sections.push(`### ${file}\n${content.slice(0, 500)}`);
+            sections.push(`### ${file}\n${content}`);
         }
     }
     return sections.join('\n\n');
@@ -850,8 +850,7 @@ function readLeoMemory(): string {
         const p = path.join(LEO_MEMORY_DIR, file);
         if (fs.existsSync(p)) {
             const content = fs.readFileSync(p, 'utf-8');
-            const trimmed = content.length > 800 ? '...' + content.slice(-800) : content;
-            sections.push(`### ${file}\n${trimmed}`);
+            sections.push(`### ${file}\n${content}`);
         }
     }
     return sections.join('\n\n');
