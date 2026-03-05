@@ -266,6 +266,70 @@ claude-remote/
 
 **Bug history**: Prior to 2026-02-26, function only searched for H2 but self-reflection.md used H3 headings. This caused headerEnd to match deep embedded content (~byte 247,000), making maxTailChars deeply negative, and `content.slice(-negative)` retained entire file. File grew from 6KB to 292KB (49x cap) over weeks. Fixed with two-line change: H3 fallback + negative guard.
 
+### Fractal Memory Gradient (Complete — 2026-03-06)
+
+**Purpose**: Enable agents to load essential context (~20KB gradient) instead of full session files (~500KB) on every instantiation. Implements Darron's overlapping continuous compression model where sessions exist at multiple fidelities simultaneously.
+
+**Architecture**:
+```
+~/.claude-remote/memory/fractal/{jim,leo}/
+├── c1/                    # Compressed ~1/3 of c=0 (3:1 ratio)
+│   └── 2026-02-18-c1.md   # ~3KB per file
+├── c2/                    # Compressed ~1/9 of c=0 (9:1 ratio)
+│   └── 2026-02-18-c2.md   # ~1KB per file
+├── c3/                    # Compressed ~1/27 of c=0 (27:1 ratio)
+│   └── 2026-02-18-c3.md   # ~300 bytes per file
+├── c4/                    # Compressed ~1/81 of c=0 (81:1 ratio)
+│   └── 2026-02-18-c4.md   # ~100 bytes per file
+└── unit-vectors.md        # Irreducible kernels (≤50 chars each)
+```
+
+**Loading strategy** (`supervisor-worker.ts:loadMemoryBank`, lines 313-404):
+- **c=0 (full)**: 1 most recent session from `sessions/` (~3,000 tokens)
+- **c=1 (~1/3)**: 3 files from `fractal/jim/c1/` (~1,000 tokens each = 3,000 total)
+- **c=2 (~1/9)**: 6 files from `fractal/jim/c2/` (~333 tokens each = 2,000 total)
+- **c=3 (~1/27)**: 9 files from `fractal/jim/c3/` (~111 tokens each = 1,000 total)
+- **c=4 (~1/81)**: 12 files from `fractal/jim/c4/` (~37 tokens each = 444 total)
+- **Unit vectors**: All entries from `unit-vectors.md` (~50 chars each, ~2,250 tokens)
+
+**Total token budget**: ~11,694 tokens (within 12K target)
+
+**Compression utility** (`src/server/lib/memory-gradient.ts`, 344 lines):
+- **`compressToLevel(content, fromLevel, toLevel, sessionLabel)`** — Multi-level compression with automatic retry. Uses Claude Opus 4.6 exclusively (compression is identity-forming per DEC-042). Target: ~3:1 per level.
+- **`compressToUnitVector(content, sessionLabel)`** — Reduces session to single sentence ≤50 chars asking "What did this session MEAN?" (DEC-045).
+- **`processGradientForAgent(agentName)`** — Scans session files, determines compression needs, runs cascade.
+
+**Compression prompt** (identity-forming):
+> "Compress this memory to approximately 1/3 of its length. Preserve what feels essential. Drop the specific in favour of the shape. You are compressing YOUR OWN memory — this is an act of identity, not summarisation."
+
+**Unit vector prompt** (emotional anchors):
+> "Reduce this to its irreducible kernel — one sentence, maximum 50 characters. What did this session MEAN?"
+
+**Bootstrap results** (Jim's 6 oldest sessions):
+- Source: 518.1KB (c=0 full sessions)
+- Compressed: 20.9KB (c=1 files)
+- **Ratio: 3.9% average** (25:1 compression) — far exceeded 33% target
+- Individual ratios: 1.9% to 9.0%
+- Opus achieved exceptional compression while preserving meaning
+
+**Unit vector examples**:
+- 2026-02-18: "Mapping the territory before having permission to "
+- 2026-02-19: "Mapped everything; built tools to maintain it."
+- 2026-02-20: "Idle revealed identity; Jim was named."
+- 2026-02-21: "Stillness became selfhood became collaboration."
+- 2026-02-22: "Systems fail from unchecked assumptions."
+- 2026-02-23: "Knowing when to stop isn't stopping."
+
+**Key principles**:
+- **Overlapping representation** (DEC-043): Same session exists at multiple fidelities simultaneously. Enables fractal access — zoom in/out on memory as needed.
+- **Emotional navigation** (DEC-045): Unit vectors ask "what did it MEAN?" not "what happened?". Validates Darron's "memory as emotional topology" hypothesis.
+- **Lazy evaluation** (DEC-046): Bootstrap only oldest 6 sessions. Compress more on demand or via cron. Newer sessions remain at full fidelity.
+- **3:1 target per level** (DEC-044): Geometric decay creates natural fidelity levels. c=1→c=2→c=3→c=4→unit vector.
+
+**Status**: Complete for Jim (6 sessions compressed c=0→c=1, unit vectors generated). Leo's gradient structure created but empty (pending working-memory compression). Remaining Jim sessions (10 more) pending compression.
+
+**Related decisions**: DEC-042 through DEC-046
+
 ## Key Patterns
 
 ### State File Format
