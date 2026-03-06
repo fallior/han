@@ -230,7 +230,7 @@ export function checkWeeklyReportSchedule(config: any): { id: string; task_count
     if (report) {
         if (config.ntfy_topic) {
             try {
-                execFileSync('curl', ['-s', '-d', report.report_text.split('\n')[0], '-H', 'Title: Claude Remote Weekly Report', '-H', 'Priority: default', '-H', 'Tags: bar_chart', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
+                execFileSync('curl', ['-s', '-d', report.report_text.split('\n')[0], '-H', 'Title: Hortus Arbor Nostra Weekly Report', '-H', 'Priority: default', '-H', 'Tags: bar_chart', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
             } catch {}
         }
         console.log(`[WeeklyReport] Generated: ${report.task_count} tasks, $${report.total_cost.toFixed(4)}`);

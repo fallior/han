@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Claude Remote - Integration Smoke Test Suite
+ * Hortus Arbor Nostra - Integration Smoke Test Suite
  * Tests HTTP endpoints without requiring tmux or Claude Code running
  * Uses Node.js built-in test runner and http module
  */
@@ -16,7 +16,7 @@ import { execSync } from 'node:child_process';
 
 // ── Test Configuration ─────────────────────────────────────
 
-const TEST_HOME = path.join(os.tmpdir(), `claude-remote-test-${Date.now()}`);
+const TEST_HOME = path.join(os.tmpdir(), `han-test-${Date.now()}`);
 const TEST_PORT = Math.floor(Math.random() * 10000) + 20000;
 
 let server: http.Server | null = null;
@@ -69,7 +69,7 @@ test('Server HTTP Tests', async (suite) => {
       fs.mkdirSync(TEST_HOME, { recursive: true });
     }
 
-    process.env.CLAUDE_REMOTE_DIR = TEST_HOME;
+    process.env.HAN_DIR = TEST_HOME;
     process.env.PORT = String(TEST_PORT);
     process.env.TEST_MODE = 'true';
 
@@ -98,7 +98,7 @@ test('Server HTTP Tests', async (suite) => {
 
     app.get('/', (_req, res) => {
       res.setHeader('content-type', 'text/html');
-      res.send('<html><head><title>Claude Remote</title></head><body>UI</body></html>');
+      res.send('<html><head><title>Hortus Arbor Nostra</title></head><body>UI</body></html>');
     });
 
     app.get('/api/prompts', (_req, res) => { res.json([]); });
@@ -149,7 +149,7 @@ test('Server HTTP Tests', async (suite) => {
     const res = await makeRequest('GET', '/');
     assert.strictEqual(res.statusCode, 200);
     assert(res.headers['content-type']!.includes('text/html'));
-    assert(res.body.includes('Claude Remote'));
+    assert(res.body.includes('Hortus Arbor Nostra'));
   });
 
   await test('GET /api/prompts returns JSON array', async () => {

@@ -15,7 +15,7 @@
 import { fork, execSync, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
-import { CLAUDE_REMOTE_DIR, taskStmts, memoryStmts } from '../db';
+import { HAN_DIR, taskStmts, memoryStmts } from '../db';
 import { loadConfig, createGoal, getAbortForTask } from './planning';
 import type {
     MainToWorkerMessage,
@@ -39,13 +39,13 @@ let workerReady = false;
 let pendingCycleResolve: ((result: CycleCompleteMessage['result'] | null) => void) | null = null;
 let cycleInProgress = false;
 
-const MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
+const MEMORY_DIR = path.join(HAN_DIR, 'memory');
 const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
 const SESSIONS_DIR = path.join(MEMORY_DIR, 'sessions');
-const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
-const JIM_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Jim');
+const HEALTH_DIR = path.join(HAN_DIR, 'health');
+const JIM_AGENT_DIR = path.join(HAN_DIR, 'agents', 'Jim');
 const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
-const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
+const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
 const LEO_HEALTH_FILE = path.join(HEALTH_DIR, 'leo-health.json');
 const JEMMA_HEALTH_FILE = path.join(HEALTH_DIR, 'jemma-health.json');
 const RESURRECTION_LOG = path.join(HEALTH_DIR, 'resurrection-log.jsonl');
@@ -689,7 +689,7 @@ export function setSupervisorBroadcastFn(fn: BroadcastFn): void {
 const IDENTITY_TEMPLATE = `# Supervisor Identity
 
 ## Role
-I am the persistent Opus supervisor for Darron's Claude Remote development ecosystem.
+I am the persistent Opus supervisor for Darron's Hortus Arbor Nostra development ecosystem.
 I oversee all autonomous task execution, make strategic decisions, track progress,
 and continuously improve the system's effectiveness.
 

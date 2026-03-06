@@ -22,8 +22,8 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-HEALTH_DIR="$HOME/.claude-remote/health"
-CONFIG_FILE="$HOME/.claude-remote/config.json"
+HEALTH_DIR="$HOME/.han/health"
+CONFIG_FILE="$HOME/.han/config.json"
 TMPDIR="/tmp/robin-hood-test"
 TEST_LOG="$TMPDIR/test-results.log"
 SCREENSHOT_DIR="$TMPDIR/screenshots"
@@ -87,11 +87,11 @@ test_verification_wait() {
     fi
 
     # Check Jim service status
-    if systemctl --user is-active claude-remote-server.service &>/dev/null; then
-        log_pass "Jim service (claude-remote-server) is active"
+    if systemctl --user is-active han-server.service &>/dev/null; then
+        log_pass "Jim service (han-server) is active"
     else
         log_warn "Jim service is not active"
-        log_info "To test resurrection, ensure Jim is running: systemctl --user start claude-remote-server.service"
+        log_info "To test resurrection, ensure Jim is running: systemctl --user start han-server.service"
     fi
 
     # Check health files exist
@@ -260,7 +260,7 @@ test_full_system() {
 
     log_test "Checking directory structure..."
 
-    for dir in "$HEALTH_DIR" "$HOME/.claude-remote/memory/leo" "$HOME/.claude-remote/signals"; do
+    for dir in "$HEALTH_DIR" "$HOME/.han/memory/leo" "$HOME/.han/signals"; do
         if [[ -d "$dir" ]]; then
             log_pass "Directory exists: $dir"
         else

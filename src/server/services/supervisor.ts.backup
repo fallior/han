@@ -12,7 +12,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import {
-    db, CLAUDE_REMOTE_DIR, supervisorStmts, taskStmts, goalStmts,
+    db, HAN_DIR, supervisorStmts, taskStmts, goalStmts,
     memoryStmts, portfolioStmts, proposalStmts, strategicProposalStmts,
     conversationStmts, conversationMessageStmts
 } from '../db';
@@ -65,7 +65,7 @@ let personalCycleCounter = 0;
 // Track the previous cycle delay to detect state transitions (idle → active)
 let lastCycleDelay: number | null = null;
 
-const MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
+const MEMORY_DIR = path.join(HAN_DIR, 'memory');
 const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
 const SESSIONS_DIR = path.join(MEMORY_DIR, 'sessions');
 
@@ -1304,7 +1304,7 @@ export async function runSupervisorCycle(): Promise<{
             options: {
                 model,
                 maxTurns,
-                cwd: CLAUDE_REMOTE_DIR,
+                cwd: HAN_DIR,
                 permissionMode: 'bypassPermissions',
                 allowDangerouslySkipPermissions: true,
                 env: cleanEnv,

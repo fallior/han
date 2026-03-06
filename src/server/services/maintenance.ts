@@ -10,7 +10,7 @@ function generateId(): string {
 
 function loadConfig(): any {
     try {
-        return JSON.parse(fs.readFileSync(path.join(process.env.HOME!, '.claude-remote', 'config.json'), 'utf8'));
+        return JSON.parse(fs.readFileSync(path.join(process.env.HOME!, '.han', 'config.json'), 'utf8'));
     } catch { return {}; }
 }
 
@@ -76,7 +76,7 @@ export function runNightlyMaintenance(
                 sendPushFn(`Nightly maintenance started: ${goalIds.length} goals across ${projects.length} projects`);
             } else {
                 try {
-                    execFileSync('curl', ['-s', '-d', `Nightly maintenance started: ${goalIds.length} goals across ${projects.length} projects`, '-H', 'Title: Claude Remote Maintenance', '-H', 'Priority: low', '-H', 'Tags: wrench', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
+                    execFileSync('curl', ['-s', '-d', `Nightly maintenance started: ${goalIds.length} goals across ${projects.length} projects`, '-H', 'Title: Hortus Arbor Nostra Maintenance', '-H', 'Priority: low', '-H', 'Tags: wrench', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
                 } catch {}
             }
         }

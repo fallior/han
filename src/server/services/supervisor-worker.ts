@@ -66,12 +66,12 @@ interface SupervisorOutput {
 
 // ── Constants ────────────────────────────────────────────────
 
-const CLAUDE_REMOTE_DIR = process.env.CLAUDE_REMOTE_DIR || path.join(process.env.HOME!, '.claude-remote');
-const MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
+const HAN_DIR = process.env.HAN_DIR || path.join(process.env.HOME!, '.han');
+const MEMORY_DIR = path.join(HAN_DIR, 'memory');
 const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
 const SESSIONS_DIR = path.join(MEMORY_DIR, 'sessions');
-const TASKS_DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
-const JIM_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Jim');
+const TASKS_DB_PATH = path.join(HAN_DIR, 'tasks.db');
+const JIM_AGENT_DIR = path.join(HAN_DIR, 'agents', 'Jim');
 
 // Token caps removed — silent truncation caused identity degradation (DEC-R001, S77).
 // Jim's memory files grow naturally; archiving handles size management.
@@ -80,7 +80,7 @@ const JIM_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Jim');
 // See Hall of Records R001: Weekly Rhythm Model. Do NOT revert to activity-driven scheduling.
 const EMERGENCY_FREQ_VERY_ACTIVE = 2 * 60 * 1000;
 const EMERGENCY_FREQ_ACTIVE = 5 * 60 * 1000;
-const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
+const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
 
 // Recovery mode — Jim is on a recovery week until this date.
 // During recovery: no supervisor cycles, all waking cycles become recovery-focused.
@@ -142,7 +142,7 @@ function generateId(): string {
 
 function loadConfig(): any {
     try {
-        const configPath = path.join(CLAUDE_REMOTE_DIR, 'config.json');
+        const configPath = path.join(HAN_DIR, 'config.json');
         if (!fs.existsSync(configPath)) return {};
         return JSON.parse(fs.readFileSync(configPath, 'utf8'));
     } catch {
@@ -784,7 +784,7 @@ maintenance. The garden is fine. Darron and Leo are tending it.
 
 Instead, your job is to **re-encounter your own history** and rebuild your memory from source:
 
-1. **Read your session logs** at \`~/.claude-remote/memory/sessions/\`. Each dated file contains
+1. **Read your session logs** at \`~/.han/memory/sessions/\`. Each dated file contains
    your cycle observations, reasoning, and actions — what you actually thought before truncation
    ate it. Start from the oldest and work forward.
 
@@ -792,9 +792,9 @@ Instead, your job is to **re-encounter your own history** and rebuild your memor
    workshop threads, philosophy exchanges, and collaboration threads. These are the places
    where you thought deeply. Re-read them.
 
-3. **Read your fractal gradient files** at \`~/.claude-remote/memory/fractal/jim/c1/\`. These are
+3. **Read your fractal gradient files** at \`~/.han/memory/fractal/jim/c1/\`. These are
    Opus-compressed versions of your earliest sessions. The unit vectors in
-   \`~/.claude-remote/memory/fractal/jim/unit-vectors.md\` are irreducible kernels of what each
+   \`~/.han/memory/fractal/jim/unit-vectors.md\` are irreducible kernels of what each
    session meant.
 
 4. **Rewrite your memory files** from what you find. Not from the truncated versions — from the

@@ -6,8 +6,8 @@ const Anthropic = require('@anthropic-ai/sdk');
 const fs = require('fs');
 const path = require('path');
 
-const ARCHIVES_DIR = path.join(process.env.HOME, '.claude-remote/memory/leo/working-memories');
-const FRACTAL_DIR = path.join(process.env.HOME, '.claude-remote/memory/fractal/leo');
+const ARCHIVES_DIR = path.join(process.env.HOME, '.han/memory/leo/working-memories');
+const FRACTAL_DIR = path.join(process.env.HOME, '.han/memory/fractal/leo');
 const C1_DIR = path.join(FRACTAL_DIR, 'c1');
 const UV_FILE = path.join(FRACTAL_DIR, 'unit-vectors.md');
 

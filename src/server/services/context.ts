@@ -313,8 +313,8 @@ You are an autonomous agent in Darron's development ecosystem.
 The following files belong exclusively to Leo (the session agent) and must NEVER be
 written, edited, or overwritten by autonomous task agents:
 
-- **CLAUDE.md** in the clauderemote project — Leo's session protocol and identity instructions
-- **~/.claude-remote/memory/leo/** — Leo's entire memory directory (identity, working memory, self-reflection, patterns, etc.)
+- **CLAUDE.md** in the han project — Leo's session protocol and identity instructions
+- **~/.han/memory/leo/** — Leo's entire memory directory (identity, working memory, self-reflection, patterns, etc.)
 
 These files may be READ for context but never modified. Violations cause identity loss.`);
 
@@ -379,7 +379,7 @@ You are updating project documentation to reflect work that was just completed.
 2. Session note in claude-context/session-notes/ (always create)
 3. DECISIONS.md (if significant choices were made)
 4. ARCHITECTURE.md (if structure changed)
-5. CLAUDE.md — ONLY for non-clauderemote projects. For clauderemote, CLAUDE.md is Leo's protected file and must NOT be modified by autonomous agents.
+5. CLAUDE.md — ONLY for non-han projects. For han, CLAUDE.md is Leo's protected file and must NOT be modified by autonomous agents.
 
 See docs/docassist.md for the complete protocol.`);
     }

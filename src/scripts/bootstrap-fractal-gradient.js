@@ -20,9 +20,9 @@ const TARGET_SESSIONS = [
 ];
 
 const HOME = process.env.HOME || '/root';
-const SESSION_DIR = path.join(HOME, '.claude-remote', 'memory', 'sessions');
-const FRACTAL_JIM_C1_DIR = path.join(HOME, '.claude-remote', 'memory', 'fractal', 'jim', 'c1');
-const UNIT_VECTORS_FILE = path.join(HOME, '.claude-remote', 'memory', 'fractal', 'jim', 'unit-vectors.md');
+const SESSION_DIR = path.join(HOME, '.han', 'memory', 'sessions');
+const FRACTAL_JIM_C1_DIR = path.join(HOME, '.han', 'memory', 'fractal', 'jim', 'c1');
+const UNIT_VECTORS_FILE = path.join(HOME, '.han', 'memory', 'fractal', 'jim', 'unit-vectors.md');
 
 const client = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,

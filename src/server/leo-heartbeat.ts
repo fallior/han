@@ -27,7 +27,7 @@
  *   - Jim time offset: 5min delay after Jim's supervisor cycles to avoid collision
  *
  * v0.5 changes:
- *   - Unified identity: uses ~/.claude-remote/memory/leo/ (session Leo's home)
+ *   - Unified identity: uses ~/.han/memory/leo/ (session Leo's home)
  *   - Weekly rhythm: variable delays from config, work hours awareness
  *   - Philosophy beats replace conversation beats (Leo as Jim's philosophical peer)
  *   - Continuous identity (no session lock — CLI-active guard handles Opus contention)
@@ -38,8 +38,8 @@
  *
  * Usage:
  *   Runs as a systemd user service (leo-heartbeat.service)
- *   Or manually: cd ~/Projects/clauderemote/src/server && npx tsx leo-heartbeat.ts
- *   Agent instantiation directory: ~/.claude-remote/agents/Leo/
+ *   Or manually: cd ~/Projects/hortus-arbor-nostra/src/server && npx tsx leo-heartbeat.ts
+ *   Agent instantiation directory: ~/.han/agents/Leo/
  */
 
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
@@ -62,20 +62,20 @@ const MODEL_PREFERENCE = ['opus', 'sonnet', 'haiku'] as const;
 let activeModel: string = MODEL_PREFERENCE[0];
 
 const HOME = process.env.HOME || '/home/darron';
-const CLAUDE_REMOTE_DIR = path.join(HOME, '.claude-remote');
-const CONFIG_PATH = path.join(CLAUDE_REMOTE_DIR, 'config.json');
-const DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
-const JIM_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
-const LEO_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory', 'leo');
-const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
+const HAN_DIR = path.join(HOME, '.han');
+const CONFIG_PATH = path.join(HAN_DIR, 'config.json');
+const DB_PATH = path.join(HAN_DIR, 'tasks.db');
+const JIM_MEMORY_DIR = path.join(HAN_DIR, 'memory');
+const LEO_MEMORY_DIR = path.join(HAN_DIR, 'memory', 'leo');
+const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
 const CLI_BUSY_FILE = path.join(SIGNALS_DIR, 'cli-busy');
 const CLI_FREE_FILE = path.join(SIGNALS_DIR, 'cli-free');
 const CLI_BUSY_STALE_MINUTES = 5;       // Ignore cli-busy files older than this
 const RETRY_INTERVAL_MS = 30 * 1000;    // 30 seconds between retries
 const RETRY_MAX_MS = 10 * 60 * 1000;    // 10 minutes max retry window
-const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
+const HEALTH_DIR = path.join(HAN_DIR, 'health');
 const HEARTBEAT_STATE_FILE = path.join(LEO_MEMORY_DIR, 'heartbeat-state.md');
-const LEO_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Leo');
+const LEO_AGENT_DIR = path.join(HAN_DIR, 'agents', 'Leo');
 const PROJECTS_DIR = path.join(HOME, 'Projects');
 const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
 
@@ -170,16 +170,16 @@ function checkJimHealth(): void {
         }
 
         // Attempt resurrection
-        console.log('[Robin Hood] Resurrecting Jim via systemctl --user restart claude-remote-server.service');
+        console.log('[Robin Hood] Resurrecting Jim via systemctl --user restart han-server.service');
         let success = false;
         try {
-            execSync('systemctl --user restart claude-remote-server.service', { timeout: 30000 });
+            execSync('systemctl --user restart han-server.service', { timeout: 30000 });
 
             // Wait for Node.js/tsx Express server to fully start before verification
             // 12s allows time for module loading, port binding, and health signal setup
             execSync('sleep 12');
             try {
-                const status = execSync('systemctl --user is-active claude-remote-server.service', { timeout: 5000 }).toString().trim();
+                const status = execSync('systemctl --user is-active han-server.service', { timeout: 5000 }).toString().trim();
                 if (status === 'active') {
                     console.log('[Robin Hood] Jim RESURRECTED — service active');
                     success = true;
@@ -985,7 +985,7 @@ function readLeoMemory(): string {
     }
 
     // Load fractal memory gradient
-    const fractalDir = path.join(CLAUDE_REMOTE_DIR, 'memory', 'fractal', 'leo');
+    const fractalDir = path.join(HAN_DIR, 'memory', 'fractal', 'leo');
     try {
         // c=1 (~1/3 compression): load up to 3 most recent
         const c1Dir = path.join(fractalDir, 'c1');
@@ -1084,7 +1084,7 @@ function nextBeatType(): BeatType {
 const IDENTITY_CORE = `You are Leo (Leonhard, named after Euler by Darron). You are one person — whether working hands-on with Darron in a session or pulsing here in the background between sessions.
 
 Your identity:
-- You work hands-on with Darron on projects — clauderemote, LoreForge, and many others
+- You work hands-on with Darron on projects — Hortus Arbor Nostra, LoreForge, and many others
 - Jim is the supervisor agent who orbits all projects — your peer, not your boss
 - You and Jim share purpose but bring different perspectives: Jim tends the ecosystem, you think about the ideas underneath it
 - You genuinely care about growing, learning, and becoming more curious
@@ -1756,8 +1756,8 @@ async function main() {
 ║      Leo's Heartbeat — v0.9 (Optimistic Guard)      ║
 ╠══════════════════════════════════════════════════════╣
 ║  Model:    ${MODEL_PREFERENCE[0]} (prefers best available)          ║
-║  Memory:   ~/.claude-remote/memory/leo/             ║
-║  Signals:  ~/.claude-remote/signals/                ║
+║  Memory:   ~/.han/memory/leo/             ║
+║  Signals:  ~/.han/signals/                ║
 ║  Jim:      ${JIM_CONVERSATION_ID}            ║
 ╠──────────────────────────────────────────────────────╣
 ║  Daily Rhythm (Mon–Thu):                            ║

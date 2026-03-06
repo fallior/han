@@ -1,7 +1,7 @@
 {
-  "name": "claude-remote-server",
+  "name": "han-server",
   "version": "1.0.0",
-  "description": "Claude Remote API server for mobile prompt response",
+  "description": "Hortus Arbor Nostra — API server",
   "main": "server.ts",
   "scripts": {
     "start": "tsx server.ts",

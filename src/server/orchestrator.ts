@@ -1,5 +1,5 @@
 /**
- * Claude Remote - Orchestrator Intelligence Layer
+ * Hortus Arbor Nostra - Orchestrator Intelligence Layer
  * Routes task decomposition and classification to Ollama (local) or Claude Haiku (API)
  */
 

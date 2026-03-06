@@ -24,12 +24,12 @@ import { withMemorySlot } from './lib/memory-slot';
 // ── Config ────────────────────────────────────────────────────
 
 const HOME = process.env.HOME || '/home/darron';
-const CLAUDE_REMOTE_DIR = path.join(HOME, '.claude-remote');
-const DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
-const JIM_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
-const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
-const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
-const JIM_HUMAN_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Jim', 'Human');
+const HAN_DIR = path.join(HOME, '.han');
+const DB_PATH = path.join(HAN_DIR, 'tasks.db');
+const JIM_MEMORY_DIR = path.join(HAN_DIR, 'memory');
+const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
+const HEALTH_DIR = path.join(HAN_DIR, 'health');
+const JIM_HUMAN_AGENT_DIR = path.join(HAN_DIR, 'agents', 'Jim', 'Human');
 
 const HEALTH_FILE = path.join(HEALTH_DIR, 'jim-human-health.json');
 const SWAP_FILE = path.join(JIM_MEMORY_DIR, 'jim-human-swap.md');

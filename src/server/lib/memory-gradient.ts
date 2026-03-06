@@ -194,13 +194,13 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
     const homeDir = process.env.HOME || '/root';
     const memoryDir =
         agentName === 'jim'
-            ? path.join(homeDir, '.claude-remote', 'memory', 'sessions')
-            : path.join(homeDir, '.claude-remote', 'memory', 'leo', 'working-memories');
+            ? path.join(homeDir, '.han', 'memory', 'sessions')
+            : path.join(homeDir, '.han', 'memory', 'leo', 'working-memories');
 
     const fractionalDir =
         agentName === 'jim'
-            ? path.join(homeDir, '.claude-remote', 'memory', 'fractal', 'jim')
-            : path.join(homeDir, '.claude-remote', 'memory', 'fractal', 'leo');
+            ? path.join(homeDir, '.han', 'memory', 'fractal', 'jim')
+            : path.join(homeDir, '.han', 'memory', 'fractal', 'leo');
 
     ensureDir(fractionalDir);
 
@@ -284,7 +284,7 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
  */
 export function getFractalMemoryFiles(agentName: 'jim' | 'leo'): string[] {
     const homeDir = process.env.HOME || '/root';
-    const fractionalDir = path.join(homeDir, '.claude-remote', 'memory', 'fractal', agentName);
+    const fractionalDir = path.join(homeDir, '.han', 'memory', 'fractal', agentName);
 
     if (!fs.existsSync(fractionalDir)) {
         return [];
@@ -304,8 +304,8 @@ export function readFractalMemory(agentName: 'jim' | 'leo', date: string, level:
     const homeDir = process.env.HOME || '/root';
     const fractionalDir =
         level === 0
-            ? path.join(homeDir, '.claude-remote', 'memory', agentName === 'jim' ? 'sessions' : 'leo', 'working-memories')
-            : path.join(homeDir, '.claude-remote', 'memory', 'fractal', agentName);
+            ? path.join(homeDir, '.han', 'memory', agentName === 'jim' ? 'sessions' : 'leo', 'working-memories')
+            : path.join(homeDir, '.han', 'memory', 'fractal', agentName);
 
     const fileName = level === 0 ? `${date}.md` : `${date}-c${level}.md`;
     const filePath = path.join(fractionalDir, fileName);
@@ -324,8 +324,8 @@ export function listAvailableSessions(agentName: 'jim' | 'leo'): string[] {
     const homeDir = process.env.HOME || '/root';
     const memoryDir =
         agentName === 'jim'
-            ? path.join(homeDir, '.claude-remote', 'memory', 'sessions')
-            : path.join(homeDir, '.claude-remote', 'memory', 'leo', 'working-memories');
+            ? path.join(homeDir, '.han', 'memory', 'sessions')
+            : path.join(homeDir, '.han', 'memory', 'leo', 'working-memories');
 
     if (!fs.existsSync(memoryDir)) {
         return [];

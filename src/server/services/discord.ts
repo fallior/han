@@ -5,7 +5,7 @@
  * and webhook posting for all agents. Each agent has their own set of webhooks
  * for every channel, so they can post anywhere under their own name.
  *
- * Config structure (in ~/.claude-remote/config.json → discord):
+ * Config structure (in ~/.han/config.json → discord):
  *   channels:  { "general": "1478...", "leo": "1478...", ... }
  *   webhooks:  { "leo": { "general": "url", ... }, "jim": { ... }, "jemma": { ... } }
  */
@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const CONFIG_PATH = path.join(process.env.HOME || '/home/darron', '.claude-remote', 'config.json');
+const CONFIG_PATH = path.join(process.env.HOME || '/home/darron', '.han', 'config.json');
 
 interface DiscordConfig {
     bot_token?: string;

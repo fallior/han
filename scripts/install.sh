@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No colour
 
-# Get script directory (where claude-remote is installed)
+# Get script directory (where han is installed)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo -e "${BLUE}"
@@ -49,10 +49,10 @@ fi
 echo -e "\n${BLUE}Creating directories...${NC}"
 
 # Create state directories
-CLAUDE_REMOTE_DIR="${CLAUDE_REMOTE_DIR:-$HOME/.claude-remote}"
-mkdir -p "$CLAUDE_REMOTE_DIR/pending"
-mkdir -p "$CLAUDE_REMOTE_DIR/resolved"
-echo -e "  ${GREEN}✓${NC} $CLAUDE_REMOTE_DIR"
+HAN_DIR="${HAN_DIR:-$HOME/.han}"
+mkdir -p "$HAN_DIR/pending"
+mkdir -p "$HAN_DIR/resolved"
+echo -e "  ${GREEN}✓${NC} $HAN_DIR"
 
 # Install npm dependencies
 echo -e "\n${BLUE}Installing server dependencies...${NC}"
@@ -132,13 +132,13 @@ fi
 # Create symlink for CLI
 echo -e "\n${BLUE}Setting up CLI...${NC}"
 
-CLI_PATH="$SCRIPT_DIR/scripts/claude-remote"
+CLI_PATH="$SCRIPT_DIR/scripts/han"
 chmod +x "$CLI_PATH"
 
 # Check if /usr/local/bin exists and is writable
 if [[ -d "/usr/local/bin" && -w "/usr/local/bin" ]]; then
-    ln -sf "$CLI_PATH" /usr/local/bin/claude-remote
-    echo -e "  ${GREEN}✓${NC} CLI available at: claude-remote"
+    ln -sf "$CLI_PATH" /usr/local/bin/han
+    echo -e "  ${GREEN}✓${NC} CLI available at: han"
 else
     echo -e "  ${YELLOW}!${NC} Could not create symlink in /usr/local/bin"
     echo -e "    Run manually: ${YELLOW}$CLI_PATH${NC}"
@@ -158,7 +158,7 @@ echo -e "  1. Start the server:"
 echo -e "     ${YELLOW}$SCRIPT_DIR/scripts/start-server.sh${NC}"
 echo ""
 echo -e "  2. Start Claude Code (in another terminal):"
-echo -e "     ${YELLOW}claude-remote${NC}"
+echo -e "     ${YELLOW}han${NC}"
 echo ""
 echo -e "  3. Open on your phone:"
 echo -e "     ${YELLOW}http://$(hostname -s).local:3847${NC}"
@@ -168,7 +168,7 @@ echo -e "${BLUE}Optional - Push notifications:${NC}"
 echo -e "  1. Install ntfy app on your phone"
 echo -e "  2. Subscribe to a secret topic (e.g., 'my-claude-abc123')"
 echo -e "  3. Create config file:"
-echo -e "     ${YELLOW}cat > ~/.claude-remote/config.json << 'EOF'"
+echo -e "     ${YELLOW}cat > ~/.han/config.json << 'EOF'"
 echo -e "     {"
 echo -e "       \"ntfy_topic\": \"my-claude-abc123\","
 echo -e "       \"remote_url\": \"http://$(hostname -s).local:3847\""
@@ -176,5 +176,5 @@ echo -e "     }"
 echo -e "     EOF${NC}"
 echo ""
 echo -e "${BLUE}Need help?${NC}"
-echo -e "  ${YELLOW}claude-remote --help${NC}"
+echo -e "  ${YELLOW}han --help${NC}"
 echo ""

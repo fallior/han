@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Claude Remote - Git Service Test Suite
+ * Hortus Arbor Nostra - Git Service Test Suite
  * Tests git checkpoint creation, cleanup, rollback, and commit operations
  * Uses Node.js built-in test runner with git command mocking
  */
@@ -65,7 +65,7 @@ async function loadGitService() {
  * Helper: Create a stash checkpoint
  */
 function createStashCheckpoint(repoPath: string, taskId: string): string {
-  const stashMessage = `claude-remote checkpoint ${taskId}`;
+  const stashMessage = `han checkpoint ${taskId}`;
 
   // Create uncommitted changes
   fs.writeFileSync(path.join(repoPath, 'test-file.txt'), 'uncommitted changes\n');
@@ -83,7 +83,7 @@ function createStashCheckpoint(repoPath: string, taskId: string): string {
  * Helper: Create a branch checkpoint
  */
 function createBranchCheckpoint(repoPath: string, taskId: string): string {
-  const branchName = `claude-remote/checkpoint-${taskId}`;
+  const branchName = `han/checkpoint-${taskId}`;
   execSync(`git branch "${branchName}"`, { cwd: repoPath, stdio: 'ignore' });
   return branchName;
 }
@@ -188,7 +188,7 @@ test('Git Checkpoint Cleanup Tests', async (suite) => {
 
       // Now modify it and stash
       fs.writeFileSync(conflictFile, 'stashed changes\n');
-      const stashMsg = `claude-remote checkpoint ${taskId}`;
+      const stashMsg = `han checkpoint ${taskId}`;
       execSync(`git stash push -u -m "${stashMsg}"`, {
         cwd: repo.path,
         stdio: 'ignore'
@@ -361,7 +361,7 @@ test('Git Checkpoint Cleanup Tests', async (suite) => {
     const repo = createTestRepo();
     try {
       const taskId = 'task-123-special';
-      const stashMsg = `claude-remote checkpoint ${taskId}`;
+      const stashMsg = `han checkpoint ${taskId}`;
 
       // Create uncommitted changes
       fs.writeFileSync(path.join(repo.path, 'test-file.txt'), 'test\n');
@@ -477,7 +477,7 @@ test('Git Checkpoint Cleanup Tests', async (suite) => {
       fs.writeFileSync(scriptPath, '#!/bin/bash\necho "test"\n');
       fs.chmodSync(scriptPath, 0o755); // Make executable
 
-      const stashMsg = `claude-remote checkpoint ${taskId}`;
+      const stashMsg = `han checkpoint ${taskId}`;
       execSync(`git stash push -u -m "${stashMsg}"`, {
         cwd: repo.path,
         stdio: 'ignore'
@@ -514,7 +514,7 @@ test('Git Checkpoint Cleanup Tests', async (suite) => {
   await test('11. Error recovery - missing stash ref in list', async () => {
     const repo = createTestRepo();
     try {
-      const stashMsg = 'claude-remote checkpoint task-missing';
+      const stashMsg = 'han checkpoint task-missing';
 
       // Don't actually create the stash, just try to find it
       const stashList = execSync('git stash list', {
@@ -549,7 +549,7 @@ test('Git Checkpoint Cleanup Tests', async (suite) => {
       fs.writeFileSync(path.join(repo.path, 'my-work.txt'), 'important code\n');
 
       // 2. Create checkpoint (stash)
-      const stashMsg = `claude-remote checkpoint ${taskId}`;
+      const stashMsg = `han checkpoint ${taskId}`;
       execSync(`git stash push -u -m "${stashMsg}"`, {
         cwd: repo.path,
         stdio: 'ignore'

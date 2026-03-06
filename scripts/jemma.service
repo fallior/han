@@ -1,6 +1,6 @@
 [Unit]
 Description=Jemma — Discord message dispatcher service
-After=network.target claude-remote-server.service
+After=network.target han-server.service
 
 [Service]
 Type=simple

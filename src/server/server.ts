@@ -1,5 +1,5 @@
 /**
- * Claude Remote - TypeScript Entry Point
+ * Hortus Arbor Nostra - TypeScript Entry Point
  * Express setup, route mounting, intervals, listen
  */
 
@@ -10,7 +10,7 @@ import path from 'node:path';
 import express from 'express';
 
 import {
-    db, CLAUDE_REMOTE_DIR, PENDING_DIR, RESOLVED_DIR, CONTEXTS_DIR,
+    db, HAN_DIR, PENDING_DIR, RESOLVED_DIR, CONTEXTS_DIR,
     PID_FILE, syncRegistry
 } from './db';
 import { authMiddleware } from './middleware/auth';
@@ -48,8 +48,8 @@ import jemmaRouter from './routes/jemma';
 
 const app = express();
 
-const TLS_CERT = path.join(CLAUDE_REMOTE_DIR, 'tls.crt');
-const TLS_KEY = path.join(CLAUDE_REMOTE_DIR, 'tls.key');
+const TLS_CERT = path.join(HAN_DIR, 'tls.crt');
+const TLS_KEY = path.join(HAN_DIR, 'tls.key');
 const useHttps = fs.existsSync(TLS_CERT) && fs.existsSync(TLS_KEY);
 
 const server = useHttps
@@ -74,8 +74,8 @@ const UI_DIR = path.join(__dirname, '..', 'ui');
             }
         }
     }
-    if (!fs.existsSync(CLAUDE_REMOTE_DIR)) {
-        fs.mkdirSync(CLAUDE_REMOTE_DIR, { recursive: true });
+    if (!fs.existsSync(HAN_DIR)) {
+        fs.mkdirSync(HAN_DIR, { recursive: true });
     }
     fs.writeFileSync(PID_FILE, String(process.pid));
 })();
@@ -194,7 +194,7 @@ function broadcastTerminal() {
 
     // Persist snapshot for UI startup
     try {
-        fs.writeFileSync(path.join(CLAUDE_REMOTE_DIR, 'terminal.txt'), result.content);
+        fs.writeFileSync(path.join(HAN_DIR, 'terminal.txt'), result.content);
     } catch { /* best effort */ }
 
     appendToLog(result.content);
@@ -261,7 +261,7 @@ server.listen(Number(PORT), '0.0.0.0', () => {
     const proto = useHttps ? 'https' : 'http';
     console.log(`
 ╔═══════════════════════════════════════════════════════════╗
-║                    Claude Remote Server                    ║
+║                    Hortus Arbor Nostra Server                    ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Mode:     ${useHttps ? 'HTTPS (Tailscale TLS)' : 'HTTP (no TLS certs found)'}${useHttps ? '              ' : '         '}║
 ║  Local:    ${proto}://localhost:${PORT}                        ║

@@ -9,7 +9,7 @@
         // Wrap global fetch to inject Bearer token for remote access
         const _originalFetch = window.fetch.bind(window);
         window.fetch = function(input, init) {
-            const token = localStorage.getItem('claude-remote-auth-token');
+            const token = localStorage.getItem('han-auth-token');
             if (token) {
                 init = init || {};
                 const headers = new Headers(init.headers || {});
@@ -34,7 +34,7 @@
             overlay.innerHTML = `
                 <div style="background:var(--bg-secondary, #1e1e2e);border:1px solid var(--border-subtle, #333);border-radius:12px;padding:32px;max-width:400px;width:90%">
                     <h2 style="margin:0 0 8px 0;font-size:18px;color:var(--text-primary, #cdd6f4)">Authentication Required</h2>
-                    <p style="margin:0 0 16px 0;font-size:13px;color:var(--text-muted, #a6adc8)">Enter your bearer token to access Claude Remote.</p>
+                    <p style="margin:0 0 16px 0;font-size:13px;color:var(--text-muted, #a6adc8)">Enter your bearer token to access Hortus Arbor Nostra.</p>
                     <input type="password" id="authTokenInput" placeholder="Bearer token" style="width:100%;padding:10px 12px;border:1px solid var(--border-subtle, #333);border-radius:8px;background:var(--bg-primary, #11111b);color:var(--text-primary, #cdd6f4);font-size:14px;box-sizing:border-box;margin-bottom:12px" />
                     <button onclick="submitAuthToken()" style="width:100%;padding:10px;border:none;border-radius:8px;background:var(--blue, #89b4fa);color:#11111b;font-weight:600;font-size:14px;cursor:pointer">Connect</button>
                 </div>
@@ -54,7 +54,7 @@
         window.submitAuthToken = function() {
             const input = document.getElementById('authTokenInput');
             if (!input || !input.value.trim()) return;
-            localStorage.setItem('claude-remote-auth-token', input.value.trim());
+            localStorage.setItem('han-auth-token', input.value.trim());
             const overlay = document.getElementById('authOverlay');
             if (overlay) overlay.remove();
             location.reload();
@@ -206,7 +206,7 @@
 
         function connectWebSocket() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const token = localStorage.getItem('claude-remote-auth-token');
+            const token = localStorage.getItem('han-auth-token');
             const wsUrl = token
                 ? `${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}`
                 : `${protocol}//${location.host}/ws`;
@@ -450,7 +450,7 @@
             if (nearBottom) termContent.scrollTop = termContent.scrollHeight;
 
             // Update chrome
-            titleText.textContent = session || 'claude-remote';
+            titleText.textContent = session || 'han';
             if (!currentPrompt) {
                 footerLeft.textContent = `Watching (${renderedLines.length} lines)`;
                 footerHint.textContent = 'history';
@@ -474,7 +474,7 @@
             }
 
             // Update chrome for prompt state
-            const session = p.tmux_session || terminalSession || 'claude-remote';
+            const session = p.tmux_session || terminalSession || 'han';
             titleText.textContent = session;
             footerLeft.textContent = p.event === 'permission_prompt' ? 'Permission required' : 'Waiting for input';
             footerHint.textContent = 'type below \u00b7 Enter to send';
@@ -490,10 +490,10 @@
             empty.className = 'empty';
             empty.innerHTML = '<div class="empty-icon">\u25c7</div>'
                 + '<div class="empty-title">No active session</div>'
-                + '<div class="empty-hint">Start a claude-remote session to begin</div>';
+                + '<div class="empty-hint">Start a han session to begin</div>';
             termContent.appendChild(empty);
 
-            titleText.textContent = 'claude-remote';
+            titleText.textContent = 'han';
             footerLeft.textContent = 'No active session';
             footerHint.textContent = 'history';
             updateQuickbar();
@@ -624,7 +624,7 @@
                         const res = await fetch(`${API_BASE}/api/terminal`);
                         const data = await res.json();
                         if (data.success && data.content) {
-                            handleTerminalUpdate(data.content, terminalSession || 'claude-remote');
+                            handleTerminalUpdate(data.content, terminalSession || 'han');
                         }
                     } catch { /* next WS broadcast will catch up */ }
                 }, 300);
@@ -815,7 +815,7 @@
                 termContent.style.display = '';
                 // Scroll to bottom to show latest
                 termContent.scrollTop = termContent.scrollHeight;
-                titleText.textContent = terminalSession || 'claude-remote';
+                titleText.textContent = terminalSession || 'han';
                 footerLeft.textContent = `Watching (${renderedLines.length} lines)`;
                 footerHint.textContent = 'history';
                 updateQuickbar();
@@ -3479,7 +3479,7 @@
                 const res = await fetch(`${API_BASE}/api/terminal`);
                 const data = await res.json();
                 if (data.success && data.content) {
-                    handleTerminalUpdate(data.content, 'claude-remote');
+                    handleTerminalUpdate(data.content, 'han');
                 }
             } catch { /* WebSocket will pick up shortly */ }
         }

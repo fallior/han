@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'fs';
 import path from 'path';
-import { CLAUDE_REMOTE_DIR, PENDING_DIR } from '../db';
+import { HAN_DIR, PENDING_DIR } from '../db';
 
 /**
- * List all active claude-remote tmux sessions
+ * List all active han tmux sessions
  */
 export function listActiveSessions(): string[] {
     try {
@@ -13,7 +13,7 @@ export function listActiveSessions(): string[] {
             stdio: ['pipe', 'pipe', 'ignore']
         });
         return output.trim().split('\n')
-            .filter(s => s.startsWith('claude-remote'))
+            .filter(s => s.startsWith('han'))
             .filter(Boolean);
     } catch {
         return [];
@@ -21,7 +21,7 @@ export function listActiveSessions(): string[] {
 }
 
 /**
- * Get the first active claude-remote session (or null)
+ * Get the first active han session (or null)
  */
 export function getActiveSession(): string | null {
     const sessions = listActiveSessions();
@@ -80,7 +80,7 @@ export function formatExport(content: string, session: string): string {
 }
 
 // Append-only terminal log with timestamps
-const TERMINAL_LOG = path.join(CLAUDE_REMOTE_DIR, 'terminal-log.txt');
+const TERMINAL_LOG = path.join(HAN_DIR, 'terminal-log.txt');
 let lastLoggedLines: string[] = [];
 let lastTimestamp = 0;
 const TIMESTAMP_INTERVAL = 5 * 60 * 1000; // 5 minutes

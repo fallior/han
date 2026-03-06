@@ -25,12 +25,12 @@ import { withMemorySlot } from './lib/memory-slot';
 // ── Config ────────────────────────────────────────────────────
 
 const HOME = process.env.HOME || '/home/darron';
-const CLAUDE_REMOTE_DIR = path.join(HOME, '.claude-remote');
-const DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
-const LEO_MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory', 'leo');
-const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
-const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
-const LEO_HUMAN_AGENT_DIR = path.join(CLAUDE_REMOTE_DIR, 'agents', 'Leo', 'Human');
+const HAN_DIR = path.join(HOME, '.han');
+const DB_PATH = path.join(HAN_DIR, 'tasks.db');
+const LEO_MEMORY_DIR = path.join(HAN_DIR, 'memory', 'leo');
+const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
+const HEALTH_DIR = path.join(HAN_DIR, 'health');
+const LEO_HUMAN_AGENT_DIR = path.join(HAN_DIR, 'agents', 'Leo', 'Human');
 
 const HEALTH_FILE = path.join(HEALTH_DIR, 'leo-human-health.json');
 const SWAP_FILE = path.join(LEO_MEMORY_DIR, 'human-swap.md');
@@ -108,7 +108,7 @@ function readLeoMemory(): string {
     }
 
     // Load fractal gradient (c1 only — keep context light for responses)
-    const c1Dir = path.join(CLAUDE_REMOTE_DIR, 'memory', 'fractal', 'leo', 'c1');
+    const c1Dir = path.join(HAN_DIR, 'memory', 'fractal', 'leo', 'c1');
     try {
         if (fs.existsSync(c1Dir)) {
             const c1Files = fs.readdirSync(c1Dir)
@@ -121,7 +121,7 @@ function readLeoMemory(): string {
     } catch { /* skip */ }
 
     // Unit vectors
-    const uvPath = path.join(CLAUDE_REMOTE_DIR, 'memory', 'fractal', 'leo', 'unit-vectors.md');
+    const uvPath = path.join(HAN_DIR, 'memory', 'fractal', 'leo', 'unit-vectors.md');
     try {
         if (fs.existsSync(uvPath)) {
             sections.push(`### unit-vectors\n${fs.readFileSync(uvPath, 'utf-8')}`);

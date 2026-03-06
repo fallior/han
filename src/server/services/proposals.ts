@@ -165,7 +165,7 @@ ${data.solution}
 
 ## References
 
-- Captured automatically by Claude Remote automator
+- Captured automatically by Hortus Arbor Nostra automator
 `;
     fs.writeFileSync(filePath, content);
 
@@ -216,7 +216,7 @@ export function writeDecision(data: { title: string; context: string; options: s
     const entry = `\n### ${decId}: ${data.title}
 
 **Date**: ${today}
-**Author**: Claude Remote (automated)
+**Author**: Hortus Arbor Nostra (automated)
 **Status**: Accepted
 
 #### Context

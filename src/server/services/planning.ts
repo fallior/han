@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
-import { db, taskStmts, goalStmts, memoryStmts, portfolioStmts, CLAUDE_REMOTE_DIR } from '../db';
+import { db, taskStmts, goalStmts, memoryStmts, portfolioStmts, HAN_DIR } from '../db';
 import { isGitRepo, createCheckpoint, rollbackCheckpoint, commitTaskChanges, cleanupCheckpoint, recalcProjectCosts, calculatePriorityScore } from './git';
 import { extractAndStoreProposals } from './proposals';
 import { buildTaskContext } from './context';
@@ -44,7 +44,7 @@ const planningQueue: Array<{
 // Default: 8 total, 2 reserve (for priority >= 8 / remediation), 1 dedicated remediation
 const _slotConfig = (() => {
     try {
-        const cfgPath = path.join(CLAUDE_REMOTE_DIR, 'config.json');
+        const cfgPath = path.join(HAN_DIR, 'config.json');
         if (fs.existsSync(cfgPath)) {
             const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
             return cfg.supervisor || {};
@@ -167,11 +167,11 @@ export function generateId(): string {
 }
 
 /**
- * Load config from ~/.claude-remote/config.json
+ * Load config from ~/.han/config.json
  */
 export function loadConfig(): any {
     try {
-        return JSON.parse(fs.readFileSync(path.join(process.env.HOME!, '.claude-remote', 'config.json'), 'utf8'));
+        return JSON.parse(fs.readFileSync(path.join(process.env.HOME!, '.han', 'config.json'), 'utf8'));
     } catch { return {}; }
 }
 
@@ -182,7 +182,7 @@ export function sendDigestPush(summary: string): void {
     const config = loadConfig();
     if (!config.ntfy_topic) return;
     try {
-        execFileSync('curl', ['-s', '-d', summary, '-H', 'Title: Claude Remote Daily Digest', '-H', 'Priority: default', '-H', 'Tags: clipboard', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
+        execFileSync('curl', ['-s', '-d', summary, '-H', 'Title: Hortus Arbor Nostra Daily Digest', '-H', 'Priority: default', '-H', 'Tags: clipboard', `https://ntfy.sh/${config.ntfy_topic}`], { timeout: 10000, stdio: 'ignore' });
     } catch {}
 }
 
@@ -230,13 +230,13 @@ ${taskList}
    - Include: Summary, What Was Built, Key Decisions, Code Changes, Next Steps
    - Author should be "Claude (autonomous)" to distinguish from human sessions
 
-5. **CLAUDE.md** — ONLY for non-clauderemote projects.
-   - For clauderemote: CLAUDE.md is Leo's protected file. DO NOT modify it.
+5. **CLAUDE.md** — ONLY for non-han projects.
+   - For han: CLAUDE.md is Leo's protected file. DO NOT modify it.
    - For other projects: Update "Quick Context" if stage or stack changed, "Key Commands" if new scripts added, "Project Structure" if layout changed.
 
-**Protected files (clauderemote project only):**
+**Protected files (han project only):**
 - CLAUDE.md — belongs to Leo (session agent), never modify
-- ~/.claude-remote/memory/leo/* — Leo's memory banks, never modify
+- ~/.han/memory/leo/* — Leo's memory banks, never modify
 
 Read the existing content of each file before updating. Preserve existing style and
 conventions. Use British English throughout. Do not remove existing content unless it

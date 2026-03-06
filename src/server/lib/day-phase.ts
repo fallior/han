@@ -12,13 +12,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const CLAUDE_REMOTE_DIR = process.env.CLAUDE_REMOTE_DIR || path.join(process.env.HOME!, '.claude-remote');
+const HAN_DIR = process.env.HAN_DIR || path.join(process.env.HOME!, '.han');
 
 export type DayPhase = 'sleep' | 'morning' | 'work' | 'evening';
 
 function loadConfig(): any {
     try {
-        const configPath = path.join(CLAUDE_REMOTE_DIR, 'config.json');
+        const configPath = path.join(HAN_DIR, 'config.json');
         if (!fs.existsSync(configPath)) return {};
         return JSON.parse(fs.readFileSync(configPath, 'utf8'));
     } catch {

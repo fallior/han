@@ -7,7 +7,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { db, conversationStmts, conversationMessageStmts, CLAUDE_REMOTE_DIR } from '../db';
+import { db, conversationStmts, conversationMessageStmts, HAN_DIR } from '../db';
 import { broadcast } from '../ws';
 import { generateId } from '../services/planning';
 
@@ -20,8 +20,8 @@ const findOpenDiscordConv = db.prepare(
 
 // ── Directories ──────────────────────────────────────────────
 
-const SIGNALS_DIR = path.join(process.env.HOME || '', '.claude-remote', 'signals');
-const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
+const SIGNALS_DIR = path.join(process.env.HOME || '', '.han', 'signals');
+const HEALTH_DIR = path.join(HAN_DIR, 'health');
 
 (() => {
     fs.mkdirSync(SIGNALS_DIR, { recursive: true });
@@ -43,7 +43,7 @@ function isLocalhost(req: Request): boolean {
  */
 function loadConfig(): any {
     try {
-        const cfgPath = path.join(process.env.HOME || '', '.claude-remote', 'config.json');
+        const cfgPath = path.join(process.env.HOME || '', '.han', 'config.json');
         return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
     } catch {
         return {};

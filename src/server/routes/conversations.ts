@@ -10,8 +10,8 @@ import fs from 'node:fs';
 
 const router = Router();
 const HOME = process.env.HOME || '/home/darron';
-const CLAUDE_REMOTE_DIR = path.join(HOME, '.claude-remote');
-const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
+const HAN_DIR = path.join(HOME, '.han');
+const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
 
 const listWithCounts = db.prepare(`
     SELECT c.*, COUNT(cm.id) as message_count,

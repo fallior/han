@@ -1,5 +1,5 @@
 /**
- * Claude Remote - Database setup, schema, migrations, and prepared statements
+ * Hortus Arbor Nostra - Database setup, schema, migrations, and prepared statements
  * Extracted from server.js for modular use.
  */
 
@@ -14,18 +14,18 @@ import type {
 
 // ── Path constants ──────────────────────────────────────────
 
-export const CLAUDE_REMOTE_DIR = process.env.CLAUDE_REMOTE_DIR || path.join(process.env.HOME!, '.claude-remote');
-export const PENDING_DIR = path.join(CLAUDE_REMOTE_DIR, 'pending');
-export const RESOLVED_DIR = path.join(CLAUDE_REMOTE_DIR, 'resolved');
-export const BRIDGE_DIR = path.join(CLAUDE_REMOTE_DIR, 'bridge');
+export const HAN_DIR = process.env.HAN_DIR || path.join(process.env.HOME!, '.han');
+export const PENDING_DIR = path.join(HAN_DIR, 'pending');
+export const RESOLVED_DIR = path.join(HAN_DIR, 'resolved');
+export const BRIDGE_DIR = path.join(HAN_DIR, 'bridge');
 export const CONTEXTS_DIR = path.join(BRIDGE_DIR, 'contexts');
 export const BRIDGE_HISTORY = path.join(BRIDGE_DIR, 'history.json');
-export const PID_FILE = path.join(CLAUDE_REMOTE_DIR, 'server.pid');
+export const PID_FILE = path.join(HAN_DIR, 'server.pid');
 export const REGISTRY_PATH = path.join(process.env.HOME!, 'Projects', 'infrastructure', 'registry', 'services.toml');
 
 // ── Database setup ──────────────────────────────────────────
 
-const TASKS_DB_PATH = path.join(CLAUDE_REMOTE_DIR, 'tasks.db');
+const TASKS_DB_PATH = path.join(HAN_DIR, 'tasks.db');
 export const db = new Database(TASKS_DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');

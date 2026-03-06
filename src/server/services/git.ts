@@ -98,7 +98,7 @@ export function createCheckpoint(projectPath: string, taskId: string): Checkpoin
 
     if (isDirty) {
         // Dirty working tree — create stash to preserve user's work
-        const stashMessage = `claude-remote checkpoint ${taskId}`;
+        const stashMessage = `han checkpoint ${taskId}`;
         try {
             execFileSync('git', ['stash', 'push', '-u', '-m', stashMessage], {
                 cwd: projectPath,
@@ -112,7 +112,7 @@ export function createCheckpoint(projectPath: string, taskId: string): Checkpoin
         }
     } else {
         // Clean working tree — create branch as checkpoint
-        const branchName = `claude-remote/checkpoint-${taskId}`;
+        const branchName = `han/checkpoint-${taskId}`;
         try {
             execFileSync('git', ['branch', branchName], {
                 cwd: projectPath,

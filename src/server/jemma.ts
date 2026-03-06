@@ -42,10 +42,10 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 // ── Configuration ─────────────────────────────────────────────────
 
 const HOME = process.env.HOME || '/home/darron';
-const CLAUDE_REMOTE_DIR = path.join(HOME, '.claude-remote');
-const CONFIG_PATH = path.join(CLAUDE_REMOTE_DIR, 'config.json');
-const SIGNALS_DIR = path.join(CLAUDE_REMOTE_DIR, 'signals');
-const HEALTH_DIR = path.join(CLAUDE_REMOTE_DIR, 'health');
+const HAN_DIR = path.join(HOME, '.han');
+const CONFIG_PATH = path.join(HAN_DIR, 'config.json');
+const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
+const HEALTH_DIR = path.join(HAN_DIR, 'health');
 const HEALTH_FILE = path.join(HEALTH_DIR, 'jemma-health.json');
 const LAST_SEEN_FILE = path.join(HEALTH_DIR, 'jemma-last-seen.json');
 
@@ -793,7 +793,7 @@ function connect(): void {
 }
 
 // ── Admin UI WebSocket Client ─────────────────────────────────────
-// Connects to Claude Remote server's WebSocket, listens for human messages
+// Connects to Hortus Arbor Nostra server's WebSocket, listens for human messages
 // in admin UI conversations, classifies, and writes appropriate signals.
 // Same dispatch pattern as Discord — Jemma is the single dispatcher.
 

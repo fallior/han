@@ -1,5 +1,5 @@
 /**
- * Claude Remote - TypeScript type definitions
+ * Hortus Arbor Nostra - TypeScript type definitions
  * Derived from server.js database schema, prepared statements, and runtime structures.
  */
 

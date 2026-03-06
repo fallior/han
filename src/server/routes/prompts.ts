@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'node:child_process';
-import { PENDING_DIR, RESOLVED_DIR, CLAUDE_REMOTE_DIR } from '../db';
+import { PENDING_DIR, RESOLVED_DIR, HAN_DIR } from '../db';
 import {
     readPendingPrompts,
     listActiveSessions,
@@ -153,7 +153,7 @@ router.get('/api/status', (req: Request, res: Response) => {
  * GET /api/terminal -- Get cached terminal content
  */
 router.get('/api/terminal', (req: Request, res: Response) => {
-    const TERMINAL_FILE = path.join(CLAUDE_REMOTE_DIR, 'terminal.txt');
+    const TERMINAL_FILE = path.join(HAN_DIR, 'terminal.txt');
     try {
         const content = fs.readFileSync(TERMINAL_FILE, 'utf8');
         res.json({ success: true, content });

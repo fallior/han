@@ -12,7 +12,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import { db, CLAUDE_REMOTE_DIR, supervisorStmts, strategicProposalStmts } from '../db';
+import { db, HAN_DIR, supervisorStmts, strategicProposalStmts } from '../db';
 import {
     runSupervisorCycle, setSupervisorPaused, isSupervisorPaused,
     isSupervisorEnabled
@@ -20,7 +20,7 @@ import {
 import { createGoal } from '../services/planning';
 
 const router = Router();
-const MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
+const MEMORY_DIR = path.join(HAN_DIR, 'memory');
 
 // GET /status — Current supervisor state
 router.get('/status', (_req: Request, res: Response) => {
@@ -376,7 +376,7 @@ router.post('/proposals/:id/dismiss', (req: Request, res: Response) => {
 // GET /health — Health status for Jim and Leo
 router.get('/health', (_req: Request, res: Response) => {
     try {
-        const healthDir = path.join(CLAUDE_REMOTE_DIR, 'health');
+        const healthDir = path.join(HAN_DIR, 'health');
         const now = new Date();
 
         // Read Jim's health file

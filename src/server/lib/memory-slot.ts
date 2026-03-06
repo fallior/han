@@ -73,7 +73,7 @@ export async function acquireMemorySlot(memoryDir: string, writer: string, maxRe
     // Failed — escalate
     console.error(`[MemorySlot] ${writer} failed to acquire slot after ${maxRetries} attempts`);
     try {
-        const configPath = path.join(process.env.HOME || '/home/darron', '.claude-remote', 'config.json');
+        const configPath = path.join(process.env.HOME || '/home/darron', '.han', 'config.json');
         const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
         if (config.ntfy_topic) {
             execSync(`curl -s -d "Memory slot acquisition failed for ${writer} after ${maxRetries} attempts" -H "Title: Memory Slot Alert" -H "Priority: urgent" -H "Tags: warning" https://ntfy.sh/${config.ntfy_topic}`, { timeout: 10000 });

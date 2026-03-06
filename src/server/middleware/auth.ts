@@ -22,7 +22,7 @@ function isLocalhost(req: Request): boolean {
  */
 function loadConfig(): any {
     try {
-        const cfgPath = path.join(process.env.HOME || '', '.claude-remote', 'config.json');
+        const cfgPath = path.join(process.env.HOME || '', '.han', 'config.json');
         return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
     } catch {
         return {};

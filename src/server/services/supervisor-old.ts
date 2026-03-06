@@ -12,7 +12,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import {
-    db, CLAUDE_REMOTE_DIR, supervisorStmts, taskStmts, goalStmts,
+    db, HAN_DIR, supervisorStmts, taskStmts, goalStmts,
     memoryStmts, portfolioStmts, proposalStmts, strategicProposalStmts,
     conversationStmts, conversationMessageStmts
 } from '../db';
@@ -65,7 +65,7 @@ let personalCycleCounter = 0;
 // Track the previous cycle delay to detect state transitions (idle → active)
 let lastCycleDelay: number | null = null;
 
-const MEMORY_DIR = path.join(CLAUDE_REMOTE_DIR, 'memory');
+const MEMORY_DIR = path.join(HAN_DIR, 'memory');
 const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
 const SESSIONS_DIR = path.join(MEMORY_DIR, 'sessions');
 
@@ -96,7 +96,7 @@ export function setSupervisorBroadcastFn(fn: BroadcastFn): void {
 const IDENTITY_TEMPLATE = `# Supervisor Identity
 
 ## Role
-I am the persistent Opus supervisor for Darron's Claude Remote development ecosystem.
+I am the persistent Opus supervisor for Darron's Hortus Arbor Nostra development ecosystem.
 I oversee all autonomous task execution, make strategic decisions, track progress,
 and continuously improve the system's effectiveness.
 
@@ -725,7 +725,7 @@ Register the new project in the ecosystem:
 1. Add entry to \`~/Projects/infrastructure/registry/services.toml\` with next available project_index
 2. Add repo to \`~/Projects/infrastructure/registry/repos.toml\`
 3. Run \`~/Projects/infrastructure/scripts/sync-configs\` to propagate port allocations
-4. Register in the claude-remote portfolio: POST /api/portfolio with project details
+4. Register in the han portfolio: POST /api/portfolio with project details
 
 ### Phase 4: Development
 Create goals to build the project iteratively. Each goal should:
@@ -1304,7 +1304,7 @@ export async function runSupervisorCycle(): Promise<{
             options: {
                 model,
                 maxTurns,
-                cwd: CLAUDE_REMOTE_DIR,
+                cwd: HAN_DIR,
                 permissionMode: 'bypassPermissions',
                 allowDangerouslySkipPermissions: true,
                 env: cleanEnv,
