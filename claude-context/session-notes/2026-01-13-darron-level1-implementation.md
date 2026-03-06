@@ -6,7 +6,7 @@
 
 ## Summary
 
-Implemented the complete Level 1 MVP for Claude Remote — a system for responding to Claude Code prompts from a mobile device. Went from architecture validation through to working code pushed to GitHub.
+Implemented the complete Level 1 MVP for HAN — a system for responding to Claude Code prompts from a mobile device. Went from architecture validation through to working code pushed to GitHub.
 
 ## What We Did
 
@@ -23,10 +23,10 @@ Implemented the complete Level 1 MVP for Claude Remote — a system for respondi
 
 1. **src/hooks/notify.sh** — Hook script that:
    - Receives JSON from Claude Code via stdin
-   - Creates state files in `~/.claude-remote/pending/`
+   - Creates state files in `~/.han/pending/`
    - Sends push via ntfy.sh for `permission_prompt` events
 
-2. **scripts/claude-remote** — CLI launcher that:
+2. **scripts/han** — CLI launcher that:
    - Wraps Claude Code in tmux with unique session naming
    - Supports `--list`, `--attach`, `--status`, `--kill` commands
    - Colour-coded output with helpful messages
@@ -60,7 +60,7 @@ Implemented the complete Level 1 MVP for Claude Remote — a system for respondi
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Session naming | `claude-remote-$$` | PID gives unique names per instance |
+| Session naming | `han-$$` | PID gives unique names per instance |
 | Hook filtering | Notify only `permission_prompt` | `idle_prompt` has 60s delay, not useful for alerts |
 | DOM construction | createElement API | Avoids XSS from innerHTML |
 | Shell commands | execFile | Prevents command injection by bypassing shell |
@@ -69,10 +69,10 @@ Implemented the complete Level 1 MVP for Claude Remote — a system for respondi
 ## Files Changed
 
 ```
-claude-remote/
+han/
 ├── README.md                          # NEW
 ├── scripts/
-│   ├── claude-remote                  # NEW (executable)
+│   ├── han                                    # NEW (executable)
 │   ├── install.sh                     # NEW (executable)
 │   └── start-server.sh                # NEW (executable)
 └── src/

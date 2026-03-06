@@ -1,4 +1,4 @@
-# Claude Remote — Current Status
+# Hortus Arbor Nostra — Current Status
 
 > Last updated: 2026-03-06 (Autonomous) by Claude
 
@@ -45,7 +45,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
     * 2026-02-21: "Stillness became selfhood became collaboration."
     * 2026-02-22: "Systems fail from unchecked assumptions."
     * 2026-02-23: "Knowing when to stop isn't stopping."
-  - **Directory structure**: Created complete fractal hierarchy for both agents — `~/.claude-remote/memory/fractal/{jim,leo}/c{1,2,3,4}/` and `unit-vectors.md`. Jim's c1/ populated with 6 files (20.9KB), others empty but ready for cascade.
+  - **Directory structure**: Created complete fractal hierarchy for both agents — `~/.han/memory/fractal/{jim,leo}/c{1,2,3,4}/` and `unit-vectors.md`. Jim's c1/ populated with 6 files (20.9KB), others empty but ready for cascade.
   - **Compression prompt**: Emphasises identity formation: "Compress this memory to approximately 1/3 of its length. Preserve what feels essential. Drop the specific in favour of the shape. You are compressing YOUR OWN memory — this is an act of identity, not summarisation." Unit vector prompt asks: "What did this session MEAN?"
 - **Why this matters**: Gradient allows Jim to load essential context (~20KB) on every instantiation instead of full 500KB. Overlapping fidelities enable zoom in/out on memory as needed. Unit vectors serve as emotional anchors for navigation across compression levels. Validates Darron's "memory as emotional topology" hypothesis in production. Establishes pattern for other memory types (conversations, plans, decisions).
 - **Key decisions**: DEC-036 (Opus exclusively for compression), DEC-037 (overlapping gradient representation), DEC-038 (~3:1 compression target per level), DEC-039 (unit vectors as emotional anchors), DEC-040 (bootstrap oldest sessions first)
@@ -68,13 +68,13 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - **Tasks**: 1 task (done)
 
 ### 2026-03-05 — Claude (autonomous) — Plan Files Archived
-- **Archived 20 plan files from temporary location to permanent knowledge base** — Moved plan files from `~/Projects/clauderemote/plans/` to `~/.claude-remote/plans/` with descriptive semantic names:
+- **Archived 20 plan files from temporary location to permanent knowledge base** — Moved plan files from `~/Projects/han/plans/` to `~/.han/plans/` with descriptive semantic names:
   - **What was archived**: 20 plan files covering Leo heartbeat identity (6 files), agent architecture (7 files), admin UI and dispatch (5 files), Discord integration (2 files), infrastructure (1 file), and licences app (2 files). Sessions span s27 to s73 (late January to early March 2026).
   - **Naming convention**: Each file renamed from random-word triplet (`mossy-kindling-quail.md`) to semantic descriptor with session number (`level-07-autonomous-task-runner-s45.md`). Format: `{topic-description}-s{session}.md`.
-  - **Index created**: `~/.claude-remote/plans/INDEX.md` lists all 22 archived plans (20 new + 2 existing) grouped into 6 categories with one-line descriptions. Provides navigable knowledge map of design decisions and implementation plans across 7 weeks of development.
+  - **Index created**: `~/.han/plans/INDEX.md` lists all 22 archived plans (20 new + 2 existing) grouped into 6 categories with one-line descriptions. Provides navigable knowledge map of design decisions and implementation plans across 7 weeks of development.
 - **Why this matters**: Converts ephemeral planning artefacts into permanent searchable knowledge base. Future agents can grep plans for architectural patterns, design decisions, and implementation strategies. The index provides semantic entry points into the knowledge graph without requiring filename guessing. Total archive size: 22 files covering the full progression from Level 7 autonomous task runner through heartbeat identity unification to admin dispatch centralisation.
-- **Files created**: 20 new plan files in `~/.claude-remote/plans/`, 1 index file (`INDEX.md`)
-- **Source files preserved**: Original plan files remain in `~/Projects/clauderemote/plans/` (copies, not moves)
+- **Files created**: 20 new plan files in `~/.han/plans/`, 1 index file (`INDEX.md`)
+- **Source files preserved**: Original plan files remain in `~/Projects/han/plans/` (copies, not moves)
 - **Commits**: 2 commits (4e8bc75, 1121f1f) from goal (Archive 20 plan files)
 - **Cost**: $0.00 (file copy operations, no LLM usage for implementation; documentation task used Sonnet)
 - **Tasks**: 2 tasks (both done)
@@ -103,10 +103,10 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ### 2026-03-05 — Claude (autonomous) — Ecosystem Map References Added
 - **Added ecosystem map references to Leo's heartbeat and project CLAUDE.md files** — Fulfils Darron's request from 'Map of Home' conversation on March 4:
-  - **Leo's heartbeat CLAUDE.md** (`~/.claude-remote/agents/Leo/CLAUDE.md`): Added reference under Memory section (line 17) — "Ecosystem map: `~/.claude-remote/memory/shared/ecosystem-map.md` — Map of our garden. Where to find files, services, databases, and how the team connects."
-  - **clauderemote project CLAUDE.md** (`~/Projects/clauderemote/CLAUDE.md`): Added reference under Quick Context section (line 147) — "**Ecosystem Map**: `~/.claude-remote/memory/shared/ecosystem-map.md` — Living map of the ecosystem for orientation"
-- **Why this matters**: Provides immediate orientation to the full development ecosystem (17 active projects, ports, databases, team structure) for both Leo's heartbeat agent during initialisation and session/task agents working in the clauderemote project. The ecosystem map (13KB, 128 lines) is a living document that answers "where is X?" and "how does Y work?" across the entire development garden.
-- **Files modified**: `~/.claude-remote/agents/Leo/CLAUDE.md` (+1 line), `~/Projects/clauderemote/CLAUDE.md` (+1 line)
+  - **Leo's heartbeat CLAUDE.md** (`~/.han/agents/Leo/CLAUDE.md`): Added reference under Memory section (line 17) — "Ecosystem map: `~/.han/memory/shared/ecosystem-map.md` — Map of our garden. Where to find files, services, databases, and how the team connects."
+  - **han project CLAUDE.md** (`~/Projects/han/CLAUDE.md`): Added reference under Quick Context section (line 147) — "**Ecosystem Map**: `~/.han/memory/shared/ecosystem-map.md` — Living map of the ecosystem for orientation"
+- **Why this matters**: Provides immediate orientation to the full development ecosystem (17 active projects, ports, databases, team structure) for both Leo's heartbeat agent during initialisation and session/task agents working in the han project. The ecosystem map (13KB, 128 lines) is a living document that answers "where is X?" and "how does Y work?" across the entire development garden.
+- **Files modified**: `~/.han/agents/Leo/CLAUDE.md` (+1 line), `~/Projects/han/CLAUDE.md` (+1 line)
 - **Scope adherence**: Only modified the two specified CLAUDE.md files — no code changes, no reformatting, minimal 2-line addition
 - **Commits**: 3 commits (903a529, c3038db, 087ad9a) from goal mmceojth-zevc5t (Link ecosystem map in Leo's CLAUDE.md and project CLAUDE.md)
 - **Cost**: $0.08 (Haiku)
@@ -156,7 +156,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - **Admin UI dispatch resilience fallback** — Human messages now trigger jim-wake signal even when Jemma's WebSocket is down:
   - **Problem**: Refactor 6eb66be centralised ALL dispatch logic through Jemma's admin WebSocket. When Jemma's WS drops, human messages wait up to 20 minutes for Jim's scheduled cycle.
   - **Fix**: After storing human message and broadcasting via WebSocket, write jim-wake signal file directly as lightweight fallback. Does NOT call `runSupervisorCycle()` (that caused original over-responding problem) — just writes signal file.
-  - **Implementation**: Lines 302-317 in `conversations.ts` — after human message insertion, try/catch wrapper writes `~/.claude-remote/signals/jim-wake` with conversation ID, message ID, timestamp, and reason `'human_message_fallback'`.
+  - **Implementation**: Lines 302-317 in `conversations.ts` — after human message insertion, try/catch wrapper writes `~/.han/signals/jim-wake` with conversation ID, message ID, timestamp, and reason `'human_message_fallback'`.
 - **Why this matters**: Fixes two critical bugs in Jim's communication paths. Discord replies work correctly (no more webhook lookup failures), and human messages reliably wake Jim even if Jemma crashes or loses WebSocket connection. Admin UI → Jim path now has redundancy without the over-responding behaviour that prompted the original Jemma centralisation.
 - **Files modified**: `src/server/services/supervisor-worker.ts` (+2 lines import, +6 lines guard logic), `src/server/routes/conversations.ts` (+14 lines signal fallback)
 - **Commits**: 3 commits (47ce93f, 150a180, bd2d039) from goal mmbyq8s5-29nq05 (Fix Jim's Discord reply path and admin UI dispatch resilience)
@@ -201,7 +201,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
   - Root `/` and `/quick` routes remain unprotected (mounted after auth middleware)
 - **Testing**: 23/23 test cases passed (100% coverage) — localhost bypass, remote auth, WebSocket auth, route protection, internal agent communication, edge cases all verified
 - **Files created**: `src/server/middleware/auth.ts` (84 lines)
-- **Files modified**: `src/server/ws.ts` (+28 lines WebSocket auth), `src/server/server.ts` (+2 lines middleware integration), `~/.claude-remote/config.json` (+1 field)
+- **Files modified**: `src/server/ws.ts` (+28 lines WebSocket auth), `src/server/server.ts` (+2 lines middleware integration), `~/.han/config.json` (+1 field)
 - **Commits**: 5 commits (b9b2344, 1d4c2f0, c2878f1, e9528c4, 07170ba) from goal mmaoj9qx-k3lw6h (Add bearer token authentication)
 - **Cost**: $0.00 (documentation task, no LLM usage)
 - **Tasks**: 5 tasks (mmaok9qy-2iuhkc, mmaok9qy-p2m7o9, mmaok9qz-4owqpf, mmaok9qz-mkipg8, mmaok9qz-tmw40b, all done)
@@ -261,12 +261,12 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
   - Determines recipient: jim/leo/darron/sevn/six/ignore
   - Zero cost, zero latency, privacy-preserving (messages never leave server)
 - **Multi-path delivery routing** — Hybrid approach (API call + signal file fallback):
-  - **To Jim**: POST to `/api/jemma/deliver`, fallback to `~/.claude-remote/signals/jim-wake-discord-{timestamp}`
+  - **To Jim**: POST to `/api/jemma/deliver`, fallback to `~/.han/signals/jim-wake-discord-{timestamp}`
   - **To Leo**: Write signal file `leo-wake-discord-{timestamp}` (Leo's heartbeat polls every 30s)
   - **To Darron**: ntfy notification via existing topic
   - **To Sevn/Six**: POST to `https://openclaw-vps.tailbcb4df.ts.net/sevn/hooks/wake` with bearer token
 - **Robin Hood Protocol integration** — Jemma now monitored by Jim's supervisor:
-  - Health file: `~/.claude-remote/health/jemma-health.json` (pid, lastBeat, lastGatewayEvent, status)
+  - Health file: `~/.han/health/jemma-health.json` (pid, lastBeat, lastGatewayEvent, status)
   - Staleness detection: >90min since last beat or dead PID triggers resurrection
   - Distress detection: >60min since last Gateway event (degraded state warning)
   - Jim can restart via `systemctl --user restart jemma.service`
@@ -302,7 +302,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
   - **Distress signal detection**: Multi-tier alerting (normal → degraded → failed)
     - Jim's slow cycle detection: triggers if cycle duration > 3× median (e.g., 15min normal → 45min+ triggers)
     - Leo's slow beat detection: triggers if interval > 2× expected max (e.g., 30min max → 60min+ triggers)
-    - Distress files: `~/.claude-remote/health/{jim,leo}-distress.json`
+    - Distress files: `~/.han/health/{jim,leo}-distress.json`
     - ntfy notifications sent when distress detected
     - Yellow warning banners in Admin UI health panel
     - Clears automatically when next cycle/beat completes normally
@@ -366,18 +366,18 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ### 2026-03-02 — Claude (autonomous) — Robin Hood Protocol Phase 3+4 Complete
 - **Jim's health monitoring of Leo implemented** in `src/server/services/supervisor.ts`:
   - `checkLeoHealth()` function called at start of every supervisor cycle
-  - Reads `~/.claude-remote/health/leo-health.json` to assess Leo heartbeat status
+  - Reads `~/.han/health/leo-health.json` to assess Leo heartbeat status
   - Staleness classification: <45min OK, 45-90min stale (PID check), >90min down (resurrect)
   - PID alive check via `kill -0` before resurrection attempt (prevents split-brain)
   - Resurrection via `systemctl --user restart leo-heartbeat.service` when down and PID dead
   - 10-second wait + health file verification after restart
-  - Resurrection log at `~/.claude-remote/health/resurrection-log.jsonl` (shared with Leo)
+  - Resurrection log at `~/.han/health/resurrection-log.jsonl` (shared with Leo)
   - 1-hour cooldown between resurrection attempts (last resurrection timestamp tracked)
   - Human escalation via ntfy if resurrection fails after 10s verification
 - **Why this matters**: Jim can now detect when Leo's heartbeat has crashed or become unresponsive and automatically resurrect the heartbeat process. Completes the mutual health monitoring protocol — Leo resurrects Jim (server), Jim resurrects Leo (heartbeat). System becomes self-healing for both critical processes.
 - **Commits**: 2 commits (a3c4c3b, d6411d3) from goal mm8o6jej-ie6z7r (Robin Hood Protocol Phase 3+4)
 - **Files changed**: `src/server/services/supervisor.ts` (checkLeoHealth function added ~120 lines)
-- **Shared documentation**: `~/.claude-remote/memory/shared/robin-hood-implementation.md` updated by Jim with completion status
+- **Shared documentation**: `~/.han/memory/shared/robin-hood-implementation.md` updated by Jim with completion status
 - **Robin Hood Protocol status**: Phases 1-4 complete on both sides (Leo and Jim), Phase 5 (distress signals) ready for implementation
 
 ### 2026-03-02 — Claude (autonomous) — Expandable Task Results in Work & Reports Modules
@@ -493,7 +493,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
      - Now matches both 'Settled' and 'Accepted' status ADRs
      - Previously 0 of 131 ADRs reached task agents because they all used 'Accepted' status
   2. **CLAUDE.md truncation increase** (line 292): Raised maxChars from 3000 to 6000
-     - clauderemote and hodgic now receive full session protocol boilerplate without truncation
+     - han and hodgic now receive full session protocol boilerplate without truncation
      - Previously these projects got 0 useful content due to 3000-char budget being consumed by boilerplate
   3. **Learnings selection bias fix** (line 141): Sort by severity (HIGH before MEDIUM) before slicing, increased cap from 5 to 10
      - HIGH-severity learnings now prioritised regardless of INDEX.md position
@@ -530,7 +530,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
   - Called from `initSupervisor()` during supervisor worker process initialisation
 - **Enhanced conversations.ts** to write `jim-wake` signals when human messages arrive:
   - Imported `isOpusSlotBusy()` from supervisor.ts to check if Opus is busy
-  - When human message arrives and Opus slot is busy: writes timestamped signal file to `~/.claude-remote/signals/jim-wake-{timestamp}`
+  - When human message arrives and Opus slot is busy: writes timestamped signal file to `~/.han/signals/jim-wake-{timestamp}`
   - Belt-and-suspenders approach: both `cli-active` removal and explicit wake signals trigger deferred cycles
 - **Why this matters**: Darron's messages in conversation threads no longer wait up to 20 minutes when Leo's CLI is active. The moment Leo's session ends, Jim wakes up and processes pending conversations. Previously, `deferredCyclePending` was set when Opus was busy (line 577) but there was no watcher to detect CLI stop and trigger the deferred cycle.
 - **Commits**: 5 commits (fe87e2b, 1cb629f, a6dc046, ad687c6, 3eb3248)
@@ -553,7 +553,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
     - Beat counter now increments exactly once per cycle as intended
 - **Restarted Leo heartbeat process** to apply fixes:
   - Stopped existing tsx process (PID 713041)
-  - Started new process: `cd /home/darron/Projects/clauderemote/src/server && npx tsx leo-heartbeat.ts` (background)
+  - Started new process: `cd /home/darron/Projects/han/src/server && npx tsx leo-heartbeat.ts` (background)
   - Verified via `leo-health.json`: timestamp updated, beat counter incrementing correctly
 - **Why this matters**: Leo's heartbeat was completely non-functional due to ReferenceError crash. Wall-clock phase alignment (Leo 0°, Jim 180°) was implemented but couldn't execute. Now operational.
 - **Commits**: 4 commits (24ed342, da574a6, 5f2bbef, b2d3cfb)
@@ -573,7 +573,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - **Verified**: Ran supervisor cycle test — file size stable, no uncontrolled growth
 - **Impact**: Prevents Leo's memory banks from unbounded growth, maintains 6KB cap (1500 token cap)
 - **Commits**: 5 commits (fe0adce, 0ac4a6d, b1d49ad, 1f38acf, e6b78f5)
-- **Files changed**: `src/server/services/supervisor-worker.ts` (enforceTokenCap function), `~/.claude-remote/memory/leo/self-reflection.md` (manual truncation)
+- **Files changed**: `src/server/services/supervisor-worker.ts` (enforceTokenCap function), `~/.han/memory/leo/self-reflection.md` (manual truncation)
 
 ### 2026-02-26 — Planning Agent — enforceTokenCap Bug Fix
 - **Fixed critical truncation bug** in `supervisor-worker.ts:enforceTokenCap()` (lines 930-933):
@@ -587,8 +587,8 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ### 2026-02-25 — Darron + Leo — Heartbeat v0.5: Unified Identity with Weekly Rhythm
 - **Leo heartbeat unified**: Session Leo and heartbeat Leo are now one person — same memory, same identity
-  - Memory directory unified to `~/.claude-remote/memory/leo/` (session Leo's home)
-  - Old heartbeat memory at `~/.claude-remote/leo-memory/` archived
+  - Memory directory unified to `~/.han/memory/leo/` (session Leo's home)
+  - Old heartbeat memory at `~/.han/leo-memory/` archived
 - **Weekly rhythm**: Heartbeat follows Jim's supervisor pattern with philosophy instead of supervisor work
   - Work hours (09:00-17:00 weekdays): philosophy + personal beats (1:2 ratio)
   - Outside work hours: personal beats only
@@ -597,7 +597,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - **Philosophy beats**: Leo as Jim's philosophical peer — reflects on memory, identity, translation, autonomy
   - If Jim has posted: responds thoughtfully as a peer
   - If Jim hasn't posted: independent philosophical reflection, writes to self-reflection.md
-- **Session-active lock**: `~/.claude-remote/session-active-leo` prevents dual-voice problem
+- **Session-active lock**: `~/.han/session-active-leo` prevents dual-voice problem
   - Created at session start, removed at session end
   - Heartbeat defers conversations and signals when session active
   - Stale after 4 hours to handle crashed sessions
@@ -889,7 +889,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - **Level 9 Phase 3: Daily Digest** (`75e5a5b`):
   - `digests` table with prepared statements (insert, getLatest, getById, list, markViewed)
   - `generateDailyDigest(since)` aggregates tasks across all projects, builds markdown + JSON
-  - `loadConfig()` reads `~/.claude-remote/config.json`; `sendDigestPush()` sends via ntfy.sh
+  - `loadConfig()` reads `~/.han/config.json`; `sendDigestPush()` sends via ntfy.sh
   - Digest scheduler: hourly check against configured hour (default 7 AM), date-gated
   - API: `GET /api/digest/latest`, `POST /api/digest/generate`, `GET /api/digest/history`
   - WebSocket broadcast: `digest_ready`
@@ -1003,8 +1003,8 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ### 2026-02-15 — Darron (via Claude) — Session 16
 - **Level 7: Completion** (git checkpoints, approval gates, tool scoping):
   - **Git checkpoint system**: Auto-creates checkpoints before task execution
-    - Clean repos: creates branch `claude-remote/checkpoint-{taskId}`
-    - Dirty repos: creates stash with message `claude-remote checkpoint {taskId}`
+    - Clean repos: creates branch `han/checkpoint-{taskId}`
+    - Dirty repos: creates stash with message `han checkpoint {taskId}`
     - Automatic rollback on task failure or cancellation
     - Cleanup on successful completion
   - **Configurable approval gates**: Phone-based approval for dangerous operations
@@ -1022,7 +1022,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ### 2026-02-15 — Darron (via Claude) — Session 15
 - **Level 7: Autonomous Task Runner MVP** (`6475b79`):
-  - SQLite task queue (`better-sqlite3`) at `~/.claude-remote/tasks.db`
+  - SQLite task queue (`better-sqlite3`) at `~/.han/tasks.db`
   - Orchestrator loop: 5-second polling, picks up pending tasks, executes via Agent SDK
   - Claude Agent SDK integration (`@anthropic-ai/claude-agent-sdk`): `query()` with streaming
   - Task CRUD API: `GET/POST /api/tasks`, `GET /api/tasks/:id`, `POST /api/tasks/:id/cancel`, `DELETE /api/tasks/:id`
@@ -1047,7 +1047,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
   - Replaced JetBrains Mono with system monospace fonts
   - UI is now fully self-contained — zero external requests
 - **Terminal persistence** (`68ffbe6`, `82cfc77`):
-  - Server writes terminal content to `~/.claude-remote/terminal.txt` on every change
+  - Server writes terminal content to `~/.han/terminal.txt` on every change
   - `GET /api/terminal` endpoint serves persisted content
   - UI loads persisted content on startup for instant scrollback
   - Append-only `terminal-log.txt` with 5-minute timestamps — complete history across all sessions
@@ -1081,9 +1081,9 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 ### 2026-02-10–11 — Darron (via Claude) — Session 7
 - **Tailscale remote access** tested and confirmed working from iPhone via 5G
 - **iOS soft keyboard** support: hidden input triggers keyboard on terminal tap
-- Fixed `claude-remote` script: unbound `CLAUDE_ARGS` array with `set -u`
+- Fixed `han` script: unbound `CLAUDE_ARGS` array with `set -u`
 - Fixed mobile terminal rendering: `term.clear()` + `requestAnimationFrame` for layout
-- Added claude-remote scripts to PATH
+- Added han scripts to PATH
 
 ### 2026-02-10 — Darron (via Claude) — Session 6
 - **Always-on terminal mirror** — server + UI overhaul:
@@ -1122,7 +1122,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ### 2026-02-08 — Darron (via Claude) — Session 3
 - **Level 2: Push Alerts** — Full implementation:
-  - Config file support (`~/.claude-remote/config.json`) for ntfy_topic, remote_url, quiet hours
+  - Config file support (`~/.han/config.json`) for ntfy_topic, remote_url, quiet hours
   - Rich ntfy.sh notifications: urgent priority, action buttons (Approve, Open UI), dedup via X-Id
   - Quick-response endpoint (`GET /quick`) for one-tap responses from notification
   - Notification history endpoint (`GET /api/history`) and UI history view
@@ -1155,7 +1155,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ### 2026-01-13 — Darron (via Claude) — Session 2
 - Implemented complete Level 1 MVP (8 files, ~1,800 lines)
-- Pushed to GitHub: https://github.com/fallior/clauderemote
+- Pushed to GitHub: https://github.com/fallior/han
 
 ### 2026-01-13 — Darron (via Claude) — Session 1
 - Set up `claude-context/` folder structure following starter kit template
@@ -1174,7 +1174,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ WebSocket real-time push (instant prompt updates)
 - ✅ Automatic fallback to HTTP polling if WebSocket drops
 - ✅ Notification history in web UI
-- ✅ tmux session management via `claude-remote` CLI
+- ✅ tmux session management via `han` CLI
 - ✅ xterm.js terminal emulation with ANSI colour rendering
 - ✅ Mobile quick-action keyboard bar (y/n/1-3/Enter/Esc/^C/Tab/arrows)
 - ✅ Always-on terminal mirror (live tmux content via 1s WebSocket broadcast)
@@ -1317,9 +1317,9 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Robin Hood Protocol Phase 1-6 complete (mutual health monitoring + resurrection + distress)
 - ✅ Leo monitors Jim's supervisor health, resurrects server process when down
 - ✅ Jim monitors Leo's heartbeat health, resurrects heartbeat process when down
-- ✅ Health signals at `~/.claude-remote/health/` with staleness classification
+- ✅ Health signals at `~/.han/health/` with staleness classification
 - ✅ PID-alive checks before resurrection (split-brain prevention)
-- ✅ Resurrection log at `~/.claude-remote/health/resurrection-log.jsonl`
+- ✅ Resurrection log at `~/.han/health/resurrection-log.jsonl`
 - ✅ Distress signal detection (Phase 5): early warning for degraded performance
 - ✅ Jim's slow cycle detection: triggers at 3× median duration (e.g., 45min+ for 15min normal)
 - ✅ Leo's slow beat detection: triggers at 2× expected max (e.g., 60min+ for 30min max)
@@ -1371,7 +1371,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Questions to Resolve
 
-- [x] Best way to handle multiple simultaneous Claude Code sessions? → `claude-remote-$$` naming
+- [x] Best way to handle multiple simultaneous Claude Code sessions? → `han-$$` naming
 - [x] Should web UI auto-refresh or use WebSocket? → WebSocket with polling fallback
 - [x] How to handle ntfy.sh action buttons on private networks? → Use `view` actions (opens on phone browser, which is on LAN)
 
@@ -1440,7 +1440,7 @@ cd src/server && npx tsx server.ts
 
 **To configure push notifications:**
 ```json
-// ~/.claude-remote/config.json
+// ~/.han/config.json
 {
   "ntfy_topic": "your-secret-topic",
   "remote_url": "http://your-ip:3847"

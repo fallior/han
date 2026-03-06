@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Claude Remote web UI now features comprehensive dark mode support with automatic theme detection, manual toggle, and localStorage persistence.
+The Hortus Arbor Nostra web UI now features comprehensive dark mode support with automatic theme detection, manual toggle, and localStorage persistence.
 
 ## Features
 

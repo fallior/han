@@ -33,7 +33,7 @@ Extended response to include distress signals:
 
 **Implementation Details:**
 
-- Reads `~/.claude-remote/health/jim-distress.json` and `leo-distress.json`
+- Reads `~/.han/health/jim-distress.json` and `leo-distress.json`
 - Signals older than 1 hour are automatically expired (not returned)
 - Age is calculated in minutes from signal timestamp to current time
 - Returns `null` for distress field if no active signals exist

@@ -16,7 +16,7 @@ Fixed 5 critical bugs in the context injection pipeline (`src/server/services/co
 **Impact**: Task agents now see all relevant settled decisions, not zero.
 
 ### 2. CLAUDE.md Truncation Increase (Line 292)
-**Problem**: 3000-char limit caused projects with long session protocols (clauderemote, hodgic) to get 0 useful content — the entire budget was consumed by boilerplate.
+**Problem**: 3000-char limit caused projects with long session protocols (han, hodgic) to get 0 useful content — the entire budget was consumed by boilerplate.
 **Fix**: Increased maxChars from 3000 to 6000
 **Impact**: Full session protocol now fits, task agents get complete project instructions.
 
@@ -111,7 +111,7 @@ Fixed 5 critical bugs in the context injection pipeline (`src/server/services/co
 
 Verified via manual context extraction:
 - ✅ ADRs: Both 'Settled' and 'Accepted' status ADRs now included
-- ✅ CLAUDE.md: Full 6000 chars captured for clauderemote/hodgic projects
+- ✅ CLAUDE.md: Full 6000 chars captured for han/hodgic projects
 - ✅ Learnings: HIGH-severity learnings sorted to top, cap increased to 10
 - ✅ Bun detection: `@types/bun` correctly triggers Bun tech detection
 - ✅ Monorepo: contempire's workspace packages scanned, Hono/Clerk/Zod found

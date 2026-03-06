@@ -102,7 +102,7 @@ Updated all 4 call sites to pass the already-known beatType:
 1. **Before fix**: Leo heartbeat crashed on every scheduled beat with ReferenceError
 2. **After fix**:
    - Restarted tsx process for leo-heartbeat.ts
-   - Checked `~/.claude-remote/health/leo-health.json`
+   - Checked `~/.han/health/leo-health.json`
    - Confirmed timestamp updates every period
    - Confirmed beat counter increments correctly (once per beat)
    - Wall-clock scheduling operational (Leo at 0°, Jim at 180°)

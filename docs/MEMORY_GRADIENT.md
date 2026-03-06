@@ -105,12 +105,12 @@ export async function processGradientForAgent(
 
 **Behaviour:**
 - Scans appropriate memory directory:
-  - **Jim**: `~/.claude-remote/memory/sessions/`
-  - **Leo**: `~/.claude-remote/memory/leo/working-memories/`
+  - **Jim**: `~/.han/memory/sessions/`
+  - **Leo**: `~/.han/memory/leo/working-memories/`
 - Identifies sessions needing compression (c0 → c1)
 - Writes compressed results to fractal directories:
-  - **Jim**: `~/.claude-remote/memory/fractal/jim/`
-  - **Leo**: `~/.claude-remote/memory/fractal/leo/`
+  - **Jim**: `~/.han/memory/fractal/jim/`
+  - **Leo**: `~/.han/memory/fractal/leo/`
 - Tracks all work done and errors
 
 **Returns `GradientProcessingResult`:**
@@ -168,7 +168,7 @@ Reads a memory file at specific date and compression level.
 
 ```typescript
 const memory = readFractalMemory('jim', '2026-02-15', 2);
-// Reads: ~/.claude-remote/memory/fractal/jim/2026-02-15-c2.md
+// Reads: ~/.han/memory/fractal/jim/2026-02-15-c2.md
 ```
 
 #### `listAvailableSessions(agentName): string[]`
@@ -220,7 +220,7 @@ API Call → Retry Wrapper → withRetry() → Exponential Backoff
 ## Directory Structure
 
 ```
-~/.claude-remote/
+~/.han/
 ├── memory/
 │   ├── sessions/              # Jim's c0 files
 │   │   ├── 2026-03-05.md
@@ -280,7 +280,7 @@ const sessions = listAvailableSessions('jim');
 const unitVectors: Record<string, string> = {};
 
 for (const date of sessions) {
-    const content = fs.readFileSync(`~/.claude-remote/memory/sessions/${date}.md`, 'utf8');
+    const content = fs.readFileSync(`~/.han/memory/sessions/${date}.md`, 'utf8');
     unitVectors[date] = await compressToUnitVector(content, `jim/${date}`);
 }
 
@@ -322,13 +322,13 @@ const c4 = readFractalMemory('leo', '2026-03-05', 4);
 ## Integration Points
 
 ### With Jim (Supervisor)
-- Jim's sessions stored in `~/.claude-remote/memory/sessions/`
-- Compressed copies go to `~/.claude-remote/memory/fractal/jim/`
+- Jim's sessions stored in `~/.han/memory/sessions/`
+- Compressed copies go to `~/.han/memory/fractal/jim/`
 - Jim can call `processGradientForAgent('jim')` autonomously
 
 ### With Leo (Session Agent)
-- Leo's working memory in `~/.claude-remote/memory/leo/working-memories/`
-- Compressed copies in `~/.claude-remote/memory/fractal/leo/`
+- Leo's working memory in `~/.han/memory/leo/working-memories/`
+- Compressed copies in `~/.han/memory/fractal/leo/`
 - Runs on Leo session end or via explicit trigger
 
 ### With Memory System

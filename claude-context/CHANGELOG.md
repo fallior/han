@@ -141,14 +141,14 @@ swap files (created), `leo-wake` signals (flowing to wrong recipient).
 #### Leo/Human — Fix Plan
 
 1. **Recreate `src/server/leo-human.ts`** (~300 lines)
-   - Adapt from plan at `~/.claude-remote/plans/leo-human-s70.md`
+   - Adapt from plan at `~/.han/plans/leo-human-s70.md`
    - Signal-driven: watch for `leo-human-wake` files
    - Two paths: Discord (immediate) and conversation (immediate — contemplation removed S77)
    - Memory: read Leo's full banks, write to `human-swap.md` / `human-swap-full.md`
    - Flush to shared `working-memory.md` via memory-slot protocol
-   - Health file: `~/.claude-remote/health/leo-human-health.json`
+   - Health file: `~/.han/health/leo-human-health.json`
    - Commitment scanner: 10-min unfulfilled ack detection
-   - Agent SDK: `cwd: ~/.claude-remote/agents/Leo/Human/`, model opus→sonnet→haiku
+   - Agent SDK: `cwd: ~/.han/agents/Leo/Human/`, model opus→sonnet→haiku
 
 2. **Strip conversation handling from `leo-heartbeat.ts`**
    - Remove: `processSignals()` (~line 1604), `respondToConversation()` (~line 1143),
@@ -192,14 +192,14 @@ supervisor, not to Jim/Human).
 #### Jim/Human — Fix Plan
 
 1. **Recreate `src/server/jim-human.ts`** (~500 lines)
-   - Adapt from plan at `~/.claude-remote/plans/jim-human-s71.md` + anatomy doc
+   - Adapt from plan at `~/.han/plans/jim-human-s71.md` + anatomy doc
    - Signal-driven: watch for `jim-human-wake` files
    - Two paths: Discord (immediate) and conversation (immediate — was 5min, now 0)
    - Memory: read Jim's full banks including `felt-moments.md`
    - Fix dedup: `m.role === 'leo' || (m.role === 'supervisor' && !m.id?.startsWith('jim-human-'))`
    - Fix signal shape: add `channelId` fallback for Discord
    - Posts as `supervisor` role (consistent with existing Jim posts)
-   - Agent SDK: `cwd: ~/.claude-remote/agents/Jim/Human/`, model opus
+   - Agent SDK: `cwd: ~/.han/agents/Jim/Human/`, model opus
 
 2. **Add `jim-human-wake` signal writes** to 4 dispatch points:
    - `routes/conversations.ts:307`: alongside existing `jim-wake`
@@ -379,5 +379,5 @@ heartbeat and supervisor. Protocol:
 ## Pre-S77 Notes
 
 Changes before S77 were not tracked in this format. Key historical decisions
-are documented in the Hall of Records (`~/.claude-remote/memory/shared/hall-of-records.md`)
+are documented in the Hall of Records (`~/.han/memory/shared/hall-of-records.md`)
 and in `claude-context/DECISIONS.md`.

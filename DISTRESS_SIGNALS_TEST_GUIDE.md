@@ -5,7 +5,7 @@
 ### 1. Create a Jim Distress Signal
 
 ```bash
-cat > ~/.claude-remote/health/jim-distress.json <<'EOF'
+cat > ~/.han/health/jim-distress.json <<'EOF'
 {
   "timestamp": "2026-03-03T09:15:00Z",
   "reason": "Heap memory usage at 85% threshold",
@@ -22,7 +22,7 @@ EOF
 ### 2. Create a Leo Distress Signal
 
 ```bash
-cat > ~/.claude-remote/health/leo-distress.json <<'EOF'
+cat > ~/.han/health/leo-distress.json <<'EOF'
 {
   "timestamp": "2026-03-03T09:18:00Z",
   "reason": "Task processing latency spike (p95: 5000ms)",
@@ -62,7 +62,7 @@ Navigate to the Supervisor module in the admin console and observe:
 # Create signal with current timestamp
 jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   '{timestamp: $ts, reason: "New issue detected", details: {}}' > \
-  ~/.claude-remote/health/jim-distress.json
+  ~/.han/health/jim-distress.json
 ```
 
 **Expected:**
@@ -77,7 +77,7 @@ jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 # Create signal 30 minutes old
 jq -n --arg ts "$(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
   '{timestamp: $ts, reason: "Aging issue", details: {}}' > \
-  ~/.claude-remote/health/jim-distress.json
+  ~/.han/health/jim-distress.json
 ```
 
 **Expected:**
@@ -92,7 +92,7 @@ jq -n --arg ts "$(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
 # Create signal 90 minutes old
 jq -n --arg ts "$(date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
   '{timestamp: $ts, reason: "Very old issue", details: {}}' > \
-  ~/.claude-remote/health/jim-distress.json
+  ~/.han/health/jim-distress.json
 ```
 
 **Expected:**
@@ -105,7 +105,7 @@ jq -n --arg ts "$(date -u -d '90 minutes ago' +%Y-%m-%dT%H:%M:%SZ)" \
 **Setup:**
 ```bash
 # Remove the distress signal file
-rm ~/.claude-remote/health/jim-distress.json
+rm ~/.han/health/jim-distress.json
 ```
 
 **Expected:**
@@ -121,10 +121,10 @@ rm ~/.claude-remote/health/jim-distress.json
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 jq -n --arg ts "$NOW" \
   '{timestamp: $ts, reason: "Jim issue", details: {}}' > \
-  ~/.claude-remote/health/jim-distress.json
+  ~/.han/health/jim-distress.json
 jq -n --arg ts "$NOW" \
   '{timestamp: $ts, reason: "Leo issue", details: {}}' > \
-  ~/.claude-remote/health/leo-distress.json
+  ~/.han/health/leo-distress.json
 ```
 
 **Expected:**
@@ -216,8 +216,8 @@ if (distressAgeMs < ONE_HOUR_MS) {
 ## Troubleshooting
 
 ### Signal not appearing in UI
-- Check file exists: `ls -la ~/.claude-remote/health/*-distress.json`
-- Verify valid JSON: `jq . ~/.claude-remote/health/jim-distress.json`
+- Check file exists: `ls -la ~/.han/health/*-distress.json`
+- Verify valid JSON: `jq . ~/.han/health/jim-distress.json`
 - Check timestamp is recent: `date -u` vs file's `timestamp` field
 - Refresh admin page (F5)
 
@@ -227,7 +227,7 @@ if (distressAgeMs < ONE_HOUR_MS) {
 - Signal must be <1 hour old to display
 
 ### Signal won't clear
-- Use `rm ~/.claude-remote/health/leo-distress.json` to delete
+- Use `rm ~/.han/health/leo-distress.json` to delete
 - Or create new signal with current timestamp to override
 - Don't rely on `cron` to delete — app handles auto-expiry
 

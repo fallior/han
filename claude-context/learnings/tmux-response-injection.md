@@ -29,7 +29,7 @@ tmux send-keys -t mysession "Y" Enter
 Use PID or timestamp for unique session names:
 
 ```bash
-SESSION_NAME="claude-remote-$$"  # $$ is current shell's PID
+SESSION_NAME="han-$$"  # $$ is current shell's PID
 tmux new-session -d -s "$SESSION_NAME"
 ```
 
@@ -72,7 +72,7 @@ function sessionExists(name) {
 ### List Sessions Matching Pattern
 
 ```bash
-tmux list-sessions -F "#{session_name}" | grep "^claude-remote"
+tmux list-sessions -F "#{session_name}" | grep "^han"
 ```
 
 ### Attach to Session

@@ -1,4 +1,4 @@
-# Claude Remote — Project Instructions
+# Hortus Arbor Nostra — Project Instructions
 
 > Unblock your Claude Code sessions from anywhere via push notifications and mobile response interface
 
@@ -6,7 +6,7 @@
 
 When developing with Claude Code, there are often large gaps between interactions — you step away for breakfast, grab a coffee, or switch to another task. But when Claude needs your input, development blocks until you return to your desk.
 
-Claude Remote solves this by creating a bridge between your development machine and your mobile device. It hooks into Claude Code's notification system, pushes alerts to your phone, and lets you respond remotely — whether that's a simple Y/n confirmation or a custom text response.
+Hortus Arbor Nostra solves this by creating a bridge between your development machine and your mobile device. It hooks into Claude Code's notification system, pushes alerts to your phone, and lets you respond remotely — whether that's a simple Y/n confirmation or a custom text response.
 
 The project is structured as progressive "levels" — from a simple MVP that unblocks prompts, all the way to a full terminal mirror with bidirectional claude.ai ↔ Claude Code integration. This lets us ship useful functionality quickly while building toward the ambitious vision of true mobile development.
 
@@ -36,7 +36,7 @@ Claude Code fires notification hooks when waiting for input. Our hook script cap
 
 **Key Components:**
 - **Hook Script** (`notify.sh`) — Triggered by Claude Code, saves state, sends push
-- **CLI Launcher** (`claude-remote`) — Starts Claude Code in tmux with session management  
+- **CLI Launcher** (`han`) — Starts Claude Code in tmux with session management  
 - **Express Server** (`server.js`) — API for prompts/responses, serves web UI
 - **Web UI** (`index.html`) — Mobile-friendly interface with quick actions
 - **Installer** (`install.sh`) — Sets up hooks, directories, and configuration
@@ -57,7 +57,7 @@ Claude Code fires notification hooks when waiting for input. Our hook script cap
 ## Project Structure
 
 ```
-claude-remote/
+han/
 ├── CLAUDE.md                 # Quick reference for Claude Code
 ├── PROJECT_INSTRUCTIONS.md   # This file (for Claude Projects)
 ├── QUICKSTART.md             # Installation and usage guide
@@ -72,7 +72,7 @@ claude-remote/
 ├── scripts/
 │   ├── install.sh            # Installation script
 │   ├── start-server.sh       # Quick start the server
-│   └── claude-remote         # CLI launcher
+│   └── han                   # CLI launcher
 └── src/
     ├── hooks/
     │   └── notify.sh         # Claude Code notification hook
@@ -115,7 +115,7 @@ When working on this project:
 1. Install with `./scripts/install.sh`
 2. Configure ntfy topic: `export NTFY_TOPIC="your-secret-topic"`
 3. Start server: `./scripts/start-server.sh`
-4. Start Claude Code: `claude-remote`
+4. Start Claude Code: `han`
 5. Test the flow end-to-end
 
 **Next milestone**: Refine Level 1 based on real usage, then move to Level 2 (push notifications).

@@ -85,7 +85,7 @@ if (finalRole === 'human') {
 
 **Key details**:
 - After storing message + broadcasting to WebSocket (primary path via Jemma)
-- Write jim-wake signal file directly to `~/.claude-remote/signals/`
+- Write jim-wake signal file directly to `~/.han/signals/`
 - Signal contains conversation ID, message ID, timestamp, and reason
 - Does NOT call `runSupervisorCycle()` (that was the original problem)
 - Jim's deferred cycle pattern will see signal via fs.watch and wake immediately

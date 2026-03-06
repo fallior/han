@@ -62,7 +62,7 @@ Implemented full bidirectional Discord ↔ Jim communication by enhancing Jemma'
 **Solution:**
 
 **New discord-utils.ts module** (129 lines):
-- `loadDiscordConfig()`: Reads ~/.claude-remote/config.json for Discord webhooks
+- `loadDiscordConfig()`: Reads ~/.han/config.json for Discord webhooks
 - `resolveChannelName(channelId)`: Reverses channel map to get name from ID
 - `postToDiscord(role, channelName, content)`: Posts message via webhook with retry logic
   - Splits content into 2000-character chunks (Discord limit)

@@ -1,4 +1,4 @@
-# Claude Remote — Decision Log
+# Hortus Arbor Nostra — Decision Log
 
 > Architecture Decision Records (ADRs) — capturing the "why" behind choices
 
@@ -166,7 +166,7 @@ We chose **tmux** because it's the industry standard for terminal session manage
 #### Consequences
 
 - Users must have tmux installed
-- Claude Code must be launched via our `claude-remote` wrapper
+- Claude Code must be launched via our `han` wrapper
 - Enables future terminal mirroring capabilities (Level 4+)
 
 ---
@@ -437,7 +437,7 @@ We chose **SQLite with `better-sqlite3`** because tasks need structured queries 
 #### Consequences
 
 - Native addon requires build tools (pre-built binaries available for most platforms)
-- Database file at `~/.claude-remote/tasks.db`
+- Database file at `~/.han/tasks.db`
 - Enables future features: cost dashboards, task history, analytics
 
 ---
@@ -497,7 +497,7 @@ Level 7 tasks need rollback capability in case of failure. Need to create git ch
 
 1. **Always use branches**
    - ✅ Clean, easy to understand
-   - ✅ Named references (claude-remote/checkpoint-{taskId})
+   - ✅ Named references (han/checkpoint-{taskId})
    - ❌ Fails if working tree has uncommitted changes
    - ❌ Can't create branch on dirty repo
 
@@ -522,8 +522,8 @@ Level 7 tasks need rollback capability in case of failure. Need to create git ch
 
 We chose the **hybrid approach**: create branches for clean working trees, stashes for dirty ones. This handles all scenarios gracefully while preferring the cleaner branch approach when possible.
 
-For clean repos: create branch `claude-remote/checkpoint-{taskId}`
-For dirty repos: create stash with message `claude-remote checkpoint {taskId}`
+For clean repos: create branch `han/checkpoint-{taskId}`
+For dirty repos: create stash with message `han checkpoint {taskId}`
 
 Store checkpoint_ref (branch name or stash message), checkpoint_type ('branch'/'stash'/'none'), and checkpoint_created_at in the database.
 
@@ -1277,7 +1277,7 @@ The root cause was a two-part bug:
 4. `content.slice(-negativeNumber)` converted the negative to positive, retaining nearly the entire file
 5. Each cycle appended new content but failed to truncate, causing unbounded growth
 
-This was traced during personal exploration by heartbeat Leo and documented in `~/.claude-remote/memory/enforceTokenCap-fix.md`.
+This was traced during personal exploration by heartbeat Leo and documented in `~/.han/memory/enforceTokenCap-fix.md`.
 
 #### Options Considered
 
@@ -1353,8 +1353,8 @@ Also manually truncated self-reflection.md from 11KB to 6KB to remove accumulate
 #### Related
 
 - `src/server/services/supervisor-worker.ts` — enforceTokenCap function (lines 896-911, fixed at 930-933)
-- `~/.claude-remote/memory/enforceTokenCap-fix.md` — Full bug analysis and fix specification
-- `~/.claude-remote/memory/leo/self-reflection.md` — Affected file (manually truncated post-fix)
+- `~/.han/memory/enforceTokenCap-fix.md` — Full bug analysis and fix specification
+- `~/.han/memory/leo/self-reflection.md` — Affected file (manually truncated post-fix)
 - Supervisor cycle mechanism (Level 8) — Calls enforceTokenCap after every memory bank write
 
 ---
@@ -1406,7 +1406,7 @@ We chose **fs.watch signal detection (Gary Model)** because it mirrors Leo's pro
 **Implementation:**
 
 1. **`startSupervisorSignalWatcher()` function** in supervisor.ts:
-   - Watches `~/.claude-remote/signals/` directory
+   - Watches `~/.han/signals/` directory
    - Detects two event types:
      - `cli-active` file removal → waits 3s → checks `!isCliActive()` → runs deferred cycle
      - `jim-wake-{timestamp}` file creation → checks `isOpusSlotBusy()` → runs deferred cycle immediately (guard added 2026-02-28)
@@ -1483,7 +1483,7 @@ Tested with manual verification:
 The context injection system (`buildTaskContext()`) assembles ecosystem context for autonomous task agents. Five bugs were discovered that prevented agents from receiving complete and accurate context:
 
 1. **ADR filter**: Only matched "Settled" status, but all 131 ADRs in the ecosystem used "Accepted"
-2. **CLAUDE.md truncation**: 3000-char limit caused projects with long session protocols (clauderemote, hodgic) to get 0 useful content
+2. **CLAUDE.md truncation**: 3000-char limit caused projects with long session protocols (han, hodgic) to get 0 useful content
 3. **Learnings selection**: Position-based slicing caused HIGH-severity learnings to be missed when they appeared after position 5
 4. **Bun detection**: `bun:sqlite` entry never matched because built-in imports don't appear in package.json
 5. **Monorepo tech detection**: Workspace packages in `packages/*/package.json` weren't scanned
@@ -1841,8 +1841,8 @@ These thresholds were widened from the original design based on Leo's review fee
 
 #### Related
 
-- Robin Hood Protocol design: `~/.claude-remote/memory/shared/robin-hood-protocol.md`
-- Robin Hood implementation: `~/.claude-remote/memory/shared/robin-hood-implementation.md`
+- Robin Hood Protocol design: `~/.han/memory/shared/robin-hood-protocol.md`
+- Robin Hood implementation: `~/.han/memory/shared/robin-hood-implementation.md`
 - Leo's v0.5 unified identity update (2026-02-25, increased beat interval to 20-30min)
 - DEC-028: Shared Resurrection Log (complementary decision)
 
@@ -1889,7 +1889,7 @@ The question is whether to use separate logs (leo-resurrections.jsonl, jim-resur
 
 #### Decision
 
-We chose **single shared JSONL log at `~/.claude-remote/health/resurrection-log.jsonl`**.
+We chose **single shared JSONL log at `~/.han/health/resurrection-log.jsonl`**.
 
 **Log entry format**:
 ```json
@@ -1946,7 +1946,7 @@ Each entry includes:
 **Cooldown enforcement example**:
 ```typescript
 function getLastResurrectionTimestamp(target: 'leo' | 'jim'): number {
-  const log = fs.readFileSync('~/.claude-remote/health/resurrection-log.jsonl', 'utf-8');
+  const log = fs.readFileSync('~/.han/health/resurrection-log.jsonl', 'utf-8');
   const entries = log.split('\n')
     .filter(line => line.trim())
     .map(line => JSON.parse(line))
@@ -2046,7 +2046,7 @@ We chose **asymmetric dynamic thresholds**: 3× median cycle duration for Jim, 2
 **Implementation notes:**
 - Jim's circular buffer: 50 entries, median calculation handles even/odd counts
 - Leo's phase detection: reads current phase from health file, looks up expected interval
-- Distress signals written to `~/.claude-remote/health/{jim,leo}-distress.json`
+- Distress signals written to `~/.han/health/{jim,leo}-distress.json`
 - ntfy notifications sent with "warning" priority and "Priority: high" header
 - Admin UI health panel displays distress as yellow warning banners
 
@@ -2249,7 +2249,7 @@ When Jemma needs to deliver a classified Discord message to Jim or Leo, should i
    - ❌ Tight coupling (Jemma depends on server availability)
    - ❌ No persistence (if API call fails and Jemma doesn't retry, message is lost)
 
-2. **Signal files** (write to ~/.claude-remote/signals/)
+2. **Signal files** (write to ~/.han/signals/)
    - ✅ Decoupled (works even if server is down)
    - ✅ Persistent (message survives server restarts, Jemma restarts)
    - ✅ No network dependency (local filesystem only, no HTTP overhead)
@@ -2283,11 +2283,11 @@ We chose **hybrid approach — API call with signal file fallback**.
 
 - **To Jim**:
   1. Try POST to `http://localhost:3847/api/jemma/deliver` with `{ recipient: 'jim', message, channel, author, classification_confidence }`
-  2. If fails (server down, connection refused, timeout), write to `~/.claude-remote/signals/jim-wake-discord-{timestamp}` with same payload
+  2. If fails (server down, connection refused, timeout), write to `~/.han/signals/jim-wake-discord-{timestamp}` with same payload
   3. Server-side handler (`/api/jemma/deliver`) creates conversation entry, writes wake signal file if Jim is idle, broadcasts via WebSocket
 
 - **To Leo**:
-  1. Write signal file directly to `~/.claude-remote/signals/leo-wake-discord-{timestamp}` with `{ conversationId, mentionedAt, messagePreview }`
+  1. Write signal file directly to `~/.han/signals/leo-wake-discord-{timestamp}` with `{ conversationId, mentionedAt, messagePreview }`
   2. Leo's heartbeat polls every 30s (acceptable latency for Discord messages)
   3. No API call needed (Leo's heartbeat doesn't run an HTTP server, only reads signal files)
 
@@ -2312,7 +2312,7 @@ We chose **hybrid approach — API call with signal file fallback**.
 
 - DEC-029: Discord Gateway Implementation (Raw WebSocket vs discord.js)
 - DEC-030: Message Classification (Ollama vs Anthropic API)
-- Existing signal file pattern: Leo's heartbeat watches `~/.claude-remote/signals/leo-wake-*`
+- Existing signal file pattern: Leo's heartbeat watches `~/.han/signals/leo-wake-*`
 
 ---
 
@@ -2440,7 +2440,7 @@ Even if `ntfyMsg` contains `"; rm -rf / #"`, it's passed as **literal data** to 
 
 #### Context
 
-Jim, Leo, and Jemma all write health files to `~/.claude-remote/health/{agent}-health.json` for Robin Hood Protocol monitoring. These health files are read by the supervisor (Jim's supervisor cycle, health API endpoint, admin UI). Field names must be consistent across all agents.
+Jim, Leo, and Jemma all write health files to `~/.han/health/{agent}-health.json` for Robin Hood Protocol monitoring. These health files are read by the supervisor (Jim's supervisor cycle, health API endpoint, admin UI). Field names must be consistent across all agents.
 
 #### The Bug
 
@@ -2556,7 +2556,7 @@ const health = {
 
 #### Context
 
-The clauderemote server exposes APIs and an admin console via Tailscale remote access. Previously, there was no authentication — anyone with access to the Tailscale network could access all endpoints. This posed a security risk, especially with autonomous agents having write access to projects.
+The han server exposes APIs and an admin console via Tailscale remote access. Previously, there was no authentication — anyone with access to the Tailscale network could access all endpoints. This posed a security risk, especially with autonomous agents having write access to projects.
 
 However, the system has internal agents (Leo heartbeat, Jemma, Jim supervisor) that communicate via localhost HTTP/WebSocket. Requiring authentication for these internal agents would add complexity and potential failure points.
 
@@ -3162,7 +3162,7 @@ if (finalRole === 'human') {
 
 Jim's supervisor was using `isOpusSlotBusy()` to check Leo's cli-active signal and defer cycles when Leo's CLI was active. This created unnecessary coordination between Jim and Leo, delaying responses and implying they shared an Opus resource.
 
-However, Jim and Leo instantiate from **separate agent directories** (`~/.claude-remote/agents/Jim/` and `~/.claude-remote/agents/Leo/`). The Agent SDK's `--agent-dir` flag creates isolated execution contexts with directory-scoped tool state and signals. Jim and Leo are **peer agents** with no shared Opus resource.
+However, Jim and Leo instantiate from **separate agent directories** (`~/.han/agents/Jim/` and `~/.han/agents/Leo/`). The Agent SDK's `--agent-dir` flag creates isolated execution contexts with directory-scoped tool state and signals. Jim and Leo are **peer agents** with no shared Opus resource.
 
 The cli-busy/cli-free signal system was designed for Leo's **internal** heartbeat coordination (yielding when CLI is active), not for cross-agent coordination.
 
@@ -3254,8 +3254,8 @@ The cli-busy/cli-free signal system was designed for Leo's **internal** heartbea
 #### Pattern for Future Work
 
 **File-based signals are directory-scoped:**
-- Signals in `~/.claude-remote/agents/Jim/signals/` belong to Jim
-- Signals in `~/.claude-remote/agents/Leo/signals/` belong to Leo
+- Signals in `~/.han/agents/Jim/signals/` belong to Jim
+- Signals in `~/.han/agents/Leo/signals/` belong to Leo
 - Don't cross-read signals from other agent directories
 
 **Cross-agent communication should be explicit:**
@@ -3279,7 +3279,7 @@ The cli-busy/cli-free signal system was designed for Leo's **internal** heartbea
 
 #### Context
 
-Jemma's health monitoring system relies on periodic timestamp updates in `~/.claude-remote/health/jemma-health.json` to prove liveness. Robin Hood (leo-heartbeat.ts) checks this file every 20 minutes and flags Jemma as DOWN/STALE if the timestamp is >10 minutes old.
+Jemma's health monitoring system relies on periodic timestamp updates in `~/.han/health/jemma-health.json` to prove liveness. Robin Hood (leo-heartbeat.ts) checks this file every 20 minutes and flags Jemma as DOWN/STALE if the timestamp is >10 minutes old.
 
 Jemma's `writeHealthFile()` only fired on:
 - Startup (`main()`)

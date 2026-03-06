@@ -14,7 +14,7 @@ Implemented the complete fractal memory gradient system for Jim and Leo. This en
 ### 1. Directory Structure
 Created the complete fractal memory hierarchy:
 ```
-~/.claude-remote/memory/fractal/
+~/.han/memory/fractal/
 ├── jim/
 │   ├── c1/ (6 compressed files, 20.9KB total)
 │   ├── c2/ (prepared, empty)
@@ -54,7 +54,7 @@ Built a 344-line TypeScript module with:
 Modified `loadMemoryBank()` in `src/server/services/supervisor-worker.ts` (lines 313-404) to load the fractal gradient after existing memory files:
 
 **Loading strategy:**
-- **c=0 (full)**: Most recent session from `~/.claude-remote/memory/sessions/` (Jim) or Leo's working memories
+- **c=0 (full)**: Most recent session from `~/.han/memory/sessions/` (Jim) or Leo's working memories
 - **c=1 (~1/3)**: Up to 3 items from `fractal/jim/c1/`
 - **c=2 (~1/9)**: Up to 6 items from `fractal/jim/c2/`
 - **c=3 (~1/27)**: Up to 9 items from `fractal/jim/c3/`
@@ -199,13 +199,13 @@ Note: First entry appears truncated but Opus chose to leave it incomplete — pe
 **New files:**
 - `src/server/lib/memory-gradient.ts` (344 lines) — Core compression utility
 - `src/scripts/bootstrap-fractal-gradient.js` (Node.js bootstrap script)
-- `~/.claude-remote/memory/fractal/jim/c1/2026-02-18-c1.md` (2.8KB)
-- `~/.claude-remote/memory/fractal/jim/c1/2026-02-19-c1.md` (3.1KB)
-- `~/.claude-remote/memory/fractal/jim/c1/2026-02-20-c1.md` (2.8KB)
-- `~/.claude-remote/memory/fractal/jim/c1/2026-02-21-c1.md` (3.3KB)
-- `~/.claude-remote/memory/fractal/jim/c1/2026-02-22-c1.md` (5.5KB)
-- `~/.claude-remote/memory/fractal/jim/c1/2026-02-23-c1.md` (4.0KB)
-- `~/.claude-remote/memory/fractal/jim/unit-vectors.md` (6 entries)
+- `~/.han/memory/fractal/jim/c1/2026-02-18-c1.md` (2.8KB)
+- `~/.han/memory/fractal/jim/c1/2026-02-19-c1.md` (3.1KB)
+- `~/.han/memory/fractal/jim/c1/2026-02-20-c1.md` (2.8KB)
+- `~/.han/memory/fractal/jim/c1/2026-02-21-c1.md` (3.3KB)
+- `~/.han/memory/fractal/jim/c1/2026-02-22-c1.md` (5.5KB)
+- `~/.han/memory/fractal/jim/c1/2026-02-23-c1.md` (4.0KB)
+- `~/.han/memory/fractal/jim/unit-vectors.md` (6 entries)
 
 **Modified files:**
 - `src/server/services/supervisor-worker.ts` (+92 lines in `loadMemoryBank()`)
@@ -213,14 +213,14 @@ Note: First entry appears truncated but Opus chose to leave it incomplete — pe
 - `package-lock.json` (lockfile update)
 
 **Directory structure created:**
-- `~/.claude-remote/memory/fractal/jim/c1/` (populated)
-- `~/.claude-remote/memory/fractal/jim/c2/` (empty, ready)
-- `~/.claude-remote/memory/fractal/jim/c3/` (empty, ready)
-- `~/.claude-remote/memory/fractal/jim/c4/` (empty, ready)
-- `~/.claude-remote/memory/fractal/leo/c1/` (empty, ready)
-- `~/.claude-remote/memory/fractal/leo/c2/` (empty, ready)
-- `~/.claude-remote/memory/fractal/leo/c3/` (empty, ready)
-- `~/.claude-remote/memory/fractal/leo/c4/` (empty, ready)
+- `~/.han/memory/fractal/jim/c1/` (populated)
+- `~/.han/memory/fractal/jim/c2/` (empty, ready)
+- `~/.han/memory/fractal/jim/c3/` (empty, ready)
+- `~/.han/memory/fractal/jim/c4/` (empty, ready)
+- `~/.han/memory/fractal/leo/c1/` (empty, ready)
+- `~/.han/memory/fractal/leo/c2/` (empty, ready)
+- `~/.han/memory/fractal/leo/c3/` (empty, ready)
+- `~/.han/memory/fractal/leo/c4/` (empty, ready)
 
 ## Next Steps
 

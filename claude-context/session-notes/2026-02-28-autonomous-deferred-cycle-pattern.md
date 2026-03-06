@@ -16,7 +16,7 @@ Implemented the deferred cycle resumption pattern for Jim's supervisor, mirrorin
 ### 1. Signal Watcher in Supervisor (`supervisor.ts`)
 
 **Function: `startSupervisorSignalWatcher()`** (lines 191-240)
-- Watches `~/.claude-remote/signals/` directory using `fs.watch()`
+- Watches `~/.han/signals/` directory using `fs.watch()`
 - Two detection patterns:
   1. **CLI stop detection**: When `cli-active` file is removed (rename event, file no longer exists)
      - Checks `deferredCyclePending` flag
@@ -46,7 +46,7 @@ Implemented the deferred cycle resumption pattern for Jim's supervisor, mirrorin
   2. If busy, write timestamped signal file: `jim-wake-{timestamp}`
   3. Signal file triggers immediate deferred cycle when Jim's watcher detects it
 - Error handling: logs failure but doesn't block message creation
-- Location: `~/.claude-remote/signals/jim-wake-{timestamp}`
+- Location: `~/.han/signals/jim-wake-{timestamp}`
 
 ## Key Decisions
 

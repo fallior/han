@@ -3,26 +3,26 @@
 **Date**: 2026-03-05
 **Author**: Claude (autonomous)
 **Type**: Documentation
-**Files Modified**: `~/.claude-remote/agents/Leo/CLAUDE.md`, `~/Projects/clauderemote/CLAUDE.md`
+**Files Modified**: `~/.han/agents/Leo/CLAUDE.md`, `~/Projects/han/CLAUDE.md`
 **Commits**: 3 commits (903a529, c3038db, 087ad9a)
 
 ## Summary
 
-Added ecosystem map references to both Leo's heartbeat CLAUDE.md and the clauderemote project CLAUDE.md, fulfilling Darron's explicit request from the 'Map of Home' conversation on March 4. The ecosystem map (`~/.claude-remote/memory/shared/ecosystem-map.md`) provides orientation to the full development ecosystem — where to find files, services, databases, and how the team (Darron, Leo, Jim) connects.
+Added ecosystem map references to both Leo's heartbeat CLAUDE.md and the han project CLAUDE.md, fulfilling Darron's explicit request from the 'Map of Home' conversation on March 4. The ecosystem map (`~/.han/memory/shared/ecosystem-map.md`) provides orientation to the full development ecosystem — where to find files, services, databases, and how the team (Darron, Leo, Jim) connects.
 
 ## What Was Built
 
 ### 1. Leo's Heartbeat CLAUDE.md Reference (commit 087ad9a)
-- **File**: `~/.claude-remote/agents/Leo/CLAUDE.md`
+- **File**: `~/.han/agents/Leo/CLAUDE.md`
 - **Location**: Added under `## Memory` section (after line 16, before line 17 'Read your memory before acting')
-- **Content**: `- Ecosystem map: `~/.claude-remote/memory/shared/ecosystem-map.md` — Map of our garden. Where to find files, services, databases, and how the team connects.`
+- **Content**: `- Ecosystem map: `~/.han/memory/shared/ecosystem-map.md` — Map of our garden. Where to find files, services, databases, and how the team connects.`
 - **Purpose**: Gives Leo's heartbeat agent immediate access to ecosystem orientation during initialisation
 
-### 2. clauderemote Project CLAUDE.md Reference (commits 903a529, c3038db)
-- **File**: `~/Projects/clauderemote/CLAUDE.md`
+### 2. han Project CLAUDE.md Reference (commits 903a529, c3038db)
+- **File**: `~/Projects/han/CLAUDE.md`
 - **Location**: Added under `## Quick Context` section (after line 146, before line 148 '- **Stage**')
-- **Content**: `- **Ecosystem Map**: `~/.claude-remote/memory/shared/ecosystem-map.md` — Living map of the ecosystem for orientation`
-- **Purpose**: Provides session Leo and autonomous task agents with ecosystem context when working in the clauderemote project
+- **Content**: `- **Ecosystem Map**: `~/.han/memory/shared/ecosystem-map.md` — Living map of the ecosystem for orientation`
+- **Purpose**: Provides session Leo and autonomous task agents with ecosystem context when working in the han project
 
 ## Key Decisions
 
@@ -46,8 +46,8 @@ Added ecosystem map references to both Leo's heartbeat CLAUDE.md and the clauder
 
 | File | Lines Changed | Description |
 |------|---------------|-------------|
-| `~/.claude-remote/agents/Leo/CLAUDE.md` | +1 | Added ecosystem map reference to Memory section |
-| `~/Projects/clauderemote/CLAUDE.md` | +1 | Added ecosystem map reference to Quick Context section |
+| `~/.han/agents/Leo/CLAUDE.md` | +1 | Added ecosystem map reference to Memory section |
+| `~/Projects/han/CLAUDE.md` | +1 | Added ecosystem map reference to Quick Context section |
 
 **Total diff**: +2 insertions across 3 commits (one commit per file, one for session note)
 
@@ -63,7 +63,7 @@ Added ecosystem map references to both Leo's heartbeat CLAUDE.md and the clauder
 - **File locations verified**: Both CLAUDE.md files exist at expected paths
 - **Section placement verified**: References added to correct sections (Memory and Quick Context)
 - **Line preservation verified**: No other lines modified, no reformatting applied
-- **Ecosystem map file verified**: Target file exists at `~/.claude-remote/memory/shared/ecosystem-map.md` (13KB, 128 lines)
+- **Ecosystem map file verified**: Target file exists at `~/.han/memory/shared/ecosystem-map.md` (13KB, 128 lines)
 
 ## Context
 
@@ -73,7 +73,7 @@ The map serves as orientation for both human and AI agents when working across m
 
 ## Next Steps
 
-None — goal complete. Both Leo's heartbeat and clauderemote project sessions now have explicit references to the ecosystem map for orientation.
+None — goal complete. Both Leo's heartbeat and han project sessions now have explicit references to the ecosystem map for orientation.
 
 ## Cost
 

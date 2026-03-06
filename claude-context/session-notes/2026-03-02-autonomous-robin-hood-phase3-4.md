@@ -17,7 +17,7 @@ Implemented Jim's side of the Robin Hood Protocol Phase 3 (staleness detection) 
 
 Added comprehensive health monitoring function (~120 lines) that:
 
-1. **Reads Leo's health signal** from `~/.claude-remote/health/leo-health.json`
+1. **Reads Leo's health signal** from `~/.han/health/leo-health.json`
 2. **Classifies staleness** based on timestamp age:
    - <45min: OK (healthy, no action)
    - 45-90min: Stale (log warning, check PID)
@@ -25,7 +25,7 @@ Added comprehensive health monitoring function (~120 lines) that:
 3. **PID alive check** via `kill -0` before resurrection (prevents split-brain)
 4. **Resurrection attempt** via `systemctl --user restart leo-heartbeat.service`
 5. **Verification** after 10s wait (reads new health file)
-6. **Resurrection logging** to `~/.claude-remote/health/resurrection-log.jsonl`
+6. **Resurrection logging** to `~/.han/health/resurrection-log.jsonl`
 7. **Cooldown enforcement** (1-hour minimum between resurrection attempts)
 8. **Human escalation** via ntfy if resurrection fails
 
@@ -40,7 +40,7 @@ Mirrored Leo's implementation from `leo-heartbeat.ts:94-221` for consistency:
 
 ### Shared Documentation
 
-Updated `~/.claude-remote/memory/shared/robin-hood-implementation.md` with completion status for both Leo and Jim's Phase 3+4 implementations.
+Updated `~/.han/memory/shared/robin-hood-implementation.md` with completion status for both Leo and Jim's Phase 3+4 implementations.
 
 ## Key Decisions
 
@@ -56,11 +56,11 @@ Updated `~/.claude-remote/memory/shared/robin-hood-implementation.md` with compl
 
 **Status**: Accepted
 
-### DEC-028: Shared Resurrection Log at `~/.claude-remote/health/resurrection-log.jsonl`
+### DEC-028: Shared Resurrection Log at `~/.han/health/resurrection-log.jsonl`
 
 **Context**: Both Leo and Jim can perform resurrections. Need to track resurrection attempts for debugging, cooldown enforcement, and human visibility.
 
-**Decision**: Single shared JSONL log file at `~/.claude-remote/health/resurrection-log.jsonl` with entries from both agents.
+**Decision**: Single shared JSONL log file at `~/.han/health/resurrection-log.jsonl` with entries from both agents.
 
 **Format**:
 ```json
@@ -95,7 +95,7 @@ Updated `~/.claude-remote/memory/shared/robin-hood-implementation.md` with compl
 ```typescript
 function checkLeoHealth(): 'ok' | 'stale' | 'down' | 'resurrecting' | 'escalated' {
   // 1. Read leo-health.json
-  const health = JSON.parse(fs.readFileSync('~/.claude-remote/health/leo-health.json'));
+  const health = JSON.parse(fs.readFileSync('~/.han/health/leo-health.json'));
 
   // 2. Calculate staleness
   const ageMinutes = (Date.now() - Date.parse(health.timestamp)) / 60000;
@@ -124,7 +124,7 @@ function checkLeoHealth(): 'ok' | 'stale' | 'down' | 'resurrecting' | 'escalated
 
   // 7. Wait and verify
   await sleep(10000);
-  const newHealth = JSON.parse(fs.readFileSync('~/.claude-remote/health/leo-health.json'));
+  const newHealth = JSON.parse(fs.readFileSync('~/.han/health/leo-health.json'));
   const newAge = (Date.now() - Date.parse(newHealth.timestamp)) / 60000;
 
   if (newAge < 5) {
@@ -164,7 +164,7 @@ This completes Phases 3+4 of the Robin Hood Protocol:
 
 **Phase 1: Server systemd unit** ✅
 - Completed by Leo 2026-02-26
-- `~/.config/systemd/user/claude-remote-server.service`
+- `~/.config/systemd/user/han-server.service`
 
 **Phase 2: Health signals** ✅
 - Leo: `writeHealthSignal()` in leo-heartbeat.ts (2026-02-26)
@@ -192,8 +192,8 @@ This completes Phases 3+4 of the Robin Hood Protocol:
 
 ## Related
 
-- Robin Hood Protocol design: `~/.claude-remote/memory/shared/robin-hood-protocol.md`
-- Robin Hood implementation plan: `~/.claude-remote/memory/shared/robin-hood-implementation.md`
+- Robin Hood Protocol design: `~/.han/memory/shared/robin-hood-protocol.md`
+- Robin Hood implementation plan: `~/.han/memory/shared/robin-hood-implementation.md`
 - Leo's Phase 3+4 implementation: leo-heartbeat.ts lines 94-221
 - Supervisor health signals: supervisor-worker.ts (Phase 2)
 - systemd units: `~/.config/systemd/user/` (Phase 1)

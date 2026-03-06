@@ -37,11 +37,11 @@ Accepts classified Discord messages from Jemma service and routes to the appropr
 - **jim**:
   - Creates (or uses provided) conversation entry in DB with type='discord'
   - Inserts message as 'discord' role
-  - Writes signal file: `~/.claude-remote/signals/jim-wake-discord-{timestamp}`
+  - Writes signal file: `~/.han/signals/jim-wake-discord-{timestamp}`
   - Signal contains: conversationId, author, channel, confidence, mentionedAt
 
 - **leo**:
-  - Writes signal file: `~/.claude-remote/signals/leo-wake-discord-{timestamp}`
+  - Writes signal file: `~/.han/signals/leo-wake-discord-{timestamp}`
   - Signal contains: author, channel, message preview (first 200 chars), confidence, mentionedAt
 
 - **darron**:
@@ -102,7 +102,7 @@ The `src/server/jemma.ts` main service:
 2. Receives MESSAGE_CREATE events
 3. Classifies incoming messages using Ollama (Gemma/Qwen)
 4. Routes classified messages to `/api/jemma/deliver`
-5. Writes health status to `~/.claude-remote/health/jemma-health.json`
+5. Writes health status to `~/.han/health/jemma-health.json`
 
 ## Testing
 
@@ -166,16 +166,16 @@ curl -X POST http://192.168.1.x:3847/api/jemma/deliver \
 
 ## File Locations
 
-- Signal files: `~/.claude-remote/signals/`
+- Signal files: `~/.han/signals/`
   - `jim-wake-discord-{timestamp}` — JSON with conversation details
   - `leo-wake-discord-{timestamp}` — JSON with message preview
 
-- Health status: `~/.claude-remote/health/jemma-health.json`
+- Health status: `~/.han/health/jemma-health.json`
   - Updated by jemma service with connection status
 
 ## Environment & Config
 
-Requires `~/.claude-remote/config.json` with:
+Requires `~/.han/config.json` with:
 ```json
 {
   "ntfy_topic": "your-ntfy-topic"

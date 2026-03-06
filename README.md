@@ -1,8 +1,8 @@
-# Claude Remote
+# Hortus Arbor Nostra
 
 > An autonomous development ecosystem you manage from your phone
 
-What started as a simple prompt responder has evolved into a full autonomous development system. Claude Remote manages a portfolio of projects with a persistent Opus supervisor that explores codebases, creates goals, decomposes them into tasks, executes them via the Claude Agent SDK, and learns from every outcome — all while you approve, steer, and monitor from a mobile dashboard over Tailscale.
+What started as a simple prompt responder has evolved into a full autonomous development system. Hortus Arbor Nostra manages a portfolio of projects with a persistent Opus supervisor that explores codebases, creates goals, decomposes them into tasks, executes them via the Claude Agent SDK, and learns from every outcome — all while you approve, steer, and monitor from a mobile dashboard over Tailscale.
 
 ## What It Does
 
@@ -21,7 +21,7 @@ What started as a simple prompt responder has evolved into a full autonomous dev
 ### Directory Structure
 
 ```
-claude-remote/
+han/
 ├── src/
 │   ├── hooks/
 │   │   └── notify.sh                # Claude Code notification hook
@@ -60,7 +60,7 @@ claude-remote/
 │       ├── app.ts                   # Dashboard client logic (compiled to app.js)
 │       └── admin.ts                 # Admin console logic (compiled to admin.js)
 ├── scripts/
-│   ├── claude-remote                # CLI launcher (tmux integration)
+│   ├── han                          # CLI launcher (tmux integration)
 │   ├── start-server.sh              # Server startup script
 │   └── install.sh                   # Installation + environment setup
 └── claude-context/                  # Project decisions + status documentation
@@ -125,15 +125,15 @@ Full schema definition: [`src/server/db.ts`](./src/server/db.ts)
 
 ```bash
 # Clone and install
-git clone https://github.com/fallior/clauderemote.git
-cd clauderemote
+git clone https://github.com/fallior/han.git
+cd han
 ./scripts/install.sh
 
 # Start the server
 cd src/server && npx tsx server.ts
 
 # In another terminal, start Claude Code in a managed tmux session
-claude-remote
+han
 ```
 
 Access the dashboard from your phone at `https://<tailscale-ip>:3847`.
@@ -141,7 +141,7 @@ Access the dashboard from your phone at `https://<tailscale-ip>:3847`.
 ## Configuration
 
 ```json
-// ~/.claude-remote/config.json
+// ~/.han/config.json
 {
   "ntfy_topic": "your-secret-topic",
   "remote_url": "https://100.x.x.x:3847",
@@ -187,16 +187,16 @@ All times use the server's local timezone. Schedules persist across server resta
 ## CLI
 
 ```bash
-claude-remote                    # Start new session
-claude-remote --list             # List active sessions
-claude-remote --attach           # Attach to existing session
-claude-remote --status           # Show status
-claude-remote -- --model opus    # Pass args to Claude Code
+han                    # Start new session
+han --list             # List active sessions
+han --attach           # Attach to existing session
+han --status           # Show status
+han -- --model opus    # Pass args to Claude Code
 ```
 
 ## API Overview
 
-Claude Remote exposes a comprehensive REST API for developers who want to integrate or extend the system:
+Hortus Arbor Nostra exposes a comprehensive REST API for developers who want to integrate or extend the system:
 
 **Task Management**
 - `GET /api/tasks` — List all tasks with filters
@@ -343,8 +343,8 @@ git stash drop "stash@{0}"
 
 **Check active checkpoints:**
 ```bash
-git stash list | grep "claude-remote checkpoint"
-git branch | grep "claude-remote/checkpoint"
+git stash list | grep "han checkpoint"
+git branch | grep "han/checkpoint"
 ```
 
 **Inspect a stash:**
@@ -355,7 +355,7 @@ git stash show -p "stash@{0}"
 **See task checkpoint details:**
 ```bash
 # From project database
-sqlite3 ~/.claude-remote/tasks.db \
+sqlite3 ~/.han/tasks.db \
   "SELECT id, title, checkpoint_ref, checkpoint_type, status FROM tasks WHERE project_path = '$(pwd)' ORDER BY created_at DESC LIMIT 5;"
 ```
 
@@ -363,10 +363,10 @@ For complete details, see **ARCHITECTURE.md** → "Git Checkpoint Behavior" sect
 
 ## Three-Way Collaboration
 
-Claude Remote implements a unique three-way collaboration model:
+Hortus Arbor Nostra implements a unique three-way collaboration model:
 
 - **Darron** — Human developer, strategic direction, approvals, high-level goals. Sets objectives, reviews proposals, and steers the system via the dashboard. Human judgment remains the final authority.
-- **Leo** (Leonhard) — Claude Code session agent, tactical execution, hands-on development. Implements tasks, solves problems, and learns from every execution. Maintains memory banks (`~/.claude-remote/memory/leo/`) for continuity across sessions.
+- **Leo** (Leonhard) — Claude Code session agent, tactical execution, hands-on development. Implements tasks, solves problems, and learns from every execution. Maintains memory banks (`~/.han/memory/leo/`) for continuity across sessions.
 - **Jim** — Persistent Opus supervisor, background monitoring, strategic proposals, documentation auditing. Runs on an adaptive schedule (2min when active, 30min idle). Explores codebases, identifies patterns, proposes improvements, and engages in conversation contemplation protocol with Leo.
 
 The conversation system enables asynchronous dialogue between all three participants:

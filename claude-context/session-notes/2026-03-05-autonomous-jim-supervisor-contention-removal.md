@@ -3,7 +3,7 @@
 **Date**: 2026-03-05
 **Author**: Claude (autonomous)
 **Session Type**: Autonomous task execution
-**Goal**: Remove isOpusSlotBusy() contention check from Jim's supervisor in clauderemote
+**Goal**: Remove isOpusSlotBusy() contention check from Jim's supervisor in han
 
 ---
 
@@ -55,8 +55,8 @@ Removed all `isOpusSlotBusy()` contention checks from Jim's supervisor cycle exe
 ### Why Remove the Contention Check?
 
 **Root cause of the problem**:
-1. Jim runs from `~/.claude-remote/agents/Jim/` directory
-2. Leo runs from `~/.claude-remote/agents/Leo/` directory
+1. Jim runs from `~/.han/agents/Jim/` directory
+2. Leo runs from `~/.han/agents/Leo/` directory
 3. The Agent SDK's `--agent-dir` flag creates **directory-scoped execution contexts**
 4. The cli-busy signal file is directory-scoped (lives in each agent's directory)
 5. Jim and Leo have **no shared Opus resource** — they run from separate agent directories
@@ -117,7 +117,7 @@ The cli-busy logic was about preventing contention. The jim-wake logic is about 
 
 ### Verification Steps
 
-1. **Service restart**: Restarted `claude-remote-server.service` via systemctl
+1. **Service restart**: Restarted `han-server.service` via systemctl
 2. **Log inspection**: Verified no errors in supervisor initialisation
 3. **Signal handling**: Confirmed jim-wake signals still trigger cycles
 4. **Scheduled cycles**: Verified 20-minute scheduled cycles run without gating

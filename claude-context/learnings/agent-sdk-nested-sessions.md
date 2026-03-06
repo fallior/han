@@ -37,7 +37,7 @@ The `CLAUDECODE` environment variable is set by Claude Code to mark the process 
 
 ## When This Applies
 
-- Running the Agent SDK from a server that was started inside a `claude-remote` tmux session
+- Running the Agent SDK from a server that was started inside a `han` tmux session
 - Any scenario where `process.env.CLAUDECODE` is set and you want to spawn a new Claude Code instance
 - The `claude -p` pipe mode has the same issue — use `env -u CLAUDECODE claude -p` from the shell
 

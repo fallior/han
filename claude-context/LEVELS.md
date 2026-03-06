@@ -1,10 +1,10 @@
-# Claude Remote — Implementation Levels
+# Hortus Arbor Nostra — Implementation Levels
 
 > Progressive enhancement from MVP to full mobile development
 
 ## Overview
 
-Claude Remote is built in layers, each adding functionality while maintaining the simplicity of previous levels. Each level is independently useful — you don't need Level 6 to benefit from Level 1.
+Hortus Arbor Nostra is built in layers, each adding functionality while maintaining the simplicity of previous levels. Each level is independently useful — you don't need Level 6 to benefit from Level 1.
 
 ## Level Summary
 
@@ -37,7 +37,7 @@ When Claude Code is waiting for input, get notified and respond from your phone.
 - [x] Web UI to view pending prompts
 - [x] Quick action buttons: Y, n, Enter, Skip, Custom
 - [x] Response injection via `tmux send-keys`
-- [x] CLI launcher (`claude-remote`) with tmux session management
+- [x] CLI launcher (`han`) with tmux session management
 - [x] Installation script with Claude Code hook configuration
 
 ### Technical Implementation

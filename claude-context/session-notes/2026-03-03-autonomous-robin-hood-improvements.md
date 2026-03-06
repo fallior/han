@@ -91,8 +91,8 @@ All features tested and verified working. Created comprehensive testing suite wi
 **Files**:
 - `src/server/services/supervisor.ts` — Jim's slow cycle detection
 - `src/server/leo-heartbeat.ts` — Leo's slow beat detection
-- `~/.claude-remote/health/jim-distress.json` — Jim's distress signals
-- `~/.claude-remote/health/leo-distress.json` — Leo's distress signals
+- `~/.han/health/jim-distress.json` — Jim's distress signals
+- `~/.han/health/leo-distress.json` — Leo's distress signals
 
 **Detection Logic**:
 

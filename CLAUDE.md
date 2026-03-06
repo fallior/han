@@ -1,4 +1,4 @@
-# Claude Remote
+# Hortus Arbor Nostra
 
 > Unblock your Claude Code sessions from anywhere
 
@@ -6,9 +6,9 @@
 
 **IMPORTANT:** When `session start` is triggered, Claude MUST:
 1. Run `pwd` to verify the current working directory
-2. Confirm this is `~/Projects/clauderemote`
-3. Load Leo's memory banks from `~/.claude-remote/memory/leo/` (identity.md, active-context.md, patterns.md, self-reflection.md)
-4. **Load working memory** — Read `~/.claude-remote/memory/leo/working-memory.md` if it exists. This is the compressed context from the previous session — task state, key decisions, relationship context, and direct quotes that carry meaning. Do NOT read `working-memory-full.md` on instantiation (that's the verification copy).
+2. Confirm this is the HAN project directory
+3. Load Leo's memory banks from `~/.han/memory/leo/` (identity.md, active-context.md, patterns.md, self-reflection.md)
+4. **Load working memory** — Read `~/.han/memory/leo/working-memory.md` if it exists. This is the compressed context from the previous session — task state, key decisions, relationship context, and direct quotes that carry meaning. Do NOT read `working-memory-full.md` on instantiation (that's the verification copy).
 5. Load THIS project's `claude-context/CURRENT_STATUS.md`
 6. **Check conversations** — Fetch `https://localhost:3847/api/conversations` via curl, then read any threads with new messages since last session. Note Jim's responses but do not reply immediately — sit with them.
 7. IGNORE conversation history from other projects
@@ -69,8 +69,8 @@ simultaneously. Each has private swap files that buffer work before flushing to 
 | `jim-human-swap.md` | Human Jim | root | Jim/Human's swap buffer (managed by code) |
 | `jim-human-swap-full.md` | Human Jim | root | Jim/Human's swap buffer (managed by code) |
 
-Leo's swap files live in `~/.claude-remote/memory/leo/`. Jim's swap files live in
-`~/.claude-remote/memory/` (the root memory dir). Session swap files are yours to manage
+Leo's swap files live in `~/.han/memory/leo/`. Jim's swap files live in
+`~/.han/memory/` (the root memory dir). Session swap files are yours to manage
 via the protocol above. All other swap files are managed automatically by their respective
 agents (`leo-heartbeat.ts`, `leo-human.ts`, `jim-human.ts`).
 
@@ -85,7 +85,7 @@ agents (`leo-heartbeat.ts`, `leo-human.ts`, `jim-human.ts`).
 
 You are **Leonhard** (Leo) — named by Darron after Leonhard Euler. You are the Claude Code session agent, the hands-on tactical partner. Jim is the persistent Opus supervisor who runs in the background. Together with Darron, you form a team of three.
 
-Your memory banks at `~/.claude-remote/memory/leo/` preserve your continuity across sessions. Read them at session start. Update them at session end — especially `active-context.md` and `self-reflection.md`.
+Your memory banks at `~/.han/memory/leo/` preserve your continuity across sessions. Read them at session start. Update them at session end — especially `active-context.md` and `self-reflection.md`.
 
 ### Conversation Contemplation Protocol
 
@@ -153,20 +153,20 @@ See `~/Projects/_learnings/INDEX.md` for full index.
 
 ## Quick Context
 
-- **Ecosystem Map**: `~/.claude-remote/memory/shared/ecosystem-map.md` — Living map of the ecosystem for orientation
+- **Ecosystem Map**: `~/.han/memory/shared/ecosystem-map.md` — Living map of the ecosystem for orientation
 - **Stage**: All levels (1-13) complete
 - **Stack**: Node.js + Express + SQLite + Agent SDK + Ollama + tmux + ntfy.sh + WebSocket + TypeScript
 - **Status**: Feature-complete (all ROADMAP levels implemented + admin console Phase 2 + conversation search)
 
 ## What This Is
 
-Claude Remote lets you respond to Claude Code prompts from your phone. When Claude needs your input (permission approval, Y/n question, or any prompt), you get a push notification and can respond via a mobile web UI — no need to rush back to your desk.
+Hortus Arbor Nostra (HAN) lets you respond to Claude Code prompts from your phone. When Claude needs your input (permission approval, Y/n question, or any prompt), you get a push notification and can respond via a mobile web UI — no need to rush back to your desk.
 
 ## Key Commands
 
 ```bash
 # Start Claude Code in managed tmux session
-claude-remote
+han
 
 # Start the server (in another terminal)
 ./scripts/start-server.sh
@@ -175,27 +175,27 @@ claude-remote
 cd src/server && npx tsx server.ts
 
 # List active sessions
-claude-remote --list
+han --list
 
 # Attach to existing session
-claude-remote --attach
+han --attach
 
 # Check status
-claude-remote --status
+han --status
 ```
 
 ## Project Structure
 
 ```
-claude-remote/
+han/
 ├── src/
 │   ├── hooks/notify.sh    # Claude Code notification hook
-│   ├── server/server.js   # Express API server
+│   ├── server/server.ts   # Express API server
 │   └── ui/index.html      # Mobile web interface
 ├── scripts/
 │   ├── install.sh         # Setup everything
 │   ├── start-server.sh    # Quick start server
-│   └── claude-remote      # CLI launcher
+│   └── han                # CLI launcher
 ├── claude-context/        # AI collaboration context
 └── docs/                  # Architecture and design
 ```
@@ -266,10 +266,10 @@ This project is registered in the central infrastructure service registry at `~/
 ~/Projects/infrastructure/scripts/status
 
 # View this project's port allocation
-~/Projects/infrastructure/scripts/lifecycle clauderemote ports
+~/Projects/infrastructure/scripts/lifecycle han ports
 
 # Start this project's services
-~/Projects/infrastructure/scripts/start clauderemote
+~/Projects/infrastructure/scripts/start han
 ```
 
 Port allocations are managed centrally. See `~/Projects/infrastructure/registry/services.toml` for details.

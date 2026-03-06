@@ -131,7 +131,7 @@ Tests verify:
 npm run start-server
 
 # In another terminal
-cd /path/to/clauderemote
+cd /path/to/han
 bash test-archive-feature.sh
 ```
 

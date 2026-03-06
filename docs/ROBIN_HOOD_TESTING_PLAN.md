@@ -21,7 +21,7 @@ This document outlines manual testing for the three Robin Hood Protocol improvem
 ### Background
 When Jim's service crashes, Leo detects stale health file and attempts resurrection via:
 ```bash
-systemctl --user restart claude-remote-server.service
+systemctl --user restart han-server.service
 ```
 
 **Issue**: Original 3s sleep was too short for Node.js/tsx Express server to fully start. Verification check ran before server was ready, causing false 'failed' entries in resurrection log.
@@ -33,7 +33,7 @@ systemctl --user restart claude-remote-server.service
 #### Setup
 1. Ensure Jim's service is running:
    ```bash
-   systemctl --user status claude-remote-server.service
+   systemctl --user status han-server.service
    ```
 
 2. Check Leo's heartbeat is active:
@@ -46,12 +46,12 @@ systemctl --user restart claude-remote-server.service
 **Step 1: Trigger a controlled failure**
 - Kill Jim's service:
   ```bash
-  systemctl --user stop claude-remote-server.service
+  systemctl --user stop han-server.service
   ```
 - Wait 5 seconds to ensure it's stopped
 - Verify service is inactive:
   ```bash
-  systemctl --user is-active claude-remote-server.service  # Should output: inactive
+  systemctl --user is-active han-server.service  # Should output: inactive
   ```
 
 **Step 2: Wait for Leo's heartbeat to detect stale health file**
@@ -71,7 +71,7 @@ systemctl --user restart claude-remote-server.service
 - Look for:
   ```
   [Robin Hood] Jim DOWN — last seen XXmin ago
-  [Robin Hood] Resurrecting Jim via systemctl --user restart claude-remote-server.service
+  [Robin Hood] Resurrecting Jim via systemctl --user restart han-server.service
   sleep 12  # ← Verify this 12s sleep happens
   [Robin Hood] Jim RESURRECTED — service active
   ```
@@ -79,7 +79,7 @@ systemctl --user restart claude-remote-server.service
 **Step 4: Verify resurrection log entry**
 - Check resurrection log:
   ```bash
-  cat ~/.claude-remote/health/resurrection-log.jsonl | jq '.[-1]'
+  cat ~/.han/health/resurrection-log.jsonl | jq '.[-1]'
   ```
 - **Expected output**:
   ```json
@@ -103,7 +103,7 @@ systemctl --user restart claude-remote-server.service
 | Issue | Cause | Fix |
 |-------|-------|-----|
 | Sleep appears as `3s` in logs | Code not updated | Verify leo-heartbeat.ts:174 has `sleep 12` |
-| Service not active after sleep | Server startup issue | Check `journalctl --user -u claude-remote-server -n 50` |
+| Service not active after sleep | Server startup issue | Check `journalctl --user -u han-server -n 50` |
 | Still getting `success: false` | Verification still too fast | Increase sleep to 15s, test again |
 
 ---
@@ -148,7 +148,7 @@ Look for **Jim's Health** section showing:
 **Validation**:
 ```bash
 # Check actual values:
-jq '.jim' ~/.claude-remote/health/jim-health.json  # May not exist in file directly
+jq '.jim' ~/.han/health/jim-health.json  # May not exist in file directly
 # Or read from API:
 curl -s https://localhost:3847/api/supervisor/health | jq '.jim'
 ```
@@ -164,7 +164,7 @@ Look for **Leo's Health** section showing:
 
 **Validation**:
 ```bash
-cat ~/.claude-remote/health/leo-health.json | jq '.'
+cat ~/.han/health/leo-health.json | jq '.'
 ```
 
 #### Test Step 4: Resurrection History
@@ -179,7 +179,7 @@ Expand the **"▼ History"** section. Verify it shows a table with:
 
 **Validation**:
 ```bash
-cat ~/.claude-remote/health/resurrection-log.jsonl | jq '.'
+cat ~/.han/health/resurrection-log.jsonl | jq '.'
 ```
 
 #### Test Step 5: WebSocket Real-Time Updates
@@ -237,7 +237,7 @@ systemctl --user stop leo-heartbeat.service
 | Issue | Cause | Fix |
 |-------|-------|-----|
 | Panel not visible | Health data endpoint returns empty | Check `/api/supervisor/health` endpoint |
-| Timestamps showing "—" | Data not found in health files | Verify health files exist in `~/.claude-remote/health/` |
+| Timestamps showing "—" | Data not found in health files | Verify health files exist in `~/.han/health/` |
 | Badges all grey | CSS class names wrong | Inspect element, check class names in CSS |
 | WebSocket not updating | Connection failed | Check browser console for errors, verify `wss://` or `ws://` URL |
 | History table empty | Resurrection log not read | Check file permissions on `resurrection-log.jsonl` |
@@ -259,13 +259,13 @@ When Leo's heartbeat interval exceeds 2x expected duration for >5 minutes, a dis
 #### Setup
 1. Verify Leo's current health:
    ```bash
-   cat ~/.claude-remote/health/leo-health.json | jq '.nextDelayMs'
+   cat ~/.han/health/leo-health.json | jq '.nextDelayMs'
    ```
    This shows expected interval (in milliseconds)
 
 2. Ensure ntfy topic is configured:
    ```bash
-   grep "ntfy_topic" ~/.claude-remote/config.json
+   grep "ntfy_topic" ~/.han/config.json
    ```
 
 #### Test Step 1: Introduce Artificial Delay
@@ -316,7 +316,7 @@ Look for:
 
 #### Test Step 3: Verify Distress Signal File
 ```bash
-cat ~/.claude-remote/health/leo-distress.json
+cat ~/.han/health/leo-distress.json
 ```
 
 **Expected structure**:
@@ -381,7 +381,7 @@ Resume normal heartbeat:
 3. Verify distress signal is removed or marked as cleared:
    ```bash
    # File should be deleted or have "cleared: true" added
-   cat ~/.claude-remote/health/leo-distress.json
+   cat ~/.han/health/leo-distress.json
    ```
 
 4. Admin UI should show:
@@ -417,13 +417,13 @@ Resume normal heartbeat:
 1. **Start with healthy system**:
    ```bash
    systemctl --user status leo-heartbeat.service  # running
-   systemctl --user status claude-remote-server.service  # running
+   systemctl --user status han-server.service  # running
    ```
    - Admin UI shows both green ✓
 
 2. **Simulate Jim crash**:
    ```bash
-   systemctl --user stop claude-remote-server.service
+   systemctl --user stop han-server.service
    ```
    - Jim's badge turns amber (2–3 min) → red (after 90 min)
 
@@ -443,7 +443,7 @@ Resume normal heartbeat:
 
 5. **Verify no false positives**:
    ```bash
-   cat ~/.claude-remote/health/resurrection-log.jsonl | jq '.[-1].success'  # true
+   cat ~/.han/health/resurrection-log.jsonl | jq '.[-1].success'  # true
    ```
 
 ### Expected Outcomes
@@ -535,30 +535,30 @@ Use this format to document test results:
 
 ```bash
 # View Leo's health
-cat ~/.claude-remote/health/leo-health.json | jq '.'
+cat ~/.han/health/leo-health.json | jq '.'
 
 # View Jim's health
-cat ~/.claude-remote/health/jim-health.json | jq '.'
+cat ~/.han/health/jim-health.json | jq '.'
 
 # View resurrection history
-cat ~/.claude-remote/health/resurrection-log.jsonl | jq '.'
+cat ~/.han/health/resurrection-log.jsonl | jq '.'
 
 # View distress signals
-cat ~/.claude-remote/health/leo-distress.json
+cat ~/.han/health/leo-distress.json
 
 # Watch Leo's logs in real-time
 journalctl --user -u leo-heartbeat.service -f
 
 # Watch Jim's logs in real-time
-journalctl --user -u claude-remote-server.service -f
+journalctl --user -u han-server.service -f
 
 # Manually restart services
 systemctl --user restart leo-heartbeat.service
-systemctl --user restart claude-remote-server.service
+systemctl --user restart han-server.service
 
 # Check service status
 systemctl --user status leo-heartbeat.service
-systemctl --user status claude-remote-server.service
+systemctl --user status han-server.service
 
 # Test ntfy directly
 curl -s -d "Test message" -H "Title: Test" https://ntfy.sh/your-topic
@@ -567,7 +567,7 @@ curl -s -d "Test message" -H "Title: Test" https://ntfy.sh/your-topic
 curl -s https://localhost:3847/api/supervisor/health | jq '.'
 
 # Check config
-cat ~/.claude-remote/config.json | jq '.ntfy_topic'
+cat ~/.han/config.json | jq '.ntfy_topic'
 ```
 
 ---

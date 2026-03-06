@@ -3,16 +3,16 @@
 **Date**: 2026-03-05
 **Type**: Autonomous Task
 **Author**: Claude (autonomous)
-**Goal**: Archive 20 plan files from ~/Projects/clauderemote/plans/ to ~/.claude-remote/plans/ with descriptive names
+**Goal**: Archive 20 plan files from ~/Projects/han/plans/ to ~/.han/plans/ with descriptive names
 
 ## Summary
 
-Archived 20 plan files covering 7 weeks of clauderemote development (sessions 27-73, late January to early March 2026) from the project's temporary plans directory to the permanent knowledge base at `~/.claude-remote/plans/`. Each file was renamed from a random-word triplet (e.g., `mossy-kindling-quail.md`) to a semantic descriptor with session number (e.g., `level-07-autonomous-task-runner-s45.md`). Created a navigable index (`INDEX.md`) listing all 22 archived plans grouped into 6 categories.
+Archived 20 plan files covering 7 weeks of han development (sessions 27-73, late January to early March 2026) from the project's temporary plans directory to the permanent knowledge base at `~/.han/plans/`. Each file was renamed from a random-word triplet (e.g., `mossy-kindling-quail.md`) to a semantic descriptor with session number (e.g., `level-07-autonomous-task-runner-s45.md`). Created a navigable index (`INDEX.md`) listing all 22 archived plans grouped into 6 categories.
 
 ## What Was Built
 
 ### Plan File Archive (20 files)
-Copied 20 plan markdown files from `~/Projects/clauderemote/plans/` to `~/.claude-remote/plans/` with semantic naming:
+Copied 20 plan markdown files from `~/Projects/han/plans/` to `~/.han/plans/` with semantic naming:
 
 **Leo Heartbeat & Identity (6 files)**
 - `heartbeat-v05-unified-identity-s51.md` — Unify session-Leo and heartbeat-Leo into single identity
@@ -119,30 +119,30 @@ Created `INDEX.md` listing all 22 archived plans (20 new + 2 existing: `jim-huma
 ## Code Changes
 
 ### Files Created
-- `/home/darron/.claude-remote/plans/level-07-autonomous-task-runner-s45.md` (copied)
-- `/home/darron/.claude-remote/plans/multi-machine-sync-s46.md` (copied)
-- `/home/darron/.claude-remote/plans/mobile-keyboard-bar-s43.md` (copied)
-- `/home/darron/.claude-remote/plans/heartbeat-v05-unified-identity-s51.md` (copied)
-- `/home/darron/.claude-remote/plans/heartbeat-weekly-rhythm-fix-s53.md` (copied)
-- `/home/darron/.claude-remote/plans/shared-working-memory-s53.md` (copied)
-- `/home/darron/.claude-remote/plans/swap-memory-protocol-s73.md` (copied)
-- `/home/darron/.claude-remote/plans/optimistic-concurrency-s73.md` (copied)
-- `/home/darron/.claude-remote/plans/admin-responsiveness-s48.md` (copied)
-- `/home/darron/.claude-remote/plans/memory-discussions-module-s54.md` (copied)
-- `/home/darron/.claude-remote/plans/dispatch-centralisation-final-s73.md` (copied)
-- `/home/darron/.claude-remote/plans/dispatch-centralisation-draft-s73.md` (copied)
-- `/home/darron/.claude-remote/plans/robin-hood-phases-3-4-s48.md` (copied)
-- `/home/darron/.claude-remote/plans/startup-signal-scan-s73.md` (copied)
-- `/home/darron/.claude-remote/plans/heartbeat-conversation-participation-s73.md` (copied)
-- `/home/darron/.claude-remote/plans/discord-response-pipeline-s49.md` (copied)
-- `/home/darron/.claude-remote/plans/tiered-health-checks-s50.md` (copied)
-- `/home/darron/.claude-remote/plans/scalable-agent-pool-s50.md` (copied)
-- `/home/darron/.claude-remote/plans/licences-r2-hybrid-s27.md` (copied)
-- `/home/darron/.claude-remote/plans/licences-d1-sync-s27.md` (copied)
-- `/home/darron/.claude-remote/plans/INDEX.md` (created)
+- `/home/darron/.han/plans/level-07-autonomous-task-runner-s45.md` (copied)
+- `/home/darron/.han/plans/multi-machine-sync-s46.md` (copied)
+- `/home/darron/.han/plans/mobile-keyboard-bar-s43.md` (copied)
+- `/home/darron/.han/plans/heartbeat-v05-unified-identity-s51.md` (copied)
+- `/home/darron/.han/plans/heartbeat-weekly-rhythm-fix-s53.md` (copied)
+- `/home/darron/.han/plans/shared-working-memory-s53.md` (copied)
+- `/home/darron/.han/plans/swap-memory-protocol-s73.md` (copied)
+- `/home/darron/.han/plans/optimistic-concurrency-s73.md` (copied)
+- `/home/darron/.han/plans/admin-responsiveness-s48.md` (copied)
+- `/home/darron/.han/plans/memory-discussions-module-s54.md` (copied)
+- `/home/darron/.han/plans/dispatch-centralisation-final-s73.md` (copied)
+- `/home/darron/.han/plans/dispatch-centralisation-draft-s73.md` (copied)
+- `/home/darron/.han/plans/robin-hood-phases-3-4-s48.md` (copied)
+- `/home/darron/.han/plans/startup-signal-scan-s73.md` (copied)
+- `/home/darron/.han/plans/heartbeat-conversation-participation-s73.md` (copied)
+- `/home/darron/.han/plans/discord-response-pipeline-s49.md` (copied)
+- `/home/darron/.han/plans/tiered-health-checks-s50.md` (copied)
+- `/home/darron/.han/plans/scalable-agent-pool-s50.md` (copied)
+- `/home/darron/.han/plans/licences-r2-hybrid-s27.md` (copied)
+- `/home/darron/.han/plans/licences-d1-sync-s27.md` (copied)
+- `/home/darron/.han/plans/INDEX.md` (created)
 
 ### Files Preserved
-All source files remain in `/home/darron/Projects/clauderemote/plans/` (copy operation, not move).
+All source files remain in `/home/darron/Projects/han/plans/` (copy operation, not move).
 
 ## Implementation Notes
 
@@ -193,13 +193,13 @@ Six categories emerged from analyzing the 22 plan files:
 None required — archive is complete and verified.
 
 ### Future Enhancements
-1. **Automated plan archiving** — Add a script to automatically archive plans from `~/Projects/clauderemote/plans/` when they're marked complete
+1. **Automated plan archiving** — Add a script to automatically archive plans from `~/Projects/han/plans/` when they're marked complete
 2. **Cross-references** — Link plan files to session notes in `claude-context/session-notes/` using session numbers
 3. **Full-text search** — Consider FTS5 index over archived plans for semantic search
 4. **Timeline view** — Generate visual timeline of architectural evolution using session dates
 
 ## Commits
-- `4e8bc75` — chore: Copy 20 plan files from ~/.claude/plans/ to ~/.claude-remote/plans/
+- `4e8bc75` — chore: Copy 20 plan files from ~/.claude/plans/ to ~/.han/plans/
 - `1121f1f` — feat: Create INDEX.md listing all 22 archived plans by category
 
 ## Cost

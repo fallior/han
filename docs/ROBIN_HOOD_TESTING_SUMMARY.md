@@ -108,7 +108,7 @@ Results: 13 PASS, 0 FAIL
 
 ### Quick Verification (5 min)
 ```bash
-cd ~/Projects/clauderemote
+cd ~/Projects/han
 ./scripts/test-robin-robin.sh all
 ```
 
@@ -289,7 +289,7 @@ Before marking as stable in production:
 A: Ensure both services are running:
 ```bash
 systemctl --user start leo-heartbeat.service
-systemctl --user start claude-remote-server.service
+systemctl --user start han-server.service
 ```
 
 **Q: Admin UI shows empty data**

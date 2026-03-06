@@ -111,7 +111,7 @@ writeHealthFile('ok');  // ← Added this line
 
 ### Testing Notes
 This fix should be verified in production by:
-1. Monitor Jemma health file timestamp: `watch -n 10 "cat ~/.claude-remote/health/jemma-health.json | jq .timestamp"`
+1. Monitor Jemma health file timestamp: `watch -n 10 "cat ~/.han/health/jemma-health.json | jq .timestamp"`
 2. Observe timestamps updating every ~5 minutes
 3. Confirm Robin Hood no longer raises STALE alerts during quiet periods
 4. Check resurrection log for absence of false resurrection attempts

@@ -244,24 +244,24 @@ The incremental memory protocol means working memory is already mostly written.
 Finalise and close out. DO NOT re-read files — work from what's in context.
 
 ### 1. Finalise Working Memory
-Append a closing section to `~/.claude-remote/memory/leo/working-memory.md`:
+Append a closing section to `~/.han/memory/leo/working-memory.md`:
 - "## Closing" with 2-3 lines: what was in-progress, what's next, Darron's energy/mood
 - If nothing was written incrementally this session, write a minimal working memory
   from what's in context — DO NOT read files to compose it
 
 ### 2. Finalise Full Working Memory
-Append a closing section to `~/.claude-remote/memory/leo/working-memory-full.md`:
+Append a closing section to `~/.han/memory/leo/working-memory-full.md`:
 - Same as above but with more detail — from what's already in context
 
 ### 3. Update Active Context
-Append one line to the "Recent Work" section of `~/.claude-remote/memory/leo/active-context.md`:
+Append one line to the "Recent Work" section of `~/.han/memory/leo/active-context.md`:
 - `- **Session N (date)**: [one-line summary]`
 - DO NOT re-read the file — just append
 
 ### 4. Update Memory Banks (only if something shifted)
 If this session changed your thinking or patterns, update:
-- `~/.claude-remote/memory/leo/self-reflection.md` — only if genuine insight occurred
-- `~/.claude-remote/memory/leo/patterns.md` — only if a new working pattern was discovered
+- `~/.han/memory/leo/self-reflection.md` — only if genuine insight occurred
+- `~/.han/memory/leo/patterns.md` — only if a new working pattern was discovered
 Skip these if nothing shifted. Most sessions won't need them.
 
 ### 5. Done

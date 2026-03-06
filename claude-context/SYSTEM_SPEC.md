@@ -23,7 +23,7 @@ Workshop > Supervisor Jim > Requests. Do not revert without discussion.
 | Property | Value | Source |
 |----------|-------|--------|
 | Source file | `src/server/services/supervisor-worker.ts` | |
-| Agent directory | `~/.claude-remote/agents/Jim/` | |
+| Agent directory | `~/.han/agents/Jim/` | |
 | MAX_TURNS | 1000 (configurable via `config.json` `supervisor.max_turns_per_cycle`) | |
 | Model | opus (configurable via `config.json` `supervisor.model`) | |
 | Tools | Read, Glob, Grep, Write, Edit, Bash, WebFetch, WebSearch | S77: was Read-only Bash |
@@ -47,7 +47,7 @@ Workshop > Supervisor Jim > Requests. Do not revert without discussion.
 | Property | Value | Source |
 |----------|-------|--------|
 | Source file | `src/server/leo-heartbeat.ts` | |
-| Agent directory | `~/.claude-remote/agents/Leo/` | |
+| Agent directory | `~/.han/agents/Leo/` | |
 | MAX_TURNS | 1000 (conversation, personal, philosophy — all contexts) | S77: was 8/12/12 |
 | Model | opus > sonnet > haiku (cascading fallback) | |
 | Tools (all contexts) | Read, Glob, Grep, Write, Edit, Bash, WebFetch, WebSearch | S77: was mixed/incomplete |
@@ -100,7 +100,7 @@ Workshop > Supervisor Jim > Requests. Do not revert without discussion.
 ### Directory Structure
 
 ```
-~/.claude-remote/memory/
+~/.han/memory/
     identity.md              # Jim's identity
     active-context.md        # Jim's active context
     patterns.md              # Jim's patterns
@@ -180,7 +180,7 @@ Contention prevented by cli-busy/cli-free signal system + swap buffering.
 
 ## Signal System
 
-All signals live in `~/.claude-remote/signals/`.
+All signals live in `~/.han/signals/`.
 
 | Signal | Writer | Reader | Purpose |
 |--------|--------|--------|---------|
@@ -231,7 +231,7 @@ phase computation. Configuration loaded from `config.json`.
 
 ## Configuration
 
-Central config at `~/.claude-remote/config.json`.
+Central config at `~/.han/config.json`.
 
 | Key | Purpose | Current Value |
 |-----|---------|---------------|
@@ -254,7 +254,7 @@ These are settled decisions from the Hall of Records. Do not change without disc
 |----|------|---------|
 | R001 | Weekly Rhythm Model | Four-phase daily cycle + emergency interrupt. Do not revert to activity-driven. |
 | R002 | Memory Swap Protocol | Session/heartbeat swap buffers with cli-busy/cli-free contention prevention. |
-| R003 | Signal Protocol | File-based signals in ~/.claude-remote/signals/. |
+| R003 | Signal Protocol | File-based signals in ~/.han/signals/. |
 | R004 | Agent Limits | No silent constraints. All limits documented in this spec. |
 | R005 | Fractal Memory Model | Overlapping compression gradient. Opus only. |
 | R006 | Context Anchor Documents | Design documents with origin story, raw exchange, emotional context. |

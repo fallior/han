@@ -37,7 +37,7 @@ Three improvements were recently completed:
 
 ### Run automated tests:
 ```bash
-cd ~/Projects/clauderemote
+cd ~/Projects/han
 ./scripts/test-robin-hood.sh all
 ```
 
@@ -45,7 +45,7 @@ cd ~/Projects/clauderemote
 ```
 ✓ Code contains 'sleep 12' (correct)
 ✓ Leo heartbeat service is active
-✓ Jim service (claude-remote-server) is active
+✓ Jim service (han-server) is active
 ✓ Leo health file exists
 ✓ Jim health file exists
 ✓ Resurrection log exists
@@ -172,7 +172,7 @@ A: Daily quick check (`./scripts/test-robin-hood.sh`) recommended. Weekly full m
 A: Leo will detect it (within 20–40 min), restart it (with 12s sleep verification), and log success to resurrection-log.jsonl.
 
 **Q: How do I get notifications?**
-A: Configure ntfy_topic in `~/.claude-remote/config.json`. Distress signals and resurrection failures will be sent to your ntfy topic.
+A: Configure ntfy_topic in `~/.han/config.json`. Distress signals and resurrection failures will be sent to your ntfy topic.
 
 ---
 
@@ -218,17 +218,17 @@ scripts/
 ./scripts/test-robin-hood.sh test3  # Distress signal
 
 # View current health
-cat ~/.claude-remote/health/leo-health.json | jq '.'
-cat ~/.claude-remote/health/jim-health.json | jq '.'
+cat ~/.han/health/leo-health.json | jq '.'
+cat ~/.han/health/jim-health.json | jq '.'
 
 # View resurrection history
-cat ~/.claude-remote/health/resurrection-log.jsonl | jq '.'
+cat ~/.han/health/resurrection-log.jsonl | jq '.'
 
 # Watch Leo's logs
 journalctl --user -u leo-heartbeat.service -f
 
 # Watch Jim's logs
-journalctl --user -u claude-remote-server.service -f
+journalctl --user -u han-server.service -f
 
 # Check Admin API health endpoint
 curl -sk https://localhost:3847/api/supervisor/health | jq '.'

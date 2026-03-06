@@ -1,10 +1,10 @@
-# Claude Remote — Project Brief
+# Hortus Arbor Nostra — Project Brief
 
 ## What We're Building
 
 When developing with Claude Code, there are often large gaps between interactions — you step away for breakfast, grab a coffee, answer a Slack message, or switch to another task. But when Claude needs your input (permission approval, a question, or any blocking prompt), development stops until you physically return to your desk.
 
-Claude Remote solves this friction by creating a bridge between your development machine and your mobile device. It hooks into Claude Code's built-in notification system, pushes alerts to your phone via ntfy.sh, and provides a mobile-friendly interface to respond — whether that's a quick Y/n tap or a custom text response.
+Hortus Arbor Nostra (HAN) solves this friction by creating a bridge between your development machine and your mobile device. It hooks into Claude Code's built-in notification system, pushes alerts to your phone via ntfy.sh, and provides a mobile-friendly interface to respond — whether that's a quick Y/n tap or a custom text response.
 
 The project is structured as progressive "levels" that build on each other. Level 1 is a simple MVP that unblocks prompts remotely. Level 6 is the ambitious end goal: a bidirectional bridge between claude.ai and Claude Code that enables true mobile development — discuss and plan in claude.ai on your phone, execute on your workstation, seamlessly.
 
@@ -132,7 +132,7 @@ MVP (Level 1) is complete when:
 ## Repository Structure
 
 ```
-claude-remote/
+han/
 ├── CLAUDE.md                 # Quick reference for Claude Code
 ├── PROJECT_INSTRUCTIONS.md   # Condensed context for Claude Projects
 ├── QUICKSTART.md             # Installation and usage guide
@@ -151,7 +151,7 @@ claude-remote/
 ├── scripts/
 │   ├── install.sh            # Installation script
 │   ├── start-server.sh       # Server quick start
-│   └── claude-remote         # CLI launcher
+│   └── han                   # CLI launcher
 └── src/
     ├── hooks/
     │   └── notify.sh         # Claude Code hook

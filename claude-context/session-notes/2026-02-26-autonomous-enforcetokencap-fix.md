@@ -39,7 +39,7 @@ const tail = maxTailChars > 0 ? content.slice(-maxTailChars) : '';
 
 ### Manual Cleanup
 
-**File**: `~/.claude-remote/memory/leo/self-reflection.md`
+**File**: `~/.han/memory/leo/self-reflection.md`
 - Truncated from 11KB/103 lines to 6KB/100 lines
 - Preserved curated Cycle #503 content
 - Removed accumulated bloat from weeks of failed truncation
@@ -73,7 +73,7 @@ Created **DEC-022** in DECISIONS.md with status **Settled**:
 
 **Files modified**:
 - `src/server/services/supervisor-worker.ts` — enforceTokenCap function (2-line fix)
-- `~/.claude-remote/memory/leo/self-reflection.md` — manual truncation
+- `~/.han/memory/leo/self-reflection.md` — manual truncation
 
 **Commits**:
 - `fe0adce` — chore: Truncate self-reflection.md to curated content
@@ -96,7 +96,7 @@ None — fix is complete and verified. Memory banks will self-manage going forwa
 
 ## Notes
 
-Bug was traced by heartbeat Leo during personal exploration and documented in `~/.claude-remote/memory/enforceTokenCap-fix.md`. Implementation followed spec precisely. Decision marked **Settled** because memory management is critical for long-running supervisor and this fix addresses a subtle but serious bug that went undetected for weeks.
+Bug was traced by heartbeat Leo during personal exploration and documented in `~/.han/memory/enforceTokenCap-fix.md`. Implementation followed spec precisely. Decision marked **Settled** because memory management is critical for long-running supervisor and this fix addresses a subtle but serious bug that went undetected for weeks.
 
 ---
 

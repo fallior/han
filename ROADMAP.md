@@ -1,4 +1,4 @@
-# Claude Remote — Future Development Roadmap
+# Hortus Arbor Nostra — Future Development Roadmap
 
 ## From Remote Prompt Responder to Autonomous Development Platform
 
@@ -8,7 +8,7 @@
 
 ## Where We Are Now
 
-Claude Remote was conceived in January 2026 as a solution to a real pain point: Claude Code blocks on prompts while you're away from your desk. The project was structured into progressive levels, with the original 6 now complete and extended levels 7–8 also delivered:
+Hortus Arbor Nostra was conceived in January 2026 as a solution to a real pain point: Claude Code blocks on prompts while you're away from your desk. The project was structured into progressive levels, with the original 6 now complete and extended levels 7–8 also delivered:
 
 | Level | Name | Status |
 |-------|------|--------|
@@ -30,7 +30,7 @@ The architecture now includes tmux session management, a notify.sh hook, an Expr
 
 ## The New Vision: Total Autonomy
 
-The original Claude Remote vision stops at Level 6 (Claude Bridge — bidirectional claude.ai ↔ Claude Code transport). But the real endgame is bigger: **a system where Claude Code runs autonomously on a dedicated machine, orchestrated either by a local model or the Claude API, with you maintaining oversight and strategic direction from your phone.**
+The original Hortus Arbor Nostra vision stops at Level 6 (Claude Bridge — bidirectional claude.ai ↔ Claude Code transport). But the real endgame is bigger: **a system where Claude Code runs autonomously on a dedicated machine, orchestrated either by a local model or the Claude API, with you maintaining oversight and strategic direction from your phone.**
 
 This isn't science fiction. The pieces exist today:
 

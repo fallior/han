@@ -1,10 +1,10 @@
-# Claude Remote — Architecture
+# Hortus Arbor Nostra — Architecture
 
 > System design and technical reference
 
 ## Overview
 
-Claude Remote bridges your development machine and mobile device, enabling remote responses to Claude Code prompts and autonomous task execution. It hooks into Claude Code's notification system, saves state to disk, sends push notifications, provides a web UI for responding, and can run tasks headlessly via the Claude Agent SDK.
+Hortus Arbor Nostra (HAN) bridges your development machine and mobile device, enabling remote responses to Claude Code prompts and autonomous task execution. It hooks into Claude Code's notification system, saves state to disk, sends push notifications, provides a web UI for responding, and can run tasks headlessly via the Claude Agent SDK.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -53,7 +53,7 @@ Claude Remote bridges your development machine and mobile device, enabling remot
 
 ### Session Management
 - **tmux**: Terminal multiplexer — enables input injection via `send-keys`
-- Sessions named `claude-remote-[pid]` for multi-session support
+- Sessions named `han-[pid]` for multi-session support
 
 ### Push Notifications
 - **ntfy.sh**: HTTP-based push notifications — free, self-hostable, simple API
@@ -78,7 +78,7 @@ Discord message arrives
   → Response appears in Discord under the agent's name
 ```
 
-**Webhook structure** (`~/.claude-remote/config.json`):
+**Webhook structure** (`~/.han/config.json`):
 ```json
 "webhooks": {
   "leo":   { "general": "url", "jim": "url", "leo": "url", ... },
@@ -108,14 +108,14 @@ Agents resolve the channel ID from Jemma's signal file against this map to deter
 - Server binds to 0.0.0.0 for Tailscale access
 
 ### Storage
-- **SQLite** (`better-sqlite3`): Database at `~/.claude-remote/tasks.db` with 15 tables:
+- **SQLite** (`better-sqlite3`): Database at `~/.han/tasks.db` with 15 tables:
   - Task execution: `tasks`, `goals`, `project_memory`
   - Supervisor system: `supervisor_cycles`, `supervisor_proposals`, `task_proposals`
   - Conversations: `conversations`, `conversation_messages`
   - Portfolio: `projects`, `products`, `product_phases`, `product_knowledge`
   - Reporting: `digests`, `maintenance_runs`, `weekly_reports`
 - **Plain text**: Terminal capture files (`terminal.txt`, `terminal-log.txt`)
-- **Memory banks**: Per-agent state in `~/.claude-remote/memory/` (identity, active-context, patterns, self-reflection)
+- **Memory banks**: Per-agent state in `~/.han/memory/` (identity, active-context, patterns, self-reflection)
 
 ### Autonomous Execution (Level 7+)
 - **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`): Headless Claude Code execution via `query()`
@@ -128,7 +128,7 @@ Agents resolve the channel ID from Jemma's signal file against this map to deter
 ## Directory Structure
 
 ```
-claude-remote/
+han/
 ├── CLAUDE.md                     # Quick reference for Claude Code
 ├── PROJECT_INSTRUCTIONS.md       # Condensed context for Claude Projects
 ├── claude-context/               # Collaboration context
@@ -143,7 +143,7 @@ claude-remote/
 ├── scripts/
 │   ├── install.sh                # Installation and setup
 │   ├── start-server.sh           # Quick server start
-│   ├── claude-remote             # CLI launcher
+│   ├── han                               # CLI launcher
 │   ├── build-client.js           # Client TypeScript compilation
 │   └── jemma.service             # Systemd user service for Jemma
 └── src/
@@ -199,7 +199,7 @@ claude-remote/
 3. **notify.sh executes**:
    - Receives JSON payload from stdin
    - Extracts message and session info
-   - Creates state file in `~/.claude-remote/pending/`
+   - Creates state file in `~/.han/pending/`
    - Sends push via ntfy.sh (if topic configured)
 4. **User receives notification** on phone
 5. **User opens web UI** (http://server:3847)
@@ -210,7 +210,7 @@ claude-remote/
 8. **Server injects response**:
    - `tmux send-keys -t [session] "[response]" Enter`
 9. **Prompt cleared**:
-   - State file moved to `~/.claude-remote/resolved/`
+   - State file moved to `~/.han/resolved/`
 
 ### Terminal Broadcast (Always-On Mirror)
 
@@ -272,7 +272,7 @@ claude-remote/
 
 **Architecture**:
 ```
-~/.claude-remote/memory/fractal/{jim,leo}/
+~/.han/memory/fractal/{jim,leo}/
 ├── c1/                    # Compressed ~1/3 of c=0 (3:1 ratio)
 │   └── 2026-02-18-c1.md   # ~3KB per file
 ├── c2/                    # Compressed ~1/9 of c=0 (9:1 ratio)
@@ -335,10 +335,10 @@ claude-remote/
 ### State File Format
 
 ```
-~/.claude-remote/pending/[timestamp]-[session].json
+~/.han/pending/[timestamp]-[session].json
 {
   "message": "Allow tool access?",
-  "session": "claude-remote-12345",
+  "session": "han-12345",
   "timestamp": "2026-01-13T10:30:00Z",
   "type": "permission_prompt"
 }
@@ -347,8 +347,8 @@ claude-remote/
 ### tmux Session Naming
 
 ```bash
-# Format: claude-remote-[pid]
-SESSION="claude-remote-$$"
+# Format: han-[pid]
+SESSION="han-$$"
 tmux new-session -d -s "$SESSION"
 ```
 
@@ -411,9 +411,9 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 {
   "prompts": [
     {
-      "id": "1736756400000-claude-remote-12345",
+      "id": "1736756400000-han-12345",
       "message": "Allow file read access?",
-      "session": "claude-remote-12345",
+      "session": "han-12345",
       "timestamp": "2026-01-13T10:30:00Z",
       "type": "permission_prompt"
     }
@@ -423,7 +423,7 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 // POST /api/respond
 // Request:
 {
-  "id": "1736756400000-claude-remote-12345",
+  "id": "1736756400000-han-12345",
   "response": "y"
 }
 
@@ -468,11 +468,11 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 - Context import: paste from claude.ai, save to file, optionally inject into Claude Code
 - Structured handoff form: task + context + working directory, injected via tmux
 - Bridge event history with timeline UI
-- Context files stored at `~/.claude-remote/bridge/contexts/`
+- Context files stored at `~/.han/bridge/contexts/`
 
 ### Level 7: Autonomous Task Runner (Complete)
 
-- **SQLite task queue**: `~/.claude-remote/tasks.db` with `better-sqlite3` (WAL mode)
+- **SQLite task queue**: `~/.han/tasks.db` with `better-sqlite3` (WAL mode)
 - Task schema: id, title, description, project_path, status, priority, model, max_turns, cost, tokens, turns, checkpoint_ref, checkpoint_type, gate_mode, allowed_tools
 - Status workflow: `pending` → `running` → `done`/`failed`/`cancelled`
 - **Orchestrator loop**: 5-second interval picks next pending task (highest priority, oldest first)
@@ -592,7 +592,7 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
   - Queries for unanswered human messages: messages where no supervisor message exists with later timestamp
   - Responds thoughtfully with strategic insight, not just task status
 - **Jim-wake signal pattern** (2026-03-05: Simplified after removing cli-busy contention):
-  - `startSupervisorSignalWatcher()` watches `~/.claude-remote/signals/` directory via fs.watch
+  - `startSupervisorSignalWatcher()` watches `~/.han/signals/` directory via fs.watch
   - **Wake signal detection**: When `jim-wake` file created → triggers immediate supervisor cycle
   - Conversations route writes jim-wake signal when human message arrives (fallback path when Jemma's WebSocket is down)
   - No contention checking — Jim and Leo run from separate agent directories (`/Jim` and `/Leo`) with no shared Opus resource
@@ -614,12 +614,12 @@ When a task is about to execute, `createCheckpoint()` is called:
 
 1. **Dirty check**: Calls `hasUncommittedChanges()` to detect working tree state
 2. **Branch checkpoint** (clean working tree):
-   - Creates a git branch named `claude-remote/checkpoint-{taskId}`
-   - Stores: `{ ref: "claude-remote/checkpoint-{taskId}", type: "branch" }`
+   - Creates a git branch named `han/checkpoint-{taskId}`
+   - Stores: `{ ref: "han/checkpoint-{taskId}", type: "branch" }`
    - Purpose: Quick rollback point if task makes commits
 3. **Stash checkpoint** (dirty working tree):
-   - Creates a git stash with message `claude-remote checkpoint {taskId}`
-   - Stores: `{ ref: "claude-remote checkpoint {taskId}", type: "stash" }`
+   - Creates a git stash with message `han checkpoint {taskId}`
+   - Stores: `{ ref: "han checkpoint {taskId}", type: "stash" }`
    - Purpose: Preserve user's uncommitted work before task execution
 4. **Database storage**:
    - Saves `checkpoint_ref` and `checkpoint_type` to tasks table
@@ -788,13 +788,13 @@ git stash drop "stash@{0}"
 **Check checkpoint status**:
 ```bash
 # See all stashes (including checkpoints)
-git stash list | grep "claude-remote checkpoint"
+git stash list | grep "han checkpoint"
 
 # Show what's in a stash
 git stash show -p "stash@{0}"
 
 # See checkpoint branches
-git branch | grep "claude-remote/checkpoint"
+git branch | grep "han/checkpoint"
 ```
 
 **Inspect task checkpoint in database**:
@@ -810,7 +810,7 @@ LIMIT 5;
 
 **Purpose**: Leo and Jim monitor each other's health with three-tier alerting: normal operation, degraded performance (distress), and complete failure (resurrection).
 
-**Health signals** (`~/.claude-remote/health/`):
+**Health signals** (`~/.han/health/`):
 - `leo-health.json` — Written by Leo every beat (agent, pid, timestamp, beat, beatType, status, lastError, uptimeMinutes)
 - `jim-health.json` — Written by Jim every cycle (agent, pid, timestamp, cycle, tier, status, lastError, serverPid, uptimeMinutes)
 - `resurrection-log.jsonl` — Shared log of all resurrection attempts from both agents
@@ -820,7 +820,7 @@ LIMIT 5;
 **Leo's health monitoring** (`leo-heartbeat.ts`):
 - `checkJimHealth()` called at start of every beat
 - Staleness thresholds: <40min OK, 40-90min stale (PID check), >90min down
-- Resurrection: `systemctl --user restart claude-remote-server.service`
+- Resurrection: `systemctl --user restart han-server.service`
 - 12s verification wait (increased from 3s to allow full Node.js/tsx server startup), 1-hour cooldown, ntfy escalation on failure
 
 **Jim's health monitoring** (`supervisor.ts`):
@@ -844,7 +844,7 @@ LIMIT 5;
 - Staggered checks (Leo checks at beat start, Jim checks at cycle start)
 
 **systemd units** (`~/.config/systemd/user/`):
-- `claude-remote-server.service` — Supervisor + server (resurrected by Leo)
+- `han-server.service` — Supervisor + server (resurrected by Leo)
 - `leo-heartbeat.service` — Leo's heartbeat (resurrected by Jim)
 
 ### Jemma: Discord Message Dispatcher (Complete)
@@ -872,7 +872,7 @@ LIMIT 5;
 - **Discord utilities** (`services/discord-utils.ts`):
   - `postToDiscord()`: Webhook posting with 2000-char splitting and exponential backoff retry (1s → 2s → 4s)
   - `resolveChannelName()`: Reverses channel ID to name using config (NOTE: This reference is outdated — function moved to jemma.ts)
-  - `loadDiscordConfig()`: Reads ~/.claude-remote/config.json
+  - `loadDiscordConfig()`: Reads ~/.han/config.json
 
 **Supervisor integration** (`supervisor-worker.ts`):
 - `respond_conversation` handler checks if `discussion_type === 'discord'`
@@ -1217,12 +1217,12 @@ curl -s "http://localhost:3847/api/conversations/grouped"
 |----------|----------|-------------|
 | NTFY_TOPIC | No | ntfy.sh topic for push notifications |
 | PORT | No | Server port (default: 3847) |
-| CLAUDE_REMOTE_DIR | No | State directory (default: ~/.claude-remote) |
+| HAN_DIR | No | State directory (default: ~/.han) |
 
 ### Config Files
 
 - `~/.claude/settings.json` — Claude Code hook configuration
-- `~/.claude-remote/` — State and history storage
+- `~/.han/` — State and history storage
 
 ---
 
@@ -1241,7 +1241,7 @@ The `buildTaskContext()` function in `src/server/services/context.ts` assembles 
 ### 2. CLAUDE.md Truncation Increase (Line 292)
 - **Before**: 3000-character limit
 - **After**: 6000-character limit
-- **Impact**: Projects with long session protocols (clauderemote, hodgic) now get full instructions instead of 0 useful content
+- **Impact**: Projects with long session protocols (han, hodgic) now get full instructions instead of 0 useful content
 
 ### 3. Learnings Selection Bias Fix (Line 141)
 - **Before**: Position-based slicing from INDEX.md (first 5 learnings)

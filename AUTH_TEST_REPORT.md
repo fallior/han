@@ -117,7 +117,7 @@ Both methods fully functional and tested.
 ✓ Fallback behavior when no token configured
 ```
 
-**Configuration** (`~/.claude-remote/config.json`):
+**Configuration** (`~/.han/config.json`):
 ```
 ✓ server_auth_token field present
 ✓ Current value: "your-secret-token-here"
@@ -161,7 +161,7 @@ Since all internal communication originates from localhost (127.0.0.1, ::1, ::ff
 
 ### To Enable Custom Token
 
-Update `~/.claude-remote/config.json`:
+Update `~/.han/config.json`:
 
 ```json
 {
@@ -242,7 +242,7 @@ When empty/missing, all auth is bypassed (auth disabled).
 src/server/middleware/auth.ts          [NEW] Bearer token middleware
 src/server/ws.ts                       [MODIFIED] WebSocket auth
 src/server/server.ts                   [MODIFIED] Middleware integration
-~/.claude-remote/config.json           [MODIFIED] server_auth_token field
+~/.han/config.json           [MODIFIED] server_auth_token field
 ```
 
 **Recent commits**:

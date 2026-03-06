@@ -44,12 +44,12 @@ All 6 tasks completed:
   - Messages in #general and #agent-comms use content-based routing
   - Bot's own messages and other bot messages → ignore
 - **Delivery routing**:
-  - **To Jim**: POST to `http://localhost:3847/api/jemma/deliver` with `{ recipient: 'jim', message, channel, author, classification_confidence }`. Fallback: write signal file to `~/.claude-remote/signals/jim-wake-discord-{timestamp}` if server is down.
-  - **To Leo**: Write signal file to `~/.claude-remote/signals/leo-wake-discord-{timestamp}` with `{ conversationId, mentionedAt, messagePreview }`
+  - **To Jim**: POST to `http://localhost:3847/api/jemma/deliver` with `{ recipient: 'jim', message, channel, author, classification_confidence }`. Fallback: write signal file to `~/.han/signals/jim-wake-discord-{timestamp}` if server is down.
+  - **To Leo**: Write signal file to `~/.han/signals/leo-wake-discord-{timestamp}` with `{ conversationId, mentionedAt, messagePreview }`
   - **To Darron**: Send ntfy notification via existing ntfy topic in config.json
   - **To Sevn/Six**: POST to `https://openclaw-vps.tailbcb4df.ts.net/sevn/hooks/wake` (or six) with bearer token auth, body: `{ "text": "Discord message from {author} in #{channel}: {preview}", "mode": "now" }`
-- **Health monitoring** — Writes `~/.claude-remote/health/jemma-health.json` with `{ pid, lastBeat, lastGatewayEvent, status, uptimeMinutes, messageCount }`
-- **Configuration** — All config from `~/.claude-remote/config.json`: bot_token, channel IDs, sevn/six wake endpoints, ntfy topic
+- **Health monitoring** — Writes `~/.han/health/jemma-health.json` with `{ pid, lastBeat, lastGatewayEvent, status, uptimeMinutes, messageCount }`
+- **Configuration** — All config from `~/.han/config.json`: bot_token, channel IDs, sevn/six wake endpoints, ntfy topic
 
 **Protocol Implementation**:
 - Uses `ws` package directly (NOT discord.js — per constraints)
@@ -81,9 +81,9 @@ All 6 tasks completed:
 
 **Unit Configuration**:
 - `Type=simple`, `Restart=always`, `RestartSec=5`
-- `ExecStart=/usr/bin/npx tsx /home/darron/Projects/clauderemote/src/server/jemma.ts`
+- `ExecStart=/usr/bin/npx tsx /home/darron/Projects/han/src/server/jemma.ts`
 - Environment: PATH, HOME
-- WorkingDirectory: /home/darron/Projects/clauderemote
+- WorkingDirectory: /home/darron/Projects/han
 
 **Setup Commands** (documented in jemma.ts header):
 ```bash
@@ -104,10 +104,10 @@ journalctl --user -u jemma -f  # Monitor logs
 - Detects stale health file (>90min since last beat) or dead PID
 - Can restart via `systemctl --user restart jemma.service`
 - 1-hour resurrection cooldown (same pattern as Jim↔Leo)
-- Logs resurrection attempts to shared `~/.claude-remote/resurrection-log.jsonl`
+- Logs resurrection attempts to shared `~/.han/resurrection-log.jsonl`
 
 **Health Check Logic**:
-- Reads `~/.claude-remote/health/jemma-health.json`
+- Reads `~/.han/health/jemma-health.json`
 - Checks: file age < 90min, PID alive, lastGatewayEvent recent
 - Distress detection: triggers if last Gateway event > 60min (degraded state)
 
@@ -246,7 +246,7 @@ journalctl --user -u jemma -f  # Monitor logs
    - ✅ Can include full context in request body
    - ❌ Requires server to be running (fails if server is down)
    - ❌ Tight coupling (Jemma depends on server availability)
-2. **Signal files** (write to ~/.claude-remote/signals/)
+2. **Signal files** (write to ~/.han/signals/)
    - ✅ Decoupled (works even if server is down)
    - ✅ Persistent (message survives restarts)
    - ✅ No network dependency (local filesystem only)
@@ -267,7 +267,7 @@ journalctl --user -u jemma -f  # Monitor logs
 - Server restart won't lose in-flight Discord messages
 
 **Implementation**:
-- **To Jim**: Try POST to `http://localhost:3847/api/jemma/deliver` first. If fails (server down), write to `~/.claude-remote/signals/jim-wake-discord-{timestamp}`
+- **To Jim**: Try POST to `http://localhost:3847/api/jemma/deliver` first. If fails (server down), write to `~/.han/signals/jim-wake-discord-{timestamp}`
 - **To Leo**: Write signal file directly (Leo's heartbeat polls every 30s, acceptable latency)
 - **To Darron**: ntfy notification only (no signal file needed)
 - **To Sevn/Six**: API call only (no signal file — they're external systems)
@@ -305,7 +305,7 @@ journalctl --user -u jemma -f  # Monitor logs
 
 ### Immediate (setup required before first use)
 1. **Enable MESSAGE_CONTENT intent** — Discord Developer Portal → Bot settings → Privileged Gateway Intents → MESSAGE CONTENT (required for reading message content)
-2. **Configure Discord credentials** — Add `discord.bot_token` to `~/.claude-remote/config.json`
+2. **Configure Discord credentials** — Add `discord.bot_token` to `~/.han/config.json`
 3. **Configure channel IDs** — Add `discord.channels` object to config.json (leo, sevn, maintainr, general, jim, agent-comms)
 4. **Install systemd service** — `cp scripts/jemma.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable jemma.service`
 5. **Start Jemma** — `systemctl --user start jemma.service`

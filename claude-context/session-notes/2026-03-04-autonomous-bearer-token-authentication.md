@@ -11,7 +11,7 @@
 
 ## Summary
 
-Implemented bearer token authentication for remote access to the clauderemote Express server. The system protects `/api/*` and `/admin` routes with Bearer token validation while automatically bypassing authentication for localhost requests. This preserves internal agent communication (Leo, Jim, Jemma) without any code changes while securing remote access via Tailscale.
+Implemented bearer token authentication for remote access to the han Express server. The system protects `/api/*` and `/admin` routes with Bearer token validation while automatically bypassing authentication for localhost requests. This preserves internal agent communication (Leo, Jim, Jemma) without any code changes while securing remote access via Tailscale.
 
 All 5 tasks completed:
 1. Add `server_auth_token` field to config.json
@@ -25,7 +25,7 @@ All 5 tasks completed:
 ## What Was Built
 
 ### 1. Configuration Update (Task: mmaok9qy-2iuhkc)
-**File**: `~/.claude-remote/config.json`
+**File**: `~/.han/config.json`
 **Commit**: b9b2344
 
 **Change**:
@@ -268,7 +268,7 @@ Full decision record: `DECISIONS.md` DEC-034
 - `AUTH_TEST_REPORT.md` — 276 lines
 
 ### Files Modified
-- `~/.claude-remote/config.json` — +1 field (`server_auth_token`)
+- `~/.han/config.json` — +1 field (`server_auth_token`)
 - `src/server/server.ts` — +2 lines (middleware integration)
 - `src/server/ws.ts` — +28 lines (WebSocket authentication)
 
@@ -310,7 +310,7 @@ All internal agents continue working with zero code changes because they communi
 ## Next Steps
 
 ### Configuration
-Users need to update `~/.claude-remote/config.json` with custom token:
+Users need to update `~/.han/config.json` with custom token:
 
 ```json
 {

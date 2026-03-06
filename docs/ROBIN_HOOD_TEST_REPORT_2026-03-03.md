@@ -3,7 +3,7 @@
 
 **Test Date**: 2026-03-03
 **Tester**: Leo (Autonomous Agent)
-**Environment**: Linux (Darron's system, clauderemote project)
+**Environment**: Linux (Darron's system, han project)
 **Status**: ✓ All Three Features Verified & Working
 
 ---
@@ -45,7 +45,7 @@ $ grep "execSync('sleep" src/server/leo-heartbeat.ts
 | Service | Status | Details |
 |---------|--------|---------|
 | Leo heartbeat | ✓ Active | Beat #34, 533min uptime |
-| Jim (claude-remote-server) | ✓ Active | Cycle #10, 346min uptime |
+| Jim (han-server) | ✓ Active | Cycle #10, 346min uptime |
 | Health directory | ✓ Ready | All required files present |
 
 ### Resurrection Log Analysis
@@ -75,7 +75,7 @@ $ grep "execSync('sleep" src/server/leo-heartbeat.ts
 When Jim crashes again, the sequence will be:
 
 1. **00s**: Leo detects stale health file (>90 min old)
-2. **00s**: `systemctl --user restart claude-remote-server.service` begins
+2. **00s**: `systemctl --user restart han-server.service` begins
 3. **0-5s**: Node.js process starts, imports modules, loads config
 4. **5-12s**: Port binding, health signal file setup
 5. **12s**: `execSync('sleep 12')` completes
@@ -248,7 +248,7 @@ Verify Leo detects degraded heartbeat intervals (> 2× expected for > 5 min) and
 **Status**: ✓ Working (file system ready)
 
 ```bash
-$ ls -la ~/.claude-remote/health/leo-distress.json
+$ ls -la ~/.han/health/leo-distress.json
 -rw-rw-r-- 1 darron darron 153 Mar 03 16:53 leo-distress.json
 ```
 
@@ -292,7 +292,7 @@ Leo's last health signal:
 **Status**: ✓ Configured
 
 ```bash
-$ cat ~/.claude-remote/config.json | jq '.ntfy_topic'
+$ cat ~/.han/config.json | jq '.ntfy_topic'
 "your-ntfy-topic"  # (actual topic configured)
 ```
 
@@ -393,7 +393,7 @@ This test validates all three components working together during a realistic fai
 3. Checks resurrection cooldown → OK to attempt
 
 **Phase 2: Resurrection** (With 12s sleep fix)
-1. Executes: `systemctl --user restart claude-remote-server.service`
+1. Executes: `systemctl --user restart han-server.service`
 2. Waits: `execSync('sleep 12')` ← **NEW FIX**
 3. Verifies: Service is now `active`
 4. Logs: `[Robin Hood] Jim RESURRECTED`
@@ -508,7 +508,7 @@ All three Robin Hood Protocol improvements are functioning correctly. No blocker
 |------|-------|
 | **Test Completion Date** | 2026-03-03 |
 | **Tester** | Leo (Autonomous Agent) |
-| **Test Environment** | Darron's system, clauderemote project |
+| **Test Environment** | Darron's system, han project |
 | **Total Tests Run** | 3 major (8+ sub-tests each) |
 | **Tests Passed** | ✓ All 3 (24/24 checks passed) |
 | **Critical Issues** | 0 |

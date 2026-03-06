@@ -35,8 +35,8 @@ ALTER TABLE tasks ADD COLUMN checkpoint_type TEXT;
 
 2. **Checkpoint strategy** (decision logic):
    - If git repo exists:
-     - If clean working tree: create branch `claude-remote/checkpoint-{taskId}`
-     - If dirty: create stash with message `claude-remote checkpoint {taskId}`
+     - If clean working tree: create branch `han/checkpoint-{taskId}`
+     - If dirty: create stash with message `han checkpoint {taskId}`
    - If not git repo: skip (no checkpoint)
    - Store checkpoint_ref, checkpoint_type ('branch'/'stash'/'none') in DB
 

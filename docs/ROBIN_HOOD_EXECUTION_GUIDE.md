@@ -11,18 +11,18 @@ Before testing, ensure:
 ```bash
 # 1. Both services are running
 systemctl --user status leo-heartbeat.service         # Should be active
-systemctl --user status claude-remote-server.service  # Should be active
+systemctl --user status han-server.service  # Should be active
 
 # 2. Health directory exists and is writable
-mkdir -p ~/.claude-remote/health
-ls -la ~/.claude-remote/health/
+mkdir -p ~/.han/health
+ls -la ~/.han/health/
 
 # 3. Admin server is running
 curl -sk https://localhost:3847/api/supervisor/health | jq '.success'
 # Should output: true
 
 # 4. Config has ntfy topic (for distress notifications)
-cat ~/.claude-remote/config.json | jq '.ntfy_topic'
+cat ~/.han/config.json | jq '.ntfy_topic'
 ```
 
 ---
@@ -32,7 +32,7 @@ cat ~/.claude-remote/config.json | jq '.ntfy_topic'
 Run the automated test script:
 
 ```bash
-cd ~/Projects/clauderemote
+cd ~/Projects/han
 ./scripts/test-robin-hood.sh all
 ```
 
@@ -56,15 +56,15 @@ Verify that Leo waits 12 seconds before checking if Jim's service restarted (not
 
 ### Prerequisites
 - [ ] Leo heartbeat running: `systemctl --user status leo-heartbeat.service`
-- [ ] Jim service running: `systemctl --user status claude-remote-server.service`
+- [ ] Jim service running: `systemctl --user status han-server.service`
 
 ### Step 1: Stop Jim's Service
 ```bash
-systemctl --user stop claude-remote-server.service
+systemctl --user stop han-server.service
 
 # Verify it stopped
 sleep 2
-systemctl --user is-active claude-remote-server.service  # Should output: inactive
+systemctl --user is-active han-server.service  # Should output: inactive
 ```
 
 ### Step 2: Trigger Leo's Heartbeat (2 options)
@@ -107,12 +107,12 @@ While watching logs, also verify the service actually came up:
 ```bash
 # In another terminal:
 sleep 13  # Wait a bit longer than the sleep
-systemctl --user is-active claude-remote-server.service  # Should be: active
+systemctl --user is-active han-server.service  # Should be: active
 ```
 
 ### Step 5: Check the Resurrection Log
 ```bash
-cat ~/.claude-remote/health/resurrection-log.jsonl | tail -1 | jq '.'
+cat ~/.han/health/resurrection-log.jsonl | tail -1 | jq '.'
 ```
 
 **Expected output**:
@@ -258,11 +258,11 @@ Check current configuration:
 
 ```bash
 # What's the expected heartbeat interval?
-cat ~/.claude-remote/health/leo-health.json | jq '.nextDelayMs'
+cat ~/.han/health/leo-health.json | jq '.nextDelayMs'
 # Example: 1200000 (= 20 minutes)
 
 # Is ntfy configured?
-cat ~/.claude-remote/config.json | jq '.ntfy_topic'
+cat ~/.han/config.json | jq '.ntfy_topic'
 # Example: "your-topic"
 ```
 
@@ -317,7 +317,7 @@ journalctl --user -u leo-heartbeat.service -f
 
 ### Step 4: Verify Distress Signal File
 ```bash
-cat ~/.claude-remote/health/leo-distress.json | jq '.'
+cat ~/.han/health/leo-distress.json | jq '.'
 ```
 
 Expected structure:
@@ -422,7 +422,7 @@ This combines all three tests into a realistic failure scenario.
 ```bash
 # Verify both services running
 systemctl --user status leo-heartbeat.service      # ✓ active
-systemctl --user status claude-remote-server.service  # ✓ active
+systemctl --user status han-server.service  # ✓ active
 
 # Check Admin UI shows both green
 curl -sk https://localhost:3847/api/supervisor/health | jq '.jim.status, .leo.status'
@@ -432,11 +432,11 @@ curl -sk https://localhost:3847/api/supervisor/health | jq '.jim.status, .leo.st
 ### Step 2: Introduce Failure
 ```bash
 # Kill Jim's service
-systemctl --user stop claude-remote-server.service
+systemctl --user stop han-server.service
 
 # Verify it's down
 sleep 2
-systemctl --user is-active claude-remote-server.service  # inactive
+systemctl --user is-active han-server.service  # inactive
 ```
 
 ### Step 3: Leo Detects Stale Health
@@ -462,7 +462,7 @@ Monitor for:
 And verify:
 ```bash
 sleep 13  # Wait for 12s sleep + buffer
-systemctl --user is-active claude-remote-server.service  # active
+systemctl --user is-active han-server.service  # active
 ```
 
 ### Step 5: Check Admin UI Updates
@@ -478,7 +478,7 @@ And in the browser:
 
 ### Step 6: Verify Log Accuracy
 ```bash
-cat ~/.claude-remote/health/resurrection-log.jsonl | jq '.[-1]'
+cat ~/.han/health/resurrection-log.jsonl | jq '.[-1]'
 # success should be: true
 ```
 
@@ -500,20 +500,20 @@ cat ~/.claude-remote/health/resurrection-log.jsonl | jq '.[-1]'
 journalctl --user -xe
 
 # Try manual start with debug output
-cd ~/Projects/clauderemote/src/server
+cd ~/Projects/han/src/server
 npx tsx leo-heartbeat.ts  # Run in foreground to see errors
 ```
 
 ### Problem: Health files showing "—"
 ```bash
 # Check if files exist and are readable
-ls -la ~/.claude-remote/health/
+ls -la ~/.han/health/
 
 # Verify file content
-cat ~/.claude-remote/health/leo-health.json | jq '.'
+cat ~/.han/health/leo-health.json | jq '.'
 
 # Check file permissions
-chmod 644 ~/.claude-remote/health/*.json
+chmod 644 ~/.han/health/*.json
 ```
 
 ### Problem: Admin UI not accessible
@@ -541,7 +541,7 @@ curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" \
 ### Problem: Distress signal never triggers
 ```bash
 # Check the interval calculation
-cat ~/.claude-remote/health/leo-health.json | jq '.nextDelayMs'
+cat ~/.han/health/leo-health.json | jq '.nextDelayMs'
 
 # Verify your delay is > 2× this value AND > 300000 (5 min)
 # Example: if nextDelayMs=1200000, delay must be > 2400000
@@ -556,7 +556,7 @@ journalctl --user -u leo-heartbeat.service | grep -i distress
 curl -d "Test message" https://ntfy.sh/your-topic
 
 # Check if topic is in config
-cat ~/.claude-remote/config.json | grep ntfy_topic
+cat ~/.han/config.json | grep ntfy_topic
 
 # Verify curl has internet access
 curl -s https://ntfy.sh &>/dev/null && echo "OK" || echo "No internet"

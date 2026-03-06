@@ -13,7 +13,7 @@
 
 ### The Problem We Discovered
 
-In February 2026, we ran an end-to-end test using clauderemote to autonomously build
+In February 2026, we ran an end-to-end test using han to autonomously build
 **realadlessbrowser** — a standalone web app (Bun + TanStack Start + Tailwind v4 + Anthropic SDK).
 The human-interactive kickoff session created full documentation scaffolding, recorded three
 architecture decisions, and established the project vision. The autonomous agents then built the
@@ -82,7 +82,7 @@ the project's actual documentation files.
 
 The supervisor can `create_goal`, `adjust_priority`, `update_memory`, `send_notification`,
 `cancel_task`, and `explore_project`. None of these produce project documentation. The
-supervisor's memory banks (`~/.claude-remote/memory/`) are private to the supervisor — they
+supervisor's memory banks (`~/.han/memory/`) are private to the supervisor — they
 don't update the project's claude-context files that humans and future Claude Code sessions read.
 
 ### 2.3 No Documentation Phase in Goal Planning
@@ -399,7 +399,7 @@ losing context.
 
 ### Don't: Duplicate Supervisor Memory into Project Docs
 
-The supervisor's memory banks (`~/.claude-remote/memory/projects/*.md`) are for the
+The supervisor's memory banks (`~/.han/memory/projects/*.md`) are for the
 supervisor's private reasoning. Project documentation (`claude-context/`) is for humans
 and Claude Code sessions. These serve different audiences and should contain different
 levels of detail. The supervisor's memory might note "scraper is fragile, watch for DDG
