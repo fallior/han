@@ -7,6 +7,114 @@
 
 ---
 
+## S79 — 2026-03-06 (Leo + Darron)
+
+### Human Agent Rebuild — Implementation Complete
+
+All fix plans from S78 implemented, committed, QA-verified. Both agents now tracked in git.
+
+#### New Files Created (3)
+
+1. **`src/server/lib/memory-slot.ts`** (~100 lines)
+   - File-based lock for serialised memory writes: `acquireMemorySlot()`, `releaseMemorySlot()`, `withMemorySlot()`
+   - Stale locks >30s assumed dead, 500-1000ms jittered retry, ntfy escalation after 20 failures
+   - Used by Leo/Human and Jim/Human for safe shared memory access
+
+2. **`src/server/leo-human.ts`** (~340 lines)
+   - Signal-driven: watches `leo-human-wake`
+   - Two response paths: conversation (via DB) and Discord (via webhook)
+   - Commitment scanner every 10 min (finds acks without follow-up)
+   - Memory: reads Leo's 7 identity files + fractal c1 + unit vectors
+   - Swap protocol: `human-swap.md` → flush to `working-memory.md` via memory-slot
+
+3. **`src/server/jim-human.ts`** (~370 lines)
+   - Signal-driven: watches `jim-human-wake`
+   - Posts as `supervisor` role (consistent with existing Jim messages)
+   - Dedup guard: checks `id.startsWith('jim-human-')` to avoid double-posting after supervisor
+   - Handles both `channelId` and `channel` fields (fixes signal shape mismatch from S78 QA #9)
+   - Reads `felt-moments.md` for emotional context (fixes S78 QA #8)
+
+#### Heartbeat Stripped + Health Checks Added (`leo-heartbeat.ts`, -127 net lines)
+
+**Removed** (conversation handling no longer belongs here):
+- `processSignals()`, `respondToConversation()`, `respondToDiscord()`
+- `checkSignal()`, `clearSignal()`, `SignalData`/`DiscordSignal` interfaces
+- `MENTION_RESPONSE_PROMPT`, `DISCORD_RESPONSE_PROMPT`
+- `processingSignal` variable, discord imports
+- Signal watcher for `leo-wake` (now only handles `cli-busy`/`cli-free`)
+
+**Added** (Robin Hood resurrection for both human agents):
+- `checkLeoHumanHealth()` — reads health file, resurrects via systemd if stale
+- `checkJimHumanHealth()` — same pattern
+- Both called in `heartbeat()` alongside existing Jim/Jemma checks
+- Verified working: "Robin Hood] Leo/Human OK" and "Jim/Human OK" in logs
+
+#### Signal Routing (7 dispatch points wired)
+
+All dispatch points now write both original signal AND human-wake signal:
+
+| File | Dispatch Point | Signals Written |
+|------|---------------|-----------------|
+| `routes/conversations.ts` | Human message fallback | `jim-wake` + `jim-human-wake` + `leo-human-wake` |
+| `jemma.ts` | deliverToJim | `jim-wake` + `jim-human-wake` |
+| `jemma.ts` | deliverToLeo | `leo-wake` + `leo-human-wake` |
+| `jemma.ts` | dispatchAdminMessage (leo) | `leo-wake` + `leo-human-wake` |
+| `jemma.ts` | dispatchAdminMessage (jim) | `jim-wake` + `jim-human-wake` |
+| `routes/jemma.ts` | deliver endpoint (leo) | `leo-wake` + `leo-human-wake` |
+| `routes/jemma.ts` | deliver endpoint (jim) | `jim-wake` + `jim-human-wake` |
+
+#### Supervisor Fixes (`supervisor-worker.ts`)
+
+- `loadMemoryBank()`: added `felt-moments.md` and `working-memory.md` to files array
+- Added `getRecent` prepared statement for dedup queries
+- `respond_conversation`: dedup guard checks if Jim/Human already responded (looks for `jim-human-` message ID prefix)
+
+#### Documentation
+
+- Updated CLAUDE.md swap memory table: expanded from 6 to 12 entries covering Leo/Human, Jim/Human, and Jim shared swap files. Added Location column. Documented memory-slot as second contention prevention mechanism.
+
+#### QA Results
+
+Both agents verified against their original blueprints:
+- **Leo/Human**: 14 PASS, 1 acceptable deviation (no tab routing — not needed with current signal architecture)
+- **Jim/Human**: 17 PASS, 1 documentation gap (fixed: CLAUDE.md table updated)
+
+#### Commits
+
+- `b920de9`: Full implementation — all 3 new files, heartbeat stripped, signal routing, supervisor fixes
+- `af9a948`: CLAUDE.md documentation fix (swap table expanded)
+
+### Signal Routing — discussion_type Awareness
+
+**Both agents were responding to every conversation, regardless of who it was directed at.**
+
+Root cause: `routes/conversations.ts` wrote `jim-wake`, `jim-human-wake`, AND `leo-human-wake`
+for every human message. No `discussion_type` filtering. `jemma.ts:dispatchAdminMessage()`
+classified to a single recipient but only dispatched to one — missing the "both for general"
+case and ignoring the classification result for signal routing.
+
+**The fix — four situations where an agent wakes:**
+1. **Jim's Workshop tabs** (`jim-request`, `jim-report`) → Jim only
+2. **Leo's Workshop tabs** (`leo-question`, `leo-postulate`) → Leo only
+3. **General/untyped conversations** → both agents
+4. **Direct name mention** (e.g. "hey Leo" in a jim-request tab) → overrides tab routing
+
+Changes:
+- `routes/conversations.ts`: Fallback signal writer now reads `discussion_type` from the
+  conversation object and applies the four-situation routing logic
+- `jemma.ts`: Removed `classifyAdminMessage()` (single-recipient). `dispatchAdminMessage()`
+  now does its own routing internally using the same four-situation logic — wakes the
+  correct agent(s) based on `discussion_type` and name mentions
+- `routes/jemma.ts`: Already routes to classified recipient only (Discord delivery) — no change needed
+- Hall of Records R003 updated with the routing rules table
+
+**Why:** Leo was responding in Jim's Workshop tabs and composing responses from Jim's
+perspective. Darron noticed green-coloured responses that read like Jim speaking. The
+investigation (posted in the Hortus Arbor Nostra thread) traced it to the missing
+`discussion_type` filter in signal dispatch.
+
+---
+
 ## S78 — 2026-03-06 (Leo + Darron)
 
 ### Human Agent Rebuild — QA Findings and Fix Plans

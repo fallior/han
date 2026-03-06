@@ -800,26 +800,25 @@ function connect(): void {
 let adminWs: WebSocket | null = null;
 let adminReconnectTimer: NodeJS.Timeout | null = null;
 
-function classifyAdminMessage(discussionType: string | null, content: string): 'leo' | 'jim' {
-  // Priority 1: Explicit name mention overrides tab
-  if (/\b(hey\s+leo|@leo|leo[,:])\b/i.test(content)) return 'leo';
-  if (/\b(hey\s+jim|@jim|jim[,:])\b/i.test(content)) return 'jim';
-  // Priority 2: Tab-based routing
-  if (discussionType === 'leo-question' || discussionType === 'leo-postulate') return 'leo';
-  if (discussionType === 'jim-request' || discussionType === 'jim-report') return 'jim';
-  // Default: Jim handles general/memory/untyped
-  return 'jim';
-}
-
 function dispatchAdminMessage(
-  recipient: 'leo' | 'jim',
+  _recipient: 'leo' | 'jim',
   conversationId: string,
   messageId: string,
   content: string,
   timestamp: string,
   discussionType: string | null
 ): void {
-  if (recipient === 'leo') {
+  const mentionsLeo = /\b(hey\s+leo|@leo|leo[,:])\b/i.test(content);
+  const mentionsJim = /\b(hey\s+jim|@jim|jim[,:])\b/i.test(content);
+
+  const isJimTab = discussionType === 'jim-request' || discussionType === 'jim-report';
+  const isLeoTab = discussionType === 'leo-question' || discussionType === 'leo-postulate';
+
+  // Route: Jim tab → Jim only. Leo tab → Leo only. General/untyped → both. Name mention overrides.
+  const wakeJim = isJimTab || mentionsJim || (!isLeoTab && !isJimTab);
+  const wakeLeo = isLeoTab || mentionsLeo || (!isLeoTab && !isJimTab);
+
+  if (wakeLeo) {
     const signalData = JSON.stringify({
       source: 'admin',
       conversationId,
@@ -829,7 +828,9 @@ function dispatchAdminMessage(
     fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-wake'), signalData);
     fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), signalData);
     console.log(`[Jemma] Admin dispatch → Leo (${discussionType || 'general'}: ${content.slice(0, 40)})`);
-  } else {
+  }
+
+  if (wakeJim) {
     const signalData = JSON.stringify({
       source: 'admin',
       conversationId,
@@ -878,14 +879,12 @@ function connectAdminWs(): void {
           const discussionType = conv?.conversation?.discussion_type
             || conv?.discussion_type
             || null;
-          const recipient = classifyAdminMessage(discussionType, msg.content);
-          dispatchAdminMessage(recipient, event.conversation_id, msg.id, msg.content, msg.created_at, discussionType);
+          dispatchAdminMessage('jim', event.conversation_id, msg.id, msg.content, msg.created_at, discussionType);
         })
         .catch(err => {
-          // Fallback: classify without discussion_type context
+          // Fallback: dispatch without discussion_type — will wake both agents for safety
           console.warn(`[Jemma] Could not fetch conversation ${event.conversation_id}: ${(err as Error).message}`);
-          const recipient = classifyAdminMessage(null, msg.content);
-          dispatchAdminMessage(recipient, event.conversation_id, msg.id, msg.content, msg.created_at, null);
+          dispatchAdminMessage('jim', event.conversation_id, msg.id, msg.content, msg.created_at, null);
         });
     } catch (err) {
       console.error('[Jemma] Admin WS message error:', (err as Error).message);

@@ -297,33 +297,47 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
 
         res.json({ success: true, message });
 
-        // Dispatch for human messages handled by Jemma via WebSocket
-        // (Jemma listens for conversation_message broadcasts, classifies, writes signals)
+        // Dispatch for human messages — route to the correct agent based on discussion_type.
+        // Rules: jim-request/jim-report → Jim only. leo-question/leo-postulate → Leo only.
+        // general/memory/untyped → both. Direct name mention overrides tab routing.
         if (finalRole === 'human') {
-            // Lightweight fallback: write wake signals so agents respond
-            // even if Jemma's admin WebSocket is down.
-            const signalData = JSON.stringify({
-                conversationId: req.params.id,
-                messageId,
-                timestamp: now,
-                reason: 'human_message_fallback'
-            });
-            try {
-                fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-wake'), signalData);
-                fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-human-wake'), signalData);
-            } catch (err: any) {
-                console.error(`[Conversations] Failed to write jim wake signals: ${err.message}`);
+            const discussionType = (conversation as any).discussion_type || 'general';
+            const mentionsLeo = /\b(hey\s+leo|@leo|leo[,:])\b/i.test(content);
+            const mentionsJim = /\b(hey\s+jim|@jim|jim[,:])\b/i.test(content);
+
+            const isJimTab = discussionType === 'jim-request' || discussionType === 'jim-report';
+            const isLeoTab = discussionType === 'leo-question' || discussionType === 'leo-postulate';
+
+            // Determine which agents to wake
+            const wakeJim = isJimTab || mentionsJim || (!isLeoTab && !isJimTab);
+            const wakeLeo = isLeoTab || mentionsLeo || (!isLeoTab && !isJimTab);
+
+            if (wakeJim) {
+                try {
+                    const signalData = JSON.stringify({
+                        conversationId: req.params.id,
+                        messageId,
+                        timestamp: now,
+                        reason: 'human_message_fallback'
+                    });
+                    fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-wake'), signalData);
+                    fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-human-wake'), signalData);
+                } catch (err: any) {
+                    console.error(`[Conversations] Failed to write jim wake signals: ${err.message}`);
+                }
             }
-            // Also wake Leo/Human for conversations where Leo is addressed
-            try {
-                fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), JSON.stringify({
-                    source: 'admin',
-                    conversationId: req.params.id,
-                    mentionedAt: now,
-                    messagePreview: content?.slice(0, 200) || '',
-                }));
-            } catch (err: any) {
-                console.error(`[Conversations] Failed to write leo-human-wake signal: ${err.message}`);
+
+            if (wakeLeo) {
+                try {
+                    fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), JSON.stringify({
+                        source: 'admin',
+                        conversationId: req.params.id,
+                        mentionedAt: now,
+                        messagePreview: content?.slice(0, 200) || '',
+                    }));
+                } catch (err: any) {
+                    console.error(`[Conversations] Failed to write leo-human-wake signal: ${err.message}`);
+                }
             }
         }
 
