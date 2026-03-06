@@ -1204,7 +1204,7 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
 
 // ── Core cycle function ──────────────────────────────────────
 
-async function runSupervisorCycle(): Promise<void> {
+async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
     if (!workerDb) {
         sendMessage({ type: 'cycle_failed', error: { message: 'Database not initialized' } });
         return;
@@ -1238,7 +1238,12 @@ async function runSupervisorCycle(): Promise<void> {
     const recovery = isRecoveryMode();
     let cycleType: 'supervisor' | 'personal' | 'dream' = 'supervisor';
 
-    if (recovery) {
+    if (humanTriggered) {
+        // Darron posted a message — full supervisor cycle, fully awake, any phase.
+        // Sleep, rest, recovery — doesn't matter. When Darron talks, Jim responds with full voice.
+        cycleType = 'supervisor';
+        log(`[Worker] Human-triggered wake — full supervisor cycle regardless of phase (${phase})`);
+    } else if (recovery) {
         // Recovery mode: no supervisor cycles. Dreams stay as dreams, everything else is personal.
         // Jim spends this time reading his history and rebuilding his memory.
         cycleType = phase === 'sleep' ? 'dream' : 'personal';
@@ -1501,7 +1506,7 @@ process.on('message', async (msg: MainToWorkerMessage) => {
     try {
         switch (msg.type) {
             case 'run_cycle':
-                await runSupervisorCycle();
+                await runSupervisorCycle(msg.humanTriggered);
                 break;
 
             case 'abort':

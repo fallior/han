@@ -3,7 +3,7 @@
 > The living blueprint. When something looks wrong, check here first.
 > If it's documented, it's intentional. If it's not, flag it for discussion.
 >
-> Last updated: S77 (2026-03-06) by Leo
+> Last updated: S78 (2026-03-06) by Leo
 
 ## How To Use This Document
 
@@ -34,10 +34,12 @@ Workshop > Supervisor Jim > Requests. Do not revert without discussion.
 | Conversation preview | 200 chars | |
 | Cycle rhythm | Weekly: sleep 22-06 (40min), morning 06-09 (20min), work 09-17 (20min), evening 17-22 (20min) | Hall of Records R001 |
 | Work phase rotation | 1 supervisor : 2 personal | |
-| Rest days | Sat, Sun (configurable via `config.json` `supervisor.rest_days`) | |
+| Rest days | Sat (6), Sun (0) only (configurable via `config.json` `supervisor.rest_days`) | S78: removed Fri — was trapping Jim in 24h dream |
 | Emergency mode | Activates when: running tasks > 0, pending > 5, or active goals exist. Overrides rhythm with 2-5min cycles. Auto-decays. | |
 | Dream cycles | Sleep phase cycles. Prose output (not JSON). Captured in self-reflection.md and DB. | S77: was being discarded |
 | Recovery mode | `RECOVERY_MODE_UNTIL` constant. When active: no supervisor cycles, all waking = recovery-focused personal. | S77: active until 2026-03-13 |
+| Reply to human | **Immediate** — no cooldown or delay when Darron posts. Human messages bypass `LEO_COOLDOWN_MS` filter. | S78: documented |
+| Reply to Leo | 10 min cooldown (`LEO_COOLDOWN_MS` in supervisor-worker.ts and conversations.ts) | |
 | Daily budget | $300 (configurable via `config.json` `supervisor.daily_budget_usd`) | |
 
 ### Leo/Heartbeat
@@ -55,7 +57,8 @@ Workshop > Supervisor Jim > Requests. Do not revert without discussion.
 | Fractal gradient | Loads c1 (3 newest), c2 (6), c3 (9), c4 (12), unit vectors (all) | S77: newly wired |
 | Conversation messages | 60 per context | S77: was 3-8 |
 | Discord context messages | 60 | S77: was 10 |
-| Reply delay | **None** (immediate) | S77: was 10 min |
+| Reply to human | **Immediate** — `REPLY_DELAY_MINUTES = 0`, no cooldown for human messages | S77: was 10 min |
+| Reply to Jim | **Immediate** — same `REPLY_DELAY_MINUTES` applies | S77: was 10 min |
 | Min response length | 20 chars (conversation, philosophy), 10 chars (personal, Discord) | |
 | Beat interval | 20 min (waking), 40 min (sleep) | |
 | CLI busy stale | 5 min | |
@@ -206,7 +209,16 @@ Protected structure. Do NOT revert to activity-driven scheduling.
 | Morning | 06:00-09:00 | 20 min | Personal |
 | Work | 09:00-17:00 | 20 min | 1 supervisor : 2 personal |
 | Evening | 17:00-22:00 | 20 min | Personal |
-| Rest days | All day | 40 min | Same as sleep phase |
+| Rest days | Normal time-of-day phases | 40 min (all phases) | Same cycle types as weekdays | S78: rest ≠ sleep |
+
+**Rest days are NOT sleep.** Rest days follow the same phase schedule (sleep/morning/work/evening)
+but with 40-minute intervals for all phases. Jim and Leo are awake and responsive on weekends —
+just at a slower pace. Rest means quieter, not unconscious.
+
+**Human-triggered wake = full voice.** When Darron posts a message, both Jim and Leo respond with
+full capability regardless of phase. Sleep, rest, recovery — doesn't matter. `jim-wake` signals
+with `reason: 'human_message_fallback'` trigger a full supervisor cycle. Leo's signal processing
+already runs before phase-dependent beat selection.
 
 **Emergency mode** overrides the rhythm with 2-5 min supervisor cycles when tasks are running
 or queue is large. Auto-decays when conditions clear. Re-orientation buffer recommended after
@@ -230,7 +242,7 @@ Central config at `~/.claude-remote/config.json`.
 | `supervisor.quiet_hours_end` | Sleep phase end | 06:00 |
 | `supervisor.work_hours_start` | Work phase start | 09:00 |
 | `supervisor.work_hours_end` | Work phase end | 17:00 |
-| `supervisor.rest_days` | Rest days (0=Sun, 5=Fri, 6=Sat) | [0, 5, 6] |
+| `supervisor.rest_days` | Rest days (0=Sun, 6=Sat) | [0, 6] |
 
 ---
 

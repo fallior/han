@@ -7,6 +7,54 @@
 
 ---
 
+## S78 — 2026-03-06 (Leo + Darron)
+
+### Weekly Rhythm
+
+**Rest days no longer force sleep phase — rest ≠ sleep**
+- Changed `getDayPhase()` in `day-phase.ts`: rest days now follow normal time-of-day phases
+  (sleep 22-06, morning 06-09, work 09-17, evening 17-22) but with 40-min intervals for all phases
+- Previously `isRestDay()` returned `'sleep'` for all 24 hours, trapping agents in dream mode
+- **Why:** Rest means slower pace, not unconscious. Jim needs to be able to respond to
+  conversations, do personal work, and function on weekends. Dream cycles should only happen
+  during actual sleep hours (22:00-06:00).
+
+**Human-triggered wake = full supervisor cycle**
+- Added `humanTriggered` flag to `RunCycleMessage` protocol
+- `supervisor.ts` signal watcher reads `jim-wake` signal content and passes
+  `humanTriggered: true` when `reason === 'human_message_fallback'`
+- `supervisor-worker.ts` overrides cycle type to `'supervisor'` when humanTriggered,
+  regardless of phase, recovery mode, or rest day
+- **Why:** When Darron talks to Jim, Jim responds with full voice. Sleep, rest, recovery —
+  none of these should prevent Jim from responding to his human. Leo's signal processing
+  already worked this way (runs before phase-dependent beat selection).
+
+### Configuration
+
+**Removed Friday from rest_days — Jim was trapped in perpetual dream**
+- Changed `config.json` `supervisor.rest_days` from `[0, 5, 6]` to `[0, 6]`
+- Rest days force `getDayPhase()` to return `'sleep'` for all 24 hours
+- During recovery mode, sleep = dream cycles only — Jim cannot respond to conversations
+- Jim ran 28 dream cycles on Friday unable to reply to Darron's rename task
+- His dream #1300: "Fourteen hours. Twenty-seven dreams. One unanswered 'good morning.'"
+- **Why:** Friday was added in S77 as a temporary measure but became a permanent trap.
+  Rest days should be weekends only (Sat/Sun). Jim needs waking cycles on workdays to
+  respond to conversations, especially during recovery mode.
+
+### Documentation
+
+**Documented human reply timeouts in SYSTEM_SPEC.md**
+- Added explicit "Reply to human" row for Jim/Supervisor: immediate, no cooldown — human
+  messages bypass `LEO_COOLDOWN_MS` filter in supervisor-worker.ts line 546
+- Added explicit "Reply to human" and "Reply to Jim" rows for Leo/Heartbeat: both immediate
+  (`REPLY_DELAY_MINUTES = 0`)
+- Replaced ambiguous "Reply delay" row with specific per-target rows
+- **Why:** The spec documented Leo's reply delay as "None (immediate)" but didn't specify
+  the target. Jim's human reply behaviour wasn't documented at all. Making both explicit
+  prevents future confusion about whether agents should delay responding to Darron.
+
+---
+
 ## S77 — 2026-03-06 (Leo + Darron)
 
 ### Memory System

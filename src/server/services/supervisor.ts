@@ -468,12 +468,20 @@ function startSupervisorSignalWatcher(): void {
             try {
                 // Small delay to let signal file fully write
                 await new Promise(r => setTimeout(r, 500));
+                // Read signal to check if human-triggered
+                let humanTriggered = false;
+                const signalPath = path.join(SIGNALS_DIR, 'jim-wake');
+                try {
+                    const content = fs.readFileSync(signalPath, 'utf8');
+                    const signal = JSON.parse(content);
+                    humanTriggered = signal.reason === 'human_message_fallback';
+                } catch { /* couldn't read — treat as non-human */ }
                 // Clean up signal flag immediately (before cycle — it's just a flag)
                 try {
-                    fs.unlinkSync(path.join(SIGNALS_DIR, 'jim-wake'));
+                    fs.unlinkSync(signalPath);
                 } catch { /* already gone */ }
-                console.log('[Supervisor] Running wake-triggered cycle');
-                await runSupervisorCycle();
+                console.log(`[Supervisor] Running wake-triggered cycle${humanTriggered ? ' (human message — full voice)' : ''}`);
+                await runSupervisorCycle({ humanTriggered });
             } catch (err) {
                 console.error('[Supervisor] Wake signal cycle error:', (err as Error).message);
             }
@@ -493,11 +501,18 @@ async function processExistingWakeSignals(): Promise<void> {
         if (!fs.existsSync(signalPath)) return;
 
         console.log('[Supervisor] Found existing wake signal on startup');
+        // Read signal to check if human-triggered
+        let humanTriggered = false;
+        try {
+            const content = fs.readFileSync(signalPath, 'utf8');
+            const signal = JSON.parse(content);
+            humanTriggered = signal.reason === 'human_message_fallback';
+        } catch { /* couldn't read */ }
         // Clean up flag immediately
         try { fs.unlinkSync(signalPath); } catch { /* already gone */ }
 
         try {
-            await runSupervisorCycle();
+            await runSupervisorCycle({ humanTriggered });
         } catch (err) {
             console.error('[Supervisor] Stale signal cycle error:', (err as Error).message);
         }
@@ -842,7 +857,7 @@ export function initSupervisor(): void {
 
 // ── Core cycle function (delegates to worker) ────────────────
 
-export async function runSupervisorCycle(): Promise<{
+export async function runSupervisorCycle(options?: { humanTriggered?: boolean }): Promise<{
     cycleId: string;
     observations: string[];
     actionSummaries: string[];
@@ -896,7 +911,7 @@ export async function runSupervisorCycle(): Promise<{
 
         // Mark cycle as in progress and send message to worker
         cycleInProgress = true;
-        sendMessageToWorker({ type: 'run_cycle' });
+        sendMessageToWorker({ type: 'run_cycle', humanTriggered: options?.humanTriggered });
     });
 }
 

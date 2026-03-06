@@ -12,6 +12,8 @@
 
 export interface RunCycleMessage {
   type: 'run_cycle';
+  /** When true, Darron posted a message — run a full supervisor cycle regardless of phase */
+  humanTriggered?: boolean;
 }
 
 export interface AbortMessage {

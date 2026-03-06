@@ -34,8 +34,8 @@ export function isRestDay(): boolean {
 }
 
 export function getDayPhase(): DayPhase {
-    if (isRestDay()) return 'sleep';
-
+    // Rest days follow normal time-of-day phases — rest ≠ sleep.
+    // The only difference is longer intervals (see getPhaseInterval).
     const config = loadConfig();
     const quietStart = config.supervisor?.quiet_hours_start || config.quiet_hours_start || '22:00';
     const quietEnd = config.supervisor?.quiet_hours_end || config.quiet_hours_end || '06:00';
@@ -80,6 +80,10 @@ export const PHASE_INTERVALS = {
     evening: 20 * 60 * 1000,
 } as const;
 
+/** Rest day interval — slower pace for all phases on weekends */
+const REST_DAY_INTERVAL = 40 * 60 * 1000;
+
 export function getPhaseInterval(): number {
+    if (isRestDay()) return REST_DAY_INTERVAL;
     return PHASE_INTERVALS[getDayPhase()];
 }
