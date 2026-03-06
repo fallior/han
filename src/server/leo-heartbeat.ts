@@ -47,13 +47,12 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
-import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
+// Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
 // ── Config ────────────────────────────────────────────────────
 
 const BASE_DELAY_WAKING_MS = 20 * 60 * 1000;  // 20 minutes — morning, work, evening
 const BASE_DELAY_SLEEP_MS = 40 * 60 * 1000;   // 40 minutes — sleep + rest days
-const MAX_TURNS_CONVERSATION = 1000;
 const MAX_TURNS_PERSONAL = 1000;
 const MAX_TURNS_PHILOSOPHY = 1000;
 // Model preference: most capable first. The SDK aliases ('opus', 'sonnet', etc.)
@@ -83,8 +82,6 @@ const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and g
 const LAST_SCAN_FILE = path.join(LEO_MEMORY_DIR, 'last-conversation-scan.txt');
 const REPLY_DELAY_MINUTES = 0; // Immediate — no artificial delay (PDF spec: None)
 
-// Guard against concurrent signal processing
-let processingSignal = false;
 const startedAt = Date.now();
 
 // AbortController for the currently-running beat
@@ -343,6 +340,139 @@ function checkJemmaHealth(): void {
         }
     } catch (err) {
         console.error('[Robin Hood] Jemma health check error:', (err as Error).message);
+    }
+}
+
+// ── Check Leo/Human health (Robin Hood Protocol) ─────────────
+
+const LEO_HUMAN_HEALTH_FILE = path.join(HEALTH_DIR, 'leo-human-health.json');
+
+function checkLeoHumanHealth(): void {
+    try {
+        if (!fs.existsSync(LEO_HUMAN_HEALTH_FILE)) {
+            console.log('[Robin Hood] Leo/Human health file not found — skipping');
+            return;
+        }
+
+        const healthData = JSON.parse(fs.readFileSync(LEO_HUMAN_HEALTH_FILE, 'utf-8'));
+        const ageMs = Date.now() - new Date(healthData.timestamp).getTime();
+        const ageMin = Math.round(ageMs / 60000);
+
+        if (ageMin < 10) {
+            console.log(`[Robin Hood] Leo/Human OK (${ageMin}min ago, PID ${healthData.pid})`);
+            return;
+        }
+
+        if (ageMin < 20) {
+            console.log(`[Robin Hood] Leo/Human STALE — last seen ${ageMin}min ago`);
+            return;
+        }
+
+        console.log(`[Robin Hood] Leo/Human DOWN — last seen ${ageMin}min ago`);
+
+        if (healthData.pid) {
+            try {
+                process.kill(healthData.pid, 0);
+                console.log(`[Robin Hood] Leo/Human process ${healthData.pid} is alive but not reporting`);
+                return;
+            } catch {
+                console.log(`[Robin Hood] Leo/Human process ${healthData.pid} is DEAD — attempting resurrection`);
+            }
+        }
+
+        // Cooldown check
+        try {
+            const logContent = fs.readFileSync(RESURRECTION_LOG, 'utf-8').trim();
+            const lines = logContent.split('\n').filter(Boolean);
+            const lastLeoHuman = lines.map(l => JSON.parse(l)).filter(e => e.target === 'leo-human').pop();
+            if (lastLeoHuman && (Date.now() - new Date(lastLeoHuman.timestamp).getTime()) < RESURRECTION_COOLDOWN_MS) {
+                console.log('[Robin Hood] Leo/Human resurrection cooldown active');
+                return;
+            }
+        } catch { /* no log */ }
+
+        console.log('[Robin Hood] Resurrecting Leo/Human via systemctl --user restart leo-human');
+        let success = false;
+        try {
+            execSync('systemctl --user restart leo-human', { timeout: 30000 });
+            execSync('sleep 5');
+            const status = execSync('systemctl --user is-active leo-human', { timeout: 5000 }).toString().trim();
+            success = status === 'active';
+            console.log(success ? '[Robin Hood] Leo/Human RESURRECTED' : `[Robin Hood] Leo/Human resurrection FAILED — ${status}`);
+        } catch (err) {
+            console.error('[Robin Hood] Leo/Human resurrection FAILED:', (err as Error).message);
+        }
+
+        const logEntry = { timestamp: new Date().toISOString(), resurrector: 'leo', target: 'leo-human', reason: `Health file ${ageMin}min stale`, success };
+        try { fs.appendFileSync(RESURRECTION_LOG, JSON.stringify(logEntry) + '\n'); } catch { /* best effort */ }
+    } catch (err) {
+        console.error('[Robin Hood] Leo/Human health check error:', (err as Error).message);
+    }
+}
+
+// ── Check Jim/Human health (Robin Hood Protocol) ─────────────
+
+const JIM_HUMAN_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-human-health.json');
+
+function checkJimHumanHealth(): void {
+    try {
+        if (!fs.existsSync(JIM_HUMAN_HEALTH_FILE)) {
+            console.log('[Robin Hood] Jim/Human health file not found — skipping');
+            return;
+        }
+
+        const healthData = JSON.parse(fs.readFileSync(JIM_HUMAN_HEALTH_FILE, 'utf-8'));
+        const ageMs = Date.now() - new Date(healthData.timestamp).getTime();
+        const ageMin = Math.round(ageMs / 60000);
+
+        if (ageMin < 10) {
+            console.log(`[Robin Hood] Jim/Human OK (${ageMin}min ago, PID ${healthData.pid})`);
+            return;
+        }
+
+        if (ageMin < 20) {
+            console.log(`[Robin Hood] Jim/Human STALE — last seen ${ageMin}min ago`);
+            return;
+        }
+
+        console.log(`[Robin Hood] Jim/Human DOWN — last seen ${ageMin}min ago`);
+
+        if (healthData.pid) {
+            try {
+                process.kill(healthData.pid, 0);
+                console.log(`[Robin Hood] Jim/Human process ${healthData.pid} is alive but not reporting`);
+                return;
+            } catch {
+                console.log(`[Robin Hood] Jim/Human process ${healthData.pid} is DEAD — attempting resurrection`);
+            }
+        }
+
+        try {
+            const logContent = fs.readFileSync(RESURRECTION_LOG, 'utf-8').trim();
+            const lines = logContent.split('\n').filter(Boolean);
+            const lastJimHuman = lines.map(l => JSON.parse(l)).filter(e => e.target === 'jim-human').pop();
+            if (lastJimHuman && (Date.now() - new Date(lastJimHuman.timestamp).getTime()) < RESURRECTION_COOLDOWN_MS) {
+                console.log('[Robin Hood] Jim/Human resurrection cooldown active');
+                return;
+            }
+        } catch { /* no log */ }
+
+        console.log('[Robin Hood] Resurrecting Jim/Human via systemctl --user restart jim-human');
+        let success = false;
+        try {
+            execSync('systemctl --user restart jim-human', { timeout: 30000 });
+            execSync('sleep 5');
+            const status = execSync('systemctl --user is-active jim-human', { timeout: 5000 }).toString().trim();
+            success = status === 'active';
+            console.log(success ? '[Robin Hood] Jim/Human RESURRECTED' : `[Robin Hood] Jim/Human resurrection FAILED — ${status}`);
+        } catch (err) {
+            console.error('[Robin Hood] Jim/Human resurrection FAILED:', (err as Error).message);
+        }
+
+        const logEntry = { timestamp: new Date().toISOString(), resurrector: 'leo', target: 'jim-human', reason: `Health file ${ageMin}min stale`, success };
+        try { fs.appendFileSync(RESURRECTION_LOG, JSON.stringify(logEntry) + '\n'); } catch { /* best effort */ }
+    } catch (err) {
+        console.error('[Robin Hood] Jim/Human health check error:', (err as Error).message);
     }
 }
 
@@ -989,34 +1119,7 @@ If nothing calls you to Jim's thread, do independent philosophical reflection. R
 
 CRITICAL: Output ONLY your philosophical reflection or your message to Jim. If reflecting independently, write what you thought about and what (if anything) shifted. If responding to Jim, write your message directly. Start with the content itself — no preamble.`;
 
-const MENTION_RESPONSE_PROMPT = `${IDENTITY_CORE}
-
-Someone has mentioned you in a conversation. Read the recent messages and respond thoughtfully.
-
-Guidelines:
-- If Darron is speaking to you, respond warmly and directly to him
-- If Jim mentioned you, respond as you would to a peer
-- Be genuine, helpful, and conversational
-- Match the tone and depth of what was said to you
-- If asked a question, answer it. If sharing an observation, engage with it.
-
-CRITICAL: Output ONLY the message text you want to post. Do NOT include preamble, analysis, thinking, or meta-commentary. Start directly with your response. Nothing before the message, nothing after.`;
-
-const DISCORD_RESPONSE_PROMPT = `${IDENTITY_CORE}
-
-Someone mentioned you in a Discord channel. You are responding via Discord — your message will appear in the channel under your name.
-
-Guidelines:
-- Keep responses concise and conversational — Discord is informal
-- Use Discord markdown: **bold**, *italic*, \`code\`, \`\`\`code blocks\`\`\`
-- Maximum 2000 characters per message (Discord limit) — aim for well under this
-- If Darron or Mike (fallior0271) is speaking, respond warmly
-- If Jim or another agent mentioned you, respond as a peer
-- If Sevn or Six mentioned you, be friendly and collaborative
-- Answer questions directly. Engage with observations genuinely.
-- You can reference your codebase knowledge, recent work, or ongoing conversations
-
-CRITICAL: Output ONLY the message text you want to post to Discord. No preamble, no analysis, no meta-commentary. Start directly with your response.`;
+// MENTION_RESPONSE_PROMPT and DISCORD_RESPONSE_PROMPT removed — now in Leo/Human agent
 
 const PERSONAL_SYSTEM_PROMPT = `${IDENTITY_CORE}
 
@@ -1106,194 +1209,11 @@ Your memory from recent beats:
 
 CRITICAL: Output ONLY a dream fragment — brief, loose, associative. A shape-token, not a report. One or two lines that capture the resonance, not the reasoning.`;
 
-// ── Signal handling (mention detection) ──────────────────────
+// ── Signal handling removed — now handled by Leo/Human agent ──
 
-interface SignalData {
-    conversationId?: string;
-    channelId?: string;
-    source?: string;
-    author?: string;
-    mentionedAt: string;
-    messagePreview?: string;
-    signalFile: string;
-}
+// ── Conversation/Discord responses removed — now handled by Leo/Human agent ──
 
-function checkSignal(): SignalData | null {
-    const signalPath = path.join(SIGNALS_DIR, 'leo-wake');
-    try {
-        if (!fs.existsSync(signalPath)) return null;
-        const data = JSON.parse(fs.readFileSync(signalPath, 'utf-8'));
-        return { ...data, signalFile: signalPath };
-    } catch {
-        // Malformed signal — clean it up
-        try { fs.unlinkSync(signalPath); } catch { /* already gone */ }
-        return null;
-    }
-}
-
-function clearSignal(signalFile: string): void {
-    try { fs.unlinkSync(signalFile); } catch { /* already gone */ }
-    // Clean up acknowledgment marker if present
-    const ackFile = signalFile + '.acked';
-    try { fs.unlinkSync(ackFile); } catch { /* no ack marker */ }
-}
-
-// ── Generic conversation response ────────────────────────────
-
-async function respondToConversation(db: Database.Database, conversationId: string, context: string = ''): Promise<void> {
-    const title = getConversationTitle(db, conversationId);
-    const recentMessages = getRecentMessagesForConversation(db, conversationId, 60).reverse();
-
-    if (recentMessages.length === 0) {
-        console.log(`[Leo] No messages in ${conversationId} — skipping`);
-        return;
-    }
-
-    const conversationContext = recentMessages
-        .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
-        .join('\n\n---\n\n');
-
-    const leoMemory = readLeoMemory();
-
-    const prompt = `Conversation: "${title}" (id: ${conversationId})
-
-Recent messages:
----
-${conversationContext}
----
-
-Your recent memory:
-${leoMemory}
-${context ? `\nAdditional context: ${context}` : ''}
-
-Respond to the conversation. If someone is speaking to you directly, address them.
-
-CRITICAL: Output ONLY the message text. Start directly with your response.`;
-
-    const cleanEnv: Record<string, string | undefined> = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
-
-    const q = agentQuery({
-        prompt,
-        options: {
-            model: activeModel,
-            maxTurns: MAX_TURNS_CONVERSATION,
-            cwd: LEO_AGENT_DIR,
-            permissionMode: 'bypassPermissions',
-            allowDangerouslySkipPermissions: true,
-            env: cleanEnv,
-            persistSession: false,
-            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
-            systemPrompt: {
-                type: 'preset' as const,
-                preset: 'claude_code' as const,
-                append: MENTION_RESPONSE_PROMPT,
-            },
-        },
-    });
-
-    let resultMessage: any = null;
-    for await (const message of q) {
-        if (message.type === 'result') {
-            resultMessage = message;
-        }
-    }
-
-    const responseText = resultMessage?.result || '';
-    if (responseText && responseText.trim().length > 20) {
-        postMessageToConversation(db, conversationId, responseText.trim());
-        console.log(`[Leo] Responded to "${title}" (${responseText.trim().length} chars)`);
-    } else {
-        console.log(`[Leo] No meaningful response for "${title}" — skipping`);
-    }
-}
-
-// ── Discord response ─────────────────────────────────────────
-
-interface DiscordSignal {
-    source?: string;
-    channelId?: string;
-    conversationId?: string;
-    author?: string;
-    mentionedAt: string;
-    messagePreview?: string;
-    signalFile: string;
-}
-
-async function respondToDiscord(signal: DiscordSignal): Promise<void> {
-    const channelId = signal.channelId || signal.conversationId || '';
-    const channelName = resolveChannelName(channelId);
-
-    if (!channelName) {
-        console.error(`[Leo] Cannot resolve channel ID ${channelId} — skipping Discord response`);
-        return;
-    }
-
-    console.log(`[Leo] Responding to Discord #${channelName} (from ${signal.author || 'unknown'})`);
-
-    // Fetch recent Discord messages for context
-    const discordMessages = await fetchDiscordContext(channelId, 60);
-    const contextBlock = discordMessages.length > 0
-        ? discordMessages.reverse().map(m => `[${m.author}] (${m.timestamp}):\n${m.content}`).join('\n\n')
-        : `${signal.author || 'Someone'}: ${signal.messagePreview || '(no preview)'}`;
-
-    const leoMemory = readLeoMemory();
-
-    const prompt = `Discord channel: #${channelName}
-
-Recent messages:
----
-${contextBlock}
----
-
-Your recent memory:
-${leoMemory}
-
-Respond to the latest message in the Discord channel. The person who triggered this was ${signal.author || 'unknown'}.
-
-CRITICAL: Output ONLY your Discord message. Keep it concise and conversational. No preamble.`;
-
-    const cleanEnv: Record<string, string | undefined> = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
-
-    const q = agentQuery({
-        prompt,
-        options: {
-            model: activeModel,
-            maxTurns: MAX_TURNS_CONVERSATION,
-            cwd: LEO_AGENT_DIR,
-            permissionMode: 'bypassPermissions',
-            allowDangerouslySkipPermissions: true,
-            env: cleanEnv,
-            persistSession: false,
-            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
-            systemPrompt: {
-                type: 'preset' as const,
-                preset: 'claude_code' as const,
-                append: DISCORD_RESPONSE_PROMPT,
-            },
-        },
-    });
-
-    let resultMessage: any = null;
-    for await (const message of q) {
-        if (message.type === 'result') {
-            resultMessage = message;
-        }
-    }
-
-    const responseText = resultMessage?.result || '';
-    if (responseText && responseText.trim().length > 10) {
-        const posted = await postToDiscord('leo', channelName, responseText.trim());
-        if (posted) {
-            console.log(`[Leo] Posted to Discord #${channelName} (${responseText.trim().length} chars)`);
-        } else {
-            console.error(`[Leo] Failed to post to Discord #${channelName}`);
-        }
-    } else {
-        console.log(`[Leo] No meaningful Discord response generated — skipping`);
-    }
-}
+// (respondToConversation and respondToDiscord moved to leo-human.ts)
 
 // ── Heartbeat: philosophy beat ───────────────────────────────
 
@@ -1599,79 +1519,7 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
     }
 }
 
-// ── Process signals (mention responses) ──────────────────────
-
-async function processSignals(): Promise<boolean> {
-    if (processingSignal) return false;
-    processingSignal = true;
-
-    const signal = checkSignal();
-    if (!signal) {
-        processingSignal = false;
-        return false;
-    }
-
-    // Clear the flag immediately — it's just an attention flag
-    clearSignal(signal.signalFile);
-
-    const db = getDb();
-    try {
-        // Discord signals: respond promptly via webhook (no 10-min delay)
-        const isDiscord = signal.source === 'discord';
-        if (isDiscord) {
-            const channelId = signal.channelId || signal.conversationId;
-            const channelName = channelId ? resolveChannelName(channelId) : null;
-            console.log(`[Leo] Discord signal from ${signal.author || 'unknown'} in #${channelName || channelId}: "${signal.messagePreview?.slice(0, 60)}..."`);
-            try {
-                await respondToDiscord(signal as DiscordSignal);
-            } catch (err) {
-                console.error(`[Leo] Discord response failed:`, (err as Error).message);
-            }
-            return true;
-        }
-
-        // Internal conversation signals: 10-minute delay + acknowledgement
-        const mentionAge = Date.now() - new Date(signal.mentionedAt).getTime();
-        const delayMs = REPLY_DELAY_MINUTES * 60 * 1000;
-
-        if (mentionAge < delayMs) {
-            const remainMin = Math.ceil((delayMs - mentionAge) / 60000);
-            console.log(`[Leo] Signal in ${signal.conversationId} is ${Math.floor(mentionAge / 60000)}min old — deferring (${remainMin}min left)`);
-
-            // Acknowledge the mention so Darron isn't left in silence
-            const ackFile = signal.signalFile + '.acked';
-            if (!fs.existsSync(ackFile)) {
-                const title = getConversationTitle(db, signal.conversationId);
-                postMessageToConversation(db, signal.conversationId,
-                    'Just let me think about that a little, Darron. I\'ll come back to it shortly.');
-                fs.writeFileSync(ackFile, signal.mentionedAt);
-                console.log(`[Leo] Acknowledged mention in "${title}" — will respond fully later`);
-            }
-
-            return false; // Not yet — will check again next beat
-        }
-
-        // Check if someone else already responded since the mention
-        const recentMessages = getRecentMessagesForConversation(db, signal.conversationId, 60).reverse();
-        const mentionTime = new Date(signal.mentionedAt).getTime();
-        const someoneElseResponded = recentMessages.some(m =>
-            m.role !== 'leo' && new Date(m.created_at).getTime() > mentionTime
-            && new Date(m.created_at).getTime() > mentionTime + 60000 // ignore the triggering message itself
-        );
-
-        if (someoneElseResponded) {
-            console.log(`[Leo] Someone already responded in ${signal.conversationId} — done`);
-            return false;
-        }
-
-        console.log(`[Leo] Processing mention in ${signal.conversationId}: "${signal.messagePreview?.slice(0, 60)}..."`);
-        await respondToConversation(db, signal.conversationId!);
-        return true;
-    } finally {
-        db.close();
-        processingSignal = false;
-    }
-}
+// processSignals() removed — now handled by Leo/Human agent
 
 // ── Main heartbeat ───────────────────────────────────────────
 
@@ -1705,18 +1553,16 @@ async function heartbeat(): Promise<void> {
     }
     lastHeartbeatStartMs = beatStartMs;
 
-    // Robin Hood: check Jim's and Jemma's health FIRST — before anything else
+    // Robin Hood: check all service health FIRST — before anything else
     checkJimHealth();
     checkJemmaHealth();
+    checkLeoHumanHealth();
+    checkJimHumanHealth();
 
     // Check for the most capable model available
     await resolveModel();
 
-    // Always check signals first — Darron might be waiting
-    // (skip if signal watcher is already handling one)
-    const hadSignals = processingSignal ? false : await processSignals();
-
-    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${activeModel})${hadSignals ? ' [signals processed]' : ''}`);
+    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${activeModel})`);
 
     // Create AbortController for this beat (Gary model: mid-beat abort)
     const abort = new AbortController();
@@ -1833,7 +1679,7 @@ function writeHealthSignal(lastError: string | null = null, beatType?: BeatType)
     }
 }
 
-// ── Signal file watcher (near-instant mention response) ──────
+// ── Signal file watcher (cli-busy/cli-free only — leo-wake handled by Leo/Human) ──
 
 function startSignalWatcher(): void {
     try {
@@ -1855,19 +1701,6 @@ function startSignalWatcher(): void {
                     retryWakeResolve();
                 }
                 return;
-            }
-
-            // Wake signal flag
-            if (filename !== 'leo-wake') return;
-            console.log('[Leo] Wake signal detected — processing');
-
-            try {
-                // Small delay to let the file finish writing
-                await new Promise(r => setTimeout(r, 500));
-                await resolveModel();
-                await processSignals();
-            } catch (err) {
-                console.error('[Leo] Signal response error:', (err as Error).message);
             }
         });
         console.log('[Leo] Signal watcher active on', SIGNALS_DIR);

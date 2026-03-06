@@ -179,30 +179,34 @@ router.post('/deliver', (req: Request, res: Response) => {
                 // Update conversation timestamp to maintain sort order
                 conversationStmts.updateTimestamp.run(now, convId);
 
-                // Write signal file to wake Jim
-                writeSignalFile('jim-wake', {
+                // Write signal files to wake Jim + Jim/Human
+                const jimSignalData = {
                     conversationId: convId,
                     author,
                     channel,
                     confidence: classification_confidence,
                     mentionedAt: new Date().toISOString()
-                });
+                };
+                writeSignalFile('jim-wake', jimSignalData);
+                writeSignalFile('jim-human-wake', jimSignalData);
 
                 delivered = true;
             } catch (err: any) {
                 console.error('[Jemma] Error routing to Jim:', err.message);
             }
         } else if (recipient === 'leo') {
-            // Write signal file to wake Leo
+            // Write signal files to wake Leo + Leo/Human
             try {
-                writeSignalFile('leo-wake', {
+                const leoSignalData = {
                     source: 'discord',
                     channelId: channel,
                     author,
                     messagePreview: message.substring(0, 200),
                     confidence: classification_confidence,
                     mentionedAt: new Date().toISOString()
-                });
+                };
+                writeSignalFile('leo-wake', leoSignalData);
+                writeSignalFile('leo-human-wake', leoSignalData);
 
                 delivered = true;
             } catch (err: any) {

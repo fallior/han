@@ -300,19 +300,30 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         // Dispatch for human messages handled by Jemma via WebSocket
         // (Jemma listens for conversation_message broadcasts, classifies, writes signals)
         if (finalRole === 'human') {
-            // Lightweight fallback: write jim-wake signal so Jim wakes
+            // Lightweight fallback: write wake signals so agents respond
             // even if Jemma's admin WebSocket is down.
-            // Do NOT call runSupervisorCycle() directly — that caused over-responding.
+            const signalData = JSON.stringify({
+                conversationId: req.params.id,
+                messageId,
+                timestamp: now,
+                reason: 'human_message_fallback'
+            });
             try {
-                const signalFile = path.join(SIGNALS_DIR, 'jim-wake');
-                fs.writeFileSync(signalFile, JSON.stringify({
+                fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-wake'), signalData);
+                fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-human-wake'), signalData);
+            } catch (err: any) {
+                console.error(`[Conversations] Failed to write jim wake signals: ${err.message}`);
+            }
+            // Also wake Leo/Human for conversations where Leo is addressed
+            try {
+                fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), JSON.stringify({
+                    source: 'admin',
                     conversationId: req.params.id,
-                    messageId,
-                    timestamp: now,
-                    reason: 'human_message_fallback'
+                    mentionedAt: now,
+                    messagePreview: content?.slice(0, 200) || '',
                 }));
             } catch (err: any) {
-                console.error(`[Conversations] Failed to write jim-wake signal: ${err.message}`);
+                console.error(`[Conversations] Failed to write leo-human-wake signal: ${err.message}`);
             }
         }
 

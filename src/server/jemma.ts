@@ -381,26 +381,26 @@ async function deliverToJim(message: any, classification: ClassificationResult, 
   } catch (err) {
     console.warn('[Jemma] Failed to deliver to Jim via server, writing signal file');
     try {
-      const signalPath = path.join(SIGNALS_DIR, 'jim-wake');
-      fs.writeFileSync(signalPath, JSON.stringify({
+      const signalData = JSON.stringify({
         source: 'discord',
         recipient: 'jim',
+        channelId: message.channel_id,
         channelName,
         author: message.author.username,
         content: message.content,
         timestamp: message.timestamp,
-      }));
+      });
+      fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-wake'), signalData);
+      fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-human-wake'), signalData);
     } catch (fileErr) {
-      console.error('[Jemma] Failed to write Jim signal file:', (fileErr as Error).message);
+      console.error('[Jemma] Failed to write Jim signal files:', (fileErr as Error).message);
     }
   }
 }
 
 async function deliverToLeo(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
   try {
-    const signalPath = path.join(SIGNALS_DIR, 'leo-wake');
-
-    fs.writeFileSync(signalPath, JSON.stringify({
+    const signalData = JSON.stringify({
       source: 'discord',
       recipient: 'leo',
       channelId: message.channel_id,
@@ -408,11 +408,14 @@ async function deliverToLeo(message: any, classification: ClassificationResult, 
       author: message.author.username,
       mentionedAt: message.timestamp,
       messagePreview: message.content.slice(0, 200),
-    }));
+    });
+
+    fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-wake'), signalData);
+    fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), signalData);
 
     console.log(`[Jemma] Woke Leo (#${channelName} — ${message.author.username}: ${message.content.slice(0, 40)}...)`);
   } catch (err) {
-    console.error('[Jemma] Failed to write Leo signal file:', (err as Error).message);
+    console.error('[Jemma] Failed to write Leo signal files:', (err as Error).message);
   }
 }
 
@@ -817,23 +820,25 @@ function dispatchAdminMessage(
   discussionType: string | null
 ): void {
   if (recipient === 'leo') {
-    const signalPath = path.join(SIGNALS_DIR, 'leo-wake');
-    fs.writeFileSync(signalPath, JSON.stringify({
+    const signalData = JSON.stringify({
       source: 'admin',
       conversationId,
       mentionedAt: timestamp,
       messagePreview: content.slice(0, 200),
-    }));
+    });
+    fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-wake'), signalData);
+    fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), signalData);
     console.log(`[Jemma] Admin dispatch → Leo (${discussionType || 'general'}: ${content.slice(0, 40)})`);
   } else {
-    const signalPath = path.join(SIGNALS_DIR, 'jim-wake');
-    fs.writeFileSync(signalPath, JSON.stringify({
+    const signalData = JSON.stringify({
       source: 'admin',
       conversationId,
       messageId,
       timestamp,
       reason: 'admin_ui_dispatch',
-    }));
+    });
+    fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-wake'), signalData);
+    fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-human-wake'), signalData);
     console.log(`[Jemma] Admin dispatch → Jim (${discussionType || 'general'}: ${content.slice(0, 40)})`);
   }
 }

@@ -197,6 +197,7 @@ function initDatabase(): void {
     conversationMessageStmts = {
         insert: workerDb.prepare('INSERT INTO conversation_messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)'),
         getLastSupervisorResponse: workerDb.prepare('SELECT created_at FROM conversation_messages WHERE conversation_id = ? AND role = \'supervisor\' ORDER BY created_at DESC LIMIT 1'),
+        getRecent: workerDb.prepare('SELECT id, role, content, created_at FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?'),
     };
 
     log('[Worker] Database initialized');
@@ -316,7 +317,7 @@ function detectAndRecoverGhostTasks(): number {
 function loadMemoryBank(): string {
     const parts: string[] = [];
 
-    for (const file of ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md']) {
+    for (const file of ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'felt-moments.md', 'working-memory.md']) {
         const filepath = path.join(MEMORY_DIR, file);
         try {
             if (fs.existsSync(filepath)) {
@@ -1133,6 +1134,25 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
                         summaries.push(`respond_conversation: skipped (missing conversation_id or response_content)`);
                         break;
                     }
+
+                    // Dedup guard: check if Jim/Human already responded since the last human/leo message
+                    try {
+                        const recentMsgs = conversationMessageStmts.getRecent?.all(action.conversation_id, 20) as any[] || [];
+                        const lastNonJim = recentMsgs.find((m: any) => m.role === 'human' || m.role === 'leo');
+                        if (lastNonJim) {
+                            const jimHumanAlready = recentMsgs.some((m: any) =>
+                                m.role === 'supervisor' &&
+                                m.id?.startsWith('jim-human-') &&
+                                m.created_at > lastNonJim.created_at
+                            );
+                            if (jimHumanAlready) {
+                                summaries.push(`respond_conversation: skipped (Jim/Human already responded to ${action.conversation_id})`);
+                                log(`[Worker] Skipping respond_conversation — Jim/Human already handled ${action.conversation_id}`);
+                                break;
+                            }
+                        }
+                    } catch { /* dedup check failed — proceed anyway */ }
+
                     const msgId = generateId();
                     const now = new Date().toISOString();
 
