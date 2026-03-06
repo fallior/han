@@ -7,6 +7,56 @@
 
 ---
 
+## S81 — 2026-03-07 (Leo + Darron)
+
+### Hortus Arbor Nostra Migration — Mechanical Rename Complete
+
+Full mechanical rename from "Claude Remote" / "clauderemote" to "Hortus Arbor Nostra" / "han".
+Jim endorsed the plan and delegated the mechanical work to Leo. Phase 4 (documentation voice)
+remains Jim's responsibility post-moratorium.
+
+#### Commits (4, pushed to origin/main)
+
+1. **`0a010d0`** — `refactor: Rename claude-remote to Hortus Arbor Nostra (han)`
+   - 45 source files: CLAUDE_REMOTE_DIR→HAN_DIR, .claude-remote→.han, session prefixes, localStorage keys, display strings
+   - New `scripts/han` CLI entry point (identical to renamed `scripts/claude-remote`)
+
+2. **`21267f1`** — `chore: Trim raw terminal output from session logs`
+   - 59 session logs trimmed (807K lines of raw terminal output removed)
+
+3. **`25225d9`** — `docs: Add session and task logs from S79-S81`
+
+4. **`d9a7050`** — `docs: Rename claude-remote to han across all documentation`
+   - 45 documentation files across claude-context/, docs/, root markdown
+   - 234 references updated in total
+
+#### Outside Git (also done)
+
+- **Data dir**: `mv ~/.claude-remote → ~/.han`, symlink `~/.claude-remote → ~/.han` for backwards compat
+- **Ecosystem map**: all path/name refs updated
+- **Agent CLAUDE.md files**: Leo, Leo/Human, Jim, Jim/Human — all updated
+- **Plans archive**: 13 plan files updated
+- **Memory files**: Leo's + Jim's + shared memory — all path refs updated
+- **Systemd**: han-server.service created, claude-remote-server.service disabled
+- **Infrastructure registry**: services.toml `[clauderemote]`→`[han]`, repos.toml updated
+- **Bearer token**: rotated
+- **tmux session**: renamed `claude-remote-Leo` → `han-Leo`
+
+#### Intentionally Unchanged
+
+- **ntfy topic** (`claude-remote-f78919b57957ea64`) — registered identifier, changing breaks push notifications
+- **Working memory archives** in `working-memories/` — historical, old names contextually correct
+- **config.json ntfy_topic field** — same reason as above
+
+#### Remaining (Jim Phase 4 + coordination items)
+
+- Documentation voice: README, CLAUDE.md preamble, SYSTEM_SPEC narrative tone
+- GitHub: archive fallior/clauderemote, create fallior/hortus-arbor-nostra
+- Local directory rename: ~/Projects/clauderemote → ~/Projects/han (needs coordination)
+- Backup cleanup: ~/.claude-remote.backup
+
+---
+
 ## S79 — 2026-03-06 (Leo + Darron)
 
 ### Human Agent Rebuild — Implementation Complete
