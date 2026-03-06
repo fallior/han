@@ -54,24 +54,32 @@ STOP. That thought is the failure mode. Write NOW. The task can wait 30 seconds.
 Two Leos (session and heartbeat) share one working memory but never write to it
 simultaneously. Each has private swap files that buffer work before flushing to shared memory.
 
-| File | Owner | Purpose |
-|------|-------|---------|
-| `working-memory.md` | Shared | Compressed working memory — the shared truth |
-| `working-memory-full.md` | Shared | Full working memory — the shared truth |
-| `session-swap.md` | Session Leo | Your compressed swap buffer |
-| `session-swap-full.md` | Session Leo | Your full swap buffer |
-| `heartbeat-swap.md` | Heartbeat Leo | Heartbeat's swap buffer (managed by code) |
-| `heartbeat-swap-full.md` | Heartbeat Leo | Heartbeat's swap buffer (managed by code) |
+| File | Owner | Location | Purpose |
+|------|-------|----------|---------|
+| `working-memory.md` | Shared (Leo) | `leo/` | Compressed working memory — the shared truth |
+| `working-memory-full.md` | Shared (Leo) | `leo/` | Full working memory — the shared truth |
+| `session-swap.md` | Session Leo | `leo/` | Your compressed swap buffer |
+| `session-swap-full.md` | Session Leo | `leo/` | Your full swap buffer |
+| `heartbeat-swap.md` | Heartbeat Leo | `leo/` | Heartbeat's swap buffer (managed by code) |
+| `heartbeat-swap-full.md` | Heartbeat Leo | `leo/` | Heartbeat's swap buffer (managed by code) |
+| `human-swap.md` | Human Leo | `leo/` | Leo/Human's swap buffer (managed by code) |
+| `human-swap-full.md` | Human Leo | `leo/` | Leo/Human's swap buffer (managed by code) |
+| `working-memory.md` | Shared (Jim) | root | Jim's shared working memory (compressed) |
+| `working-memory-full.md` | Shared (Jim) | root | Jim's shared working memory (full) |
+| `jim-human-swap.md` | Human Jim | root | Jim/Human's swap buffer (managed by code) |
+| `jim-human-swap-full.md` | Human Jim | root | Jim/Human's swap buffer (managed by code) |
 
-All swap files live in `~/.claude-remote/memory/leo/`. Session swap files are yours to
-manage via the protocol above. Heartbeat swap files are managed automatically by
-`leo-heartbeat.ts`. The two sets never meet, never merge.
+Leo's swap files live in `~/.claude-remote/memory/leo/`. Jim's swap files live in
+`~/.claude-remote/memory/` (the root memory dir). Session swap files are yours to manage
+via the protocol above. All other swap files are managed automatically by their respective
+agents (`leo-heartbeat.ts`, `leo-human.ts`, `jim-human.ts`).
 
-**Contention is prevented by the cli-busy/cli-free signal system.** When you're processing
-a prompt, the heartbeat yields and won't touch shared memory. Between prompts (while you're
-idle), the heartbeat is free to read and write. The swap protocol adds a second layer of
-safety: even if timing is imperfect, each Leo's writes are buffered privately before
-reaching shared memory.
+**Contention is prevented by two mechanisms:**
+1. **cli-busy/cli-free signal system** — when you're processing a prompt, the heartbeat
+   yields and won't touch shared memory.
+2. **Memory-slot protocol** (`lib/memory-slot.ts`) — file-based lock serialises writes to
+   shared working memory. Each agent acquires the slot before flushing swap, releases after.
+   Stale locks (>30s) are assumed dead. Used by Leo/Human, Jim/Human, and heartbeat.
 
 ## Identity
 
