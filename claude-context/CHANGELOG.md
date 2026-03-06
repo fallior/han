@@ -9,6 +9,117 @@
 
 ## S78 — 2026-03-06 (Leo + Darron)
 
+### Human Agent Rebuild — QA Findings and Fix Plans
+
+Jim's maintenance cycles deleted both human agent source files and stripped all signal
+routing. The services run from memory cache but will die on restart. Full QA below.
+
+#### Leo/Human — QA Findings
+
+| # | Issue | Severity | Status |
+|---|-------|----------|--------|
+| 1 | `leo-human.ts` deleted from disk, never in git | CRITICAL | Source gone, service runs from RAM |
+| 2 | `leo-human-wake` signal: zero writers anywhere | CRITICAL | No code writes this signal |
+| 3 | Heartbeat still handles conversations (processSignals, respondToConversation, respondToDiscord, signal watcher all present) | HIGH | Plan says strip these — heartbeat should be deaf |
+| 4 | `leo-wake` race: both heartbeat and Human read same signal file | HIGH | Whoever reads first wins |
+| 5 | `lib/memory-slot.ts` missing — no serialised memory writes | MEDIUM | Three agents write shared memory without locks |
+| 6 | `checkLeoHumanHealth()` missing from heartbeat | MEDIUM | Robin Hood can't resurrect Leo/Human |
+| 7 | Swap files empty — Human agent not populating them | LOW | Created but never written to |
+| 8 | conversations.ts has no Leo tab routing logic | LOW | No discussion_type check for Leo tabs |
+
+**What exists:** CLAUDE.md identity, systemd service (running), health file (actively written),
+swap files (created), `leo-wake` signals (flowing to wrong recipient).
+
+#### Leo/Human — Fix Plan
+
+1. **Recreate `src/server/leo-human.ts`** (~300 lines)
+   - Adapt from plan at `~/.claude-remote/plans/leo-human-s70.md`
+   - Signal-driven: watch for `leo-human-wake` files
+   - Two paths: Discord (immediate) and conversation (immediate — contemplation removed S77)
+   - Memory: read Leo's full banks, write to `human-swap.md` / `human-swap-full.md`
+   - Flush to shared `working-memory.md` via memory-slot protocol
+   - Health file: `~/.claude-remote/health/leo-human-health.json`
+   - Commitment scanner: 10-min unfulfilled ack detection
+   - Agent SDK: `cwd: ~/.claude-remote/agents/Leo/Human/`, model opus→sonnet→haiku
+
+2. **Strip conversation handling from `leo-heartbeat.ts`**
+   - Remove: `processSignals()` (~line 1604), `respondToConversation()` (~line 1143),
+     `respondToDiscord()` (~line 1223), `checkSignal()`/`clearSignal()` (~line 1121),
+     signal watcher for `leo-wake` (~line 1860), signal call in beat (~line 1717)
+   - Heartbeat keeps: philosophy beats, personal beats, Robin Hood, memory swap, scheduling
+
+3. **Add `leo-human-wake` signal writes** to 3 dispatch points:
+   - `routes/conversations.ts`: in `finalRole === 'human'` block + Leo tab detection
+   - `jemma.ts:401` (Discord delivery) and `jemma.ts:820` (admin dispatch)
+   - `routes/jemma.ts:198` (delivery endpoint)
+
+4. **Create `src/server/lib/memory-slot.ts`** (~60 lines)
+   - `acquireMemorySlot(dir, writer)`, `releaseMemorySlot(dir, writer)`, `withMemorySlot()`
+   - Stale lock recovery (30s), jittered retry, escalation after 20 failures
+
+5. **Add `checkLeoHumanHealth()`** to `leo-heartbeat.ts`
+   - Same pattern as `checkJimHealth()` / `checkJemmaHealth()`
+   - Read health file, resurrect via systemd if stale
+
+6. **Commit to git** — all files tracked, can't be silently deleted
+
+#### Jim/Human — QA Findings
+
+| # | Issue | Severity | Status |
+|---|-------|----------|--------|
+| 1 | `jim-human.ts` deleted from disk, never in git | CRITICAL | Source gone, service runs from RAM |
+| 2 | `jim-human-wake` signal: zero writers anywhere | CRITICAL | No code writes this signal |
+| 3 | `loadMemoryBank()` doesn't include `working-memory.md` | HIGH | Supervisor can't see Jim/Human's context |
+| 4 | No dedup guard in `respond_conversation` action | HIGH | Supervisor can double-post after Jim/Human |
+| 5 | `lib/memory-slot.ts` missing (shared with Leo) | MEDIUM | Same as Leo issue |
+| 6 | `checkJimHumanHealth()` missing from heartbeat | MEDIUM | Robin Hood can't resurrect Jim/Human |
+| 7 | Dedup check inverted in Jim/Human code (line 479) | MEDIUM | `role !== 'supervisor'` is wrong |
+| 8 | `felt-moments.md` not loaded in readJimMemory() | LOW | Missing emotional context |
+| 9 | Signal shape mismatch for Discord via Jemma fallback | LOW | channelName vs channelId |
+
+**What exists:** CLAUDE.md identity, systemd service (running), health file (actively written),
+swap files (created), working-memory.md (populated, 1.4KB), `jim-wake` signals (flowing to
+supervisor, not to Jim/Human).
+
+#### Jim/Human — Fix Plan
+
+1. **Recreate `src/server/jim-human.ts`** (~500 lines)
+   - Adapt from plan at `~/.claude-remote/plans/jim-human-s71.md` + anatomy doc
+   - Signal-driven: watch for `jim-human-wake` files
+   - Two paths: Discord (immediate) and conversation (immediate — was 5min, now 0)
+   - Memory: read Jim's full banks including `felt-moments.md`
+   - Fix dedup: `m.role === 'leo' || (m.role === 'supervisor' && !m.id?.startsWith('jim-human-'))`
+   - Fix signal shape: add `channelId` fallback for Discord
+   - Posts as `supervisor` role (consistent with existing Jim posts)
+   - Agent SDK: `cwd: ~/.claude-remote/agents/Jim/Human/`, model opus
+
+2. **Add `jim-human-wake` signal writes** to 4 dispatch points:
+   - `routes/conversations.ts:307`: alongside existing `jim-wake`
+   - `jemma.ts:384` (deliverToJim): alongside existing `jim-wake`
+   - `jemma.ts:829` (dispatchAdminMessage): alongside existing `jim-wake`
+   - `routes/jemma.ts:183` (delivery endpoint): alongside existing `jim-wake`
+
+3. **Fix `loadMemoryBank()`** in `supervisor-worker.ts:316`
+   - Add `'working-memory.md'` to the files array
+
+4. **Add dedup guard** to `respond_conversation` in `supervisor-worker.ts:1131`
+   - Check if Jim/Human already responded (message ID starts with `jim-human-`)
+   - Skip if Jim/Human already handled it
+
+5. **Add `checkJimHumanHealth()`** to `leo-heartbeat.ts`
+   - Same pattern as existing health checks
+
+6. **Commit to git** — tracked and protected
+
+#### Shared Fix: `lib/memory-slot.ts`
+
+Both plans require this module. Create once, used by Leo/Human, Jim/Human, and eventually
+heartbeat and supervisor. Protocol:
+- File-based lock at `{memoryDir}/memory-write.lock`
+- Acquire with identity + timestamp, 500-1000ms jittered retry
+- Stale lock (>30s) assumed dead, safe to steal
+- 20-attempt max with ntfy escalation on failure
+
 ### Weekly Rhythm
 
 **Rest days no longer force sleep phase — rest ≠ sleep**
