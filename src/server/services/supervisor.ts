@@ -402,7 +402,8 @@ function isRestDay(): boolean {
 }
 
 function getDayPhase(): DayPhase {
-    if (isRestDay()) return 'sleep';
+    // Rest days follow normal time-of-day phases — rest ≠ sleep.
+    // The only difference is longer intervals (see getCurrentPeriodMs).
     const config = loadConfig();
     const quietStart = config.supervisor?.quiet_hours_start || config.quiet_hours_start || '22:00';
     const quietEnd = config.supervisor?.quiet_hours_end || config.quiet_hours_end || '06:00';
@@ -429,6 +430,7 @@ function getDayPhase(): DayPhase {
 }
 
 function getCurrentPeriodMs(): number {
+    if (isRestDay()) return BASE_DELAY_SLEEP_MS; // 40min on rest days, all phases
     return getDayPhase() === 'sleep' ? BASE_DELAY_SLEEP_MS : BASE_DELAY_WAKING_MS;
 }
 
@@ -447,7 +449,7 @@ function getWallClockDelay(): number {
     // If within 30s of boundary, skip to next period
     if (delay < 30000) delay += periodMs;
     const phase = getDayPhase();
-    const phaseLabel = phase === 'sleep' ? (isRestDay() ? 'rest' : 'sleep') : phase;
+    const phaseLabel = isRestDay() ? `rest/${phase}` : phase;
     console.log(`[Supervisor] Wall-clock: ${phaseLabel} phase, period ${periodMs / 60000}min, next cycle in ${Math.round(delay / 1000)}s (${Math.round(delay / 60000)}min)`);
     return delay;
 }
