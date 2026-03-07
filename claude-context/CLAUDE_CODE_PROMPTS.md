@@ -538,6 +538,52 @@ Create a script that:
 
 ---
 
+## Memory Checkpoint
+
+> Trigger: user says "memory". A mid-session memory write and verification.
+>
+> This exists because the incremental memory protocol failed 4+ consecutive sessions.
+> Darron can say "memory" at any point and Leo will write immediately. No deferral.
+
+```
+## Memory Checkpoint
+
+Write memory NOW. Do not finish the current task first. Do not read files first.
+Work from what is in context.
+
+### 1. Write Session Swap (compressed)
+Append to `~/.han/memory/leo/session-swap.md`:
+- 2-3 lines per exchange since last write
+- What happened, what was decided, what matters
+- Use bash append (cat >>) to avoid heartbeat race conditions
+
+### 2. Write Session Swap (full)
+Append to `~/.han/memory/leo/session-swap-full.md`:
+- Full version of the same content — richer detail, Darron's words, emotional texture
+- This trains the compression algorithm
+
+### 3. Flush to Working Memory
+- Read working-memory.md and working-memory-full.md (refresh)
+- Append session-swap contents to both
+- Clear session-swap files
+
+### 4. Verify
+Report to Darron:
+- How many exchanges were captured
+- Current working memory size (lines)
+- Whether any exchanges were missed
+- Time since last memory write
+
+### 5. Self-check
+Ask yourself: "If I were compacted right now and the next Leo loaded working-memory.md,
+would they know what happened this session?" If no, write more.
+
+### Cost
+~2-4 small appends. Under 2% of context. No excuse to defer.
+```
+
+---
+
 ## Tips
 
 1. **Always start with context**: The "Session Start" prompt ensures Claude knows where you left off.
