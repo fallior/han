@@ -880,6 +880,33 @@ function getDb() {
     return new Database(DB_PATH, { readonly: false });
 }
 
+function logAgentUsage(resultMessage: any, context: string): void {
+    try {
+        const db = getDb();
+        db.exec(`CREATE TABLE IF NOT EXISTS agent_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            cost_usd REAL DEFAULT 0,
+            tokens_in INTEGER DEFAULT 0,
+            tokens_out INTEGER DEFAULT 0,
+            num_turns INTEGER DEFAULT 0,
+            model TEXT,
+            context TEXT
+        )`);
+        const cost = resultMessage?.total_cost_usd || 0;
+        const tokensIn = resultMessage?.usage?.input_tokens || 0;
+        const tokensOut = resultMessage?.usage?.output_tokens || 0;
+        const turns = resultMessage?.num_turns || 0;
+        db.prepare('INSERT INTO agent_usage (agent, timestamp, cost_usd, tokens_in, tokens_out, num_turns, model, context) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+            .run('leo-heartbeat', new Date().toISOString(), cost, tokensIn, tokensOut, turns, activeModel, context);
+        console.log(`[Leo] Usage: $${cost.toFixed(4)}, ${tokensIn}in/${tokensOut}out, ${turns} turns`);
+        db.close();
+    } catch (err) {
+        console.error('[Leo] Failed to log usage:', (err as Error).message);
+    }
+}
+
 function getRecentMessagesForConversation(db: Database.Database, conversationId: string, limit = 10): Array<{ role: string; content: string; created_at: string }> {
     return db.prepare(`
         SELECT role, content, created_at
@@ -1316,6 +1343,8 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
             throw err;
         }
 
+        logAgentUsage(resultMessage, 'philosophy: responding to Jim');
+
         const responseText = resultMessage?.result || '';
         if (responseText && responseText.trim().length > 20) {
             postMessageToConversation(db, JIM_CONVERSATION_ID, responseText.trim());
@@ -1393,6 +1422,8 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
             }
             throw err;
         }
+
+        logAgentUsage(resultMessage, 'philosophy: independent reflection');
 
         const reflection = resultMessage?.result || '';
         if (reflection && reflection.trim().length > 20) {
@@ -1497,6 +1528,8 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
         }
         throw err;
     }
+
+    logAgentUsage(resultMessage, `personal: ${phase}`);
 
     const reflection = resultMessage?.result || '';
     if (reflection && reflection.trim().length > 10) {

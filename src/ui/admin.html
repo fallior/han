@@ -1483,6 +1483,44 @@
             transition: grid-template-columns 0.3s ease;
         }
 
+        .conversation-layout.thread-panel-collapsed,
+        .workshop-conversation-layout.thread-panel-collapsed {
+            grid-template-columns: 0px 1fr;
+        }
+
+        .conversation-layout.thread-panel-collapsed .thread-list-panel,
+        .workshop-conversation-layout.thread-panel-collapsed .thread-list-panel {
+            overflow: hidden;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .workshop-conversation-layout {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 0;
+            flex: 1;
+            overflow: hidden;
+            transition: grid-template-columns 0.3s ease;
+        }
+
+        .thread-panel-toggle {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 4px;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 13px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+
+        .thread-panel-toggle:hover {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+        }
+
         /* ─── Period Filter Bar ─── */
         .period-filter-bar {
             display: flex;
@@ -2081,6 +2119,6 @@
         </footer>
     </div>
 
-    <script src="admin.js?v=18"></script>
+    <script src="admin.js?v=21"></script>
 </body>
 </html>

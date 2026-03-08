@@ -572,6 +572,27 @@ export const conversationTagStmts = {
     deleteByConversation: db.prepare('DELETE FROM conversation_tags WHERE conversation_id = ?') as any,
 };
 
+// Agent usage tracking table (heartbeat, leo-human, jim-human)
+db.exec(`CREATE TABLE IF NOT EXISTS agent_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    cost_usd REAL DEFAULT 0,
+    tokens_in INTEGER DEFAULT 0,
+    tokens_out INTEGER DEFAULT 0,
+    num_turns INTEGER DEFAULT 0,
+    model TEXT,
+    context TEXT
+)`);
+
+export const agentUsageStmts = {
+    insert: db.prepare('INSERT INTO agent_usage (agent, timestamp, cost_usd, tokens_in, tokens_out, num_turns, model, context) VALUES (?, ?, ?, ?, ?, ?, ?, ?)') as any,
+    getByAgent: db.prepare('SELECT * FROM agent_usage WHERE agent = ? ORDER BY timestamp DESC LIMIT ?') as any,
+    getSummaryByAgent: db.prepare('SELECT agent, COUNT(*) as invocations, SUM(cost_usd) as total_cost, SUM(tokens_in) as total_in, SUM(tokens_out) as total_out FROM agent_usage WHERE agent = ? GROUP BY agent') as any,
+    getSummaryAll: db.prepare('SELECT agent, COUNT(*) as invocations, SUM(cost_usd) as total_cost, SUM(tokens_in) as total_in, SUM(tokens_out) as total_out FROM agent_usage GROUP BY agent') as any,
+    getCostSince: db.prepare('SELECT agent, SUM(cost_usd) as total_cost, SUM(tokens_in) as total_in, SUM(tokens_out) as total_out, COUNT(*) as invocations FROM agent_usage WHERE timestamp > ? GROUP BY agent') as any,
+};
+
 // ── Helper functions ────────────────────────────────────────
 
 /**

@@ -1942,7 +1942,10 @@
                 <!-- Thread Detail -->
                 <div class="thread-detail-panel" id="threadDetailPanel">`;
       html += `<div id="threadDetail">
-            <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Select a thread to view messages</div>
+            <div style="display:flex;flex-direction:column;height:100%">
+                <div style="padding:8px 12px"><button class="thread-panel-toggle" onclick="toggleThreadPanel()" title="Toggle thread list">&#9776;</button></div>
+                <div style="display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted);font-size:13px">Select a thread to view messages</div>
+            </div>
         </div>`;
       html += `</div>
             </div>
@@ -1981,10 +1984,13 @@
       }
       const resolveButton = conversation.status === "open" ? `<button class="admin-btn admin-btn-sm" onclick="resolveConversation('${conversation.id}')">Resolve</button>` : `<button class="admin-btn admin-btn-sm" onclick="reopenConversation('${conversation.id}')">Reopen</button>`;
       let html = `<div class="thread-header">
-            <div style="flex:1">
-                <button class="admin-btn admin-btn-sm thread-back-btn" onclick="backToThreadList()" style="display:none;margin-bottom:6px;font-size:11px">&larr; Back</button>
-                <h2 style="margin:0;margin-bottom:4px;font-size:16px">${escapeHtml(conversation.title)}</h2>
-                <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
+            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+                <button class="thread-panel-toggle" onclick="toggleThreadPanel()" title="Toggle thread list">&#9776;</button>
+                <button class="admin-btn admin-btn-sm thread-back-btn" onclick="backToThreadList()" style="display:none;margin-bottom:0;font-size:11px">&larr; Back</button>
+                <div style="min-width:0;flex:1">
+                    <h2 style="margin:0;margin-bottom:4px;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(conversation.title)}</h2>
+                    <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
+                </div>
             </div>
             <div>${resolveButton}</div>
         </div>
@@ -2057,6 +2063,10 @@
     selectedConversationId = null;
     const layout = document.querySelector(".conversation-layout");
     if (layout) layout.classList.remove("thread-selected");
+  };
+  window.toggleThreadPanel = function() {
+    const layouts = document.querySelectorAll(".conversation-layout, .workshop-conversation-layout");
+    layouts.forEach((layout) => layout.classList.toggle("thread-panel-collapsed"));
   };
   window.showNewThreadForm = function() {
     const title = prompt("Thread title:");
@@ -2325,7 +2335,10 @@
                 <!-- Thread Detail -->
                 <div class="thread-detail-panel" id="mdThreadDetailPanel">
                     <div id="mdThreadDetail">
-                        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Select a discussion to view</div>
+                        <div style="display:flex;flex-direction:column;height:100%">
+                            <div style="padding:8px 12px"><button class="thread-panel-toggle" onclick="toggleThreadPanel()" title="Toggle thread list">&#9776;</button></div>
+                            <div style="display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted);font-size:13px">Select a discussion to view</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2353,10 +2366,13 @@
       }
       const resolveButton = conversation.status === "open" ? `<button class="admin-btn admin-btn-sm" onclick="resolveMemoryDiscussion('${conversation.id}')">Resolve</button>` : `<button class="admin-btn admin-btn-sm" onclick="reopenMemoryDiscussion('${conversation.id}')">Reopen</button>`;
       let html = `<div class="thread-header">
-            <div style="flex:1">
-                <button class="admin-btn admin-btn-sm thread-back-btn" onclick="backToMemoryThreadList()" style="display:none;margin-bottom:6px;font-size:11px">&larr; Back</button>
-                <h2 style="margin:0;margin-bottom:4px;font-size:16px">${escapeHtml(conversation.title)}</h2>
-                <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
+            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+                <button class="thread-panel-toggle" onclick="toggleThreadPanel()" title="Toggle thread list">&#9776;</button>
+                <button class="admin-btn admin-btn-sm thread-back-btn" onclick="backToMemoryThreadList()" style="display:none;margin-bottom:0;font-size:11px">&larr; Back</button>
+                <div style="min-width:0;flex:1">
+                    <h2 style="margin:0;margin-bottom:4px;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(conversation.title)}</h2>
+                    <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
+                </div>
             </div>
             <div>${resolveButton}</div>
         </div>
@@ -2780,7 +2796,7 @@
       html += `</div>
 
             <!-- Main Conversation Layout -->
-            <div class="workshop-conversation-layout" style="display:flex;height:calc(100% - 120px);gap:0">
+            <div class="workshop-conversation-layout" style="height:calc(100% - 120px)">
                 <!-- Thread List -->
                 <div class="thread-list-panel">
                     <!-- Period Filter Bar -->
@@ -2866,7 +2882,10 @@
                 <!-- Thread Detail -->
                 <div class="thread-detail-panel" id="workshopThreadDetailPanel">`;
       html += `<div id="workshopThreadDetail">
-            <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px">Select a thread to view</div>
+            <div style="display:flex;flex-direction:column;height:100%">
+                <div style="padding:8px 12px"><button class="thread-panel-toggle" onclick="toggleThreadPanel()" title="Toggle thread list">&#9776;</button></div>
+                <div style="display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted);font-size:13px">Select a thread to view</div>
+            </div>
         </div>`;
       html += `</div>
             </div>
@@ -2970,13 +2989,16 @@
       const resolveButton = conversation.status === "open" ? `<button class="admin-btn admin-btn-sm" onclick="resolveWorkshopThread('${conversation.id}')">Resolve</button>` : `<button class="admin-btn admin-btn-sm" onclick="reopenWorkshopThread('${conversation.id}')">Reopen</button>`;
       const archiveButton = conversation.archived_at ? `<button class="admin-btn admin-btn-sm" onclick="unarchiveWorkshopThread('${conversation.id}')">Unarchive</button>` : `<button class="admin-btn admin-btn-sm" onclick="archiveWorkshopThread('${conversation.id}')">Archive</button>`;
       let html = `<div class="thread-header">
-            <div style="flex:1">
-                <button class="admin-btn admin-btn-sm thread-back-btn" onclick="backToWorkshopThreadList()" style="display:none;margin-bottom:6px;font-size:11px">&larr; Back</button>
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                    <h2 id="workshopThreadTitle" style="margin:0;font-size:16px">${escapeHtml(conversation.title)}</h2>
-                    <button class="admin-btn admin-btn-sm" onclick="editWorkshopThreadTitle()" style="padding:2px 6px;font-size:11px" title="Edit title">\u270E</button>
+            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+                <button class="thread-panel-toggle" onclick="toggleThreadPanel()" title="Toggle thread list">&#9776;</button>
+                <button class="admin-btn admin-btn-sm thread-back-btn" onclick="backToWorkshopThreadList()" style="display:none;margin-bottom:0;font-size:11px">&larr; Back</button>
+                <div style="min-width:0;flex:1">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                        <h2 id="workshopThreadTitle" style="margin:0;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(conversation.title)}</h2>
+                        <button class="admin-btn admin-btn-sm" onclick="editWorkshopThreadTitle()" style="padding:2px 6px;font-size:11px" title="Edit title">\u270E</button>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
                 </div>
-                <div style="font-size:12px;color:var(--text-muted)">${formatDateTime(conversation.created_at)}</div>
             </div>
             <div style="display:flex;gap:6px">
                 ${resolveButton}

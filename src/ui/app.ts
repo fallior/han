@@ -73,6 +73,7 @@
         let terminalSession = null;
 
         let lastWrittenContent = '';
+        let pendingLines: string[] = [];
 
         const terminal = document.getElementById('terminal');
         const termContent = document.getElementById('termContent');
@@ -341,6 +342,14 @@
             renderedLines.push(div);
         }
 
+        function flushPendingLines() {
+            if (pendingLines.length === 0) return;
+            for (const line of pendingLines) appendLine(line);
+            pendingLines = [];
+            termContent.scrollTop = termContent.scrollHeight;
+            autoTrimBuffer();
+        }
+
         function updateTerminalAppend(content) {
             const newSnap = content.split('\n');
 
@@ -349,7 +358,7 @@
                 newSnap.pop();
             }
 
-            if (renderedLines.length === 0) {
+            if (renderedLines.length === 0 && pendingLines.length === 0) {
                 // First render — show the whole snapshot, start at bottom
                 for (const line of newSnap) appendLine(line);
                 termContent.scrollTop = termContent.scrollHeight;
@@ -374,31 +383,33 @@
                 if (match) { overlap = tryLen; break; }
             }
 
-            // Append lines that are new (after the overlap)
-            for (let i = overlap; i < newSnap.length; i++) {
-                appendLine(newSnap[i]);
-            }
-
-            // Re-render last 10 rendered lines from the new snapshot tail
-            const TAIL = 10;
-            const reCount = Math.min(TAIL, renderedLines.length, newSnap.length);
-            for (let i = 0; i < reCount; i++) {
-                const ri = renderedLines.length - reCount + i;
-                const ni = newSnap.length - reCount + i;
-                if (renderedLines[ri]._text !== newSnap[ni]) {
-                    renderedLines[ri].textContent = newSnap[ni];
-                    renderedLines[ri]._text = newSnap[ni];
-                }
-            }
-
+            const newLines = newSnap.slice(overlap);
             lastSnapshotLines = newSnap;
 
-            // Auto-trim if buffer too large
-            autoTrimBuffer();
+            if (newLines.length === 0) return;
+
+            // Check if near bottom — if so, render immediately; otherwise buffer
+            const nearBottom = termContent.scrollHeight - termContent.scrollTop - termContent.clientHeight < 2;
+
+            if (nearBottom) {
+                for (const line of newLines) appendLine(line);
+                termContent.scrollTop = termContent.scrollHeight;
+                autoTrimBuffer();
+            } else {
+                pendingLines.push(...newLines);
+            }
         }
+
+        // Flush buffered lines when user scrolls to bottom
+        termContent.addEventListener('scroll', () => {
+            if (pendingLines.length === 0) return;
+            const nearBottom = termContent.scrollHeight - termContent.scrollTop - termContent.clientHeight < 2;
+            if (nearBottom) flushPendingLines();
+        });
 
         function clearRenderedLines() {
             renderedLines = [];
+            pendingLines = [];
             termContent.innerHTML = '';
         }
 
@@ -438,16 +449,10 @@
 
             termContent.style.display = '';
 
-            // Check scroll position BEFORE appending (DEC-014)
-            const nearBottom = termContent.scrollHeight - termContent.scrollTop - termContent.clientHeight < 50;
-
             if (content && content !== lastWrittenContent) {
                 lastWrittenContent = content;
                 updateTerminalAppend(content);
             }
-
-            // Auto-follow only if we were already at the bottom
-            if (nearBottom) termContent.scrollTop = termContent.scrollHeight;
 
             // Update chrome
             titleText.textContent = session || 'han';
@@ -665,8 +670,9 @@
                 return;
             }
 
-            // Handle End button — jump to bottom
+            // Handle End button — flush buffered lines and jump to bottom
             if (btn.id === 'scrollEndBtn') {
+                flushPendingLines();
                 termContent.scrollTop = termContent.scrollHeight;
                 return;
             }

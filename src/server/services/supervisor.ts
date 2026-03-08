@@ -320,8 +320,8 @@ function getMedianCycleDuration(): number {
         const { supervisorStmts } = require('../db');
         const recentCycles = supervisorStmts.getRecent.all(5) as any[];
 
-        // Filter to only successful cycles (status = 'ok', not 'error')
-        const successfulCycles = recentCycles.filter((c: any) => !c.error);
+        // Filter to only completed successful cycles (has completed_at, no error)
+        const successfulCycles = recentCycles.filter((c: any) => c.completed_at && !c.error);
 
         if (successfulCycles.length === 0) {
             return DEFAULT_MEDIAN_MS;

@@ -708,10 +708,11 @@ The mobile terminal view is a scrollable ever-growing text log. Previous impleme
 #### Rules (do NOT change without explicit user discussion)
 
 1. **Never force scroll position** — The user's scroll position is sacred. If they scroll up to read something, it stays there.
-2. **Smart-scroll (within 50px)** — If the user is already within 50px of the bottom, auto-follow new output. Otherwise leave scroll alone.
-3. **Scroll to bottom on first render only** — When the page first loads or terminal first connects, scroll to bottom to show the latest output.
-4. **Hard scroll boundaries** — `overscroll-behavior: contain` on `.terminal-content`. No rubber-banding, no wrap-around. Scroll stops at top and bottom edges.
-5. **"End" button in quickbar** — User taps End to jump to bottom when they want to. This is the only way to force-scroll besides being near the bottom.
+2. **Smart-scroll (within 2px)** — If the user is already within 2px of the bottom, auto-follow new output. Otherwise leave scroll alone. (Threshold tightened from 50px to 2px in S84 — 50px caused too much jitter.)
+3. **Buffer when scrolled up** — New lines are buffered in memory with zero DOM changes while the user is reading scrolled-up content. Lines flush in one batch when the user scrolls back to within 2px of the bottom, or taps End. (Added S85.)
+4. **Scroll to bottom on first render only** — When the page first loads or terminal first connects, scroll to bottom to show the latest output.
+5. **Hard scroll boundaries** — `overscroll-behavior: contain` on `.terminal-content`. No rubber-banding, no wrap-around. Scroll stops at top and bottom edges.
+6. **"End" button in quickbar** — User taps End to jump to bottom when they want to. This is the only way to force-scroll besides being near the bottom.
 
 #### Decision
 
@@ -721,10 +722,11 @@ The user controls their scroll position at all times. The system only auto-follo
 
 #### Consequences
 
-- `handleTerminalUpdate()` checks `nearBottom` (< 50px) before scrolling
+- `updateTerminalAppend()` checks `nearBottom` (< 2px) internally — renders immediately if at bottom, buffers to `pendingLines[]` if scrolled up
+- `flushPendingLines()` renders all buffered lines and scrolls to bottom — called by scroll listener (within 2px) and End button
 - `updateTerminalAppend()` scrolls to bottom on first render only
 - `.terminal-content` has `overscroll-behavior: contain`
-- "End" quickbar button provides manual jump-to-bottom
+- "End" quickbar button calls `flushPendingLines()` then jumps to bottom
 - Any future features must respect these scroll rules
 
 ---
