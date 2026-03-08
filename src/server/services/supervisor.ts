@@ -392,6 +392,7 @@ function sendDistressNtfy(expectedMinutes: number, actualMinutes: number): void 
 
 const BASE_DELAY_WAKING_MS = 20 * 60 * 1000;  // 20 minutes — morning, work, evening
 const BASE_DELAY_SLEEP_MS = 40 * 60 * 1000;   // 40 minutes — sleep + rest days
+const HOLIDAY_DELAY_MS = 80 * 60 * 1000;      // 80 minutes — holiday mode (rest day doubled)
 
 type DayPhase = 'sleep' | 'morning' | 'work' | 'evening';
 
@@ -399,6 +400,10 @@ function isRestDay(): boolean {
     const config = loadConfig();
     const restDays: number[] = config.supervisor?.rest_days ?? [0, 6];
     return restDays.includes(new Date().getDay());
+}
+
+function isOnHoliday(): boolean {
+    return fs.existsSync(path.join(HAN_DIR, 'signals', 'holiday-jim'));
 }
 
 function getDayPhase(): DayPhase {
@@ -430,6 +435,7 @@ function getDayPhase(): DayPhase {
 }
 
 function getCurrentPeriodMs(): number {
+    if (isOnHoliday()) return HOLIDAY_DELAY_MS; // 80min on holiday
     if (isRestDay()) return BASE_DELAY_SLEEP_MS; // 40min on rest days, all phases
     return getDayPhase() === 'sleep' ? BASE_DELAY_SLEEP_MS : BASE_DELAY_WAKING_MS;
 }
@@ -449,7 +455,7 @@ function getWallClockDelay(): number {
     // If within 30s of boundary, skip to next period
     if (delay < 30000) delay += periodMs;
     const phase = getDayPhase();
-    const phaseLabel = isRestDay() ? `rest/${phase}` : phase;
+    const phaseLabel = isOnHoliday() ? `holiday/${phase}` : isRestDay() ? `rest/${phase}` : phase;
     console.log(`[Supervisor] Wall-clock: ${phaseLabel} phase, period ${periodMs / 60000}min, next cycle in ${Math.round(delay / 1000)}s (${Math.round(delay / 60000)}min)`);
     return delay;
 }

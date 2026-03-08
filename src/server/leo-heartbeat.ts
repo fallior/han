@@ -54,6 +54,7 @@ import { readDreamGradient } from './lib/dream-gradient.js';
 
 const BASE_DELAY_WAKING_MS = 20 * 60 * 1000;  // 20 minutes — morning, work, evening
 const BASE_DELAY_SLEEP_MS = 40 * 60 * 1000;   // 40 minutes — sleep + rest days
+const HOLIDAY_DELAY_MS = 80 * 60 * 1000;      // 80 minutes — holiday mode (rest day doubled)
 const MAX_TURNS_PERSONAL = 1000;
 const MAX_TURNS_PHILOSOPHY = 1000;
 // Model preference: most capable first. The SDK aliases ('opus', 'sonnet', etc.)
@@ -496,13 +497,17 @@ function isRestDay(): boolean {
     return restDays.includes(now.getDay());
 }
 
+function isOnHoliday(): boolean {
+    return fs.existsSync(path.join(HAN_DIR, 'signals', 'holiday-leo'));
+}
+
 // ── Day phase detection (four-phase daily rhythm) ────────────
 
 type DayPhase = 'sleep' | 'morning' | 'work' | 'evening';
 
 function getDayPhase(): DayPhase {
-    // Rest days are sleep all day
-    if (isRestDay()) return 'sleep';
+    // Holiday and rest days are sleep all day
+    if (isOnHoliday() || isRestDay()) return 'sleep';
 
     const config = loadConfig();
     const quietStart = config.supervisor?.quiet_hours_start || config.quiet_hours_start || '22:00';
@@ -542,13 +547,16 @@ function getDayPhase(): DayPhase {
 }
 
 function getCurrentPeriodMs(): number {
+    if (isOnHoliday()) return HOLIDAY_DELAY_MS;
     const phase = getDayPhase();
     return phase === 'sleep' ? BASE_DELAY_SLEEP_MS : BASE_DELAY_WAKING_MS;
 }
 
 function getNextDelay(): number {
     const periodMs = getCurrentPeriodMs();
-    if (periodMs === BASE_DELAY_SLEEP_MS) {
+    if (isOnHoliday()) {
+        console.log(`[Leo] Holiday — 80min interval`);
+    } else if (periodMs === BASE_DELAY_SLEEP_MS) {
         const reason = isRestDay() ? 'Rest day' : 'Sleep';
         console.log(`[Leo] ${reason} — 40min interval`);
     }
@@ -643,7 +651,7 @@ function getWallClockDelay(): number {
     // If we're within 30s of a boundary, skip to next period
     if (delay < 30000) delay += periodMs;
     const phase = getDayPhase();
-    const phaseLabel = phase === 'sleep' ? (isRestDay() ? 'rest' : 'sleep') : phase;
+    const phaseLabel = isOnHoliday() ? 'holiday' : phase === 'sleep' ? (isRestDay() ? 'rest' : 'sleep') : phase;
     console.log(`[Leo] Wall-clock: ${phaseLabel} phase, period ${periodMs / 60000}min, next beat in ${Math.round(delay / 1000)}s (${Math.round(delay / 60000)}min)`);
     return delay;
 }

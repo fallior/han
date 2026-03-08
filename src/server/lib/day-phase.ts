@@ -33,6 +33,13 @@ export function isRestDay(): boolean {
     return restDays.includes(now.getDay());
 }
 
+/** Check if an agent is on holiday. Signal file: ~/.han/signals/holiday-{agent} */
+export function isOnHoliday(agent?: string): boolean {
+    if (!agent) return false;
+    const signalPath = path.join(HAN_DIR, 'signals', `holiday-${agent}`);
+    return fs.existsSync(signalPath);
+}
+
 export function getDayPhase(): DayPhase {
     // Rest days follow normal time-of-day phases — rest ≠ sleep.
     // The only difference is longer intervals (see getPhaseInterval).
@@ -83,7 +90,11 @@ export const PHASE_INTERVALS = {
 /** Rest day interval — slower pace for all phases on weekends */
 const REST_DAY_INTERVAL = 40 * 60 * 1000;
 
-export function getPhaseInterval(): number {
+/** Holiday interval — rest day but doubled (80 min) */
+const HOLIDAY_INTERVAL = 80 * 60 * 1000;
+
+export function getPhaseInterval(agent?: string): number {
+    if (isOnHoliday(agent)) return HOLIDAY_INTERVAL;
     if (isRestDay()) return REST_DAY_INTERVAL;
     return PHASE_INTERVALS[getDayPhase()];
 }
