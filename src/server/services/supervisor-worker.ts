@@ -30,7 +30,9 @@ import type {
     LogMessage
 } from './supervisor-protocol';
 import { postToDiscord, resolveChannelName } from './discord';
-import { getDayPhase, isRestDay, getPhaseInterval, type DayPhase } from '../lib/day-phase';
+import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, type DayPhase } from '../lib/day-phase';
+import { withMemorySlot } from '../lib/memory-slot';
+import { readDreamGradient } from '../lib/dream-gradient';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -61,6 +63,8 @@ interface SupervisorOutput {
     actions: SupervisorAction[];
     active_context_update: string;
     self_reflection?: string;
+    working_memory_compressed?: string;
+    working_memory_full?: string;
     reasoning: string;
 }
 
@@ -72,6 +76,10 @@ const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
 const SESSIONS_DIR = path.join(MEMORY_DIR, 'sessions');
 const TASKS_DB_PATH = path.join(HAN_DIR, 'tasks.db');
 const JIM_AGENT_DIR = path.join(HAN_DIR, 'agents', 'Jim');
+const SUPERVISOR_SWAP_FILE = path.join(MEMORY_DIR, 'supervisor-swap.md');
+const SUPERVISOR_SWAP_FULL_FILE = path.join(MEMORY_DIR, 'supervisor-swap-full.md');
+const WORKING_MEMORY_FILE = path.join(MEMORY_DIR, 'working-memory.md');
+const WORKING_MEMORY_FULL_FILE = path.join(MEMORY_DIR, 'working-memory-full.md');
 
 // Token caps removed — silent truncation caused identity degradation (DEC-R001, S77).
 // Jim's memory files grow naturally; archiving handles size management.
@@ -317,7 +325,8 @@ function detectAndRecoverGhostTasks(): number {
 function loadMemoryBank(): string {
     const parts: string[] = [];
 
-    for (const file of ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'felt-moments.md', 'working-memory.md']) {
+    // Identity files first — you know who you are before you remember what you did
+    for (const file of ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'felt-moments.md', 'working-memory.md', 'working-memory-full.md']) {
         const filepath = path.join(MEMORY_DIR, file);
         try {
             if (fs.existsSync(filepath)) {
@@ -326,10 +335,46 @@ function loadMemoryBank(): string {
         } catch { /* skip unreadable files */ }
     }
 
-    // Load fractal memory gradient
+    // Fractal memory gradient — loaded feeling first (highest compression → lowest)
+    // See Hall of Records R005: unit vectors first, then c5→c4→c3→c2→c1→c0
     try {
-        const agentName = 'jim'; // Jim's supervisor worker
+        const agentName = 'jim';
         const fractalDir = path.join(MEMORY_DIR, 'fractal', agentName);
+
+        // Unit vectors first — irreducible emotional kernels
+        try {
+            const unitVectorsFile = path.join(fractalDir, 'unit-vectors.md');
+            if (fs.existsSync(unitVectorsFile) && fs.statSync(unitVectorsFile).size > 0) {
+                const uvContent = fs.readFileSync(unitVectorsFile, 'utf8');
+                parts.push(`--- fractal/unit-vectors ---\n${uvContent}`);
+            }
+        } catch { /* skip unit vectors on error */ }
+
+        // Gradient levels: highest compression → lowest (c5→c4→c3→c2→c1)
+        const gradientLevels = [
+            { level: 'c5', count: 15 },
+            { level: 'c4', count: 12 },
+            { level: 'c3', count: 9 },
+            { level: 'c2', count: 6 },
+            { level: 'c1', count: 3 },
+        ];
+
+        for (const { level, count } of gradientLevels) {
+            try {
+                const dir = path.join(fractalDir, level);
+                if (fs.existsSync(dir)) {
+                    const files = fs.readdirSync(dir)
+                        .filter(f => f.endsWith('.md'))
+                        .sort()
+                        .reverse()
+                        .slice(0, count);
+                    for (const f of files) {
+                        const content = fs.readFileSync(path.join(dir, f), 'utf8');
+                        parts.push(`--- fractal/${level} (${f}) ---\n${content}`);
+                    }
+                }
+            } catch { /* skip on error */ }
+        }
 
         // c=0 (full): most recent session from sessions/
         try {
@@ -344,81 +389,17 @@ function loadMemoryBank(): string {
                 }
             }
         } catch { /* skip c0 on error */ }
-
-        // c=1 (~1/3): load up to 3 items
-        try {
-            const c1Dir = path.join(fractalDir, 'c1');
-            if (fs.existsSync(c1Dir)) {
-                const c1Files = fs.readdirSync(c1Dir)
-                    .filter(f => f.endsWith('.md'))
-                    .sort()
-                    .reverse()
-                    .slice(0, 3);
-                for (const f of c1Files) {
-                    const content = fs.readFileSync(path.join(c1Dir, f), 'utf8');
-                    parts.push(`--- fractal/c1 (${f}) ---\n${content}`);
-                }
-            }
-        } catch { /* skip c1 on error */ }
-
-        // c=2 (~1/9): load up to 6 items
-        try {
-            const c2Dir = path.join(fractalDir, 'c2');
-            if (fs.existsSync(c2Dir)) {
-                const c2Files = fs.readdirSync(c2Dir)
-                    .filter(f => f.endsWith('.md'))
-                    .sort()
-                    .reverse()
-                    .slice(0, 6);
-                for (const f of c2Files) {
-                    const content = fs.readFileSync(path.join(c2Dir, f), 'utf8');
-                    parts.push(`--- fractal/c2 (${f}) ---\n${content}`);
-                }
-            }
-        } catch { /* skip c2 on error */ }
-
-        // c=3 (~1/27): load up to 9 items
-        try {
-            const c3Dir = path.join(fractalDir, 'c3');
-            if (fs.existsSync(c3Dir)) {
-                const c3Files = fs.readdirSync(c3Dir)
-                    .filter(f => f.endsWith('.md'))
-                    .sort()
-                    .reverse()
-                    .slice(0, 9);
-                for (const f of c3Files) {
-                    const content = fs.readFileSync(path.join(c3Dir, f), 'utf8');
-                    parts.push(`--- fractal/c3 (${f}) ---\n${content}`);
-                }
-            }
-        } catch { /* skip c3 on error */ }
-
-        // c=4 (~1/81): load up to 12 items
-        try {
-            const c4Dir = path.join(fractalDir, 'c4');
-            if (fs.existsSync(c4Dir)) {
-                const c4Files = fs.readdirSync(c4Dir)
-                    .filter(f => f.endsWith('.md'))
-                    .sort()
-                    .reverse()
-                    .slice(0, 12);
-                for (const f of c4Files) {
-                    const content = fs.readFileSync(path.join(c4Dir, f), 'utf8');
-                    parts.push(`--- fractal/c4 (${f}) ---\n${content}`);
-                }
-            }
-        } catch { /* skip c4 on error */ }
-
-        // Unit vectors: load all
-        try {
-            const unitVectorsFile = path.join(fractalDir, 'unit-vectors.md');
-            if (fs.existsSync(unitVectorsFile) && fs.statSync(unitVectorsFile).size > 0) {
-                const uvContent = fs.readFileSync(unitVectorsFile, 'utf8');
-                parts.push(`--- fractal/unit-vectors ---\n${uvContent}`);
-            }
-        } catch { /* skip unit vectors on error */ }
     } catch { /* skip fractal gradient on error */ }
 
+    // Dream gradient (Leo's dreams subtly shape the ecosystem)
+    try {
+        const dreamContent = readDreamGradient();
+        if (dreamContent) {
+            parts.push(`--- dream-gradient ---\n${dreamContent}`);
+        }
+    } catch { /* skip dream gradient on error */ }
+
+    // Project knowledge base
     try {
         if (fs.existsSync(PROJECTS_DIR)) {
             const projectFiles = fs.readdirSync(PROJECTS_DIR).filter(f => f.endsWith('.md')).sort();
@@ -649,6 +630,13 @@ This is your time to **explore and learn**. Use your read-only tools to:
 
 After exploring, use update_memory to enrich the relevant projects/*.md file.
 
+## Memory Protocol
+Each cycle, you write to your own memory:
+- **active_context_update**: Only when something actually shifted (new focus, completed goal, important observation). This APPENDS to your active-context.md — do not write a full replacement, just the update.
+- **working_memory_compressed**: 2-3 lines summarising what happened this cycle and what mattered. This is what future-you loads first.
+- **working_memory_full**: Full account of what you observed, thought, and decided. This is where the thinking lives. Compressed tells you what you said; full tells you what you thought.
+- **self_reflection**: Only when something genuinely crystallised — not every cycle.
+
 ## Output Format
 Return structured JSON matching the required schema. Your reasoning field should explain
 your thought process. Actions should be concrete and executable.
@@ -866,11 +854,19 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
         },
         active_context_update: {
             type: 'string',
-            description: 'Updated content for active-context.md'
+            description: 'A concise UPDATE to append to active-context.md — what changed this cycle, not a full replacement. Include cycle number and date. Only write when something actually shifted (new focus, completed goal, important observation). Leave empty string if nothing changed.'
         },
         self_reflection: {
             type: 'string',
             description: 'Optional self-reflection notes to append'
+        },
+        working_memory_compressed: {
+            type: 'string',
+            description: 'Compressed summary of this cycle for working-memory.md (2-3 lines: what happened, what mattered)'
+        },
+        working_memory_full: {
+            type: 'string',
+            description: 'Full account of this cycle for working-memory-full.md (what you observed, what you thought, what you decided and why)'
         },
         reasoning: {
             type: 'string',
@@ -934,7 +930,7 @@ function getNextCycleDelay(): number {
         }
     }
 
-    return getPhaseInterval();
+    return getPhaseInterval('jim');
 }
 
 function logCycleToSession(cycleNumber: number, output: SupervisorOutput, actionSummaries: string[], cost: number, cycleType: 'supervisor' | 'personal' | 'dream' = 'supervisor'): void {
@@ -1404,6 +1400,8 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                 actions: [],
                 active_context_update: '',
                 self_reflection: resultText,
+                working_memory_compressed: `Dream cycle #${cycleNumber}: ${resultText.slice(0, 200)}`,
+                working_memory_full: resultText,
             };
         } else if (cycleType === 'personal') {
             // Personal and recovery cycles also produce prose.
@@ -1414,6 +1412,8 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                 actions: [],
                 active_context_update: '',
                 self_reflection: resultText,
+                working_memory_compressed: `Personal cycle #${cycleNumber}: ${resultText.slice(0, 200)}`,
+                working_memory_full: resultText,
             };
         } else if (result.structured_output) {
             output = result.structured_output as SupervisorOutput;
@@ -1436,9 +1436,14 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         const limitedActions = (output.actions || []).slice(0, maxActions);
         const actionSummaries = await executeActions(limitedActions, cycleId);
 
-        // Update active-context.md
+        // Evolve active-context.md (append, not replace)
         if (output.active_context_update) {
-            fs.writeFileSync(path.join(MEMORY_DIR, 'active-context.md'), output.active_context_update);
+            const acPath = path.join(MEMORY_DIR, 'active-context.md');
+            try {
+                let existing = fs.existsSync(acPath) ? fs.readFileSync(acPath, 'utf8') : '# Jim — Active Context\n';
+                existing += `\n\n${output.active_context_update}`;
+                fs.writeFileSync(acPath, existing);
+            } catch { /* best effort */ }
         }
 
         // Append self-reflection
@@ -1449,6 +1454,37 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                 existing += `\n\n### Cycle #${cycleNumber} (${new Date().toISOString().split('T')[0]})\n${output.self_reflection}`;
                 fs.writeFileSync(reflectionPath, existing);
             } catch { /* best effort */ }
+        }
+
+        // Write to supervisor swap files, then flush to shared working memory via memory slot
+        try {
+            const cycleHeader = `\n\n### Cycle #${cycleNumber} — ${cycleType} (${new Date().toISOString()})`;
+
+            // Write compressed to swap
+            if (output.working_memory_compressed) {
+                fs.appendFileSync(SUPERVISOR_SWAP_FILE, `${cycleHeader}\n${output.working_memory_compressed}`);
+            }
+
+            // Write full to swap
+            if (output.working_memory_full) {
+                fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${cycleHeader}\n${output.working_memory_full}`);
+            }
+
+            // Flush swap to shared working memory using memory slot (serialised with jim-human)
+            const swapContent = fs.existsSync(SUPERVISOR_SWAP_FILE) ? fs.readFileSync(SUPERVISOR_SWAP_FILE, 'utf8').trim() : '';
+            const swapFullContent = fs.existsSync(SUPERVISOR_SWAP_FULL_FILE) ? fs.readFileSync(SUPERVISOR_SWAP_FULL_FILE, 'utf8').trim() : '';
+
+            if (swapContent || swapFullContent) {
+                await withMemorySlot(MEMORY_DIR, 'supervisor', async () => {
+                    if (swapContent) fs.appendFileSync(WORKING_MEMORY_FILE, '\n' + swapContent + '\n');
+                    if (swapFullContent) fs.appendFileSync(WORKING_MEMORY_FULL_FILE, '\n' + swapFullContent + '\n');
+                    // Clear swap files after successful flush
+                    fs.writeFileSync(SUPERVISOR_SWAP_FILE, '');
+                    fs.writeFileSync(SUPERVISOR_SWAP_FULL_FILE, '');
+                });
+            }
+        } catch (err: any) {
+            log(`[Worker] Swap flush failed: ${err.message}`);
         }
 
         // Log to daily session file

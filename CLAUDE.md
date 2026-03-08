@@ -86,6 +86,8 @@ simultaneously. Each has private swap files that buffer work before flushing to 
 | `working-memory-full.md` | Shared (Jim) | root | Jim's shared working memory (full) |
 | `jim-human-swap.md` | Human Jim | root | Jim/Human's swap buffer (managed by code) |
 | `jim-human-swap-full.md` | Human Jim | root | Jim/Human's swap buffer (managed by code) |
+| `supervisor-swap.md` | Supervisor Jim | root | Supervisor's swap buffer (managed by code) |
+| `supervisor-swap-full.md` | Supervisor Jim | root | Supervisor's swap buffer (managed by code) |
 
 Leo's swap files live in `~/.han/memory/leo/`. Jim's swap files live in
 `~/.han/memory/` (the root memory dir). Session swap files are yours to manage
