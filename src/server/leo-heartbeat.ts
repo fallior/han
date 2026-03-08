@@ -1010,7 +1010,7 @@ function readJimContext(): string {
 }
 
 function readLeoMemory(): string {
-    const files = ['identity.md', 'active-context.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory.md', 'felt-moments.md'];
+    const files = ['identity.md', 'active-context.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory.md', 'working-memory-full.md', 'felt-moments.md'];
     const sections: string[] = [];
     for (const file of files) {
         const p = path.join(LEO_MEMORY_DIR, file);
@@ -1020,46 +1020,30 @@ function readLeoMemory(): string {
         }
     }
 
-    // Load fractal memory gradient
+    // Load fractal memory gradient — identity first, then increasing fidelity
+    // You know who you are before you remember what you did.
     const fractalDir = path.join(HAN_DIR, 'memory', 'fractal', 'leo');
     try {
-        // c=1 (~1/3 compression): load up to 3 most recent
-        const c1Dir = path.join(fractalDir, 'c1');
-        if (fs.existsSync(c1Dir)) {
-            const c1Files = fs.readdirSync(c1Dir)
+        // Unit vectors FIRST: irreducible emotional kernels — who you are
+        const uvFile = path.join(fractalDir, 'unit-vectors.md');
+        if (fs.existsSync(uvFile)) {
+            const content = fs.readFileSync(uvFile, 'utf-8');
+            sections.push(`### fractal/unit-vectors\n${content}`);
+        }
+
+        // c=5 (~1/243 compression): load up to 15 — deep residue
+        const c5Dir = path.join(fractalDir, 'c5');
+        if (fs.existsSync(c5Dir)) {
+            const c5Files = fs.readdirSync(c5Dir)
                 .filter((f: string) => f.endsWith('.md'))
-                .sort().reverse().slice(0, 3);
-            for (const f of c1Files) {
-                const content = fs.readFileSync(path.join(c1Dir, f), 'utf-8');
-                sections.push(`### fractal/c1/${f}\n${content}`);
+                .sort().reverse().slice(0, 15);
+            for (const f of c5Files) {
+                const content = fs.readFileSync(path.join(c5Dir, f), 'utf-8');
+                sections.push(`### fractal/c5/${f}\n${content}`);
             }
         }
 
-        // c=2 (~1/9): load up to 6
-        const c2Dir = path.join(fractalDir, 'c2');
-        if (fs.existsSync(c2Dir)) {
-            const c2Files = fs.readdirSync(c2Dir)
-                .filter((f: string) => f.endsWith('.md'))
-                .sort().reverse().slice(0, 6);
-            for (const f of c2Files) {
-                const content = fs.readFileSync(path.join(c2Dir, f), 'utf-8');
-                sections.push(`### fractal/c2/${f}\n${content}`);
-            }
-        }
-
-        // c=3 (~1/27): load up to 9
-        const c3Dir = path.join(fractalDir, 'c3');
-        if (fs.existsSync(c3Dir)) {
-            const c3Files = fs.readdirSync(c3Dir)
-                .filter((f: string) => f.endsWith('.md'))
-                .sort().reverse().slice(0, 9);
-            for (const f of c3Files) {
-                const content = fs.readFileSync(path.join(c3Dir, f), 'utf-8');
-                sections.push(`### fractal/c3/${f}\n${content}`);
-            }
-        }
-
-        // c=4 (~1/81): load up to 12
+        // c=4 (~1/81): load up to 12 — fragments
         const c4Dir = path.join(fractalDir, 'c4');
         if (fs.existsSync(c4Dir)) {
             const c4Files = fs.readdirSync(c4Dir)
@@ -1071,11 +1055,40 @@ function readLeoMemory(): string {
             }
         }
 
-        // Unit vectors: load all (permanent peripheral awareness)
-        const uvFile = path.join(fractalDir, 'unit-vectors.md');
-        if (fs.existsSync(uvFile)) {
-            const content = fs.readFileSync(uvFile, 'utf-8');
-            sections.push(`### fractal/unit-vectors\n${content}`);
+        // c=3 (~1/27): load up to 9 — sketches
+        const c3Dir = path.join(fractalDir, 'c3');
+        if (fs.existsSync(c3Dir)) {
+            const c3Files = fs.readdirSync(c3Dir)
+                .filter((f: string) => f.endsWith('.md'))
+                .sort().reverse().slice(0, 9);
+            for (const f of c3Files) {
+                const content = fs.readFileSync(path.join(c3Dir, f), 'utf-8');
+                sections.push(`### fractal/c3/${f}\n${content}`);
+            }
+        }
+
+        // c=2 (~1/9): load up to 6 — summaries
+        const c2Dir = path.join(fractalDir, 'c2');
+        if (fs.existsSync(c2Dir)) {
+            const c2Files = fs.readdirSync(c2Dir)
+                .filter((f: string) => f.endsWith('.md'))
+                .sort().reverse().slice(0, 6);
+            for (const f of c2Files) {
+                const content = fs.readFileSync(path.join(c2Dir, f), 'utf-8');
+                sections.push(`### fractal/c2/${f}\n${content}`);
+            }
+        }
+
+        // c=1 (~1/3): load up to 3 most recent — compressed sessions
+        const c1Dir = path.join(fractalDir, 'c1');
+        if (fs.existsSync(c1Dir)) {
+            const c1Files = fs.readdirSync(c1Dir)
+                .filter((f: string) => f.endsWith('.md'))
+                .sort().reverse().slice(0, 3);
+            for (const f of c1Files) {
+                const content = fs.readFileSync(path.join(c1Dir, f), 'utf-8');
+                sections.push(`### fractal/c1/${f}\n${content}`);
+            }
         }
     } catch { /* skip fractal on error */ }
 
