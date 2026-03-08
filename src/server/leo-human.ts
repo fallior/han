@@ -21,6 +21,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
 import { withMemorySlot } from './lib/memory-slot';
+import { readDreamGradient } from './lib/dream-gradient';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -154,6 +155,12 @@ function readLeoMemory(): string {
             sections.push(`### unit-vectors\n${fs.readFileSync(uvPath, 'utf-8')}`);
         }
     } catch { /* skip */ }
+
+    // Dream gradient — subtle influence from dreaming
+    const dreamGradient = readDreamGradient();
+    if (dreamGradient) {
+        sections.push(dreamGradient);
+    }
 
     return sections.join('\n\n');
 }

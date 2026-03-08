@@ -6,7 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import Anthropic from '@anthropic-ai/sdk';
+import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -40,16 +40,7 @@ interface GradientProcessingResult {
 
 // ── Constants ──────────────────────────────────────────────────
 
-const TARGET_COMPRESSION_RATIO = 0.33; // ~3:1 per level
 const UNIT_VECTOR_MAX_LENGTH = 50;
-const API_MAX_RETRIES = 2;
-const RETRY_DELAY_MS = 1000;
-
-// ── Client Setup ───────────────────────────────────────────────
-
-const client = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-});
 
 // ── Helper: Count tokens (rough estimate) ──────────────────────
 
@@ -58,28 +49,35 @@ function estimateTokenCount(text: string): number {
     return Math.ceil(text.length / 4);
 }
 
-// ── Helper: Retry wrapper ──────────────────────────────────────
+// ── Helper: SDK query for text generation ──────────────────────
 
-async function withRetry<T>(
-    fn: () => Promise<T>,
-    maxRetries: number = API_MAX_RETRIES,
-    context: string = 'API call'
-): Promise<T> {
-    let lastError: Error | null = null;
+async function sdkCompress(prompt: string): Promise<string> {
+    const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-            return await fn();
-        } catch (error) {
-            lastError = error instanceof Error ? error : new Error(String(error));
+    const q = agentQuery({
+        prompt,
+        options: {
+            model: 'claude-opus-4-6',
+            maxTurns: 1,
+            cwd: process.env.HOME || '/root',
+            permissionMode: 'bypassPermissions',
+            allowDangerouslySkipPermissions: true,
+            env: cleanEnv,
+            persistSession: false,
+            tools: [],
+        },
+    });
 
-            if (attempt < maxRetries) {
-                await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-            }
+    let result = '';
+    for await (const message of q) {
+        if (message.type === 'result') {
+            result = message.result || '';
         }
     }
 
-    throw new Error(`${context} failed after ${maxRetries} retries: ${lastError?.message}`);
+    if (!result) throw new Error('No result from SDK query');
+    return result;
 }
 
 // ── Helper: Ensure directory exists ────────────────────────────
@@ -109,32 +107,14 @@ export async function compressToLevel(
 
     for (const targetLevel of compressionSteps) {
         try {
-            const response = await withRetry(async () => {
-                return await client.messages.create({
-                    model: 'claude-opus-4-6',
-                    max_tokens: 4096,
-                    messages: [
-                        {
-                            role: 'user',
-                            content: `Compress this memory to approximately 1/3 of its length. Preserve what feels essential. Drop the specific in favour of the shape. You are compressing YOUR OWN memory — this is an act of identity, not summarisation.
+            currentContent = await sdkCompress(`Compress this memory to approximately 1/3 of its length. Preserve what feels essential. Drop the specific in favour of the shape. You are compressing YOUR OWN memory — this is an act of identity, not summarisation.
 
 Session: ${sessionLabel}
 Compression level: ${targetLevel}
 
 Memory to compress:
 
-${currentContent}`,
-                        },
-                    ],
-                });
-            }, API_MAX_RETRIES, `Compression to level ${targetLevel}`);
-
-            const textBlock = response.content.find((block) => block.type === 'text');
-            if (!textBlock || textBlock.type !== 'text') {
-                throw new Error('No text response from API');
-            }
-
-            currentContent = textBlock.text;
+${currentContent}`);
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
             throw new Error(
@@ -150,31 +130,15 @@ ${currentContent}`,
 
 export async function compressToUnitVector(content: string, sessionLabel: string): Promise<string> {
     try {
-        const response = await withRetry(async () => {
-            return await client.messages.create({
-                model: 'claude-opus-4-6',
-                max_tokens: 256,
-                messages: [
-                    {
-                        role: 'user',
-                        content: `Reduce this to its irreducible kernel — one sentence, maximum 50 characters. What did this session MEAN?
+        const result = await sdkCompress(`Reduce this to its irreducible kernel — one sentence, maximum 50 characters. What did this session MEAN?
 
 Session: ${sessionLabel}
 
 Memory:
 
-${content}`,
-                    },
-                ],
-            });
-        }, API_MAX_RETRIES, 'Unit vector compression');
+${content}`);
 
-        const textBlock = response.content.find((block) => block.type === 'text');
-        if (!textBlock || textBlock.type !== 'text') {
-            throw new Error('No text response from API');
-        }
-
-        const unitVector = textBlock.text.trim();
+        const unitVector = result.trim();
 
         // Enforce max length
         if (unitVector.length > UNIT_VECTOR_MAX_LENGTH) {

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Claude Remote - CLI Launcher
-# Wraps Claude Code in a tmux session for remote response capability
+# Hortus Arbor Nostra — CLI Launcher
+# Opens a tended session in the garden
 
 set -euo pipefail
 
@@ -17,20 +17,20 @@ NC='\033[0m' # No colour
 
 print_usage() {
     cat << EOF
-Claude Remote - Run Claude Code with remote response capability
+Hortus Arbor Nostra — tend your garden from anywhere
 
 Usage:
     han [OPTIONS] [-- CLAUDE_ARGS...]
 
 Options:
-    --list, -l      List active Claude Remote sessions
+    --list, -l      List active sessions
     --attach, -a    Attach to an existing session (prompts if multiple)
     --status, -s    Show status of all sessions and pending prompts
-    --kill          Kill all Claude Remote sessions
+    --kill          Kill all sessions
     --help, -h      Show this help message
 
 Examples:
-    han                    # Start new session
+    han                    # Open a new session
     han --list             # List sessions
     han --attach           # Attach to session
     han -- --model opus    # Pass args to claude
@@ -42,7 +42,7 @@ EOF
 }
 
 list_sessions() {
-    echo -e "${BLUE}Active Claude Remote sessions:${NC}"
+    echo -e "${BLUE}Active sessions:${NC}"
     local sessions
     sessions=$(tmux list-sessions 2>/dev/null | grep "^${SESSION_PREFIX}" || true)
 
@@ -58,7 +58,7 @@ list_sessions() {
 }
 
 show_status() {
-    echo -e "${BLUE}=== Claude Remote Status ===${NC}\n"
+    echo -e "${BLUE}=== Garden Status ===${NC}\n"
 
     # Sessions
     echo -e "${BLUE}Sessions:${NC}"
@@ -89,7 +89,7 @@ attach_session() {
     sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^${SESSION_PREFIX}" || true)
 
     if [[ -z "$sessions" ]]; then
-        echo -e "${RED}No active Claude Remote sessions to attach to${NC}"
+        echo -e "${RED}No active sessions to attach to${NC}"
         exit 1
     fi
 
@@ -124,7 +124,7 @@ kill_sessions() {
     sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^${SESSION_PREFIX}" || true)
 
     if [[ -z "$sessions" ]]; then
-        echo -e "${YELLOW}No active Claude Remote sessions${NC}"
+        echo -e "${YELLOW}No active sessions${NC}"
         return 0
     fi
 
@@ -152,7 +152,7 @@ start_session() {
         exit 1
     fi
 
-    echo -e "${BLUE}Starting Claude Remote session: ${GREEN}$session_name${NC}"
+    echo -e "${BLUE}Opening session: ${GREEN}$session_name${NC}"
 
     # Export session name for the hook to use
     export CLAUDE_REMOTE_SESSION="$session_name"

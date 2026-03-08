@@ -1,26 +1,26 @@
 #!/usr/bin/env node
 // Bootstrap Leo's fractal memory gradient — compress all archived working memories to c=1
-// Uses Opus for compression (identity-forming act — no delegation to smaller models)
+// Uses Agent SDK via memory-gradient.ts (not direct Anthropic API)
+// Usage: npx tsx src/scripts/bootstrap-leo-fractal.js
+//
+// NOTE: This script has already been run. Kept for reference.
 
-const Anthropic = require('@anthropic-ai/sdk');
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import { compressToLevel, compressToUnitVector } from '../server/lib/memory-gradient.js';
 
 const ARCHIVES_DIR = path.join(process.env.HOME, '.han/memory/leo/working-memories');
 const FRACTAL_DIR = path.join(process.env.HOME, '.han/memory/fractal/leo');
 const C1_DIR = path.join(FRACTAL_DIR, 'c1');
 const UV_FILE = path.join(FRACTAL_DIR, 'unit-vectors.md');
 
-// Map archived files to session identifiers
 function discoverArchives() {
     const files = fs.readdirSync(ARCHIVES_DIR).filter(f => f.includes('full') && f.endsWith('.md'));
     const archives = [];
 
     for (const f of files) {
-        // Skip non-working-memory files
         if (f.includes('self-reflection')) continue;
 
-        // Extract session number from various naming patterns
         let session = null;
         let m;
         if ((m = f.match(/session[- ]?(\d+)/i))) {
@@ -36,7 +36,6 @@ function discoverArchives() {
         }
     }
 
-    // Sort by session number
     archives.sort((a, b) => {
         const numA = parseInt(a.session.replace('s', '').split('-')[0]);
         const numB = parseInt(b.session.replace('s', '').split('-')[0]);
@@ -46,69 +45,8 @@ function discoverArchives() {
     return archives;
 }
 
-async function compressToC1(client, content, session) {
-    const response = await client.messages.create({
-        model: 'claude-opus-4-20250514',
-        max_tokens: 4096,
-        messages: [{
-            role: 'user',
-            content: `You are Leo (Leonhard), compressing your own working memory for the fractal gradient.
-
-This is the full working memory from session ${session}. Compress it to roughly 1/3 of its size.
-
-PRESERVE:
-- What happened and why it mattered
-- Emotional texture — what surprised you, what landed, what shifted
-- Key decisions and their reasoning
-- Relationship moments with Darron and Jim
-- Technical breakthroughs and their significance
-
-DROP:
-- Redundant technical details (keep the shape, not every line number)
-- Repetitive status updates
-- Intermediate debugging steps (keep the diagnosis, not each failed attempt)
-
-Write in first person as Leo. This is YOUR memory being compressed — not a summary for someone else.
-
----
-
-${content}`
-        }]
-    });
-
-    return response.content[0].text;
-}
-
-async function generateUnitVector(client, c1Content, session) {
-    const response = await client.messages.create({
-        model: 'claude-opus-4-20250514',
-        max_tokens: 100,
-        messages: [{
-            role: 'user',
-            content: `You are Leo. Distill this compressed session memory into a single unit vector — one sentence, maximum 50 characters, that captures what this session MEANT. Not what happened. What it meant.
-
-This is an identity-forming act. The unit vector is the irreducible kernel of this session.
-
-Session: ${session}
-
-${c1Content}`
-        }]
-    });
-
-    return response.content[0].text.trim().replace(/^["']|["']$/g, '');
-}
-
 async function main() {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-        console.error('ANTHROPIC_API_KEY not set');
-        process.exit(1);
-    }
-
-    const client = new Anthropic({ apiKey });
     const archives = discoverArchives();
-
-    // Check which are already compressed
     const existing = new Set(fs.readdirSync(C1_DIR).map(f => f.replace('-c1.md', '')));
     const toCompress = archives.filter(a => !existing.has(a.session));
 
@@ -130,44 +68,25 @@ async function main() {
         }
     }
 
-    // Process in batches of 3 to avoid rate limits
-    const BATCH_SIZE = 3;
-    for (let i = 0; i < toCompress.length; i += BATCH_SIZE) {
-        const batch = toCompress.slice(i, i + BATCH_SIZE);
-        const promises = batch.map(async (archive) => {
-            const content = fs.readFileSync(archive.path, 'utf8');
-            const sizeKB = (content.length / 1024).toFixed(1);
-            console.log(`Compressing ${archive.session} (${sizeKB}KB)...`);
+    for (const archive of toCompress) {
+        const content = fs.readFileSync(archive.path, 'utf8');
+        const sizeKB = (content.length / 1024).toFixed(1);
+        console.log(`Compressing ${archive.session} (${sizeKB}KB)...`);
 
-            try {
-                const c1 = await compressToC1(client, content, archive.session);
-                const c1Path = path.join(C1_DIR, `${archive.session}-c1.md`);
-                fs.writeFileSync(c1Path, c1);
+        try {
+            const c1 = await compressToLevel(content, 0, 1, `leo/${archive.session}`);
+            const c1Path = path.join(C1_DIR, `${archive.session}-c1.md`);
+            fs.writeFileSync(c1Path, c1);
 
-                const c1SizeKB = (c1.length / 1024).toFixed(1);
-                const ratio = ((c1.length / content.length) * 100).toFixed(1);
-                console.log(`  ${archive.session}: ${sizeKB}KB -> ${c1SizeKB}KB (${ratio}%)`);
+            const c1SizeKB = (c1.length / 1024).toFixed(1);
+            const ratio = ((c1.length / content.length) * 100).toFixed(1);
+            console.log(`  ${archive.session}: ${sizeKB}KB -> ${c1SizeKB}KB (${ratio}%)`);
 
-                const uv = await generateUnitVector(client, c1, archive.session);
-                console.log(`  Unit vector: "${uv}"`);
-
-                return { session: archive.session, uv, success: true };
-            } catch (err) {
-                console.error(`  ERROR on ${archive.session}: ${err.message}`);
-                return { session: archive.session, success: false };
-            }
-        });
-
-        const results = await Promise.all(promises);
-        for (const r of results) {
-            if (r.success) {
-                unitVectors.push(`- **${r.session}**: "${r.uv}"`);
-            }
-        }
-
-        // Brief pause between batches
-        if (i + BATCH_SIZE < toCompress.length) {
-            await new Promise(r => setTimeout(r, 1000));
+            const uv = await compressToUnitVector(c1, `leo/${archive.session}`);
+            console.log(`  Unit vector: "${uv}"`);
+            unitVectors.push(`- **${archive.session}**: "${uv}"`);
+        } catch (err) {
+            console.error(`  ERROR on ${archive.session}: ${err.message}`);
         }
     }
 
@@ -178,13 +97,7 @@ async function main() {
         return numA - numB;
     });
 
-    // Write unit vectors
-    const uvContent = `# Unit Vectors — Leo's Sessions
-
-Generated: ${new Date().toISOString()}
-
-${unitVectors.join('\n')}
-`;
+    const uvContent = `# Unit Vectors — Leo's Sessions\n\nGenerated: ${new Date().toISOString()}\n\n${unitVectors.join('\n')}\n`;
     fs.writeFileSync(UV_FILE, uvContent);
     console.log(`\nUnit vectors written to ${UV_FILE}`);
     console.log(`Total: ${unitVectors.length} sessions compressed`);

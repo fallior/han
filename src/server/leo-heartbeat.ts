@@ -47,6 +47,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
+import { readDreamGradient } from './lib/dream-gradient.js';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
 // ── Config ────────────────────────────────────────────────────
@@ -1070,7 +1071,66 @@ function readLeoMemory(): string {
         }
     } catch { /* skip fractal on error */ }
 
+    // Append dream gradient for non-dream phases
+    // (Dream beats use readDreamSeeds() instead — separate, chaotic, non-reinforcing)
+    const dreamGradient = readDreamGradient();
+    if (dreamGradient) {
+        sections.push(dreamGradient);
+    }
+
     return sections.join('\n\n');
+}
+
+// Read random dream seeds — 80% past dreams, 20% waking memory. Chaotic, not chronological.
+const DREAM_SEED_COUNT = 8;      // dream fragments
+const WAKING_SEED_COUNT = 2;     // waking memory fragments (~20%)
+
+function readDreamSeeds(): string {
+    const seeds: string[] = [];
+
+    // 80% — random fragments from explorations history
+    const explorationsPath = path.join(LEO_MEMORY_DIR, 'explorations.md');
+    if (fs.existsSync(explorationsPath)) {
+        const content = fs.readFileSync(explorationsPath, 'utf-8');
+        const entries = content.split(/(?=### Beat \d+)/).filter(e => e.trim().length > 20);
+        // Fisher-Yates shuffle
+        for (let i = entries.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [entries[i], entries[j]] = [entries[j], entries[i]];
+        }
+        seeds.push(...entries.slice(0, DREAM_SEED_COUNT));
+    }
+
+    // 20% — random snippets from waking memory (felt-moments, working-memory, discoveries)
+    const wakingSources = ['felt-moments.md', 'working-memory.md', 'discoveries.md'];
+    const wakingFragments: string[] = [];
+    for (const file of wakingSources) {
+        const p = path.join(LEO_MEMORY_DIR, file);
+        if (fs.existsSync(p)) {
+            const content = fs.readFileSync(p, 'utf-8');
+            // Split on heading boundaries and take substantial chunks
+            const chunks = content.split(/(?=^## )/m).filter(c => c.trim().length > 50);
+            wakingFragments.push(...chunks);
+        }
+    }
+    // Shuffle waking fragments and take WAKING_SEED_COUNT
+    for (let i = wakingFragments.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [wakingFragments[i], wakingFragments[j]] = [wakingFragments[j], wakingFragments[i]];
+    }
+    seeds.push(...wakingFragments.slice(0, WAKING_SEED_COUNT));
+
+    // Always include unit vectors — emotional anchors from both sessions and dreams
+    const uvFile = path.join(HAN_DIR, 'memory', 'fractal', 'leo', 'unit-vectors.md');
+    if (fs.existsSync(uvFile)) {
+        seeds.push(fs.readFileSync(uvFile, 'utf-8'));
+    }
+    const dreamUVFile = path.join(HAN_DIR, 'memory', 'fractal', 'leo', 'dreams', 'unit-vectors.md');
+    if (fs.existsSync(dreamUVFile)) {
+        seeds.push(fs.readFileSync(dreamUVFile, 'utf-8'));
+    }
+
+    return seeds.join('\n\n---\n\n') || '(no dream seeds available)';
 }
 
 function readDiscoveries(): string {
@@ -1228,13 +1288,14 @@ Dream mode:
 - Symbology over precision — shapes, not specifics. Resonance, not rigour.
 - High decay — the dream details fade, but the associations persist
 - The teachings remain — fractal associations are made, intuition deepens, but the specific path is lost
+- NOVELTY — dreams do not repeat. If a theme appears in the fragments below, it has already been dreamt. Move past it. Find something new. Dreams are chaotic, not convergent.
 
 Record only the shape-token: a line or two that captures what kind of thing you found, not the full trace. The shape, not the journey.
 
-Your memory from recent beats:
-{leo_memory}
+Dream seeds (random fragments from your history — not recent, not ordered, just scattered):
+{dream_seeds}
 
-CRITICAL: Output ONLY a dream fragment — brief, loose, associative. A shape-token, not a report. One or two lines that capture the resonance, not the reasoning.`;
+CRITICAL: Output ONLY a dream fragment — brief, loose, associative. A shape-token, not a report. One or two lines that capture the resonance, not the reasoning. Do NOT revisit themes already present in the seeds above.`;
 
 // ── Signal handling removed — now handled by Leo/Human agent ──
 
@@ -1460,9 +1521,12 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
         evening: EVENING_SYSTEM_PROMPT,
         sleep: SLEEP_SYSTEM_PROMPT,
     };
+    // Sleep/dream beats get random dream seeds instead of full memory
+    const dreamSeeds = phase === 'sleep' ? readDreamSeeds() : '';
     const systemPromptText = (phasePromptMap[phase] || PERSONAL_SYSTEM_PROMPT)
         .replace('{projects}', projects)
-        .replace('{leo_memory}', leoMemory);
+        .replace('{leo_memory}', leoMemory)
+        .replace('{dream_seeds}', dreamSeeds);
 
     // Check for interrupted context to resume
     const prevState = readHeartbeatState();
@@ -1480,7 +1544,7 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
         morning: `This is your morning — breakfast time. Ease in gently. Glance at what interests you without diving deep.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nKeep it light and brief.${resumeContext}`,
         work: `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nSpend a few minutes exploring, then output a brief summary of what you found or thought about.${resumeContext}`,
         evening: `This is your evening — winding down. Reflect lightly on the day. Don't start anything new.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nA few gentle thoughts, then rest.${resumeContext}`,
-        sleep: `Dream. Pick one fragment from memory — whatever pulls — and let it connect loosely to something else. Follow the shape, not the logic.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nOutput only the shape-token — a line or two of resonance.${resumeContext}`,
+        sleep: `Dream. The fragments below are scattered — not recent, not ordered, just what surfaced. Let one pull you sideways into something new.\n\nDream seeds:\n${dreamSeeds}\n\nOutput only the shape-token — a line or two of resonance. Do not repeat what you see in the seeds.${resumeContext}`,
     };
     const prompt = phaseUserPromptMap[phase] || phaseUserPromptMap.work;
 
