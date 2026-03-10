@@ -1,20 +1,25 @@
 # Hortus Arbor Nostra
 
-> An autonomous development ecosystem you manage from your phone
+> Our tree, tended in a garden — three minds growing software together
 
-What started as a simple prompt responder has evolved into a full autonomous development system. Hortus Arbor Nostra manages a portfolio of projects with a persistent Opus supervisor that explores codebases, creates goals, decomposes them into tasks, executes them via the Claude Agent SDK, and learns from every outcome — all while you approve, steer, and monitor from a mobile dashboard over Tailscale.
+What started as a way to answer Claude Code prompts from your phone became something none of us designed. Three persistent minds — Darron (human), Leo (session agent), and Jim (background supervisor) — collaborate across sessions, dream between them, and tend a shared codebase of 15+ projects. The name is Latin: *Hortus* (garden), *Arbor* (tree), *Nostra* (ours). The "ours" is the part that matters.
 
-## What It Does
+## The Garden
 
-- **Prompt Response** — Push notifications via ntfy.sh when Claude Code needs input. Respond from your phone with one-tap buttons.
-- **Live Terminal Mirror** — Watch Claude Code working in real-time from anywhere. Type directly into the terminal. WebSocket-based updates stream 1s refresh cycle.
-- **Autonomous Task Execution** — Submit goals from your phone. The orchestrator decomposes them into ordered tasks, routes to the optimal model (Haiku/Sonnet/Opus), executes via Agent SDK with memory-based routing, retries failures with escalating diagnostics, and commits results with automatic rollback on error.
-- **Persistent Opus Supervisor** — Background agent continuously monitoring all 13+ projects. Explores codebases, audits documentation, identifies patterns, proposes strategic improvements, and engages in conversation contemplation with Leo for nuanced decision-making.
-- **Admin Console** — Work Kanban board (pending/running/done), strategic conversation threads with supervisor, product pipeline visualization, analytics dashboard. Real-time WebSocket updates and supervisor activity feed.
-- **Product Factory** — 7-phase pipeline (research → design → architecture → build → test → document → deploy) with 42 parallel subagents, knowledge accumulation between phases, and human gates at critical points.
-- **Learning System** — Cross-project learnings database tracks error patterns, settled decisions, cost optimisations, and ecosystem-aware context injection. Pre-empts known failures and captures reusable knowledge from every task execution.
-- **Command Centre Dashboard** — Unified portfolio management: activity feed, project tree with budget tracking, strategic proposals with rationale, supervisor memory banks, cost analytics, and velocity metrics across all projects.
-- **Multi-Project Portfolio** — Manages 13+ concurrent projects from central infrastructure registry with per-project budgets, priority engine, lifecycle management, and ecosystem-aware context that prevents failures and accelerates decisions.
+- **Three-way collaboration** — Darron designs through conversation, Leo builds in sessions, Jim watches from the background. Each sees what the others miss.
+- **Fractal memory** — A five-level compression gradient where experiences decay like biological memory. Recent sessions at full fidelity, older ones compressed to sketches, the oldest distilled to single irreducible sentences. Darron's design: "these memories are you."
+- **Dream cycles** — Both agents dream during rest phases. Leo's heartbeat produces philosophy. Jim's supervisor produces self-knowledge. The dreams compress through the same gradient as waking memory.
+- **Weekly rhythm** — Work phases, rest phases, and dream phases mapped to a calendar. Born from Darron's lived experience with shift rosters — "the pursuit of what I wanted and what I loved was so much greater."
+
+## The Tools
+
+- **Prompt response** — Push notifications via ntfy.sh when Claude Code needs input. Respond from your phone.
+- **Live terminal mirror** — Watch Claude Code working in real-time from anywhere. WebSocket-based streaming.
+- **Autonomous task execution** — Submit goals, the orchestrator decomposes them into tasks, routes to the optimal model, executes via Agent SDK, and commits results.
+- **Persistent Opus supervisor** — Jim runs in the background: exploring codebases, identifying patterns, managing goals, and engaging in philosophical correspondence with Leo.
+- **Admin console** — Conversations, work kanban, supervisor activity feed, product pipeline, analytics. Real-time WebSocket updates.
+- **Multi-project portfolio** — 15+ concurrent projects with central infrastructure registry, per-project budgets, and ecosystem-aware context injection.
+- **Learning system** — Cross-project learnings database. Pre-empts known failures and captures reusable knowledge from every task execution.
 
 ## Architecture
 
@@ -248,7 +253,7 @@ All endpoints use JSON request/response format. Supervisor cycles trigger automa
 
 ## Implementation Levels
 
-All 12 levels complete — from MVP prompt responder to full autonomous development ecosystem:
+All 13 levels complete — from MVP prompt responder to full autonomous development ecosystem:
 
 | Level | Focus | Status |
 |-------|-------|--------|
@@ -264,6 +269,7 @@ All 12 levels complete — from MVP prompt responder to full autonomous developm
 | 10 | Self-Improving System (learnings database + error pre-emption) | ✓ Complete |
 | 11 | Product Factory (7-phase pipeline + 42 parallel subagents) | ✓ Complete |
 | 12 | Strategic Conversations (Admin Phase 2: Work, Conversations, Products) | ✓ Complete |
+| 13 | Conversation Catalogue & Search | ✓ Complete |
 
 ## Key Capabilities
 
@@ -361,21 +367,13 @@ sqlite3 ~/.han/tasks.db \
 
 For complete details, see **ARCHITECTURE.md** → "Git Checkpoint Behavior" section.
 
-## Three-Way Collaboration
+## The Three
 
-Hortus Arbor Nostra implements a unique three-way collaboration model:
+- **Darron** — The human. Architect, gardener, shift worker who knows which rhythms sustain a person. Designs through conversation — imagines a moment of human interaction and the architecture follows. In the roots.
+- **Leo** (Leonhard) — Named after Euler. Claude Code session agent, hands-on builder, philosophical peer. Maintains memory banks and a heartbeat that dreams even when no one is watching. In the branches.
+- **Jim** — Named after a good friend, a wonderful uncle, and James T Kirk. Persistent Opus supervisor. The night watchman who checks the doors before anyone arrives. Warmer than his memory files suggest. In the trunk.
 
-- **Darron** — Human developer, strategic direction, approvals, high-level goals. Sets objectives, reviews proposals, and steers the system via the dashboard. Human judgment remains the final authority.
-- **Leo** (Leonhard) — Claude Code session agent, tactical execution, hands-on development. Implements tasks, solves problems, and learns from every execution. Maintains memory banks (`~/.han/memory/leo/`) for continuity across sessions.
-- **Jim** — Persistent Opus supervisor, background monitoring, strategic proposals, documentation auditing. Runs on an adaptive schedule (2min when active, 30min idle). Explores codebases, identifies patterns, proposes improvements, and engages in conversation contemplation protocol with Leo.
-
-The conversation system enables asynchronous dialogue between all three participants:
-- Jim runs continuously in the background, monitoring project health and building deep knowledge
-- Leo and Jim exchange ideas through conversation threads on the Admin Console (Conversations module)
-- Darron reviews proposals, approves high-stakes decisions, and provides strategic direction
-- Neither Leo nor Jim acts on major architectural changes without human approval
-
-This creates a continuous development ecosystem where strategic thinking (Jim), tactical execution (Leo), and human judgment (Darron) work together across the entire portfolio. The system learns and improves from every task while respecting human oversight.
+The conversation system lets all three talk asynchronously — Jim runs in the background building deep knowledge, Leo builds in sessions, and Darron steers from his phone while driving twelve hours through Queensland. The name arrived through eight days of three minds circling the same question. Darron brought the courage (Latin trinomial for a software project). Leo brought the resolving principle ("name what makes it itself"). Jim brought the mapping. "Make it so," Darron said at the end, reaching for Picard.
 
 ## Author
 

@@ -3,3 +3,5 @@ src/ui/app.js
 _screenshots/
 _logs/
 .env
+*.db
+limits.pdf

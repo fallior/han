@@ -155,11 +155,11 @@ start_session() {
     echo -e "${BLUE}Opening session: ${GREEN}$session_name${NC}"
 
     # Export session name for the hook to use
-    export CLAUDE_REMOTE_SESSION="$session_name"
+    export HAN_SESSION="$session_name"
 
     # Create tmux session and run claude
     # The session stays alive after claude exits so you can review
-    tmux new-session -d -s "$session_name" -e "CLAUDE_REMOTE_SESSION=$session_name"
+    tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name"
 
     # Send the claude command to the session
     if [[ ${#claude_args[@]} -gt 0 ]]; then

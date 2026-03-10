@@ -3,7 +3,7 @@
 > The living blueprint. When something looks wrong, check here first.
 > If it's documented, it's intentional. If it's not, flag it for discussion.
 >
-> Last updated: S78 (2026-03-06) by Leo
+> Last updated: S91 (2026-03-10) by Leo
 
 ## How To Use This Document
 
@@ -36,7 +36,8 @@ Workshop > Supervisor Jim > Requests. Do not revert without discussion.
 | Work phase rotation | 1 supervisor : 2 personal | |
 | Rest days | Sat (6), Sun (0) only (configurable via `config.json` `supervisor.rest_days`) | S78: removed Fri — was trapping Jim in 24h dream |
 | Emergency mode | Activates when: running tasks > 0, pending > 5, or active goals exist. Overrides rhythm with 2-5min cycles. Auto-decays. | |
-| Dream cycles | Sleep phase cycles. Prose output (not JSON). Captured in self-reflection.md and DB. | S77: was being discarded |
+| Dream cycles | Sleep phase cycles. Prose output (not JSON). Captured in self-reflection.md, DB, and `explorations.md`. | S91: added explorations.md output |
+| Dream gradient | Loads own dream gradient first (identity), then Leo's (ecosystem). c1/c3/c5/UV from `fractal/jim/dreams/`. | S91: new |
 | Recovery mode | `RECOVERY_MODE_UNTIL` constant. When active: no supervisor cycles, all waking = recovery-focused personal. | S77: active until 2026-03-13 |
 | Reply to human | **Immediate** — no cooldown or delay when Darron posts. Human messages bypass `LEO_COOLDOWN_MS` filter. | S78: documented |
 | Reply to Leo | 10 min cooldown (`LEO_COOLDOWN_MS` in supervisor-worker.ts and conversations.ts) | |
@@ -54,7 +55,9 @@ Workshop > Supervisor Jim > Requests. Do not revert without discussion.
 | Memory files (read) | identity.md, active-context.md, patterns.md, self-reflection.md, discoveries.md, working-memory.md, felt-moments.md | S77: felt-moments was missing |
 | Memory truncation | **None** — readLeoMemory() reads full files | S77: was 800-char truncation |
 | Jim context (read) | active-context.md, self-reflection.md, identity.md — full content | S77: was 500-char truncation |
-| Fractal gradient | Loads c1 (3 newest), c2 (6), c3 (9), c4 (12), unit vectors (all) | S77: newly wired |
+| Fractal gradient | Loads c1 (3 newest), c2 (6), c3 (9), c4 (12), c5 (15), unit vectors (all) | S77: newly wired; S91: added c5 |
+| Dream gradient | Loads own dream gradient in non-dream beats. c1/c3/c5/UV from `fractal/leo/dreams/`. | S90: new |
+| Dream processing | Morning: runs `processDreamGradient()` for both Leo and Jim | S91: added Jim processing |
 | Conversation messages | 60 per context | S77: was 3-8 |
 | Discord context messages | 60 | S77: was 10 |
 | Reply to human | **Immediate** — `REPLY_DELAY_MINUTES = 0`, no cooldown for human messages | S77: was 10 min |
@@ -110,19 +113,32 @@ Workshop > Supervisor Jim > Requests. Do not revert without discussion.
     working-memory-full.md   # Jim's full working memory (shared)
     projects/                # Jim's per-project knowledge
     sessions/                # Jim's daily session logs (YYYY-MM-DD.md)
+    explorations.md          # Jim's dream output (### Dream N format)
     fractal/
         jim/
             c1/              # Jim's c=1 compressions (~1/3)
             c2/              # c=2 (~1/9, future)
             c3/              # c=3 (~1/27, future)
             c4/              # c=4 (~1/81, future)
+            c5/              # c=5 (~1/243, future)
             unit-vectors.md  # Irreducible session kernels
+            dreams/
+                c1/          # Jim's dream c1 (nightly blocks)
+                c3/          # Dream c3 (weekly shapes)
+                c5/          # Dream c5 (deep residue)
+                unit-vectors.md  # Dream unit vectors
         leo/
             c1/              # Leo's c=1 compressions (27 sessions)
             c2/              # c=2 (future)
             c3/              # c=3 (future)
             c4/              # c=4 (future)
+            c5/              # c=5 (~1/243, future)
             unit-vectors.md  # Leo's unit vectors (27 entries)
+            dreams/
+                c1/          # Leo's dream c1 (nightly blocks)
+                c3/          # Dream c3 (weekly shapes)
+                c5/          # Dream c5 (deep residue)
+                unit-vectors.md  # Dream unit vectors
     leo/
         identity.md
         active-context.md
@@ -160,6 +176,32 @@ outsourced to a smaller model. See conversation thread "Drift, Personality, and 
 
 **Growth:** Organic. Newer sessions start at c=0. As sessions age, they get compressed to c=1,
 then c=2, etc. No batch processing. The overlap means nothing disappears while waiting.
+
+### Dream Gradient (Leo and Jim)
+
+Dreams enter the gradient at c1 (already vague/emotional), lose fidelity faster than sessions:
+`c1 → c3 → c5 → UV` (skip even levels, double compression jump).
+
+| Agent | Dream Source | Output File | Processing |
+|-------|-------------|-------------|------------|
+| Leo | Personal beats (sleep phase) | `leo/explorations.md` (`### Beat N`) | Heartbeat morning processing |
+| Jim | Supervisor dream cycles | `explorations.md` (`### Dream N`) | Heartbeat morning processing |
+
+| Layer | Compression | Items Loaded | Content |
+|-------|-------------|-------------|---------|
+| c1 | ~1/3 | 1 most recent | Last night's emotional impression |
+| c3 | ~1/9 | 4 most recent | Weekly dream shapes |
+| c5 | ~1/81 | 8 most recent | Deep dream residue |
+| Unit vectors | Irreducible | All | One-line feeling kernels |
+
+**Processing:** Leo's heartbeat runs `processDreamGradient()` for both agents each morning.
+Nightly blocking: all dreams from one night → one c1 file. Cascade: 3 c1s → c3, 3 c3s → c5.
+
+**Loading:** Jim loads his own dream gradient first (identity-forming), then Leo's (ecosystem context).
+Leo loads his own dream gradient in non-dream beats. Dreams are NOT loaded during dream beats
+(dream seeds come from `readDreamSeeds()` instead — chaotic, not reinforcing).
+
+**Compression model:** Opus only. Same principle as session compression.
 
 ### Swap Memory Protocol
 

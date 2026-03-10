@@ -47,7 +47,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
-import { readDreamGradient } from './lib/dream-gradient.js';
+import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
 // ── Config ────────────────────────────────────────────────────
@@ -1639,6 +1639,30 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
 
 // processSignals() removed — now handled by Leo/Human agent
 
+// ── Morning dream gradient processing ─────────────────────────
+
+let lastDreamGradientDate = '';
+
+async function maybeProcessDreamGradient(phase: string): Promise<void> {
+    if (phase !== 'morning') return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lastDreamGradientDate === today) return;
+
+    for (const agent of ['leo', 'jim'] as const) {
+        console.log(`[Leo] Morning — processing ${agent}'s dream gradient...`);
+        try {
+            const result = await processDreamGradient(agent);
+            console.log(`[Leo] ${agent} dream gradient: ${result.nightsProcessed} nights, ${result.c1Created.length} c1, ${result.c3Created.length} c3, ${result.c5Created.length} c5, ${result.uvsCreated.length} UVs`);
+            if (result.errors.length > 0) {
+                console.error(`[Leo] ${agent} dream gradient errors:`, result.errors);
+            }
+        } catch (err) {
+            console.error(`[Leo] ${agent} dream gradient processing failed:`, (err as Error).message);
+        }
+    }
+    lastDreamGradientDate = today;
+}
+
 // ── Main heartbeat ───────────────────────────────────────────
 
 async function heartbeat(): Promise<void> {
@@ -1679,6 +1703,9 @@ async function heartbeat(): Promise<void> {
 
     // Check for the most capable model available
     await resolveModel();
+
+    // Morning dream gradient processing (both Leo and Jim)
+    await maybeProcessDreamGradient(phase);
 
     console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${activeModel})`);
 

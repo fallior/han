@@ -16,7 +16,7 @@ import readline from 'node:readline';
 
 const HOME = process.env.HOME || '/home/darron';
 const DB_PATH = path.join(HOME, '.han', 'tasks.db');
-const SESSIONS_DIR = path.join(HOME, '.claude', 'projects', '-home-darron-Projects-clauderemote');
+const SESSIONS_DIR = path.join(HOME, '.claude', 'projects', '-home-darron-Projects-han');
 
 const dryRun = process.argv.includes('--dry-run');
 const specificSession = process.argv.find(a => !a.startsWith('-') && a !== process.argv[0] && a !== process.argv[1]);

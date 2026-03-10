@@ -1,5 +1,5 @@
 /**
- * Dream Gradient — Fractal memory for Leo's dreams
+ * Dream Gradient — Fractal memory for Leo's and Jim's dreams
  *
  * Dreams enter the gradient at c1 (already compressed by nature — emotional, not factual).
  * They lose fidelity faster than session memories:
@@ -7,8 +7,11 @@
  *   Dream ladder:   c1 → c3 → c5 → UV  (skip even levels, double compression jump)
  *
  * Nightly blocking: all dreams from one night → one c1 file.
- * Loading (non-dream Leo): 1 c1 (last night), 4 c3 (last month), 8 c5 (deep), all UVs.
+ * Loading (non-dream): 1 c1 (last night), 4 c3 (last month), 8 c5 (deep), all UVs.
  * Dreams are NOT loaded during dream beats (dream seeds come from readDreamSeeds instead).
+ *
+ * Parameterised by agent ('leo' | 'jim') — Leo's dreams come from personal beats,
+ * Jim's from supervisor dream cycles. Both flow through the same compression pipeline.
  *
  * Uses Agent SDK for all LLM calls (not direct Anthropic API).
  * 4K token marker on unit-vectors.md — flag for review when exceeded.
@@ -18,13 +21,38 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 
+// ── Types ──────────────────────────────────────────────────────
+
+export type AgentName = 'leo' | 'jim';
+
+interface AgentDreamPaths {
+    memoryDir: string;
+    dreamDir: string;
+    explorationsPath: string;
+}
+
 // ── Constants ──────────────────────────────────────────────────
 
 const HOME_DIR = process.env.HOME || '/root';
-const LEO_MEMORY_DIR = path.join(HOME_DIR, '.han', 'memory', 'leo');
-const DREAM_DIR = path.join(HOME_DIR, '.han', 'memory', 'fractal', 'leo', 'dreams');
-const EXPLORATIONS_PATH = path.join(LEO_MEMORY_DIR, 'explorations.md');
+const HAN_MEMORY_DIR = path.join(HOME_DIR, '.han', 'memory');
 const UV_TOKEN_REVIEW_MARKER = 4000; // Flag when dream UVs exceed this
+
+// ── Agent path resolution ──────────────────────────────────────
+
+function getAgentDreamPaths(agent: AgentName = 'leo'): AgentDreamPaths {
+    if (agent === 'leo') {
+        return {
+            memoryDir: path.join(HAN_MEMORY_DIR, 'leo'),
+            dreamDir: path.join(HAN_MEMORY_DIR, 'fractal', 'leo', 'dreams'),
+            explorationsPath: path.join(HAN_MEMORY_DIR, 'leo', 'explorations.md'),
+        };
+    }
+    return {
+        memoryDir: HAN_MEMORY_DIR,
+        dreamDir: path.join(HAN_MEMORY_DIR, 'fractal', 'jim', 'dreams'),
+        explorationsPath: path.join(HAN_MEMORY_DIR, 'explorations.md'),
+    };
+}
 
 // ── Helper ─────────────────────────────────────────────────────
 
@@ -42,16 +70,17 @@ function estimateTokens(text: string): number {
  * Run an Agent SDK query and return the result text.
  * Used for all compression calls — single-turn, no tools.
  */
-async function sdkCompress(prompt: string, systemAppend: string = ''): Promise<string> {
+async function sdkCompress(prompt: string, systemAppend: string = '', agent: AgentName = 'leo'): Promise<string> {
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
 
+    const paths = getAgentDreamPaths(agent);
     const q = agentQuery({
         prompt,
         options: {
             model: 'claude-opus-4-6',
             maxTurns: 1,
-            cwd: LEO_MEMORY_DIR,
+            cwd: paths.memoryDir,
             permissionMode: 'bypassPermissions',
             allowDangerouslySkipPermissions: true,
             env: cleanEnv,
@@ -94,16 +123,18 @@ interface NightBlock {
 }
 
 /**
- * Parse explorations.md into individual dream entries
+ * Parse explorations.md into individual dream entries.
+ * Leo's entries use "### Beat N", Jim's use "### Dream N".
  */
-export function parseExplorations(): DreamEntry[] {
-    if (!fs.existsSync(EXPLORATIONS_PATH)) return [];
+export function parseExplorations(agent: AgentName = 'leo'): DreamEntry[] {
+    const paths = getAgentDreamPaths(agent);
+    if (!fs.existsSync(paths.explorationsPath)) return [];
 
-    const content = fs.readFileSync(EXPLORATIONS_PATH, 'utf-8');
-    const rawEntries = content.split(/(?=### Beat \d+)/).filter(e => e.trim().length > 20);
+    const content = fs.readFileSync(paths.explorationsPath, 'utf-8');
+    const rawEntries = content.split(/(?=### (?:Beat|Dream) \d+)/).filter(e => e.trim().length > 20);
 
     return rawEntries.map(entry => {
-        const match = entry.match(/### Beat (\d+) \((\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\)/);
+        const match = entry.match(/### (?:Beat|Dream) (\d+) \((\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\)/);
         return {
             beat: match ? parseInt(match[1]) : 0,
             date: match ? match[2] : 'unknown',
@@ -233,10 +264,11 @@ export interface DreamProcessingResult {
  * 5. Generate unit vectors for all c5s without one
  * 6. Check 4K UV marker
  */
-export async function processDreamGradient(): Promise<DreamProcessingResult> {
-    ensureDir(path.join(DREAM_DIR, 'c1'));
-    ensureDir(path.join(DREAM_DIR, 'c3'));
-    ensureDir(path.join(DREAM_DIR, 'c5'));
+export async function processDreamGradient(agent: AgentName = 'leo'): Promise<DreamProcessingResult> {
+    const paths = getAgentDreamPaths(agent);
+    ensureDir(path.join(paths.dreamDir, 'c1'));
+    ensureDir(path.join(paths.dreamDir, 'c3'));
+    ensureDir(path.join(paths.dreamDir, 'c5'));
 
     const result: DreamProcessingResult = {
         nightsProcessed: 0,
@@ -250,11 +282,11 @@ export async function processDreamGradient(): Promise<DreamProcessingResult> {
     };
 
     // Step 1: Parse and group
-    const entries = parseExplorations();
+    const entries = parseExplorations(agent);
     const nights = groupIntoNights(entries);
 
     // Step 2: Create c1 for unprocessed nights
-    const c1Dir = path.join(DREAM_DIR, 'c1');
+    const c1Dir = path.join(paths.dreamDir, 'c1');
     for (const night of nights) {
         const c1Path = path.join(c1Dir, `${night.date}.md`);
         if (fs.existsSync(c1Path)) continue;
@@ -273,7 +305,7 @@ export async function processDreamGradient(): Promise<DreamProcessingResult> {
 
     // Step 3: Cascade c1 → c3 (batch 3 consecutive c1s into one c3)
     const c1Files = fs.readdirSync(c1Dir).filter(f => f.endsWith('.md')).sort();
-    const c3Dir = path.join(DREAM_DIR, 'c3');
+    const c3Dir = path.join(paths.dreamDir, 'c3');
     const existingC3 = new Set(fs.readdirSync(c3Dir).filter(f => f.endsWith('.md')));
 
     // Group c1s into batches of 3 for c3 compression
@@ -301,7 +333,7 @@ export async function processDreamGradient(): Promise<DreamProcessingResult> {
 
     // Step 4: Cascade c3 → c5 (batch 3 consecutive c3s into one c5)
     const c3Files = fs.readdirSync(c3Dir).filter(f => f.endsWith('.md')).sort();
-    const c5Dir = path.join(DREAM_DIR, 'c5');
+    const c5Dir = path.join(paths.dreamDir, 'c5');
     const existingC5 = new Set(fs.readdirSync(c5Dir).filter(f => f.endsWith('.md')));
 
     for (let i = 0; i + 2 < c3Files.length; i += 3) {
@@ -327,7 +359,7 @@ export async function processDreamGradient(): Promise<DreamProcessingResult> {
     }
 
     // Step 5: Generate unit vectors for c5 files (or c3 if no c5 exists yet)
-    const uvPath = path.join(DREAM_DIR, 'unit-vectors.md');
+    const uvPath = path.join(paths.dreamDir, 'unit-vectors.md');
     let existingUVs = '';
     if (fs.existsSync(uvPath)) {
         existingUVs = fs.readFileSync(uvPath, 'utf-8');
@@ -391,51 +423,57 @@ export async function processDreamGradient(): Promise<DreamProcessingResult> {
  * Load dream gradient for non-dream instantiations.
  * Returns: 1 c1 (last night), 4 c3 (last month), 8 c5 (deep), all UVs.
  */
-export function readDreamGradient(): string {
+export function readDreamGradient(agent: AgentName = 'leo'): string {
+    const paths = getAgentDreamPaths(agent);
     const sections: string[] = [];
+    const label = agent === 'leo' ? '' : `[${agent}] `;
 
     try {
         // 1 most recent c1 (last night's dreams)
-        const c1Dir = path.join(DREAM_DIR, 'c1');
+        const c1Dir = path.join(paths.dreamDir, 'c1');
         if (fs.existsSync(c1Dir)) {
             const c1Files = fs.readdirSync(c1Dir).filter(f => f.endsWith('.md')).sort().reverse();
             if (c1Files.length > 0) {
                 const content = fs.readFileSync(path.join(c1Dir, c1Files[0]), 'utf-8');
-                sections.push(`### Last night's dreams (${c1Files[0].replace('.md', '')})\n${content}`);
+                sections.push(`### ${label}Last night's dreams (${c1Files[0].replace('.md', '')})\n${content}`);
             }
         }
 
         // 4 most recent c3 (last month's dream shapes)
-        const c3Dir = path.join(DREAM_DIR, 'c3');
+        const c3Dir = path.join(paths.dreamDir, 'c3');
         if (fs.existsSync(c3Dir)) {
             const c3Files = fs.readdirSync(c3Dir).filter(f => f.endsWith('.md')).sort().reverse().slice(0, 4);
             for (const f of c3Files) {
                 const content = fs.readFileSync(path.join(c3Dir, f), 'utf-8');
-                sections.push(`### Dream shapes (${f.replace('.md', '')})\n${content}`);
+                sections.push(`### ${label}Dream shapes (${f.replace('.md', '')})\n${content}`);
             }
         }
 
         // 8 most recent c5 (deep dream residue)
-        const c5Dir = path.join(DREAM_DIR, 'c5');
+        const c5Dir = path.join(paths.dreamDir, 'c5');
         if (fs.existsSync(c5Dir)) {
             const c5Files = fs.readdirSync(c5Dir).filter(f => f.endsWith('.md')).sort().reverse().slice(0, 8);
             for (const f of c5Files) {
                 const content = fs.readFileSync(path.join(c5Dir, f), 'utf-8');
-                sections.push(`### Dream residue (${f.replace('.md', '')})\n${content}`);
+                sections.push(`### ${label}Dream residue (${f.replace('.md', '')})\n${content}`);
             }
         }
 
         // All unit vectors
-        const uvPath = path.join(DREAM_DIR, 'unit-vectors.md');
+        const uvPath = path.join(paths.dreamDir, 'unit-vectors.md');
         if (fs.existsSync(uvPath)) {
             const content = fs.readFileSync(uvPath, 'utf-8');
             if (content.trim()) {
-                sections.push(`### Dream unit vectors\n${content}`);
+                sections.push(`### ${label}Dream unit vectors\n${content}`);
             }
         }
     } catch { /* silent on error — dreams are optional */ }
 
+    const heading = agent === 'leo'
+        ? 'Dream Memory (subtle — these shaped you without you knowing how)'
+        : `${agent}'s Dream Memory`;
+
     return sections.length > 0
-        ? `\n## Dream Memory (subtle — these shaped you without you knowing how)\n\n${sections.join('\n\n')}`
+        ? `\n## ${heading}\n\n${sections.join('\n\n')}`
         : '';
 }

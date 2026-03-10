@@ -4,15 +4,15 @@ After=network.target han-server.service
 
 [Service]
 Type=simple
-WorkingDirectory=/home/darron/Projects/clauderemote/src/server
-ExecStart=/home/darron/Projects/clauderemote/src/server/node_modules/.bin/tsx jemma.ts
+WorkingDirectory=/home/darron/Projects/han/src/server
+ExecStart=/home/darron/Projects/han/src/server/node_modules/.bin/tsx jemma.ts
 Restart=always
 RestartSec=5
 Environment=HOME=/home/darron
 Environment=PATH=/home/darron/.nvm/versions/node/v23.9.0/bin:/usr/local/bin:/usr/bin:/bin
 Environment=OLLAMA_MODEL=gemma3:4b
 Environment=NODE_TLS_REJECT_UNAUTHORIZED=0
-EnvironmentFile=/home/darron/Projects/clauderemote/.env
+EnvironmentFile=/home/darron/Projects/han/.env
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=jemma

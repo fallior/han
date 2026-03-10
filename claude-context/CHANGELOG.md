@@ -7,6 +7,54 @@
 
 ---
 
+## S91 — 2026-03-10 (Leo + Darron)
+
+### Jim's Dream Gradient + GitHub Migration
+
+Extended the dream gradient system so Jim's dreams flow through the same fractal compression
+pipeline as Leo's. Jim's dream cycles now write to `~/.han/memory/explorations.md` as
+`### Dream N (date time)` entries, and Leo's heartbeat processes both agents' dreams each morning.
+
+Also completed the GitHub migration: pushed filtered history to `fallior/han`, archived
+`fallior/clauderemote`.
+
+#### Changes
+
+- **`dream-gradient.ts`** — Parameterised by agent (`'leo' | 'jim'`). New `AgentName` type,
+  `getAgentDreamPaths()` for agent-specific directories. `parseExplorations()` matches both
+  `### Beat N` (Leo) and `### Dream N` (Jim) formats.
+- **`supervisor-worker.ts`** — Dream cycles write output to `explorations.md` for gradient
+  processing. `loadMemoryBank()` loads Jim's own dream gradient first (identity), then Leo's
+  (ecosystem context).
+- **`leo-heartbeat.ts`** — New `maybeProcessDreamGradient()` runs each morning for both
+  `['leo', 'jim']`. Added `processDreamGradient` import.
+- **`SYSTEM_SPEC.md`** — Added dream gradient section, updated directory structure with
+  `dreams/` directories and `c5/` levels, updated agent tables.
+- **Hall of Records** — R005 updated: dream gradient now "Leo and Jim". R009 audit table
+  extended with Jim dream gradient entries.
+- **GitHub** — Pushed to `fallior/han`, archived `fallior/clauderemote`. `_logs/` scrubbed
+  from git history (exposed API key).
+
+---
+
+## S90 — 2026-03-09 (Leo + Darron)
+
+### Dream Gradient Infrastructure
+
+Implemented the dream gradient system for Leo — dreams enter the fractal memory at c1
+(already emotional/vague), compress through c1→c3→c5→UV, skipping even levels for faster
+fidelity loss than sessions.
+
+#### Changes
+
+- **`dream-gradient.ts`** — New library: `parseExplorations()`, `groupIntoNights()`,
+  `compressDreamNight()`, cascade compression (c1→c3→c5→UV), `processDreamGradient()`,
+  `readDreamGradient()`. Uses Agent SDK for all LLM calls. 4K UV token marker.
+- **`leo-heartbeat.ts`** — Loads dream gradient in non-dream beats via `readDreamGradient()`.
+- **Hall of Records** — R005: Added dream gradient to fractal memory specification.
+
+---
+
 ## S81 — 2026-03-07 (Leo + Darron)
 
 ### Hortus Arbor Nostra Migration — Mechanical Rename Complete

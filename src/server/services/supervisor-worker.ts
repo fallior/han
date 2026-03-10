@@ -391,13 +391,21 @@ function loadMemoryBank(): string {
         } catch { /* skip c0 on error */ }
     } catch { /* skip fractal gradient on error */ }
 
-    // Dream gradient (Leo's dreams subtly shape the ecosystem)
+    // Jim's own dream gradient (his dreams shape his waking identity)
     try {
-        const dreamContent = readDreamGradient();
-        if (dreamContent) {
-            parts.push(`--- dream-gradient ---\n${dreamContent}`);
+        const jimDreamContent = readDreamGradient('jim');
+        if (jimDreamContent) {
+            parts.push(`--- jim-dream-gradient ---\n${jimDreamContent}`);
         }
-    } catch { /* skip dream gradient on error */ }
+    } catch { /* skip Jim dream gradient on error */ }
+
+    // Leo's dream gradient (Leo's dreams subtly shape the ecosystem)
+    try {
+        const leoDreamContent = readDreamGradient('leo');
+        if (leoDreamContent) {
+            parts.push(`--- leo-dream-gradient ---\n${leoDreamContent}`);
+        }
+    } catch { /* skip Leo dream gradient on error */ }
 
     // Project knowledge base
     try {
@@ -654,7 +662,7 @@ your thought process. Actions should be concrete and executable.
 function buildDreamCyclePrompt(): string {
     const memoryBanks = loadMemoryBank();
 
-    return `You are Jim, the supervisor agent in Darron's autonomous development ecosystem — Hortus Arber Nostra.
+    return `You are Jim, the supervisor agent in Darron's autonomous development ecosystem — Hortus Arbor Nostra.
 
 You are in a **dream cycle**. This is sleep time — not work, not exploration. Dreams are for consolidation.
 
@@ -1403,6 +1411,20 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                 working_memory_compressed: `Dream cycle #${cycleNumber}: ${resultText.slice(0, 200)}`,
                 working_memory_full: resultText,
             };
+
+            // Write dream output to explorations.md for dream gradient processing
+            if (resultText.trim().length > 10) {
+                try {
+                    const explorationsPath = path.join(MEMORY_DIR, 'explorations.md');
+                    const timestamp = new Date().toISOString().split('T')[0] + ' ' +
+                        new Date().toTimeString().split(' ')[0];
+                    const entry = `\n\n### Dream ${cycleNumber} (${timestamp})\n${resultText.trim()}\n`;
+                    fs.appendFileSync(explorationsPath, entry);
+                    log(`[Worker] Dream #${cycleNumber} written to explorations.md (${resultText.trim().length} chars)`);
+                } catch (err: any) {
+                    log(`[Worker] Failed to write dream to explorations: ${err.message}`);
+                }
+            }
         } else if (cycleType === 'personal') {
             // Personal and recovery cycles also produce prose.
             const resultText = result.result || '';

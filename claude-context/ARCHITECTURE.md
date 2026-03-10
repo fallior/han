@@ -8,7 +8,7 @@ Hortus Arbor Nostra (HAN) bridges your development machine and mobile device, en
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        CLAUDE REMOTE ARCHITECTURE                           │
+│                     HORTUS ARBOR NOSTRA ARCHITECTURE                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   ┌──────────────┐    hooks     ┌──────────────┐                           │

@@ -69,7 +69,7 @@ test_verification_wait() {
     log_test "Checking leo-heartbeat.ts for 12s sleep..."
 
     # Check if 12s sleep exists in the code
-    if grep -q "execSync('sleep 12')" /home/darron/Projects/clauderemote/src/server/leo-heartbeat.ts; then
+    if grep -q "execSync('sleep 12')" /home/darron/Projects/han/src/server/leo-heartbeat.ts; then
         log_pass "Code contains 'sleep 12' (correct)"
     else
         log_fail "Code does not contain 'sleep 12'"

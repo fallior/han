@@ -1,12 +1,13 @@
 #!/bin/bash
-# Claude Remote - Notification Hook (Level 2)
+# Hortus Arbor Nostra — Notification Hook (Level 2)
 # Receives prompt events from Claude Code and creates state files for remote response
 # Sends rich push notifications via ntfy.sh with action buttons
 
 set -euo pipefail
 
-# Configuration
-CLAUDE_REMOTE_DIR="${CLAUDE_REMOTE_DIR:-$HOME/.claude-remote}"
+# Configuration — supports both new and legacy paths
+HAN_DIR="${HAN_DIR:-$HOME/.han}"
+CLAUDE_REMOTE_DIR="${CLAUDE_REMOTE_DIR:-$HAN_DIR}"
 PENDING_DIR="$CLAUDE_REMOTE_DIR/pending"
 RESOLVED_DIR="$CLAUDE_REMOTE_DIR/resolved"
 CONFIG_FILE="$CLAUDE_REMOTE_DIR/config.json"
@@ -56,12 +57,14 @@ TIMESTAMP=$(date +%s%3N)
 PROMPT_ID="${TIMESTAMP}-${SESSION_ID:-unknown}"
 
 # Auto-detect tmux session name, with env override and fallback
-if [[ -n "${CLAUDE_REMOTE_SESSION:-}" ]]; then
+if [[ -n "${HAN_SESSION:-}" ]]; then
+    TMUX_SESSION="$HAN_SESSION"
+elif [[ -n "${CLAUDE_REMOTE_SESSION:-}" ]]; then
     TMUX_SESSION="$CLAUDE_REMOTE_SESSION"
 elif [[ -n "${TMUX:-}" ]] && command -v tmux &> /dev/null; then
-    TMUX_SESSION=$(tmux display-message -p '#{session_name}' 2>/dev/null || echo "claude-remote")
+    TMUX_SESSION=$(tmux display-message -p '#{session_name}' 2>/dev/null || echo "han")
 else
-    TMUX_SESSION="claude-remote"
+    TMUX_SESSION="han"
 fi
 
 # Capture terminal content to show actual prompt options
