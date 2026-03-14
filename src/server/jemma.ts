@@ -35,6 +35,8 @@ import WebSocket from 'ws';
 import path from 'node:path';
 import fs from 'node:fs';
 import { execSync, execFileSync } from 'node:child_process';
+import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
+import { ensureSingleInstance } from './lib/pid-guard';
 
 // Allow self-signed TLS cert for localhost server connection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -269,34 +271,34 @@ Rules:
 - Real names are provided in the Author field — use them for better context when classifying`;
 }
 
-async function classifyWithHaiku(prompt: string): Promise<ClassificationResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('No ANTHROPIC_API_KEY');
+async function classifyWithHaikuSDK(prompt: string): Promise<ClassificationResult> {
+  const cleanEnv: Record<string, string | undefined> = { ...process.env };
+  delete cleanEnv.CLAUDECODE;
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
+  const q = agentQuery({
+    prompt,
+    options: {
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 256,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-    signal: AbortSignal.timeout(10000),
+      maxTurns: 1,
+      cwd: HAN_DIR,
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      env: cleanEnv,
+      persistSession: false,
+      tools: [],
+    },
   });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Haiku API ${res.status}: ${errText}`);
+  let resultText = '';
+  for await (const event of q) {
+    if (event.type === 'assistant' && event.message?.content) {
+      for (const block of event.message.content) {
+        if (block.type === 'text') resultText += block.text;
+      }
+    }
   }
 
-  const data = await res.json();
-  const raw = data.content[0].text;
-  // Strip markdown code fences if Haiku wraps the JSON
-  const text = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  const text = resultText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
   const result = JSON.parse(text);
   return {
     recipient: result.recipient || 'ignore',
@@ -332,13 +334,13 @@ async function classifyWithOllama(prompt: string): Promise<ClassificationResult>
 async function callLLMForClassification(message: any): Promise<ClassificationResult> {
   const prompt = buildClassificationPrompt(message);
 
-  // Try Haiku first (fast, free), fall back to Gemma (local)
+  // Try Haiku via Agent SDK first, fall back to local Gemma (Ollama)
   try {
-    const result = await classifyWithHaiku(prompt);
-    console.log('[Jemma] Classified via Haiku');
+    const result = await classifyWithHaikuSDK(prompt);
+    console.log('[Jemma] Classified via Haiku SDK');
     return result;
   } catch (err) {
-    console.warn('[Jemma] Haiku classification failed:', (err as Error).message);
+    console.warn('[Jemma] Haiku SDK classification failed:', (err as Error).message);
   }
 
   try {
@@ -924,9 +926,90 @@ function handleShutdown(): void {
   process.exit(143);
 }
 
+// ── Credential Swap (rate-limit failover) ─────────────────────────
+
+const CREDENTIAL_SWAP_INTERVAL_MS = 30 * 1000; // 30 seconds
+const CREDENTIAL_SWAP_LOG = path.join(HEALTH_DIR, 'credential-swaps.jsonl');
+
+/**
+ * Check for rate-limited signal and swap Claude credentials.
+ * Only activates when 2+ credential files exist (.credentials-[a-z].json).
+ * Pure Node.js — no LLM needed.
+ */
+function checkAndSwapCredentials(): void {
+  const signalPath = path.join(SIGNALS_DIR, 'rate-limited');
+  if (!fs.existsSync(signalPath)) return;
+
+  const credDir = path.join(HOME, '.claude');
+  const credPath = path.join(credDir, '.credentials.json');
+
+  // Find all alternate credential files (.credentials-a.json, .credentials-b.json, etc.)
+  let files: string[];
+  try {
+    files = fs.readdirSync(credDir)
+      .filter(f => /^\.credentials-[a-z]\.json$/.test(f))
+      .sort();
+  } catch {
+    return; // Can't read credential directory
+  }
+
+  // Safety: only swap when 2+ credential files exist
+  if (files.length < 2) {
+    // Remove stale signal — no backup to swap to
+    try { fs.unlinkSync(signalPath); } catch { /* best effort */ }
+    console.log('[Jemma] Rate-limited signal received but only 1 credential file — clearing signal');
+    return;
+  }
+
+  // Read current live credentials
+  let currentContent: string;
+  try {
+    currentContent = fs.readFileSync(credPath, 'utf-8');
+  } catch {
+    return; // Can't read live credentials
+  }
+
+  // Find which credential file matches current, pick next in round-robin
+  const currentIndex = files.findIndex(f => {
+    try {
+      return fs.readFileSync(path.join(credDir, f), 'utf-8') === currentContent;
+    } catch {
+      return false;
+    }
+  });
+  const nextIndex = (currentIndex + 1) % files.length;
+  const nextFile = files[nextIndex];
+
+  // Perform the swap
+  try {
+    const nextContent = fs.readFileSync(path.join(credDir, nextFile), 'utf-8');
+    fs.writeFileSync(credPath, nextContent);
+    fs.unlinkSync(signalPath);
+  } catch (err) {
+    console.error('[Jemma] Credential swap failed:', (err as Error).message);
+    return;
+  }
+
+  // Log the swap for usage analytics
+  const entry = {
+    timestamp: new Date().toISOString(),
+    from: currentIndex >= 0 ? files[currentIndex] : 'unknown',
+    to: nextFile,
+    accountCount: files.length,
+  };
+  try {
+    fs.appendFileSync(CREDENTIAL_SWAP_LOG, JSON.stringify(entry) + '\n');
+  } catch { /* best effort */ }
+
+  console.log(`[Jemma] Swapped credentials: ${entry.from} → ${nextFile} (${files.length} accounts available)`);
+}
+
 // ── Main ──────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const pidGuard = ensureSingleInstance('jemma');
+  process.on('exit', () => pidGuard.cleanup());
+
   ensureDirectories();
   loadLastSeen();
   writeHealthFile('ok');
@@ -973,6 +1056,10 @@ async function main(): Promise<void> {
 
   // Start reconciliation poll
   setInterval(reconcileMessages, RECONCILIATION_INTERVAL_MS);
+
+  // Start credential swap watcher (rate-limit failover)
+  setInterval(checkAndSwapCredentials, CREDENTIAL_SWAP_INTERVAL_MS);
+  console.log('[Jemma] Credential swap watcher active (30s interval)');
 
   // Graceful shutdown
   process.on('SIGTERM', handleShutdown);

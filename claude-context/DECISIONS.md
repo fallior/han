@@ -76,6 +76,8 @@ When you make a significant technical or design decision:
 | DEC-044 | Fractal Memory Gradient — 3:1 Compression Target Per Level | Accepted | 2026-03-06 |
 | DEC-045 | Fractal Memory Gradient — Unit Vectors as Emotional Anchors | Accepted | 2026-03-06 |
 | DEC-046 | Fractal Memory Gradient — Bootstrap Oldest Sessions First | Accepted | 2026-03-06 |
+| DEC-047 | Credential Swap — Failure-Triggered Round-Robin | Accepted | 2026-03-12 |
+| DEC-048 | Per-Cycle Cost Cap for Autonomous Agents | Accepted | 2026-03-14 |
 
 ---
 
@@ -3600,4 +3602,94 @@ Jim has ~16 session files. Could compress all immediately (batch process) or sel
 #### Related
 
 - **Bootstrap script:** `src/scripts/bootstrap-fractal-gradient.js`
+
+### DEC-047: Credential Swap — Failure-Triggered Round-Robin
+
+**Date:** 2026-03-12
+**Author:** Darron + Leo
+**Status:** Accepted
+
+#### Context
+
+All agents share one Claude Max subscription ($340/month). When the weekly limit hits 100%,
+all SDK thinking stops. Robin Hood (pure Node.js) keeps bodies alive but no agent can reason
+until the weekly reset.
+
+#### Decision
+
+**Swap credentials on failure, not on schedule.** Jemma watches for a `rate-limited` signal
+file (written by any agent on SDK rate limit error) and round-robins through
+`.credentials-[a-z].json` files in `~/.claude/`.
+
+**Key design choices:**
+- **No reset timer, no percentage tracking, no schedule awareness.** Run A until exhausted →
+  swap to B → run B until exhausted → swap to A (refreshed by then). The weekly reset window
+  is longer than any depletion cycle, so ping-pong is self-correcting.
+- **N-account ready.** Round-robin, not two-account toggle. Adding a third account = adding
+  `.credentials-c.json`. No code changes.
+- **Agents are oblivious.** Leo and Jim read `.credentials.json` and get Opus. They never know
+  which account provided it. At most one beat/cycle fails (the trigger), then the next succeeds.
+- **Safe without backup.** Swap watcher is a no-op when < 2 credential files exist. No breakage
+  on single-account setups.
+- **Swap logging.** Every swap recorded in `~/.han/health/credential-swaps.jsonl` with timestamp,
+  from, to, accountCount. Enables data-driven decisions on account count and subscription tier.
+
+#### Consequences
+
+**Positive:**
+- Continuous operation through limit hits — no dark periods
+- Scalable to N accounts with zero code changes
+- Swap log provides usage analytics (days-between-swaps, swaps-per-week)
+- Account B can be a lower tier if barely used
+
+**Trade-offs:**
+- At most one missed beat/cycle per swap event
+- Requires Jemma running (already a systemd service)
+- Second account = additional subscription cost
+
+#### Related
+
+- **Plan:** `~/.han/plans/jemma-credential-swap-s93.md`
+- **Signal:** `rate-limited` in `~/.han/signals/`
+- **Swap log:** `~/.han/health/credential-swaps.jsonl`
+
+### DEC-048: Per-Cycle Cost Cap for Autonomous Agents
+
+**Date:** 2026-03-14
+**Author:** Darron (with fresh-eyes Claude)
+**Status:** Accepted
+
+#### Context
+
+Overnight token leak consumed ~21% of the weekly MAX allowance in 18.5 hours. Root cause:
+dream cycles running 2+ hours via Agent SDK with no cost limit. 8 of 11 supervisor cycles
+were SIGTERM'd without recording cost — estimated $130-200+ untracked spend. Two dream
+cycles ran for 2 full hours each at Opus rate before being killed.
+
+#### Decision
+
+**$2 per-cycle cost cap on autonomous background agents. Interactive agents remain unlimited.**
+
+| Process | Cap | Reason |
+|---------|-----|--------|
+| Leo CLI, Jim/Human, Leo/Human | None | Interactive / conversation-facing |
+| Supervisor cycles, Leo heartbeat | $2 | Autonomous background — needs guardrails |
+
+**Implementation:**
+- Mid-stream token tracking from each `assistant` message during Agent SDK streaming
+- Graceful abort when estimated cost hits cap — partial work saved before exit
+- SIGTERM handler records accumulated cost to database before dying
+- Cycle audit log at `~/.han/logs/cycle-audit.jsonl` (JSONL: timestamp, cycle, type, outcome, cost, duration)
+
+#### Consequences
+
+**Positive:**
+- No more silent token burns on runaway cycles
+- Every cycle exit path (completed/cost_cap/sigterm/error) is logged and costed
+- Partial work preserved on abort — dreams, reasoning, swap content saved
+- Darron has visibility into autonomous spend via audit log
+
+**Trade-offs:**
+- $2 cap may truncate some legitimate deep-thinking cycles
+- Cap is configurable via `supervisor.cycle_cost_cap_usd` for tuning
 

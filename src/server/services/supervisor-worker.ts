@@ -111,6 +111,17 @@ let runningCycleAbort: AbortController | null = null;
 let personalCycleCounter = 0;
 let lastCycleDelay: number | null = null;
 
+// Track current cycle state for SIGTERM handler and cost cap (so work isn't lost on kill)
+let currentCycleId: string | null = null;
+let currentCycleTokensIn = 0;
+let currentCycleTokensOut = 0;
+let currentCycleType: string = 'supervisor';
+let currentCycleNumber: number = 0;
+let currentCyclePartialContent: string[] = [];  // accumulated assistant text blocks
+
+// Nightly audit file
+const AUDIT_FILE = path.join(HAN_DIR, 'logs', 'cycle-audit.jsonl');
+
 // Prepared statements (worker-local)
 let supervisorStmts: any = {};
 let taskStmts: any = {};
@@ -941,6 +952,71 @@ function getNextCycleDelay(): number {
     return getPhaseInterval('jim');
 }
 
+// ── Cycle audit ─────────────────────────────────────────────
+
+function logCycleAudit(cycleNumber: number, cycleType: string, outcome: 'completed' | 'cost_cap' | 'sigterm' | 'timeout' | 'error', costUsd: number, durationMs: number): void {
+    try {
+        const logDir = path.dirname(AUDIT_FILE);
+        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+        const entry = JSON.stringify({
+            timestamp: new Date().toISOString(),
+            cycle: cycleNumber,
+            type: cycleType,
+            outcome,
+            cost_usd: Number(costUsd.toFixed(4)),
+            duration_s: Math.round(durationMs / 1000),
+        });
+        fs.appendFileSync(AUDIT_FILE, entry + '\n');
+    } catch { /* best effort */ }
+}
+
+// ── Partial work save ───────────────────────────────────────
+
+function savePartialCycleWork(cycleNumber: number, cycleType: string, partialContent: string[], costUsd: number, reason: string): void {
+    if (partialContent.length === 0) return;
+    const combined = partialContent.join('\n\n').trim();
+    if (combined.length < 10) return;
+
+    try {
+        if (cycleType === 'dream') {
+            const explorationsPath = path.join(MEMORY_DIR, 'explorations.md');
+            const timestamp = new Date().toISOString().split('T')[0] + ' ' +
+                new Date().toTimeString().split(' ')[0];
+            const entry = `\n\n### Dream ${cycleNumber} — partial (${reason}) (${timestamp})\n${combined.slice(0, 5000)}\n`;
+            fs.appendFileSync(explorationsPath, entry);
+            log(`[Worker] Saved partial dream #${cycleNumber} (${combined.length} chars, $${costUsd.toFixed(2)})`);
+        }
+
+        // Write to swap files for all cycle types
+        const cycleHeader = `\n\n### Cycle #${cycleNumber} — ${cycleType} — partial (${reason}) (${new Date().toISOString()})`;
+        const summary = combined.slice(0, 500);
+        fs.appendFileSync(SUPERVISOR_SWAP_FILE, `${cycleHeader}\n${summary}`);
+        fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${cycleHeader}\n${combined}`);
+
+        // Flush swap to working memory
+        const swapContent = fs.readFileSync(SUPERVISOR_SWAP_FILE, 'utf8').trim();
+        const swapFullContent = fs.readFileSync(SUPERVISOR_SWAP_FULL_FILE, 'utf8').trim();
+        if (swapContent || swapFullContent) {
+            // Synchronous flush — no memory slot contention during abort/SIGTERM
+            if (swapContent) fs.appendFileSync(WORKING_MEMORY_FILE, '\n' + swapContent + '\n');
+            if (swapFullContent) fs.appendFileSync(WORKING_MEMORY_FULL_FILE, '\n' + swapFullContent + '\n');
+            fs.writeFileSync(SUPERVISOR_SWAP_FILE, '');
+            fs.writeFileSync(SUPERVISOR_SWAP_FULL_FILE, '');
+        }
+
+        // Log to session file
+        const output: SupervisorOutput = {
+            observations: [`${cycleType} cycle — partial (${reason})`],
+            reasoning: combined.slice(0, 200),
+            actions: [],
+            active_context_update: '',
+        };
+        logCycleToSession(cycleNumber, output, [], costUsd, cycleType as any);
+    } catch (err: any) {
+        log(`[Worker] Failed to save partial work: ${err.message}`);
+    }
+}
+
 function logCycleToSession(cycleNumber: number, output: SupervisorOutput, actionSummaries: string[], cost: number, cycleType: 'supervisor' | 'personal' | 'dream' = 'supervisor'): void {
     try {
         const now = new Date();
@@ -1237,6 +1313,7 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
     const config = loadConfig();
     const supervisorConfig = config.supervisor || {};
     const dailyBudget = supervisorConfig.daily_budget_usd ?? 5.0;
+    const cycleCostCap = supervisorConfig.cycle_cost_cap_usd ?? 2.0;
 
     // Check daily budget
     try {
@@ -1305,6 +1382,7 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
 
     const abort = new AbortController();
     runningCycleAbort = abort;
+    const cycleStartMs = Date.now();
 
     try {
         // Clean up phantom goals and ghost tasks
@@ -1367,19 +1445,78 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             }
         });
 
-        // Consume the stream
+        // Consume the stream — with per-cycle cost cap
         let result: any = null;
+        let accumulatedTokensIn = 0;
+        let accumulatedTokensOut = 0;
+        let costCapExceeded = false;
+
+        // Track at module level so SIGTERM handler can record cost and save partial work
+        currentCycleId = cycleId;
+        currentCycleTokensIn = 0;
+        currentCycleTokensOut = 0;
+        currentCycleType = cycleType;
+        currentCycleNumber = cycleNumber;
+        currentCyclePartialContent = [];
 
         for await (const message of q) {
             if (abort.signal.aborted) break;
             if (message.type === 'result') {
                 result = message;
             }
+            // Accumulate partial content and track cost to enforce per-cycle cap
+            if (message.type === 'assistant') {
+                // Extract text content from assistant message
+                const content = message.message?.content;
+                if (Array.isArray(content)) {
+                    for (const block of content) {
+                        if (block.type === 'text' && block.text) {
+                            currentCyclePartialContent.push(block.text);
+                        }
+                    }
+                }
+                const usage = message.message?.usage;
+                if (usage) {
+                    accumulatedTokensIn += (usage.input_tokens || 0);
+                    accumulatedTokensOut += (usage.output_tokens || 0);
+                    currentCycleTokensIn = accumulatedTokensIn;
+                    currentCycleTokensOut = accumulatedTokensOut;
+                    // Approximate cost using Opus pricing ($15/MTok in, $75/MTok out)
+                    const estimatedCost = (accumulatedTokensIn * 15 + accumulatedTokensOut * 75) / 1_000_000;
+                    if (estimatedCost >= cycleCostCap) {
+                        log(`[Worker] Cycle #${cycleNumber} hit cost cap ($${estimatedCost.toFixed(2)} >= $${cycleCostCap.toFixed(2)}) — aborting gracefully`);
+                        costCapExceeded = true;
+                        abort.abort();
+                    }
+                }
+            }
         }
 
         if (abort.signal.aborted) {
-            supervisorStmts.failCycle.run(new Date().toISOString(), 'Aborted', cycleId);
-            sendMessage({ type: 'cycle_skipped', reason: 'Aborted' });
+            // Record the cost even on abort so it's not lost
+            const estimatedCost = (accumulatedTokensIn * 15 + accumulatedTokensOut * 75) / 1_000_000;
+            const outcome = costCapExceeded ? 'cost_cap' : 'timeout';
+            const abortReason = costCapExceeded
+                ? `Cost cap exceeded ($${estimatedCost.toFixed(2)}/$${cycleCostCap.toFixed(2)})`
+                : 'Aborted';
+            supervisorStmts.completeCycle.run(
+                new Date().toISOString(),
+                estimatedCost,
+                accumulatedTokensIn,
+                accumulatedTokensOut,
+                0,
+                '[]',
+                JSON.stringify([`${cycleType} cycle — ${abortReason}`]),
+                abortReason,
+                cycleId
+            );
+
+            // Save whatever work was achieved before the cap was hit
+            savePartialCycleWork(cycleNumber, cycleType, currentCyclePartialContent, estimatedCost, abortReason);
+            logCycleAudit(cycleNumber, cycleType, outcome, estimatedCost, Date.now() - cycleStartMs);
+
+            log(`[Worker] Cycle #${cycleNumber} ${outcome} — saved partial work, recorded $${estimatedCost.toFixed(4)} (${accumulatedTokensIn}in/${accumulatedTokensOut}out)`);
+            sendMessage({ type: 'cycle_skipped', reason: abortReason });
             return;
         }
 
@@ -1527,6 +1664,7 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
 
         const completeLabel = `[Worker] ${typeLabels[cycleType] || 'Supervisor'} cycle #${cycleNumber} complete`;
         log(`${completeLabel} — ${output.observations?.length || 0} observations, ${actionSummaries.length} actions, $${totalCost.toFixed(4)}`);
+        logCycleAudit(cycleNumber, cycleType, 'completed', totalCost, Date.now() - cycleStartMs);
 
         // Broadcast cycle completion
         broadcast({
@@ -1561,6 +1699,9 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
     } catch (err: any) {
         logError(`[Worker] Cycle #${cycleNumber} failed:`, err.message);
         supervisorStmts.failCycle.run(new Date().toISOString(), err.message, cycleId);
+        const estimatedCost = (currentCycleTokensIn * 15 + currentCycleTokensOut * 75) / 1_000_000;
+        savePartialCycleWork(cycleNumber, cycleType, currentCyclePartialContent, estimatedCost, `error: ${err.message.slice(0, 100)}`);
+        logCycleAudit(cycleNumber, cycleType, 'error', estimatedCost, Date.now() - cycleStartMs);
 
         const nextDelay = getNextCycleDelay();
         lastCycleDelay = nextDelay;
@@ -1573,8 +1714,23 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             }
         };
         sendMessage(failedMsg);
+
+        // Signal rate limit for Jemma credential swap (if rate-limited)
+        const errMsg = (err.message || '').toLowerCase();
+        if (errMsg.includes('rate') || errMsg.includes('429') || errMsg.includes('overloaded') || errMsg.includes('capacity')) {
+            try {
+                fs.writeFileSync(path.join(SIGNALS_DIR, 'rate-limited'), new Date().toISOString());
+                log('[Worker] Rate limit detected — wrote rate-limited signal');
+            } catch { /* best effort */ }
+        }
     } finally {
         runningCycleAbort = null;
+        currentCycleId = null;
+        currentCycleTokensIn = 0;
+        currentCycleTokensOut = 0;
+        currentCycleType = 'supervisor';
+        currentCycleNumber = 0;
+        currentCyclePartialContent = [];
     }
 }
 
@@ -1603,6 +1759,35 @@ process.on('message', async (msg: MainToWorkerMessage) => {
     } catch (err: any) {
         logError('[Worker] Message handler error:', err.message);
     }
+});
+
+// ── SIGTERM handler — record cost before dying ──────────────
+
+process.on('SIGTERM', () => {
+    if (currentCycleId && workerDb) {
+        const estimatedCost = (currentCycleTokensIn * 15 + currentCycleTokensOut * 75) / 1_000_000;
+        try {
+            if (currentCycleTokensIn > 0 || currentCycleTokensOut > 0) {
+                supervisorStmts.completeCycle.run(
+                    new Date().toISOString(),
+                    estimatedCost,
+                    currentCycleTokensIn,
+                    currentCycleTokensOut,
+                    0,
+                    '[]',
+                    JSON.stringify([`${currentCycleType} cycle — killed by SIGTERM`]),
+                    `SIGTERM — estimated $${estimatedCost.toFixed(4)}`,
+                    currentCycleId
+                );
+            }
+            // Save whatever work was achieved before the kill
+            savePartialCycleWork(currentCycleNumber, currentCycleType, currentCyclePartialContent, estimatedCost, 'SIGTERM');
+            logCycleAudit(currentCycleNumber, currentCycleType, 'sigterm', estimatedCost, 0);
+            log(`[Worker] SIGTERM — saved partial work, recorded $${estimatedCost.toFixed(4)} for cycle #${currentCycleNumber}`);
+        } catch { /* best effort */ }
+    }
+    cleanupDatabase();
+    process.exit(0);
 });
 
 // ── Worker initialization ────────────────────────────────────

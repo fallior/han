@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
 import { withMemorySlot } from './lib/memory-slot';
 import { readDreamGradient } from './lib/dream-gradient';
+import { ensureSingleInstance } from './lib/pid-guard';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -492,6 +493,9 @@ async function processSignal(signal: SignalData): Promise<void> {
 // ── Main loop ─────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+    const pidGuard = ensureSingleInstance('leo-human');
+    process.on('exit', () => pidGuard.cleanup());
+
     console.log(`[Leo/Human] Starting (PID ${process.pid})`);
     ensureDirectories();
     writeHealth();

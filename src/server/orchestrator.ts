@@ -1,9 +1,10 @@
 /**
  * Hortus Arbor Nostra - Orchestrator Intelligence Layer
- * Routes task decomposition and classification to Ollama (local) or Claude Haiku (API)
+ * Routes task decomposition and classification to Ollama (local) or Claude Haiku (SDK)
  */
 
 import type Database from 'better-sqlite3';
+import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -158,51 +159,53 @@ export async function callLLM<T = Record<string, unknown>>(
         }
     }
 
-    // Fallback: Claude Haiku via Anthropic Messages API
-    if (!process.env.ANTHROPIC_API_KEY) {
-        throw new Error('No ANTHROPIC_API_KEY available and Ollama is not working');
-    }
-
+    // Fallback: Claude Haiku via Agent SDK
     try {
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': process.env.ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
+        const cleanEnv: Record<string, string | undefined> = { ...process.env };
+        delete cleanEnv.CLAUDECODE;
+
+        const fullPrompt = systemPrompt
+            ? `System: ${systemPrompt}\n\nUser: ${userPrompt}`
+            : userPrompt;
+
+        const q = agentQuery({
+            prompt: fullPrompt,
+            options: {
                 model: 'claude-haiku-4-5-20251001',
-                max_tokens: 2048,
-                system: systemPrompt,
-                messages: [{ role: 'user', content: userPrompt }]
-            }),
-            signal: AbortSignal.timeout(timeout)
+                maxTurns: 1,
+                cwd: process.cwd(),
+                permissionMode: 'bypassPermissions',
+                allowDangerouslySkipPermissions: true,
+                env: cleanEnv,
+                persistSession: false,
+                tools: [],
+            },
         });
 
-        if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(`Anthropic API error: ${res.status} ${errText}`);
+        let resultText = '';
+        for await (const event of q) {
+            if (event.type === 'assistant' && event.message?.content) {
+                for (const block of event.message.content) {
+                    if (block.type === 'text') resultText += block.text;
+                }
+            }
         }
 
-        const data = await res.json();
-        const textContent: string = data.content[0].text;
-
         // Extract JSON from markdown code blocks if needed
-        let jsonText = textContent;
-        const jsonMatch = textContent.match(/```json\s*([\s\S]*?)\s*```/);
+        let jsonText = resultText;
+        const jsonMatch = resultText.match(/```json\s*([\s\S]*?)\s*```/);
         if (jsonMatch) {
             jsonText = jsonMatch[1];
         }
 
         return {
-            response: JSON.parse(jsonText) as T,
-            backend: 'anthropic',
+            response: JSON.parse(jsonText.trim()) as T,
+            backend: 'sdk',
             model: 'claude-haiku-4-5-20251001'
         };
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        throw new Error(`Failed to call Claude API: ${message}`);
+        throw new Error(`Failed to call Haiku SDK: ${message}`);
     }
 }
 
@@ -364,8 +367,8 @@ export function getStatus(): OrchestratorStatus {
         ollamaAvailable,
         ollamaUrl: OLLAMA_URL,
         ollamaModel: OLLAMA_MODEL,
-        backend: ollamaAvailable ? 'ollama' : 'anthropic',
-        hasApiKey: !!process.env.ANTHROPIC_API_KEY
+        backend: ollamaAvailable ? 'ollama' : 'sdk',
+        hasApiKey: false
     };
 }
 

@@ -12,6 +12,9 @@
  *
  * Posts as 'supervisor' role for consistency with existing Jim posts.
  * Signal: jim-human-wake (separate from jim-wake to avoid supervisor conflicts).
+ *
+ * COST: Unlimited. Jim/Human has no per-cycle cost cap — same as Leo's CLI session.
+ * Conversation responses should never be truncated by budget. (Darron, 2026-03-14)
  */
 
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
@@ -20,6 +23,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
 import { withMemorySlot } from './lib/memory-slot';
+import { ensureSingleInstance } from './lib/pid-guard';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -453,6 +457,9 @@ async function processSignal(signal: SignalData): Promise<void> {
 // ── Main loop ─────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+    const pidGuard = ensureSingleInstance('jim-human');
+    process.on('exit', () => pidGuard.cleanup());
+
     console.log(`[Jim/Human] Starting (PID ${process.pid})`);
     ensureDirectories();
     writeHealth();

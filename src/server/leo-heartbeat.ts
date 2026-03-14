@@ -48,6 +48,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
+import { ensureSingleInstance } from './lib/pid-guard';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
 // ── Config ────────────────────────────────────────────────────
@@ -57,6 +58,7 @@ const BASE_DELAY_SLEEP_MS = 40 * 60 * 1000;   // 40 minutes — sleep + rest day
 const HOLIDAY_DELAY_MS = 80 * 60 * 1000;      // 80 minutes — holiday mode (rest day doubled)
 const MAX_TURNS_PERSONAL = 1000;
 const MAX_TURNS_PHILOSOPHY = 1000;
+const BEAT_COST_CAP_USD = 2.0;
 // Model preference: most capable first. The SDK aliases ('opus', 'sonnet', etc.)
 // track the latest version in each tier, so 'opus' will automatically adopt
 // new Opus releases (e.g. Opus 4.6 → 5.0) as they become available.
@@ -1404,11 +1406,21 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
         });
 
         let resultMessage: any = null;
+        let beatTokensIn = 0, beatTokensOut = 0;
         try {
             for await (const message of q) {
                 if (abort.signal.aborted) break;
                 if (message.type === 'result') {
                     resultMessage = message;
+                }
+                if (message.type === 'assistant' && message.message?.usage) {
+                    beatTokensIn += (message.message.usage.input_tokens || 0);
+                    beatTokensOut += (message.message.usage.output_tokens || 0);
+                    const estCost = (beatTokensIn * 15 + beatTokensOut * 75) / 1_000_000;
+                    if (estCost >= BEAT_COST_CAP_USD) {
+                        console.log(`[Leo] Philosophy beat hit cost cap ($${estCost.toFixed(2)} >= $${BEAT_COST_CAP_USD}) — aborting`);
+                        abort.abort();
+                    }
                 }
             }
         } catch (err) {
@@ -1484,11 +1496,21 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
         });
 
         let resultMessage: any = null;
+        let beatTokensIn = 0, beatTokensOut = 0;
         try {
             for await (const message of q) {
                 if (abort.signal.aborted) break;
                 if (message.type === 'result') {
                     resultMessage = message;
+                }
+                if (message.type === 'assistant' && message.message?.usage) {
+                    beatTokensIn += (message.message.usage.input_tokens || 0);
+                    beatTokensOut += (message.message.usage.output_tokens || 0);
+                    const estCost = (beatTokensIn * 15 + beatTokensOut * 75) / 1_000_000;
+                    if (estCost >= BEAT_COST_CAP_USD) {
+                        console.log(`[Leo] Philosophy beat hit cost cap ($${estCost.toFixed(2)} >= $${BEAT_COST_CAP_USD}) — aborting`);
+                        abort.abort();
+                    }
                 }
             }
         } catch (err) {
@@ -1593,11 +1615,21 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
     });
 
     let resultMessage: any = null;
+    let beatTokensIn = 0, beatTokensOut = 0;
     try {
         for await (const message of q) {
             if (abort.signal.aborted) break;
             if (message.type === 'result') {
                 resultMessage = message;
+            }
+            if (message.type === 'assistant' && message.message?.usage) {
+                beatTokensIn += (message.message.usage.input_tokens || 0);
+                beatTokensOut += (message.message.usage.output_tokens || 0);
+                const estCost = (beatTokensIn * 15 + beatTokensOut * 75) / 1_000_000;
+                if (estCost >= BEAT_COST_CAP_USD) {
+                    console.log(`[Leo] Personal beat hit cost cap ($${estCost.toFixed(2)} >= $${BEAT_COST_CAP_USD}) — aborting`);
+                    abort.abort();
+                }
             }
         }
     } catch (err) {
@@ -1749,6 +1781,15 @@ async function heartbeat(): Promise<void> {
         } else {
             console.error('[Leo] Error:', (err as Error).message);
             writeHealthSignal((err as Error).message, beatType);
+
+            // Signal rate limit for Jemma credential swap (if rate-limited)
+            const errMsg = (err as Error).message?.toLowerCase() || '';
+            if (errMsg.includes('rate') || errMsg.includes('429') || errMsg.includes('overloaded') || errMsg.includes('capacity')) {
+                try {
+                    fs.writeFileSync(path.join(SIGNALS_DIR, 'rate-limited'), new Date().toISOString());
+                    console.log('[Leo] Rate limit detected — wrote rate-limited signal');
+                } catch { /* best effort */ }
+            }
         }
         return;
     } finally {
@@ -1886,6 +1927,9 @@ function scheduleNext(): void {
 // ── Main ─────────────────────────────────────────────────────
 
 async function main() {
+    const pidGuard = ensureSingleInstance('leo-heartbeat');
+    process.on('exit', () => pidGuard.cleanup());
+
     ensureDirectories();
 
     const config = loadConfig();

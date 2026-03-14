@@ -7,6 +7,93 @@
 
 ---
 
+## 2026-03-14 (Darron — token usage audit)
+
+### Per-Cycle Cost Cap & Audit Trail
+
+Overnight token leak consumed ~21% of weekly MAX allowance. Root cause: dream cycles
+running 2+ hours via Agent SDK with no cost limit and no cost recording on timeout/kill.
+8 of 11 supervisor cycles in an 18.5-hour window showed $0 cost in the database because
+they were SIGTERM'd before `completeCycle` ran.
+
+#### Changes
+
+- **`supervisor-worker.ts`** — Per-cycle cost cap (`cycle_cost_cap_usd`, default $2).
+  Tracks accumulated tokens mid-stream from each `assistant` message and aborts gracefully
+  when estimated cost hits the cap. Partial work (reasoning text, dream content) is saved
+  to explorations.md, swap files, working memory, and session logs before exit.
+- **`supervisor-worker.ts`** — SIGTERM handler now records accumulated cost and saves
+  partial work before dying. Previously all cost data and cycle output was lost on kill.
+- **`supervisor-worker.ts`** — Cycle audit log (`~/.han/logs/cycle-audit.jsonl`). JSONL
+  with timestamp, cycle number, type, outcome (`completed`/`cost_cap`/`sigterm`/`error`),
+  cost, and duration. Every cycle exit path is logged.
+- **`leo-heartbeat.ts`** — Same $2 cost cap applied to philosophy and personal beat
+  agent queries (3 stream loops). `BEAT_COST_CAP_USD = 2.0`.
+- **`jim-human.ts`** — Documented as explicitly unlimited (no cost cap). Conversation
+  responses are never truncated by budget, same policy as Leo CLI.
+
+#### Cost cap policy
+
+| Process | Cap | Reason |
+|---------|-----|--------|
+| Leo CLI, Jim/Human, Leo/Human | None | Interactive / conversation-facing |
+| Supervisor cycles, Leo heartbeat | $2 | Autonomous background — needs guardrails |
+
+---
+
+## S94 — 2026-03-13 (Leo + Darron)
+
+### Jemma Haiku Removal & API Purge
+
+Jemma's `classifyWithHaiku()` was calling the Anthropic API directly (fetch to
+api.anthropic.com with x-api-key header) — violating the SDK-only rule. Caused 9x 401
+errors on Mar 12 when credentials rotated. Removed entirely; classification is now
+Gemma-only via local Ollama.
+
+Also purged the last direct API fallback in `orchestrator.ts` `callLLM()`. All LLM calls
+in the codebase now use Agent SDK exclusively.
+
+#### Changes
+
+- **`jemma.ts`** — Removed `classifyWithHaiku()` function and its imports. Classification
+  pipeline: Gemma (Ollama) only. No API key needed.
+- **`orchestrator.ts`** — Replaced direct Anthropic API fallback in `callLLM()` with Agent
+  SDK `query()` using Haiku model. Backend now reports `'sdk'` not `'anthropic'`.
+- **`src/server/lib/pid-guard.ts`** — New utility: PID file guard for server process management.
+
+---
+
+## S93 — 2026-03-12 (Leo + Darron)
+
+### Credential Swap — Dual SDK Failover
+
+Implemented transparent credential failover so Leo and Jim survive rate limit exhaustion.
+When either agent's SDK call hits a rate limit (429/overloaded/capacity), they write a
+`rate-limited` signal. Jemma checks every 30s and round-robins to the next credential file.
+Agents never know which account they're running on.
+
+#### Changes
+
+- **`leo-heartbeat.ts`** — Added rate-limit signal writing in main beat error handler.
+  Detects rate/429/overloaded/capacity in error messages, writes `~/.han/signals/rate-limited`.
+- **`supervisor-worker.ts`** — Same pattern in main cycle error handler.
+- **`jemma.ts`** — New `checkAndSwapCredentials()` function (30s interval). Scans
+  `~/.claude/` for `.credentials-[a-z].json` files, round-robins on signal. Safety:
+  no-op when < 2 credential files exist. Logs swaps to `credential-swaps.jsonl`.
+- **`SYSTEM_SPEC.md`** — Added `rate-limited` signal to signal table. Added credential
+  swap and swap log properties to Jemma agent table.
+- **Credential backup** — Copied live `.credentials.json` → `.credentials-a.json`.
+- **Plan** — Full design at `~/.han/plans/jemma-credential-swap-s93.md`.
+
+#### Setup (when Account B is ready)
+
+1. `claude login` with new email (overwrites `.credentials.json`)
+2. `cp ~/.claude/.credentials.json ~/.claude/.credentials-b.json`
+3. `cp ~/.claude/.credentials-a.json ~/.claude/.credentials.json` (restore A)
+4. Jemma handles failover from that point — transparent to all agents.
+
+---
+
 ## S91 — 2026-03-10 (Leo + Darron)
 
 ### Jim's Dream Gradient + GitHub Migration

@@ -1,6 +1,6 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-03-10 (S91) by Leo
+> Last updated: 2026-03-14 (S95) by Leo
 
 ## Current Stage
 
@@ -31,6 +31,27 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-03-14 — Darron — Per-Cycle Cost Cap & Audit Trail
+- **$2 per-cycle cost cap on autonomous agents** after overnight token leak consumed ~21% of weekly allowance. Dream cycles running 2+ hours untracked. (DEC-048)
+- SIGTERM handler saves partial work and records cost before dying
+- Cycle audit log at `~/.han/logs/cycle-audit.jsonl` — every exit path logged
+- Jim/Human and Leo CLI remain unlimited
+- **Files modified**: `supervisor-worker.ts`, `leo-heartbeat.ts`, `jim-human.ts`
+
+### 2026-03-13 — Leo + Darron — Jemma Haiku Removal & API Purge (S94)
+- **Removed classifyWithHaiku()** — was using direct Anthropic API (violating SDK-only rule), causing 401 errors. Classification now Gemma-only via local Ollama.
+- **Purged all direct Anthropic API references** from `orchestrator.ts` callLLM fallback. All LLM calls now use Agent SDK.
+- **Files modified**: `jemma.ts`, `orchestrator.ts`
+
+### 2026-03-12 — Leo + Darron — Credential Swap (Dual SDK Failover)
+- **Implemented transparent credential failover for rate limit resilience** — When Leo or Jim hit SDK rate limits, they write a `rate-limited` signal. Jemma checks every 30s and swaps to the next credential file in round-robin order. Agents never know which account they're on.
+  - **Signal side**: `leo-heartbeat.ts` and `supervisor-worker.ts` — detect rate/429/overloaded/capacity in error messages, write `~/.han/signals/rate-limited`
+  - **Swap side**: `jemma.ts` — `checkAndSwapCredentials()` scans `~/.claude/.credentials-[a-z].json`, round-robins on signal, logs to `credential-swaps.jsonl`
+  - **Safety**: No-op when < 2 credential files exist. Single-account setups unaffected.
+  - **Credential backup**: Live credentials copied to `.credentials-a.json`
+- **Files modified**: `leo-heartbeat.ts`, `supervisor-worker.ts`, `jemma.ts`, `SYSTEM_SPEC.md`, `CHANGELOG.md`, `DECISIONS.md` (DEC-047)
+- **Plan**: `~/.han/plans/jemma-credential-swap-s93.md`
 
 ### 2026-03-06 — Claude (autonomous) — Fractal Memory Gradient System (Complete Implementation)
 - **Implemented complete fractal memory gradient system for Jim and Leo** — Built compression utility, integrated gradient loading into supervisor, bootstrapped Jim's first 6 sessions, created full directory structure.

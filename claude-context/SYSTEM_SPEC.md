@@ -3,7 +3,7 @@
 > The living blueprint. When something looks wrong, check here first.
 > If it's documented, it's intentional. If it's not, flag it for discussion.
 >
-> Last updated: S91 (2026-03-10) by Leo
+> Last updated: S93 (2026-03-12) by Leo
 
 ## How To Use This Document
 
@@ -95,6 +95,8 @@ Workshop > Supervisor Jim > Requests. Do not revert without discussion.
 | Admin WS reconnect | 5s fixed | |
 | Gemma warmup timeout | 30s | |
 | Health file | Updates on startup, READY, MESSAGE_CREATE, and reconciliation completion | |
+| Credential swap | 30s interval watcher. Reads `rate-limited` signal, round-robins `.credentials-[a-z].json`. Safe without backup (< 2 files = no-op). | S93: new |
+| Swap log | `~/.han/health/credential-swaps.jsonl` — timestamp, from, to, accountCount | S93: new |
 
 ---
 
@@ -232,6 +234,7 @@ All signals live in `~/.han/signals/`.
 | `jim-human-wake` | conversations.ts | supervisor-worker.ts | Wake Jim/Human for mentioned conversation |
 | `jim-emergency` | manual | supervisor-worker.ts | Force emergency mode |
 | `leo-human-wake` | conversations.ts, jemma.ts | leo-heartbeat.ts | Wake Leo for a conversation |
+| `rate-limited` | leo-heartbeat.ts, supervisor-worker.ts | jemma.ts | SDK rate limit detected — triggers credential swap |
 
 **Cross-tab mentions:** When Jim is mentioned in a Leo tab (or vice versa), both agents are signalled.
 The mention detection uses regex patterns consistent with Jemma's classification.
