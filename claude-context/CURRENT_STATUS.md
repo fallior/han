@@ -1,6 +1,6 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-03-14 (S95) by Leo
+> Last updated: 2026-03-16 by Darron + Claude
 
 ## Current Stage
 
@@ -31,6 +31,18 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-03-15/16 — Darron + Claude — Ecosystem Audit & Architecture
+- **SDK stream exit code 1 fix** — personal/dream cycles now complete successfully (were silently failing)
+- **Conversation-first ordering** — Jim checks for unanswered human messages before deciding cycle type
+- **Self-reflection accumulation stopped** — only supervisor cycles write to `self-reflection.md`
+- **Holiday-jim cycle type fixed** — forces dream cycles on holiday (was only affecting interval)
+- **Leo phase imports + SIGTERM handler** — shared lib, cost recording on kill
+- **Project knowledge fractal gradient** — gradient loading by recency instead of flat 137KB load (DEC-049)
+- **Gary Protocol for Jim** — interruption/resume with delineation markers (DEC-050)
+- **Rumination guard** — 2-cycle limit on same-topic personal exploration (DEC-051)
+- **HAN-ECOSYSTEM-COMPLETE.md** — 30-section technical reference, single source of truth
+- **Files modified**: `supervisor-worker.ts`, `leo-heartbeat.ts`, `docs/HAN-ECOSYSTEM-COMPLETE.md`
 
 ### 2026-03-14 — Darron — Per-Cycle Cost Cap & Audit Trail
 - **$2 per-cycle cost cap on autonomous agents** after overnight token leak consumed ~21% of weekly allowance. Dream cycles running 2+ hours untracked. (DEC-048)

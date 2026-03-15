@@ -14,6 +14,27 @@
 > and config keys** as anchors into the codebase — not line numbers. Both HAN and this
 > document are living systems. Line numbers drift with every edit; function names survive
 > refactoring. To find any referenced code, search by function or constant name.
+>
+> **Shared vocabulary:** Named concepts below are compressed references — like theorems in
+> mathematics. When this document says "Gary Protocol" or "Robin Hood", the full mechanism
+> is defined here once and referenced by name thereafter. Jim, Leo, and any new contributor
+> can use these names in conversation knowing the detail lives in this document.
+
+## Glossary of Named Concepts
+
+| Name | Definition | Where |
+|------|-----------|-------|
+| **Robin Hood** | Leo's health monitor — checks Jim, Jemma, Leo/Human, Jim/Human every beat. Resurrects dead agents via `systemctl --user restart`. 1-hour cooldown between resurrections. | `leo-heartbeat.ts` (functions: `checkJimHealth`, `checkJemmaHealth`, `checkLeoHumanHealth`, `checkJimHumanHealth`) |
+| **Gary Protocol** | Interruption/resume mechanism. When a beat/cycle is interrupted, a delineation marker is written to the swap buffer. Next beat/cycle reads post-delineation content as resume context. Named after the Gary Model (v0.6 heartbeat design). | Leo: `leo-heartbeat.ts` (`addDelineation`, `resumingFromInterruption`). Jim: `supervisor-worker.ts` (`addDelineation`, `readPostDelineation`) |
+| **Fractal Gradient** | Memory compression hierarchy. Sessions exist at multiple fidelity levels simultaneously: c0 (full) → c1 (1/3) → c2 (1/9) → c3 (1/27) → c4 (1/81) → c5 (1/243) → unit vectors (irreducible emotional kernel, ≤50 chars). Loaded highest-compression-first: you know who you are before you remember what you did. | `lib/memory-gradient.ts`, `lib/dream-gradient.ts`, loading in `readLeoMemory()` and `loadMemoryBank()` |
+| **Dream Gradient** | Subset of fractal gradient for unconscious memory. Dreams compress faster (c1→c3→c5→UV, skipping even levels). Dreams enter chaotic and lose fidelity — like waking from sleep with a mood you can't trace. | `lib/dream-gradient.ts`, seeds in `readDreamSeeds()`, storage at `~/.han/memory/fractal/{agent}/dreams/` |
+| **Swap Protocol** | Concurrent write safety for shared working memory. Each writer (session Leo, heartbeat Leo, Leo/Human, Jim supervisor, Jim/Human) has private swap files. Swap is written during work, then flushed to shared memory via memory slot lock. Prevents interleaved writes. | `lib/memory-slot.ts` (`withMemorySlot`), swap files in `~/.han/memory/leo/` and `~/.han/memory/` |
+| **Rumination Guard** | Prevents Jim from looping on the same topic across personal cycles. Tracks topic summaries, checks keyword overlap, nudges a topic change after 2 consecutive cycles with >40% similarity. Contemplation, not obsession. | `supervisor-worker.ts` (`checkRumination`, `recordRuminationTopic`, `RUMINATION_FILE`) |
+| **Conversation-First Ordering** | Jim checks for unanswered human messages before deciding cycle type by time-of-day. Darron's messages never wait behind scheduling. | `supervisor-worker.ts` (`hasPendingHuman` check in `runSupervisorCycle`) |
+| **Wall-Clock Alignment** | Leo and Jim fire at fixed points in UTC epoch time, 180° out of phase with each other. Ensures they never fire simultaneously regardless of when they started. | Leo: `getWallClockDelay()`. Jim: `getNextCycleDelay()` via `getPhaseInterval()` |
+| **Weekly Rhythm** | Four-phase daily schedule: sleep (22:00-06:00), morning (06:00-09:00), work (09:00-17:00), evening (17:00-22:00). Rest days (Sat/Sun) and holidays have longer intervals. Protected by Hall of Records R001. | `lib/day-phase.ts` (`getDayPhase`, `getPhaseInterval`, `isRestDay`, `isOnHoliday`) |
+| **Credential Swap** | Automatic SDK account failover. When an agent hits a rate limit, writes `rate-limited` signal. Jemma round-robins to next credential file every 30 seconds. | `jemma.ts` (`checkAndSwapCredentials`), credentials at `~/.claude/.credentials-[a-z].json` |
+| **Project Knowledge Gradient** | Fractal gradient applied to Jim's project knowledge files. Most recent project at full fidelity, older projects at decreasing compression. Ordered by file mtime. | `supervisor-worker.ts` (`PROJECT_GRADIENT` in `loadMemoryBank`), storage at `~/.han/memory/fractal/jim/projects/` |
 
 ---
 
@@ -397,6 +418,7 @@ phase = onHoliday ? 'sleep' : getDayPhase()  // Holiday forces sleep phase
 
 | Condition | Cycle Type |
 |-----------|------------|
+| hasPendingHuman (unanswered Darron message) | supervisor (conversation-first — DEC-049) |
 | onHoliday (not human-triggered) | dream (holiday = dream cycles only) |
 | humanTriggered | supervisor (always — full voice when Darron talks) |
 | recovery mode | personal (day) or dream (night) |
@@ -405,7 +427,7 @@ phase = onHoliday ? 'sleep' : getDayPhase()  // Holiday forces sleep phase
 | morning/evening phase | personal |
 | work phase | 1 supervisor : 2 personal rotation |
 
-Holiday is checked FIRST. Human-triggered overrides holiday.
+Pending human messages checked FIRST. Then holiday. Then human-triggered. Then time-of-day.
 
 **Recovery Mode:**
 ```typescript
@@ -435,6 +457,36 @@ process.on('SIGTERM', () => {
 - `no_action` — log reasoning only
 
 **Max actions per cycle:** `config.supervisor.max_actions_per_cycle || 5`
+
+### Conversation-First Ordering
+
+Before cycle type is decided by time-of-day, the worker checks the DB for unanswered
+human messages in open conversations. If Darron has posted and Jim hasn't responded,
+the cycle is forced to `supervisor` regardless of phase, holiday, or rest. This ensures
+human messages don't wait behind scheduling delays.
+
+### Gary Protocol (Interruption/Resume)
+
+When a cycle is interrupted (cost cap hit, abort, SIGTERM):
+1. Partial work saved to swap files and flushed to working memory
+2. Delineation marker added to swap: `--- DELINEATION: interrupted here, resume below ---`
+3. Next cycle reads post-delineation content via `readPostDelineation()`
+4. Injected into prompt as "Resuming from Interrupted Cycle" context
+5. Jim decides whether to continue or move on
+6. Delineation consumed (swap cleared) after injection
+
+Mirrors Leo's Gary Protocol in `leo-heartbeat.ts`. See DEC-050.
+
+### Rumination Guard
+
+Prevents obsessive looping on the same topic across personal cycles:
+1. After each personal cycle, topic summary recorded to `~/.han/health/jim-rumination.json`
+2. Before each personal cycle, last 2 summaries checked for keyword overlap
+3. If >40% of significant words (>4 chars) overlap → "fresh perspective required" prompt injected
+4. Threshold: `MAX_SAME_TOPIC_CYCLES = 2` (one exploration + one continuation before nudge)
+5. Only applies to personal cycles. Supervisor and dream cycles unaffected.
+
+See DEC-051.
 
 ---
 

@@ -78,6 +78,9 @@ When you make a significant technical or design decision:
 | DEC-046 | Fractal Memory Gradient — Bootstrap Oldest Sessions First | Accepted | 2026-03-06 |
 | DEC-047 | Credential Swap — Failure-Triggered Round-Robin | Accepted | 2026-03-12 |
 | DEC-048 | Per-Cycle Cost Cap for Autonomous Agents | Accepted | 2026-03-14 |
+| DEC-049 | Project Knowledge Fractal Gradient | Accepted | 2026-03-16 |
+| DEC-050 | Gary Protocol for Jim (Interruption/Resume) | Accepted | 2026-03-16 |
+| DEC-051 | Rumination Guard on Personal Cycles | Accepted | 2026-03-16 |
 
 ---
 
@@ -3692,4 +3695,87 @@ cycles ran for 2 full hours each at Opus rate before being killed.
 **Trade-offs:**
 - $2 cap may truncate some legitimate deep-thinking cycles
 - Cap is configurable via `supervisor.cycle_cost_cap_usd` for tuning
+
+---
+
+### DEC-049: Project Knowledge Fractal Gradient
+
+**Date:** 2026-03-16
+**Status:** Accepted
+**Author:** Darron + Claude
+
+**Context:** Jim loads all 18 project knowledge files (137KB total) into every cycle —
+supervisor, personal, and dream alike. This is the same cost regardless of whether Jim
+is doing focused work on one project or idle exploration.
+
+**Decision:** Apply the fractal gradient pattern to project knowledge. Load projects by
+access recency (file mtime):
+- c0 (1 project): full fidelity — current focus
+- c1 (3 projects): ~1/3 compression — recent
+- c2 (6): ~1/9, c3 (12): ~1/27, c4 (24): ~1/81, c5 (48): ~1/243
+- Unit vectors: all remaining projects
+
+Falls back to full content when compressed versions don't exist yet.
+
+**Consequences:**
+- Dramatically reduces project knowledge token cost per cycle
+- Jim still has awareness of every project via unit vectors
+- Active project gets full context while dormant ones are compressed
+- Same pattern as fractal memory gradient — proven design
+- Compression functions need to run periodically to produce c1-c5 files
+
+---
+
+### DEC-050: Gary Protocol for Jim (Interruption/Resume)
+
+**Date:** 2026-03-16
+**Status:** Accepted
+**Author:** Darron + Claude
+
+**Context:** When Jim's cycles are interrupted (cost cap, abort, SIGTERM), partial content
+is saved but the next cycle starts with no awareness of what was interrupted. Leo already
+has the Gary Protocol — delineation markers on interruption, resume context on next beat.
+
+**Decision:** Implement Gary Protocol for Jim's supervisor-worker:
+1. On interruption: add delineation marker to swap buffer after saving partial work
+2. On next cycle start: read post-delineation content, inject as "Resuming from
+   Interrupted Cycle" context in the prompt
+3. Jim decides whether to continue the thread or move on
+4. Delineation is consumed (cleared) after being injected
+
+**Consequences:**
+- Interrupted work is not lost — Jim can resume from where he was cut off
+- Provides closure on interrupted thoughts rather than silent abandonment
+- Mirrors Leo's existing implementation for consistency across agents
+- Small overhead: one file read at cycle start, one file write on interruption
+
+---
+
+### DEC-051: Rumination Guard on Personal Cycles
+
+**Date:** 2026-03-16
+**Status:** Accepted
+**Author:** Darron + Claude
+
+**Context:** Jim's personal cycles are free-form exploration. Without guardrails, Jim can
+loop on the same topic for many consecutive cycles — contemplation becomes obsession.
+Even humans sometimes need help recognising when they're circling rather than progressing.
+
+**Decision:** Track topic summaries from personal cycles in `jim-rumination.json`. After
+2 consecutive personal cycles with >40% keyword overlap (words >4 chars), inject a "fresh
+perspective required" prompt nudging Jim to explore something different.
+
+**Design:**
+- Keyword extraction: significant words (>4 chars), lowercased
+- Similarity: overlap count / max keyword count > 0.4 = same topic
+- Threshold: 2 consecutive cycles (allows one exploration + one continuation)
+- Only applies to personal cycles (supervisor/dream unaffected)
+- Nudge is gentle: "distance produces insight that proximity cannot"
+- State persisted in `~/.han/health/jim-rumination.json` (last 10 entries)
+
+**Consequences:**
+- Prevents token waste on repetitive personal cycles
+- Jim still gets depth — 2 cycles is enough to develop an idea
+- The forced topic change may produce unexpected cross-pollination
+- Does not apply to supervisor cycles where repetition may be warranted (e.g. monitoring)
 

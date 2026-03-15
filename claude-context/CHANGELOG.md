@@ -7,6 +7,71 @@
 
 ---
 
+## 2026-03-15/16 (Darron + Leo — ecosystem audit, bug fixes, architecture)
+
+### SDK Stream Exit Code 1 Fix
+Personal and dream cycles were failing with "Claude Code process exited with code 1"
+despite the SDK returning `subtype=success`. Root cause: the Agent SDK's async iterator
+throws after yielding the result message when no `outputFormat` (JSON schema) is set.
+The underlying Claude Code process exits with code 1 during cleanup. Fix: wrapped the
+stream iterator in a try/catch that ignores the exit error when a successful result has
+already been received. Supervisor cycles (which use `outputFormat`) were unaffected.
+
+### Conversation-First Ordering (Jim's Deferred #2)
+Jim's cycle type was decided purely by time-of-day. If Darron posted a message during
+a rest day, Jim would run a personal cycle and only see the message 40-80 minutes later.
+Fix: before cycle type selection, check the DB for unanswered human messages. If found,
+force a supervisor cycle regardless of phase. Personal/dream cycles can't respond to
+conversations — only supervisor cycles have the `respond_conversation` action.
+
+### Self-Reflection Accumulation Fix (Jim's Deferred #3)
+`self-reflection.md` was 163KB+ and growing. Every cycle type (personal, dream, supervisor)
+appended the full result text to it. Personal/dream cycles dump their entire output as
+`self_reflection`. Fix: only supervisor cycles write to `self-reflection.md`, where Jim
+explicitly produces a structured reflection. Session logs capture full personal/dream content.
+
+### Holiday-Jim Cycle Type Fix
+`isOnHoliday('jim')` was imported but never called in cycle type selection. Jim ran full
+supervisor/personal/dream cycles on holiday, just at 80-minute intervals. Fix: holiday
+check now forces `cycleType = 'dream'` (human-triggered still gets full supervisor).
+
+### Leo Phase Imports & SIGTERM Handler
+Leo had local copies of `isOnHoliday()` and `isRestDay()` that diverged from the shared
+`lib/day-phase.ts`. Replaced with imports from shared lib. Local `getDayPhase()` retained
+as thin wrapper that checks holiday/rest before delegating. Added SIGTERM handler that
+records cost to health file (previously Leo had none — Jim's handler saves to DB).
+
+### Recovery Mode Cleared
+`RECOVERY_MODE_UNTIL` set to `null` (was expired date `'2026-03-13'`).
+
+### Project Knowledge Fractal Gradient (DEC-049)
+Replaced flat loading of all 18 project files (137KB) into every cycle with gradient-based
+loading ordered by access recency (file mtime). Most recently touched project at full
+fidelity (c0), then c1(3), c2(6), c3(12), c4(24), c5(48) at decreasing compression.
+Falls back to full content when compressed versions don't exist yet. Unit vectors for
+all remaining projects.
+
+### Gary Protocol for Jim (DEC-050)
+Interruption/resume mechanism (matching Leo's existing implementation). When a cycle is
+interrupted (cost cap, abort, SIGTERM), a delineation marker is added to the swap buffer.
+Next cycle reads post-delineation content and injects it as resume context. Jim can choose
+to continue or move on — the thread isn't lost.
+
+### Rumination Guard (DEC-051)
+Prevents obsessive looping on the same topic across personal cycles. Tracks topic summaries
+in `jim-rumination.json`. After 2 consecutive personal cycles with >40% keyword overlap,
+injects a "fresh perspective required" prompt. The nudge is gentle — framed as "distance
+produces insight that proximity cannot." Only applies to personal cycles.
+
+### HAN-ECOSYSTEM-COMPLETE.md
+New 30-section technical reference at `docs/HAN-ECOSYSTEM-COMPLETE.md`. Verified against
+source code. Covers all processes, services, routes, database schema, signals, scheduling,
+cost controls, memory architecture, UI, CLI, and authentication. Anchored by function names
+and file paths (no line numbers — they drift). Intended as the single source of truth for
+onboarding and reference.
+
+---
+
 ## 2026-03-14 (Darron — token usage audit)
 
 ### Per-Cycle Cost Cap & Audit Trail
