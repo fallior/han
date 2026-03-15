@@ -95,7 +95,7 @@ const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
 // Jim reads his session logs, rebuilds his memory, and reflects.
 // He can still respond to conversations and do explicitly requested work.
 // Set to null to disable recovery mode.
-const RECOVERY_MODE_UNTIL: string | null = '2026-03-13';
+const RECOVERY_MODE_UNTIL: string | null = null;
 
 function isRecoveryMode(): boolean {
     if (!RECOVERY_MODE_UNTIL) return false;
@@ -1334,12 +1334,18 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
     const startedAt = new Date().toISOString();
 
     // Determine cycle type based on weekly rhythm (Hall of Records R001)
-    const phase = getDayPhase();
+    const onHoliday = isOnHoliday('jim');
+    const phase = onHoliday ? 'sleep' as DayPhase : getDayPhase();
     const emergency = isEmergencyMode();
     const recovery = isRecoveryMode();
     let cycleType: 'supervisor' | 'personal' | 'dream' = 'supervisor';
 
-    if (humanTriggered) {
+    if (onHoliday && !humanTriggered) {
+        // Holiday mode: dream cycles only (like sleep), 80min interval.
+        // Human-triggered cycles still get full voice — holiday doesn't silence Darron.
+        cycleType = 'dream';
+        log(`[Worker] Holiday mode — dream cycle only`);
+    } else if (humanTriggered) {
         // Darron posted a message — full supervisor cycle, fully awake, any phase.
         // Sleep, rest, recovery — doesn't matter. When Darron talks, Jim responds with full voice.
         cycleType = 'supervisor';
@@ -1459,36 +1465,48 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         currentCycleNumber = cycleNumber;
         currentCyclePartialContent = [];
 
-        for await (const message of q) {
-            if (abort.signal.aborted) break;
-            if (message.type === 'result') {
-                result = message;
-            }
-            // Accumulate partial content and track cost to enforce per-cycle cap
-            if (message.type === 'assistant') {
-                // Extract text content from assistant message
-                const content = message.message?.content;
-                if (Array.isArray(content)) {
-                    for (const block of content) {
-                        if (block.type === 'text' && block.text) {
-                            currentCyclePartialContent.push(block.text);
+        try {
+            for await (const message of q) {
+                if (abort.signal.aborted) break;
+                if (message.type === 'result') {
+                    result = message;
+                }
+                // Accumulate partial content and track cost to enforce per-cycle cap
+                if (message.type === 'assistant') {
+                    // Extract text content from assistant message
+                    const content = message.message?.content;
+                    if (Array.isArray(content)) {
+                        for (const block of content) {
+                            if (block.type === 'text' && block.text) {
+                                currentCyclePartialContent.push(block.text);
+                            }
+                        }
+                    }
+                    const usage = message.message?.usage;
+                    if (usage) {
+                        accumulatedTokensIn += (usage.input_tokens || 0);
+                        accumulatedTokensOut += (usage.output_tokens || 0);
+                        currentCycleTokensIn = accumulatedTokensIn;
+                        currentCycleTokensOut = accumulatedTokensOut;
+                        // Approximate cost using Opus pricing ($15/MTok in, $75/MTok out)
+                        const estimatedCost = (accumulatedTokensIn * 15 + accumulatedTokensOut * 75) / 1_000_000;
+                        if (estimatedCost >= cycleCostCap) {
+                            log(`[Worker] Cycle #${cycleNumber} hit cost cap ($${estimatedCost.toFixed(2)} >= $${cycleCostCap.toFixed(2)}) — aborting gracefully`);
+                            costCapExceeded = true;
+                            abort.abort();
                         }
                     }
                 }
-                const usage = message.message?.usage;
-                if (usage) {
-                    accumulatedTokensIn += (usage.input_tokens || 0);
-                    accumulatedTokensOut += (usage.output_tokens || 0);
-                    currentCycleTokensIn = accumulatedTokensIn;
-                    currentCycleTokensOut = accumulatedTokensOut;
-                    // Approximate cost using Opus pricing ($15/MTok in, $75/MTok out)
-                    const estimatedCost = (accumulatedTokensIn * 15 + accumulatedTokensOut * 75) / 1_000_000;
-                    if (estimatedCost >= cycleCostCap) {
-                        log(`[Worker] Cycle #${cycleNumber} hit cost cap ($${estimatedCost.toFixed(2)} >= $${cycleCostCap.toFixed(2)}) — aborting gracefully`);
-                        costCapExceeded = true;
-                        abort.abort();
-                    }
-                }
+            }
+        } catch (streamErr: any) {
+            // The SDK throws "Claude Code process exited with code 1" after yielding the
+            // result message when no outputFormat is set (personal/dream cycles). If we
+            // already have a successful result, this is process cleanup noise — not a real
+            // failure. Only re-throw if we don't have a result.
+            if (result && result.subtype === 'success') {
+                log(`[Worker] SDK stream error after successful result (ignored): ${streamErr.message}`);
+            } else {
+                throw streamErr;
             }
         }
 
@@ -1533,7 +1551,6 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         const numTurns = result.num_turns || 0;
         const totalTokensIn = result.usage?.input_tokens || 0;
         const totalTokensOut = result.usage?.output_tokens || 0;
-
         // Parse structured output
         let output: SupervisorOutput;
         if (cycleType === 'dream') {
@@ -1697,7 +1714,7 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         sendMessage(completeMsg);
 
     } catch (err: any) {
-        logError(`[Worker] Cycle #${cycleNumber} failed:`, err.message);
+        logError(`[Worker] Cycle #${cycleNumber} failed: ${err.message}`);
         supervisorStmts.failCycle.run(new Date().toISOString(), err.message, cycleId);
         const estimatedCost = (currentCycleTokensIn * 15 + currentCycleTokensOut * 75) / 1_000_000;
         savePartialCycleWork(cycleNumber, cycleType, currentCyclePartialContent, estimatedCost, `error: ${err.message.slice(0, 100)}`);

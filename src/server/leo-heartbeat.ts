@@ -49,6 +49,7 @@ import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
 import { ensureSingleInstance } from './lib/pid-guard';
+import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, getPhaseInterval, type DayPhase } from './lib/day-phase';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
 // ── Config ────────────────────────────────────────────────────
@@ -100,6 +101,11 @@ let lastHeartbeatStartMs: number | null = null;
 // Optimistic concurrency: resolve function for retry-wait promise
 // When set, the signal watcher can call it to wake the retry loop early
 let retryWakeResolve: (() => void) | null = null;
+
+// Module-level cost tracking for SIGTERM handler
+let currentBeatTokensIn = 0;
+let currentBeatTokensOut = 0;
+let currentBeatType: string = 'unknown';
 
 // ── Robin Hood Protocol — mutual health checks ──────────────
 
@@ -490,73 +496,22 @@ function loadConfig(): any {
     }
 }
 
-// ── Rhythm functions (adapted from supervisor-worker.ts) ─────
+// ── Rhythm functions — delegates to shared lib/day-phase.ts ──
 
-function isRestDay(): boolean {
-    const config = loadConfig();
-    const restDays: number[] = config.supervisor?.rest_days ?? [0, 6]; // 0=Sunday, 6=Saturday
-    const now = new Date();
-    return restDays.includes(now.getDay());
-}
-
-function isOnHoliday(): boolean {
-    return fs.existsSync(path.join(HAN_DIR, 'signals', 'holiday-leo'));
-}
-
-// ── Day phase detection (four-phase daily rhythm) ────────────
-
-type DayPhase = 'sleep' | 'morning' | 'work' | 'evening';
-
+// Leo-specific getDayPhase: holiday and rest days → sleep (personal beats only).
+// Uses the shared lib for time-of-day detection, adds holiday/rest awareness.
 function getDayPhase(): DayPhase {
-    // Holiday and rest days are sleep all day
-    if (isOnHoliday() || isRestDay()) return 'sleep';
-
-    const config = loadConfig();
-    const quietStart = config.supervisor?.quiet_hours_start || config.quiet_hours_start || '22:00';
-    const quietEnd = config.supervisor?.quiet_hours_end || config.quiet_hours_end || '06:00';
-    const workStart = config.supervisor?.work_hours_start || '09:00';
-    const workEnd = config.supervisor?.work_hours_end || '17:00';
-
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-    const toMinutes = (t: string) => {
-        const [h, m] = t.split(':').map(Number);
-        return h * 60 + (m || 0);
-    };
-
-    const quietStartM = toMinutes(quietStart);
-    const quietEndM = toMinutes(quietEnd);
-    const workStartM = toMinutes(workStart);
-    const workEndM = toMinutes(workEnd);
-
-    // Sleep: quiet hours (overnight window, e.g. 22:00–06:00)
-    if (quietStartM > quietEndM) {
-        // Overnight: sleep if >= start OR < end
-        if (currentMinutes >= quietStartM || currentMinutes < quietEndM) return 'sleep';
-    } else {
-        if (currentMinutes >= quietStartM && currentMinutes < quietEndM) return 'sleep';
-    }
-
-    // Morning: between quiet end and work start (e.g. 06:00–09:00)
-    if (currentMinutes >= quietEndM && currentMinutes < workStartM) return 'morning';
-
-    // Work: work hours (e.g. 09:00–17:00)
-    if (currentMinutes >= workStartM && currentMinutes < workEndM) return 'work';
-
-    // Evening: between work end and quiet start (e.g. 17:00–22:00)
-    return 'evening';
+    if (isOnHoliday('leo') || isRestDay()) return 'sleep';
+    return getSharedDayPhase();
 }
 
 function getCurrentPeriodMs(): number {
-    if (isOnHoliday()) return HOLIDAY_DELAY_MS;
-    const phase = getDayPhase();
-    return phase === 'sleep' ? BASE_DELAY_SLEEP_MS : BASE_DELAY_WAKING_MS;
+    return getPhaseInterval('leo');
 }
 
 function getNextDelay(): number {
     const periodMs = getCurrentPeriodMs();
-    if (isOnHoliday()) {
+    if (isOnHoliday('leo')) {
         console.log(`[Leo] Holiday — 80min interval`);
     } else if (periodMs === BASE_DELAY_SLEEP_MS) {
         const reason = isRestDay() ? 'Rest day' : 'Sleep';
@@ -653,7 +608,7 @@ function getWallClockDelay(): number {
     // If we're within 30s of a boundary, skip to next period
     if (delay < 30000) delay += periodMs;
     const phase = getDayPhase();
-    const phaseLabel = isOnHoliday() ? 'holiday' : phase === 'sleep' ? (isRestDay() ? 'rest' : 'sleep') : phase;
+    const phaseLabel = isOnHoliday('leo') ? 'holiday' : phase === 'sleep' ? (isRestDay() ? 'rest' : 'sleep') : phase;
     console.log(`[Leo] Wall-clock: ${phaseLabel} phase, period ${periodMs / 60000}min, next beat in ${Math.round(delay / 1000)}s (${Math.round(delay / 60000)}min)`);
     return delay;
 }
@@ -1407,6 +1362,7 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
 
         let resultMessage: any = null;
         let beatTokensIn = 0, beatTokensOut = 0;
+        currentBeatTokensIn = 0; currentBeatTokensOut = 0;
         try {
             for await (const message of q) {
                 if (abort.signal.aborted) break;
@@ -1416,6 +1372,8 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
                 if (message.type === 'assistant' && message.message?.usage) {
                     beatTokensIn += (message.message.usage.input_tokens || 0);
                     beatTokensOut += (message.message.usage.output_tokens || 0);
+                    currentBeatTokensIn = beatTokensIn;
+                    currentBeatTokensOut = beatTokensOut;
                     const estCost = (beatTokensIn * 15 + beatTokensOut * 75) / 1_000_000;
                     if (estCost >= BEAT_COST_CAP_USD) {
                         console.log(`[Leo] Philosophy beat hit cost cap ($${estCost.toFixed(2)} >= $${BEAT_COST_CAP_USD}) — aborting`);
@@ -1497,6 +1455,7 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
 
         let resultMessage: any = null;
         let beatTokensIn = 0, beatTokensOut = 0;
+        currentBeatTokensIn = 0; currentBeatTokensOut = 0;
         try {
             for await (const message of q) {
                 if (abort.signal.aborted) break;
@@ -1506,6 +1465,8 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
                 if (message.type === 'assistant' && message.message?.usage) {
                     beatTokensIn += (message.message.usage.input_tokens || 0);
                     beatTokensOut += (message.message.usage.output_tokens || 0);
+                    currentBeatTokensIn = beatTokensIn;
+                    currentBeatTokensOut = beatTokensOut;
                     const estCost = (beatTokensIn * 15 + beatTokensOut * 75) / 1_000_000;
                     if (estCost >= BEAT_COST_CAP_USD) {
                         console.log(`[Leo] Philosophy beat hit cost cap ($${estCost.toFixed(2)} >= $${BEAT_COST_CAP_USD}) — aborting`);
@@ -1713,6 +1674,7 @@ async function heartbeat(): Promise<void> {
     }
 
     const beatType = nextBeatType();
+    currentBeatType = beatType;
 
     // Distress signal detection: check if heartbeat interval is degraded
     if (lastHeartbeatStartMs !== null) {
@@ -1929,6 +1891,31 @@ function scheduleNext(): void {
 async function main() {
     const pidGuard = ensureSingleInstance('leo-heartbeat');
     process.on('exit', () => pidGuard.cleanup());
+
+    // SIGTERM handler — record cost and save partial work before dying
+    process.on('SIGTERM', () => {
+        console.log('[Leo] SIGTERM received — recording cost and exiting');
+        if (currentBeatTokensIn > 0 || currentBeatTokensOut > 0) {
+            const estimatedCost = (currentBeatTokensIn * 15 + currentBeatTokensOut * 75) / 1_000_000;
+            console.log(`[Leo] Beat interrupted: ${currentBeatType}, ~$${estimatedCost.toFixed(2)} (${currentBeatTokensIn} in / ${currentBeatTokensOut} out)`);
+            // Write health signal with error so Robin Hood sees the reason
+            try {
+                const signal = {
+                    agent: 'leo',
+                    pid: process.pid,
+                    timestamp: new Date().toISOString(),
+                    beat: beatCounter,
+                    beatType: currentBeatType,
+                    status: 'sigterm',
+                    lastError: `SIGTERM during ${currentBeatType} beat (~$${estimatedCost.toFixed(2)})`,
+                    uptimeMinutes: Math.round((Date.now() - startedAt) / 60000),
+                    nextDelayMs: 0,
+                };
+                fs.writeFileSync(path.join(HEALTH_DIR, 'leo-health.json'), JSON.stringify(signal, null, 2));
+            } catch { /* best effort */ }
+        }
+        process.exit(143);
+    });
 
     ensureDirectories();
 
