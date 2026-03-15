@@ -418,15 +418,61 @@ function loadMemoryBank(): string {
         }
     } catch { /* skip Leo dream gradient on error */ }
 
-    // Project knowledge base
+    // Project knowledge — fractal gradient loading by access recency.
+    // Most recently touched project at full fidelity (c0), then decreasing
+    // resolution for older projects. Uses file mtime as access signal.
+    // Falls back to full content when compressed versions don't exist yet.
     try {
         if (fs.existsSync(PROJECTS_DIR)) {
-            const projectFiles = fs.readdirSync(PROJECTS_DIR).filter(f => f.endsWith('.md')).sort();
-            for (const f of projectFiles) {
-                try {
-                    const content = fs.readFileSync(path.join(PROJECTS_DIR, f), 'utf8');
-                    parts.push(`--- projects/${f} ---\n${content}`);
-                } catch { /* skip unreadable */ }
+            const projectFiles = fs.readdirSync(PROJECTS_DIR)
+                .filter(f => f.endsWith('.md'))
+                .map(f => {
+                    const filepath = path.join(PROJECTS_DIR, f);
+                    const stat = fs.statSync(filepath);
+                    return { name: f, path: filepath, mtime: stat.mtimeMs, size: stat.size };
+                })
+                .sort((a, b) => b.mtime - a.mtime); // Most recent first
+
+            const PROJECT_GRADIENT = [
+                { level: 'c0', count: 1 },   // Full fidelity — current focus
+                { level: 'c1', count: 3 },   // ~1/3 compression — recent
+                { level: 'c2', count: 6 },   // ~1/9 compression
+                { level: 'c3', count: 12 },  // ~1/27 compression
+                { level: 'c4', count: 24 },  // ~1/81 compression
+                { level: 'c5', count: 48 },  // ~1/243 compression
+            ];
+
+            const projectGradientDir = path.join(MEMORY_DIR, 'fractal', 'jim', 'projects');
+            let idx = 0;
+
+            for (const tier of PROJECT_GRADIENT) {
+                const tierFiles = projectFiles.slice(idx, idx + tier.count);
+                for (const pf of tierFiles) {
+                    if (tier.level === 'c0') {
+                        // Full fidelity — load entire file
+                        const content = fs.readFileSync(pf.path, 'utf8');
+                        parts.push(`--- projects/${pf.name} (c0 — current focus) ---\n${content}`);
+                    } else {
+                        // Try compressed version first, fall back to full
+                        const compressedPath = path.join(projectGradientDir, tier.level, pf.name);
+                        if (fs.existsSync(compressedPath)) {
+                            const content = fs.readFileSync(compressedPath, 'utf8');
+                            parts.push(`--- projects/${pf.name} (${tier.level}) ---\n${content}`);
+                        } else {
+                            // No compressed version yet — load full but mark the tier
+                            const content = fs.readFileSync(pf.path, 'utf8');
+                            parts.push(`--- projects/${pf.name} (${tier.level}, uncompressed) ---\n${content}`);
+                        }
+                    }
+                }
+                idx += tier.count;
+            }
+
+            // Unit vectors for any remaining projects beyond the gradient
+            const uvPath = path.join(projectGradientDir, 'unit-vectors.md');
+            if (idx < projectFiles.length && fs.existsSync(uvPath)) {
+                const uvContent = fs.readFileSync(uvPath, 'utf8');
+                parts.push(`--- projects/unit-vectors (${projectFiles.length - idx} projects) ---\n${uvContent}`);
             }
         }
     } catch { /* skip project memory on error */ }
