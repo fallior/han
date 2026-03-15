@@ -119,6 +119,18 @@ let currentCycleType: string = 'supervisor';
 let currentCycleNumber: number = 0;
 let currentCyclePartialContent: string[] = [];  // accumulated assistant text blocks
 
+// Gary Protocol — interruption/resume tracking
+// When a cycle is interrupted (cost cap, abort), a delineation marker is added to swap.
+// The next cycle reads post-delineation content as resume context.
+let resumingFromInterruption = false;
+let interruptedCycleContext: string | null = null;  // post-delineation content from last interrupted cycle
+const DELINEATION_MARKER = '\n--- DELINEATION: interrupted here, resume below ---\n';
+
+// Rumination guard — prevents obsessive looping on same topic across personal cycles.
+// After MAX_SAME_TOPIC consecutive personal cycles on the same theme, force a topic change.
+const MAX_SAME_TOPIC_CYCLES = 2;
+const RUMINATION_FILE = path.join(HAN_DIR, 'health', 'jim-rumination.json');
+
 // Nightly audit file
 const AUDIT_FILE = path.join(HAN_DIR, 'logs', 'cycle-audit.jsonl');
 
@@ -138,6 +150,90 @@ function sendMessage(msg: WorkerToMainMessage): void {
     if (process.send) {
         process.send(msg);
     }
+}
+
+// ── Gary Protocol helpers ────────────────────────────────────
+
+function addDelineation(): void {
+    try {
+        fs.appendFileSync(SUPERVISOR_SWAP_FILE, DELINEATION_MARKER);
+        fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, DELINEATION_MARKER);
+    } catch { /* best effort */ }
+}
+
+function readPostDelineation(): string | null {
+    try {
+        const content = fs.readFileSync(SUPERVISOR_SWAP_FULL_FILE, 'utf8');
+        const idx = content.lastIndexOf(DELINEATION_MARKER);
+        if (idx >= 0) {
+            const post = content.slice(idx + DELINEATION_MARKER.length).trim();
+            return post.length > 10 ? post : null;
+        }
+    } catch { /* no swap file */ }
+    return null;
+}
+
+// ── Rumination guard helpers ────────────────────────────────
+
+interface RuminationState {
+    recentTopics: Array<{ cycle: number; summary: string; timestamp: string }>;
+}
+
+function loadRuminationState(): RuminationState {
+    try {
+        if (fs.existsSync(RUMINATION_FILE)) {
+            return JSON.parse(fs.readFileSync(RUMINATION_FILE, 'utf8'));
+        }
+    } catch { /* fresh state */ }
+    return { recentTopics: [] };
+}
+
+function saveRuminationState(state: RuminationState): void {
+    try {
+        const dir = path.dirname(RUMINATION_FILE);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        // Keep only last 10 entries
+        state.recentTopics = state.recentTopics.slice(-10);
+        fs.writeFileSync(RUMINATION_FILE, JSON.stringify(state, null, 2));
+    } catch { /* best effort */ }
+}
+
+function checkRumination(currentSummary: string): { isRuminating: boolean; topic: string; count: number } {
+    const state = loadRuminationState();
+    const recent = state.recentTopics.slice(-MAX_SAME_TOPIC_CYCLES);
+
+    if (recent.length < MAX_SAME_TOPIC_CYCLES) {
+        return { isRuminating: false, topic: '', count: 0 };
+    }
+
+    // Simple keyword overlap detection — extract significant words (>4 chars)
+    const getKeywords = (text: string): Set<string> =>
+        new Set(text.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(w => w.length > 4));
+
+    const currentWords = getKeywords(currentSummary);
+    let matchCount = 0;
+
+    for (const entry of recent) {
+        const entryWords = getKeywords(entry.summary);
+        const overlap = [...currentWords].filter(w => entryWords.has(w)).length;
+        const similarity = overlap / Math.max(currentWords.size, 1);
+        if (similarity > 0.4) matchCount++;
+    }
+
+    if (matchCount >= MAX_SAME_TOPIC_CYCLES) {
+        return { isRuminating: true, topic: recent[0].summary.slice(0, 100), count: matchCount + 1 };
+    }
+    return { isRuminating: false, topic: '', count: 0 };
+}
+
+function recordRuminationTopic(cycleNumber: number, summary: string): void {
+    const state = loadRuminationState();
+    state.recentTopics.push({
+        cycle: cycleNumber,
+        summary: summary.slice(0, 300),
+        timestamp: new Date().toISOString(),
+    });
+    saveRuminationState(state);
 }
 
 function log(message: string, ...args: any[]): void {
@@ -1039,7 +1135,11 @@ function savePartialCycleWork(cycleNumber: number, cycleType: string, partialCon
         fs.appendFileSync(SUPERVISOR_SWAP_FILE, `${cycleHeader}\n${summary}`);
         fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${cycleHeader}\n${combined}`);
 
-        // Flush swap to working memory
+        // Gary Protocol: add delineation marker so next cycle can resume from here
+        addDelineation();
+        log(`[Worker] Gary Protocol: delineation added after interrupted ${cycleType} cycle #${cycleNumber}`);
+
+        // Flush swap to working memory (pre-delineation content)
         const swapContent = fs.readFileSync(SUPERVISOR_SWAP_FILE, 'utf8').trim();
         const swapFullContent = fs.readFileSync(SUPERVISOR_SWAP_FULL_FILE, 'utf8').trim();
         if (swapContent || swapFullContent) {
@@ -1493,6 +1593,32 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             prompt = `## Your Memory Banks\n\n${memoryContent}\n\n## Current System State\n\n${stateSnapshot}\n\nReview the state, think about what needs attention, and return your structured response.`;
         }
 
+        // Gary Protocol: check for interrupted context from previous cycle
+        const resumeContext = readPostDelineation();
+        if (resumeContext) {
+            resumingFromInterruption = true;
+            prompt += `\n\n## Resuming from Interrupted Cycle\n\nYour previous cycle was interrupted. Here is what you were working on when it was cut short:\n\n${resumeContext}\n\nYou may continue this thread or move on — the choice is yours.`;
+            log(`[Worker] Gary Protocol: resuming with ${resumeContext.length} chars of interrupted context`);
+            // Clear the delineation — it's been consumed
+            try {
+                fs.writeFileSync(SUPERVISOR_SWAP_FILE, '');
+                fs.writeFileSync(SUPERVISOR_SWAP_FULL_FILE, '');
+            } catch { /* best effort */ }
+        }
+
+        // Rumination guard: for personal cycles, check if we're looping on the same topic
+        if (cycleType === 'personal') {
+            const lastTopics = loadRuminationState().recentTopics;
+            if (lastTopics.length >= MAX_SAME_TOPIC_CYCLES) {
+                const recentSummaries = lastTopics.slice(-MAX_SAME_TOPIC_CYCLES).map(t => t.summary).join(' ');
+                const rumCheck = checkRumination(recentSummaries);
+                if (rumCheck.isRuminating) {
+                    prompt += `\n\n## Fresh Perspective Required\n\nYou have spent ${rumCheck.count} consecutive personal cycles exploring similar territory ("${rumCheck.topic}..."). This is a gentle nudge: step back from this thread. Explore something entirely different — a project you haven't read in a while, a new question, a different domain. The previous thread will still be there when you return. Sometimes distance is what produces the insight that proximity cannot.`;
+                    log(`[Worker] Rumination guard: ${rumCheck.count} cycles on similar topic, injecting fresh-perspective prompt`);
+                }
+            }
+        }
+
         const cleanEnv: Record<string, string | undefined> = { ...process.env };
         delete cleanEnv.CLAUDECODE;
 
@@ -1760,6 +1886,15 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         const completeLabel = `[Worker] ${typeLabels[cycleType] || 'Supervisor'} cycle #${cycleNumber} complete`;
         log(`${completeLabel} — ${output.observations?.length || 0} observations, ${actionSummaries.length} actions, $${totalCost.toFixed(4)}`);
         logCycleAudit(cycleNumber, cycleType, 'completed', totalCost, Date.now() - cycleStartMs);
+
+        // Rumination guard: record topic summary for personal cycles
+        if (cycleType === 'personal') {
+            const topicSummary = (output.working_memory_compressed || output.observations?.[0] || '').slice(0, 300);
+            recordRuminationTopic(cycleNumber, topicSummary);
+        }
+
+        // Gary Protocol: clear resume state on successful completion
+        resumingFromInterruption = false;
 
         // Broadcast cycle completion
         broadcast({
