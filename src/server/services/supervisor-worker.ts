@@ -1340,7 +1340,36 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
     const recovery = isRecoveryMode();
     let cycleType: 'supervisor' | 'personal' | 'dream' = 'supervisor';
 
-    if (onHoliday && !humanTriggered) {
+    // Conversation-first ordering: check for pending human messages BEFORE
+    // time-of-day cycle type selection. If Darron has an unanswered message,
+    // force a supervisor cycle so Jim can respond. Personal/dream cycles
+    // can't respond to conversations — only supervisor cycles have actions.
+    let hasPendingHuman = false;
+    if (!humanTriggered) {
+        try {
+            const pending = workerDb?.prepare(`
+                SELECT 1 FROM conversations c
+                JOIN conversation_messages cm ON c.id = cm.conversation_id
+                WHERE c.status = 'open'
+                AND cm.role = 'human'
+                AND NOT EXISTS (
+                    SELECT 1 FROM conversation_messages cm2
+                    WHERE cm2.conversation_id = c.id
+                    AND cm2.role = 'supervisor'
+                    AND cm2.created_at > cm.created_at
+                )
+                LIMIT 1
+            `).get();
+            hasPendingHuman = !!pending;
+        } catch { /* proceed with normal selection */ }
+    }
+
+    if (hasPendingHuman) {
+        // Darron has an unanswered message — force supervisor so Jim can respond.
+        // Conversations take priority over time-of-day scheduling.
+        cycleType = 'supervisor';
+        log(`[Worker] Pending human message — forcing supervisor cycle`);
+    } else if (onHoliday && !humanTriggered) {
         // Holiday mode: dream cycles only (like sleep), 80min interval.
         // Human-triggered cycles still get full voice — holiday doesn't silence Darron.
         cycleType = 'dream';
@@ -1622,8 +1651,11 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             } catch { /* best effort */ }
         }
 
-        // Append self-reflection
-        if (output.self_reflection) {
+        // Append self-reflection — only for supervisor cycles where Jim explicitly
+        // writes a reflection via structured output. Personal/dream cycles set
+        // self_reflection to the entire result text, which causes unbounded growth
+        // (163KB+ as of Mar 14). Session logs already capture the full content.
+        if (cycleType === 'supervisor' && output.self_reflection) {
             const reflectionPath = path.join(MEMORY_DIR, 'self-reflection.md');
             try {
                 let existing = fs.existsSync(reflectionPath) ? fs.readFileSync(reflectionPath, 'utf8') : '';
