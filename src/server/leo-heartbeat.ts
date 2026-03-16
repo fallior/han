@@ -107,6 +107,12 @@ let currentBeatTokensIn = 0;
 let currentBeatTokensOut = 0;
 let currentBeatType: string = 'unknown';
 
+// ── Transition dampening (Deferred #7) ──────────────────────
+// Gradual ramp-down when returning from holiday/rest to normal intervals.
+let previousPeriodMs = 0;
+const TRANSITION_STEPS = [0.75, 0.5, 0.25]; // Blend ratios: 75% old, 50% old, 25% old
+let transitionStep = -1; // -1 = no transition in progress
+
 // ── Robin Hood Protocol — mutual health checks ──────────────
 
 const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
@@ -599,9 +605,31 @@ async function waitForCliFree(): Promise<boolean> {
 /**
  * Calculate delay until next wall-clock-aligned beat.
  * Leo is at phase 0: fires when epoch_ms mod period == 0.
+ *
+ * Applies transition dampening (#7): gradual ramp-down when returning
+ * from holiday/rest to normal intervals.
  */
 function getWallClockDelay(): number {
-    const periodMs = getCurrentPeriodMs();
+    let periodMs = getCurrentPeriodMs();
+
+    // ── Transition dampening (#7) ────────────────────────────
+    if (previousPeriodMs > 0 && periodMs < previousPeriodMs) {
+        transitionStep = 0;
+        console.log(`[Leo] Transition detected: ${previousPeriodMs / 60000}min → ${periodMs / 60000}min, ramping down gradually`);
+    }
+
+    if (transitionStep >= 0 && transitionStep < TRANSITION_STEPS.length) {
+        const blendRatio = TRANSITION_STEPS[transitionStep];
+        const blendedPeriod = Math.round(periodMs + (previousPeriodMs - periodMs) * blendRatio);
+        console.log(`[Leo] Transition step ${transitionStep + 1}/${TRANSITION_STEPS.length}: ${Math.round(blendedPeriod / 60000)}min (blending ${Math.round(blendRatio * 100)}% of old interval)`);
+        periodMs = blendedPeriod;
+        transitionStep++;
+    } else if (transitionStep >= TRANSITION_STEPS.length) {
+        transitionStep = -1;
+    }
+
+    previousPeriodMs = getCurrentPeriodMs();
+
     const now = Date.now();
     const remainder = now % periodMs;
     let delay = periodMs - remainder;

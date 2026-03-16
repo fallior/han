@@ -7,6 +7,27 @@
 
 ---
 
+## 2026-03-16 (Leo + Darron — Jim's deferred fixes #4 and #7)
+
+### Idle Cycle Dampening (DEC-052, Jim's Deferred #4)
+When consecutive supervisor cycles produce no actions (`no_action` only), the scheduling
+interval increases exponentially: 2x after 3 idle cycles, 4x (capped) after 4+. Resets
+on any productive cycle or human wake signal. Prevents the $155 incident pattern where 60
+idle cycles in one day each loaded 800KB of memory and produced nothing.
+
+### Transition Dampening (DEC-053, Jim's Deferred #7)
+When returning from a longer interval to a shorter one (e.g. holiday 80min → work 20min),
+the transition is gradual over 3 cycles using blend ratios (75%/50%/25% of old interval).
+Example: 65min → 50min → 35min → 20min. Applied to both Jim (supervisor.ts) and Leo
+(leo-heartbeat.ts). Prevents burst-of-activity on transition where early cycles are likely
+idle, burning tokens at the faster rate.
+
+### Files Modified
+- `src/server/services/supervisor.ts` — idle dampening state/logic, transition dampening
+- `src/server/leo-heartbeat.ts` — transition dampening
+
+---
+
 ## 2026-03-15/16 (Darron + Leo — ecosystem audit, bug fixes, architecture)
 
 ### SDK Stream Exit Code 1 Fix

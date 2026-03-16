@@ -61,6 +61,21 @@ const RESTART_BACKOFF_MS = 5000;
 let cycleCount = 0;
 let currentCycleStartTime = 0; // Track cycle start for distress detection
 
+// ── Dampening (Deferred #4) ─────────────────────────────────
+// When consecutive cycles produce no actions, increase interval exponentially.
+// Prevents idle token burn (the $155 incident: 60 idle cycles in one day).
+let consecutiveIdleCycles = 0;
+const DAMPEN_AFTER = 2;            // Start dampening after 2 idle cycles
+const DAMPEN_MAX_MULTIPLIER = 4;   // Cap at 4x normal interval
+const DAMPEN_BASE = 2;             // Double each step
+
+// ── Transition dampening (Deferred #7) ──────────────────────
+// When returning from holiday/rest to normal, ramp down gradually instead of
+// jumping from 80min to 20min. Eases the transition.
+let previousPeriodMs = 0;          // Track last period for transition detection
+const TRANSITION_STEPS = [0.75, 0.5, 0.25]; // Blend ratios: 75% old, 50% old, 25% old
+let transitionStep = -1;           // -1 = no transition in progress
+
 // ── Health signal (Robin Hood Protocol) ──────────────────────
 
 function writeJimHealthSignal(cycleNumber: number, tier: string, costUsd: number, nextDelayMs: number, lastError: string | null = null): void {
@@ -318,17 +333,31 @@ function escalateToNtfy(message: string): void {
 function getMedianCycleDuration(): number {
     try {
         const { supervisorStmts } = require('../db');
-        const recentCycles = supervisorStmts.getRecent.all(5) as any[];
+        // Fetch more cycles to get a meaningful sample after filtering idle ones
+        const recentCycles = supervisorStmts.getRecent.all(20) as any[];
 
-        // Filter to only completed successful cycles (has completed_at, no error)
-        const successfulCycles = recentCycles.filter((c: any) => c.completed_at && !c.error);
+        // Filter to completed successful cycles that actually did something.
+        // Idle cycles (no_action only) skew the median down, causing productive
+        // cycles to look "slow" and trigger false distress notifications.
+        const productiveCycles = recentCycles.filter((c: any) => {
+            if (!c.completed_at || c.error) return false;
+            // Parse actions_taken JSON — idle if empty or only no_action
+            try {
+                const actions: string[] = JSON.parse(c.actions_taken || '[]');
+                if (actions.length === 0) return false;
+                if (actions.length === 1 && actions[0].startsWith('no_action')) return false;
+                return true;
+            } catch {
+                return true; // Can't parse — include to be safe
+            }
+        });
 
-        if (successfulCycles.length === 0) {
+        if (productiveCycles.length === 0) {
             return DEFAULT_MEDIAN_MS;
         }
 
         // Calculate duration for each cycle
-        const durations = successfulCycles.map((c: any) => {
+        const durations = productiveCycles.map((c: any) => {
             const startedAt = new Date(c.started_at).getTime();
             const completedAt = new Date(c.completed_at).getTime();
             return completedAt - startedAt;
@@ -443,9 +472,45 @@ function getCurrentPeriodMs(): number {
 /**
  * Calculate delay until next wall-clock-aligned cycle.
  * Jim is at phase 180°: fires when epoch_ms mod period == period/2.
+ *
+ * Applies two dampening mechanisms:
+ * - Idle dampening (#4): exponential backoff when consecutive cycles produce no actions
+ * - Transition dampening (#7): gradual ramp-down when returning from holiday/rest
  */
 function getWallClockDelay(): number {
-    const periodMs = getCurrentPeriodMs();
+    let periodMs = getCurrentPeriodMs();
+
+    // ── Transition dampening (#7) ────────────────────────────
+    // Detect transition from longer to shorter interval (e.g. holiday→normal)
+    if (previousPeriodMs > 0 && periodMs < previousPeriodMs) {
+        // Just transitioned to a faster interval — start ramping
+        transitionStep = 0;
+        console.log(`[Supervisor] Transition detected: ${previousPeriodMs / 60000}min → ${periodMs / 60000}min, ramping down gradually`);
+    }
+
+    if (transitionStep >= 0 && transitionStep < TRANSITION_STEPS.length) {
+        const blendRatio = TRANSITION_STEPS[transitionStep];
+        const blendedPeriod = Math.round(periodMs + (previousPeriodMs - periodMs) * blendRatio);
+        console.log(`[Supervisor] Transition step ${transitionStep + 1}/${TRANSITION_STEPS.length}: ${Math.round(blendedPeriod / 60000)}min (blending ${Math.round(blendRatio * 100)}% of old interval)`);
+        periodMs = blendedPeriod;
+        transitionStep++;
+    } else if (transitionStep >= TRANSITION_STEPS.length) {
+        // Transition complete
+        transitionStep = -1;
+    }
+
+    previousPeriodMs = getCurrentPeriodMs(); // Store raw (undampened) period for next comparison
+
+    // ── Idle dampening (#4) ──────────────────────────────────
+    // After DAMPEN_AFTER consecutive idle cycles, multiply interval
+    if (consecutiveIdleCycles >= DAMPEN_AFTER) {
+        const steps = consecutiveIdleCycles - DAMPEN_AFTER;
+        const multiplier = Math.min(Math.pow(DAMPEN_BASE, steps + 1), DAMPEN_MAX_MULTIPLIER);
+        const dampenedPeriod = Math.round(periodMs * multiplier);
+        console.log(`[Supervisor] Idle dampening: ${consecutiveIdleCycles} consecutive idle cycles, ${multiplier}x multiplier → ${Math.round(dampenedPeriod / 60000)}min`);
+        periodMs = dampenedPeriod;
+    }
+
     const offsetMs = Math.floor(periodMs / 2); // 180° offset
     const now = Date.now();
     const remainder = (now - offsetMs) % periodMs;
@@ -489,6 +554,8 @@ function startSupervisorSignalWatcher(): void {
                     fs.unlinkSync(signalPath);
                 } catch { /* already gone */ }
                 console.log(`[Supervisor] Running wake-triggered cycle${humanTriggered ? ' (human message — full voice)' : ''}`);
+                // Wake signals indicate activity — reset idle dampening
+                consecutiveIdleCycles = 0;
                 await runSupervisorCycle({ humanTriggered });
             } catch (err) {
                 console.error('[Supervisor] Wake signal cycle error:', (err as Error).message);
@@ -943,6 +1010,19 @@ export function scheduleSupervisorCycle(): void {
             cycleCount++;
 
             if (result) {
+                // ── Idle dampening: track consecutive idle cycles ──
+                const isIdle = result.actionSummaries.length === 0 ||
+                    (result.actionSummaries.length === 1 && result.actionSummaries[0].startsWith('no_action'));
+                if (isIdle) {
+                    consecutiveIdleCycles++;
+                    console.log(`[Supervisor] Idle cycle (${consecutiveIdleCycles} consecutive)`);
+                } else {
+                    if (consecutiveIdleCycles > 0) {
+                        console.log(`[Supervisor] Productive cycle — idle dampening reset (was ${consecutiveIdleCycles} idle)`);
+                    }
+                    consecutiveIdleCycles = 0;
+                }
+
                 // Check for slow cycle (distress signal)
                 const actualDurationMs = Date.now() - currentCycleStartTime;
                 const medianDurationMs = getMedianCycleDuration();

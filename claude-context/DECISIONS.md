@@ -81,6 +81,8 @@ When you make a significant technical or design decision:
 | DEC-049 | Project Knowledge Fractal Gradient | Accepted | 2026-03-16 |
 | DEC-050 | Gary Protocol for Jim (Interruption/Resume) | Accepted | 2026-03-16 |
 | DEC-051 | Rumination Guard on Personal Cycles | Accepted | 2026-03-16 |
+| DEC-052 | Idle Cycle Dampening (Exponential Backoff) | Accepted | 2026-03-16 |
+| DEC-053 | Transition Dampening (Gradual Interval Ramp-Down) | Accepted | 2026-03-16 |
 
 ---
 
@@ -3778,4 +3780,62 @@ perspective required" prompt nudging Jim to explore something different.
 - Jim still gets depth — 2 cycles is enough to develop an idea
 - The forced topic change may produce unexpected cross-pollination
 - Does not apply to supervisor cycles where repetition may be warranted (e.g. monitoring)
+
+### DEC-052: Idle Cycle Dampening (Exponential Backoff)
+
+**Date:** 2026-03-16
+**Status:** Accepted
+**Author:** Leo + Darron
+
+**Context:** Jim's supervisor cycles sometimes produce no actions — the system is quiet,
+nothing needs doing. Each idle cycle still loads 800KB of memory ($3 input cost), runs
+Opus, and produces a `no_action` response. On Feb 23, 60 consecutive idle cycles burned
+$155 in a single day. The system had no mechanism to slow down when it had nothing to do.
+
+**Decision:** Track consecutive idle cycles (where the only action is `no_action` or no
+actions at all). After 2 consecutive idle cycles, multiply the scheduling interval
+exponentially: 2x after 3 idle, 4x (capped) after 4+. Reset on any productive cycle or
+any wake signal (human message).
+
+**Design:**
+- `DAMPEN_AFTER = 2` — first 2 idle cycles run at normal interval
+- `DAMPEN_BASE = 2` — double each step
+- `DAMPEN_MAX_MULTIPLIER = 4` — cap at 4x (e.g. 20min → 80min max)
+- Reset to 0 on productive cycle or wake signal
+- Applied in `supervisor.ts` `getWallClockDelay()` after transition dampening
+
+**Consequences:**
+- Idle periods cost 4x less at steady state (1 cycle per 80min vs 4 per 80min)
+- Human messages immediately reset dampening — no latency impact on responses
+- Productive cycles (goals created, conversations responded to) reset dampening
+- Leo heartbeat is NOT dampened — beats are always productive (philosophy/personal)
+
+### DEC-053: Transition Dampening (Gradual Interval Ramp-Down)
+
+**Date:** 2026-03-16
+**Status:** Accepted
+**Author:** Leo + Darron
+
+**Context:** When holiday mode ends or a rest day transitions to a work day, the
+scheduling interval drops abruptly (80min → 20min). This causes a burst of activity
+— 4 cycles fire in the time window where 1 would have fired before. If the ecosystem
+is still waking up, those early cycles are likely idle, burning tokens at the faster rate.
+
+**Decision:** When the base interval drops (detected by comparing current period to
+previous period), ramp down gradually over 3 cycles using blend ratios. The transition
+applies to both Jim (supervisor.ts) and Leo (leo-heartbeat.ts).
+
+**Design:**
+- Blend ratios: `[0.75, 0.5, 0.25]` of the difference between old and new intervals
+- Step 1: `new + (old - new) × 0.75` = 75% of old blended in
+- Step 2: `new + (old - new) × 0.50` = 50% of old blended in
+- Step 3: `new + (old - new) × 0.25` = 25% of old blended in
+- Step 4: normal interval (transition complete)
+- Example (80min → 20min): 65min → 50min → 35min → 20min
+
+**Consequences:**
+- Smooth transition over ~2.5 hours instead of instant jump
+- Works for any interval transition, not just holiday (e.g. sleep→morning, rest→work)
+- Applies to both Jim and Leo identically
+- No effect on wake signals — those bypass scheduling entirely
 

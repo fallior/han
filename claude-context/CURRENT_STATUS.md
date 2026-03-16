@@ -32,6 +32,12 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-16 — Leo + Darron — Jim's Deferred Fixes #4 and #7
+- **Idle cycle dampening** (DEC-052) — exponential backoff when consecutive cycles produce no actions (2x→4x capped). Resets on productive cycle or wake signal.
+- **Transition dampening** (DEC-053) — gradual interval ramp-down (75%→50%→25% blend) when returning from holiday/rest to normal. Applied to both Jim and Leo.
+- **Files modified**: `supervisor.ts`, `leo-heartbeat.ts`
+- **Docs updated**: CHANGELOG, DECISIONS (DEC-052/053), HAN-ECOSYSTEM-COMPLETE (glossary + Section 11), Hall of Records R001
+
 ### 2026-03-15/16 — Darron + Claude — Ecosystem Audit & Architecture
 - **SDK stream exit code 1 fix** — personal/dream cycles now complete successfully (were silently failing)
 - **Conversation-first ordering** — Jim checks for unanswered human messages before deciding cycle type

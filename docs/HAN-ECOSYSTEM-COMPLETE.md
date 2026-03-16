@@ -35,6 +35,8 @@
 | **Weekly Rhythm** | Four-phase daily schedule: sleep (22:00-06:00), morning (06:00-09:00), work (09:00-17:00), evening (17:00-22:00). Rest days (Sat/Sun) and holidays have longer intervals. Protected by Hall of Records R001. | `lib/day-phase.ts` (`getDayPhase`, `getPhaseInterval`, `isRestDay`, `isOnHoliday`) |
 | **Credential Swap** | Automatic SDK account failover. When an agent hits a rate limit, writes `rate-limited` signal. Jemma round-robins to next credential file every 30 seconds. | `jemma.ts` (`checkAndSwapCredentials`), credentials at `~/.claude/.credentials-[a-z].json` |
 | **Project Knowledge Gradient** | Fractal gradient applied to Jim's project knowledge files. Most recent project at full fidelity, older projects at decreasing compression. Ordered by file mtime. | `supervisor-worker.ts` (`PROJECT_GRADIENT` in `loadMemoryBank`), storage at `~/.han/memory/fractal/jim/projects/` |
+| **Idle Dampening** | Jim-only exponential backoff when consecutive cycles produce no actions. 2x after 3 idle, 4x (capped) after 4+. Resets on productive cycle or wake signal. Prevents idle token burn. | `supervisor.ts` (`consecutiveIdleCycles`, `DAMPEN_*` constants in `getWallClockDelay`) |
+| **Transition Dampening** | Gradual interval ramp-down when returning from longer to shorter intervals (e.g. holiday→normal). 3-step blend: 75%→50%→25% of old interval. Applies to both Jim and Leo. | `supervisor.ts` and `leo-heartbeat.ts` (`previousPeriodMs`, `TRANSITION_STEPS` in `getWallClockDelay`) |
 
 ---
 
@@ -833,6 +835,44 @@ This ensures they never fire simultaneously, regardless of when they started.
 - Leo local: `isRestDay()` → `getDayPhase()` returns `'sleep'`
 - Jim shared: `isRestDay()` is checked by `getPhaseInterval()` → 40min interval
 - But `getDayPhase()` in shared lib does NOT check rest days (intentionally — "rest ≠ sleep")
+
+### Idle Cycle Dampening (Jim Only — DEC-052)
+
+When consecutive supervisor cycles produce no actions (`no_action` only or empty action
+list), the scheduling interval increases exponentially:
+
+| Consecutive Idle | Multiplier | Example (20min base) |
+|-----------------|------------|---------------------|
+| 0–2 | 1x | 20 min |
+| 3 | 2x | 40 min |
+| 4+ | 4x (capped) | 80 min |
+
+Resets to 0 on any productive cycle or any wake signal (human message).
+
+**Source:** `supervisor.ts` — state variables `consecutiveIdleCycles`, `DAMPEN_AFTER`,
+`DAMPEN_BASE`, `DAMPEN_MAX_MULTIPLIER`. Applied in `getWallClockDelay()`. Tracked in
+`scheduleSupervisorCycle()`. Reset in wake signal handler.
+
+**Not applied to Leo** — Leo's heartbeat beats are always productive (philosophy/personal
+content). There is no `no_action` equivalent.
+
+### Transition Dampening (Both Agents — DEC-053)
+
+When the base interval drops (e.g. holiday ends, sleep→morning), the transition is
+gradual over 3 cycles instead of an instant jump:
+
+| Step | Blend | Holiday→Work example |
+|------|-------|---------------------|
+| 1 | 75% old | 65 min |
+| 2 | 50% old | 50 min |
+| 3 | 25% old | 35 min |
+| 4 | normal | 20 min |
+
+Detected by comparing `getCurrentPeriodMs()` against `previousPeriodMs`. Only triggers
+when interval *decreases* (increasing intervals, e.g. entering holiday, are immediate).
+
+**Source:** Both `supervisor.ts` and `leo-heartbeat.ts` — state variables
+`previousPeriodMs`, `transitionStep`, `TRANSITION_STEPS`. Applied in `getWallClockDelay()`.
 
 ---
 
