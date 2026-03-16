@@ -1392,14 +1392,16 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
 
                     conversationStmts.updateTimestamp.run(now, action.conversation_id);
 
-                    // Fetch conversation to get discussion_type
-                    const conversation = conversationStmts.get.get(action.conversation_id) as any;
-                    const discussionType = conversation?.discussion_type || 'general';
+                    // Fetch conversation for discussion_type (also used for Discord check below)
+                    let conversation: any = null;
+                    try {
+                        conversation = conversationStmts.get.get(action.conversation_id) as any;
+                    } catch { /* best effort */ }
 
                     broadcast({
                         type: 'conversation_message',
                         conversation_id: action.conversation_id,
-                        discussion_type: discussionType,
+                        discussion_type: conversation?.discussion_type || 'general',
                         message: {
                             id: msgId,
                             conversation_id: action.conversation_id,
@@ -1414,7 +1416,6 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
 
                     // Post to Discord if this is a Discord conversation
                     try {
-                        const conversation = conversationStmts.get.get(action.conversation_id) as any;
                         if (conversation && conversation.discussion_type === 'discord') {
                             // Extract channelId from conversation metadata or title
                             // Title format: "Discord: {author} in #{channelId}"
