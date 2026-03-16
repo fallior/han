@@ -13,6 +13,9 @@ import {
     db, HAN_DIR, PENDING_DIR, RESOLVED_DIR, CONTEXTS_DIR,
     PID_FILE, syncRegistry
 } from './db';
+
+// Signals directory for cross-process communication
+const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
 import { authMiddleware } from './middleware/auth';
 import * as orchestrator from './orchestrator';
 import { createWebSocketServer, broadcast, broadcastPrompts, broadcastTerminal as wsBroadcastTerminal, stopHeartbeat } from './ws';
@@ -98,7 +101,7 @@ app.use(express.static(UI_DIR));
 app.use('/api', authMiddleware);
 
 // Ensure directories exist
-[PENDING_DIR, RESOLVED_DIR, CONTEXTS_DIR].forEach(dir => {
+[PENDING_DIR, RESOLVED_DIR, CONTEXTS_DIR, SIGNALS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -172,6 +175,18 @@ const wss = createWebSocketServer(server, () => {
 
 syncRegistry();
 
+// ── Clean up stale broadcast signals from previous run ───
+
+try {
+    const staleBroadcastSignal = path.join(SIGNALS_DIR, 'ws-broadcast');
+    if (fs.existsSync(staleBroadcastSignal)) {
+        fs.unlinkSync(staleBroadcastSignal);
+        console.log('[Server] Cleaned stale broadcast signal from previous run');
+    }
+} catch (err) {
+    console.error('[Server] Failed to clean stale broadcast signal:', (err as Error).message);
+}
+
 // ── Terminal broadcast (200ms loop) ──────────────────────
 
 function broadcastTerminal() {
@@ -241,6 +256,56 @@ fs.watch(PENDING_DIR, (eventType, filename) => {
     }, 100);
 });
 
+// ── WebSocket broadcast signal watcher ───────────────────
+
+/**
+ * Process a WebSocket broadcast signal from an external agent (jim-human, leo-human).
+ * The signal file contains a JSON payload to broadcast to all connected WebSocket clients.
+ */
+function processBroadcastSignal(): void {
+    const signalPath = path.join(SIGNALS_DIR, 'ws-broadcast');
+    try {
+        if (!fs.existsSync(signalPath)) return;
+
+        const raw = fs.readFileSync(signalPath, 'utf-8');
+        fs.unlinkSync(signalPath);  // Consume the signal
+
+        const data = JSON.parse(raw);
+
+        // Validate required fields
+        if (!data.type || !data.conversation_id) {
+            console.error('[Server] Invalid broadcast signal: missing type or conversation_id');
+            return;
+        }
+
+        // Strip signal metadata (timestamp is for debugging, not for clients)
+        delete data.timestamp;
+
+        broadcast(data);
+        console.log(`[Server] Broadcast signal relayed: ${data.type} for ${data.conversation_id}`);
+    } catch (err) {
+        console.error('[Server] Failed to process broadcast signal:', (err as Error).message);
+    }
+}
+
+// Watch SIGNALS_DIR for ws-broadcast files
+let broadcastDebounce: ReturnType<typeof setTimeout> | null = null;
+
+fs.watch(SIGNALS_DIR, (eventType, filename) => {
+    if (filename !== 'ws-broadcast') return;
+
+    // Short debounce — prevents double-fires from file write + chmod events
+    if (broadcastDebounce) clearTimeout(broadcastDebounce);
+    broadcastDebounce = setTimeout(() => {
+        processBroadcastSignal();
+    }, 100);
+});
+
+// Polling fallback every 5s (backup for edge cases where fs.watch misses)
+const broadcastSignalInterval = setInterval(() => {
+    processBroadcastSignal();
+}, 5000);
+
 // ── Initialize orchestrator ──────────────────────────────
 
 orchestrator.initialize().then(status => {
@@ -286,6 +351,7 @@ process.on('SIGTERM', () => {
     clearInterval(digestInterval);
     clearInterval(weeklyReportInterval);
     clearInterval(ghostTaskInterval);
+    clearInterval(broadcastSignalInterval);
     abortAllTasks();
     try { db.close(); } catch {}
     wss.close();
