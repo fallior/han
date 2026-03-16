@@ -1392,11 +1392,17 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
 
                     conversationStmts.updateTimestamp.run(now, action.conversation_id);
 
+                    // Fetch conversation to get discussion_type
+                    const conversation = conversationStmts.get.get(action.conversation_id) as any;
+                    const discussionType = conversation?.discussion_type || 'general';
+
                     broadcast({
                         type: 'conversation_message',
-                        data: {
+                        conversation_id: action.conversation_id,
+                        discussion_type: discussionType,
+                        message: {
+                            id: msgId,
                             conversation_id: action.conversation_id,
-                            message_id: msgId,
                             role: 'supervisor',
                             content: action.response_content,
                             created_at: now,

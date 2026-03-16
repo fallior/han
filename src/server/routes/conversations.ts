@@ -289,9 +289,11 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         };
 
         // Broadcast via WebSocket
+        const discussionType = (conversation as any).discussion_type || 'general';
         broadcast({
             type: 'conversation_message',
             conversation_id: req.params.id,
+            discussion_type: discussionType,
             message
         });
 
@@ -301,7 +303,6 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         // Rules: jim-request/jim-report → Jim only. leo-question/leo-postulate → Leo only.
         // general/memory/untyped → both. Direct name mention overrides tab routing.
         if (finalRole === 'human') {
-            const discussionType = (conversation as any).discussion_type || 'general';
             const mentionsLeo = /\b(hey\s+leo|@leo|leo[,:])\b/i.test(content);
             const mentionsJim = /\b(hey\s+jim|@jim|jim[,:])\b/i.test(content);
 
@@ -614,6 +615,41 @@ Return JSON array of relevant conversations ranked by relevance.`;
         });
     } catch (err: any) {
         console.error('[Routes] Semantic search error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /internal/broadcast -- Internal endpoint for cross-process WebSocket broadcasts.
+ * Used by jim-human and leo-human (separate processes) to notify admin UI of new messages.
+ * Localhost-only (auth middleware already bypasses localhost).
+ */
+router.post('/internal/broadcast', (req: Request, res: Response) => {
+    try {
+        const { conversation_id, message_id, role, content, created_at } = req.body;
+        if (!conversation_id || !message_id) {
+            return res.status(400).json({ success: false, error: 'conversation_id and message_id required' });
+        }
+
+        const conversation = conversationStmts.get.get(conversation_id) as any;
+        const discussionType = conversation?.discussion_type || 'general';
+
+        broadcast({
+            type: 'conversation_message',
+            conversation_id,
+            discussion_type: discussionType,
+            message: {
+                id: message_id,
+                conversation_id,
+                role: role || 'supervisor',
+                content: content || '',
+                created_at: created_at || new Date().toISOString(),
+            }
+        });
+
+        res.json({ success: true });
+    } catch (err: any) {
+        console.error('[Routes] Internal broadcast error:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });

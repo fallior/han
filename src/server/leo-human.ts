@@ -17,6 +17,7 @@
 
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import Database from 'better-sqlite3';
+import https from 'node:https';
 import path from 'node:path';
 import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
