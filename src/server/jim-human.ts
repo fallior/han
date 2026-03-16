@@ -118,6 +118,23 @@ function postMessage(db: Database.Database, conversationId: string, content: str
     `).run(id, conversationId, content, now);
     db.prepare(`UPDATE conversations SET updated_at = ? WHERE id = ?`).run(now, conversationId);
     notifyServer(conversationId, id, 'supervisor', content, now);
+
+    // Write broadcast signal for WebSocket clients
+    try {
+        const conversation = db.prepare('SELECT discussion_type FROM conversations WHERE id = ?').get(conversationId) as any;
+        const discussionType = conversation?.discussion_type || 'general';
+        writeBroadcastSignal(conversationId, discussionType, {
+            id,
+            conversation_id: conversationId,
+            role: 'supervisor',
+            content,
+            created_at: now
+        });
+    } catch (err) {
+        // Best effort — message is already in DB
+        console.error('[Jim/Human] Failed to write broadcast signal:', (err as Error).message);
+    }
+
     return id;
 }
 
@@ -137,6 +154,27 @@ function notifyServer(conversationId: string, messageId: string, role: string, c
     });
     req.on('error', (err) => console.log(`[Jim/Human] Broadcast notify failed: ${err.message}`));
     req.end(body);
+}
+
+/** Write broadcast signal for cross-process WebSocket notification. */
+function writeBroadcastSignal(
+    conversationId: string,
+    discussionType: string,
+    message: { id: string; conversation_id: string; role: string; content: string; created_at: string }
+): void {
+    try {
+        const signal = JSON.stringify({
+            type: 'conversation_message',
+            conversation_id: conversationId,
+            discussion_type: discussionType,
+            message,
+            timestamp: new Date().toISOString()
+        });
+        fs.writeFileSync(path.join(SIGNALS_DIR, 'ws-broadcast'), signal);
+    } catch (err) {
+        // Best effort — message is already in DB
+        console.error('[Jim/Human] Failed to write broadcast signal:', (err as Error).message);
+    }
 }
 
 // ── Memory ────────────────────────────────────────────────────
