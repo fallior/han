@@ -19,6 +19,7 @@
 
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import Database from 'better-sqlite3';
+import https from 'node:https';
 import path from 'node:path';
 import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
@@ -116,7 +117,26 @@ function postMessage(db: Database.Database, conversationId: string, content: str
         VALUES (?, ?, 'supervisor', ?, ?)
     `).run(id, conversationId, content, now);
     db.prepare(`UPDATE conversations SET updated_at = ? WHERE id = ?`).run(now, conversationId);
+    notifyServer(conversationId, id, 'supervisor', content, now);
     return id;
+}
+
+/** Notify the main server to broadcast this message via WebSocket to admin clients. */
+function notifyServer(conversationId: string, messageId: string, role: string, content: string, createdAt: string): void {
+    const body = JSON.stringify({ conversation_id: conversationId, message_id: messageId, role, content, created_at: createdAt });
+    const req = https.request({
+        hostname: '127.0.0.1',
+        port: 3847,
+        path: '/api/conversations/internal/broadcast',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        rejectUnauthorized: false,
+    }, (res) => {
+        if (res.statusCode !== 200) console.log(`[Jim/Human] Broadcast notify returned ${res.statusCode}`);
+        res.resume();
+    });
+    req.on('error', (err) => console.log(`[Jim/Human] Broadcast notify failed: ${err.message}`));
+    req.end(body);
 }
 
 // ── Memory ────────────────────────────────────────────────────

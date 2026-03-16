@@ -118,7 +118,26 @@ function postMessage(db: Database.Database, conversationId: string, content: str
         VALUES (?, ?, 'leo', ?, ?)
     `).run(id, conversationId, content, now);
     db.prepare(`UPDATE conversations SET updated_at = ? WHERE id = ?`).run(now, conversationId);
+    notifyServer(conversationId, id, 'leo', content, now);
     return id;
+}
+
+/** Notify the main server to broadcast this message via WebSocket to admin clients. */
+function notifyServer(conversationId: string, messageId: string, role: string, content: string, createdAt: string): void {
+    const body = JSON.stringify({ conversation_id: conversationId, message_id: messageId, role, content, created_at: createdAt });
+    const req = https.request({
+        hostname: '127.0.0.1',
+        port: 3847,
+        path: '/api/conversations/internal/broadcast',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        rejectUnauthorized: false,
+    }, (res) => {
+        if (res.statusCode !== 200) console.log(`[Leo/Human] Broadcast notify returned ${res.statusCode}`);
+        res.resume();
+    });
+    req.on('error', (err) => console.log(`[Leo/Human] Broadcast notify failed: ${err.message}`));
+    req.end(body);
 }
 
 // ── Memory ────────────────────────────────────────────────────
