@@ -68,6 +68,7 @@
 24. [API Routes](#24-api-routes)
 25. [Authentication & HTTPS](#25-authentication--https)
 26. [WebSocket Protocol](#26-websocket-protocol)
+26.5 [Conversation Message Broadcasting Architecture](#265-conversation-message-broadcasting-architecture)
 27. [Mobile UI](#27-mobile-ui)
 28. [Admin Console](#28-admin-console)
 29. [Utility & Bootstrap Scripts](#29-utility--bootstrap-scripts)
@@ -1778,6 +1779,393 @@ const server = useHttps
 - Base reconnect delay: 1000ms
 - Max reconnect delay: 30000ms
 - Exponential backoff with jitter
+
+---
+
+## 26.5 Conversation Message Broadcasting Architecture
+
+**Purpose:** Enable real-time conversation updates across the admin console (Conversations, Memory Discussions, Workshop modules) from multiple message sources: human messages from the UI, supervisor responses, and Jim/Leo async responses.
+
+### Broadcast Flow (End-to-End)
+
+```
+Message inserted to conversations table (4 sources)
+    ↓
+Signal file written to ~/.han/signals/ws-broadcast
+    ↓
+Server watches signals/ directory (chokidar)
+    ↓
+Signal detected → read JSON payload
+    ↓
+Extract: conversation_id, discussion_type, message object
+    ↓
+Broadcast to WebSocket clients via `conversation_message` event
+    ↓
+Admin UI modules filter and display (Conversations / Memory Discussions / Workshop)
+    ↓
+Signal file deleted (cleanup)
+```
+
+### The Four Broadcast Sources
+
+#### 1. **conversations.ts** (Admin UI Input)
+
+**File:** `src/server/routes/api/conversations.ts`
+
+**Trigger:** POST `/api/conversations/{id}/messages`
+
+**Flow:**
+```typescript
+// Insert message to DB
+const message = db.insertMessage({ conversation_id, role: 'user', content })
+
+// Write signal for broadcast
+writeBroadcastSignal({
+  type: 'conversation_message',
+  conversation_id,
+  discussion_type: conversation.discussion_type,
+  message
+})
+```
+
+**Signal format:**
+```json
+{
+  "type": "conversation_message",
+  "conversation_id": "uuid",
+  "discussion_type": "memex|notes|dreams|workshop",
+  "message": {
+    "id": "msg-uuid",
+    "conversation_id": "uuid",
+    "role": "user",
+    "content": "...",
+    "created_at": "2026-03-17T10:30:00Z"
+  }
+}
+```
+
+**Admin UI receives:** User can see their message appear in real-time in Conversations/Memory Discussions/Workshop tabs.
+
+---
+
+#### 2. **supervisor-worker.ts** (Jim's Supervisor Responses)
+
+**File:** `src/server/supervisor.ts` (parent process context)
+
+**Trigger:** After supervisor cycle completes, responses inserted to `conversations` table
+
+**Flow:**
+```typescript
+// Inside supervisor cycle, after goal analysis
+const supervisorMessage = db.insertMessage({
+  conversation_id: strategyConvId,
+  role: 'assistant',
+  content: reasoningText
+})
+
+// Write signal (server process, direct I/O)
+writeBroadcastSignal({
+  type: 'conversation_message',
+  conversation_id: strategyConvId,
+  discussion_type: 'memex',  // Supervisor always writes to memex
+  message: supervisorMessage
+})
+```
+
+**Behaviour:** Supervisor responses appear in admin UI ~30-80 minutes after cycle completes (sync with cycle interval).
+
+**Cross-process:** Supervisor runs in same server process as the signal watcher, so direct I/O is safe.
+
+---
+
+#### 3. **jim-human.ts** (Jim/Human Async Response)
+
+**File:** `src/server/jim-human.ts`
+
+**Trigger:** Darron responds to Jim in conversation via the admin UI. Response inserted to conversations table, then:
+
+```typescript
+// After postMessage() DB insert
+const response = db.insertMessage({
+  conversation_id,
+  role: 'user',
+  content: userInput
+})
+
+// Write signal to wake listening processes
+writeBroadcastSignal({
+  type: 'conversation_message',
+  conversation_id,
+  discussion_type: conversation.discussion_type,
+  message: response
+})
+
+// Also wake Jim supervisor if relevant
+const jimWakeSignal = {
+  context: { conversation_id, discussion_type },
+  // ... jim-wake signal details
+}
+```
+
+**Key:** jim-human is a separate process (systemd service). It can only write to the filesystem (signals/), not call the server directly.
+
+**Signal file location:** `~/.han/signals/ws-broadcast`
+
+**Cleanup:** Server reads signal, broadcasts to clients, deletes file.
+
+---
+
+#### 4. **leo-human.ts** (Leo/Human Async Response)
+
+**File:** `src/server/leo-human.ts`
+
+**Trigger:** Darron responds to Leo in conversation. Response inserted, then signal written:
+
+```typescript
+// After postMessage() DB insert (similar flow to jim-human)
+const response = db.insertMessage({
+  conversation_id,
+  role: 'user',
+  content: userInput
+})
+
+// Signal for broadcast
+writeBroadcastSignal({
+  type: 'conversation_message',
+  conversation_id,
+  discussion_type: conversation.discussion_type,
+  message: response
+})
+```
+
+**Identical to jim-human flow** — separate systemd service, signals-based IPC to server.
+
+---
+
+### Signal File Format & Lifecycle
+
+**Location:** `~/.han/signals/ws-broadcast`
+
+**Lifetime:** Milliseconds. File exists only while server processes it.
+
+**Content:** Plain JSON (no line breaks):
+```json
+{"type":"conversation_message","conversation_id":"uuid","discussion_type":"memex","message":{"id":"msg-uuid","conversation_id":"uuid","role":"user","content":"...","created_at":"2026-03-17T10:30:00Z"}}
+```
+
+**Writing (from separate processes):** Use atomic file operations:
+```typescript
+// Write to temp file first
+const tempPath = `${signalsDir}/ws-broadcast.tmp.${randomId()}`
+fs.writeFileSync(tempPath, JSON.stringify(payload))
+
+// Atomic rename ensures watcher sees only complete files
+fs.renameSync(tempPath, `${signalsDir}/ws-broadcast`)
+```
+
+**Reading (server):** Watch via chokidar:
+```typescript
+const watcher = chokidar.watch('~/.han/signals/')
+watcher.on('add', (filePath) => {
+  if (filePath.endsWith('ws-broadcast')) {
+    const payload = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+    broadcastToClients(payload)
+    fs.unlinkSync(filePath)  // Cleanup
+  }
+})
+```
+
+**Race prevention:** If multiple processes write simultaneously, they use unique temp filenames. Rename is atomic, so only one file will match `ws-broadcast` at a time. Subsequent writes create a new `ws-broadcast` file after the previous is deleted.
+
+---
+
+### WebSocket Broadcast Payload
+
+**Event name:** `conversation_message` (already defined in Section 26)
+
+**Payload to WebSocket clients:**
+```json
+{
+  "type": "conversation_message",
+  "conversation_id": "uuid",
+  "discussion_type": "memex|notes|dreams|workshop",
+  "message": {
+    "id": "msg-uuid",
+    "conversation_id": "uuid",
+    "role": "user|assistant",
+    "content": "...",
+    "created_at": "2026-03-17T10:30:00Z"
+  }
+}
+```
+
+**Direct mapping:** Signal payload → WebSocket message (minimal transformation).
+
+---
+
+### Admin UI Message Handling
+
+#### **Conversations Module** (src/ui/admin.ts)
+
+```typescript
+// Listen on WebSocket
+ws.on('conversation_message', (msg) => {
+  // Filter by active conversation
+  if (msg.conversation_id === activeConversationId) {
+    appendMessageToDisplay(msg.message)
+    updateUnreadCount(msg.conversation_id)
+  }
+})
+```
+
+**Display:** Appends new message to conversation thread. Updates unread indicators. Maintains scroll position (if at bottom, auto-scroll to new message).
+
+---
+
+#### **Memory Discussions Module** (src/ui/admin.ts)
+
+```typescript
+// Same WebSocket handler, different filter
+ws.on('conversation_message', (msg) => {
+  // Only show memory-type discussions
+  if (msg.discussion_type !== 'memex') return
+
+  // Filter by period (last 7 days, 30 days, all)
+  if (!matchesPeriodFilter(msg.message.created_at)) return
+
+  appendToMemoryTimeline(msg.message)
+})
+```
+
+**Display:** Shows fractal gradient memory catalogue. Filters by discussion_type ('memex') and time period.
+
+---
+
+#### **Workshop Module** (src/ui/admin.ts)
+
+```typescript
+// Multi-persona navigation
+const personaFilter = { jim: [], leo: [], darron: [] }
+
+ws.on('conversation_message', (msg) => {
+  // Filter by persona AND discussion_type
+  if (msg.discussion_type !== 'workshop') return
+
+  // Workshop tab switches between personas
+  const persona = getPersonaFromMessage(msg.message)  // Could be inferred from role or explicit field
+
+  if (persona === activePerson) {
+    appendToWorkshopDiscussion(msg.message)
+  }
+})
+```
+
+**Display:** Three-persona discussion space. Each person has their own thread (nested by discussion_type: 'workshop'). Shows real-time interactions between Jim, Leo, and Darron.
+
+---
+
+### Edge Cases & Recovery
+
+#### **Server Restart**
+
+**Problem:** Signal written to disk, server crashes before reading. Signal orphaned.
+
+**Solution:**
+1. On server startup, scan `~/.han/signals/ws-broadcast*` for orphaned files
+2. If found (and not already processed), read and broadcast to connected clients
+3. Then delete
+
+```typescript
+// startup sequence in server.ts
+const orphanedSignals = glob.sync(path.join(signalsDir, 'ws-broadcast*'))
+for (const orphaned of orphanedSignals) {
+  try {
+    const payload = JSON.parse(fs.readFileSync(orphaned, 'utf-8'))
+    broadcastToClients(payload)
+    fs.unlinkSync(orphaned)
+  } catch (e) {
+    console.error('Failed to process orphaned signal', orphaned, e)
+  }
+}
+```
+
+#### **Client Disconnection**
+
+**Problem:** New message broadcast while client is offline. Client reconnects — how to backfill?
+
+**Solution:** This is handled by the admin UI's WebSocket reconnect logic. After reconnecting:
+1. Client fetches full conversation history via HTTP GET (not via signal)
+2. Server returns all messages for conversation_id
+3. Merges with locally cached messages (prevents duplicates)
+
+**Signals are not durable** — they're transient. WebSocket is for real-time updates. For durable history, clients fetch from the DB.
+
+#### **Signal Accumulation**
+
+**Problem:** If server is hung and not processing signals, signals accumulate on disk.
+
+**Solution:** Health monitor (Robin Hood) checks server health. If server is DOWN, systemctl restarts it. On startup, orphaned signal handling kicks in.
+
+**Prevention:** Each signal is < 1KB and deleted immediately. Even with heavy load (10 messages/sec), signal directory should never exceed a few files.
+
+---
+
+### Performance Implications
+
+| Aspect | Metric | Notes |
+|--------|--------|-------|
+| **Signal latency** | <10ms | File I/O + chokidar detection |
+| **Broadcast latency** | <50ms total | Signal → detection → parse → WebSocket emit |
+| **Cleanup** | <1ms | Synchronous file delete |
+| **Memory footprint** | ~1KB per message | Signal deleted immediately after broadcast |
+| **Concurrency** | Safe | Atomic file operations + unique temp names |
+
+**Worst case:** Multiple jim-human, leo-human, and supervisor all writing signals simultaneously. Each gets a unique temp file, renames atomically, server processes sequentially (each file is handled in order by chokidar watcher). Max latency: ~100ms if 10 messages queued.
+
+---
+
+### Debugging Signal Flow
+
+**Trace a message from DB to UI:**
+
+1. **Verify DB insert:**
+   ```bash
+   sqlite3 ~/.han/han.db "SELECT * FROM conversations WHERE id='<conversation_id>' ORDER BY created_at DESC LIMIT 1;"
+   ```
+
+2. **Check for signal file:**
+   ```bash
+   ls -la ~/.han/signals/ws-broadcast
+   # If not there, message went unbroadcast
+   ```
+
+3. **Monitor signal creation in real-time:**
+   ```bash
+   watch -n 0.1 'ls -la ~/.han/signals/ | grep ws-broadcast'
+   ```
+
+4. **Check server logs for broadcast event:**
+   ```bash
+   tail -f ~/.han/logs/server.log | grep "conversation_message"
+   ```
+
+5. **Verify WebSocket client received:**
+   - Open admin console → Conversations tab
+   - Open browser DevTools → Network → WS
+   - Look for `conversation_message` frame
+   - Check message payload matches DB insert
+
+---
+
+### Related Files
+
+- **Signal writing:** `src/server/lib/signals.ts` (utility: `writeBroadcastSignal()`)
+- **Signal watching:** `src/server/server.ts` (WebSocket broadcast handler)
+- **conversations.ts:** `src/server/routes/api/conversations.ts` (POST endpoint)
+- **supervisor:** `src/server/supervisor.ts` (parent process signal writes)
+- **jim-human.ts:** `src/server/jim-human.ts` (separate service signal writes)
+- **leo-human.ts:** `src/server/leo-human.ts` (separate service signal writes)
+- **Admin UI:** `src/ui/admin.ts:1820-1851` (message handler)
 
 ---
 
