@@ -602,6 +602,68 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
   - `conversation_message` event when new message posted
   - Real-time updates in admin UI
 
+### WebSocket Broadcasting Architecture
+
+Real-time admin UI updates are implemented via a **signal-based cross-process broadcasting** mechanism (DEC-054). This allows worker processes (jim-human.ts, leo-human.ts, supervisor-worker.ts) to trigger WebSocket broadcasts from the main server without direct IPC.
+
+**Signal File Protocol:**
+
+1. **Worker writes signal**: When a conversation message is inserted to the database, worker writes `~/.han/signals/ws-broadcast` with broadcast payload
+   - Atomic write via temp file: `ws-broadcast-{timestamp}-{random}.tmp` → rename to `ws-broadcast`
+   - Prevents race conditions when multiple workers write simultaneously
+
+2. **Server polls and broadcasts**: Main server (`server.ts`) polls signal directory every 100ms
+   - On signal detection: read JSON payload, broadcast to all WebSocket clients, delete signal
+   - One-time delivery model (signal consumed after broadcast)
+
+3. **Admin UI receives update**: Browser clients filter by conversation_id or discussion_type
+   - Conversations module: matches conversation_id
+   - Workshop module: matches discussion_type='workshop' + persona
+   - Memory Discussions: matches discussion_type='memex'
+
+**Broadcast Sources (4 total):**
+
+| Source | File | Trigger | Payload Fields |
+|--------|------|---------|----------------|
+| Admin UI messages | `conversations.ts` | POST /api/conversations/:id/messages | type, conversation_id, discussion_type, message |
+| Supervisor cycles | `supervisor-worker.ts` | Jim's cycle responses | type, conversation_id, discussion_type, message |
+| Jim/Human async | `jim-human.ts` | postMessage() DB insert | type, conversation_id, discussion_type, message |
+| Leo/Human async | `leo-human.ts` | postMessage() DB insert | type, conversation_id, discussion_type, message |
+
+**Payload Structure (standardised across all sources):**
+
+```typescript
+{
+  type: 'conversation_message',
+  conversation_id: number,
+  discussion_type: string,  // 'workshop', 'memex', 'planning', etc.
+  message: {
+    id: number,
+    conversation_id: number,
+    content: string,
+    author: 'jim' | 'leo' | 'darron',
+    timestamp: string,
+    // ... other message fields
+  }
+}
+```
+
+**Performance Characteristics:**
+- Latency: 50-100ms average (100ms polling interval + broadcast time)
+- CPU overhead: Minimal (10 stat calls/second on signal directory)
+- Memory: O(connected clients) for broadcast fanout
+- Concurrency: Signal temp file naming prevents write collisions
+
+**Edge Cases:**
+- Server restart: Signals written during downtime are lost (acceptable for admin UI)
+- Client disconnect: No retry mechanism (client re-requests on reconnect)
+- Signal accumulation: Unlikely with 100ms polling (would require >10 messages/second sustained)
+
+**Related Documentation:**
+- Design doc: `docs/websocket-broadcast-design.md`
+- Architecture: `docs/HAN-ECOSYSTEM-COMPLETE.md` Section 26.5
+- Decision record: DEC-054
+
 ## Git Checkpoint Behavior
 
 **Purpose**: Protect against data loss by creating recovery points before task execution, enabling safe rollback on failure while preserving user's pre-existing work.

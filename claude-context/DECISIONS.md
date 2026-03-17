@@ -83,6 +83,7 @@ When you make a significant technical or design decision:
 | DEC-051 | Rumination Guard on Personal Cycles | Accepted | 2026-03-16 |
 | DEC-052 | Idle Cycle Dampening (Exponential Backoff) | Accepted | 2026-03-16 |
 | DEC-053 | Transition Dampening (Gradual Interval Ramp-Down) | Accepted | 2026-03-16 |
+| DEC-054 | Signal-Based Cross-Process WebSocket Broadcasting | Accepted | 2026-03-17 |
 
 ---
 
@@ -3838,4 +3839,50 @@ applies to both Jim (supervisor.ts) and Leo (leo-heartbeat.ts).
 - Works for any interval transition, not just holiday (e.g. sleep→morning, rest→work)
 - Applies to both Jim and Leo identically
 - No effect on wake signals — those bypass scheduling entirely
+
+### DEC-054: Signal-Based Cross-Process WebSocket Broadcasting
+
+**Date:** 2026-03-17
+**Status:** Accepted
+**Author:** Claude (autonomous)
+
+**Context:** Jim/Human and Leo/Human run in separate worker processes from the main Express server that hosts the WebSocket connections. Need a way for worker processes to trigger real-time broadcasts to admin UI clients when they insert conversation messages into the database. Previously, only admin UI messages (`conversations.ts`) and supervisor cycle responses triggered real-time updates.
+
+**Options Considered:**
+
+1. **Internal HTTP endpoint** (e.g., `POST http://localhost:3847/internal/broadcast`)
+   - ✅ Simple request/response model
+   - ❌ Requires network stack overhead for local-only communication
+   - ❌ Requires authentication/security for internal endpoint
+   - ❌ Introduces HTTP client dependency in workers
+
+2. **Signal file** (write JSON to `~/.han/signals/ws-broadcast`, main server polls)
+   - ✅ Zero dependencies (just fs operations)
+   - ✅ No authentication needed (filesystem permissions sufficient)
+   - ✅ Atomic writes via temp files prevent races
+   - ✅ Server deletes signal after broadcast (one-time delivery)
+   - ❌ Requires polling (100ms interval = 10 checks/second)
+   - ❌ Small latency (~50-100ms average) vs instant HTTP
+
+3. **Shared EventEmitter** (via cluster IPC)
+   - ✅ Native Node.js mechanism
+   - ❌ Requires workers to be cluster forks (current workers are Agent SDK subprocesses)
+   - ❌ Significant refactor to process architecture
+
+**Decision:** Chose **signal file** approach for simplicity and zero dependencies. The 50-100ms latency is acceptable for admin UI updates (not user-facing real-time chat). This matches existing signal file patterns used throughout the HAN ecosystem (jim-wake, rate-limited, deferred-cycles, etc.).
+
+**Implementation:**
+- Signal file path: `~/.han/signals/ws-broadcast`
+- Atomic writes: temp file pattern `ws-broadcast-{timestamp}-{random}.tmp` then rename
+- Server polling: `setInterval(checkAndBroadcastSignals, 100)` in `server.ts`
+- Lifecycle: write signal → server reads + broadcasts → server deletes signal
+- Standardised payload shape across all four sources (conversations.ts, supervisor-worker.ts, jim-human.ts, leo-human.ts)
+
+**Consequences:**
+- Server must poll signal directory (10 checks/second, minimal CPU)
+- Workers write signal files atomically (temp file + rename for race prevention)
+- No network overhead or authentication complexity
+- Consistent with existing HAN signal patterns
+- All four message sources now trigger real-time admin UI updates
+- Broadcast latency: 50-100ms average (acceptable for admin console)
 

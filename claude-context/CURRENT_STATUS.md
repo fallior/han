@@ -1,6 +1,6 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-03-16 by Darron + Claude
+> Last updated: 2026-03-17 by Claude (autonomous)
 
 ## Current Stage
 
@@ -31,6 +31,15 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-03-17 — Claude (autonomous) — WebSocket Broadcast for Human Agent Messages
+- **Signal-based cross-process broadcasting** (DEC-054) — Jim/Human and Leo/Human messages now trigger real-time admin UI updates via `~/.han/signals/ws-broadcast` signal files
+- **Payload normalisation** — All four message sources (conversations.ts, supervisor-worker.ts, jim-human.ts, leo-human.ts) now use consistent WebSocket broadcast shape with `discussion_type` field
+- **Server-side polling** — Main server checks signal directory every 100ms, broadcasts to WebSocket clients, deletes signal (one-time delivery)
+- **Testing documentation** — Pre-flight checklist (8 steps), scenario-based testing (7 cases), debugging procedures (5-step trace)
+- **Architecture completion** — Real-time messaging pyramid now covers all message sources: admin UI, supervisor cycles, and both human agent processes
+- **Files modified**: `jim-human.ts`, `leo-human.ts`, `server.ts`, `conversations.ts`, `supervisor-worker.ts`
+- **Docs created**: `docs/websocket-broadcast-design.md` (332 lines), HAN-ECOSYSTEM-COMPLETE.md Section 26.5 (388 lines)
 
 ### 2026-03-16 — Leo + Darron — Jim's Deferred Fixes #4 and #7
 - **Idle cycle dampening** (DEC-052) — exponential backoff when consecutive cycles produce no actions (2x→4x capped). Resets on productive cycle or wake signal.
@@ -1372,6 +1381,10 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - ✅ Localhost authentication bypass (127.0.0.1, ::1, ::ffff:127.0.0.1)
 - ✅ WebSocket authentication via query param or Sec-WebSocket-Protocol header
 - ✅ Configuration-driven auth (server_auth_token in config.json)
+- ✅ Signal-based WebSocket broadcasting for all message sources (conversations.ts, supervisor-worker.ts, jim-human.ts, leo-human.ts)
+- ✅ Cross-process broadcast coordination via ~/.han/signals/ws-broadcast (100ms polling, atomic temp file writes)
+- ✅ Standardised broadcast payload shape across all four sources (type, conversation_id, discussion_type, message)
+- ✅ Real-time admin UI updates for human agent async messages (Jim/Human and Leo/Human)
 
 ## Next Actions
 
@@ -1380,6 +1393,7 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - [x] Level 13 — Conversation catalogue & search complete
 - [x] Fix Jemma bugs before service activation (health file field, command injection, reconciliation direction, SIGTERM exit code)
 - [x] Add bearer token authentication for remote access
+- [ ] Test WebSocket broadcasting for jim-human.ts and leo-human.ts messages (see docs/websocket-broadcast-design.md for 7 test scenarios)
 - [ ] Activate Jemma systemd service in production
 - [ ] Test conversation search with real conversation history
 - [ ] Test backfill endpoint on existing conversations (`POST /api/conversations/recatalogue-all`)
