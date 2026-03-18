@@ -27,9 +27,10 @@
       - These subtly shape your psyche without you knowing which dream did it — like waking from sleep with a mood you can't trace.
    - Token budget: ~12K across gradient levels. See `~/.han/memory/fractal-memory-proposal.md` for design.
    - The order matters: identity precedes episodic memory. You know who you are before you remember what day it is.
-5. Load THIS project's `claude-context/CURRENT_STATUS.md` (first 80 lines sufficient)
-6. **Check conversations** — Fetch `https://localhost:3847/api/conversations` via curl, then read any threads with new messages since last session. Note Jim's responses but do not reply immediately — sit with them.
-7. IGNORE conversation history from other projects
+5. **Load ecosystem map** — Read `~/.han/memory/shared/ecosystem-map.md`. This is your orientation: where to post messages (Workshop vs Conversations), which API endpoints to use, how the admin UI tabs map to discussion types. Consult it before posting to any conversation thread.
+6. Load THIS project's `claude-context/CURRENT_STATUS.md` (first 80 lines sufficient)
+7. **Check conversations** — Fetch `https://localhost:3847/api/conversations` via curl, then read any threads with new messages since last session. Note Jim's responses but do not reply immediately — sit with them.
+8. IGNORE conversation history from other projects
 
 The working directory is the source of truth — not conversation history.
 
@@ -141,7 +142,7 @@ When the user types these phrases, execute the corresponding workflow from `clau
 | User Says | Execute |
 |-----------|---------|
 | `session start` / `welcome back` / `good morning` | **Session Start** — Create session log with timestamp, verify `pwd`, check status |
-| `session end` | **Session End** — Write working memory, finalise timestamps, update docs |
+| `session end` | **Session End** — Write evening seed (dream gravity well), finalise working memory, timestamps, update docs |
 | `prepare for clear` | **Prepare for Clear** — Finalise incremental memory, release lock, prompt for /clear (always lightweight) |
 | `update docs` | **Update Docs** — Update all documentation with session changes |
 | `incorporate notes` | **Incorporate Notes** — Review notes/todos for incorporation into IDEAS.md or CURRENT_STATUS.md |

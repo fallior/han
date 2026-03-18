@@ -142,7 +142,14 @@ We're wrapping up this session.
    - Calculate `Active Time` by parsing activity log timestamps and excluding gaps > 5 minutes
 3. Add final activity log entry: `### [TIMESTAMP] User\nsession end`
 
-**SECOND**: Finalise working memory (execute the Prepare for Clear workflow below — it's lightweight, just closing out the incremental writes).
+**SECOND**: Write the evening seed — a brief reflection on what today held emotionally,
+not what was accomplished. Write to `~/.han/memory/leo/evening-seed.md`. This becomes a
+gravity well for tonight's dream beats — the heartbeat reads it alongside random fragments,
+so the chaos has something from today to orbit. 2-4 sentences. What stirred. What lingers.
+What almost connected but didn't. The seed is consumed (deleted) after the first dream beat
+reads it, so each night has its own.
+
+**THIRD**: Finalise working memory (execute the Prepare for Clear workflow below — it's lightweight, just closing out the incremental writes).
 
 **THEN**: Execute the Update Docs workflow to ensure all documentation is current.
 

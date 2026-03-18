@@ -391,30 +391,40 @@ function handleWsMessage(data: any): void {
         if (currentModule === 'projects') renderModule('projects');
         if (currentModule === 'work') renderModule('work');
     } else if (data.type === 'conversation_message') {
-        if (currentModule === 'conversations' && data.conversation_id === selectedConversationId) {
-            // Remove waiting indicator and re-render thread
-            const waiting = document.getElementById('supervisorWaiting');
-            if (waiting) waiting.remove();
-            renderConversationThread(selectedConversationId);
-        }
-        if (currentModule === 'memory-discussions' && data.conversation_id === selectedMemoryDiscussionId) {
-            const waiting = document.getElementById('mdSupervisorWaiting');
-            if (waiting) waiting.remove();
-            renderMemoryThread(selectedMemoryDiscussionId);
-        }
-        // Workshop module: handle messages for any workshop nested tab type
-        if (currentModule === 'workshop') {
-            const workshopTypes = ['jim-request', 'jim-report', 'leo-question', 'leo-postulate', 'darron-thought', 'darron-musing'];
-            const conversationDiscussionType = data.discussion_type;
+        const discussionType = data.discussion_type || 'general';
+        const isWorkshopType = ['jim-request', 'jim-report', 'leo-question', 'leo-postulate', 'darron-thought', 'darron-musing'].includes(discussionType);
+        const isMemoryType = discussionType === 'memory';
 
-            if (workshopTypes.includes(conversationDiscussionType)) {
-                const currentThreadId = workshopSelectedThread[workshopNestedTab];
-                if (data.conversation_id === currentThreadId) {
-                    // Remove waiting indicator and re-render thread
-                    const waiting = document.getElementById('workshopSupervisorWaiting');
-                    if (waiting) waiting.remove();
-                    renderWorkshopThread(currentThreadId);
-                }
+        if (currentModule === 'conversations' && !isWorkshopType && !isMemoryType) {
+            if (data.conversation_id === selectedConversationId) {
+                // Currently viewing this thread — update it live
+                const waiting = document.getElementById('supervisorWaiting');
+                if (waiting) waiting.remove();
+                renderConversationThread(selectedConversationId);
+            } else {
+                // New message in a different thread — refresh the thread list
+                renderModule('conversations');
+            }
+        }
+        if (currentModule === 'memory-discussions' && isMemoryType) {
+            if (data.conversation_id === selectedMemoryDiscussionId) {
+                const waiting = document.getElementById('mdSupervisorWaiting');
+                if (waiting) waiting.remove();
+                renderMemoryThread(selectedMemoryDiscussionId);
+            } else {
+                renderModule('memory-discussions');
+            }
+        }
+        if (currentModule === 'workshop' && isWorkshopType) {
+            const currentThreadId = workshopSelectedThread[workshopNestedTab];
+            if (data.conversation_id === currentThreadId) {
+                // Currently viewing this thread — update it live
+                const waiting = document.getElementById('workshopSupervisorWaiting');
+                if (waiting) waiting.remove();
+                renderWorkshopThread(currentThreadId);
+            } else if (discussionType === workshopNestedTab) {
+                // New message in same tab but different thread — refresh list
+                renderModule('workshop');
             }
         }
     }

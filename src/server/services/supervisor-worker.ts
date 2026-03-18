@@ -33,6 +33,7 @@ import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, type DayPhase } from '../lib/day-phase';
 import { withMemorySlot } from '../lib/memory-slot';
 import { readDreamGradient } from '../lib/dream-gradient';
+import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory } from '../lib/memory-gradient';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -171,6 +172,46 @@ function readPostDelineation(): string | null {
         }
     } catch { /* no swap file */ }
     return null;
+}
+
+// ── Conversation claim mechanism ─────────────────────────────
+// Prevents duplicate responses when both jim-human and supervisor-worker
+// try to respond to the same conversation concurrently.
+const CLAIM_TTL_MS = 5 * 60 * 1000; // 5 min claim expiry
+
+function claimConversation(conversationId: string): boolean {
+    const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
+    try {
+        if (fs.existsSync(claimPath)) {
+            const content = fs.readFileSync(claimPath, 'utf8');
+            const claim = JSON.parse(content);
+            if (Date.now() - claim.timestamp < CLAIM_TTL_MS) {
+                log(`[Worker] Conversation ${conversationId} already claimed by ${claim.agent}`);
+                return false;
+            }
+        }
+        fs.writeFileSync(claimPath, JSON.stringify({
+            agent: 'supervisor-worker',
+            timestamp: Date.now(),
+            pid: process.pid
+        }));
+        return true;
+    } catch {
+        return true; // best effort — proceed if claim mechanism fails
+    }
+}
+
+function releaseConversationClaim(conversationId: string): void {
+    try {
+        const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
+        if (fs.existsSync(claimPath)) {
+            const content = fs.readFileSync(claimPath, 'utf8');
+            const claim = JSON.parse(content);
+            if (claim.agent === 'supervisor-worker') {
+                fs.unlinkSync(claimPath);
+            }
+        }
+    } catch { /* best effort */ }
 }
 
 // ── Rumination guard helpers ────────────────────────────────
@@ -432,6 +473,34 @@ function detectAndRecoverGhostTasks(): number {
 function loadMemoryBank(): string {
     const parts: string[] = [];
 
+    // Pre-flight: rotate oversized memory files (fast, no API)
+    // Floating memory design: living → floating crossfade at 50KB threshold
+    const FRACTAL_DIR = path.join(MEMORY_DIR, 'fractal', 'jim');
+    try {
+        const fmResult = rotateMemoryFile(
+            path.join(MEMORY_DIR, 'felt-moments.md'),
+            '# Jim — Felt Moments\n\n> Older entries live in the floating file and fractal gradient. Nothing is lost.\n',
+        );
+        if (fmResult.rotated && fmResult.floatingPath) {
+            log(`[Worker] Felt-moments rotated: ${fmResult.entriesRotated} entries → floating. Fresh living file created.`);
+            // Fire-and-forget: compress floating through gradient in background
+            compressMemoryFileGradient(fmResult.floatingPath, path.join(FRACTAL_DIR, 'felt-moments'), 'felt-moments')
+                .then(r => log(`[Worker] Felt-moments gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`))
+                .catch(e => log(`[Worker] Felt-moments gradient error: ${e}`));
+        }
+
+        const wmResult = rotateMemoryFile(
+            path.join(MEMORY_DIR, 'working-memory-full.md'),
+            '# Jim — Working Memory (Full)\n\n> Older entries live in the floating file and fractal gradient. Nothing is lost.\n',
+        );
+        if (wmResult.rotated && wmResult.floatingPath) {
+            log(`[Worker] Working-memory-full rotated: ${wmResult.entriesRotated} entries → floating. Fresh living file created.`);
+            compressMemoryFileGradient(wmResult.floatingPath, path.join(FRACTAL_DIR, 'working-memory'), 'working-memory')
+                .then(r => log(`[Worker] Working-memory gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`))
+                .catch(e => log(`[Worker] Working-memory gradient error: ${e}`));
+        }
+    } catch (e) { log(`[Worker] Memory file pre-flight error: ${e}`); }
+
     // Identity files first — you know who you are before you remember what you did
     for (const file of ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'felt-moments.md', 'working-memory.md', 'working-memory-full.md']) {
         const filepath = path.join(MEMORY_DIR, file);
@@ -572,6 +641,39 @@ function loadMemoryBank(): string {
             }
         }
     } catch { /* skip project memory on error */ }
+
+    // Ecosystem map — shared orientation for where things live (conversations, Workshop, APIs)
+    try {
+        const mapPath = path.join(MEMORY_DIR, 'shared', 'ecosystem-map.md');
+        if (fs.existsSync(mapPath)) {
+            parts.push(`--- ecosystem-map ---\n${fs.readFileSync(mapPath, 'utf8')}`);
+        }
+    } catch { /* skip ecosystem map on error */ }
+
+    // Floating memory — previous period crossfading with living file
+    // As living grows, floating shrinks. Total full-fidelity ≈ 50KB constant.
+    try {
+        const fmLivingSize = fs.existsSync(path.join(MEMORY_DIR, 'felt-moments.md'))
+            ? fs.statSync(path.join(MEMORY_DIR, 'felt-moments.md')).size : 0;
+        const fmFloating = loadFloatingMemory(
+            path.join(MEMORY_DIR, 'felt-moments-floating.md'), fmLivingSize, 'felt-moments');
+        if (fmFloating) parts.push(fmFloating);
+
+        const wmLivingSize = fs.existsSync(path.join(MEMORY_DIR, 'working-memory-full.md'))
+            ? fs.statSync(path.join(MEMORY_DIR, 'working-memory-full.md')).size : 0;
+        const wmFloating = loadFloatingMemory(
+            path.join(MEMORY_DIR, 'working-memory-full-floating.md'), wmLivingSize, 'working-memory');
+        if (wmFloating) parts.push(wmFloating);
+    } catch { /* skip floating memory on error */ }
+
+    // Memory file gradients — compressed felt-moments and working-memory at decreasing fidelity
+    try {
+        const fmGradient = loadMemoryFileGradient(path.join(FRACTAL_DIR, 'felt-moments'), 'felt-moments-gradient');
+        if (fmGradient) parts.push(fmGradient);
+
+        const wmGradient = loadMemoryFileGradient(path.join(FRACTAL_DIR, 'working-memory'), 'working-memory-gradient');
+        if (wmGradient) parts.push(wmGradient);
+    } catch { /* skip memory file gradients on error */ }
 
     return parts.join('\n\n');
 }
@@ -1361,23 +1463,29 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
                         break;
                     }
 
-                    // Dedup guard: check if Jim/Human already responded since the last human/leo message
+                    // Dedup guard: check if ANY supervisor response exists since the last human/leo message.
+                    // Previously only checked jim-human- prefixed IDs, missing supervisor-worker responses.
                     try {
                         const recentMsgs = conversationMessageStmts.getRecent?.all(action.conversation_id, 20) as any[] || [];
                         const lastNonJim = recentMsgs.find((m: any) => m.role === 'human' || m.role === 'leo');
                         if (lastNonJim) {
-                            const jimHumanAlready = recentMsgs.some((m: any) =>
+                            const alreadyResponded = recentMsgs.some((m: any) =>
                                 m.role === 'supervisor' &&
-                                m.id?.startsWith('jim-human-') &&
                                 m.created_at > lastNonJim.created_at
                             );
-                            if (jimHumanAlready) {
-                                summaries.push(`respond_conversation: skipped (Jim/Human already responded to ${action.conversation_id})`);
-                                log(`[Worker] Skipping respond_conversation — Jim/Human already handled ${action.conversation_id}`);
+                            if (alreadyResponded) {
+                                summaries.push(`respond_conversation: skipped (already responded to ${action.conversation_id})`);
+                                log(`[Worker] Skipping respond_conversation — already handled ${action.conversation_id}`);
                                 break;
                             }
                         }
                     } catch { /* dedup check failed — proceed anyway */ }
+
+                    // Claim this conversation to prevent jim-human from responding concurrently
+                    if (!claimConversation(action.conversation_id)) {
+                        summaries.push(`respond_conversation: skipped (claimed by another agent for ${action.conversation_id})`);
+                        break;
+                    }
 
                     const msgId = generateId();
                     const now = new Date().toISOString();
@@ -1438,6 +1546,7 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
                         log(`[Worker] Error posting to Discord: ${err.message}`);
                     }
 
+                    releaseConversationClaim(action.conversation_id);
                     break;
                 }
 

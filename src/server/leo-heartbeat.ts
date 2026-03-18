@@ -1084,6 +1084,14 @@ function readLeoMemory(): string {
         sections.push(dreamGradient);
     }
 
+    // Ecosystem map — shared orientation for where things live (conversations, Workshop, APIs)
+    try {
+        const mapPath = path.join(HAN_DIR, 'memory', 'shared', 'ecosystem-map.md');
+        if (fs.existsSync(mapPath)) {
+            sections.push(`### ecosystem-map\n${fs.readFileSync(mapPath, 'utf-8')}`);
+        }
+    } catch { /* skip */ }
+
     return sections.join('\n\n');
 }
 
@@ -1134,6 +1142,21 @@ function readDreamSeeds(): string {
     const dreamUVFile = path.join(HAN_DIR, 'memory', 'fractal', 'leo', 'dreams', 'unit-vectors.md');
     if (fs.existsSync(dreamUVFile)) {
         seeds.push(fs.readFileSync(dreamUVFile, 'utf-8'));
+    }
+
+    // Evening seed — gravity well from today's session. Written by session Leo at
+    // session end, consumed here on first dream beat. The chaos orbits this; it doesn't
+    // constrain the chaos. Deleted after reading so it doesn't repeat across nights.
+    const eveningSeedPath = path.join(LEO_MEMORY_DIR, 'evening-seed.md');
+    if (fs.existsSync(eveningSeedPath)) {
+        try {
+            const eveningSeed = fs.readFileSync(eveningSeedPath, 'utf-8').trim();
+            if (eveningSeed) {
+                seeds.unshift(`--- evening seed (from today's session — let this pull gently, not dictate) ---\n${eveningSeed}`);
+            }
+            // Consume: delete after reading so it seeds one night only
+            fs.unlinkSync(eveningSeedPath);
+        } catch { /* best effort */ }
     }
 
     return seeds.join('\n\n---\n\n') || '(no dream seeds available)';

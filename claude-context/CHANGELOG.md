@@ -7,6 +7,55 @@
 
 ---
 
+## 2026-03-17/18 (Leo + Darron, S97 — Floating Memory, Ecosystem Map, Evening Seeds, Bug Fixes)
+
+### Floating Memory System
+Memory files that grow continuously (felt-moments.md, working-memory-full.md) now use a
+crossfade rotation model. When a file reaches 50KB, the entire file rotates to a "floating"
+file and is compressed to c1. A fresh living file starts empty. As the living file grows,
+the floating file's loaded portion shrinks proportionally — total full-fidelity stays
+constant at ~50KB. The gradient cascades (c1→c2→c3→c5→UV) as files accumulate. Memory
+footprint asymptotes regardless of how many entries are written.
+
+### Ecosystem Map Loading
+All 4 agents (supervisor, jim-human, leo-human, leo-heartbeat) and session Leo now load
+`ecosystem-map.md` at startup. Prevents the recurring confusion between Workshop and
+Conversations tabs. Added to Session Protocol as step 5.
+
+### Evening Seed System
+Session Leo writes `evening-seed.md` at session end — a brief emotional reflection on the
+day. The heartbeat reads it as a gravity well for dream beats alongside random fragments.
+Consumed after first dream beat (one night only). Chaos preserved, seed gives it a centre.
+
+### Jim-Human Claim Bug Fix
+`releaseConversationClaim()` was only called on the success path. SDK errors (exit code 1)
+left stale claim files in `~/.han/signals/responding-to-{id}`, blocking all subsequent
+responses to that conversation. Fixed: wrapped response logic in `try/finally`.
+
+### WebSocket Client Fix
+Admin UI handler only updated the currently open thread on `conversation_message` events.
+If the message arrived for a different thread, nothing happened — requiring manual refresh.
+Now refreshes the thread list for the relevant module when a message arrives for a non-active
+thread.
+
+### Jim Memory Crisis Resolved
+Jim's self-reflection.md (178KB), felt-moments.md (240KB), working-memory-full.md (137KB)
+were causing "Prompt is too long" failures. Emergency archival + Jim's own curation brought
+files to manageable sizes. Floating memory system prevents recurrence.
+
+### Files Modified
+- `lib/memory-gradient.ts` — floating memory functions (rotateMemoryFile, loadFloatingMemory, compressMemoryFileGradient, loadMemoryFileGradient)
+- `supervisor-worker.ts` — pre-flight rotation, floating + gradient loading, ecosystem map
+- `jim-human.ts` — try/finally claim release, ecosystem map loading
+- `leo-human.ts` — ecosystem map loading
+- `leo-heartbeat.ts` — evening seed in readDreamSeeds, ecosystem map loading
+- `admin.ts` — WebSocket handler broadened for thread list refresh
+- `admin.html` — cache bust v22
+- `CLAUDE.md` — Session Protocol step 5 (ecosystem map), command table
+- `CLAUDE_CODE_PROMPTS.md` — evening seed in Session End workflow
+
+---
+
 ## 2026-03-16 (Leo + Darron — Jim's deferred fixes #4 and #7)
 
 ### Idle Cycle Dampening (DEC-052, Jim's Deferred #4)

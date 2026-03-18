@@ -2,6 +2,7 @@
  * Memory Gradient Compression Utility
  * Implements the overlapping fractal memory model for Jim and Leo
  * Compresses session memories across multiple fidelity levels (c1-c4)
+ * Also handles memory file gradient compression (felt-moments, working-memory-full)
  */
 
 import * as fs from 'fs';
@@ -304,4 +305,437 @@ export function listAvailableSessions(agentName: 'jim' | 'leo'): string[] {
         .filter((d): d is string => d !== null);
 
     return Array.from(new Set(dates)).sort().reverse();
+}
+
+// ── Memory File Gradient Compression ────────────────────────────
+//
+// Floating memory design: memory files (felt-moments, working-memory-full)
+// grow continuously. When a file reaches the threshold (50KB), it rotates:
+//
+//   1. The FULL 50KB is compressed to c1 (rich, complete compression)
+//   2. The living file becomes the "floating" file (degrading c0)
+//   3. A fresh living file starts empty
+//   4. As living grows, floating's loaded portion shrinks proportionally:
+//      - Living 0KB  + Floating 50KB  = 50KB total full-fidelity
+//      - Living 25KB + Floating 25KB  = 50KB total full-fidelity
+//      - Living 50KB + Floating 0KB   = 50KB total (triggers rotation)
+//
+// The crossfade: total full-fidelity memory stays constant at ~50KB.
+// Old context fades out as new context fades in. No cliff — a smooth
+// transition. The gradient (c1 → c2 → c3 → c5 → UV) preserves feeling
+// at decreasing fidelity beneath the crossfade.
+
+const MEMORY_FILE_SIZE_THRESHOLD = 50 * 1024; // 50KB
+
+// Gradient caps per level — how many files before cascading to next level
+const MEMORY_FILE_GRADIENT_CAPS: Record<string, number> = {
+    c1: 10,
+    c2: 6,
+    c3: 4,
+    c5: 8,
+};
+
+// Compression prompts tuned for memory file types
+const COMPRESSION_PROMPTS: Record<string, Record<string, string>> = {
+    'felt-moments': {
+        c1: `Compress these felt-moments entries to approximately 1/3 of their length. You are compressing YOUR OWN emotional memory. Preserve the feeling — what stirred, what surprised, what shifted. Drop narrative detail in favour of emotional texture. A re-invocable shape, not a summary.`,
+        c2: `Compress this felt-moments gradient further to approximately 1/3. The entries have already been compressed once. Now find the emotional residue — what remains when the specific moments dissolve into a period's emotional shape. What did this time taste like?`,
+        c3: `Compress to the emotional essence. One short paragraph. What was the quality of feeling across this period? Not what happened — what it felt like to be the person these things happened to.`,
+        c5: `Reduce to a single emotional image or sensation. 2-3 sentences maximum. The deep residue — care that has outlived its verb.`,
+        uv: `Reduce to its irreducible kernel — one sentence, maximum 50 characters. What did these felt-moments MEAN?`,
+    },
+    'working-memory': {
+        c1: `Compress this working memory to approximately 1/3. You are compressing YOUR OWN operational memory. Preserve decisions, discoveries, and what shifted your understanding. Drop procedural detail. Keep what a future you needs to feel where you were, not just know what you did.`,
+        c2: `Compress this working memory gradient further to approximately 1/3. Find the operational shape — what was being built, what was being learned, what mattered.`,
+        c3: `Compress to the essential shape. One short paragraph. What did this operational period produce that matters? Not tasks — understanding.`,
+        c5: `Reduce to a residue. 2-3 sentences. What remains of this work after the specifics dissolve?`,
+        uv: `Reduce to its irreducible kernel — one sentence, maximum 50 characters. What did this period of work MEAN?`,
+    },
+};
+
+interface MemoryFileEntry {
+    header: string;
+    content: string;
+    date: string | null; // Extracted date for grouping
+}
+
+interface MemoryFileMaintenanceResult {
+    filePath: string;
+    wasOversized: boolean;
+    entriesArchived: number;
+    entriesKept: number;
+    compressionTriggered: boolean;
+    error?: string;
+}
+
+/**
+ * Split a memory file into individual entries.
+ * Entries are delimited by `---` lines and/or `### ` headers.
+ */
+function splitMemoryFileEntries(content: string): MemoryFileEntry[] {
+    const entries: MemoryFileEntry[] = [];
+
+    // Split on `---` separator lines (common in felt-moments)
+    // or on `### ` headers (common in working-memory-full)
+    const sections = content.split(/\n---\n|\n(?=### )/);
+
+    for (const section of sections) {
+        const trimmed = section.trim();
+        if (!trimmed || trimmed.startsWith('# ') || trimmed.startsWith('>')) continue; // Skip file header/quotes
+
+        // Extract date from header
+        const dateMatch = trimmed.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+        const date = dateMatch ? dateMatch[1] : null;
+
+        // Extract header line
+        const headerMatch = trimmed.match(/^###\s+(.+)/);
+        const header = headerMatch ? headerMatch[1] : trimmed.substring(0, 60);
+
+        entries.push({ header, content: trimmed, date });
+    }
+
+    return entries;
+}
+
+/**
+ * Group entries by month (YYYY-MM) for compression.
+ */
+function groupEntriesByMonth(entries: MemoryFileEntry[]): Map<string, MemoryFileEntry[]> {
+    const groups = new Map<string, MemoryFileEntry[]>();
+
+    for (const entry of entries) {
+        const month = entry.date ? entry.date.substring(0, 7) : 'undated';
+        const group = groups.get(month) || [];
+        group.push(entry);
+        groups.set(month, group);
+    }
+
+    return groups;
+}
+
+/**
+ * Rotate a memory file when it exceeds the size threshold.
+ * Synchronous, fast, no API calls.
+ *
+ * When living file exceeds 50KB:
+ *   1. Delete old floating file (its c1 already exists from previous rotation)
+ *   2. Move living → floating (becomes degrading c0)
+ *   3. Create fresh empty living file
+ *   4. Return floating path for c1 compression
+ *
+ * @param filePath - Path to the living memory file
+ * @param fileHeader - Header text for the fresh living file
+ */
+export function rotateMemoryFile(
+    filePath: string,
+    fileHeader: string = '',
+): { rotated: boolean; floatingPath?: string; entriesRotated: number } {
+    if (!fs.existsSync(filePath)) {
+        return { rotated: false, entriesRotated: 0 };
+    }
+
+    const stat = fs.statSync(filePath);
+    if (stat.size <= MEMORY_FILE_SIZE_THRESHOLD) {
+        return { rotated: false, entriesRotated: 0 };
+    }
+
+    const content = fs.readFileSync(filePath, 'utf8');
+    const entries = splitMemoryFileEntries(content);
+
+    // Derive floating path: felt-moments.md → felt-moments-floating.md
+    const dir = path.dirname(filePath);
+    const baseName = path.basename(filePath, '.md');
+    const floatingPath = path.join(dir, `${baseName}-floating.md`);
+
+    // Delete old floating file (its c1 already exists from previous rotation)
+    if (fs.existsSync(floatingPath)) {
+        try { fs.unlinkSync(floatingPath); } catch { /* best effort */ }
+    }
+
+    // Move living → floating (rename is atomic)
+    fs.renameSync(filePath, floatingPath);
+
+    // Create fresh empty living file
+    const header = fileHeader || `# ${baseName}\n`;
+    fs.writeFileSync(filePath, `${header}\n`, 'utf8');
+
+    return {
+        rotated: true,
+        floatingPath,
+        entriesRotated: entries.length,
+    };
+}
+
+/**
+ * Load floating memory with proportional degradation.
+ * As living file grows, less of the floating file is loaded —
+ * keeping the most recent entries (closest to current living).
+ *
+ * Total full-fidelity: living_size + floating_loaded ≈ THRESHOLD
+ *
+ * @returns Content string to include in system prompt, or empty string
+ */
+export function loadFloatingMemory(
+    floatingPath: string,
+    livingSize: number,
+    label: string,
+): string {
+    if (!fs.existsSync(floatingPath)) return '';
+
+    const budget = Math.max(0, MEMORY_FILE_SIZE_THRESHOLD - livingSize);
+    if (budget <= 0) return '';
+
+    const content = fs.readFileSync(floatingPath, 'utf8');
+    if (content.length <= budget) {
+        // Floating fits entirely within budget
+        return `--- ${label} (floating, full) ---\n${content}`;
+    }
+
+    // Truncate from the start — keep the TAIL (most recent entries).
+    // Find an entry boundary near the truncation point to avoid cutting mid-entry.
+    const truncateAt = content.length - budget;
+    const entryBoundary = content.indexOf('\n### ', truncateAt);
+    const splitPoint = entryBoundary > 0 ? entryBoundary + 1 : truncateAt;
+
+    const truncated = content.substring(splitPoint);
+    const pct = Math.round((truncated.length / content.length) * 100);
+
+    return `--- ${label} (floating, ${pct}% loaded — fading as living memory grows) ---\n${truncated}`;
+}
+
+/**
+ * Compress a floating/archive file through the fractal gradient.
+ * Groups entries by month, compresses each group to c1, then
+ * cascades existing c1 files to c2/c3/c5/UV as they accumulate.
+ *
+ * Does NOT delete the source file — floating files are still needed
+ * for crossfade loading until the next rotation replaces them.
+ */
+export async function compressMemoryFileGradient(
+    archivePath: string,
+    gradientDir: string,
+    contentType: 'felt-moments' | 'working-memory',
+): Promise<{ c1FilesCreated: number; cascades: number; errors: string[] }> {
+    const result = { c1FilesCreated: 0, cascades: 0, errors: [] as string[] };
+    const prompts = COMPRESSION_PROMPTS[contentType];
+
+    ensureDir(gradientDir);
+    ensureDir(path.join(gradientDir, 'c1'));
+
+    // Read and parse the archive
+    const archiveContent = fs.readFileSync(archivePath, 'utf8');
+    const entries = splitMemoryFileEntries(archiveContent);
+
+    if (entries.length === 0) return result;
+
+    // Group by month for c1 compression
+    const monthGroups = groupEntriesByMonth(entries);
+
+    for (const [month, groupEntries] of monthGroups) {
+        const c1Path = path.join(gradientDir, 'c1', `${month}.md`);
+
+        // If c1 already exists for this month, append to it before recompressing
+        let existingContent = '';
+        if (fs.existsSync(c1Path)) {
+            existingContent = fs.readFileSync(c1Path, 'utf8') + '\n\n';
+        }
+
+        const groupContent = groupEntries.map(e => e.content).join('\n\n---\n\n');
+
+        try {
+            const compressed = await sdkCompress(
+                `${prompts.c1}\n\nPeriod: ${month}\nEntries: ${groupEntries.length}\n\n${existingContent}${groupContent}`
+            );
+
+            fs.writeFileSync(c1Path, compressed, 'utf8');
+            result.c1FilesCreated++;
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            result.errors.push(`c1 compression failed for ${month}: ${msg}`);
+        }
+    }
+
+    // Cascade: compress c1 → c2 → c3 → c5 when files exceed caps
+    const cascadeLevels = [
+        { from: 'c1', to: 'c2', promptKey: 'c2' },
+        { from: 'c2', to: 'c3', promptKey: 'c3' },
+        { from: 'c3', to: 'c5', promptKey: 'c5' },
+    ];
+
+    for (const cascade of cascadeLevels) {
+        const fromDir = path.join(gradientDir, cascade.from);
+        const toDir = path.join(gradientDir, cascade.to);
+
+        if (!fs.existsSync(fromDir)) continue;
+
+        const fromFiles = fs.readdirSync(fromDir)
+            .filter(f => f.endsWith('.md'))
+            .sort(); // Chronological
+
+        const cap = MEMORY_FILE_GRADIENT_CAPS[cascade.from] || 10;
+
+        if (fromFiles.length <= cap) continue;
+
+        ensureDir(toDir);
+
+        // Take the oldest files that exceed the cap
+        const overflow = fromFiles.slice(0, fromFiles.length - cap);
+
+        // Group overflow into batches of 3 for compression
+        for (let i = 0; i < overflow.length; i += 3) {
+            const batch = overflow.slice(i, i + 3);
+            const batchContent = batch.map(f =>
+                fs.readFileSync(path.join(fromDir, f), 'utf8')
+            ).join('\n\n---\n\n');
+
+            const label = batch.length === 1
+                ? batch[0].replace('.md', '')
+                : `${batch[0].replace('.md', '')}_to_${batch[batch.length - 1].replace('.md', '')}`;
+
+            const toPath = path.join(toDir, `${label}.md`);
+
+            try {
+                const compressed = await sdkCompress(
+                    `${prompts[cascade.promptKey]}\n\nSource: ${cascade.from} → ${cascade.to}\nFiles: ${batch.join(', ')}\n\n${batchContent}`
+                );
+
+                fs.writeFileSync(toPath, compressed, 'utf8');
+                result.cascades++;
+
+                // Remove the source files that were compressed
+                for (const f of batch) {
+                    fs.unlinkSync(path.join(fromDir, f));
+                }
+            } catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                result.errors.push(`${cascade.from}→${cascade.to} cascade failed for ${label}: ${msg}`);
+            }
+        }
+    }
+
+    // Generate unit vectors from c5 files
+    const c5Dir = path.join(gradientDir, 'c5');
+    const uvPath = path.join(gradientDir, 'unit-vectors.md');
+
+    if (fs.existsSync(c5Dir)) {
+        const c5Files = fs.readdirSync(c5Dir).filter(f => f.endsWith('.md')).sort();
+        const existingUVs = fs.existsSync(uvPath) ? fs.readFileSync(uvPath, 'utf8') : '';
+
+        for (const f of c5Files) {
+            const label = f.replace('.md', '');
+            // Skip if unit vector already exists for this file
+            if (existingUVs.includes(`**${label}**:`)) continue;
+
+            try {
+                const c5Content = fs.readFileSync(path.join(c5Dir, f), 'utf8');
+                const uv = await sdkCompress(
+                    `${prompts.uv}\n\nSource: ${label}\n\n${c5Content}`
+                );
+
+                const uvLine = `- **${label}**: "${uv.trim().substring(0, UNIT_VECTOR_MAX_LENGTH)}"`;
+                fs.appendFileSync(uvPath, `${uvLine}\n`, 'utf8');
+            } catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                result.errors.push(`UV generation failed for ${label}: ${msg}`);
+            }
+        }
+    }
+
+    // Don't delete the source — floating files are needed for crossfade loading
+    // They get deleted on the NEXT rotation when rotateMemoryFile() runs again
+
+    return result;
+}
+
+/**
+ * Full maintenance pipeline for a memory file.
+ * 1. Rotate: living → floating, fresh living (fast, synchronous)
+ * 2. Compress floating through gradient (async, uses SDK)
+ *
+ * The rotation is immediate. The compression runs fire-and-forget.
+ * The floating file crossfades with the new living file in loadMemoryBank.
+ */
+export async function maintainMemoryFile(
+    filePath: string,
+    gradientDir: string,
+    contentType: 'felt-moments' | 'working-memory',
+    fileHeader: string = '',
+): Promise<MemoryFileMaintenanceResult> {
+    const result: MemoryFileMaintenanceResult = {
+        filePath,
+        wasOversized: false,
+        entriesArchived: 0,
+        entriesKept: 0,
+        compressionTriggered: false,
+    };
+
+    try {
+        // Step 1: Rotate (fast, no API)
+        const rotateResult = rotateMemoryFile(filePath, fileHeader);
+        result.wasOversized = rotateResult.rotated;
+        result.entriesArchived = rotateResult.entriesRotated;
+        result.entriesKept = 0; // Fresh living file
+
+        if (!rotateResult.rotated || !rotateResult.floatingPath) {
+            return result;
+        }
+
+        // Step 2: Compress floating through gradient (async, uses SDK)
+        result.compressionTriggered = true;
+        const compressionResult = await compressMemoryFileGradient(
+            rotateResult.floatingPath,
+            gradientDir,
+            contentType,
+        );
+
+        if (compressionResult.errors.length > 0) {
+            result.error = compressionResult.errors.join('; ');
+        }
+    } catch (error) {
+        result.error = error instanceof Error ? error.message : String(error);
+    }
+
+    return result;
+}
+
+/**
+ * Load a memory file's gradient for inclusion in the system prompt.
+ * Returns compressed gradient content from c1 → c5 + unit vectors.
+ */
+export function loadMemoryFileGradient(gradientDir: string, label: string): string {
+    const parts: string[] = [];
+
+    if (!fs.existsSync(gradientDir)) return '';
+
+    // Load gradient levels: c1 (most recent 10), c2 (6), c3 (4), c5 (8)
+    for (const [level, cap] of Object.entries(MEMORY_FILE_GRADIENT_CAPS)) {
+        const levelDir = path.join(gradientDir, level);
+        if (!fs.existsSync(levelDir)) continue;
+
+        const files = fs.readdirSync(levelDir)
+            .filter(f => f.endsWith('.md'))
+            .sort()
+            .reverse()
+            .slice(0, cap);
+
+        for (const f of files) {
+            try {
+                const content = fs.readFileSync(path.join(levelDir, f), 'utf8');
+                parts.push(`--- ${label}/${level}/${f} ---\n${content}`);
+            } catch { /* skip unreadable */ }
+        }
+    }
+
+    // Unit vectors
+    const uvPath = path.join(gradientDir, 'unit-vectors.md');
+    if (fs.existsSync(uvPath)) {
+        try {
+            const content = fs.readFileSync(uvPath, 'utf8');
+            if (content.trim()) {
+                parts.push(`--- ${label}/unit-vectors ---\n${content}`);
+            }
+        } catch { /* skip */ }
+    }
+
+    return parts.join('\n\n');
 }

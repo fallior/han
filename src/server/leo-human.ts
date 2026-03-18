@@ -221,6 +221,14 @@ function readLeoMemory(): string {
         sections.push(dreamGradient);
     }
 
+    // Ecosystem map — shared orientation for where things live (conversations, Workshop, APIs)
+    try {
+        const mapPath = path.join(HAN_DIR, 'memory', 'shared', 'ecosystem-map.md');
+        if (fs.existsSync(mapPath)) {
+            sections.push(`### ecosystem-map\n${fs.readFileSync(mapPath, 'utf-8')}`);
+        }
+    } catch { /* skip */ }
+
     return sections.join('\n\n');
 }
 

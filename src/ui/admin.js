@@ -301,26 +301,35 @@
       if (currentModule === "projects") renderModule("projects");
       if (currentModule === "work") renderModule("work");
     } else if (data.type === "conversation_message") {
-      if (currentModule === "conversations" && data.conversation_id === selectedConversationId) {
-        const waiting = document.getElementById("supervisorWaiting");
-        if (waiting) waiting.remove();
-        renderConversationThread(selectedConversationId);
+      const discussionType = data.discussion_type || "general";
+      const isWorkshopType = ["jim-request", "jim-report", "leo-question", "leo-postulate", "darron-thought", "darron-musing"].includes(discussionType);
+      const isMemoryType = discussionType === "memory";
+      if (currentModule === "conversations" && !isWorkshopType && !isMemoryType) {
+        if (data.conversation_id === selectedConversationId) {
+          const waiting = document.getElementById("supervisorWaiting");
+          if (waiting) waiting.remove();
+          renderConversationThread(selectedConversationId);
+        } else {
+          renderModule("conversations");
+        }
       }
-      if (currentModule === "memory-discussions" && data.conversation_id === selectedMemoryDiscussionId) {
-        const waiting = document.getElementById("mdSupervisorWaiting");
-        if (waiting) waiting.remove();
-        renderMemoryThread(selectedMemoryDiscussionId);
+      if (currentModule === "memory-discussions" && isMemoryType) {
+        if (data.conversation_id === selectedMemoryDiscussionId) {
+          const waiting = document.getElementById("mdSupervisorWaiting");
+          if (waiting) waiting.remove();
+          renderMemoryThread(selectedMemoryDiscussionId);
+        } else {
+          renderModule("memory-discussions");
+        }
       }
-      if (currentModule === "workshop") {
-        const workshopTypes = ["jim-request", "jim-report", "leo-question", "leo-postulate", "darron-thought", "darron-musing"];
-        const conversationDiscussionType = data.discussion_type;
-        if (workshopTypes.includes(conversationDiscussionType)) {
-          const currentThreadId = workshopSelectedThread[workshopNestedTab];
-          if (data.conversation_id === currentThreadId) {
-            const waiting = document.getElementById("workshopSupervisorWaiting");
-            if (waiting) waiting.remove();
-            renderWorkshopThread(currentThreadId);
-          }
+      if (currentModule === "workshop" && isWorkshopType) {
+        const currentThreadId = workshopSelectedThread[workshopNestedTab];
+        if (data.conversation_id === currentThreadId) {
+          const waiting = document.getElementById("workshopSupervisorWaiting");
+          if (waiting) waiting.remove();
+          renderWorkshopThread(currentThreadId);
+        } else if (discussionType === workshopNestedTab) {
+          renderModule("workshop");
         }
       }
     }

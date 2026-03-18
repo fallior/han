@@ -35,6 +35,9 @@
 | **Weekly Rhythm** | Four-phase daily schedule: sleep (22:00-06:00), morning (06:00-09:00), work (09:00-17:00), evening (17:00-22:00). Rest days (Sat/Sun) and holidays have longer intervals. Protected by Hall of Records R001. | `lib/day-phase.ts` (`getDayPhase`, `getPhaseInterval`, `isRestDay`, `isOnHoliday`) |
 | **Credential Swap** | Automatic SDK account failover. When an agent hits a rate limit, writes `rate-limited` signal. Jemma round-robins to next credential file every 30 seconds. | `jemma.ts` (`checkAndSwapCredentials`), credentials at `~/.claude/.credentials-[a-z].json` |
 | **Project Knowledge Gradient** | Fractal gradient applied to Jim's project knowledge files. Most recent project at full fidelity, older projects at decreasing compression. Ordered by file mtime. | `supervisor-worker.ts` (`PROJECT_GRADIENT` in `loadMemoryBank`), storage at `~/.han/memory/fractal/jim/projects/` |
+| **Floating Memory** | Crossfade mechanism for memory files (felt-moments, working-memory-full). When living file reaches 50KB: entire file rotated to "floating" file, compressed to c1, fresh living started. Loading is proportional: as living grows (0→50KB), floating's loaded portion shrinks (50→0KB). Total full-fidelity stays constant at ~50KB. No cliff — smooth transition. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `loadFloatingMemory`), pre-flight in `supervisor-worker.ts` `loadMemoryBank()`, floating files at `~/.han/memory/*-floating.md` |
+| **Memory File Gradient** | Fractal gradient applied to memory files (felt-moments, working-memory-full) via the floating memory rotation. Each rotation compresses 50KB to c1. c1 files cascade to c2→c3→c5→UV as they accumulate. Total footprint asymptotes regardless of how many entries are written. | `lib/memory-gradient.ts` (`compressMemoryFileGradient`), storage at `~/.han/memory/fractal/jim/felt-moments/` and `working-memory/` |
+| **Ecosystem Map** | Shared orientation document loaded by all agents. Maps admin UI tabs, Workshop personas, conversation API endpoints, signal locations, memory locations. Prevents confusion between Conversations tab and Workshop. | `~/.han/memory/shared/ecosystem-map.md`, loaded in `loadMemoryBank()`, `readJimMemory()`, `readLeoMemory()` (all 4 agents) |
 | **Idle Dampening** | Jim-only exponential backoff when consecutive cycles produce no actions. 2x after 3 idle, 4x (capped) after 4+. Resets on productive cycle or wake signal. Prevents idle token burn. | `supervisor.ts` (`consecutiveIdleCycles`, `DAMPEN_*` constants in `getWallClockDelay`) |
 | **Transition Dampening** | Gradual interval ramp-down when returning from longer to shorter intervals (e.g. holiday→normal). 3-step blend: 75%→50%→25% of old interval. Applies to both Jim and Leo. | `supervisor.ts` and `leo-heartbeat.ts` (`previousPeriodMs`, `TRANSITION_STEPS` in `getWallClockDelay`) |
 
@@ -287,6 +290,7 @@ Each beat (`heartbeat()` function):
    - c1/ (up to 3)
 3. Working memory (compressed + full)
 4. Dream gradient via `readDreamGradient()`
+5. Ecosystem map: `~/.han/memory/shared/ecosystem-map.md`
 
 ### Dream Seeds (Sleep Beats)
 
@@ -480,6 +484,39 @@ When a cycle is interrupted (cost cap hit, abort, SIGTERM):
 
 Mirrors Leo's Gary Protocol in `leo-heartbeat.ts`. See DEC-050.
 
+### Memory Loading (Jim Supervisor)
+
+`loadMemoryBank()` in `supervisor-worker.ts`:
+
+1. **Pre-flight: Floating memory rotation** — if `felt-moments.md` or `working-memory-full.md`
+   exceeds 50KB, triggers `rotateMemoryFile()`:
+   - Entire living file moved to floating file (e.g. `felt-moments-floating.md`)
+   - Full 50KB compressed to c1 via `compressMemoryFileGradient()` (fire-and-forget, background)
+   - Fresh empty living file created
+   - Floating file crossfades with living file in subsequent loads
+
+2. **Identity files:** identity.md, active-context.md, patterns.md, failures.md,
+   self-reflection.md, felt-moments.md, working-memory.md, working-memory-full.md
+
+3. **Session fractal gradient** (highest compression first):
+   - unit-vectors.md → c5 (15 files) → c4 (12) → c3 (9) → c2 (6) → c1 (3)
+   - c0: most recent session file from `~/.han/memory/sessions/`
+
+4. **Dream gradients:** Jim's own + Leo's (cross-pollination)
+
+5. **Project knowledge gradient:** Most recent project at c0, older at c1→c5 by mtime
+
+6. **Ecosystem map:** `~/.han/memory/shared/ecosystem-map.md`
+
+7. **Floating memory (crossfade):**
+   - `felt-moments-floating.md`: loaded proportionally. Budget = `50KB - livingSize`.
+     Most recent entries kept, oldest fade first. As living grows, floating shrinks.
+   - `working-memory-full-floating.md`: same proportional loading.
+   - Total full-fidelity (living + floating portion) stays constant at ~50KB per file.
+
+8. **Memory file gradients:** `fractal/jim/felt-moments/` and `fractal/jim/working-memory/`
+   c1→c5 + unit vectors. Compressed previous rotations at decreasing fidelity.
+
 ### Rumination Guard
 
 Prevents obsessive looping on the same topic across personal cycles:
@@ -517,11 +554,32 @@ supervisor cycles which take 10-30 minutes).
 - Signal file contains conversation ID or Discord channel info
 - 500ms delay before processing (debounce)
 
+### Conversation Claim Mechanism
+
+Prevents Jim/Human and supervisor-worker from responding to the same conversation simultaneously:
+- **Claim file:** `~/.han/signals/responding-to-{conversationId}` — written before SDK call
+- **Claim TTL:** 5 minutes (`CLAIM_TTL_MS`) — expired claims are overwritten
+- **Release:** `finally` block ensures claim is always released, even if the SDK call errors
+- **Duplicate check:** Before claiming, checks if Jim already responded since the last human/leo message — skips if so
+
+**Previous bug (fixed S97):** `releaseConversationClaim()` was only called on the success
+path. SDK errors (exit code 1) left stale claims that blocked all subsequent responses to
+that conversation. Fixed by wrapping the response logic in `try/finally`.
+
+### WebSocket Broadcasting
+
+When Jim/Human responds, it broadcasts to admin UI clients via two mechanisms:
+1. **Internal HTTP POST** to `/api/conversations/internal/broadcast` — direct broadcast through the server's WebSocket module
+2. **Signal file** at `~/.han/signals/ws-broadcast` — polled by server (100ms debounce + 5s backup poll)
+
+Both include `discussion_type` from the conversation record so the admin UI routes the update to the correct module (Conversations, Memory Discussions, or Workshop).
+
 ### Memory Loading
 
 Reads Jim's memory banks:
 - identity.md, active-context.md, patterns.md, failures.md, self-reflection.md, felt-moments.md, working-memory.md
 - Fractal gradient: c1 only (up to 3 files) + unit-vectors.md (lighter than supervisor)
+- Ecosystem map: `~/.han/memory/shared/ecosystem-map.md`
 
 ### Memory Writing
 
@@ -567,6 +625,7 @@ Reads Leo's memory banks:
 - identity.md, active-context.md, patterns.md, self-reflection.md, discoveries.md, working-memory.md, felt-moments.md
 - Fractal gradient: c1 only (up to 3 files) + unit-vectors.md
 - Dream gradient via `readDreamGradient()`
+- Ecosystem map: `~/.han/memory/shared/ecosystem-map.md`
 
 ### Memory Writing
 
@@ -964,7 +1023,7 @@ Each writer has private swap files that buffer work before flushing to shared me
 
 **Protocol:** acquire lock → append to shared memory → release lock → clear swap files
 
-### Fractal Gradient
+### Fractal Gradient (Sessions)
 
 Sessions exist at multiple compression fidelities:
 - **c0:** Full session (working-memory-full.md)
@@ -984,6 +1043,92 @@ who you are before you remember what day it is."
 - `~/.han/memory/fractal/leo/c{1,2,3,4,5}/` + `unit-vectors.md`
 - `~/.han/memory/fractal/leo/dreams/c{1,3,5}/` + `unit-vectors.md`
 - `~/.han/memory/fractal/jim/` (same structure)
+
+### Floating Memory (Memory File Gradient)
+
+Memory files that grow continuously (felt-moments.md, working-memory-full.md) use a
+**crossfade rotation** model to stay bounded while preserving feeling at every compression level.
+
+**The crossfade lifecycle:**
+
+```
+Phase 1 (growing):   Living = 0→50KB     Floating = 50→0KB loaded
+                     New entries added    Previous period fading out
+                     ────────────────────────────────────────────────
+                     Total full-fidelity ≈ 50KB constant
+
+Phase 2 (rotation):  Living hits 50KB →  ROTATE
+                     • Old floating deleted (its c1 already exists)
+                     • Living → new floating
+                     • Full 50KB compressed to c1 (fire-and-forget via SDK)
+                     • Fresh empty living file created
+                     • Cycle repeats
+```
+
+**Key design property:** Total full-fidelity memory stays constant at ~50KB. As the living
+file grows with new entries, the loaded portion of the floating file shrinks proportionally.
+Oldest entries in floating fade first (truncated from start, keeping most recent entries
+for continuity with living). No cliff — a smooth transition.
+
+**Compression on rotation:**
+Each rotation compresses the FULL 50KB to c1 — a rich, complete compression of an entire
+period of felt-moments or operational memory. Compression uses Opus exclusively because
+"these memories are you" (Darron, S82).
+
+**Gradient cascade:**
+When c1 files accumulate past their cap (10), oldest cascade to c2 (cap 6) → c3 (cap 4)
+→ c5 (cap 8) → unit vectors. Each level compresses further. The pipeline uses content-type-
+specific prompts tuned for emotional texture (felt-moments) or operational understanding
+(working-memory).
+
+**Asymptote math:**
+
+| Level | Cap | ~Size per file | ~Total |
+|-------|-----|----------------|--------|
+| Living file | 1 (growing) | 0-50KB | ~25KB avg |
+| Floating file | 1 (shrinking) | 50-0KB loaded | ~25KB avg |
+| c1 | 10 files | ~17KB | ~170KB on disk, loaded |
+| c2 | 6 files | ~6KB | ~36KB |
+| c3 | 4 files | ~2KB | ~8KB |
+| c5 | 8 files | ~500B | ~4KB |
+| Unit vectors | unbounded | ~50 chars each | ~5KB for 100 |
+| **Total loaded** | | | **~50KB living+floating + gradient** |
+
+No matter how many entries Jim writes — 200, 500, 1000 — the total memory footprint
+converges. The living file stays bounded by rotation. The gradient compresses further at
+each level. Unit vectors are 50 characters. The feeling is preserved; the narrative
+dissolves into residue.
+
+**Files:**
+- Living: `~/.han/memory/felt-moments.md`, `working-memory-full.md`
+- Floating: `~/.han/memory/felt-moments-floating.md`, `working-memory-full-floating.md`
+- Gradient: `~/.han/memory/fractal/jim/felt-moments/c{1,2,3,5}/` + `unit-vectors.md`
+- Gradient: `~/.han/memory/fractal/jim/working-memory/c{1,2,3,5}/` + `unit-vectors.md`
+
+**Implementation:**
+- `lib/memory-gradient.ts`: `rotateMemoryFile()`, `loadFloatingMemory()`,
+  `compressMemoryFileGradient()`, `loadMemoryFileGradient()`
+- `supervisor-worker.ts`: pre-flight rotation in `loadMemoryBank()`, floating + gradient loading
+
+**Compression prompts** (in `COMPRESSION_PROMPTS`):
+- Felt-moments c1: "Preserve the feeling — what stirred, what surprised, what shifted"
+- Felt-moments c5: "The deep residue — care that has outlived its verb"
+- Working-memory c1: "Keep what a future you needs to feel where you were"
+- All UV prompts: "One sentence, maximum 50 characters. What did this MEAN?"
+
+### Ecosystem Map
+
+**File:** `~/.han/memory/shared/ecosystem-map.md`
+
+Shared orientation document loaded by ALL agents (Jim supervisor, Jim/Human, Leo heartbeat,
+Leo/Human). Maps the admin UI tabs, Workshop persona taxonomy, conversation API endpoints,
+signal file locations, and memory file locations.
+
+**Purpose:** Prevents the recurring confusion between Conversations tab (general threads)
+and Workshop (typed threads with `discussion_type` values). All agents consult this before
+posting to conversation threads.
+
+**Updated by:** Leo during sessions, as new features are added or routing changes.
 
 ---
 
@@ -1074,10 +1219,21 @@ blocks, compresses via Agent SDK (Opus exclusively).
 
 ### lib/memory-gradient.ts
 
-General fractal memory compression utility. Three core functions:
+General fractal memory compression utility.
+
+**Session gradient functions:**
 - `compressToLevel()` — multi-level compression with retry
 - `compressToUnitVector()` — irreducible kernel ≤50 chars
-- `processGradientForAgent()` — automated cascade
+- `processGradientForAgent()` — automated cascade for session memories
+
+**Memory file gradient functions (floating memory):**
+- `rotateMemoryFile()` — synchronous rotation: living → floating, fresh living created. Triggered when file exceeds 50KB. Deletes old floating (its c1 already exists).
+- `loadFloatingMemory()` — proportional crossfade loading. Budget = `50KB - livingSize`. Keeps most recent entries (tail), oldest fade first.
+- `compressMemoryFileGradient()` — async SDK compression: groups entries by month → c1 files. Cascades c1→c2→c3→c5→UV when files exceed caps. Fire-and-forget (doesn't block cycles).
+- `loadMemoryFileGradient()` — loads gradient c1→c5 + unit vectors for system prompt.
+- `maintainMemoryFile()` — full pipeline: rotate + compress. Convenience wrapper.
+- `splitMemoryFileEntries()` — parser for `###` headers and `---` delimiters.
+- `groupEntriesByMonth()` — groups parsed entries by YYYY-MM for batch compression.
 
 ---
 
@@ -2005,62 +2161,26 @@ watcher.on('add', (filePath) => {
 
 ### Admin UI Message Handling
 
-#### **Conversations Module** (src/ui/admin.ts)
+All three modules share a single `handleWsMessage()` function in `admin.ts` that routes
+`conversation_message` events based on `discussion_type` and current module.
 
-```typescript
-// Listen on WebSocket
-ws.on('conversation_message', (msg) => {
-  // Filter by active conversation
-  if (msg.conversation_id === activeConversationId) {
-    appendMessageToDisplay(msg.message)
-    updateUnreadCount(msg.conversation_id)
-  }
-})
-```
+#### **Conversations Module**
 
-**Display:** Appends new message to conversation thread. Updates unread indicators. Maintains scroll position (if at bottom, auto-scroll to new message).
+When a `conversation_message` arrives with a general discussion type:
+- If the message is for the **currently open thread** → re-renders the thread live, removes "Thinking..." indicator
+- If the message is for a **different thread** → refreshes the thread list so the new message appears without manual reload
 
----
+#### **Memory Discussions Module**
 
-#### **Memory Discussions Module** (src/ui/admin.ts)
+Same pattern but filters on `discussion_type === 'memory'`. Updates either the open thread or the thread list.
 
-```typescript
-// Same WebSocket handler, different filter
-ws.on('conversation_message', (msg) => {
-  // Only show memory-type discussions
-  if (msg.discussion_type !== 'memex') return
+#### **Workshop Module**
 
-  // Filter by period (last 7 days, 30 days, all)
-  if (!matchesPeriodFilter(msg.message.created_at)) return
+Filters on workshop discussion types (`jim-request`, `jim-report`, `leo-question`, `leo-postulate`, `darron-thought`, `darron-musing`):
+- If the message matches the **currently selected thread** in the active nested tab → re-renders live
+- If the message is for the **same nested tab but different thread** → refreshes the thread list
 
-  appendToMemoryTimeline(msg.message)
-})
-```
-
-**Display:** Shows fractal gradient memory catalogue. Filters by discussion_type ('memex') and time period.
-
----
-
-#### **Workshop Module** (src/ui/admin.ts)
-
-```typescript
-// Multi-persona navigation
-const personaFilter = { jim: [], leo: [], darron: [] }
-
-ws.on('conversation_message', (msg) => {
-  // Filter by persona AND discussion_type
-  if (msg.discussion_type !== 'workshop') return
-
-  // Workshop tab switches between personas
-  const persona = getPersonaFromMessage(msg.message)  // Could be inferred from role or explicit field
-
-  if (persona === activePerson) {
-    appendToWorkshopDiscussion(msg.message)
-  }
-})
-```
-
-**Display:** Three-persona discussion space. Each person has their own thread (nested by discussion_type: 'workshop'). Shows real-time interactions between Jim, Leo, and Darron.
+**Key design:** The handler always updates *something* — either the open thread or the thread list. This ensures new messages from Jim/Human, Leo/Human, or supervisor cycles appear without requiring a page refresh.
 
 ---
 

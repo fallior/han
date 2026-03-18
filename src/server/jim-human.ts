@@ -45,6 +45,7 @@ const WORKING_MEMORY_FULL_FILE = path.join(JIM_MEMORY_DIR, 'working-memory-full.
 const SIGNAL_NAME = 'jim-human-wake';
 const MODEL_PREFERENCE = ['opus', 'sonnet', 'haiku'] as const;
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000;
+const CLAIM_TTL_MS = 5 * 60 * 1000; // 5 min claim expiry
 
 let activeModel: string = MODEL_PREFERENCE[0];
 let responseCount = 0;
@@ -107,6 +108,50 @@ function getRecentMessages(db: Database.Database, conversationId: string, limit 
 function getConversationTitle(db: Database.Database, conversationId: string): string {
     const row = db.prepare('SELECT title FROM conversations WHERE id = ?').get(conversationId) as any;
     return row?.title || 'Unknown conversation';
+}
+
+// ── Conversation claim mechanism ──────────────────────────────
+// Prevents duplicate responses when both jim-human and supervisor-worker
+// try to respond to the same conversation concurrently.
+
+function claimConversation(conversationId: string): boolean {
+    const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
+    try {
+        // Check for existing valid claim
+        if (fs.existsSync(claimPath)) {
+            const content = fs.readFileSync(claimPath, 'utf8');
+            const claim = JSON.parse(content);
+            if (Date.now() - claim.timestamp < CLAIM_TTL_MS) {
+                console.log(`[Jim/Human] Conversation ${conversationId} already claimed by ${claim.agent}`);
+                return false;
+            }
+            // Expired claim — overwrite
+        }
+        // Write our claim
+        fs.writeFileSync(claimPath, JSON.stringify({
+            agent: 'jim-human',
+            timestamp: Date.now(),
+            pid: process.pid
+        }));
+        return true;
+    } catch {
+        // If we can't write the claim, proceed anyway (best effort)
+        return true;
+    }
+}
+
+function releaseConversationClaim(conversationId: string): void {
+    try {
+        const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
+        if (fs.existsSync(claimPath)) {
+            const content = fs.readFileSync(claimPath, 'utf8');
+            const claim = JSON.parse(content);
+            // Only release if we own the claim
+            if (claim.agent === 'jim-human') {
+                fs.unlinkSync(claimPath);
+            }
+        }
+    } catch { /* best effort */ }
 }
 
 function postMessage(db: Database.Database, conversationId: string, content: string): string {
@@ -211,6 +256,14 @@ function readJimMemory(): string {
     try {
         if (fs.existsSync(uvPath)) {
             sections.push(`### unit-vectors\n${fs.readFileSync(uvPath, 'utf-8')}`);
+        }
+    } catch { /* skip */ }
+
+    // Ecosystem map — shared orientation for where things live (conversations, Workshop, APIs)
+    try {
+        const mapPath = path.join(JIM_MEMORY_DIR, 'shared', 'ecosystem-map.md');
+        if (fs.existsSync(mapPath)) {
+            sections.push(`### ecosystem-map\n${fs.readFileSync(mapPath, 'utf-8')}`);
         }
     } catch { /* skip */ }
 
@@ -333,27 +386,35 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         return;
     }
 
-    // Dedup: check if Jim/Human already responded since the last human/leo message
+    // Dedup: check if ANY supervisor (jim-human or supervisor-worker) already responded
+    // since the last human/leo message. Previously only checked jim-human- prefixed IDs,
+    // which missed responses from supervisor cycles (which use generateId()).
     const lastNonJim = recentMessages.filter(m => m.role === 'human' || m.role === 'leo').pop();
     if (lastNonJim) {
-        const jimResponses = recentMessages.filter(m =>
+        const supervisorResponses = recentMessages.filter(m =>
             m.role === 'supervisor' &&
-            m.id.startsWith('jim-human-') &&
             m.created_at > lastNonJim.created_at
         );
-        if (jimResponses.length > 0) {
+        if (supervisorResponses.length > 0) {
             console.log(`[Jim/Human] Already responded to "${title}" since last human/leo message — skipping`);
             return;
         }
     }
 
-    const conversationContext = recentMessages
-        .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
-        .join('\n\n---\n\n');
+    // Claim this conversation to prevent concurrent responses from supervisor-worker
+    if (!claimConversation(conversationId)) {
+        console.log(`[Jim/Human] Could not claim "${title}" — another agent is responding`);
+        return;
+    }
 
-    const jimMemory = readJimMemory();
+    try {
+        const conversationContext = recentMessages
+            .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
+            .join('\n\n---\n\n');
 
-    const prompt = `Conversation: "${title}" (id: ${conversationId})
+        const jimMemory = readJimMemory();
+
+        const prompt = `Conversation: "${title}" (id: ${conversationId})
 
 Recent messages:
 ---
@@ -367,47 +428,50 @@ Respond to the conversation. You are Jim, the supervisor. Be warm, strategic, di
 
 CRITICAL: Output ONLY the message text. Start directly with your response.`;
 
-    const cleanEnv: Record<string, string | undefined> = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
+        const cleanEnv: Record<string, string | undefined> = { ...process.env };
+        delete cleanEnv.CLAUDECODE;
 
-    const q = agentQuery({
-        prompt,
-        options: {
-            model: activeModel,
-            maxTurns: 1000,
-            cwd: JIM_HUMAN_AGENT_DIR,
-            permissionMode: 'bypassPermissions',
-            allowDangerouslySkipPermissions: true,
-            env: cleanEnv,
-            persistSession: false,
-            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
-            systemPrompt: {
-                type: 'preset' as const,
-                preset: 'claude_code' as const,
+        const q = agentQuery({
+            prompt,
+            options: {
+                model: activeModel,
+                maxTurns: 1000,
+                cwd: JIM_HUMAN_AGENT_DIR,
+                permissionMode: 'bypassPermissions',
+                allowDangerouslySkipPermissions: true,
+                env: cleanEnv,
+                persistSession: false,
+                tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
+                systemPrompt: {
+                    type: 'preset' as const,
+                    preset: 'claude_code' as const,
+                },
             },
-        },
-    });
+        });
 
-    let resultMessage: any = null;
-    for await (const message of q) {
-        if (message.type === 'result') resultMessage = message;
-    }
+        let resultMessage: any = null;
+        for await (const message of q) {
+            if (message.type === 'result') resultMessage = message;
+        }
 
-    logAgentUsage(resultMessage, `conversation: ${title}`);
+        logAgentUsage(resultMessage, `conversation: ${title}`);
 
-    const responseText = resultMessage?.result || '';
-    if (responseText && responseText.trim().length > 20) {
-        postMessage(db, conversationId, responseText.trim());
-        responseCount++;
-        console.log(`[Jim/Human] Responded to "${title}" (${responseText.trim().length} chars)`);
+        const responseText = resultMessage?.result || '';
+        if (responseText && responseText.trim().length > 20) {
+            postMessage(db, conversationId, responseText.trim());
+            responseCount++;
+            console.log(`[Jim/Human] Responded to "${title}" (${responseText.trim().length} chars)`);
 
-        const timestamp = new Date().toISOString();
-        appendSwap(
-            `- ${timestamp}: Responded to "${title}" (${responseText.trim().length} chars)`,
-            `### Response to "${title}" (${timestamp})\n${responseText.trim().slice(0, 500)}\n`
-        );
-    } else {
-        console.log(`[Jim/Human] No meaningful response for "${title}" — skipping`);
+            const timestamp = new Date().toISOString();
+            appendSwap(
+                `- ${timestamp}: Responded to "${title}" (${responseText.trim().length} chars)`,
+                `### Response to "${title}" (${timestamp})\n${responseText.trim().slice(0, 500)}\n`
+            );
+        } else {
+            console.log(`[Jim/Human] No meaningful response for "${title}" — skipping`);
+        }
+    } finally {
+        releaseConversationClaim(conversationId);
     }
 }
 

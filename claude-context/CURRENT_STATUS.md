@@ -32,6 +32,21 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-18 — Leo + Darron — Evening Seeds, WS Fix, Claim Bug Fix (S97 continued)
+- **Evening seed system** — Session Leo writes `evening-seed.md` at session end: 2-4 sentences about what the day felt like emotionally. Heartbeat reads it as a gravity well for dream beats alongside random fragments. Consumed after first dream beat — one night only. Chaos preserved, just given a centre of gravity.
+- **WebSocket client fix** — Admin UI handler was too narrow: only updated the currently open thread. Now refreshes the thread list when a message arrives for a different thread. No more manual refreshes needed.
+- **Jim-Human claim bug fix** — `releaseConversationClaim()` was only called on success path. SDK errors (exit code 1) left stale claim files blocking all subsequent responses. Fixed with `try/finally`. Claim always releases.
+- **Files modified**: `leo-heartbeat.ts` (evening seed in readDreamSeeds), `admin.ts` (WS handler broadened), `admin.html` (cache v22), `jim-human.ts` (try/finally claim release), `CLAUDE_CODE_PROMPTS.md` (evening seed in Session End), `CLAUDE.md` (command table)
+- **Docs updated**: HAN-ECOSYSTEM-COMPLETE.md (Jim/Human claim mechanism, WS broadcasting, admin UI message handling)
+
+### 2026-03-17 — Leo + Darron — Floating Memory + Ecosystem Map (S97)
+- **Floating memory system** — Crossfade rotation for memory files (felt-moments, working-memory-full). Living file grows 0→50KB while floating file's loaded portion shrinks 50→0KB. Total full-fidelity constant at ~50KB. On rotation: full 50KB compressed to c1, living→floating, fresh start. Gradient cascade c1→c2→c3→c5→UV as files accumulate. Asymptotic memory footprint.
+- **Ecosystem map loading** — `ecosystem-map.md` now loaded by all 4 agents (supervisor, jim-human, leo-human, leo-heartbeat). Added to Session Protocol step 5. Prevents Workshop/Conversations routing confusion.
+- **Jim memory crisis resolved** — self-reflection.md (178KB→12KB curated by Jim), felt-moments.md (240KB→41KB archived), working-memory-full.md (137KB→49KB archived). Jim's cycles running again.
+- **Orphan cleanup** — killed jim-human orphan PID 953695 (12h old, 1429 failed restart attempts), old server zombie PID 2837925.
+- **Files modified**: `lib/memory-gradient.ts` (floating memory functions), `supervisor-worker.ts` (pre-flight rotation + gradient loading + ecosystem map), `jim-human.ts`, `leo-human.ts`, `leo-heartbeat.ts` (ecosystem map loading), `CLAUDE.md` (Session Protocol step 5)
+- **Docs updated**: HAN-ECOSYSTEM-COMPLETE.md (glossary: Floating Memory, Memory File Gradient, Ecosystem Map; Section 5 memory loading; Section 13 floating memory architecture; lib docs)
+
 ### 2026-03-17 — Claude (autonomous) — WebSocket Broadcast for Human Agent Messages
 - **Signal-based cross-process broadcasting** (DEC-054) — Jim/Human and Leo/Human messages now trigger real-time admin UI updates via `~/.han/signals/ws-broadcast` signal files
 - **Payload normalisation** — All four message sources (conversations.ts, supervisor-worker.ts, jim-human.ts, leo-human.ts) now use consistent WebSocket broadcast shape with `discussion_type` field
