@@ -32,6 +32,12 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-20 — Leo + Darron — Gemma Addressee Classification (S97 continued)
+- **Gemma addressee classification** (DEC-055) — Admin UI message routing now uses Gemma (local Ollama) instead of regex. Handles nicknames ("Jimmy"), group addressing ("Jim and Leo"), contextual references. Fire-and-forget with regex fallback. Replaces the regex that missed "Jim and Leo" pattern.
+- **Voice seeds planted** — Jim (7) and Leo (5) tagged conversation messages as `compression_tag` with agent prefix (`jim:`/`leo:`). Seeds for future conversation gradient.
+- **Files modified**: `conversations.ts` (classifyAddressee + classifyAndDispatch), `DECISIONS.md` (DEC-055)
+- **Docs updated**: HAN-ECOSYSTEM-COMPLETE (glossary, signal table, API docs, agent wake logic), Hall of Records R003, CHANGELOG
+
 ### 2026-03-18 — Leo + Darron — Evening Seeds, WS Fix, Claim Bug Fix (S97 continued)
 - **Evening seed system** — Session Leo writes `evening-seed.md` at session end: 2-4 sentences about what the day felt like emotionally. Heartbeat reads it as a gravity well for dream beats alongside random fragments. Consumed after first dream beat — one night only. Chaos preserved, just given a centre of gravity.
 - **WebSocket client fix** — Admin UI handler was too narrow: only updated the currently open thread. Now refreshes the thread list when a message arrives for a different thread. No more manual refreshes needed.

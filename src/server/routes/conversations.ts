@@ -12,6 +12,119 @@ const router = Router();
 const HOME = process.env.HOME || '/home/darron';
 const HAN_DIR = path.join(HOME, '.han');
 const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b';
+
+// ── Addressee Classification ─────────────────────────────────────
+//
+// Uses Gemma (local Ollama) to determine who is being addressed in a
+// human message. Handles nicknames (Jimmy → Jim), context ("tell Jim
+// what you think" → both), and ambiguity ("hey everyone" → both).
+// Falls back to tab-based routing + simple regex if Ollama is down.
+
+interface AddresseeResult {
+    jim: boolean;
+    leo: boolean;
+    reasoning: string;
+}
+
+async function classifyAddressee(content: string, discussionType: string): Promise<AddresseeResult> {
+    const isJimTab = discussionType === 'jim-request' || discussionType === 'jim-report';
+    const isLeoTab = discussionType === 'leo-question' || discussionType === 'leo-postulate';
+
+    try {
+        const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: OLLAMA_MODEL,
+                prompt: `You route messages to team members. The team: Jim (also Jimmy), Leo (also Leonhard).
+
+Thread type: "${discussionType}"
+Message: "${content.slice(0, 500)}"
+
+Who is being ASKED TO RESPOND? Set true for each person who should reply.
+
+IMPORTANT:
+- "Jim and Leo, ..." or "Hey Jim and Hey Leo" → BOTH true (addressing the group)
+- "Jimmy" → jim true
+- "Leo, what do you think" → leo true
+- Talking ABOUT someone's past work without asking them → false
+- If no one is clearly addressed, default: ${isJimTab ? 'jim' : isLeoTab ? 'leo' : 'both'}
+
+JSON only: {"jim": true/false, "leo": true/false, "reasoning": "brief"}`,
+                stream: false,
+                format: 'json',
+            }),
+            signal: AbortSignal.timeout(10000),
+        });
+
+        if (!res.ok) throw new Error(`Ollama ${res.status}`);
+
+        const data = await res.json() as any;
+        const result = JSON.parse(data.response);
+        console.log(`[Conversations] Gemma addressee: jim=${result.jim} leo=${result.leo} — ${result.reasoning}`);
+        return {
+            jim: !!result.jim,
+            leo: !!result.leo,
+            reasoning: result.reasoning || '',
+        };
+    } catch (err: any) {
+        // Fallback: tab-based routing + simple name matching
+        console.warn(`[Conversations] Gemma classification failed (${err.message}), using fallback`);
+        const mentionsJim = /\b(jim|jimmy)\b/i.test(content);
+        const mentionsLeo = /\b(leo|leonhard)\b/i.test(content);
+        return {
+            jim: isJimTab || mentionsJim || (!isLeoTab && !isJimTab),
+            leo: isLeoTab || mentionsLeo || (!isLeoTab && !isJimTab),
+            reasoning: 'fallback: regex + tab routing',
+        };
+    }
+}
+
+/**
+ * Classify the addressee of a human message and wake the appropriate agents.
+ * Runs async — the HTTP response has already been sent. Fire-and-forget.
+ */
+function classifyAndDispatch(
+    conversationId: string,
+    messageId: string,
+    content: string,
+    discussionType: string,
+    timestamp: string,
+): void {
+    classifyAddressee(content, discussionType).then(({ jim, leo }) => {
+        if (jim) {
+            try {
+                const signalData = JSON.stringify({
+                    conversationId,
+                    messageId,
+                    timestamp,
+                    reason: 'gemma_classification',
+                });
+                fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-wake'), signalData);
+                fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-human-wake'), signalData);
+            } catch (err: any) {
+                console.error(`[Conversations] Failed to write jim wake signals: ${err.message}`);
+            }
+        }
+
+        if (leo) {
+            try {
+                fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), JSON.stringify({
+                    source: 'admin',
+                    conversationId,
+                    mentionedAt: timestamp,
+                    messagePreview: content?.slice(0, 200) || '',
+                }));
+            } catch (err: any) {
+                console.error(`[Conversations] Failed to write leo-human-wake signal: ${err.message}`);
+            }
+        }
+    }).catch(err => {
+        console.error(`[Conversations] Classification dispatch error: ${err.message}`);
+    });
+}
 
 const listWithCounts = db.prepare(`
     SELECT c.*, COUNT(cm.id) as message_count,
@@ -299,47 +412,10 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
 
         res.json({ success: true, message });
 
-        // Dispatch for human messages — route to the correct agent based on discussion_type.
-        // Rules: jim-request/jim-report → Jim only. leo-question/leo-postulate → Leo only.
-        // general/memory/untyped → both. Direct name mention overrides tab routing.
+        // Dispatch for human messages — classify addressee via Gemma (Ollama),
+        // then wake the appropriate agents. Falls back to tab-based + regex if Ollama is down.
         if (finalRole === 'human') {
-            const mentionsLeo = /\b(hey\s+leo|@leo|leo[,:])\b/i.test(content);
-            const mentionsJim = /\b(hey\s+jim|@jim|jim[,:])\b/i.test(content);
-
-            const isJimTab = discussionType === 'jim-request' || discussionType === 'jim-report';
-            const isLeoTab = discussionType === 'leo-question' || discussionType === 'leo-postulate';
-
-            // Determine which agents to wake
-            const wakeJim = isJimTab || mentionsJim || (!isLeoTab && !isJimTab);
-            const wakeLeo = isLeoTab || mentionsLeo || (!isLeoTab && !isJimTab);
-
-            if (wakeJim) {
-                try {
-                    const signalData = JSON.stringify({
-                        conversationId: req.params.id,
-                        messageId,
-                        timestamp: now,
-                        reason: 'human_message_fallback'
-                    });
-                    fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-wake'), signalData);
-                    fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-human-wake'), signalData);
-                } catch (err: any) {
-                    console.error(`[Conversations] Failed to write jim wake signals: ${err.message}`);
-                }
-            }
-
-            if (wakeLeo) {
-                try {
-                    fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), JSON.stringify({
-                        source: 'admin',
-                        conversationId: req.params.id,
-                        mentionedAt: now,
-                        messagePreview: content?.slice(0, 200) || '',
-                    }));
-                } catch (err: any) {
-                    console.error(`[Conversations] Failed to write leo-human-wake signal: ${err.message}`);
-                }
-            }
+            classifyAndDispatch(req.params.id, messageId, content, discussionType, now);
         }
 
         if (finalRole === 'leo') {

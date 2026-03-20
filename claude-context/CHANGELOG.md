@@ -7,6 +7,25 @@
 
 ---
 
+## 2026-03-20 (Leo + Darron, S97 continued — Gemma Addressee Classification)
+
+### Gemma Addressee Classification (DEC-055)
+Admin UI message routing now uses Gemma (local Ollama) to classify who is being addressed
+instead of regex matching. Handles nicknames ("Jimmy" → Jim), group addressing ("Jim and
+Leo" → both), and distinguishes addressing from referencing. Fire-and-forget — doesn't
+block the HTTP response. Falls back to regex + tab routing if Ollama is down.
+
+### Voice Seeds — Compression Tags
+Jim (7) and Leo (5) tagged their own conversation messages as voice seeds. Tags prefixed
+with tagger name (`jim:`/`leo:` + timestamp). These seed the future conversation gradient
+for preserving personality across cycles.
+
+### Files Modified
+- `src/server/routes/conversations.ts` — replaced regex routing with `classifyAddressee()` via Gemma
+- `claude-context/DECISIONS.md` — DEC-055
+
+---
+
 ## 2026-03-17/18 (Leo + Darron, S97 — Floating Memory, Ecosystem Map, Evening Seeds, Bug Fixes)
 
 ### Floating Memory System

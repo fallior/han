@@ -38,6 +38,7 @@
 | **Floating Memory** | Crossfade mechanism for memory files (felt-moments, working-memory-full). When living file reaches 50KB: entire file rotated to "floating" file, compressed to c1, fresh living started. Loading is proportional: as living grows (0→50KB), floating's loaded portion shrinks (50→0KB). Total full-fidelity stays constant at ~50KB. No cliff — smooth transition. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `loadFloatingMemory`), pre-flight in `supervisor-worker.ts` `loadMemoryBank()`, floating files at `~/.han/memory/*-floating.md` |
 | **Memory File Gradient** | Fractal gradient applied to memory files (felt-moments, working-memory-full) via the floating memory rotation. Each rotation compresses 50KB to c1. c1 files cascade to c2→c3→c5→UV as they accumulate. Total footprint asymptotes regardless of how many entries are written. | `lib/memory-gradient.ts` (`compressMemoryFileGradient`), storage at `~/.han/memory/fractal/jim/felt-moments/` and `working-memory/` |
 | **Ecosystem Map** | Shared orientation document loaded by all agents. Maps admin UI tabs, Workshop personas, conversation API endpoints, signal locations, memory locations. Prevents confusion between Conversations tab and Workshop. | `~/.han/memory/shared/ecosystem-map.md`, loaded in `loadMemoryBank()`, `readJimMemory()`, `readLeoMemory()` (all 4 agents) |
+| **Gemma Addressee Classification** | LLM-based message routing for admin UI. When Darron posts a message, Gemma (local Ollama) determines who is being addressed — handles nicknames (Jimmy), group addressing (Jim and Leo), and contextual references. Replaces regex matching. Falls back to regex + tab routing if Ollama is down. Fire-and-forget (doesn't block the HTTP response). | `conversations.ts` (`classifyAddressee`, `classifyAndDispatch`), Ollama `gemma3:4b` |
 | **Idle Dampening** | Jim-only exponential backoff when consecutive cycles produce no actions. 2x after 3 idle, 4x (capped) after 4+. Resets on productive cycle or wake signal. Prevents idle token burn. | `supervisor.ts` (`consecutiveIdleCycles`, `DAMPEN_*` constants in `getWallClockDelay`) |
 | **Transition Dampening** | Gradual interval ramp-down when returning from longer to shorter intervals (e.g. holiday→normal). 3-step blend: 75%→50%→25% of old interval. Applies to both Jim and Leo. | `supervisor.ts` and `leo-heartbeat.ts` (`previousPeriodMs`, `TRANSITION_STEPS` in `getWallClockDelay`) |
 
@@ -751,9 +752,9 @@ All signals live at `~/.han/signals/`. They are plain files — existence is the
 | `holiday-leo` | Manual or Leo session | leo-heartbeat (LOCAL check) | Leo holiday mode | Empty file |
 | `holiday-jim` | Manual or Leo session | supervisor-worker (cycle type + interval via `getPhaseInterval('jim')`) | Holiday = dream cycles only, 80min interval | Empty file |
 | `rate-limited` | leo-heartbeat, supervisor-worker (on SDK error) | jemma | SDK rate limit detected — trigger credential swap | Empty file |
-| `jim-wake` | jemma, conversations.ts | supervisor-worker (via parent IPC) | Wake Jim supervisor for new work | JSON with context |
-| `jim-human-wake` | jemma, conversations.ts | jim-human | Wake Jim/Human for conversation response | JSON with context |
-| `leo-human-wake` | jemma, conversations.ts | leo-human | Wake Leo for conversation response | JSON with context |
+| `jim-wake` | jemma, conversations.ts (via Gemma classification) | supervisor-worker (via parent IPC) | Wake Jim supervisor for new work | JSON with context |
+| `jim-human-wake` | jemma, conversations.ts (via Gemma classification) | jim-human | Wake Jim/Human for conversation response | JSON with context |
+| `leo-human-wake` | jemma, conversations.ts (via Gemma classification) | leo-human | Wake Leo for conversation response | JSON with context |
 | `jim-emergency` | Manual | supervisor-worker | Force emergency mode (all cycles = supervisor) | Empty file |
 | `maintenance-mode` | Manual | (not checked by any code — aspirational) | Belt-and-braces ecosystem stop guard | Empty file |
 
@@ -1719,7 +1720,7 @@ Routes are mounted in `server.ts` — some with prefixes, some with full paths.
 | POST | `/search/semantic` | Claude Haiku semantic search — ranks catalogued conversations by relevance |
 | POST | `/recatalogue-all` | Re-catalogue all uncatalogued resolved conversations (background) |
 | GET | `/:id` | Get conversation with all messages |
-| POST | `/:id/messages` | Add message. Auto-wakes Jim or Leo based on discussion_type/mentions. WebSocket broadcast. |
+| POST | `/:id/messages` | Add message. Classifies addressee via Gemma (DEC-055) and wakes appropriate agents. WebSocket broadcast. |
 | POST | `/:id/resolve` | Mark resolved + trigger background cataloguing |
 | POST | `/:id/reopen` | Reopen resolved conversation |
 | PATCH | `/:id` | Update title |
@@ -1727,11 +1728,23 @@ Routes are mounted in `server.ts` — some with prefixes, some with full paths.
 | POST | `/:id/unarchive` | Unarchive conversation |
 | POST | `/:id/catalogue` | Manually trigger cataloguing (background) |
 
-**Agent wake logic on message post:**
-- Role `leo` with 10-min cooldown → write `leo-human-wake` signal
-- Mentions (`@jim`, `hey jim`, `jim:`) → write `jim-human-wake` signal
-- Mentions (`@leo`, `hey leo`, `leo:`) → write `leo-human-wake` signal
-- Discussion type determines default wake target
+**Agent wake logic on message post (DEC-055):**
+
+When a human message is posted, the addressee is classified via **Gemma (local Ollama, ~1s)**
+using `classifyAddressee()`. This replaces the previous regex-based matching which couldn't
+handle nicknames ("Jimmy"), group addressing ("Jim and Leo"), or contextual references.
+
+The classification is **fire-and-forget** — the HTTP response returns immediately, then
+the async Gemma call determines which agents to wake. Handles:
+- Nicknames: "Jimmy" → Jim, "Leonhard" → Leo
+- Group addressing: "Jim and Leo, ..." → both
+- Context: "Jim's architecture was good" (reference, not address) → neither
+- Tab-aware defaults: unclear on `jim-request` tab → Jim, on `leo-question` → Leo
+
+**Fallback:** If Ollama is unreachable, falls back to simple regex (`/\b(jim|jimmy)\b/i`,
+`/\b(leo|leonhard)\b/i`) plus tab-based routing.
+
+Role `leo` messages with 10-min cooldown → write `leo-human-wake` signal (unchanged).
 
 ### Prompts & Terminal — `/api/prompts`, `/api/respond`, `/api/status`
 

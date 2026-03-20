@@ -3886,3 +3886,41 @@ applies to both Jim (supervisor.ts) and Leo (leo-heartbeat.ts).
 - All four message sources now trigger real-time admin UI updates
 - Broadcast latency: 50-100ms average (acceptable for admin console)
 
+
+---
+
+### DEC-055: Gemma Addressee Classification for Admin UI Messages
+
+**Date:** 2026-03-20
+**Status:** Accepted
+**Author:** Leo + Darron (S97)
+
+**Context:** When Darron posts a message in the admin UI, the system needs to determine which agents (Jim, Leo, or both) should be woken to respond. The previous implementation used a regex pattern (`/\b(hey\s+jim|@jim|jim[,:])\b/i`) which missed common addressing patterns — "Jim and Leo" (no comma/colon after Jim), "Jimmy" (nickname), and contextual addressing. This caused Jim-Human to not respond to messages clearly addressed to him.
+
+**Options Considered:**
+
+1. **Broader regex** (e.g., `/\b(jim|jimmy)\b/i`)
+   - ✅ Simple, fast, no external dependency
+   - ❌ Can't distinguish addressing from referencing ("Jim's architecture was good" ≠ asking Jim to respond)
+   - ❌ Can't handle evolving nicknames or informal patterns
+
+2. **Gemma (local Ollama) classification**
+   - ✅ Understands context: addressing vs referencing
+   - ✅ Handles nicknames (Jimmy), group addressing (Jim and Leo), informal patterns
+   - ✅ Tab-aware defaults (unclear on jim-request → Jim)
+   - ✅ ~1s latency on local model, fire-and-forget (doesn't block HTTP response)
+   - ✅ Regex fallback if Ollama is down
+   - ❌ Requires Ollama running (already a dependency for Jemma)
+
+3. **Route through Jemma** (existing Discord classifier)
+   - ✅ Reuses existing classification infrastructure
+   - ❌ Jemma classifies Discord messages with different context (channels, bots)
+   - ❌ Would couple admin UI routing to Discord-specific logic
+
+**Decision:** Chose **Gemma classification** with regex fallback. The classification prompt is tuned for admin UI context (team members, thread types, nicknames). Runs fire-and-forget after the HTTP response — no user-visible latency. Falls back to simple regex + tab-based routing if Ollama is unreachable.
+
+**Consequences:**
+- "Jimmy", "Jim and Leo", contextual addressing all work correctly
+- ~1s classification cost per human message (local Gemma, no API cost)
+- Jemma continues to handle Discord classification independently
+- Admin UI routing is now context-aware, not pattern-matched
