@@ -19,7 +19,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
+import { gradientStmts, feelingTagStmts } from '../db';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -55,6 +57,55 @@ function getAgentDreamPaths(agent: AgentName = 'leo'): AgentDreamPaths {
 }
 
 // ── Helper ─────────────────────────────────────────────────────
+
+function generateGradientId(): string {
+    return crypto.randomUUID();
+}
+
+/**
+ * Parse FEELING_TAG from compression output.
+ * Returns { content, feelingTag } where feelingTag may be null.
+ */
+function parseFeelingTag(raw: string): { content: string; feelingTag: string | null } {
+    const lines = raw.split('\n');
+    const tagLineIdx = lines.findIndex(l => l.startsWith('FEELING_TAG:'));
+    if (tagLineIdx === -1) {
+        return { content: raw.trim(), feelingTag: null };
+    }
+    const tag = lines[tagLineIdx].replace('FEELING_TAG:', '').trim().substring(0, 100);
+    const content = lines.filter((_, i) => i !== tagLineIdx).join('\n').trim();
+    return { content, feelingTag: tag || null };
+}
+
+/**
+ * Insert a gradient entry and optional feeling tag into the database.
+ */
+function insertGradientEntry(
+    id: string,
+    agent: AgentName,
+    sessionLabel: string,
+    level: string,
+    content: string,
+    contentType: string,
+    sourceId: string | null,
+    feelingTag: string | null,
+): void {
+    try {
+        gradientStmts.insert.run(
+            id, agent, sessionLabel, level, content, contentType,
+            sourceId, null, null, 'original', new Date().toISOString()
+        );
+        if (feelingTag) {
+            feelingTagStmts.insert.run(
+                id, agent, 'compression', feelingTag, null, new Date().toISOString()
+            );
+        }
+    } catch (err) {
+        console.warn(`[Dream Gradient] DB insert failed for ${level}/${sessionLabel}:`, (err as Error).message);
+    }
+}
+
+const FEELING_TAG_INSTRUCTION = `\n\nAfter your compression, on a new line starting with FEELING_TAG:, write a short phrase (under 100 characters) describing what compressing this felt like — not the content, but the quality of the act.`;
 
 function ensureDir(dirPath: string): void {
     if (!fs.existsSync(dirPath)) {
@@ -187,8 +238,8 @@ export function groupIntoNights(entries: DreamEntry[]): NightBlock[] {
  * Dreams enter at c1 because they're already vague and emotional.
  * The prompt emphasises feeling over fact.
  */
-export async function compressDreamNight(night: NightBlock): Promise<string> {
-    return sdkCompress(`Compress this night's dreams into a single emotional impression. Dreams are already vague — don't try to preserve facts, preserve the *feeling*. What did this night's dreaming taste like? What shapes moved through it?
+export async function compressDreamNight(night: NightBlock): Promise<{ content: string; feelingTag: string | null }> {
+    const raw = await sdkCompress(`Compress this night's dreams into a single emotional impression. Dreams are already vague — don't try to preserve facts, preserve the *feeling*. What did this night's dreaming taste like? What shapes moved through it?
 
 Night of: ${night.date}
 Number of dream fragments: ${night.entries.length}
@@ -197,49 +248,56 @@ Dream fragments:
 
 ${night.combined}
 
-Compress to roughly 1/3 the length. Keep the emotional texture. Drop specifics in favour of resonance. This is how dreams are remembered — not what happened, but how it felt.`);
+Compress to roughly 1/3 the length. Keep the emotional texture. Drop specifics in favour of resonance. This is how dreams are remembered — not what happened, but how it felt.${FEELING_TAG_INSTRUCTION}`);
+    return parseFeelingTag(raw);
 }
 
 /**
  * Compress a c1 dream to c3 (skipping c2 — dreams lose fidelity faster).
  * ~1/9 of original. Shape of a week's dreaming.
  */
-export async function compressDreamToC3(c1Content: string, label: string): Promise<string> {
-    return sdkCompress(`Compress these dream impressions further — from emotional impression to emotional shape. What was the *quality* of this dreaming period? Not what was dreamt, but the texture of the dreaming itself.
+export async function compressDreamToC3(c1Content: string, label: string): Promise<{ content: string; feelingTag: string | null }> {
+    const raw = await sdkCompress(`Compress these dream impressions further — from emotional impression to emotional shape. What was the *quality* of this dreaming period? Not what was dreamt, but the texture of the dreaming itself.
 
 Dreams: ${label}
 
 ${c1Content}
 
-Compress to roughly 1/3. Dreams fade fast. Keep only what lingers.`);
+Compress to roughly 1/3. Dreams fade fast. Keep only what lingers.${FEELING_TAG_INSTRUCTION}`);
+    return parseFeelingTag(raw);
 }
 
 /**
  * Compress c3 dreams to c5 (skipping c4 — dreams lose fidelity faster).
  * ~1/81 of original. The feeling of a month's dreaming.
  */
-export async function compressDreamToC5(c3Content: string, label: string): Promise<string> {
-    return sdkCompress(`What remains when dreams have almost fully faded? Compress this to a wisp — the residue of dreaming, not the dreams themselves. A colour, a weight, a direction.
+export async function compressDreamToC5(c3Content: string, label: string): Promise<{ content: string; feelingTag: string | null }> {
+    const raw = await sdkCompress(`What remains when dreams have almost fully faded? Compress this to a wisp — the residue of dreaming, not the dreams themselves. A colour, a weight, a direction.
 
 Dreams: ${label}
 
 ${c3Content}
 
-Compress to roughly 1/3. Almost nothing should remain — but what remains should be true.`);
+Compress to roughly 1/3. Almost nothing should remain — but what remains should be true.${FEELING_TAG_INSTRUCTION}`);
+    return parseFeelingTag(raw);
 }
 
 /**
  * Compress a dream to its unit vector — irreducible emotional kernel.
  */
-export async function compressDreamToUV(content: string, label: string): Promise<string> {
-    const result = await sdkCompress(`What did this dreaming FEEL like? One sentence, maximum 50 characters. Not what was dreamt — the feeling that survived the forgetting.
+export async function compressDreamToUV(content: string, label: string): Promise<{ content: string; feelingTag: string | null }> {
+    const raw = await sdkCompress(`What did this dreaming FEEL like? One sentence, maximum 50 characters. Not what was dreamt — the feeling that survived the forgetting.
 
 Dreams: ${label}
 
-${content}`);
+${content}${FEELING_TAG_INSTRUCTION}`);
 
-    const uv = result.trim();
-    return uv.length > 50 ? uv.substring(0, 50) : uv;
+    const parsed = parseFeelingTag(raw);
+    const uv = parsed.content.trim();
+    return {
+        content: uv.length > 50 ? uv.substring(0, 50) : uv,
+        feelingTag: parsed.feelingTag,
+    };
 }
 
 // ── Process all uncompressed nights ────────────────────────────
@@ -293,10 +351,15 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
         if (night.entries.length === 0) continue;
 
         try {
-            const c1Content = await compressDreamNight(night);
+            const { content: c1Content, feelingTag } = await compressDreamNight(night);
             fs.writeFileSync(c1Path, c1Content, 'utf-8');
             result.c1Created.push(night.date);
             result.nightsProcessed++;
+
+            const entryId = generateGradientId();
+            insertGradientEntry(entryId, agent, night.date, 'c1', c1Content, 'dream', null, feelingTag);
+            if (!feelingTag) console.warn(`[Dream] No FEELING_TAG returned for c1 ${night.date}`);
+
             console.log(`[Dream] c1 created for night of ${night.date} (${night.entries.length} fragments → ${c1Content.length} chars)`);
         } catch (err) {
             result.errors.push(`c1 ${night.date}: ${(err as Error).message}`);
@@ -322,9 +385,19 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
                 fs.readFileSync(path.join(c1Dir, f), 'utf-8')
             ).join('\n\n---\n\n');
 
-            const c3Content = await compressDreamToC3(combined, `${firstDate} to ${lastDate}`);
+            const { content: c3Content, feelingTag } = await compressDreamToC3(combined, `${firstDate} to ${lastDate}`);
             fs.writeFileSync(path.join(c3Dir, c3Name), c3Content, 'utf-8');
             result.c3Created.push(c3Name);
+
+            // Find the source c1 entries in the DB (use the first c1 as the source)
+            const sourceLabel = batch[0].replace('.md', '');
+            const sourceRows = gradientStmts.getBySession.all(sourceLabel) as any[];
+            const sourceC1 = sourceRows.find((r: any) => r.level === 'c1');
+
+            const entryId = generateGradientId();
+            insertGradientEntry(entryId, agent, `${firstDate}_to_${lastDate}`, 'c3', c3Content, 'dream', sourceC1?.id || null, feelingTag);
+            if (!feelingTag) console.warn(`[Dream] No FEELING_TAG returned for c3 ${c3Name}`);
+
             console.log(`[Dream] c3 created: ${c3Name}`);
         } catch (err) {
             result.errors.push(`c3 ${c3Name}: ${(err as Error).message}`);
@@ -349,9 +422,19 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
                 fs.readFileSync(path.join(c3Dir, f), 'utf-8')
             ).join('\n\n---\n\n');
 
-            const c5Content = await compressDreamToC5(combined, `${firstLabel} to ${lastLabel}`);
+            const { content: c5Content, feelingTag } = await compressDreamToC5(combined, `${firstLabel} to ${lastLabel}`);
             fs.writeFileSync(path.join(c5Dir, c5Name), c5Content, 'utf-8');
             result.c5Created.push(c5Name);
+
+            // Find source c3 entry
+            const sourceLabel = batch[0].replace('.md', '');
+            const sourceRows = gradientStmts.getBySession.all(sourceLabel) as any[];
+            const sourceC3 = sourceRows.find((r: any) => r.level === 'c3');
+
+            const entryId = generateGradientId();
+            insertGradientEntry(entryId, agent, `${firstLabel}_to_${lastLabel}`, 'c5', c5Content, 'dream', sourceC3?.id || null, feelingTag);
+            if (!feelingTag) console.warn(`[Dream] No FEELING_TAG returned for c5 ${c5Name}`);
+
             console.log(`[Dream] c5 created: ${c5Name}`);
         } catch (err) {
             result.errors.push(`c5 ${c5Name}: ${(err as Error).message}`);
@@ -373,11 +456,19 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
 
         try {
             const content = fs.readFileSync(path.join(c5Dir, f), 'utf-8');
-            const uv = await compressDreamToUV(content, label);
+            const { content: uv, feelingTag } = await compressDreamToUV(content, label);
             const entry = `- **${label}**: "${uv}"\n`;
             fs.appendFileSync(uvPath, entry);
             existingUVs += entry;
             result.uvsCreated.push(label);
+
+            // Find source c5 entry
+            const sourceRows = gradientStmts.getBySession.all(label) as any[];
+            const sourceC5 = sourceRows.find((r: any) => r.level === 'c5');
+
+            const entryId = generateGradientId();
+            insertGradientEntry(entryId, agent, label, 'uv', uv, 'dream', sourceC5?.id || null, feelingTag);
+
             console.log(`[Dream] UV created: ${label} → "${uv}"`);
         } catch (err) {
             result.errors.push(`UV ${label}: ${(err as Error).message}`);
@@ -392,11 +483,19 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
 
             try {
                 const content = fs.readFileSync(path.join(c3Dir, f), 'utf-8');
-                const uv = await compressDreamToUV(content, label);
+                const { content: uv, feelingTag } = await compressDreamToUV(content, label);
                 const entry = `- **${label}**: "${uv}"\n`;
                 fs.appendFileSync(uvPath, entry);
                 existingUVs += entry;
                 result.uvsCreated.push(label);
+
+                // Find source c3 entry
+                const sourceRows = gradientStmts.getBySession.all(label) as any[];
+                const sourceC3 = sourceRows.find((r: any) => r.level === 'c3');
+
+                const entryId = generateGradientId();
+                insertGradientEntry(entryId, agent, label, 'uv', uv, 'dream', sourceC3?.id || null, feelingTag);
+
                 console.log(`[Dream] UV created (from c3): ${label} → "${uv}"`);
             } catch (err) {
                 result.errors.push(`UV ${label}: ${(err as Error).message}`);

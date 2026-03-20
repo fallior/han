@@ -74,7 +74,7 @@ async function main() {
         console.log(`Compressing ${archive.session} (${sizeKB}KB)...`);
 
         try {
-            const c1 = await compressToLevel(content, 0, 1, `leo/${archive.session}`);
+            const { content: c1 } = await compressToLevel(content, 0, 1, `leo/${archive.session}`);
             const c1Path = path.join(C1_DIR, `${archive.session}-c1.md`);
             fs.writeFileSync(c1Path, c1);
 
@@ -82,7 +82,7 @@ async function main() {
             const ratio = ((c1.length / content.length) * 100).toFixed(1);
             console.log(`  ${archive.session}: ${sizeKB}KB -> ${c1SizeKB}KB (${ratio}%)`);
 
-            const uv = await compressToUnitVector(c1, `leo/${archive.session}`);
+            const { content: uv } = await compressToUnitVector(c1, `leo/${archive.session}`);
             console.log(`  Unit vector: "${uv}"`);
             unitVectors.push(`- **${archive.session}**: "${uv}"`);
         } catch (err) {

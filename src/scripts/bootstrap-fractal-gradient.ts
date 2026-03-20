@@ -81,7 +81,7 @@ async function main() {
 
             // Compress to c1
             console.log(`   → Compressing to c1 (${(originalSize / 1024).toFixed(1)}KB)...`);
-            const c1Content = await compressToLevel(c0Content, 0, 1, `jim/${task.date}`);
+            const { content: c1Content } = await compressToLevel(c0Content, 0, 1, `jim/${task.date}`);
             const compressedSize = c1Content.length;
             const ratio = compressedSize / originalSize;
 
@@ -91,7 +91,7 @@ async function main() {
 
             // Generate unit vector
             console.log(`   → Generating unit vector...`);
-            const unitVector = await compressToUnitVector(c1Content, `jim/${task.date}`);
+            const { content: unitVector } = await compressToUnitVector(c1Content, `jim/${task.date}`);
             console.log(`   ✓ Unit vector: "${unitVector}"`);
 
             results.push({

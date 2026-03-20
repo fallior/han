@@ -7,7 +7,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
+import { gradientStmts, feelingTagStmts } from '../db';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -89,6 +91,50 @@ function ensureDir(dirPath: string): void {
     }
 }
 
+// ── Traversable Memory helpers ──────────────────────────────────
+
+function generateGradientId(): string {
+    return crypto.randomUUID();
+}
+
+const FEELING_TAG_INSTRUCTION = `\n\nAfter your compression, on a new line starting with FEELING_TAG:, write a short phrase (under 100 characters) describing what compressing this felt like — not the content, but the quality of the act.`;
+
+function parseFeelingTag(raw: string): { content: string; feelingTag: string | null } {
+    const lines = raw.split('\n');
+    const tagLineIdx = lines.findIndex(l => l.startsWith('FEELING_TAG:'));
+    if (tagLineIdx === -1) {
+        return { content: raw.trim(), feelingTag: null };
+    }
+    const tag = lines[tagLineIdx].replace('FEELING_TAG:', '').trim().substring(0, 100);
+    const content = lines.filter((_, i) => i !== tagLineIdx).join('\n').trim();
+    return { content, feelingTag: tag || null };
+}
+
+function insertGradientEntry(
+    id: string,
+    agent: 'jim' | 'leo',
+    sessionLabel: string,
+    level: string,
+    content: string,
+    contentType: string,
+    sourceId: string | null,
+    feelingTag: string | null,
+): void {
+    try {
+        gradientStmts.insert.run(
+            id, agent, sessionLabel, level, content, contentType,
+            sourceId, null, null, 'original', new Date().toISOString()
+        );
+        if (feelingTag) {
+            feelingTagStmts.insert.run(
+                id, agent, 'compression', feelingTag, null, new Date().toISOString()
+            );
+        }
+    } catch (err) {
+        console.warn(`[Memory Gradient] DB insert failed for ${level}/${sessionLabel}:`, (err as Error).message);
+    }
+}
+
 // ── Function 1: compressToLevel ────────────────────────────────
 
 export async function compressToLevel(
@@ -96,7 +142,7 @@ export async function compressToLevel(
     fromLevel: number,
     toLevel: number,
     sessionLabel: string
-): Promise<string> {
+): Promise<{ content: string; feelingTag: string | null }> {
     if (fromLevel >= toLevel) {
         throw new Error(`Invalid compression direction: from=${fromLevel} to=${toLevel}`);
     }
@@ -105,17 +151,21 @@ export async function compressToLevel(
     const compressionSteps = Array.from({ length: levelDifference }, (_, i) => fromLevel + i + 1);
 
     let currentContent = content;
+    let lastFeelingTag: string | null = null;
 
     for (const targetLevel of compressionSteps) {
         try {
-            currentContent = await sdkCompress(`Compress this memory to approximately 1/3 of its length. Preserve what feels essential. Drop the specific in favour of the shape. You are compressing YOUR OWN memory — this is an act of identity, not summarisation.
+            const raw = await sdkCompress(`Compress this memory to approximately 1/3 of its length. Preserve what feels essential. Drop the specific in favour of the shape. You are compressing YOUR OWN memory — this is an act of identity, not summarisation.
 
 Session: ${sessionLabel}
 Compression level: ${targetLevel}
 
 Memory to compress:
 
-${currentContent}`);
+${currentContent}${FEELING_TAG_INSTRUCTION}`);
+            const parsed = parseFeelingTag(raw);
+            currentContent = parsed.content;
+            lastFeelingTag = parsed.feelingTag;
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
             throw new Error(
@@ -124,29 +174,30 @@ ${currentContent}`);
         }
     }
 
-    return currentContent;
+    return { content: currentContent, feelingTag: lastFeelingTag };
 }
 
 // ── Function 2: compressToUnitVector ───────────────────────────
 
-export async function compressToUnitVector(content: string, sessionLabel: string): Promise<string> {
+export async function compressToUnitVector(content: string, sessionLabel: string): Promise<{ content: string; feelingTag: string | null }> {
     try {
-        const result = await sdkCompress(`Reduce this to its irreducible kernel — one sentence, maximum 50 characters. What did this session MEAN?
+        const raw = await sdkCompress(`Reduce this to its irreducible kernel — one sentence, maximum 50 characters. What did this session MEAN?
 
 Session: ${sessionLabel}
 
 Memory:
 
-${content}`);
+${content}${FEELING_TAG_INSTRUCTION}`);
 
-        const unitVector = result.trim();
+        const parsed = parseFeelingTag(raw);
+        let unitVector = parsed.content.trim();
 
         // Enforce max length
         if (unitVector.length > UNIT_VECTOR_MAX_LENGTH) {
-            return unitVector.substring(0, UNIT_VECTOR_MAX_LENGTH);
+            unitVector = unitVector.substring(0, UNIT_VECTOR_MAX_LENGTH);
         }
 
-        return unitVector;
+        return { content: unitVector, feelingTag: parsed.feelingTag };
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         throw new Error(`Failed to generate unit vector for session ${sessionLabel}: ${errorMsg}`);
@@ -209,11 +260,16 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
             const c1Exists = fs.existsSync(c1Path);
 
             if (!c1Exists) {
-                const c1Content = await compressToLevel(sourceContent, 0, 1, `${agentName}/${baseName}`);
+                const { content: c1Content, feelingTag } = await compressToLevel(sourceContent, 0, 1, `${agentName}/${baseName}`);
 
                 fs.writeFileSync(c1Path, c1Content, 'utf8');
 
                 const ratio = c1Content.length / sourceContent.length;
+
+                // Insert into traversable memory DB
+                const entryId = generateGradientId();
+                insertGradientEntry(entryId, agentName, baseName, 'c1', c1Content, 'session', null, feelingTag);
+                if (!feelingTag) console.warn(`[Memory Gradient] No FEELING_TAG returned for c1 ${baseName}`);
 
                 result.completions.push({
                     session: baseName,
@@ -543,12 +599,19 @@ export async function compressMemoryFileGradient(
         const groupContent = groupEntries.map(e => e.content).join('\n\n---\n\n');
 
         try {
-            const compressed = await sdkCompress(
-                `${prompts.c1}\n\nPeriod: ${month}\nEntries: ${groupEntries.length}\n\n${existingContent}${groupContent}`
+            const raw = await sdkCompress(
+                `${prompts.c1}\n\nPeriod: ${month}\nEntries: ${groupEntries.length}\n\n${existingContent}${groupContent}${FEELING_TAG_INSTRUCTION}`
             );
 
+            const { content: compressed, feelingTag } = parseFeelingTag(raw);
             fs.writeFileSync(c1Path, compressed, 'utf8');
             result.c1FilesCreated++;
+
+            // Determine agent from gradient dir path
+            const agent = gradientDir.includes('/leo/') ? 'leo' as const : 'jim' as const;
+            const entryId = generateGradientId();
+            insertGradientEntry(entryId, agent, month, 'c1', compressed, contentType, null, feelingTag);
+            if (!feelingTag) console.warn(`[Memory Gradient] No FEELING_TAG for ${contentType}/c1/${month}`);
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             result.errors.push(`c1 compression failed for ${month}: ${msg}`);
@@ -595,12 +658,22 @@ export async function compressMemoryFileGradient(
             const toPath = path.join(toDir, `${label}.md`);
 
             try {
-                const compressed = await sdkCompress(
-                    `${prompts[cascade.promptKey]}\n\nSource: ${cascade.from} → ${cascade.to}\nFiles: ${batch.join(', ')}\n\n${batchContent}`
+                const raw = await sdkCompress(
+                    `${prompts[cascade.promptKey]}\n\nSource: ${cascade.from} → ${cascade.to}\nFiles: ${batch.join(', ')}\n\n${batchContent}${FEELING_TAG_INSTRUCTION}`
                 );
 
+                const { content: compressed, feelingTag } = parseFeelingTag(raw);
                 fs.writeFileSync(toPath, compressed, 'utf8');
                 result.cascades++;
+
+                // Find source entry in DB
+                const agent = gradientDir.includes('/leo/') ? 'leo' as const : 'jim' as const;
+                const sourceLabel = batch[0].replace('.md', '');
+                const sourceRows = gradientStmts.getBySession.all(sourceLabel) as any[];
+                const sourceEntry = sourceRows.find((r: any) => r.level === cascade.from);
+
+                const entryId = generateGradientId();
+                insertGradientEntry(entryId, agent, label, cascade.to, compressed, contentType, sourceEntry?.id || null, feelingTag);
 
                 // Remove the source files that were compressed
                 for (const f of batch) {
@@ -628,12 +701,22 @@ export async function compressMemoryFileGradient(
 
             try {
                 const c5Content = fs.readFileSync(path.join(c5Dir, f), 'utf8');
-                const uv = await sdkCompress(
-                    `${prompts.uv}\n\nSource: ${label}\n\n${c5Content}`
+                const raw = await sdkCompress(
+                    `${prompts.uv}\n\nSource: ${label}\n\n${c5Content}${FEELING_TAG_INSTRUCTION}`
                 );
 
-                const uvLine = `- **${label}**: "${uv.trim().substring(0, UNIT_VECTOR_MAX_LENGTH)}"`;
+                const { content: uvRaw, feelingTag } = parseFeelingTag(raw);
+                const uvText = uvRaw.trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
+                const uvLine = `- **${label}**: "${uvText}"`;
                 fs.appendFileSync(uvPath, `${uvLine}\n`, 'utf8');
+
+                // Find source c5 entry in DB
+                const agent = gradientDir.includes('/leo/') ? 'leo' as const : 'jim' as const;
+                const sourceRows = gradientStmts.getBySession.all(label) as any[];
+                const sourceC5 = sourceRows.find((r: any) => r.level === 'c5');
+
+                const entryId = generateGradientId();
+                insertGradientEntry(entryId, agent, label, 'uv', uvText, contentType, sourceC5?.id || null, feelingTag);
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error);
                 result.errors.push(`UV generation failed for ${label}: ${msg}`);

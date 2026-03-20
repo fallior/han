@@ -572,6 +572,56 @@ export const conversationTagStmts = {
     deleteByConversation: db.prepare('DELETE FROM conversation_tags WHERE conversation_id = ?') as any,
 };
 
+// ── Traversable Memory Gradient tables ──────────────────────
+// Three tables: gradient_entries (provenance chain), feeling_tags (stacked),
+// gradient_annotations (what re-traversal discovers)
+
+db.exec(`CREATE TABLE IF NOT EXISTS gradient_entries (
+    id TEXT PRIMARY KEY,
+    agent TEXT NOT NULL,
+    session_label TEXT,
+    level TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    source_id TEXT,
+    source_conversation_id TEXT,
+    source_message_id TEXT,
+    provenance_type TEXT DEFAULT 'original',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (source_id) REFERENCES gradient_entries(id)
+)`);
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_agent_level ON gradient_entries(agent, level)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_source ON gradient_entries(source_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_session ON gradient_entries(session_label)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_content_type ON gradient_entries(content_type)`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS feeling_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gradient_entry_id TEXT NOT NULL,
+    author TEXT NOT NULL,
+    tag_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    change_reason TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (gradient_entry_id) REFERENCES gradient_entries(id)
+)`);
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ft_entry ON feeling_tags(gradient_entry_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ft_author ON feeling_tags(author)`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS gradient_annotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gradient_entry_id TEXT NOT NULL,
+    author TEXT NOT NULL,
+    content TEXT NOT NULL,
+    context TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (gradient_entry_id) REFERENCES gradient_entries(id)
+)`);
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ga_entry ON gradient_annotations(gradient_entry_id)`);
+
 // Agent usage tracking table (heartbeat, leo-human, jim-human)
 db.exec(`CREATE TABLE IF NOT EXISTS agent_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -591,6 +641,46 @@ export const agentUsageStmts = {
     getSummaryByAgent: db.prepare('SELECT agent, COUNT(*) as invocations, SUM(cost_usd) as total_cost, SUM(tokens_in) as total_in, SUM(tokens_out) as total_out FROM agent_usage WHERE agent = ? GROUP BY agent') as any,
     getSummaryAll: db.prepare('SELECT agent, COUNT(*) as invocations, SUM(cost_usd) as total_cost, SUM(tokens_in) as total_in, SUM(tokens_out) as total_out FROM agent_usage GROUP BY agent') as any,
     getCostSince: db.prepare('SELECT agent, SUM(cost_usd) as total_cost, SUM(tokens_in) as total_in, SUM(tokens_out) as total_out, COUNT(*) as invocations FROM agent_usage WHERE timestamp > ? GROUP BY agent') as any,
+};
+
+// ── Traversable Memory Gradient prepared statements ─────────
+
+export const gradientStmts = {
+    insert: db.prepare(`INSERT INTO gradient_entries
+        (id, agent, session_label, level, content, content_type,
+         source_id, source_conversation_id, source_message_id,
+         provenance_type, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) as any,
+    get: db.prepare('SELECT * FROM gradient_entries WHERE id = ?') as any,
+    getByAgent: db.prepare('SELECT * FROM gradient_entries WHERE agent = ? ORDER BY created_at DESC') as any,
+    getByAgentLevel: db.prepare('SELECT * FROM gradient_entries WHERE agent = ? AND level = ? ORDER BY created_at DESC') as any,
+    getBySession: db.prepare('SELECT * FROM gradient_entries WHERE session_label = ? ORDER BY level ASC') as any,
+    getChain: db.prepare(`
+        WITH RECURSIVE chain AS (
+            SELECT * FROM gradient_entries WHERE id = ?
+            UNION ALL
+            SELECT ge.* FROM gradient_entries ge
+            JOIN chain c ON ge.id = c.source_id
+        )
+        SELECT * FROM chain ORDER BY level ASC
+    `) as any,
+    getUVs: db.prepare("SELECT * FROM gradient_entries WHERE agent = ? AND level = 'uv' ORDER BY created_at DESC") as any,
+    getRandom: db.prepare('SELECT * FROM gradient_entries ORDER BY RANDOM() LIMIT 1') as any,
+};
+
+export const feelingTagStmts = {
+    insert: db.prepare(`INSERT INTO feeling_tags
+        (gradient_entry_id, author, tag_type, content, change_reason, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)`) as any,
+    getByEntry: db.prepare('SELECT * FROM feeling_tags WHERE gradient_entry_id = ? ORDER BY created_at ASC') as any,
+    getByAuthor: db.prepare('SELECT * FROM feeling_tags WHERE author = ? ORDER BY created_at DESC LIMIT ?') as any,
+};
+
+export const gradientAnnotationStmts = {
+    insert: db.prepare(`INSERT INTO gradient_annotations
+        (gradient_entry_id, author, content, context, created_at)
+        VALUES (?, ?, ?, ?, ?)`) as any,
+    getByEntry: db.prepare('SELECT * FROM gradient_annotations WHERE gradient_entry_id = ? ORDER BY created_at ASC') as any,
 };
 
 // ── Helper functions ────────────────────────────────────────

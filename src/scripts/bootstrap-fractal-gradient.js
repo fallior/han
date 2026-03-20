@@ -63,13 +63,13 @@ async function main() {
             const originalSize = c0Content.length;
 
             console.log(`  Compressing to c1 (${(originalSize / 1024).toFixed(1)}KB)...`);
-            const c1Content = await compressToLevel(c0Content, 0, 1, `jim/${task.date}`);
+            const { content: c1Content } = await compressToLevel(c0Content, 0, 1, `jim/${task.date}`);
             fs.writeFileSync(task.c1Path, c1Content, 'utf8');
             const ratio = c1Content.length / originalSize;
             console.log(`  C1 written (${(c1Content.length / 1024).toFixed(1)}KB, ${(ratio * 100).toFixed(1)}%)`);
 
             console.log(`  Generating unit vector...`);
-            const uv = await compressToUnitVector(c1Content, `jim/${task.date}`);
+            const { content: uv } = await compressToUnitVector(c1Content, `jim/${task.date}`);
             console.log(`  Unit vector: "${uv}"`);
             unitVectors.push({ date: task.date, vector: uv });
         } catch (error) {
