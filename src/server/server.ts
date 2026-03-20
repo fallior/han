@@ -11,7 +11,7 @@ import express from 'express';
 
 import {
     db, HAN_DIR, PENDING_DIR, RESOLVED_DIR, CONTEXTS_DIR,
-    PID_FILE, syncRegistry
+    syncRegistry
 } from './db';
 
 // Signals directory for cross-process communication
@@ -62,32 +62,11 @@ const server = useHttps
 const PORT = process.env.PORT || 3847;
 const UI_DIR = path.join(__dirname, '..', 'ui');
 
-(function ensureSingleInstance() {
-    if (fs.existsSync(PID_FILE)) {
-        const oldPid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10);
-        if (oldPid) {
-            try {
-                process.kill(oldPid, 0);
-                console.log(`Killing previous server (PID ${oldPid})`);
-                process.kill(oldPid, 'SIGTERM');
-                const start = Date.now();
-                while (Date.now() - start < 1000) { /* spin */ }
-            } catch {
-                // Not running — stale PID file
-            }
-        }
-    }
-    if (!fs.existsSync(HAN_DIR)) {
-        fs.mkdirSync(HAN_DIR, { recursive: true });
-    }
-    fs.writeFileSync(PID_FILE, String(process.pid));
-})();
-
-function cleanPid() {
-    try { if (fs.readFileSync(PID_FILE, 'utf8').trim() === String(process.pid)) fs.unlinkSync(PID_FILE); } catch {}
-}
-process.on('exit', cleanPid);
-process.on('SIGINT', () => { cleanPid(); process.exit(130); }); // 128 + 2 (SIGINT)
+// PID guard: kill previous server gracefully (30s), then SIGKILL if needed
+import { replaceExistingInstance } from './lib/pid-guard';
+const serverPidGuard = replaceExistingInstance('han-server');
+process.on('exit', () => serverPidGuard.cleanup());
+process.on('SIGINT', () => { serverPidGuard.cleanup(); process.exit(130); });
 
 // ── Middleware ────────────────────────────────────────────
 

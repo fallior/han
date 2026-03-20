@@ -93,6 +93,7 @@ function classifyAndDispatch(
     discussionType: string,
     timestamp: string,
 ): void {
+    console.log(`[Conversations] Classifying addressee for message in ${discussionType} thread`);
     classifyAddressee(content, discussionType).then(({ jim, leo }) => {
         if (jim) {
             try {
