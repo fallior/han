@@ -39,6 +39,7 @@
 | 11.G | Document Swarm | Implementation Spec | Complete | [level-11-phase-g-document-swarm.md](level-11-phase-g-document-swarm.md) |
 | 11.H | Deploy Swarm | Implementation Spec | Complete | [level-11-phase-h-deploy-swarm.md](level-11-phase-h-deploy-swarm.md) |
 | — | Opus Planner | Implementation Spec | Complete | [opus-planner.md](opus-planner.md) |
+| — | Traversable Memory | Implementation Spec | Planned | [traversable-memory.md](traversable-memory.md) |
 
 ## Plan Template
 

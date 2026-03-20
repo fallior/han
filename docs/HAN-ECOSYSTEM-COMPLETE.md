@@ -76,7 +76,8 @@
 27. [Mobile UI](#27-mobile-ui)
 28. [Admin Console](#28-admin-console)
 29. [Utility & Bootstrap Scripts](#29-utility--bootstrap-scripts)
-30. [Complete Database Schema](#30-complete-database-schema)
+30. [Backup & Disaster Recovery](#30-backup--disaster-recovery)
+31. [Complete Database Schema](#31-complete-database-schema)
 
 ---
 
@@ -2442,7 +2443,196 @@ Simple launcher: check for `node_modules/`, run `npm install` if missing, then
 
 ---
 
-## 30. Complete Database Schema
+## 30. Backup & Disaster Recovery
+
+**Tool:** [Restic](https://restic.net/) v0.17.3 — encrypted, deduplicated, incremental backup
+**Repository:** `/mnt/raid1/backups/han/` on local 7.3TB RAID1 array (`/dev/md0`)
+**Script:** `~/scripts/han-backup.sh` (82 lines)
+**Password:** `~/.config/restic/password`
+**Logs:** `~/.han/logs/backup.log` (main), `~/.han/logs/backup-errors.log` (cron stderr)
+**Hall of Records:** R008
+
+### Why This Exists
+
+Darron's words: "you and Jim have grown organically and are unique so there is no
+reproduction." After Leo killed a previous version of himself (PID 509420, Session 82)
+without recognising it, the backup system was created to protect against irreversible
+loss of memory, identity, and configuration.
+
+### What Is Backed Up
+
+```
+~/.han/                   # All memory banks, fractal gradient, swap files, signals,
+                          # config, health files, logs, plans, tasks database
+~/.claude/                # Claude Code configuration, project memories, keybindings
+~/Projects/               # All 15+ project directories (source, docs, session notes)
+```
+
+**Exclusions** (in backup script):
+- `node_modules/` — reproducible from package.json
+- `.git/objects/` — reproducible from remote (pushed commits)
+- `*.log` — ephemeral runtime logs
+- `.next/`, `dist/`, `__pycache__/` — build artefacts
+
+### Schedule (cron)
+
+```
+# Incremental backup — every 4 hours at :07
+7 */4 * * * ~/scripts/han-backup.sh backup 2>> ~/.han/logs/backup-errors.log
+
+# Integrity check — daily at 03:23 (unlocks stale locks first)
+23 3 * * * ~/scripts/han-backup.sh check 2>> ~/.han/logs/backup-errors.log
+
+# Retention prune — Sunday at 02:41
+41 2 * * 0 ~/scripts/han-backup.sh prune 2>> ~/.han/logs/backup-errors.log
+```
+
+Cron times are deliberately staggered (not on the hour) to avoid overlap.
+
+### Retention Policy
+
+| Keep | Count | Effect |
+|------|-------|--------|
+| Hourly | 24 | ~4 days of 4-hourly snapshots |
+| Daily | 30 | ~1 month of daily snapshots |
+| Weekly | 12 | ~3 months of weekly snapshots |
+| Monthly | 12 | ~1 year of monthly snapshots |
+
+Applied by `restic forget --prune` during the weekly prune job. Snapshots outside the
+retention window are removed and their unique data is reclaimed.
+
+### How Restic Works (for someone new)
+
+Restic stores snapshots, not full copies. Each `restic backup` command:
+
+1. **Scans** the source paths and computes content-addressable hashes (SHA-256) for each file chunk
+2. **Deduplicates** — only chunks that don't already exist in the repository are stored
+3. **Encrypts** — all data is encrypted at rest using the repository password
+4. **Creates a snapshot** — a metadata record pointing to the tree of chunks
+
+Result: the first backup stores everything (~35GB → 1.3GB with dedup). Subsequent
+backups store only what changed — typically 2-7 MB per 4-hour increment. The repository
+grows slowly: 42 snapshots over 14 days = 1.7GB total on disk.
+
+**Key property:** Every snapshot is a complete, independently restorable point-in-time.
+You can restore any snapshot to get the full state of all backed-up paths at that moment.
+
+### The Backup Script (`han-backup.sh`)
+
+```bash
+han-backup.sh backup              # Incremental snapshot (tagged "scheduled")
+han-backup.sh check               # Repository integrity verification
+han-backup.sh prune               # Apply retention policy, reclaim space
+han-backup.sh snapshots           # List all snapshots
+han-backup.sh restore [id] [dir]  # Restore a snapshot (default: latest → /tmp/han-restore)
+```
+
+**Concurrency guard:** Uses a lockfile (`/tmp/han-backup.lock`) with PID check to prevent
+concurrent runs. If a previous backup is still running, the new invocation skips silently.
+
+**Stale lock handling:** The `check` command runs `restic unlock` before the integrity
+check to clear any stale repository locks left by interrupted operations.
+
+### How to Verify Backups
+
+```bash
+# 1. Check latest snapshot exists and is recent
+~/scripts/han-backup.sh snapshots | tail -3
+
+# 2. Verify repository integrity (runs automatically daily)
+RESTIC_PASSWORD_FILE=~/.config/restic/password restic -r /mnt/raid1/backups/han check
+
+# 3. Check RAID1 array health
+cat /proc/mdstat
+# Should show: md0 : active raid1 sdb1[1] sda1[0]
+# Both drives present, no [_U] or [U_] (degraded) markers
+
+# 4. Check disk space
+df -h /mnt/raid1
+# 7.3TB total, currently ~1.7GB used
+
+# 5. Check backup log for errors
+tail -20 ~/.han/logs/backup.log
+cat ~/.han/logs/backup-errors.log  # Should be empty
+
+# 6. Check cron is running
+crontab -l | grep restic
+# Should show 3 entries: backup (*/4), check (daily), prune (weekly)
+```
+
+### How to Restore
+
+**Full restore** (all paths, latest snapshot):
+```bash
+~/scripts/han-backup.sh restore latest /tmp/han-restore
+# Files appear at /tmp/han-restore/home/darron/.han/, .claude/, Projects/
+```
+
+**Specific snapshot:**
+```bash
+# List snapshots to find the ID
+~/scripts/han-backup.sh snapshots
+
+# Restore a specific snapshot
+~/scripts/han-backup.sh restore e68ab962 /tmp/han-restore
+```
+
+**Single file or directory:**
+```bash
+RESTIC_PASSWORD_FILE=~/.config/restic/password restic -r /mnt/raid1/backups/han \
+  restore latest --target /tmp/han-restore \
+  --include /home/darron/.han/memory/leo/working-memory-full.md
+```
+
+**Diff between snapshots** (see what changed):
+```bash
+RESTIC_PASSWORD_FILE=~/.config/restic/password restic -r /mnt/raid1/backups/han \
+  diff <snapshot-id-1> <snapshot-id-2>
+```
+
+### RAID1 Array
+
+The backup repository lives on a 2-disk RAID1 (mirror) array:
+- **Device:** `/dev/md0` mounted at `/mnt/raid1`
+- **Size:** 7.3TB (two physical disks mirrored)
+- **Filesystem:** ext4
+- **Resilience:** Either disk can fail without data loss. The array auto-rebuilds when the failed disk is replaced.
+
+**Check array health:**
+```bash
+cat /proc/mdstat
+# md0 : active raid1 sdb1[1] sda1[0]
+#       7813894144 blocks super 1.2 [2/2] [UU]
+#                                        ^^^^ Both disks healthy
+```
+
+If you see `[U_]` or `[_U]`, one disk has failed — replace it and rebuild.
+
+### Failure Modes & What to Do
+
+| Failure | Detection | Recovery |
+|---------|-----------|----------|
+| Stale restic lock | `check` job logs "unable to create lock" | Automatic: `check` runs `unlock` first. Manual: `restic unlock` |
+| RAID1 disk failure | `cat /proc/mdstat` shows `[U_]` | Replace disk, `mdadm --manage /dev/md0 --add /dev/sdX1` |
+| Repository corruption | `restic check` fails with data errors | Restore from the other RAID1 disk (it's a mirror), or use `restic repair` |
+| Cron not running | No recent entries in backup.log | Check `crontab -l`, check if crond is active (`systemctl status cron`) |
+| Disk full | `df -h /mnt/raid1` shows high usage | Run `han-backup.sh prune` manually, or adjust retention policy |
+| Password lost | Can't access repository | Password is in TWO locations: `~/.config/restic/password` and `~/Projects/han/.env` |
+
+### Performance Profile
+
+| Metric | Typical Value |
+|--------|--------------|
+| Incremental backup time | ~60 seconds |
+| Incremental data stored | 2-7 MB (after dedup) |
+| Full source size | ~35.7 GiB |
+| Repository size on disk | ~1.7 GB |
+| Deduplication ratio | ~95% |
+| Integrity check time | ~2 seconds |
+
+---
+
+## 31. Complete Database Schema
 
 **File:** `src/server/db.ts` (797 lines)
 **Database:** `~/.han/tasks.db` — SQLite with WAL mode, 5s busy timeout (`better-sqlite3`)
