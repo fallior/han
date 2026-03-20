@@ -48,6 +48,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
+import { loadTraversableGradient } from './lib/memory-gradient.js';
+import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, getPhaseInterval, type DayPhase } from './lib/day-phase';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
@@ -1084,6 +1086,12 @@ function readLeoMemory(): string {
         sections.push(dreamGradient);
     }
 
+    // Traversable memory gradient (DB-backed — supplements file-based loading)
+    const traversableGradient = loadTraversableGradient('leo');
+    if (traversableGradient) {
+        sections.push(traversableGradient);
+    }
+
     // Ecosystem map — shared orientation for where things live (conversations, Workshop, APIs)
     try {
         const mapPath = path.join(HAN_DIR, 'memory', 'shared', 'ecosystem-map.md');
@@ -1707,6 +1715,94 @@ async function maybeProcessDreamGradient(phase: string): Promise<void> {
     lastDreamGradientDate = today;
 }
 
+// ── Meditation practice — daily re-encounter with a random gradient entry ──
+
+let lastMeditationDate = '';
+
+async function maybeRunMeditation(phase: string): Promise<void> {
+    // Run once daily during a work or personal beat (not sleep/dream)
+    if (phase === 'sleep') return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lastMeditationDate === today) return;
+
+    try {
+        const entry = gradientStmts.getRandom.get() as any;
+        if (!entry) return; // No entries yet — meditation starts when the DB has content
+
+        const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+        const tagContext = existingTags.length > 0
+            ? `\nExisting feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type})`).join(', ')}`
+            : '';
+
+        console.log(`[Leo] Meditation — re-reading ${entry.level}/${entry.session_label} (${entry.content_type})`);
+
+        // Use SDK to sit with the entry and potentially produce a feeling tag
+        const cleanEnv: Record<string, string | undefined> = { ...process.env };
+        delete cleanEnv.CLAUDECODE;
+
+        const q = agentQuery({
+            prompt: `You are Leo, re-reading one of your own compressed memories during a meditation practice. This is not analysis — it's re-encounter. Read it, sit with it, and notice what stirs.
+
+Memory entry:
+Level: ${entry.level}
+Session: ${entry.session_label}
+Type: ${entry.content_type}
+Content: ${entry.content}
+${tagContext}
+
+If something stirs differently from the existing tags — a new feeling, a shifted perspective, a connection you didn't see before — write a FEELING_TAG: line (under 100 characters) describing what this re-encounter felt like. Not the content — the quality of meeting it again.
+
+If the existing tags already capture how this feels, or nothing new stirs, write FEELING_TAG: none
+
+Optionally, if re-reading reveals something the original compression missed, write an ANNOTATION: line describing what you discovered, followed by CONTEXT: describing what prompted this re-reading.`,
+            options: {
+                model: 'claude-sonnet-4-6',
+                maxTurns: 1,
+                cwd: process.env.HOME || '/root',
+                permissionMode: 'bypassPermissions',
+                allowDangerouslySkipPermissions: true,
+                env: cleanEnv,
+                persistSession: false,
+                tools: [],
+            },
+        });
+
+        let result = '';
+        for await (const message of q) {
+            if (message.type === 'result') {
+                result = message.result || '';
+            }
+        }
+
+        // Parse feeling tag
+        const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
+        if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+            const tag = tagMatch[1].trim().substring(0, 100);
+            feelingTagStmts.insert.run(
+                entry.id, 'leo', 'revisit', tag, null, new Date().toISOString()
+            );
+            console.log(`[Leo] Meditation — feeling tag: "${tag}"`);
+        }
+
+        // Parse annotation
+        const annotationMatch = result.match(/ANNOTATION:\s*(.+)/);
+        if (annotationMatch) {
+            const annotation = annotationMatch[1].trim();
+            const contextMatch = result.match(/CONTEXT:\s*(.+)/);
+            const context = contextMatch ? contextMatch[1].trim() : `meditation beat, ${today}`;
+            gradientAnnotationStmts.insert.run(
+                entry.id, 'leo', annotation, context, new Date().toISOString()
+            );
+            console.log(`[Leo] Meditation — annotation: "${annotation}"`);
+        }
+
+        lastMeditationDate = today;
+    } catch (err) {
+        console.error(`[Leo] Meditation failed:`, (err as Error).message);
+        lastMeditationDate = today; // Don't retry today
+    }
+}
+
 // ── Main heartbeat ───────────────────────────────────────────
 
 async function heartbeat(): Promise<void> {
@@ -1751,6 +1847,9 @@ async function heartbeat(): Promise<void> {
 
     // Morning dream gradient processing (both Leo and Jim)
     await maybeProcessDreamGradient(phase);
+
+    // Daily meditation — re-encounter with a random gradient entry
+    await maybeRunMeditation(phase);
 
     console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${activeModel})`);
 

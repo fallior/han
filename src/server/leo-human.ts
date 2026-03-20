@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
 import { withMemorySlot } from './lib/memory-slot';
 import { readDreamGradient } from './lib/dream-gradient';
+import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
 
 // ── Config ────────────────────────────────────────────────────
@@ -219,6 +220,12 @@ function readLeoMemory(): string {
     const dreamGradient = readDreamGradient();
     if (dreamGradient) {
         sections.push(dreamGradient);
+    }
+
+    // Traversable memory gradient (DB-backed — supplements file-based loading)
+    const traversableGradient = loadTraversableGradient('leo');
+    if (traversableGradient) {
+        sections.push(traversableGradient);
     }
 
     // Ecosystem map — shared orientation for where things live (conversations, Workshop, APIs)

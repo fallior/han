@@ -33,7 +33,7 @@ import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, type DayPhase } from '../lib/day-phase';
 import { withMemorySlot } from '../lib/memory-slot';
 import { readDreamGradient } from '../lib/dream-gradient';
-import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory } from '../lib/memory-gradient';
+import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient } from '../lib/memory-gradient';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -674,6 +674,12 @@ function loadMemoryBank(): string {
         const wmGradient = loadMemoryFileGradient(path.join(FRACTAL_DIR, 'working-memory'), 'working-memory-gradient');
         if (wmGradient) parts.push(wmGradient);
     } catch { /* skip memory file gradients on error */ }
+
+    // Traversable memory gradient (DB-backed — supplements file-based loading)
+    try {
+        const jimTraversable = loadTraversableGradient('jim');
+        if (jimTraversable) parts.push(jimTraversable);
+    } catch { /* skip traversable gradient on error */ }
 
     return parts.join('\n\n');
 }

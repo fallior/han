@@ -822,3 +822,61 @@ export function loadMemoryFileGradient(gradientDir: string, label: string): stri
 
     return parts.join('\n\n');
 }
+
+// ── Traversable Memory — DB-backed gradient loading ─────────────
+//
+// Reads from gradient_entries + feeling_tags tables. Falls back to
+// file-based loading when the DB has no entries for the agent.
+
+/**
+ * Load an agent's full traversable gradient from the database.
+ * Includes all content types (session, dream, felt-moment, working-memory)
+ * with feeling tags inline. Falls back to file-based loading if DB is empty.
+ *
+ * Returns formatted text for system prompt inclusion.
+ */
+export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
+    // Check if DB has entries for this agent
+    const uvs = gradientStmts.getUVs.all(agent) as any[];
+    if (uvs.length === 0) {
+        // No DB entries yet — fall back to file-based loading
+        return '';
+    }
+
+    const sections: string[] = [];
+
+    // Unit vectors first (always loaded in full)
+    if (uvs.length > 0) {
+        const uvLines = uvs.map((uv: any) => {
+            const tags = feelingTagStmts.getByEntry.all(uv.id) as any[];
+            const tagStr = tags.length > 0
+                ? ` [${tags.map((t: any) => t.content).join('; ')}]`
+                : '';
+            return `- **${uv.session_label}** (${uv.content_type}): "${uv.content}"${tagStr}`;
+        });
+        sections.push(`### Unit Vectors\n${uvLines.join('\n')}`);
+    }
+
+    // Load by level — most compressed first (c5, c3, c2, c1)
+    const levelCaps: Record<string, number> = { c5: 8, c3: 4, c2: 6, c1: 10 };
+
+    for (const [level, cap] of Object.entries(levelCaps)) {
+        const entries = gradientStmts.getByAgentLevel.all(agent, level) as any[];
+        if (entries.length === 0) continue;
+
+        const sliced = entries.slice(0, cap);
+        const levelParts = sliced.map((e: any) => {
+            const tags = feelingTagStmts.getByEntry.all(e.id) as any[];
+            const tagStr = tags.length > 0
+                ? `\n*Feeling: ${tags.map((t: any) => `${t.content}${t.tag_type === 'revisit' ? ' (revisit)' : ''}`).join('; ')}*`
+                : '';
+            return `--- ${e.content_type}/${level}/${e.session_label} ---\n${e.content}${tagStr}`;
+        });
+
+        sections.push(`### ${level.toUpperCase()} (${sliced.length} entries)\n${levelParts.join('\n\n')}`);
+    }
+
+    return sections.length > 0
+        ? `\n## Traversable Memory Gradient (${agent})\n\n${sections.join('\n\n')}`
+        : '';
+}
