@@ -1,4 +1,4 @@
-import type { useAdminStore } from './adminStore';
+import type { useStore } from './index';
 
 /**
  * WebSocket message dispatcher.
@@ -13,7 +13,7 @@ import type { useAdminStore } from './adminStore';
  */
 export function dispatchWsMessage(
   data: any,
-  store: ReturnType<typeof useAdminStore.getState>
+  store: ReturnType<typeof useStore.getState>
 ) {
   switch (data.type) {
     case 'supervisor_cycle':

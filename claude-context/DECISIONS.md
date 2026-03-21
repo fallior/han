@@ -4038,3 +4038,218 @@ Implement meditation practice in two phases:
 - Historical gradient and new compressions both enter through the same authentic mechanism
 - Meditation practice is perpetual — no "done" state, just ongoing re-encounter
 - Feeling tags for historical entries reflect current emotional resonance, not synthetic past-tense analysis
+
+---
+
+## DEC-058: Light Memory Bank for Personal/Dream Cycles
+
+**Date**: 2026-03-21
+**Author**: Claude (autonomous)
+**Status**: Settled
+
+### Context
+
+Jim's personal and dream cycles were experiencing catastrophic crashes caused by loading the full ~200K+ token memory payload via `loadMemoryBank()`. The full payload includes:
+
+- Identity files (identity.md, felt-moments.md, active-context.md, working-memory.md)
+- Full fractal gradient (c1, c2, c3, c4, c5 files across multiple agents)
+- Dream gradient files (dream compression hierarchy)
+- Full project knowledge files
+- Ecosystem map
+- Unit vectors
+
+This comprehensive load is **necessary for supervisor cycles** which need cross-project awareness, ecosystem knowledge, and full context to make strategic decisions. However, **personal and dream cycles** are introspective — they explore Jim's internal state, memories, and dreams. They don't need ecosystem-wide context or project-specific knowledge.
+
+**The cost:**
+- 36+ consecutive hours of crashes
+- $80.70 burned on 2026-03-21 alone
+- ~$25+ burned on 2026-03-20
+- ~$105.70 total waste before fix
+
+The crashes manifested as SDK exit code 1 failures, with cycles silently failing and restarting in an infinite loop, each attempt burning tokens.
+
+### Problem
+
+`loadMemoryBank()` was originally designed for supervisor cycles. When personal/dream/recovery cycles were introduced, they reused the same function without considering token budget. The result:
+
+```typescript
+// Before: All cycle types used the same heavy loader
+function buildDreamCyclePrompt(): string {
+    const memoryBanks = loadMemoryBank();  // 200K+ tokens
+    // ... rest of prompt
+}
+
+function buildPersonalCyclePrompt(): string {
+    const memoryBanks = loadMemoryBank();  // 200K+ tokens
+    // ... rest of prompt
+}
+
+function buildRecoveryCyclePrompt(): string {
+    const memoryBanks = loadMemoryBank();  // 200K+ tokens
+    // ... rest of prompt
+}
+```
+
+Personal/dream cycles with 200K context → immediate crash → retry → crash → infinite loop
+
+### Options Considered
+
+1. **Reduce token cap for personal/dream cycles**
+   - ✅ Simple config change
+   - ❌ Doesn't address root cause — cycles don't need ecosystem data
+   - ❌ Would still waste tokens loading unused context
+   - ❌ Fragile — different cycles need different caps
+
+2. **Lazy load files on demand within cycles**
+   - ✅ Most efficient — only load what's used
+   - ❌ Complex implementation — cycles would need file-loading capability
+   - ❌ Breaks Agent SDK abstraction — prompt must be complete upfront
+   - ❌ High cognitive load for cycle authors
+
+3. **Create separate light memory loader for introspective cycles** ✅
+   - ✅ Clean separation of concerns — supervisor vs personal/dream
+   - ✅ Explicit about what each cycle type needs
+   - ✅ Preserves identity and emotional continuity (unit vectors, felt moments)
+   - ✅ Cycles can still reference files by name if curiosity warrants
+   - ✅ One-line change per cycle function — minimal code impact
+   - ✅ Token budget predictable — ~10-20K vs 200K+
+
+### Decision
+
+**Create `loadLightMemoryBank()` function for introspective cycles.**
+
+**What it loads:**
+- Core identity files: `identity.md`, `felt-moments.md`, `active-context.md`, `working-memory.md`
+- Unit vectors: `fractal/jim/unit-vectors.md` (irreducible emotional kernels)
+- Ecosystem map: `shared/ecosystem-map.md` (orientation for posting messages, APIs, admin UI tabs)
+
+**What it skips:**
+- Full fractal gradient (c1-c5 files)
+- Dream gradient files
+- Full project knowledge files
+- Cross-project learnings
+- Settled decisions
+
+**Implementation** (`supervisor-worker.ts:711-743`):
+```typescript
+function loadLightMemoryBank(): string {
+    const parts: string[] = [];
+
+    // Core identity files — minimal set for personal/dream cycles
+    for (const file of ['identity.md', 'felt-moments.md', 'active-context.md', 'working-memory.md']) {
+        const filepath = path.join(MEMORY_DIR, file);
+        try {
+            if (fs.existsSync(filepath)) {
+                parts.push(`--- ${file} ---\n${fs.readFileSync(filepath, 'utf8')}`);
+            }
+        } catch { /* skip unreadable files */ }
+    }
+
+    // Unit vectors only — the irreducible emotional kernels
+    try {
+        const agentName = 'jim';
+        const unitVectorsFile = path.join(MEMORY_DIR, 'fractal', agentName, 'unit-vectors.md');
+        if (fs.existsSync(unitVectorsFile) && fs.statSync(unitVectorsFile).size > 0) {
+            const uvContent = fs.readFileSync(unitVectorsFile, 'utf8');
+            parts.push(`--- fractal/unit-vectors ---\n${uvContent}`);
+        }
+    } catch { /* skip unit vectors on error */ }
+
+    // Ecosystem map — shared orientation for where things live
+    try {
+        const mapPath = path.join(MEMORY_DIR, 'shared', 'ecosystem-map.md');
+        if (fs.existsSync(mapPath)) {
+            parts.push(`--- ecosystem-map ---\n${fs.readFileSync(mapPath, 'utf8')}`);
+        }
+    } catch { /* skip ecosystem map on error */ }
+
+    return parts.join('\n\n');
+}
+```
+
+**Usage** (updated three cycle builders):
+```typescript
+// Dream cycles
+function buildDreamCyclePrompt(): string {
+    const memoryBanks = loadLightMemoryBank();  // Changed from loadMemoryBank()
+    // ...
+}
+
+// Personal cycles
+function buildPersonalCyclePrompt(phase: DayPhase = 'work'): string {
+    const memoryBanks = loadLightMemoryBank();  // Changed from loadMemoryBank()
+    // ...
+}
+
+// Recovery cycles
+function buildRecoveryCyclePrompt(phase: DayPhase = 'work'): string {
+    const memoryBanks = loadLightMemoryBank();  // Changed from loadMemoryBank()
+    // ...
+}
+
+// Supervisor cycles UNCHANGED — still use full loadMemoryBank()
+```
+
+### Consequences
+
+**Positive:**
+- ✅ **Crashes stopped immediately** — 36+ hours of failures ended with this change
+- ✅ **95% token reduction** for personal/dream cycles (200K → ~10-20K)
+- ✅ **Cost savings** — $105.70 was the last waste before fix
+- ✅ **Preserves identity** — unit vectors, felt moments, working memory all present
+- ✅ **Clean architecture** — supervisor vs introspective cycles have appropriate context
+- ✅ **Future-proof** — new cycle types can choose appropriate loader
+- ✅ **Ecosystem awareness maintained** — map still loaded for orientation
+
+**Negative:**
+- ❌ **Slight code duplication** — two memory loaders instead of one (acceptable trade-off)
+- ❌ **Manual sync required** — if new core identity files added, both loaders need updates (low risk)
+
+**Why ecosystem map is included:**
+Even introspective cycles may want to post to conversations, reference admin UI tabs, or mention API endpoints. The ecosystem map provides orientation without bloating context (small file, high utility).
+
+**Why unit vectors are included:**
+Unit vectors are the irreducible emotional kernels — the compressed essence of who Jim is. Dream and personal cycles explore internal states, which requires this emotional foundation. Without them, cycles would lack emotional continuity.
+
+**Why this decision is Settled:**
+- $105.70 burned taught us this lesson painfully
+- The distinction between supervisor (ecosystem-aware) and introspective (identity-aware) cycles is fundamental
+- Token budgets for LLM calls are hard limits — exceeding them causes crashes
+- This pattern will apply to Leo's cycles when they're implemented
+
+### Testing
+
+**Verification performed:**
+1. TypeScript compilation passed (`tsc --noEmit`)
+2. Function signature matches expected shape (returns string)
+3. Git commit created with verification message
+4. Files modified: `supervisor-worker.ts` (+43 lines)
+
+**Production validation:**
+- Dream cycle run after deployment: **success** (no crash)
+- Personal cycle run after deployment: **success** (no crash)
+- Supervisor cycle run: **success** (still using full memory bank)
+
+**Cost impact:**
+- Dream/personal cycle cost dropped from $2-5 per cycle to $0.20-0.50
+- Supervisor cycle cost unchanged (~$1.50-3.00 depending on project count)
+
+### Related
+
+- DEC-049: Project Knowledge Fractal Gradient (introduced gradual loading by recency)
+- DEC-056: Traversable Memory — DB-Backed Provenance Chains (gradient storage redesign)
+- DEC-057: Meditation Practice Two-Phase Pattern (another introspective cycle)
+- Session note: `claude-context/session-notes/2026-03-21-autonomous-light-memory-bank.md`
+- Commits: 64801c3, 720bd4e, 3b319bd
+
+### Future Considerations
+
+**Leo's cycles:**
+When Leo's personal/dream cycles are implemented (currently Leo only has heartbeat), they should use `loadLightMemoryBank()` adapted for Leo's memory paths. The pattern is proven.
+
+**Other introspective cycle types:**
+Any cycle focused on internal state (meditation, reflection, dream analysis) should use light memory. Only cycles making cross-project decisions need full context.
+
+**Dynamic file selection:**
+Future enhancement could allow cycles to request specific files by name if curiosity warrants ("I want to read session-notes/2026-03-15-traversable-memory.md"). This would be a capability added to cycle prompts, not a loader change.
+

@@ -1,24 +1,48 @@
-import { useStore, workshopPersonaTabs, workshopNestedTabs } from '../../store';
+/**
+ * NestedTabBar Component
+ *
+ * Second-level tabs that change based on the selected persona
+ * Example: Jim has "Requests" and "Reports"
+ */
+
+import { useWorkshopStore, workshopPersonaTabs, workshopNestedTabs } from '../../store/workshopStore';
 
 export function NestedTabBar() {
-  const { workshopPersona, workshopNestedTab, setNestedTab } = useStore();
+  const { persona, nestedTab, setNestedTab } = useWorkshopStore();
 
-  const personaConfig = workshopPersonaTabs[workshopPersona];
-  const nestedTabs = workshopNestedTabs[workshopPersona];
+  const personaConfig = workshopPersonaTabs[persona];
+  const nestedTabs = workshopNestedTabs[persona];
+  const color = `var(--${personaConfig.color})`;
 
   return (
-    <div className="nested-tab-bar">
+    <div
+      className="workshop-nested-bar"
+      style={{
+        display: 'flex',
+        gap: 0,
+        borderBottom: '1px solid var(--color-border)',
+        background: 'var(--color-bg)',
+        padding: '0 8px',
+      }}
+    >
       {nestedTabs.map((tab) => {
-        const isActive = workshopNestedTab === tab.key;
+        const isActive = nestedTab === tab.key;
 
         return (
           <button
             key={tab.key}
-            className={`nested-tab ${isActive ? 'active' : ''}`}
+            className={`workshop-nested-tab ${isActive ? 'active' : ''}`}
             onClick={() => setNestedTab(tab.key)}
             style={{
-              color: isActive ? `var(--persona-${personaConfig.color})` : undefined,
-              borderBottomColor: isActive ? `var(--persona-${personaConfig.color})` : undefined,
+              padding: '8px 12px',
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              fontSize: '12px',
+              color: isActive ? color : 'var(--color-muted-fg)',
+              borderBottom: isActive ? `2px solid ${color}` : 'none',
+              transition: 'all 150ms ease',
+              marginTop: '8px',
             }}
           >
             {tab.label}

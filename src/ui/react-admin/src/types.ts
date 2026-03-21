@@ -35,8 +35,7 @@ export interface SearchResult {
 
 export interface Message {
   id: string;
-  thread_id: string;
-  author: string;
+  conversation_id: string;
   role: string;
   content: string;
   created_at: string;

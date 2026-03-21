@@ -4,7 +4,6 @@
  */
 
 import { useStore } from './index';
-import type { WorkshopSlice } from './workshopSlice';
 
 /**
  * Hook to access workshop slice of the store

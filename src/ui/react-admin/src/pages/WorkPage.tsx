@@ -104,24 +104,41 @@ export default function WorkPage() {
       const taskProject = t.project_path?.split('/').pop() || '';
       const taskModel = t.model || '';
 
-      // Status match
-      let statusMatch = false;
-      if (status === 'pending') statusMatch = taskStatus === 'pending';
+      // Column status match (which column to put the task in)
+      let columnStatusMatch = false;
+      if (status === 'pending') columnStatusMatch = taskStatus === 'pending';
       else if (status === 'running')
-        statusMatch =
+        columnStatusMatch =
           taskStatus === 'running' ||
           taskStatus === 'active' ||
           taskStatus === 'decomposing';
       else if (status === 'done')
-        statusMatch = taskStatus === 'done' || taskStatus === 'completed';
-      else if (status === 'failed') statusMatch = taskStatus === 'failed';
+        columnStatusMatch = taskStatus === 'done' || taskStatus === 'completed';
+      else if (status === 'failed') columnStatusMatch = taskStatus === 'failed';
+
+      // Filter dropdown status match (which tasks to show across all columns)
+      let filterStatusMatch = true;
+      if (workFilters.status !== 'all') {
+        if (workFilters.status === 'pending')
+          filterStatusMatch = taskStatus === 'pending';
+        else if (workFilters.status === 'running')
+          filterStatusMatch =
+            taskStatus === 'running' ||
+            taskStatus === 'active' ||
+            taskStatus === 'decomposing';
+        else if (workFilters.status === 'done')
+          filterStatusMatch = taskStatus === 'done' || taskStatus === 'completed';
+        else if (workFilters.status === 'failed')
+          filterStatusMatch = taskStatus === 'failed';
+      }
 
       // Filter matches
       const projectMatch =
         workFilters.project === 'all' || taskProject === workFilters.project;
-      const modelMatch = workFilters.model === 'all' || taskModel === workFilters.model;
+      const modelMatch =
+        workFilters.model === 'all' || taskModel === workFilters.model;
 
-      return statusMatch && projectMatch && modelMatch;
+      return columnStatusMatch && filterStatusMatch && projectMatch && modelMatch;
     });
   }
 
