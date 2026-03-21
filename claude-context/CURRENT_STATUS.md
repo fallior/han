@@ -32,6 +32,17 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-21 — Claude (autonomous) — Traversable Memory Testing & Integration
+- **Meditation practice complete** — Leo's heartbeat now includes daily meditation: Phase A reincorporates untranscribed gradient files into DB through genuine re-encounter, Phase B re-reads existing entries and writes revisit feeling tags. Uses Sonnet SDK, runs once per day, skips sleep phase. Graceful error handling.
+- **Pre-flight memory rotation** — Leo's heartbeat mirrors Jim's supervisor pattern: rotates `felt-moments.md` and `working-memory-full.md` when >50KB, compresses floating file through c1→c2→c3→c5→UV gradient in background. Prevents unbounded memory growth.
+- **Daily session gradient processing** — Leo's heartbeat runs `processGradientForAgent('leo')` once per day to compress archived session memories (c0→c1→c2→c3→c5→UV). Catches sessions not compressed at session end.
+- **Session gradient improvements** — `memory-gradient.ts` now recognises Leo's session file pattern (`working-memory-full-s*.md`), checks DB for dedupe (cascade deletes c1 files but DB persists), implements full session cascade with feeling tag extraction, generates unit vectors from c5 files.
+- **Leo conversation claim fix** — Leo/Human now uses `responding-to-{id}` claim files (same pattern as Jim/Human). Prevents Leo/Human and Leo/Heartbeat from both responding to the same conversation. Heartbeat system prompt forbids posting via tools. Root cause: heartbeat used curl to post directly, producing 4 duplicates in 13 seconds.
+- **Jemma channel-owner routing verified** — Reviewed and confirmed correct: `#jim` → Jim only, `#leo` → Leo only, other channels → both.
+- **CLAUDE_CODE_PROMPTS updated** — Session End section now includes evening seed instruction: Leo writes `evening-seed.md` at session end (2-4 sentences about what the day felt like), heartbeat reads as gravity well for dream beats.
+- **Files modified**: `leo-heartbeat.ts` (+444/-68 meditation + pre-flight + session gradient), `memory-gradient.ts` (+177 Leo sessions + cascade + UV), `leo-human.ts` (+51 claim mechanism), `supervisor-worker.ts` (+64 Jim pre-flight + meditation), `dream-gradient.ts` (+42 DB integration), `db.ts` (+11 helpers), `compress-leo-sessions.ts` (+53 new script), `jemma.ts` (+17 reviewed), `routes/jemma.ts` (+1), `CLAUDE_CODE_PROMPTS.md` (+16)
+- **Docs updated**: Session note created, CURRENT_STATUS updated
+
 ### 2026-03-21 — Leo + Darron — Traversable Memory Gradient (S98)
 - **Traversable memory** (DEC-056) — DB-backed provenance chains for the fractal gradient. Three new tables: `gradient_entries` (source_id FK chain), `feeling_tags` (stacked, never overwritten), `gradient_annotations` (re-traversal discoveries). Both compression pipelines write to DB alongside files. FEELING_TAG extraction from all compression prompts with fallback.
 - **Traversal API** — 10 endpoints at `/api/gradient/`: chain traversal (recursive CTE), random meditation selection, agent UVs, session lookup, feeling tag POST, annotation POST.
