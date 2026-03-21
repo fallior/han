@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import { MessageBubble } from '../shared/MessageBubble';
-import { formatTime } from '../../utils/formatters';
 import {
   fetchThread,
   postMessage,
@@ -55,7 +54,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
     async function loadThread() {
       setLoading(true);
       try {
-        const thread = await fetchThread(threadId);
+        const thread = await fetchThread(threadId as string);
         if (!cancelled) {
           setCurrentThread(thread);
         }
@@ -496,7 +495,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
           </div>
         ) : (
           <>
-            {workshopCurrentThread.messages.map((msg) => (
+            {workshopCurrentThread.messages.map((msg: any) => (
               <MessageBubble
                 key={msg.id}
                 role={msg.role}

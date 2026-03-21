@@ -312,15 +312,29 @@ tasks.db
     └── created_at
 ```
 
-**Loading strategy** (`supervisor-worker.ts:loadMemoryBank`, lines 313-404):
+**Loading strategy — Two loaders for different cycle types:**
+
+**`loadMemoryBank()`** (`supervisor-worker.ts:313-404`) — **For supervisor cycles**:
 - **c=0 (full)**: 1 most recent session from `sessions/` (~3,000 tokens)
 - **c=1 (~1/3)**: 3 files from `fractal/jim/c1/` (~1,000 tokens each = 3,000 total)
 - **c=2 (~1/9)**: 6 files from `fractal/jim/c2/` (~333 tokens each = 2,000 total)
 - **c=3 (~1/27)**: 9 files from `fractal/jim/c3/` (~111 tokens each = 1,000 total)
 - **c=4 (~1/81)**: 12 files from `fractal/jim/c4/` (~37 tokens each = 444 total)
 - **Unit vectors**: All entries from `unit-vectors.md` (~50 chars each, ~2,250 tokens)
+- **Project knowledge**, **settled decisions**, **cross-project learnings**
+- **Total**: ~200K tokens (needed for ecosystem-wide strategic decisions)
 
-**Total token budget**: ~11,694 tokens (within 12K target)
+**`loadLightMemoryBank()`** (`supervisor-worker.ts:711-743`) — **For personal/dream/recovery cycles** (DEC-058):
+- **Core identity**: identity.md, felt-moments.md, active-context.md, working-memory.md
+- **Unit vectors**: fractal/jim/unit-vectors.md (irreducible emotional kernels)
+- **Ecosystem map**: shared/ecosystem-map.md (orientation for conversations/APIs)
+- **Total**: ~10-20K tokens (95% reduction — introspection needs identity, not ecosystem)
+
+**Why two loaders:**
+- Supervisor cycles make cross-project decisions → need full ecosystem context
+- Personal/dream cycles explore internal states → need emotional continuity only
+- Loading 200K tokens into introspective cycles caused 36+ hours of crashes ($105.70 burned before fix)
+- Pattern: targeted context enables focus; excess context causes failure
 
 **Compression utility** (`src/server/lib/memory-gradient.ts`, 344 lines):
 - **`compressToLevel(content, fromLevel, toLevel, sessionLabel)`** — Multi-level compression with automatic retry. Uses Claude Opus 4.6 exclusively (compression is identity-forming per DEC-042). Target: ~3:1 per level.
