@@ -1,10 +1,22 @@
+import { useState, useEffect } from 'react';
+import './StatusBar.css';
+
 export default function StatusBar() {
+  const [connected, setConnected] = useState(false);
+  const [statusInfo, setStatusInfo] = useState('');
+
+  useEffect(() => {
+    // Connection status check logic will be added later
+    // For now, just show "Connecting..."
+  }, []);
+
   return (
-    <div className="status-bar">
-      <div className="status-item">
-        <span className="status-label">Status:</span>
-        <span className="status-value">Connected</span>
-      </div>
-    </div>
+    <footer className="status-bar">
+      <span id="statusConnection">
+        <span className={`status-dot ${connected ? 'connected' : 'disconnected'}`}></span>
+        {connected ? 'Connected' : 'Connecting...'}
+      </span>
+      <span id="statusInfo">{statusInfo}</span>
+    </footer>
   );
 }

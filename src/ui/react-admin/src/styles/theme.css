@@ -1,0 +1,106 @@
+/* ─── Theme Variables (GitHub Dark/Light) ─── */
+:root {
+    color-scheme: light dark;
+    --bg-page: #0d1117;
+    --bg-sidebar: #010409;
+    --bg-card: #161b22;
+    --bg-card-hover: #1c2128;
+    --bg-input: #0d1117;
+    --border: rgba(48, 54, 61, 0.6);
+    --border-subtle: rgba(48, 54, 61, 0.3);
+    --border-card: rgba(48, 54, 61, 0.4);
+    --text: #e6edf3;
+    --text-heading: #f0f6fc;
+    --text-dim: #8b949e;
+    --text-muted: #484f58;
+    --green: #3fb950;
+    --cyan: #39d0d8;
+    --amber: #d29922;
+    --red: #f85149;
+    --blue: #58a6ff;
+    --purple: #b392f0;
+    --pink: #f85167;
+    --shadow: rgba(0, 0, 0, 0.5);
+    --sidebar-hover: rgba(48, 54, 61, 0.3);
+    --sidebar-active: rgba(56, 139, 253, 0.15);
+}
+
+:root.light-mode {
+    --bg-page: #f6f8fa;
+    --bg-sidebar: #ffffff;
+    --bg-card: #ffffff;
+    --bg-card-hover: #f6f8fa;
+    --bg-input: #f6f8fa;
+    --border: rgba(27, 31, 35, 0.15);
+    --border-subtle: rgba(27, 31, 35, 0.08);
+    --border-card: rgba(27, 31, 35, 0.12);
+    --text: #24292f;
+    --text-heading: #1b1f24;
+    --text-dim: #57606a;
+    --text-muted: #79828b;
+    --green: #1f8934;
+    --cyan: #0969da;
+    --amber: #9e6a03;
+    --red: #d1242f;
+    --blue: #0969da;
+    --purple: #6639ba;
+    --pink: #bf3989;
+    --shadow: rgba(0, 0, 0, 0.12);
+    --sidebar-hover: rgba(27, 31, 35, 0.06);
+    --sidebar-active: rgba(9, 105, 218, 0.1);
+}
+
+/* ─── Reset & Base ─── */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text);
+    background: var(--bg-page);
+    overflow: hidden;
+}
+
+.mono {
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+a {
+    color: var(--blue);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* ─── Scrollbar Styling (Dark Theme) ─── */
+::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-page);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 6px;
+    border: 2px solid var(--bg-page);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) var(--bg-page);
+}
