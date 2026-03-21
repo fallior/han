@@ -288,7 +288,11 @@
 
 .persona-tab.active {
     font-weight: 600;
+<<<<<<< Updated upstream
     /* Color and border-color set inline via style prop based on persona */
+=======
+    /* Color set inline via style prop based on persona */
+>>>>>>> Stashed changes
 }
 
 /* ─── Nested Tab Bar ─── */
@@ -319,7 +323,11 @@
 
 .nested-tab.active {
     font-weight: 500;
+<<<<<<< Updated upstream
     /* Color and border-color set inline via style prop based on persona */
+=======
+    /* Color set inline via style prop based on persona */
+>>>>>>> Stashed changes
 }
 
 /* ─── Workshop Layout Accent Tinting - Jim (Purple) ─── */

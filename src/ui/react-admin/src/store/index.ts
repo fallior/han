@@ -161,7 +161,7 @@ export const useStore = create<AppState>((set, get, api) => ({
   conversations: {},
   conversationMessages: {},
   selectedConversationId: null,
-  lastReadTimestamps: loadLastReadTimestamps(),
+  lastReadTimestamps: _loadLastReadTimestamps(),
 
   // Supervisor initial state
   supervisorStatus: null,
@@ -205,11 +205,75 @@ export const useStore = create<AppState>((set, get, api) => ({
   setWsConnected: (connected) => set({ wsConnected: connected }),
 
   // Supervisor actions
+  setSupervisorPaused: (paused) => set({ supervisorPaused: paused }),
+
+  updateSupervisorStatus: (data) => {
+    set({ lastCycleAt: new Date().toISOString() });
+  },
+
   setSupervisorStatus: (status) => set({ supervisorStatus: status }),
   setSupervisorCycles: (cycles) => set({ supervisorCycles: cycles }),
   setSupervisorMemory: (memory) => set({ supervisorMemory: memory }),
   setSupervisorProposals: (proposals) => set({ supervisorProposals: proposals }),
   setSupervisorHealth: (health) => set({ supervisorHealth: health }),
+
+  // Conversation actions
+  setConversations: (conversations) => {
+    const conversationsById = conversations.reduce((acc, conv) => {
+      acc[conv.id] = conv;
+      return acc;
+    }, {} as Record<string, Conversation>);
+    set({ conversations: conversationsById });
+  },
+
+  setConversationMessages: (conversationId, messages) => {
+    set((state) => ({
+      conversationMessages: {
+        ...state.conversationMessages,
+        [conversationId]: messages,
+      },
+    }));
+  },
+
+  addConversationMessage: (conversationId, message) => {
+    set((state) => {
+      const existing = state.conversationMessages[conversationId] || [];
+      return {
+        conversationMessages: {
+          ...state.conversationMessages,
+          [conversationId]: [...existing, message],
+        },
+      };
+    });
+  },
+
+  selectConversation: (conversationId) => {
+    set({ selectedConversationId: conversationId });
+  },
+
+  markAsRead: (conversationId) => {
+    const now = new Date().toISOString();
+    set((state) => {
+      const updated = {
+        ...state.lastReadTimestamps,
+        [conversationId]: now,
+      };
+      _saveLastReadTimestamps(updated);
+      return { lastReadTimestamps: updated };
+    });
+  },
+
+  hasUnread: (conversationId) => {
+    const state = get();
+    const messages = state.conversationMessages[conversationId];
+    if (!messages || messages.length === 0) return false;
+
+    const latestMessage = messages[messages.length - 1];
+    const lastRead = state.lastReadTimestamps[conversationId];
+
+    if (!lastRead) return true; // Never read
+    return latestMessage.created_at > lastRead;
+  },
 
   // Work actions
   setGoals: (goals) => set({ goals }),
