@@ -353,8 +353,16 @@ function claimConversation(conversationId: string): boolean {
             const content = fs.readFileSync(claimPath, 'utf8');
             const claim = JSON.parse(content);
             if (Date.now() - claim.timestamp < CLAIM_TTL_MS) {
-                console.log(`[Leo/Human] Conversation ${conversationId} already claimed by ${claim.agent}`);
-                return false;
+                // Only blocked by our own agent family (leo-human, heartbeat).
+                // Jim's claims don't block Leo — both agents can respond to the
+                // same thread when Darron addresses both.
+                const isLeoFamily = claim.agent === 'leo-human' || claim.agent === 'leo-heartbeat';
+                if (isLeoFamily) {
+                    console.log(`[Leo/Human] Conversation ${conversationId} already claimed by ${claim.agent}`);
+                    return false;
+                }
+                // Jim has a claim — Leo can still respond independently
+                console.log(`[Leo/Human] Conversation ${conversationId} claimed by ${claim.agent} — Leo proceeding independently`);
             }
             // Expired claim — overwrite
         }
