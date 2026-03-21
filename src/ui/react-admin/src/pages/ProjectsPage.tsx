@@ -84,17 +84,14 @@ export default function ProjectsPage() {
 
   // WebSocket refresh
   useEffect(() => {
-    const handleTaskUpdate = () => fetchData();
-    const handleGoalUpdate = () => fetchData();
-
-    subscribe('task_update', handleTaskUpdate);
-    subscribe('goal_update', handleGoalUpdate);
+    const unsubTask = subscribeWs('task_update', () => fetchData());
+    const unsubGoal = subscribeWs('goal_update', () => fetchData());
 
     return () => {
-      unsubscribe('task_update', handleTaskUpdate);
-      unsubscribe('goal_update', handleGoalUpdate);
+      unsubTask();
+      unsubGoal();
     };
-  }, [subscribe, unsubscribe]);
+  }, [subscribeWs]);
 
   // Unthrottle action
   async function handleUnthrottle(projectName: string) {

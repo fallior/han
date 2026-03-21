@@ -13,7 +13,6 @@ import {
 import { Line, Radar } from 'react-chartjs-2';
 import { apiFetch } from '../api';
 import { formatCost, formatPct, formatDate } from '../lib/formatters';
-import { escapeHtml } from '../lib/utils';
 import MarkdownRenderer from '../components/shared/MarkdownRenderer';
 
 // Register Chart.js components
@@ -101,7 +100,6 @@ export default function ReportsPage() {
   const [latestDigest, setLatestDigest] = useState<Digest | null>(null);
   const [digests, setDigests] = useState<Digest[]>([]);
   const [latestWeekly, setLatestWeekly] = useState<WeeklyReport | null>(null);
-  const [weeklies, setWeeklies] = useState<WeeklyReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState<'digest' | 'weekly' | null>(null);
 

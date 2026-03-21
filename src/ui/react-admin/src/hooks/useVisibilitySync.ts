@@ -28,7 +28,7 @@ export function useVisibilitySync() {
       console.log('[VisibilitySync] Page became visible, re-fetching data');
 
       const token = localStorage.getItem('han-auth-token');
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
 
       try {
         // Re-fetch conversation list
