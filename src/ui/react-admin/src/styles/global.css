@@ -1,5 +1,6 @@
 @import './variables.css';
 @import './components.css';
+@import './memory.css';
 
 /* ─── Reset & Base ─── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
