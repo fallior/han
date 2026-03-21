@@ -98,3 +98,8 @@ export const useStore = create<AppState>((set, get) => ({
 // We need to get the store API to pass to connectWebSocket
 const storeApi = useStore as unknown as StoreApi<AppState>;
 connectWebSocket(storeApi);
+
+// Re-export types and constants for convenience
+export type { WorkshopPersona, WorkshopSlice } from './workshopSlice';
+export { workshopPersonaTabs, workshopNestedTabs } from './constants';
+export type { PersonaTabConfig, NestedTabConfig } from './constants';
