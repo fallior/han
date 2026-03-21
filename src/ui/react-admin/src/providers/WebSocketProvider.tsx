@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { useStore } from '../store/store';
+import { useStore } from '../store';
 
 // ============================================================================
 // Types

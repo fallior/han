@@ -18,6 +18,7 @@ export interface WorkshopSlice {
   workshopThreads: Record<string, any[]>;
   workshopPeriods: Record<string, any>;
   workshopCurrentThread: any | null;
+  workshopNeedsRefresh: boolean;
 
   // Actions
   setPersona: (persona: WorkshopPersona) => void;
@@ -28,6 +29,10 @@ export interface WorkshopSlice {
   setThreads: (tabKey: string, periods: any) => void;
   setCurrentThread: (thread: any | null) => void;
   addMessageToCurrentThread: (message: any) => void;
+  setNeedsRefresh: (needsRefresh: boolean) => void;
+
+  // Computed getters
+  currentThreadId: () => string | null;
 }
 
 // Default nested tab for each persona
@@ -38,7 +43,7 @@ const defaultNestedTabs: Record<WorkshopPersona, string> = {
   jemma: 'jemma-task',
 };
 
-export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSlice> = (set, _get) => ({
+export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSlice> = (set, get) => ({
   // Initial state
   workshopPersona: 'jim',
   workshopNestedTab: 'jim-request',
@@ -48,6 +53,7 @@ export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSl
   workshopThreads: {},
   workshopPeriods: {},
   workshopCurrentThread: null,
+  workshopNeedsRefresh: false,
 
   // Actions
   setPersona: (persona: WorkshopPersona) => {
@@ -108,5 +114,15 @@ export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSl
         },
       };
     });
+  },
+
+  setNeedsRefresh: (needsRefresh: boolean) => {
+    set({ workshopNeedsRefresh: needsRefresh });
+  },
+
+  // Computed getters
+  currentThreadId: () => {
+    const state = get();
+    return state.workshopCurrentThread?.id || null;
   },
 });
