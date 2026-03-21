@@ -3,7 +3,7 @@
  * Defines persona tabs, nested tabs, and UI metadata
  */
 
-import { WorkshopPersona } from './workshopSlice';
+import { type WorkshopPersona } from './workshopSlice';
 
 export interface PersonaTabConfig {
   label: string;

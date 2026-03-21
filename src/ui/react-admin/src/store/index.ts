@@ -33,6 +33,9 @@ interface AppState extends WorkshopSlice {
 }
 
 export const useStore = create<AppState>((set, get) => ({
+  // Spread workshop slice
+  ...createWorkshopSlice(set, get),
+
   // Initial state
   wsConnected: false,
   conversationsSelectedId: null,

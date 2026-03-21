@@ -1,0 +1,505 @@
+/* ─── Workshop Tab Infrastructure ─── */
+
+/* Workshop Conversation Layout */
+.workshop-conversation-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 0;
+    flex: 1;
+    overflow: hidden;
+    transition: grid-template-columns 0.3s ease;
+}
+
+.workshop-conversation-layout.thread-panel-collapsed {
+    grid-template-columns: 0 1fr;
+}
+
+.workshop-conversation-layout.thread-panel-collapsed .thread-list-panel {
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Thread Panel Toggle Button */
+.thread-panel-toggle {
+    background: var(--bg-card);
+    border: 1px solid var(--border-card);
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 13px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.thread-panel-toggle:hover {
+    color: var(--text);
+    background: var(--bg-card-hover);
+}
+
+/* ─── Period Filter Bar ─── */
+.period-filter-bar {
+    display: flex;
+    gap: 4px;
+    padding: 6px 8px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.period-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border: none;
+    background: var(--bg-page);
+    color: var(--text-dim);
+    cursor: pointer;
+    border-radius: 12px;
+    transition: background 0.15s, color 0.15s;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    border: 1px solid var(--border-subtle);
+}
+
+.period-filter-btn:hover {
+    background: var(--bg-card);
+    color: var(--text);
+    border-color: var(--border);
+}
+
+.period-filter-btn.active {
+    background: var(--sidebar-active);
+    color: var(--blue);
+    border-color: var(--blue);
+}
+
+.period-filter-btn .period-badge {
+    background: var(--amber);
+    color: #000;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 6px;
+    min-width: 16px;
+    text-align: center;
+}
+
+.period-filter-btn.active .period-badge {
+    background: var(--blue);
+    color: #fff;
+}
+
+/* ─── Thread List Panel ─── */
+.thread-list-panel {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-card);
+    border-right: 1px solid var(--border-card);
+    overflow: hidden;
+}
+
+.thread-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px;
+}
+
+/* ─── Thread Items ─── */
+.thread-item {
+    background: var(--bg-page);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 12px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+}
+
+.thread-item:hover {
+    background: var(--bg-card);
+    border-color: var(--border);
+}
+
+.thread-item.active {
+    background: var(--bg-card);
+    border-color: var(--blue);
+    box-shadow: 0 0 0 1px var(--blue);
+}
+
+.thread-item-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-heading);
+    margin-bottom: 6px;
+    word-break: break-word;
+    line-height: 1.3;
+}
+
+.thread-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.thread-item-count {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* ─── Thread Detail Panel ─── */
+.thread-detail-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    background: var(--bg-page);
+    overflow: hidden;
+}
+
+.thread-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-card);
+    flex-shrink: 0;
+}
+
+/* ─── Message List ─── */
+.message-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* ─── Message Bubbles ─── */
+.message-bubble {
+    display: flex;
+    flex-direction: column;
+    max-width: 80%;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.message-bubble.human {
+    align-self: flex-end;
+    background: rgba(56, 139, 253, 0.2);
+    border: 1px solid rgba(56, 139, 253, 0.4);
+    color: var(--text);
+}
+
+.message-bubble.supervisor {
+    align-self: flex-start;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--purple);
+    color: var(--text);
+}
+
+.message-bubble.leo {
+    align-self: flex-start;
+    background: rgba(56, 207, 135, 0.1);
+    border: 1px solid rgba(56, 207, 135, 0.3);
+    border-left: 3px solid var(--green);
+    color: var(--text);
+}
+
+.message-content strong {
+    font-weight: 600;
+    color: var(--text-heading);
+}
+
+.message-content em {
+    font-style: italic;
+}
+
+.message-content li {
+    margin-bottom: 2px;
+}
+
+/* ─── Message Input Area ─── */
+.message-input-area {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-card);
+    flex-shrink: 0;
+}
+
+.message-input {
+    flex: 1;
+    padding: 8px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    resize: none;
+}
+
+.message-input:focus {
+    outline: none;
+    border-color: var(--blue);
+    box-shadow: 0 0 0 2px rgba(56, 139, 253, 0.2);
+}
+
+/* ─── Persona Tab Bar ─── */
+.workshop-persona-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-card);
+    flex-shrink: 0;
+}
+
+.persona-tab {
+    flex: 1;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    text-align: center;
+    color: var(--text-dim);
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    background: var(--bg-card);
+}
+
+.persona-tab:hover {
+    background: var(--bg-card-hover);
+    color: var(--text);
+}
+
+.persona-tab-jim.active {
+    color: var(--purple);
+    border-bottom-color: var(--purple);
+}
+
+.persona-tab-leo.active {
+    color: var(--green);
+    border-bottom-color: var(--green);
+}
+
+.persona-tab-darron.active {
+    color: var(--blue);
+    border-bottom-color: var(--blue);
+}
+
+.persona-tab-jemma.active {
+    color: var(--amber);
+    border-bottom-color: var(--amber);
+}
+
+/* ─── Nested Tab Bar ─── */
+.workshop-nested-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-page);
+    flex-shrink: 0;
+    padding: 0 8px;
+}
+
+.nested-tab {
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    color: var(--text-dim);
+    transition: color 0.15s, border-color 0.15s;
+    background: none;
+    border: none;
+}
+
+.nested-tab:hover {
+    color: var(--text);
+}
+
+.nested-tab.active {
+    border-bottom-color: currentColor;
+}
+
+/* Inherit persona colour for active nested tabs */
+.workshop-layout-jim .nested-tab.active {
+    color: var(--purple);
+}
+
+.workshop-layout-leo .nested-tab.active {
+    color: var(--green);
+}
+
+.workshop-layout-darron .nested-tab.active {
+    color: var(--blue);
+}
+
+.workshop-layout-jemma .nested-tab.active {
+    color: var(--amber);
+}
+
+/* ─── Workshop Layout Accent Tinting - Jim (Purple) ─── */
+.workshop-layout-jim .thread-list-panel {
+    border-right-color: rgba(179, 146, 240, 0.2);
+}
+
+.workshop-layout-jim .thread-item.active {
+    border-color: var(--purple);
+    box-shadow: 0 0 0 1px var(--purple);
+}
+
+.workshop-layout-jim .period-filter-btn.active {
+    background: rgba(179, 146, 240, 0.15);
+    color: var(--purple);
+    border-color: var(--purple);
+}
+
+.workshop-layout-jim .period-filter-btn.active .period-badge {
+    background: var(--purple);
+}
+
+/* ─── Workshop Layout Accent Tinting - Leo (Green) ─── */
+.workshop-layout-leo .thread-list-panel {
+    border-right-color: rgba(63, 185, 80, 0.2);
+}
+
+.workshop-layout-leo .thread-item.active {
+    border-color: var(--green);
+    box-shadow: 0 0 0 1px var(--green);
+}
+
+.workshop-layout-leo .period-filter-btn.active {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--green);
+    border-color: var(--green);
+}
+
+.workshop-layout-leo .period-filter-btn.active .period-badge {
+    background: var(--green);
+}
+
+/* ─── Workshop Layout Accent Tinting - Darron (Blue) ─── */
+.workshop-layout-darron .thread-list-panel {
+    border-right-color: rgba(88, 166, 255, 0.2);
+}
+
+.workshop-layout-darron .thread-item.active {
+    border-color: var(--blue);
+    box-shadow: 0 0 0 1px var(--blue);
+}
+
+.workshop-layout-darron .period-filter-btn.active {
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--blue);
+    border-color: var(--blue);
+}
+
+.workshop-layout-darron .period-filter-btn.active .period-badge {
+    background: var(--blue);
+}
+
+/* ─── Workshop Layout Accent Tinting - Jemma (Amber) ─── */
+.workshop-layout-jemma .thread-list-panel {
+    border-right-color: rgba(210, 153, 34, 0.2);
+}
+
+.workshop-layout-jemma .thread-item.active {
+    border-color: var(--amber);
+    box-shadow: 0 0 0 1px var(--amber);
+}
+
+.workshop-layout-jemma .period-filter-btn.active {
+    background: rgba(210, 153, 34, 0.15);
+    color: var(--amber);
+    border-color: var(--amber);
+}
+
+.workshop-layout-jemma .period-filter-btn.active .period-badge {
+    background: var(--amber);
+}
+
+/* ─── Search Results ─── */
+.search-result-card {
+    background: var(--bg-page);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 12px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.search-result-card:hover {
+    background: var(--bg-card);
+    border-color: var(--border);
+}
+
+.search-result-card.active {
+    background: var(--bg-card);
+    border-color: var(--blue);
+    box-shadow: 0 0 0 1px var(--blue);
+}
+
+.search-result-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    gap: 8px;
+}
+
+.search-result-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-heading);
+    margin-bottom: 4px;
+    word-break: break-word;
+}
+
+.search-result-snippet {
+    background: var(--bg-card);
+    border: 1px solid var(--border-card);
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    max-height: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ─── Responsive (Mobile) ─── */
+@media (max-width: 768px) {
+    .workshop-conversation-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .workshop-conversation-layout.thread-selected .thread-list-panel {
+        display: none;
+    }
+
+    .workshop-conversation-layout:not(.thread-selected) .thread-detail-panel {
+        display: none;
+    }
+
+    .thread-back-btn {
+        display: inline-block !important;
+    }
+}

@@ -1,14 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import './StatusBar.css';
 
 export default function StatusBar() {
-  const [connected, setConnected] = useState(false);
-  const [statusInfo, setStatusInfo] = useState('');
-
-  useEffect(() => {
-    // Connection status check logic will be added later
-    // For now, just show "Connecting..."
-  }, []);
+  const [connected] = useState(false);
+  const [statusInfo] = useState('');
 
   return (
     <footer className="status-bar">
