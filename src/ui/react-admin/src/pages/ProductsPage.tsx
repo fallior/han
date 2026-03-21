@@ -329,7 +329,9 @@ function PhaseDetails({ phases, phaseRefs }: PhaseDetailsProps) {
           <div
             key={phase.phase_index}
             ref={(el) => {
-              phaseRefs.current[phase.phase_index] = el;
+              if (el) {
+                phaseRefs.current[phase.phase_index] = el;
+              }
             }}
           >
             <PhaseDetailCard phase={phase} phaseIndex={phase.phase_index} />

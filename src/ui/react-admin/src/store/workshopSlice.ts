@@ -14,7 +14,7 @@ export interface WorkshopSlice {
   workshopNestedTab: string;
   workshopPeriod: string;
   workshopShowArchived: boolean;
-  workshopSelectedThread: Record<string, string | null>;
+  workshopSelectedThread: Record<string, number | string | null>;
   workshopThreads: Record<string, any[]>;
   workshopPeriods: Record<string, any>;
   workshopCurrentThread: any | null;
@@ -25,14 +25,14 @@ export interface WorkshopSlice {
   setNestedTab: (tab: string) => void;
   setPeriod: (period: string) => void;
   toggleArchived: () => void;
-  selectThread: (tabKey: string, threadId: string | null) => void;
+  selectThread: (tabKey: string, threadId: number | string | null) => void;
   setThreads: (tabKey: string, periods: any) => void;
   setCurrentThread: (thread: any | null) => void;
   addMessageToCurrentThread: (message: any) => void;
   setNeedsRefresh: (needsRefresh: boolean) => void;
 
   // Computed getters
-  currentThreadId: () => string | null;
+  currentThreadId: () => number | string | null;
 }
 
 // Default nested tab for each persona
@@ -77,7 +77,7 @@ export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSl
     }));
   },
 
-  selectThread: (tabKey: string, threadId: string | null) => {
+  selectThread: (tabKey: string, threadId: number | string | null) => {
     set((state) => ({
       workshopSelectedThread: {
         ...state.workshopSelectedThread,

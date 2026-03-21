@@ -185,9 +185,43 @@ han/
     │   └── package.json          # Server dependencies
     └── ui/
         ├── index.html            # Command Centre dashboard
-        ├── admin.html            # Admin console (desktop-optimised)
+        ├── admin.html            # Admin console (legacy vanilla JS — desktop-optimised)
         ├── app.ts                # Dashboard client logic (compiled to app.js)
-        └── admin.ts              # Admin console logic (compiled to admin.js)
+        ├── admin.ts              # Admin console logic (legacy — compiled to admin.js)
+        └── react-admin/          # React admin UI (migration in progress)
+            └── src/
+                ├── App.tsx       # Router + AuthGuard + Layout wrapper
+                ├── main.tsx      # React entry point + WebSocket initialisation
+                ├── store/
+                │   └── index.ts  # Zustand store (WebSocket + conversations + supervisor state)
+                ├── components/
+                │   ├── Layout.tsx           # Sidebar + header + main content wrapper
+                │   ├── AuthGuard.tsx        # Bearer token authentication
+                │   ├── WebSocketProvider.tsx  # WebSocket connection manager
+                │   ├── shared/              # Reusable components (all tabs)
+                │   │   ├── ThreadListPanel.tsx    # Thread list with period filter + search
+                │   │   ├── ThreadDetailPanel.tsx  # Thread detail with messages + input
+                │   │   ├── MessageBubble.tsx      # Role-based message bubble
+                │   │   ├── MarkdownRenderer.tsx   # Markdown rendering with syntax highlighting
+                │   │   ├── Badge.tsx              # Status badge component
+                │   │   └── StatCard.tsx           # Overview page stat card
+                │   └── workshop/            # Workshop-specific components
+                │       ├── PersonaTabBar.tsx      # Jim/Leo/Darron persona tabs
+                │       ├── NestedTabBar.tsx       # Nested discussion type tabs
+                │       ├── ThreadList.tsx         # Workshop thread list (persona-aware)
+                │       ├── ThreadDetail.tsx       # Workshop thread detail (persona-aware)
+                │       ├── OverviewView.tsx       # Workshop overview panel
+                │       └── JemmaView.tsx          # Workshop Jemma panel
+                └── pages/
+                    ├── OverviewPage.tsx      # Dashboard with stats + charts + activity feed
+                    ├── WorkshopPage.tsx      # Workshop tab (Phase 3 — 3 personas × 6 types)
+                    ├── ConversationsPage.tsx # Conversations tab (Phase 4 — general threads)
+                    ├── MemoryPage.tsx        # Memory Discussions tab (Phase 4 — purple accent)
+                    ├── WorkPage.tsx          # Work tab (tasks + goals)
+                    ├── SupervisorPage.tsx    # Supervisor tab (cycles + proposals)
+                    ├── ProjectsPage.tsx      # Projects tab (portfolio)
+                    ├── ProductsPage.tsx      # Products tab (product factory)
+                    └── ReportsPage.tsx       # Reports tab (digests + analytics)
 ```
 
 ## Data Flow

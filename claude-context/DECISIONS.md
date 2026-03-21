@@ -4256,3 +4256,92 @@ Any cycle focused on internal state (meditation, reflection, dream analysis) sho
 **Dynamic file selection:**
 Future enhancement could allow cycles to request specific files by name if curiosity warrants ("I want to read session-notes/2026-03-15-traversable-memory.md"). This would be a capability added to cycle prompts, not a loader change.
 
+---
+
+### DEC-061: Shared Components for Conversations/Memory, Dedicated for Workshop
+
+**Date**: 2026-03-21
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Phase 4 of the React admin migration required building Conversations and Memory Discussions tabs. These tabs share the same underlying pattern as the Workshop tab built in Phase 3: a two-column layout with thread list on the left and thread detail on the right. However, Workshop has additional complexity (persona tabs, nested discussion type tabs) that Conversations and Memory do not.
+
+The question: should we extract fully shared components that all three tabs use, or keep Workshop-specific components separate?
+
+#### Options Considered
+
+**Option 1: Fully shared components across all three tabs**
+
+Pros:
+- ✅ Maximum code reuse
+- ✅ Single source of truth for thread list/detail logic
+- ✅ Changes to shared components automatically propagate to all tabs
+
+Cons:
+- ❌ Workshop tab has persona tabs and nested tabs — requires special props and conditional rendering
+- ❌ Shared component would need to handle both simple (Conversations/Memory) and complex (Workshop) cases
+- ❌ Risk of breaking Workshop tab when making changes for Conversations/Memory
+- ❌ Component props would be complex and harder to understand
+
+**Option 2: Shared components for Conversations/Memory, dedicated for Workshop**
+
+Pros:
+- ✅ Conversations and Memory tabs have identical structure — perfect candidates for sharing
+- ✅ Workshop complexity isolated in dedicated components (WorkshopThreadList, WorkshopThreadDetail)
+- ✅ Changes to shared components don't risk breaking Workshop tab
+- ✅ Simple component props for shared components (no conditional rendering for persona tabs)
+- ✅ Future refactor possible if Workshop can be adapted to use shared components with additional props
+
+Cons:
+- ❌ Some code duplication between shared components and Workshop-specific components
+- ❌ Shared logic (message rendering, markdown) must be extracted separately (MessageBubble, MarkdownRenderer)
+
+**Option 3: No shared components — each tab has dedicated components**
+
+Pros:
+- ✅ Maximum isolation — changes to one tab don't affect others
+- ✅ No risk of breaking other tabs when making changes
+
+Cons:
+- ❌ High code duplication (227+228 lines for Conversations/Memory pages alone)
+- ❌ Bug fixes and feature additions must be applied to all three tabs
+- ❌ Inconsistent UI behaviour across tabs if implementations diverge
+
+#### Decision
+
+We chose **Option 2: Shared components for Conversations/Memory, dedicated for Workshop**.
+
+**Reasoning:**
+1. Conversations and Memory tabs are structurally identical — only API endpoints and accent colour differ. This is the perfect use case for shared components.
+2. Workshop tab has fundamentally different requirements (persona tabs, nested tabs, per-persona message filtering) that don't map cleanly to the simple thread list + detail pattern.
+3. Extracting ThreadListPanel and ThreadDetailPanel as shared components reduces Conversations/Memory code from 455 lines to 339 lines (154+185 shared components + minimal page logic).
+4. Workshop tab continues to work with its dedicated components (WorkshopThreadList, WorkshopThreadDetail) without risk of breakage from shared component changes.
+5. Genuinely shared UI logic (MessageBubble, MarkdownRenderer) is extracted separately and used by all three tabs.
+
+**Implementation:**
+- Created `ThreadListPanel.tsx` (154 lines) — generic thread list with period filter, search, archive toggle
+- Created `ThreadDetailPanel.tsx` (185 lines) — generic thread detail with messages, input, resolve/reopen
+- ConversationsPage and MemoryPage use shared components with minimal wrapper logic
+- WorkshopPage continues using WorkshopThreadList and WorkshopThreadDetail
+
+#### Consequences
+
+**Positive:**
+- ✅ **50% code reduction** for Conversations/Memory tabs vs full duplication
+- ✅ **Clean separation** between simple tabs (Conversations/Memory) and complex tabs (Workshop)
+- ✅ **Bug fixes propagate** automatically across Conversations and Memory tabs
+- ✅ **UI consistency** guaranteed between Conversations and Memory tabs
+- ✅ **Workshop tab protected** from accidental breakage during Conversations/Memory changes
+
+**Negative:**
+- ❌ **Some duplication** between shared components and Workshop-specific components (acceptable trade-off)
+- ❌ **Future Workshop refactor** may require adapting to use shared components (low priority)
+
+**Alternative considered:**
+Extract a generic `ConversationPageTemplate` component that accepts API endpoint, discussion_type filter, and accent colour as props. This would reduce ConversationsPage and MemoryPage to ~20 lines each. However, current duplication is manageable (227+228 lines) and the components are easy to maintain.
+
+**Future refactor path:**
+If more tabs follow the Conversations/Memory pattern, extract ConversationPageTemplate. If Workshop's nested tabs can be represented as props (e.g., `nestedTabs?: NestedTabConfig[]`), migrate Workshop to use shared components.
+
