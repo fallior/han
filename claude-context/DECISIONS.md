@@ -4345,3 +4345,4 @@ Extract a generic `ConversationPageTemplate` component that accepts API endpoint
 **Future refactor path:**
 If more tabs follow the Conversations/Memory pattern, extract ConversationPageTemplate. If Workshop's nested tabs can be represented as props (e.g., `nestedTabs?: NestedTabConfig[]`), migrate Workshop to use shared components.
 
+

@@ -26,7 +26,7 @@ export function connectWebSocket(store: StoreApi<AppState>) {
   // Build WebSocket URL
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;
-  const token = localStorage.getItem('authToken') || '';
+  const token = localStorage.getItem('han-auth-token') || '';
   const wsUrl = `${protocol}//${host}/ws?token=${encodeURIComponent(token)}`;
 
   try {

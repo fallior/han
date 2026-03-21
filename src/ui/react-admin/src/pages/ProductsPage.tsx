@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { apiFetch } from '../lib/api';
 import { formatCost, formatDate, formatDateTime, statusBadgeClass } from '../lib/formatters';
 
@@ -438,7 +438,7 @@ function ProductDetailView({ productId, onBack }: ProductDetailViewProps) {
   const [knowledge, setKnowledge] = useState<KnowledgeEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const phaseRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+  const phaseRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
     const fetchProduct = async () => {
