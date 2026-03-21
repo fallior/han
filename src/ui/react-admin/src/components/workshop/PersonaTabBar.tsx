@@ -1,6 +1,4 @@
-import { useStore } from '../../store';
-import { workshopPersonaTabs } from '../../store/slices/workshop';
-import type { WorkshopPersona } from '../../store/slices/workshop';
+import { useStore, workshopPersonaTabs, type WorkshopPersona } from '../../store';
 
 export function PersonaTabBar() {
   const { workshopPersona, setPersona } = useStore();

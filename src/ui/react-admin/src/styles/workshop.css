@@ -259,24 +259,25 @@
 }
 
 /* ─── Persona Tab Bar ─── */
-.workshop-persona-tabs {
+.persona-tab-bar {
     display: flex;
     gap: 0;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: 2px solid var(--border-subtle);
     background: var(--bg-card);
     flex-shrink: 0;
 }
 
 .persona-tab {
     flex: 1;
-    padding: 10px 16px;
+    padding: 12px 16px;
     font-size: 13px;
-    font-weight: 600;
-    border-bottom: 2px solid transparent;
+    font-weight: 400;
+    border: none;
+    border-bottom: 3px solid transparent;
     cursor: pointer;
     text-align: center;
-    color: var(--text-dim);
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    color: var(--text-muted);
+    transition: color 0.15s, border-color 0.15s, background 0.15s, font-weight 0.15s;
     background: var(--bg-card);
 }
 
@@ -285,28 +286,13 @@
     color: var(--text);
 }
 
-.persona-tab-jim.active {
-    color: var(--purple);
-    border-bottom-color: var(--purple);
-}
-
-.persona-tab-leo.active {
-    color: var(--green);
-    border-bottom-color: var(--green);
-}
-
-.persona-tab-darron.active {
-    color: var(--blue);
-    border-bottom-color: var(--blue);
-}
-
-.persona-tab-jemma.active {
-    color: var(--amber);
-    border-bottom-color: var(--amber);
+.persona-tab.active {
+    font-weight: 600;
+    /* Color and border-color set inline via style prop based on persona */
 }
 
 /* ─── Nested Tab Bar ─── */
-.workshop-nested-tabs {
+.nested-tab-bar {
     display: flex;
     gap: 0;
     border-bottom: 1px solid var(--border-subtle);
@@ -316,15 +302,15 @@
 }
 
 .nested-tab {
-    padding: 6px 12px;
+    padding: 8px 12px;
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 400;
+    border: none;
     border-bottom: 2px solid transparent;
     cursor: pointer;
-    color: var(--text-dim);
+    color: var(--text-muted);
     transition: color 0.15s, border-color 0.15s;
     background: none;
-    border: none;
 }
 
 .nested-tab:hover {
@@ -332,24 +318,8 @@
 }
 
 .nested-tab.active {
-    border-bottom-color: currentColor;
-}
-
-/* Inherit persona colour for active nested tabs */
-.workshop-layout-jim .nested-tab.active {
-    color: var(--purple);
-}
-
-.workshop-layout-leo .nested-tab.active {
-    color: var(--green);
-}
-
-.workshop-layout-darron .nested-tab.active {
-    color: var(--blue);
-}
-
-.workshop-layout-jemma .nested-tab.active {
-    color: var(--amber);
+    font-weight: 500;
+    /* Color and border-color set inline via style prop based on persona */
 }
 
 /* ─── Workshop Layout Accent Tinting - Jim (Purple) ─── */

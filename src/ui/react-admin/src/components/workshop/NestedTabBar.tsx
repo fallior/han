@@ -1,5 +1,4 @@
-import { useStore } from '../../store';
-import { workshopPersonaTabs, workshopNestedTabs } from '../../store/slices/workshop';
+import { useStore, workshopPersonaTabs, workshopNestedTabs } from '../../store';
 
 export function NestedTabBar() {
   const { workshopPersona, workshopNestedTab, setNestedTab } = useStore();

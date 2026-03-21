@@ -979,7 +979,7 @@ your thought process. Actions should be concrete and executable.
 }
 
 function buildDreamCyclePrompt(): string {
-    const memoryBanks = loadMemoryBank();
+    const memoryBanks = loadLightMemoryBank();
 
     // Meditation: select a random gradient entry for Jim to sit with
     let meditationSection = '';
@@ -1038,7 +1038,7 @@ function buildDreamUserPrompt(): string {
 }
 
 function buildPersonalCyclePrompt(phase: DayPhase = 'work'): string {
-    const memoryBanks = loadMemoryBank();
+    const memoryBanks = loadLightMemoryBank();
 
     const portfolioParts: string[] = [];
     try {
@@ -1100,7 +1100,7 @@ function buildPersonalUserPrompt(phase: DayPhase): string {
 }
 
 function buildRecoveryCyclePrompt(phase: DayPhase = 'work'): string {
-    const memoryBanks = loadMemoryBank();
+    const memoryBanks = loadLightMemoryBank();
 
     const phaseIntro: Record<string, string> = {
         morning: `It's morning. A gentle start to your recovery work. Read something from your history and sit with it.`,

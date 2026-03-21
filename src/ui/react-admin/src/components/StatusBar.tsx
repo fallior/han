@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import './StatusBar.css';
 
 export default function StatusBar() {
-  const [connected, setConnected] = useState(false);
-  const [statusInfo, setStatusInfo] = useState('');
+  const [connected, _setConnected] = useState(false);
+  const [statusInfo, _setStatusInfo] = useState('');
 
   useEffect(() => {
     // Connection status check logic will be added later
