@@ -762,6 +762,20 @@ All signals live at `~/.han/signals/`. They are plain files — existence is the
 | `leo-human-wake` | jemma, conversations.ts (via Gemma classification) | leo-human | Wake Leo for conversation response | JSON with context |
 | `jim-emergency` | Manual | supervisor-worker | Force emergency mode (all cycles = supervisor) | Empty file |
 | `maintenance-mode` | Manual | (not checked by any code — aspirational) | Belt-and-braces ecosystem stop guard | Empty file |
+| `responding-to-{id}` | jim-human, supervisor-worker, leo-human | All conversation-responding agents | Conversation claim token — prevents duplicate responses | `{ agent, timestamp }` |
+
+### Conversation Claim Mechanism
+
+When an agent begins responding to a conversation, it writes a claim file
+`responding-to-{conversationId}` containing `{ agent, timestamp }`. Other agents check
+for an existing valid claim (< 5 min old) before responding. Claims are released with
+`try/finally` to prevent stale claims on SDK errors.
+
+**Agents with claims:** jim-human, supervisor-worker (since S64), leo-human (since S98).
+**Heartbeat Leo:** does NOT use claims — posts only to the Jim philosophy thread via its
+own `postMessageToConversation` function. System prompt explicitly forbids posting to other
+conversations via tools (curl/Bash/API). This boundary was added S98 after the heartbeat's
+SDK agent independently posted 4 duplicate messages to a conversation thread in 13 seconds.
 
 ### How cli-busy/cli-free Works
 

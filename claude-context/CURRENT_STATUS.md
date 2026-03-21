@@ -39,6 +39,9 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 - **Daily meditation practice** — Leo's heartbeat picks a random gradient entry, sits with it via Sonnet, writes revisit feeling tags and annotations. Once per day, skips sleep phase.
 - **Files modified**: `db.ts`, `dream-gradient.ts`, `memory-gradient.ts`, `routes/gradient.ts` (new), `server.ts`, `leo-heartbeat.ts`, `leo-human.ts`, `supervisor-worker.ts`, bootstrap scripts
 - **Docs updated**: HAN-ECOSYSTEM-COMPLETE (glossary, memory architecture, lib docs, API routes, DB schema), Hall of Records R005, DECISIONS (DEC-056), CHANGELOG
+- **Leo conversation claim fix** — Leo/Human now uses `responding-to-{id}` claim files (same pattern as Jim/Human). Heartbeat system prompt forbids posting to conversations via tools. Root cause of 4x duplicate responses in traversable memory thread.
+- **Files modified**: `leo-human.ts` (claim mechanism), `leo-heartbeat.ts` (system prompt boundary)
+- **Docs updated**: HAN-ECOSYSTEM-COMPLETE (signal system — claim mechanism), Hall of Records R003 (claim table + section), CHANGELOG
 
 ### 2026-03-20 — Leo + Darron — Gemma Addressee Classification (S97 continued)
 - **Gemma addressee classification** (DEC-055) — Admin UI message routing now uses Gemma (local Ollama) instead of regex. Handles nicknames ("Jimmy"), group addressing ("Jim and Leo"), contextual references. Fire-and-forget with regex fallback. Replaces the regex that missed "Jim and Leo" pattern.

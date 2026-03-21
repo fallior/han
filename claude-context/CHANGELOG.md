@@ -53,6 +53,21 @@ Runs once per day, skips sleep phase.
 - `claude-context/CHANGELOG.md` — this entry
 - `claude-context/CURRENT_STATUS.md` — recent changes
 
+### Leo Conversation Claim Mechanism (bug fix)
+Leo/Human was producing 4 duplicate responses within 13 seconds. Root cause: no claim
+mechanism — Leo/Human responded to the wake signal, AND the heartbeat's SDK agent
+independently posted via `curl` (it had Bash access with no claim check). Fixed:
+- `leo-human.ts` — added `claimConversation()` / `releaseConversationClaim()` with `try/finally`
+  (same pattern as Jim/Human and supervisor-worker)
+- `leo-heartbeat.ts` — IDENTITY_CORE system prompt now explicitly forbids posting to
+  conversations via tools. Heartbeat may only post to Jim philosophy thread via its own code.
+- `responding-to-{id}` claim files are shared across all agents — Jim's claims block Leo
+  and vice versa.
+
+### Files Modified (claim fix)
+- `src/server/leo-human.ts` — claim mechanism added
+- `src/server/leo-heartbeat.ts` — system prompt boundary added
+
 ---
 
 ## 2026-03-20 (Leo + Darron, S97 continued — Gemma Addressee Classification)
