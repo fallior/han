@@ -101,11 +101,21 @@ interface AppState extends WorkshopSlice {
   setWsConnected: (connected: boolean) => void;
 
   // Supervisor actions
+  setSupervisorPaused: (paused: boolean) => void;
+  updateSupervisorStatus: (data: any) => void;
   setSupervisorStatus: (status: any | null) => void;
   setSupervisorCycles: (cycles: any[]) => void;
   setSupervisorMemory: (memory: Record<string, string>) => void;
   setSupervisorProposals: (proposals: any[]) => void;
   setSupervisorHealth: (health: any | null) => void;
+
+  // Conversation actions
+  setConversations: (conversations: Conversation[]) => void;
+  setConversationMessages: (conversationId: string, messages: Message[]) => void;
+  addConversationMessage: (conversationId: string, message: Message) => void;
+  selectConversation: (conversationId: string | null) => void;
+  markAsRead: (conversationId: string) => void;
+  hasUnread: (conversationId: string) => boolean;
 
   // Work actions
   setGoals: (goals: any[]) => void;
