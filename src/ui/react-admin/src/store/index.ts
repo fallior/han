@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { StoreApi } from 'zustand';
 import { connectWebSocket } from './websocket';
-import { createWorkshopSlice, WorkshopSlice } from './workshopSlice';
+import { createWorkshopSlice, type WorkshopSlice } from './workshopSlice';
 
 type WsListener = (data: any) => void;
 

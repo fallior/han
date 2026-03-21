@@ -1,4 +1,4 @@
-import { StateCreator } from 'zustand';
+import { type StateCreator } from 'zustand';
 
 /**
  * Workshop tab state slice
@@ -38,7 +38,7 @@ const defaultNestedTabs: Record<WorkshopPersona, string> = {
   jemma: 'jemma-task',
 };
 
-export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSlice> = (set, get) => ({
+export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSlice> = (set) => ({
   // Initial state
   workshopPersona: 'jim',
   workshopNestedTab: 'jim-request',
