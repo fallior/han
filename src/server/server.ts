@@ -337,7 +337,7 @@ server.listen(Number(PORT), '0.0.0.0', () => {
 
 process.on('SIGTERM', () => {
     console.log('[Server] SIGTERM received — shutting down');
-    cleanPid();
+    serverPidGuard.cleanup();
     stopSupervisor();
     stopHeartbeat();
     clearInterval(terminalBroadcastInterval);

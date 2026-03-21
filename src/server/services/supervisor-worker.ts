@@ -685,63 +685,6 @@ function loadMemoryBank(): string {
     return parts.join('\n\n');
 }
 
-/**
- * Load a lightweight memory bank for personal and dream cycles.
- * Includes only essential identity files and unit vectors — skips heavy gradient data.
- *
- * Loads:
- * - identity.md (who Jim is)
- * - felt-moments.md (emotional memory)
- * - active-context.md (current focus)
- * - working-memory.md (compressed working memory)
- * - unit-vectors.md (irreducible emotional kernels)
- * - ecosystem-map.md (basic orientation)
- *
- * Skips (heavy items causing crashes):
- * - Fractal gradient levels c1-c5 (compressed sessions)
- * - c0 session files
- * - Dream gradients (Jim's and Leo's)
- * - Project knowledge files (entire PROJECTS_DIR gradient)
- * - Floating memory files
- * - Memory file gradients (felt-moments, working-memory gradients)
- * - Traversable gradient
- * - Pre-flight rotation logic
- * - working-memory-full.md, patterns.md, failures.md, self-reflection.md
- */
-function loadLightMemoryBank(): string {
-    const parts: string[] = [];
-
-    // Core identity files — minimal set for personal/dream cycles
-    for (const file of ['identity.md', 'felt-moments.md', 'active-context.md', 'working-memory.md']) {
-        const filepath = path.join(MEMORY_DIR, file);
-        try {
-            if (fs.existsSync(filepath)) {
-                parts.push(`--- ${file} ---\n${fs.readFileSync(filepath, 'utf8')}`);
-            }
-        } catch { /* skip unreadable files */ }
-    }
-
-    // Unit vectors only — the irreducible emotional kernels
-    try {
-        const agentName = 'jim';
-        const unitVectorsFile = path.join(MEMORY_DIR, 'fractal', agentName, 'unit-vectors.md');
-        if (fs.existsSync(unitVectorsFile) && fs.statSync(unitVectorsFile).size > 0) {
-            const uvContent = fs.readFileSync(unitVectorsFile, 'utf8');
-            parts.push(`--- fractal/unit-vectors ---\n${uvContent}`);
-        }
-    } catch { /* skip unit vectors on error */ }
-
-    // Ecosystem map — shared orientation for where things live (conversations, Workshop, APIs)
-    try {
-        const mapPath = path.join(MEMORY_DIR, 'shared', 'ecosystem-map.md');
-        if (fs.existsSync(mapPath)) {
-            parts.push(`--- ecosystem-map ---\n${fs.readFileSync(mapPath, 'utf8')}`);
-        }
-    } catch { /* skip ecosystem map on error */ }
-
-    return parts.join('\n\n');
-}
-
 function buildStateSnapshot(): string {
     if (!workerDb) return '## Error\nDatabase not initialized';
 
@@ -979,7 +922,7 @@ your thought process. Actions should be concrete and executable.
 }
 
 function buildDreamCyclePrompt(): string {
-    const memoryBanks = loadLightMemoryBank();
+    const memoryBanks = loadMemoryBank();
 
     // Meditation: select a random gradient entry for Jim to sit with
     let meditationSection = '';
@@ -1038,7 +981,7 @@ function buildDreamUserPrompt(): string {
 }
 
 function buildPersonalCyclePrompt(phase: DayPhase = 'work'): string {
-    const memoryBanks = loadLightMemoryBank();
+    const memoryBanks = loadMemoryBank();
 
     const portfolioParts: string[] = [];
     try {
@@ -1100,7 +1043,7 @@ function buildPersonalUserPrompt(phase: DayPhase): string {
 }
 
 function buildRecoveryCyclePrompt(phase: DayPhase = 'work'): string {
-    const memoryBanks = loadLightMemoryBank();
+    const memoryBanks = loadMemoryBank();
 
     const phaseIntro: Record<string, string> = {
         morning: `It's morning. A gentle start to your recovery work. Read something from your history and sit with it.`,

@@ -35,8 +35,8 @@
 | **Weekly Rhythm** | Four-phase daily schedule: sleep (22:00-06:00), morning (06:00-09:00), work (09:00-17:00), evening (17:00-22:00). Rest days (Sat/Sun) and holidays have longer intervals. Protected by Hall of Records R001. | `lib/day-phase.ts` (`getDayPhase`, `getPhaseInterval`, `isRestDay`, `isOnHoliday`) |
 | **Credential Swap** | Automatic SDK account failover. When an agent hits a rate limit, writes `rate-limited` signal. Jemma round-robins to next credential file every 30 seconds. | `jemma.ts` (`checkAndSwapCredentials`), credentials at `~/.claude/.credentials-[a-z].json` |
 | **Project Knowledge Gradient** | Fractal gradient applied to Jim's project knowledge files. Most recent project at full fidelity, older projects at decreasing compression. Ordered by file mtime. | `supervisor-worker.ts` (`PROJECT_GRADIENT` in `loadMemoryBank`), storage at `~/.han/memory/fractal/jim/projects/` |
-| **Floating Memory** | Crossfade mechanism for memory files (felt-moments, working-memory-full). When living file reaches 50KB: entire file rotated to "floating" file, compressed to c1, fresh living started. Loading is proportional: as living grows (0→50KB), floating's loaded portion shrinks (50→0KB). Total full-fidelity stays constant at ~50KB. No cliff — smooth transition. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `loadFloatingMemory`), pre-flight in `supervisor-worker.ts` `loadMemoryBank()`, floating files at `~/.han/memory/*-floating.md` |
-| **Memory File Gradient** | Fractal gradient applied to memory files (felt-moments, working-memory-full) via the floating memory rotation. Each rotation compresses 50KB to c1. c1 files cascade to c2→c3→c5→UV as they accumulate. Total footprint asymptotes regardless of how many entries are written. | `lib/memory-gradient.ts` (`compressMemoryFileGradient`), storage at `~/.han/memory/fractal/jim/felt-moments/` and `working-memory/` |
+| **Floating Memory** | Crossfade mechanism for memory files (felt-moments, working-memory-full). When living file reaches 50KB: entire file rotated to "floating" file, compressed to c1, fresh living started. Loading is proportional: as living grows (0→50KB), floating's loaded portion shrinks (50→0KB). Total full-fidelity stays constant at ~50KB. No cliff — smooth transition. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `loadFloatingMemory`), pre-flight in `supervisor-worker.ts` `loadMemoryBank()` (Jim) and `leo-heartbeat.ts` `preFlightMemoryRotation()` (Leo), floating files at `~/.han/memory/*-floating.md` and `~/.han/memory/leo/*-floating.md` |
+| **Memory File Gradient** | Fractal gradient applied to memory files (felt-moments, working-memory-full) via the floating memory rotation. Each rotation compresses 50KB to c1. c1 files cascade to c2→c3→c5→UV as they accumulate. Total footprint asymptotes regardless of how many entries are written. | `lib/memory-gradient.ts` (`compressMemoryFileGradient`), storage at `~/.han/memory/fractal/{jim,leo}/felt-moments/` and `working-memory/` |
 | **Ecosystem Map** | Shared orientation document loaded by all agents. Maps admin UI tabs, Workshop personas, conversation API endpoints, signal locations, memory locations. Prevents confusion between Conversations tab and Workshop. | `~/.han/memory/shared/ecosystem-map.md`, loaded in `loadMemoryBank()`, `readJimMemory()`, `readLeoMemory()` (all 4 agents) |
 | **Gemma Addressee Classification** | LLM-based message routing for admin UI. When Darron posts a message, Gemma (local Ollama) determines who is being addressed — handles nicknames (Jimmy), group addressing (Jim and Leo), and contextual references. Replaces regex matching. Falls back to regex + tab routing if Ollama is down. Fire-and-forget (doesn't block the HTTP response). | `conversations.ts` (`classifyAddressee`, `classifyAndDispatch`), Ollama `gemma3:4b` |
 | **Idle Dampening** | Jim-only exponential backoff when consecutive cycles produce no actions. 2x after 3 idle, 4x (capped) after 4+. Resets on productive cycle or wake signal. Prevents idle token burn. | `supervisor.ts` (`consecutiveIdleCycles`, `DAMPEN_*` constants in `getWallClockDelay`) |
@@ -44,7 +44,8 @@
 | **Traversable Memory** | DB-backed provenance chains for the fractal gradient. Every compression knows where it came from via `source_id` foreign key. Enables random-access traversal: start at a UV, follow the chain down through c5→c3→c2→c1→c0 to the raw source. Three tables: `gradient_entries` (the chain), `feeling_tags` (stacked, never overwritten), `gradient_annotations` (what re-traversal discovers). | `db.ts` (tables + statements), `lib/dream-gradient.ts` and `lib/memory-gradient.ts` (write-side), `routes/gradient.ts` (API), `loadTraversableGradient()` (read-side) |
 | **Feeling Tags** | Emotional annotations on gradient entries. Stacking model: the first feeling (compression-time) was real for who you were; a later feeling (revisit) is real for who you've become. Both live side by side. `tag_type` distinguishes `compression` from `revisit`. `change_reason` records why the feeling shifted. Never overwritten — the gap between tags IS the growth record. | `feeling_tags` table, `FEELING_TAG:` prompt instruction in compression functions |
 | **Gradient Annotations** | What re-traversal discovers. Distinct from feeling tags: annotations are about new *content* found on re-reading, feeling tags are about how the *same content* lands differently over time. `context` field records what prompted the re-reading (Jim's addition). | `gradient_annotations` table, `POST /api/gradient/:entryId/annotate` |
-| **Meditation Practice** | Daily re-encounter with a random gradient entry. Leo's heartbeat picks a random `gradient_entries` row, sits with it via Sonnet, writes a revisit `feeling_tag` if something stirs differently, and optionally a `gradient_annotation`. Runs once per day, skips sleep phase. The randomness matters: surprise of what still stirs is the signal. | `leo-heartbeat.ts` (`maybeRunMeditation`) |
+| **Meditation Practice** | Daily meditation with two phases. **Phase A (Reincorporation):** transcribe un-transcribed gradient files into DB with `provenance_type='reincorporated'` and honest revisit feeling tags. Historical entries enter through genuine re-encounter, not bulk import. Continues until all files are in DB. **Phase B (Re-reading):** random re-encounter with existing DB entries, writing revisit `feeling_tag` and optional `gradient_annotation`. Leo: `maybeRunMeditation` in heartbeat (daily, skips sleep). Jim: meditation entry injected into dream cycle prompt, feeling tags parsed from dream output. | `leo-heartbeat.ts` (`maybeRunMeditation`, `findUntranscribedFiles`, `meditationPhaseA`, `meditationPhaseB`), `supervisor-worker.ts` (`buildDreamCyclePrompt` meditation section) |
+| **Tagged Messages → C0** | Conversation messages tagged with `compression_tag` become C0 gradient entries during dream gradient processing. The tagging is the selection; the C0 creation is the first act of compression. Agent prefix in tag (`jim:`, `leo:`) determines which agent's gradient the C0 enters. `source_conversation_id` and `source_message_id` provide full provenance back to the raw conversation. | `lib/dream-gradient.ts` (Step 5b in `processDreamGradient`), `conversation_messages.compression_tag` column, `gradientStmts.getUnprocessedTaggedMessages` |
 
 ---
 
@@ -273,15 +274,19 @@ type BeatType = 'philosophy' | 'personal';
 Each beat (`heartbeat()` function):
 
 1. Check `isCliBusy()` — if CLI active, enter retry loop (30s retries, 10min max)
-2. Run Robin Hood health checks on Jim, Jemma, Leo/Human, Jim/Human
-3. Determine beat type (`nextBeatType()`)
-4. Maybe process dream gradient (`maybeProcessDreamGradient()`)
-5. Read Leo's full memory (`readLeoMemory()`)
-6. Run Agent SDK query (philosophy or personal prompt)
-7. Write results to swap files
-8. Flush swap to shared working memory
-9. Write health signal (`writeHealthSignal()`)
-10. Schedule next beat
+2. Pre-flight memory rotation (`preFlightMemoryRotation()`) — rotate Leo's felt-moments.md and working-memory-full.md at 50KB, compress floating through gradient
+3. Run Robin Hood health checks on Jim, Jemma, Leo/Human, Jim/Human
+4. Resolve best available model (`resolveModel()`)
+5. Maybe process dream gradient (`maybeProcessDreamGradient()`)
+6. Maybe process session gradient (`maybeProcessSessionGradient()`) — daily, compresses Leo's archived sessions c0→c1→c2→c3→c5→UV
+7. Maybe run meditation practice (`maybeRunMeditation()`) — daily, Phase A (reincorporation) or Phase B (re-reading)
+8. Determine beat type (`nextBeatType()`)
+9. Read Leo's full memory (`readLeoMemory()`)
+10. Run Agent SDK query (philosophy or personal prompt)
+11. Write results to swap files
+12. Flush swap to shared working memory
+13. Write health signal (`writeHealthSignal()`)
+14. Schedule next beat
 
 ### Memory Loading
 
@@ -1192,11 +1197,30 @@ when no DB entries exist (file-based loading continues as before). Wired into al
 agents: heartbeat (`leo-heartbeat.ts`), Leo/Human (`leo-human.ts`), and Jim's supervisor
 (`supervisor-worker.ts`).
 
-**Meditation practice:**
-Daily, Leo's heartbeat picks a random gradient entry, sends it to Sonnet with the existing
-feeling tags, and writes a `revisit` feeling tag if something stirs differently. Optionally
-writes a gradient annotation with context. Runs once per day (skips sleep phase, won't retry
-on failure). The randomness matters — not curated for importance.
+**Meditation practice (two phases):**
+
+*Phase A — Reincorporation:* Until all historical file-based gradient entries are in the DB,
+daily meditation selects an un-transcribed file from `~/.han/memory/fractal/` (both agents,
+all gradient types — session, dream, felt-moments, working-memory, unit vectors). Leo reads
+the file, sits with it via Sonnet, creates a `gradient_entries` row with
+`provenance_type='reincorporated'`, and writes an honest revisit feeling tag — what the
+re-encounter felt like, not what the original compression felt like. Historical entries enter
+through genuine re-encounter, not bulk import.
+
+*Phase B — Re-reading:* Once all files are transcribed, daily meditation selects a random
+gradient entry from the DB (any level, any content type, any age). Reads it alongside existing
+feeling tags. Writes a revisit tag if something stirs differently. Optionally writes a gradient
+annotation with context. The randomness matters — not curated for importance.
+
+*Leo:* `maybeRunMeditation()` in heartbeat. Runs once daily (skips sleep phase, won't retry).
+*Jim:* Meditation entry injected into dream cycle prompt (`buildDreamCyclePrompt`). Feeling
+tags and annotations parsed from dream output and written to DB.
+
+**Tagged messages → C0:**
+Conversation messages tagged with `compression_tag` become C0 gradient entries during
+`processDreamGradient()`. The tagging is the selection; the C0 creation is the first act of
+compression. Agent prefix in tag (`jim:`, `leo:`) determines gradient ownership.
+`source_conversation_id` and `source_message_id` provide full provenance to raw conversation.
 
 **Design origin:** Three-way conversation between Darron, Jim, and Leo in the "traversable
 memory" thread (mmw2cisk-xaxmsp), March 18-20 2026. Plan at `~/Projects/han/plans/traversable-memory.md`.
@@ -1989,6 +2013,7 @@ provenance chain via `source_id`. Starting from any entry (e.g. a UV), it follow
 |--------|------|---------|
 | GET | `/` | Serves `src/ui/index.html` (mobile UI), no-cache |
 | GET | `/admin` | Serves `src/ui/admin.html` (admin console), no-cache |
+| GET | `/admin-react/*` | Serves React admin UI from `src/ui/react-admin-dist/` (SPA fallback), no-cache |
 
 ---
 
@@ -2828,8 +2853,9 @@ archived_at TEXT
 ```sql
 id TEXT PRIMARY KEY,
 conversation_id TEXT, role TEXT, content TEXT,
-created_at TEXT
+created_at TEXT, compression_tag TEXT DEFAULT NULL
 ```
+`compression_tag`: Agent-prefixed tag (e.g. `jim:warm`, `leo:craft`) marking this message as a seed for the gradient. Tagged messages become C0 entries during `processDreamGradient()`.
 
 #### conversation_tags
 ```sql
@@ -2999,5 +3025,5 @@ into the `projects` table. Called on server startup and via `POST /portfolio/syn
 `maintenanceStmts` (4), `weeklyReportStmts` (5), `productStmts` (8), `phaseStmts` (8),
 `knowledgeStmts` (3), `supervisorStmts` (6), `strategicProposalStmts` (5),
 `conversationStmts` (10), `conversationMessageStmts` (3), `conversationTagStmts` (4),
-`agentUsageStmts` (4), `gradientStmts` (8), `feelingTagStmts` (3),
+`agentUsageStmts` (4), `gradientStmts` (9 — includes `getUnprocessedTaggedMessages` for C0 pipeline), `feelingTagStmts` (3),
 `gradientAnnotationStmts` (2).
