@@ -36,9 +36,8 @@ export default function WorkshopPage() {
 
     try {
       const thread = await createThread(title.trim(), nestedTab);
-      // Select the newly created thread (convert number to string)
-      const threadIdStr = String(thread.id);
-      selectThread(nestedTab, threadIdStr);
+      // Select the newly created thread
+      selectThread(nestedTab, thread.id.toString());
     } catch (err) {
       console.error('Failed to create thread:', err);
       alert('Failed to create thread. Please try again.');
