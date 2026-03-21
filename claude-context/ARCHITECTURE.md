@@ -774,7 +774,7 @@ Real-time admin UI updates are implemented via a **signal-based cross-process br
 
 ### React Admin UI (Phases 1-5, Complete)
 
-The React admin UI migration completed 2026-03-21 with all 9 tabs functional. Phase 2 implemented the real-time data layer that solves the core bug in the vanilla JS admin: WebSocket messages arriving while the user isn't on the active tab get silently dropped, requiring manual refresh. Phases 4-5 completed all remaining tabs (Conversations, Memory, Overview, Supervisor, Work, Reports, Projects, Products) with full feature parity to the original vanilla TypeScript admin.
+The React admin UI migration completed 2026-03-21 with all 9 tabs functional. Phase 2 implemented the real-time data layer that solves the core bug in the vanilla JS admin: WebSocket messages arriving while the user isn't on the active tab get silently dropped, requiring manual refresh. Phase 3 migrated the Workshop tab (most complex, highest-value tab) with three-persona navigation and dedicated components for nested tab state management. Phases 4-5 completed all remaining tabs (Conversations, Memory, Overview, Supervisor, Work, Reports, Projects, Products) with full feature parity to the original vanilla TypeScript admin.
 
 **Architecture Pattern:**
 
@@ -843,7 +843,7 @@ function dispatchWsMessage(data: any) {
 
 **Page Modules (9 total):**
 
-1. **Workshop** (Phase 1) — Three-persona tabs (Leo/Jim/Jemma) with six nested discussion types each
+1. **Workshop** (Phase 3) — Three-persona navigation (Jim/Leo/Darron/Jemma) with six nested discussion types. Dedicated components (ThreadList, ThreadDetail) handle complex nested tab state (persona + discussion type + period filter + selected thread keyed by tab). Jemma special view fetches from `/api/jemma/status` instead of conversations API.
 2. **Conversations** (Phase 4) — General async discussion threads with period filter, search, archive
 3. **Memory** (Phase 4) — Memory-focused discussions with same UI as Conversations, purple accent
 4. **Overview** (Phase 5) — Dashboard with stat cards, Charts.js graphs, activity feed

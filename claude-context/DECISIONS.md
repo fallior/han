@@ -92,6 +92,8 @@ When you make a significant technical or design decision:
 | DEC-060 | Vite + React Router + Zustand Stack | Accepted | 2026-03-21 |
 | DEC-061 | Shared Components for Conversations/Memory, Dedicated for Workshop | Accepted | 2026-03-21 |
 | DEC-062 | WebSocket Provider Architecture with Context Pattern | Accepted | 2026-03-21 |
+| DEC-063 | Workshop Dedicated Components vs Shared Components | Accepted | 2026-03-21 |
+| DEC-064 | Selected Thread State Keyed by Nested Tab | Accepted | 2026-03-21 |
 
 ---
 
@@ -4672,4 +4674,228 @@ export function dispatchWsMessage(data: any, store: AppState) {
 - DEC-059: React Admin Migration — Parallel Deployment Strategy
 - DEC-060: Vite + React Router + Zustand Stack
 - Session note: `claude-context/session-notes/2026-03-21-autonomous-react-admin-phase-2.md`
+
+---
+
+### DEC-063: Workshop Dedicated Components vs Shared Components
+
+**Date**: 2026-03-21
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+The Workshop tab has significantly more complex state than Conversations/Memory tabs:
+- **Nested tabs** — Persona (Jim/Leo/Darron/Jemma) → Discussion type (Requests/Reports, Questions/Postulates, etc.)
+- **Persona-specific colours** — Active persona determines accent colour throughout the UI (purple for Jim, green for Leo, blue for Darron, amber for Jemma)
+- **Special Jemma view** — Jemma persona doesn't use conversations API, instead fetches from `/api/jemma/status`
+- **Selected thread state preserved per nested tab** — Not just one global selected thread, but selectedThread[nestedTab]
+
+Conversations and Memory tabs use shared `ThreadListPanel` and `ThreadDetailPanel` components because they have simpler, flat navigation (no nested tabs, single accent colour).
+
+Should Workshop extend the shared components with additional props, or create dedicated Workshop-specific components?
+
+#### Options Considered
+
+**Option 1: Extend shared ThreadListPanel/ThreadDetailPanel with props for Workshop complexity**
+
+Pros:
+- ✅ Maximum code reuse (~400 lines shared instead of duplicated)
+- ✅ Single source of truth for thread list/detail logic
+- ✅ Bug fixes in shared components benefit all tabs
+
+Cons:
+- ❌ Shared components would need 8+ additional props (accentColor, showPersonaTabs, showNestedTabs, jemmaMode, selectedThreadKey, etc.)
+- ❌ Component logic becomes complex with many conditionals ("if Workshop mode, then...")
+- ❌ Harder to understand and maintain shared components
+- ❌ Risk of breaking Conversations/Memory tabs when modifying for Workshop
+- ❌ Prop drilling complexity increases with each new Workshop feature
+
+**Option 2: Create dedicated Workshop components (ThreadList, ThreadDetail)**
+
+Pros:
+- ✅ Clear separation of concerns — Workshop complexity doesn't leak into shared components
+- ✅ Easier to understand each component's purpose
+- ✅ Easier to modify Workshop without breaking Conversations/Memory
+- ✅ Simpler component APIs — no complex prop combinations
+- ✅ Workshop-specific optimisations possible without affecting other tabs
+
+Cons:
+- ❌ Code duplication (~400 lines duplicated between shared and Workshop components)
+- ❌ Bug fixes need to be applied in multiple places
+- ❌ More files to maintain
+
+#### Decision
+
+**Create dedicated Workshop components (ThreadList, ThreadDetail).**
+
+Workshop's navigation model (persona → nested tab) is fundamentally different from the flat tab model of Conversations/Memory. The complexity required to unify these models into shared components outweighs the code duplication cost.
+
+Shared components remain for truly shared logic:
+- `MessageBubble` — Role-based message styling (no Workshop-specific logic)
+- `MarkdownRenderer` — Markdown rendering (no Workshop-specific logic)
+
+#### Reasoning
+
+1. **Complexity vs duplication trade-off** — 400 lines of duplication is acceptable when the alternative is 8+ props with complex conditional logic in shared components
+2. **Separate concerns** — Workshop has nested tabs, persona colours, and Jemma special case. Conversations/Memory have none of these. Forcing them into shared components creates artificial coupling.
+3. **Maintainability** — Dedicated components are easier to understand. A developer reading `ThreadList.tsx` knows it's Workshop-specific and can modify freely without worrying about breaking other tabs.
+4. **Future flexibility** — If Workshop needs drag-to-reorder threads or persona-specific thread actions, these can be added without affecting Conversations/Memory.
+
+#### Consequences
+
+**Positive:**
+- ✅ **Workshop components simple and focused** — No prop drilling, no conditionals for other tabs
+- ✅ **Shared components remain simple** — Conversations/Memory use clean, minimal API
+- ✅ **Safe to modify** — Changes to Workshop don't risk breaking Conversations/Memory and vice versa
+- ✅ **Clear ownership** — Workshop directory contains all Workshop-specific logic
+
+**Negative:**
+- ❌ **Code duplication** — ~400 lines duplicated between shared and Workshop components
+- ❌ **Bug fixes in multiple places** — If there's a bug in thread list logic, need to fix in both ThreadListPanel and Workshop/ThreadList
+- ❌ **More files to maintain** — 2 additional component files (ThreadList.tsx, ThreadDetail.tsx)
+
+**Trade-off accepted**: The cost of duplication is lower than the cost of complex, brittle shared components with 8+ props and many conditionals.
+
+#### Related
+
+- DEC-061: Shared Components for Conversations/Memory, Dedicated for Workshop (predecessor)
+- DEC-064: Selected Thread State Keyed by Nested Tab (complementary decision)
+- Session note: `claude-context/session-notes/2026-03-21-autonomous-react-admin-phase-3.md`
+
+---
+
+### DEC-064: Selected Thread State Keyed by Nested Tab
+
+**Date**: 2026-03-21
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+The Workshop tab has 6 nested tabs (jim-request, jim-report, leo-question, leo-postulate, darron-thought, darron-musing). Users frequently switch between these tabs to check different conversation threads.
+
+When a user is viewing a thread in "Jim's Requests" and then switches to "Leo's Questions" to check something, what should happen when they switch back to "Jim's Requests"?
+
+- Should the previously-selected thread still be selected?
+- Or should the selection be cleared, requiring the user to re-select?
+
+#### Options Considered
+
+**Option 1: Single global `selectedThreadId` — switching tabs clears selection**
+
+Implementation:
+```typescript
+{
+  selectedThreadId: string | null  // One global selected thread across all nested tabs
+}
+```
+
+Behaviour:
+- User selects thread in Jim's Requests → `selectedThreadId = "abc123"`
+- User switches to Leo's Questions → `selectedThreadId = null` (cleared)
+- User switches back to Jim's Requests → No thread selected, must re-select
+
+Pros:
+- ✅ Simpler state structure (one field instead of a map)
+- ✅ Less memory usage (one string vs a Record)
+- ✅ Clear that switching tabs "starts fresh"
+
+Cons:
+- ❌ User must re-select thread after every tab switch
+- ❌ Friction in workflow — breaks user's mental model of "I was reading thread X, I'll come back to it"
+- ❌ Forces user to remember which thread they were reading in each tab
+
+**Option 2: `selectedThread: Record<string, string | null>` — keyed by nested tab**
+
+Implementation:
+```typescript
+{
+  selectedThread: {
+    'jim-request': 'abc123',     // Thread selected in Jim's Requests tab
+    'jim-report': null,           // No thread selected in Jim's Reports tab
+    'leo-question': 'def456',     // Thread selected in Leo's Questions tab
+    // ... etc
+  }
+}
+```
+
+Behaviour:
+- User selects thread in Jim's Requests → `selectedThread['jim-request'] = "abc123"`
+- User switches to Leo's Questions → Loads `selectedThread['leo-question']` (might be null or another thread)
+- User switches back to Jim's Requests → Loads `selectedThread['jim-request'] = "abc123"` (still selected)
+
+Pros:
+- ✅ Matches user mental model — "I was reading thread X in this tab, it should still be there when I come back"
+- ✅ No re-selection friction — user can switch tabs freely
+- ✅ Each tab maintains independent state
+- ✅ Memory overhead negligible (6 keys in a Record)
+
+Cons:
+- ❌ Slightly more complex state structure (Record instead of single value)
+- ❌ More code to manage (need to key by nestedTab in selectors/actions)
+
+#### Decision
+
+**Selected thread state keyed by nested tab** (`selectedThread: Record<string, string | null>`).
+
+Preserving the selected thread per nested tab matches the user's mental model and eliminates re-selection friction. The implementation complexity is minimal and the memory overhead is negligible.
+
+#### Reasoning
+
+1. **User mental model** — When a user is reading thread X in Jim's Requests and switches to Leo's Questions temporarily, they expect thread X to still be selected when they return to Jim's Requests. This is how browser tabs work, how IDE file tabs work, and how most multi-pane UIs work.
+
+2. **Workflow friction** — Darron frequently switches between Jim's Requests (to see what Jim is proposing), Leo's Questions (to see what Leo is curious about), and Darron's Thoughts (to post new ideas). Requiring re-selection after every switch creates significant friction in this workflow.
+
+3. **Implementation simplicity** — The Record structure is straightforward:
+   ```typescript
+   selectThread(threadId: string | null) {
+     set(state => ({
+       selectedThread: {
+         ...state.selectedThread,
+         [state.nestedTab]: threadId
+       }
+     }))
+   }
+   ```
+
+4. **Negligible cost** — 6 keys in a Record (one per nested tab) is ~100 bytes of memory. The clarity and UX benefits vastly outweigh this cost.
+
+#### Consequences
+
+**Positive:**
+- ✅ **Better UX** — Users can switch tabs freely without losing their place
+- ✅ **Matches mental model** — Selected thread persists when returning to a tab
+- ✅ **Independent state per tab** — Each nested tab has its own selected thread
+- ✅ **Simple implementation** — Key by `nestedTab`, read/write from Record
+
+**Negative:**
+- ❌ **Slightly more state** — Record instead of single value (negligible memory cost)
+- ❌ **More code in selectors** — Need to read `selectedThread[nestedTab]` instead of just `selectedThread`
+
+**Trade-off accepted**: The UX benefit of preserving selection far outweighs the minimal implementation complexity.
+
+#### Edge Cases Considered
+
+**What if the user opens the same thread ID in different nested tabs?**
+- Each tab tracks it independently in the Record
+- Example: Thread "abc123" could be selected in both jim-request and leo-question simultaneously
+- This is the correct behaviour — the user has independently selected that thread in each context
+
+**What if the user deletes/archives a thread that's selected in another tab?**
+- When the user switches to that tab, the thread ID will be in `selectedThread` but won't exist in the conversation list
+- ThreadDetail component will call `GET /api/conversations/{id}` and get a 404
+- Component should handle 404 gracefully (clear selection, show "Thread not found" message)
+- This edge case is rare and handled at the component level, not in state management
+
+**What if there are 50+ nested tabs in the future?**
+- Currently there are 6 nested tabs (fixed by design)
+- If the design changes to allow user-created nested tabs, a Map or LRU cache might be more appropriate
+- For now, a Record with 6 keys is the right choice
+
+#### Related
+
+- DEC-063: Workshop Dedicated Components vs Shared Components (complementary decision)
+- DEC-061: Shared Components for Conversations/Memory, Dedicated for Workshop (predecessor)
+- Session note: `claude-context/session-notes/2026-03-21-autonomous-react-admin-phase-3.md`
 
