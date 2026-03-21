@@ -10,5 +10,20 @@ export default defineConfig({
   },
   server: {
     port: 3001,
+    proxy: {
+      // Proxy API requests to HAN server
+      '/api': {
+        target: 'https://localhost:3847',
+        changeOrigin: true,
+        secure: false, // Allow self-signed certificates in dev
+      },
+      // Proxy WebSocket connections to HAN server
+      '/ws': {
+        target: 'wss://localhost:3847',
+        ws: true,
+        changeOrigin: true,
+        secure: false, // Allow self-signed certificates in dev
+      },
+    },
   },
 })

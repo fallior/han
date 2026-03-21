@@ -115,3 +115,6 @@ export function formatDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 }
+
+// Alias for backwards compatibility
+export const formatTimeSince = timeSince;
