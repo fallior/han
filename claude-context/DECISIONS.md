@@ -84,6 +84,9 @@ When you make a significant technical or design decision:
 | DEC-052 | Idle Cycle Dampening (Exponential Backoff) | Accepted | 2026-03-16 |
 | DEC-053 | Transition Dampening (Gradual Interval Ramp-Down) | Accepted | 2026-03-16 |
 | DEC-054 | Signal-Based Cross-Process WebSocket Broadcasting | Accepted | 2026-03-17 |
+| DEC-055 | Gemma Addressee Classification for Admin UI Messages | Accepted | 2026-03-20 |
+| DEC-056 | Traversable Memory — DB-Backed Provenance Chains | Accepted | 2026-03-21 |
+| DEC-057 | Meditation Practice Two-Phase Pattern | Accepted | 2026-03-21 |
 
 ---
 
