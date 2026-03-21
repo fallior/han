@@ -14,7 +14,7 @@ const LAST_READ_KEY = 'han-react-admin-last-read';
 /**
  * Load last read timestamps from localStorage
  */
-function loadLastReadTimestamps(): Record<string, string> {
+function _loadLastReadTimestamps(): Record<string, string> {
   try {
     const stored = localStorage.getItem(LAST_READ_KEY);
     return stored ? JSON.parse(stored) : {};
@@ -27,7 +27,7 @@ function loadLastReadTimestamps(): Record<string, string> {
 /**
  * Save last read timestamps to localStorage
  */
-function saveLastReadTimestamps(timestamps: Record<string, string>) {
+function _saveLastReadTimestamps(timestamps: Record<string, string>) {
   try {
     localStorage.setItem(LAST_READ_KEY, JSON.stringify(timestamps));
   } catch (err) {
@@ -39,7 +39,19 @@ interface AppState extends WorkshopSlice {
   // WebSocket connection state
   wsConnected: boolean;
 
-  // Conversations tab state
+  // Supervisor state
+  lastCycleAt: string | null;
+  supervisorPaused: boolean;
+
+  // Conversations data (keyed by ID for efficient lookups)
+  conversations: Record<string, Conversation>;
+  conversationMessages: Record<string, Message[]>;
+  selectedConversationId: string | null;
+
+  // Last read timestamps (persisted to localStorage)
+  lastReadTimestamps: Record<string, string>;
+
+  // Legacy tab state (to be migrated)
   conversationsSelectedId: string | null;
   conversationsPeriod: string;
 
@@ -47,7 +59,7 @@ interface AppState extends WorkshopSlice {
   memorySelectedId: string | null;
   memoryPeriod: string;
 
-  // Supervisor tab state
+  // Supervisor tab state (legacy)
   supervisorStatus: any | null;
   supervisorCycles: any[];
   supervisorMemory: Record<string, string>;

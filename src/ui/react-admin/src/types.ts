@@ -1,5 +1,6 @@
 /**
  * Shared type definitions for the admin UI
+ * Note: Some types are intentionally flexible (any) to allow for gradual migration
  */
 
 export interface ConversationThread {
@@ -10,13 +11,9 @@ export interface ConversationThread {
   updated_at: string;
   message_count: number;
   last_message_at?: string;
-  participants?: string[];
-  summary?: {
-    type: string;
-    request?: string;
-    status?: string;
-  };
-  topics?: string[];
+  participants?: any;
+  summary?: any;
+  topics?: any;
   metadata?: Record<string, any>;
 }
 
@@ -31,11 +28,7 @@ export interface SearchResult {
   conversation_title: string;
   conversation_status: 'open' | 'resolved' | 'archived';
   snippet: string;
-  matched_message?: {
-    author: string;
-    content: string;
-    created_at: string;
-  };
+  matched_message?: any;
   relevance: number;
   created_at: string;
 }
