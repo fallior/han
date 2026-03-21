@@ -1,0 +1,67 @@
+/* ─── Memory Discussions Tab Infrastructure ─── */
+
+/* Memory Conversation Layout */
+.md-conversation-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 0;
+    flex: 1;
+    overflow: hidden;
+    transition: grid-template-columns 0.3s ease;
+}
+
+.md-conversation-layout.thread-panel-collapsed {
+    grid-template-columns: 0 1fr;
+}
+
+.md-conversation-layout.thread-panel-collapsed .thread-list-panel {
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* ─── Memory Layout Accent Tinting (Purple) ─── */
+.md-conversation-layout .thread-list-panel {
+    border-right-color: rgba(179, 146, 240, 0.2);
+}
+
+.md-conversation-layout .thread-item.selected {
+    border-left: 3px solid var(--purple);
+}
+
+.md-conversation-layout .period-btn.active {
+    background: rgba(179, 146, 240, 0.15);
+    color: var(--purple);
+    border-color: var(--purple);
+}
+
+/* Topic badges with purple accent */
+.md-conversation-layout .topic-badge {
+    background: rgba(179, 146, 240, 0.15) !important;
+    color: var(--purple) !important;
+}
+
+/* Search highlight with purple accent */
+.md-conversation-layout .search-result-snippet mark {
+    background: rgba(179, 146, 240, 0.3);
+    color: var(--purple);
+}
+
+/* Mobile responsive layout */
+@media (max-width: 768px) {
+    .md-conversation-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .md-conversation-layout.thread-selected .thread-list-panel {
+        display: none;
+    }
+
+    .md-conversation-layout:not(.thread-selected) .thread-detail-panel {
+        display: none;
+    }
+
+    .thread-back-btn {
+        display: inline-block !important;
+    }
+}
