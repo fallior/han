@@ -6,7 +6,9 @@ export default defineConfig({
   plugins: [react()],
   base: '/admin-react/',
   build: {
-    outDir: '../react-admin-dist',
-    emptyOutDir: true,
+    outDir: 'dist',
+  },
+  server: {
+    port: 3001,
   },
 })
