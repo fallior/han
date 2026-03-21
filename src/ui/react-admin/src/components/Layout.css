@@ -1,0 +1,46 @@
+.admin-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  grid-template-rows: 1fr auto;
+  height: 100vh;
+  transition: grid-template-columns 0.2s ease;
+}
+
+.admin-layout.collapsed {
+  grid-template-columns: 56px 1fr;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.main-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border-subtle);
+  min-height: 52px;
+  background: var(--bg-page);
+  flex-shrink: 0;
+}
+
+.main-header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.main-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+}

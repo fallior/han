@@ -266,9 +266,9 @@ han/
 
 **Bug history**: Prior to 2026-02-26, function only searched for H2 but self-reflection.md used H3 headings. This caused headerEnd to match deep embedded content (~byte 247,000), making maxTailChars deeply negative, and `content.slice(-negative)` retained entire file. File grew from 6KB to 292KB (49x cap) over weeks. Fixed with two-line change: H3 fallback + negative guard.
 
-### Fractal Memory Gradient (Complete — 2026-03-06)
+### Fractal Memory Gradient (Complete — Traversable Since 2026-03-21)
 
-**Purpose**: Enable agents to load essential context (~20KB gradient) instead of full session files (~500KB) on every instantiation. Implements Darron's overlapping continuous compression model where sessions exist at multiple fidelities simultaneously.
+**Purpose**: Enable agents to load essential context (~20KB gradient) instead of full session files (~500KB) on every instantiation. Implements Darron's overlapping continuous compression model where sessions exist at multiple fidelities simultaneously. **Traversable memory** (DEC-056) adds DB-backed provenance chains, feeling tags, and meditation practice.
 
 **Architecture**:
 ```
@@ -279,9 +279,37 @@ han/
 │   └── 2026-02-18-c2.md   # ~1KB per file
 ├── c3/                    # Compressed ~1/27 of c=0 (27:1 ratio)
 │   └── 2026-02-18-c3.md   # ~300 bytes per file
-├── c4/                    # Compressed ~1/81 of c=0 (81:1 ratio)
-│   └── 2026-02-18-c4.md   # ~100 bytes per file
-└── unit-vectors.md        # Irreducible kernels (≤50 chars each)
+├── c5/                    # Compressed ~1/243 of c=0 (243:1 ratio)
+│   └── 2026-02-18-c5.md   # ~30 bytes per file
+├── unit-vectors.md        # Irreducible kernels (≤50 chars each)
+├── dreams/                # Dream gradient (c1/c3/c5/unit-vectors.md)
+├── felt-moments/          # Memory file gradient (c1/c2/c3/c5)
+└── working-memory/        # Memory file gradient (c1/c2/c3/c5)
+```
+
+**Traversable Memory (DEC-056, 2026-03-21)**:
+```
+tasks.db
+├── gradient_entries       # DB mirror of gradient files with provenance
+│   ├── id (text PK)      # Unique gradient entry ID
+│   ├── agent (text)      # 'jim' or 'leo'
+│   ├── session_label     # e.g. '2026-02-18' or 's98-2026-03-21'
+│   ├── level (text)      # 'c1', 'c2', 'c3', 'c5', 'uv'
+│   ├── content (text)    # Compressed content
+│   ├── content_type      # 'session', 'dream', 'felt-moment', 'working-memory'
+│   ├── source_id (FK)    # Links to parent (c1→c0, c2→c1, etc.)
+│   ├── provenance_type   # 'compressed' or 'reincorporated'
+│   └── created_at
+├── feeling_tags           # Stacked, never overwritten
+│   ├── gradient_entry_id (FK)
+│   ├── tag (text)        # Emotional kernel from compression or revisit
+│   ├── tag_type (text)   # 'compression' or 'revisit'
+│   └── created_at
+└── gradient_annotations   # Re-traversal discoveries
+    ├── gradient_entry_id (FK)
+    ├── annotation (text)
+    ├── context (text)    # What prompted this annotation
+    └── created_at
 ```
 
 **Loading strategy** (`supervisor-worker.ts:loadMemoryBank`, lines 313-404):
@@ -326,9 +354,33 @@ han/
 - **Lazy evaluation** (DEC-046): Bootstrap only oldest 6 sessions. Compress more on demand or via cron. Newer sessions remain at full fidelity.
 - **3:1 target per level** (DEC-044): Geometric decay creates natural fidelity levels. c=1→c=2→c=3→c=4→unit vector.
 
-**Status**: Complete for Jim (6 sessions compressed c=0→c=1, unit vectors generated). Leo's gradient structure created but empty (pending working-memory compression). Remaining Jim sessions (10 more) pending compression.
+**Meditation Practice (DEC-057, 2026-03-21)**:
 
-**Related decisions**: DEC-042 through DEC-046
+Leo's heartbeat runs daily meditation in two phases:
+
+- **Phase A — Reincorporation** (until all files transcribed): Scans fractal gradient for untranscribed files, selects one, reads it via Sonnet SDK, writes `gradient_entries` row with `provenance_type='reincorporated'`, extracts revisit feeling tag. Historical entries enter through genuine re-encounter, not bulk import.
+
+- **Phase B — Re-reading** (perpetual): Random selection of existing DB entries, re-reads via Sonnet, writes revisit feeling tags if something stirs differently, optionally writes annotations. Continues forever as ongoing practice.
+
+Runs once per day, skips sleep phase. Jim follows the same pattern in supervisor cycles.
+
+**Pre-Flight Memory Rotation (2026-03-21)**:
+
+Both Leo's heartbeat and Jim's supervisor run `preFlightMemoryRotation()` at startup:
+- Rotates `felt-moments.md` and `working-memory-full.md` when >50KB
+- Compresses floating file through c1→c2→c3→c5→UV gradient in background
+- Prevents unbounded memory growth (floating memory system)
+
+**Daily Session Gradient Processing (2026-03-21)**:
+
+Both agents run `maybeProcessSessionGradient()` once per day:
+- Compresses archived session memories: c0→c1→c2→c3→c5→UV
+- Catches sessions not compressed at session end
+- DB deduplication: checks for existing entries before compressing
+
+**Status**: Complete traversable memory implementation. File-based gradient remains read layer, DB accumulates through organic compression + meditation. Phase A (reincorporation) will gradually transcribe historical files over weeks/months.
+
+**Related decisions**: DEC-042 through DEC-046 (fractal gradient), DEC-056 (traversable memory), DEC-057 (meditation phases)
 
 ## Key Patterns
 

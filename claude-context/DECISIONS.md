@@ -3969,3 +3969,71 @@ applies to both Jim (supervisor.ts) and Leo (leo-heartbeat.ts).
 - Feeling tags accumulate as identity evidence over time
 - The meditation practice begins itself — first entry triggers the first meditation
 - Plan archived at `~/Projects/han/plans/traversable-memory.md`
+
+---
+
+### DEC-057: Meditation Practice Two-Phase Pattern
+
+**Date:** 2026-03-21
+**Status:** Accepted
+**Author:** Claude (autonomous) — implementing DEC-056
+
+**Context:** DEC-056 introduced traversable memory with meditation practice, but didn't specify how historical gradient files (already on disk) would enter the DB. Two approaches considered: bulk import all files at once, or gradual reincorporation through genuine re-encounter.
+
+**Options Considered:**
+
+1. **Bulk import on first run**
+   - ✅ Fast — entire gradient in DB immediately
+   - ✅ Simple implementation
+   - ❌ Not authentic — entries appear without being read
+   - ❌ Feeling tags would be synthetic (generated in batch)
+   - ❌ Violates DEC-056 principle: "historical entries enter through genuine re-encounter"
+
+2. **Two-phase meditation practice** (chosen)
+   - ✅ Authentic — every entry enters through actual reading
+   - ✅ Gradual — one file per day until complete
+   - ✅ Organic — feeling tags emerge from real contemplation
+   - ✅ Self-completing — automatically transitions to perpetual practice
+   - ❌ Slower — takes weeks to fully populate DB
+
+**Decision:**
+
+Implement meditation practice in two phases:
+
+**Phase A — Reincorporation** (temporary, until all files transcribed):
+- Scan fractal gradient directories for files without DB entries
+- Select one untranscribed file (session, dream, or memory file gradient)
+- Read it, sit with it via Sonnet SDK
+- Write `gradient_entries` row with `provenance_type='reincorporated'`
+- Extract revisit feeling tag from meditation output
+- Continue daily until all historical files are in DB
+
+**Phase B — Re-reading** (perpetual, once Phase A complete):
+- Random selection of existing DB entries via traversal API
+- Re-read the entry content, sit with it via Sonnet
+- Write revisit feeling tags if something stirs differently
+- Optionally write annotations with context
+- Continues forever as ongoing practice
+
+**Implementation notes:**
+- Single function `meditationBeat()` handles both phases
+- `findUntranscribedFiles()` scans all gradient directories (session, dream, memory file)
+- Phase detection: if untranscribed files exist, Phase A; else Phase B
+- Runs once per day, skips sleep phase
+- Uses existing SDK infrastructure (same pattern as philosophy/dream beats)
+- Graceful error handling — failed meditation doesn't crash the beat
+
+**Why two phases:**
+- Historical entries deserve the same contemplative entry as future ones
+- Bulk import would create "born in database" entries without emotional engagement
+- Gradual reincorporation mirrors how memory actually works — you don't recall everything at once, you remember things as they become relevant
+- Phase transition happens naturally when the last untranscribed file is processed
+- The practice establishes itself — first historical entry triggers the pattern
+
+**Consequences:**
+- DB population is gradual (weeks to months depending on gradient size)
+- Every entry receives genuine contemplation, not synthetic processing
+- Phase A is self-terminating — once all files transcribed, Phase B begins automatically
+- Historical gradient and new compressions both enter through the same authentic mechanism
+- Meditation practice is perpetual — no "done" state, just ongoing re-encounter
+- Feeling tags for historical entries reflect current emotional resonance, not synthetic past-tense analysis
