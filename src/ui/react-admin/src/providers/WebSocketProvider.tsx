@@ -37,7 +37,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const [reconnecting, setReconnecting] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<number | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelayRef = useRef(1000); // Start at 1s
   const mountedRef = useRef(true);
 

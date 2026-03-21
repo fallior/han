@@ -100,6 +100,7 @@ export default function ReportsPage() {
   const [latestDigest, setLatestDigest] = useState<Digest | null>(null);
   const [digests, setDigests] = useState<Digest[]>([]);
   const [latestWeekly, setLatestWeekly] = useState<WeeklyReport | null>(null);
+  const [, setWeeklies] = useState<WeeklyReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState<'digest' | 'weekly' | null>(null);
 
