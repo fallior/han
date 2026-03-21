@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { apiFetch } from '../api';
 import { useStore } from '../store';
 import { timeSince, formatCost } from '../utils/formatters';
