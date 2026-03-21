@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ConversationThread, Message } from '../../types';
-import { formatRelativeTime, renderMarkdown } from '../../utils';
+import { timeSince, renderMarkdown } from '../../utils';
 
 interface ThreadDetailPanelProps {
   conversation: ConversationThread | null;
@@ -145,7 +145,7 @@ export function ThreadDetailPanel({
         <div className="thread-info">
           <h2>{conversation.title}</h2>
           <span className="thread-meta">
-            Created {formatRelativeTime(conversation.created_at)}
+            Created {timeSince(conversation.created_at)}
           </span>
         </div>
         <button
@@ -167,7 +167,7 @@ export function ThreadDetailPanel({
               <div key={msg.id} className={`message-bubble ${getRoleClass(msg.role)}`}>
                 <div className="message-header">
                   <span className="message-role">{getRoleLabel(msg.role)}</span>
-                  <span className="message-time">{formatRelativeTime(msg.created_at)}</span>
+                  <span className="message-time">{timeSince(msg.created_at)}</span>
                 </div>
                 <div
                   className="message-content"
