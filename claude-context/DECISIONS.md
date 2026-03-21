@@ -4346,3 +4346,205 @@ Extract a generic `ConversationPageTemplate` component that accepts API endpoint
 If more tabs follow the Conversations/Memory pattern, extract ConversationPageTemplate. If Workshop's nested tabs can be represented as props (e.g., `nestedTabs?: NestedTabConfig[]`), migrate Workshop to use shared components.
 
 
+---
+
+### DEC-059: React Admin Migration — Parallel Deployment Strategy
+
+**Date**: 2026-03-21
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+The HAN admin UI is currently a 3,975-line vanilla TypeScript file (`src/ui/admin.ts`) compiled by esbuild (bundle: false, IIFE format) and served as a static JS file. The admin HTML page contains 2,043 lines of inline CSS. While functional, the monolithic structure makes adding new features difficult due to:
+
+1. No component boundaries (single 3,975-line file)
+2. Manual DOM manipulation (error-prone)
+3. No state management (implicit state in closures)
+4. No hot module reload (slow iteration)
+5. All CSS inline (2,043 lines in admin.html)
+
+We need to migrate to React for maintainability, but how do we do this without:
+- Breaking production usage
+- Blocking other development work
+- Creating a risky big-bang deployment
+
+#### Options Considered
+
+**Option 1: Big Bang Rewrite**
+
+Replace `admin.ts` entirely, cut over in one deployment.
+
+**Pros:**
+- ✅ Clean break — no dual maintenance
+- ✅ Single source of truth immediately
+
+**Cons:**
+- ❌ **High risk** — all features must work before deployment
+- ❌ **Blocks other work** — migration becomes blocker for any admin UI changes
+- ❌ **No rollback path** — if issues arise, must fix forward or revert entire commit
+- ❌ **Hard to test incrementally** — can't validate modules in isolation
+
+**Option 2: Parallel Deployment (CHOSEN)**
+
+Build React UI at `/admin-react`, keep `/admin` intact during migration.
+
+**Pros:**
+- ✅ **Zero downtime** — both UIs coexist during migration
+- ✅ **Incremental feature porting** — validate each module before cutover
+- ✅ **Instant rollback** — revert to `/admin` if issues arise
+- ✅ **Non-blocking** — development continues on original UI
+- ✅ **Side-by-side comparison** — validate visual and functional parity
+- ✅ **Gradual user migration** — can direct specific users to `/admin-react` for beta testing
+
+**Cons:**
+- ❌ **Temporary dual maintenance** — changes to backend may need dual UI updates (acceptable for migration period)
+- ❌ **Extra routes in server** — 2 admin endpoints instead of 1 (~10 lines of code, negligible)
+
+**Option 3: In-Place Refactor**
+
+Gradually replace sections of `admin.ts` with React components, mixing vanilla TS and React in one bundle.
+
+**Pros:**
+- ✅ Single URL maintained throughout
+
+**Cons:**
+- ❌ **Extremely complex** — mixing vanilla TS DOM manipulation and React in one file
+- ❌ **Requires esbuild → Vite migration simultaneously** — can't bundle React properly with esbuild's current config
+- ❌ **Hard to test in isolation** — no clear boundaries between old/new code
+- ❌ **State management nightmare** — how do vanilla TS closures and React hooks share state?
+
+#### Decision
+
+We chose **Option 2: Parallel Deployment Strategy**.
+
+#### Implementation Plan
+
+**Phase 1: Scaffold React App** ✅ (this goal)
+1. Create Vite + React + TypeScript project at `src/ui/react-admin/`
+2. Install dependencies: React Router, Zustand, Chart.js
+3. Configure Vite build output: `outDir: '../react-admin-dist'`, `base: '/admin-react/'`
+4. Create app shell: Layout, Sidebar, StatusBar, AuthGuard
+5. Extract CSS variables from `admin.html` into modular CSS files
+6. Create 9 placeholder page components (Overview, Projects, Work, Workshop, Supervisor, Reports, Conversations, Memory, Products)
+7. Add Express route: serve `react-admin-dist/` at `/admin-react`
+8. Add build script to `server/package.json`: `build:react-admin`
+
+**Phase 2: Port Remaining Modules** 🟡 (next)
+- Port Projects module (project list, stats)
+- Port Work module (task board, goals)
+- Port Supervisor module (cycle history, responses)
+- Port Reports module (analytics, charts)
+- Port Memory module (gradient browser, search)
+- Port Products module (factory pipeline)
+
+**Phase 3: Feature Parity Validation** 🟡
+- Test matrix: perform same actions in both `/admin` and `/admin-react`
+- Validate: Auth, WebSocket, CRUD operations, search, real-time updates
+- Verify visual parity (dark theme, colours, spacing)
+- Test mobile responsiveness (375px, 768px, 1024px)
+
+**Phase 4: Performance Comparison** 🟡
+- Measure initial page load time (both UIs)
+- Compare bundle sizes (esbuild vs Vite)
+- Profile memory usage (browser DevTools)
+- Measure WebSocket message handling latency
+- Target: React UI ≤ 10% slower (acceptable trade-off for maintainability)
+
+**Phase 5: Cutover** 🟡
+1. Add redirect in `server.ts`: `/admin` → `/admin-react`
+2. Update all documentation links
+3. Update `CLAUDE.md` admin URL reference
+4. Monitor error logs for 48 hours
+5. **Rollback trigger**: If >5% error rate or negative user feedback, revert redirect
+
+**Phase 6: Cleanup (After 2-Week Burn-In)** 🟡
+- Delete `src/ui/admin.ts` (3,975 lines)
+- Delete `src/ui/admin.html` (2,043 lines CSS)
+- Delete `src/ui/admin.js` (compiled output)
+- Remove esbuild admin build script
+- Update `.gitignore`
+- **Estimated savings**: ~6,000 lines removed, 1 build tool removed
+
+#### Rationale
+
+**Risk mitigation**: Building at a new route (`/admin-react`) instead of replacing `/admin` immediately means production admin UI remains untouched and functional during entire migration. Each module can be ported, tested, and validated independently.
+
+**User choice**: Darron can switch between `/admin` and `/admin-react` to compare functionality and visual parity side-by-side.
+
+**Instant rollback**: If React migration reveals unexpected complexity or bugs, simply stop using `/admin-react` and continue with original UI. No code changes needed.
+
+#### Consequences
+
+**Positive:**
+- ✅ **Zero risk to production** — original UI never touched
+- ✅ **Incremental progress** — each module port is a deliverable milestone
+- ✅ **Future-proof architecture** — React enables component reuse, state management, HMR
+
+**Negative:**
+- ❌ **Temporary dual endpoints** — server handles 2 admin UIs (10 lines of code, acceptable)
+- ❌ **Dual maintenance window** — backend changes during migration may need dual UI updates (short window, manageable)
+
+#### Related
+
+- DEC-060: Vite + React Router + Zustand Stack (complementary decision)
+- DEC-013: Terminal Rendering — Append-only buffer (another UI architecture choice)
+- Session note: `claude-context/session-notes/2026-03-21-autonomous-react-admin-foundation.md`
+
+---
+
+### DEC-060: Vite + React Router + Zustand Stack
+
+**Date**: 2026-03-21
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+With the decision to migrate admin UI to React (DEC-059), we need to choose build tool, routing library, and state management. The original admin.ts uses esbuild for compilation, no router (manual hash parsing), and implicit state in closures.
+
+#### Options Considered
+
+**Build Tool: Vite (CHOSEN) vs esbuild**
+- Vite: Fast HMR (<50ms), native ESM, React Fast Refresh, simple config
+- esbuild: Already in project, but no React HMR, manual dev server setup
+
+**Routing: React Router (CHOSEN) vs Custom**
+- React Router: Industry standard, HashRouter matches original, NavLink for active state
+- Custom: Lighter bundle (~2KB vs 50KB), but reinventing wheel, no nested routes
+
+**State: Zustand (CHOSEN) vs Redux Toolkit vs Context**
+- Zustand: Minimal API, 2KB gzipped, handles high-frequency WebSocket updates well
+- Redux Toolkit: More boilerplate, 15KB gzipped, mature ecosystem
+- Context + useReducer: No deps, but performance issues with high-frequency updates
+
+#### Decision
+
+We chose **Vite + React Router + Zustand**.
+
+#### Rationale
+
+**Vite**: Developer experience matters — <50ms HMR makes rapid iteration pleasant. React Fast Refresh preserves component state during development.
+
+**React Router**: HashRouter matches original admin.ts behaviour. NavLink simplifies sidebar active state. 50KB bundle cost acceptable for feature richness.
+
+**Zustand**: Minimal API (entire store ~150 lines vs 500+ with Redux), 2KB bundle (vs 15KB Redux), selector-based subscriptions prevent unnecessary re-renders, perfect for WebSocket high-frequency updates.
+
+**Bundle size**: ~200KB gzipped total (vs ~180KB uncompressed for original admin.ts).
+
+#### Consequences
+
+**Positive:**
+- ✅ **Fast iteration** — Vite HMR <50ms
+- ✅ **Type safety** — Full TypeScript inference
+- ✅ **Simple state updates** — Zustand `set()` easier than Redux dispatch
+- ✅ **Performance** — Zustand selectors prevent unnecessary re-renders
+
+**Negative:**
+- ❌ **New tools** — Developers must learn Vite CLI and Zustand API (low learning curve)
+- ❌ **Build process change** — Production builds via `npm run build:react-admin`
+
+#### Related
+
+- DEC-059: React Admin Migration — Parallel Deployment Strategy
+- Session note: `claude-context/session-notes/2026-03-21-autonomous-react-admin-foundation.md`
