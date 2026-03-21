@@ -1,7 +1,31 @@
 import { NavLink } from 'react-router-dom';
+import { useState } from 'react';
 import './Sidebar.css';
 
-export default function Sidebar() {
+interface SidebarProps {
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+}
+
+export default function Sidebar({ collapsed = false, onToggleCollapse = () => {} }: SidebarProps) {
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const root = document.documentElement;
+    return root.classList.contains('light-mode') ? 'light' : 'dark';
+  });
+
+  const _toggleTheme = () => {
+    const root = document.documentElement;
+    const newTheme = theme === 'dark' ? 'light' : 'dark';
+
+    if (newTheme === 'light') {
+      root.classList.add('light-mode');
+    } else {
+      root.classList.remove('light-mode');
+    }
+
+    setTheme(newTheme);
+  };
+
   return (
     <nav className="sidebar" id="sidebar">
       <div className="sidebar-logo">
@@ -105,19 +129,25 @@ export default function Sidebar() {
       </div>
 
       <div className="sidebar-footer">
-        <button className="sidebar-item" id="collapseBtn" title="Toggle sidebar">
+        <button className="sidebar-item" id="collapseBtn" title="Toggle sidebar" onClick={onToggleCollapse}>
           <span className="sidebar-icon">
             <svg viewBox="0 0 20 20">
-              <path d="M12 4l-6 6 6 6"/>
+              <path d={collapsed ? "M8 4l6 6-6 6" : "M12 4l-6 6 6 6"}/>
             </svg>
           </span>
           <span className="sidebar-label">Collapse</span>
         </button>
-        <button className="sidebar-item" id="themeToggle" title="Toggle theme">
+        <button className="sidebar-item" id="themeToggle" title="Toggle theme" onClick={toggleTheme}>
           <span className="sidebar-icon">
             <svg viewBox="0 0 20 20">
-              <circle cx="10" cy="10" r="4"/>
-              <path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.93 4.93l1.41 1.41M13.66 13.66l1.41 1.41M4.93 15.07l1.41-1.41M13.66 6.34l1.41-1.41"/>
+              {theme === 'dark' ? (
+                <>
+                  <circle cx="10" cy="10" r="4"/>
+                  <path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.93 4.93l1.41 1.41M13.66 13.66l1.41 1.41M4.93 15.07l1.41-1.41M13.66 6.34l1.41-1.41"/>
+                </>
+              ) : (
+                <path d="M17 10a7 7 0 11-14 0 7 7 0 0114 0zM10 3v14"/>
+              )}
             </svg>
           </span>
           <span className="sidebar-label">Theme</span>

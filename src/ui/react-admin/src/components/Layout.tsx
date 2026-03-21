@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
 import './Layout.css';
@@ -8,9 +8,15 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const toggleCollapse = () => {
+    setCollapsed(!collapsed);
+  };
+
   return (
-    <div className="admin-layout">
-      <Sidebar />
+    <div className={`admin-layout ${collapsed ? 'collapsed' : ''}`}>
+      <Sidebar collapsed={collapsed} onToggleCollapse={toggleCollapse} />
       <main className="main">
         <header className="main-header">
           <h1 id="moduleTitle">Overview</h1>
