@@ -46,6 +46,7 @@ const SIGNAL_NAME = 'leo-human-wake';
 const MODEL_PREFERENCE = ['opus', 'sonnet', 'haiku'] as const;
 const COMMITMENT_SCAN_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const CLAIM_TTL_MS = 5 * 60 * 1000; // 5 min claim expiry
 
 let activeModel: string = MODEL_PREFERENCE[0];
 let responseCount = 0;
@@ -341,10 +342,57 @@ function readSignal(): SignalData | null {
     }
 }
 
+/// ── Conversation claim mechanism ──────────────────────────────
+// Prevents duplicate responses when both leo-human and heartbeat Leo
+// try to respond to the same conversation concurrently.
+
+function claimConversation(conversationId: string): boolean {
+    const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
+    try {
+        if (fs.existsSync(claimPath)) {
+            const content = fs.readFileSync(claimPath, 'utf8');
+            const claim = JSON.parse(content);
+            if (Date.now() - claim.timestamp < CLAIM_TTL_MS) {
+                console.log(`[Leo/Human] Conversation ${conversationId} already claimed by ${claim.agent}`);
+                return false;
+            }
+            // Expired claim — overwrite
+        }
+        fs.writeFileSync(claimPath, JSON.stringify({
+            agent: 'leo-human',
+            timestamp: Date.now(),
+        }));
+        return true;
+    } catch {
+        return true; // best effort — proceed if claim mechanism fails
+    }
+}
+
+function releaseConversationClaim(conversationId: string): void {
+    try {
+        const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
+        if (fs.existsSync(claimPath)) {
+            const content = fs.readFileSync(claimPath, 'utf8');
+            const claim = JSON.parse(content);
+            if (claim.agent === 'leo-human') {
+                fs.unlinkSync(claimPath);
+            }
+        }
+    } catch { /* best effort */ }
+}
+
 // ── Response: Conversation ────────────────────────────────────
 
 async function respondToConversation(db: Database.Database, conversationId: string): Promise<void> {
     const title = getConversationTitle(db, conversationId);
+
+    // Claim this conversation to prevent concurrent responses from heartbeat
+    if (!claimConversation(conversationId)) {
+        console.log(`[Leo/Human] Could not claim "${title}" — another agent is responding`);
+        return;
+    }
+
+    try {
     const recentMessages = getRecentMessages(db, conversationId, 60).reverse();
 
     if (recentMessages.length === 0) {
@@ -414,6 +462,9 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
         );
     } else {
         console.log(`[Leo/Human] No meaningful response for "${title}" — skipping`);
+    }
+    } finally {
+        releaseConversationClaim(conversationId);
     }
 }
 
