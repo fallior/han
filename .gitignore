@@ -1,5 +1,7 @@
 node_modules/
 src/ui/app.js
+src/ui/react-admin-dist/
+src/ui/react-admin/node_modules/
 _screenshots/
 _logs/
 .env

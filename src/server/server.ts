@@ -137,6 +137,19 @@ app.get('/admin', (_req, res) => {
     }
 });
 
+// React Admin console (new UI — Phase 1)
+const REACT_ADMIN_DIST = path.join(UI_DIR, 'react-admin-dist');
+app.use('/admin-react', express.static(REACT_ADMIN_DIST));
+app.get('/admin-react/*', (_req, res) => {
+    const indexPath = path.join(REACT_ADMIN_DIST, 'index.html');
+    if (fs.existsSync(indexPath)) {
+        res.set('Cache-Control', 'no-store');
+        res.sendFile(indexPath);
+    } else {
+        res.status(404).send('React admin not found. Run: npm run build:react-admin');
+    }
+});
+
 // ── WebSocket ────────────────────────────────────────────
 
 const wss = createWebSocketServer(server, () => {

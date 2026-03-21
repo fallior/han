@@ -8,6 +8,7 @@
     "dev": "tsx watch server.ts",
     "build": "tsc -p tsconfig.json",
     "build:client": "npx tsx build-client.ts",
+    "build:react-admin": "cd ../ui/react-admin && npm run build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsx --test tests/smoke.test.ts",
     "test:legacy": "node --test tests/smoke.test.js",
