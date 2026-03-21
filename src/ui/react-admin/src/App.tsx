@@ -10,8 +10,13 @@ import ReportsPage from './pages/ReportsPage'
 import ConversationsPage from './pages/ConversationsPage'
 import MemoryPage from './pages/MemoryPage'
 import ProductsPage from './pages/ProductsPage'
+import { WebSocketProvider } from './providers/WebSocketProvider'
+import { useVisibilitySync } from './hooks/useVisibilitySync'
 
-function App() {
+function AppContent() {
+  // Enable visibility sync for tab switching
+  useVisibilitySync()
+
   return (
     <AuthGuard>
       <Layout>
@@ -28,6 +33,14 @@ function App() {
         </Routes>
       </Layout>
     </AuthGuard>
+  )
+}
+
+function App() {
+  return (
+    <WebSocketProvider>
+      <AppContent />
+    </WebSocketProvider>
   )
 }
 

@@ -21,6 +21,7 @@ export default function ConversationsPage() {
   const setSelectedId = useStore(state => state.setConversationsSelectedId);
   const setPeriod = useStore(state => state.setConversationsPeriod);
   const subscribeWs = useStore(state => state.subscribeWs);
+  const conversationsInStore = useStore(state => state.conversations);
 
   // Local state
   const [threads, setThreads] = useState<ConversationThread[]>([]);
@@ -227,6 +228,8 @@ export default function ConversationsPage() {
     selectedId && 'thread-selected'
   ].filter(Boolean).join(' ');
 
+  const storeConversationCount = Object.keys(conversationsInStore).length;
+
   return (
     <div className="page-container">
       {/* Page Header with New Thread Button */}
@@ -237,7 +240,17 @@ export default function ConversationsPage() {
         marginBottom: '16px',
         padding: '0 16px'
       }}>
-        <h1 style={{ margin: 0 }}>Conversations</h1>
+        <div>
+          <h1 style={{ margin: 0 }}>Conversations</h1>
+          <p style={{
+            margin: '4px 0 0 0',
+            fontSize: '13px',
+            color: 'var(--text-secondary)',
+            opacity: 0.7
+          }}>
+            {storeConversationCount} conversation{storeConversationCount !== 1 ? 's' : ''} in store
+          </p>
+        </div>
         <button
           className="btn btn-primary"
           onClick={() => setNewThreadDialogOpen(true)}

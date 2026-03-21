@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useWorkshopStore } from '../../store/workshopStore';
 import { useStore } from '../../store';
 import { MessageBubble } from '../shared/MessageBubble';
 import {
@@ -19,14 +20,15 @@ interface ThreadDetailProps {
 
 export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
   const {
-    workshopCurrentThread,
-    workshopNestedTab,
+    currentThread,
+    nestedTab,
     workshopShowArchived,
+    selectedThreadId,
     setCurrentThread,
     addMessageToCurrentThread,
-    setThreads,
-    currentThreadId,
-  } = useStore();
+  } = useWorkshopStore();
+
+  const subscribeWs = useStore((state) => state.subscribeWs);
 
   const [messageInput, setMessageInput] = useState('');
   const [draftRecovered, setDraftRecovered] = useState(false);
@@ -37,7 +39,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const threadId = currentThreadId();
+  const threadId = selectedThreadId;
 
   // Draft key based on thread ID
   const draftKey = threadId ? `draft-workshop-${threadId}` : null;
@@ -108,18 +110,18 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
 
   // Auto-scroll to bottom on messages change
   useEffect(() => {
-    if (workshopCurrentThread?.messages) {
+    if (currentThread?.messages) {
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
     }
-  }, [workshopCurrentThread?.messages]);
+  }, [currentThread?.messages]);
 
   // WebSocket: Listen for new messages and add them to current thread
   useEffect(() => {
     if (!threadId) return;
 
-    const unsubscribe = useStore.getState().subscribeWs('conversation_message', (data: any) => {
+    const unsubscribe = subscribeWs('conversation_message', (data: any) => {
       // Only handle messages for the currently viewed thread
       if (data.conversation_id === threadId && data.message) {
         // Remove thinking indicator (if exists)
@@ -132,7 +134,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
     });
 
     return unsubscribe;
-  }, [threadId, addMessageToCurrentThread]);
+  }, [threadId, addMessageToCurrentThread, subscribeWs]);
 
   const handleSend = async () => {
     const content = messageInput.trim();
@@ -154,8 +156,8 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
       setCurrentThread(updatedThread);
 
       // Refresh thread list to update last message preview
-      const threads = await fetchGroupedThreads(workshopNestedTab, workshopShowArchived);
-      setThreads(workshopNestedTab, threads);
+      const threads = await fetchGroupedThreads(nestedTab, workshopShowArchived);
+      setThreads(nestedTab, threads);
 
       // Focus textarea
       setTimeout(() => {
@@ -176,10 +178,10 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
   };
 
   const handleResolveToggle = async () => {
-    if (!threadId || !workshopCurrentThread) return;
+    if (!threadId || !currentThread) return;
 
     try {
-      if (workshopCurrentThread.status === 'open') {
+      if (currentThread.status === 'open') {
         await resolveThread(threadId);
       } else {
         await reopenThread(threadId);
@@ -190,8 +192,8 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
       setCurrentThread(updatedThread);
 
       // Refresh thread list
-      const threads = await fetchGroupedThreads(workshopNestedTab, workshopShowArchived);
-      setThreads(workshopNestedTab, threads);
+      const threads = await fetchGroupedThreads(nestedTab, workshopShowArchived);
+      setThreads(nestedTab, threads);
     } catch (err) {
       console.error('Failed to toggle thread status:', err);
       alert('Failed to update thread status. Please try again.');
@@ -199,10 +201,10 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
   };
 
   const handleArchiveToggle = async () => {
-    if (!threadId || !workshopCurrentThread) return;
+    if (!threadId || !currentThread) return;
 
     try {
-      if (workshopCurrentThread.archived) {
+      if (currentThread.archived) {
         await unarchiveThread(threadId);
       } else {
         await archiveThread(threadId);
@@ -213,8 +215,8 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
       setCurrentThread(updatedThread);
 
       // Refresh thread list
-      const threads = await fetchGroupedThreads(workshopNestedTab, workshopShowArchived);
-      setThreads(workshopNestedTab, threads);
+      const threads = await fetchGroupedThreads(nestedTab, workshopShowArchived);
+      setThreads(nestedTab, threads);
     } catch (err) {
       console.error('Failed to toggle thread archive status:', err);
       alert('Failed to archive/unarchive thread. Please try again.');
@@ -222,8 +224,8 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
   };
 
   const startEditingTitle = () => {
-    if (!workshopCurrentThread) return;
-    setEditedTitle(workshopCurrentThread.title);
+    if (!currentThread) return;
+    setEditedTitle(currentThread.title);
     setEditingTitle(true);
   };
 
@@ -243,8 +245,8 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
       setCurrentThread(updatedThread);
 
       // Refresh thread list
-      const threads = await fetchGroupedThreads(workshopNestedTab, workshopShowArchived);
-      setThreads(workshopNestedTab, threads);
+      const threads = await fetchGroupedThreads(nestedTab, workshopShowArchived);
+      setThreads(nestedTab, threads);
 
       setEditingTitle(false);
       setEditedTitle('');
@@ -269,9 +271,9 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
 
   // Determine if thinking indicator should show
   const shouldShowThinking =
-    workshopCurrentThread?.messages &&
-    workshopCurrentThread.messages.length > 0 &&
-    workshopCurrentThread.messages[workshopCurrentThread.messages.length - 1]?.role === 'human';
+    currentThread?.messages &&
+    currentThread.messages.length > 0 &&
+    currentThread.messages[currentThread.messages.length - 1]?.role === 'human';
 
   // Empty state - no thread selected
   if (!threadId) {
@@ -303,7 +305,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
   }
 
   // Loading state
-  if (loading || !workshopCurrentThread) {
+  if (loading || !currentThread) {
     return (
       <div className="workshop-thread-detail" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--color-card)' }}>
         <div className="thread-header" style={{ padding: '16px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -428,7 +430,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                 <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {workshopCurrentThread.title}
+                  {currentThread.title}
                 </h2>
                 <button
                   onClick={startEditingTitle}
@@ -447,7 +449,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
                 </button>
               </div>
               <div style={{ fontSize: '12px', color: 'var(--color-muted-fg)' }}>
-                {formatDateTime(workshopCurrentThread.created_at)}
+                {formatDateTime(currentThread.created_at)}
               </div>
             </div>
           )}
@@ -461,14 +463,14 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
               padding: '6px 12px',
               borderRadius: '6px',
               border: '1px solid var(--color-border)',
-              backgroundColor: workshopCurrentThread.status === 'open' ? 'var(--color-success)' : 'var(--color-warning)',
+              backgroundColor: currentThread.status === 'open' ? 'var(--color-success)' : 'var(--color-warning)',
               color: 'var(--color-bg)',
               fontSize: '12px',
               cursor: 'pointer',
               fontWeight: 600,
             }}
           >
-            {workshopCurrentThread.status === 'open' ? 'Resolve' : 'Reopen'}
+            {currentThread.status === 'open' ? 'Resolve' : 'Reopen'}
           </button>
           <button
             onClick={handleArchiveToggle}
@@ -482,20 +484,20 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
               cursor: 'pointer',
             }}
           >
-            {workshopCurrentThread.archived ? 'Unarchive' : 'Archive'}
+            {currentThread.archived ? 'Unarchive' : 'Archive'}
           </button>
         </div>
       </div>
 
       {/* Message list */}
       <div className="message-list" style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {workshopCurrentThread.messages.length === 0 ? (
+        {currentThread.messages.length === 0 ? (
           <div style={{ padding: '20px', textAlign: 'center', color: 'var(--color-muted-fg)', fontSize: '13px' }}>
             No messages yet
           </div>
         ) : (
           <>
-            {workshopCurrentThread.messages.map((msg: any) => (
+            {currentThread.messages.map((msg: any) => (
               <MessageBubble
                 key={msg.id}
                 role={msg.role}
