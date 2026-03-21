@@ -91,6 +91,7 @@ When you make a significant technical or design decision:
 | DEC-059 | React Admin Migration — Parallel Deployment Strategy | Accepted | 2026-03-21 |
 | DEC-060 | Vite + React Router + Zustand Stack | Accepted | 2026-03-21 |
 | DEC-061 | Shared Components for Conversations/Memory, Dedicated for Workshop | Accepted | 2026-03-21 |
+| DEC-062 | WebSocket Provider Architecture with Context Pattern | Accepted | 2026-03-21 |
 
 ---
 
