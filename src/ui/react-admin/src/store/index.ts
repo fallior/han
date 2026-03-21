@@ -1,7 +1,5 @@
 // @ts-nocheck
 import { create } from 'zustand';
-import type { StoreApi } from 'zustand';
-import { connectWebSocket } from './websocket';
 import { createWorkshopSlice, type WorkshopSlice } from './workshopSlice';
 import type { Conversation, Message } from '../types';
 
@@ -337,10 +335,8 @@ export const useStore = create<AppState>((set, get, api) => ({
   },
 }));
 
-// Initialize WebSocket connection
-// We need to get the store API to pass to connectWebSocket
-const storeApi = useStore as unknown as StoreApi<AppState>;
-connectWebSocket(storeApi);
+// Note: WebSocket connection is now managed by the WebSocketProvider component
+// (no longer initialized here to avoid dual connections)
 
 // Re-export types and constants for convenience
 export type { WorkshopPersona, WorkshopSlice } from './workshopSlice';
