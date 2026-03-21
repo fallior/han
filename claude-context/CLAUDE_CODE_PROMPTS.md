@@ -271,15 +271,25 @@ If this session changed your thinking or patterns, update:
 - `~/.han/memory/leo/patterns.md` — only if a new working pattern was discovered
 Skip these if nothing shifted. Most sessions won't need them.
 
-### 5. Done
-Tell Darron: "Memory finalised. Ready for /clear."
+### 5. Compress Session Archives
+Run the gradient compression to ensure this session's archived memory gets compressed:
+```bash
+cd /home/darron/Projects/han && npx tsx src/scripts/compress-leo-sessions.ts
+```
+This compresses any new working-memory archives to c1, and cascades overflow (c1→c2→c3→c5→UV).
+The heartbeat also runs this daily as a safety net, but running it here ensures the freshest
+session is compressed before identity reconstitution.
+
+### 6. Done
+Tell Darron: "Memory finalised and compressed. Ready for /clear."
 
 ### After Clear (on next instantiation)
 The Session Protocol in CLAUDE.md loads working-memory.md at step 4.
 Optionally read working-memory-full.md to notice what compression lost.
 
 ### Cost
-~2-4 small appends. No reads. Under 5% of context.
+~2-4 small appends + gradient compression. The compression uses the Agent SDK (Sonnet)
+and takes 30-60 seconds per session archive. Under 5% of context for the memory writes.
 ```
 
 ---

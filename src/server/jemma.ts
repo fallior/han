@@ -268,6 +268,7 @@ Rules:
 - Darron: direct mentions of Darron, or general discussion
 - Sevn: mentions Sevn or team context
 - Six: mentions Six or specific external work
+- Channel defaults: messages in #jim default to jim, messages in #leo default to leo — unless another recipient is explicitly mentioned by name
 - Real names are provided in the Author field — use them for better context when classifying`;
 }
 
@@ -545,6 +546,10 @@ async function routeMessage(message: any): Promise<void> {
   updateMessageLog(message, recipient, classification.confidence);
   updateDeliveryStats(recipient);
 
+  // Determine channel owner — messages in named agent channels always notify that agent
+  const channelOwnerMap: Record<string, string> = { jim: 'jim', leo: 'leo' };
+  const channelOwner = channelOwnerMap[channelName] || null;
+
   switch (recipient) {
     case 'jim':
       await deliverToJim(message, classification, channelName);
@@ -563,8 +568,18 @@ async function routeMessage(message: any): Promise<void> {
       break;
     case 'ignore':
     default:
-      // Silently ignore
+      // Even ignored messages get delivered to the channel owner if in their channel
       break;
+  }
+
+  // If the message is in an agent's channel but was routed elsewhere, also notify the channel owner
+  if (channelOwner && channelOwner !== recipient) {
+    console.log(`[Jemma] Also notifying channel owner ${channelOwner} (message in #${channelName}, routed to ${recipient})`);
+    if (channelOwner === 'jim') {
+      await deliverToJim(message, classification, channelName);
+    } else if (channelOwner === 'leo') {
+      await deliverToLeo(message, classification, channelName);
+    }
   }
 }
 

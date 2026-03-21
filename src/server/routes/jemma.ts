@@ -181,6 +181,7 @@ router.post('/deliver', (req: Request, res: Response) => {
 
                 // Write signal files to wake Jim + Jim/Human
                 const jimSignalData = {
+                    source: 'discord',
                     conversationId: convId,
                     author,
                     channel,

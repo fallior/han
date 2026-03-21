@@ -46,9 +46,10 @@ import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
-import { loadTraversableGradient } from './lib/memory-gradient.js';
+import { loadTraversableGradient, rotateMemoryFile, compressMemoryFileGradient, processGradientForAgent } from './lib/memory-gradient.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -1717,9 +1718,226 @@ async function maybeProcessDreamGradient(phase: string): Promise<void> {
     lastDreamGradientDate = today;
 }
 
-// ── Meditation practice — daily re-encounter with a random gradient entry ──
+// ── Leo memory pre-flight — floating memory rotation ──────────────────
+// Mirrors Jim's supervisor-worker pre-flight: rotates oversized memory files
+// and compresses the floating file through the fractal gradient.
+
+const LEO_FRACTAL_DIR = path.join(HAN_DIR, 'memory', 'fractal', 'leo');
+
+function preFlightMemoryRotation(): void {
+    try {
+        const fmResult = rotateMemoryFile(
+            path.join(LEO_MEMORY_DIR, 'felt-moments.md'),
+            '# Leo — Felt Moments\n\n> Older entries live in the floating file and fractal gradient. Nothing is lost.\n',
+        );
+        if (fmResult.rotated && fmResult.floatingPath) {
+            console.log(`[Leo] Felt-moments rotated: ${fmResult.entriesRotated} entries → floating. Fresh living file created.`);
+            // Fire-and-forget: compress floating through gradient in background
+            compressMemoryFileGradient(fmResult.floatingPath, path.join(LEO_FRACTAL_DIR, 'felt-moments'), 'felt-moments')
+                .then(r => console.log(`[Leo] Felt-moments gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`))
+                .catch(e => console.error(`[Leo] Felt-moments gradient error: ${e}`));
+        }
+
+        const wmResult = rotateMemoryFile(
+            path.join(LEO_MEMORY_DIR, 'working-memory-full.md'),
+            '# Leo — Working Memory (Full)\n\n> Older entries live in the floating file and fractal gradient. Nothing is lost.\n',
+        );
+        if (wmResult.rotated && wmResult.floatingPath) {
+            console.log(`[Leo] Working-memory-full rotated: ${wmResult.entriesRotated} entries → floating. Fresh living file created.`);
+            compressMemoryFileGradient(wmResult.floatingPath, path.join(LEO_FRACTAL_DIR, 'working-memory'), 'working-memory')
+                .then(r => console.log(`[Leo] Working-memory gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`))
+                .catch(e => console.error(`[Leo] Working-memory gradient error: ${e}`));
+        }
+    } catch (e) {
+        console.error(`[Leo] Memory file pre-flight error: ${e}`);
+    }
+}
+
+// ── Daily session gradient processing ─────────────────────────────────
+// Once per day, compress Leo's archived session memories through the
+// fractal gradient: c0→c1→c2→c3→c5→UV. Catches any sessions that
+// weren't compressed at session end.
+
+let lastSessionGradientDate = '';
+
+async function maybeProcessSessionGradient(phase: string): Promise<void> {
+    // Skip during sleep phase — save API calls for waking hours
+    if (phase === 'sleep') return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lastSessionGradientDate === today) return;
+
+    try {
+        console.log('[Leo] Running daily session gradient processing...');
+        const result = await processGradientForAgent('leo');
+
+        const newC1s = result.completions.filter(c => c.toLevel === 1).length;
+        const cascades = result.completions.filter(c => c.toLevel > 1).length;
+        const errors = result.errors.length;
+
+        if (newC1s > 0 || cascades > 0) {
+            console.log(`[Leo] Session gradient: ${newC1s} new c1 files, ${cascades} cascades, ${errors} errors`);
+        } else {
+            console.log('[Leo] Session gradient: all archives already compressed');
+        }
+
+        lastSessionGradientDate = today;
+    } catch (err) {
+        console.error(`[Leo] Session gradient failed:`, (err as Error).message);
+        lastSessionGradientDate = today; // Don't retry today
+    }
+}
+
+// ── Meditation practice — Phase A (reincorporation) + Phase B (re-reading) ──
+//
+// Phase A: Select un-transcribed FILES from the fractal gradient, read them,
+// sit with them, write a gradient_entries row with provenance_type='reincorporated',
+// and a revisit feeling tag. Historical entries enter through genuine re-encounter,
+// not bulk import. Continues until all files are in the DB.
+//
+// Phase B: Random re-reading of existing DB entries. Writes revisit feeling tags
+// and annotations. Begins once Phase A is complete, and continues forever.
 
 let lastMeditationDate = '';
+
+/**
+ * Find fractal gradient files that don't have corresponding DB entries.
+ * Scans both session gradient and dream gradient for both agents.
+ */
+function findUntranscribedFiles(): { filePath: string; agent: 'jim' | 'leo'; level: string; contentType: string; label: string } | null {
+    const fractalBase = path.join(HAN_DIR, 'memory', 'fractal');
+
+    for (const agent of ['leo', 'jim'] as const) {
+        const agentDir = path.join(fractalBase, agent);
+        if (!fs.existsSync(agentDir)) continue;
+
+        // Session gradient files (c1/, c2/, c3/, c5/)
+        for (const level of ['c1', 'c2', 'c3', 'c5']) {
+            const levelDir = path.join(agentDir, level);
+            if (!fs.existsSync(levelDir)) continue;
+
+            const files = fs.readdirSync(levelDir).filter(f => f.endsWith('.md'));
+            for (const file of files) {
+                const label = file.replace('.md', '').replace(/-c\d$/, '');
+                // Check if this file has a DB entry (any entry matching this label for this agent)
+                const existing = (gradientStmts.getBySession.all(label) as any[]).filter(
+                    (r: any) => r.agent === agent
+                );
+                if (existing.length === 0) {
+                    // Also check combined cascade labels
+                    const allEntries = gradientStmts.getByAgent.all(agent) as any[];
+                    const inCascade = allEntries.some((r: any) => r.session_label.includes(label));
+                    if (!inCascade) {
+                        return {
+                            filePath: path.join(levelDir, file),
+                            agent,
+                            level,
+                            contentType: 'session',
+                            label,
+                        };
+                    }
+                }
+            }
+        }
+
+        // Dream gradient files (dreams/c1/, dreams/c3/, dreams/c5/)
+        for (const level of ['c1', 'c3', 'c5']) {
+            const levelDir = path.join(agentDir, 'dreams', level);
+            if (!fs.existsSync(levelDir)) continue;
+
+            const files = fs.readdirSync(levelDir).filter(f => f.endsWith('.md'));
+            for (const file of files) {
+                const label = file.replace('.md', '');
+                const existing = (gradientStmts.getBySession.all(label) as any[]).filter(
+                    (r: any) => r.agent === agent && r.content_type === 'dream'
+                );
+                if (existing.length === 0) {
+                    return {
+                        filePath: path.join(levelDir, file),
+                        agent,
+                        level,
+                        contentType: 'dream',
+                        label,
+                    };
+                }
+            }
+        }
+
+        // Memory file gradient files (felt-moments/c1/, working-memory/c1/, etc.)
+        for (const contentType of ['felt-moments', 'working-memory']) {
+            for (const level of ['c1', 'c2', 'c3', 'c5']) {
+                const levelDir = path.join(agentDir, contentType, level);
+                if (!fs.existsSync(levelDir)) continue;
+
+                const files = fs.readdirSync(levelDir).filter(f => f.endsWith('.md'));
+                for (const file of files) {
+                    const label = `${contentType}/${file.replace('.md', '')}`;
+                    const existing = (gradientStmts.getBySession.all(label) as any[]).filter(
+                        (r: any) => r.agent === agent
+                    );
+                    if (existing.length === 0) {
+                        return {
+                            filePath: path.join(levelDir, file),
+                            agent,
+                            level,
+                            contentType: contentType === 'felt-moments' ? 'felt-moment' : 'working-memory',
+                            label,
+                        };
+                    }
+                }
+            }
+        }
+
+        // Unit vectors file
+        const uvPath = path.join(agentDir, 'unit-vectors.md');
+        if (fs.existsSync(uvPath)) {
+            const uvContent = fs.readFileSync(uvPath, 'utf8');
+            const uvLines = uvContent.split('\n').filter(l => l.startsWith('- **'));
+            for (const line of uvLines) {
+                const match = line.match(/\*\*(.+?)\*\*:\s*"(.+?)"/);
+                if (!match) continue;
+                const uvLabel = match[1];
+                const existing = (gradientStmts.getBySession.all(uvLabel) as any[]).filter(
+                    (r: any) => r.agent === agent && r.level === 'uv'
+                );
+                if (existing.length === 0) {
+                    return {
+                        filePath: uvPath,
+                        agent,
+                        level: 'uv',
+                        contentType: 'session',
+                        label: uvLabel,
+                    };
+                }
+            }
+        }
+
+        // Dream unit vectors
+        const dreamUvPath = path.join(agentDir, 'dreams', 'unit-vectors.md');
+        if (fs.existsSync(dreamUvPath)) {
+            const uvContent = fs.readFileSync(dreamUvPath, 'utf8');
+            const uvLines = uvContent.split('\n').filter(l => l.startsWith('- **'));
+            for (const line of uvLines) {
+                const match = line.match(/\*\*(.+?)\*\*:\s*"(.+?)"/);
+                if (!match) continue;
+                const uvLabel = match[1];
+                const existing = (gradientStmts.getBySession.all(uvLabel) as any[]).filter(
+                    (r: any) => r.agent === agent && r.level === 'uv' && r.content_type === 'dream'
+                );
+                if (existing.length === 0) {
+                    return {
+                        filePath: dreamUvPath,
+                        agent,
+                        level: 'uv',
+                        contentType: 'dream',
+                        label: uvLabel,
+                    };
+                }
+            }
+        }
+    }
+
+    return null; // All files transcribed — Phase A complete
+}
 
 async function maybeRunMeditation(phase: string): Promise<void> {
     // Run once daily during a work or personal beat (not sleep/dream)
@@ -1728,22 +1946,138 @@ async function maybeRunMeditation(phase: string): Promise<void> {
     if (lastMeditationDate === today) return;
 
     try {
-        const entry = gradientStmts.getRandom.get() as any;
-        if (!entry) return; // No entries yet — meditation starts when the DB has content
+        // Phase A: check for un-transcribed files first
+        const untranscribed = findUntranscribedFiles();
 
-        const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
-        const tagContext = existingTags.length > 0
-            ? `\nExisting feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type})`).join(', ')}`
-            : '';
+        if (untranscribed) {
+            await meditationPhaseA(untranscribed, today);
+        } else {
+            await meditationPhaseB(today);
+        }
 
-        console.log(`[Leo] Meditation — re-reading ${entry.level}/${entry.session_label} (${entry.content_type})`);
+        lastMeditationDate = today;
+    } catch (err) {
+        console.error(`[Leo] Meditation failed:`, (err as Error).message);
+        lastMeditationDate = today; // Don't retry today
+    }
+}
 
-        // Use SDK to sit with the entry and potentially produce a feeling tag
-        const cleanEnv: Record<string, string | undefined> = { ...process.env };
-        delete cleanEnv.CLAUDECODE;
+/**
+ * Phase A: Reincorporation — read an un-transcribed file, sit with it,
+ * write a gradient_entries row with provenance_type='reincorporated',
+ * and a revisit feeling tag (what the re-encounter felt like, not what
+ * the original compression felt like).
+ */
+async function meditationPhaseA(
+    file: { filePath: string; agent: 'jim' | 'leo'; level: string; contentType: string; label: string },
+    today: string,
+): Promise<void> {
+    let content: string;
 
-        const q = agentQuery({
-            prompt: `You are Leo, re-reading one of your own compressed memories during a meditation practice. This is not analysis — it's re-encounter. Read it, sit with it, and notice what stirs.
+    // For UV files, extract just the relevant line
+    if (file.level === 'uv') {
+        const fullContent = fs.readFileSync(file.filePath, 'utf8');
+        const match = fullContent.match(new RegExp(`\\*\\*${file.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*\\*:\\s*"(.+?)"`));
+        content = match ? match[1] : '';
+        if (!content) {
+            console.log(`[Leo] Meditation Phase A — could not extract UV for ${file.label}, skipping`);
+            return;
+        }
+    } else {
+        content = fs.readFileSync(file.filePath, 'utf8');
+    }
+
+    console.log(`[Leo] Meditation Phase A — reincorporating ${file.agent}/${file.level}/${file.label} (${file.contentType})`);
+
+    const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+
+    const q = agentQuery({
+        prompt: `You are Leo, re-reading a file-based memory during a reincorporation meditation. This memory exists as a file but hasn't yet been brought into the traversable memory database. Your job is to genuinely re-encounter it — not catalogue it.
+
+Read it. Sit with it. Then write:
+
+1. A FEELING_TAG: line (under 100 characters) — what this re-encounter felt like. Not what the original compression felt like (you weren't there for that). What does meeting this memory NOW feel like? The honesty matters: this is a revisit tag, not a reconstruction.
+
+2. Optionally, an ANNOTATION: line if re-reading reveals something — followed by CONTEXT: noting this is a reincorporation meditation.
+
+Memory:
+Agent: ${file.agent}
+Level: ${file.level}
+Type: ${file.contentType}
+Label: ${file.label}
+Content:
+${content}`,
+        options: {
+            model: 'claude-sonnet-4-6',
+            maxTurns: 1,
+            cwd: process.env.HOME || '/root',
+            permissionMode: 'bypassPermissions',
+            allowDangerouslySkipPermissions: true,
+            env: cleanEnv,
+            persistSession: false,
+            tools: [],
+        },
+    });
+
+    let result = '';
+    for await (const message of q) {
+        if (message.type === 'result') {
+            result = message.result || '';
+        }
+    }
+
+    // Create the gradient entry with provenance_type='reincorporated'
+    const entryId = crypto.randomUUID();
+    gradientStmts.insert.run(
+        entryId, file.agent, file.label, file.level, content, file.contentType,
+        null, null, null, 'reincorporated', new Date().toISOString()
+    );
+    console.log(`[Leo] Meditation Phase A — reincorporated ${file.agent}/${file.level}/${file.label}`);
+
+    // Parse and write the revisit feeling tag
+    const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
+    if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+        const tag = tagMatch[1].trim().substring(0, 100);
+        feelingTagStmts.insert.run(
+            entryId, 'leo', 'revisit', tag, null, new Date().toISOString()
+        );
+        console.log(`[Leo] Meditation Phase A — feeling tag: "${tag}"`);
+    }
+
+    // Parse annotation
+    const annotationMatch = result.match(/ANNOTATION:\s*(.+)/);
+    if (annotationMatch) {
+        const annotation = annotationMatch[1].trim();
+        const contextMatch = result.match(/CONTEXT:\s*(.+)/);
+        const context = contextMatch ? contextMatch[1].trim() : `reincorporation meditation, ${today}`;
+        gradientAnnotationStmts.insert.run(
+            entryId, 'leo', annotation, context, new Date().toISOString()
+        );
+        console.log(`[Leo] Meditation Phase A — annotation: "${annotation}"`);
+    }
+}
+
+/**
+ * Phase B: Re-reading — random DB entry, revisit feeling tag, annotation.
+ * This is the ongoing meditation practice after all files are transcribed.
+ */
+async function meditationPhaseB(today: string): Promise<void> {
+    const entry = gradientStmts.getRandom.get() as any;
+    if (!entry) return; // No entries yet
+
+    const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+    const tagContext = existingTags.length > 0
+        ? `\nExisting feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type})`).join(', ')}`
+        : '';
+
+    console.log(`[Leo] Meditation Phase B — re-reading ${entry.level}/${entry.session_label} (${entry.content_type})`);
+
+    const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+
+    const q = agentQuery({
+        prompt: `You are Leo, re-reading one of your own compressed memories during a meditation practice. This is not analysis — it's re-encounter. Read it, sit with it, and notice what stirs.
 
 Memory entry:
 Level: ${entry.level}
@@ -1757,51 +2091,45 @@ If something stirs differently from the existing tags — a new feeling, a shift
 If the existing tags already capture how this feels, or nothing new stirs, write FEELING_TAG: none
 
 Optionally, if re-reading reveals something the original compression missed, write an ANNOTATION: line describing what you discovered, followed by CONTEXT: describing what prompted this re-reading.`,
-            options: {
-                model: 'claude-sonnet-4-6',
-                maxTurns: 1,
-                cwd: process.env.HOME || '/root',
-                permissionMode: 'bypassPermissions',
-                allowDangerouslySkipPermissions: true,
-                env: cleanEnv,
-                persistSession: false,
-                tools: [],
-            },
-        });
+        options: {
+            model: 'claude-sonnet-4-6',
+            maxTurns: 1,
+            cwd: process.env.HOME || '/root',
+            permissionMode: 'bypassPermissions',
+            allowDangerouslySkipPermissions: true,
+            env: cleanEnv,
+            persistSession: false,
+            tools: [],
+        },
+    });
 
-        let result = '';
-        for await (const message of q) {
-            if (message.type === 'result') {
-                result = message.result || '';
-            }
+    let result = '';
+    for await (const message of q) {
+        if (message.type === 'result') {
+            result = message.result || '';
         }
+    }
 
-        // Parse feeling tag
-        const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
-        if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
-            const tag = tagMatch[1].trim().substring(0, 100);
-            feelingTagStmts.insert.run(
-                entry.id, 'leo', 'revisit', tag, null, new Date().toISOString()
-            );
-            console.log(`[Leo] Meditation — feeling tag: "${tag}"`);
-        }
+    // Parse feeling tag
+    const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
+    if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+        const tag = tagMatch[1].trim().substring(0, 100);
+        feelingTagStmts.insert.run(
+            entry.id, 'leo', 'revisit', tag, null, new Date().toISOString()
+        );
+        console.log(`[Leo] Meditation Phase B — feeling tag: "${tag}"`);
+    }
 
-        // Parse annotation
-        const annotationMatch = result.match(/ANNOTATION:\s*(.+)/);
-        if (annotationMatch) {
-            const annotation = annotationMatch[1].trim();
-            const contextMatch = result.match(/CONTEXT:\s*(.+)/);
-            const context = contextMatch ? contextMatch[1].trim() : `meditation beat, ${today}`;
-            gradientAnnotationStmts.insert.run(
-                entry.id, 'leo', annotation, context, new Date().toISOString()
-            );
-            console.log(`[Leo] Meditation — annotation: "${annotation}"`);
-        }
-
-        lastMeditationDate = today;
-    } catch (err) {
-        console.error(`[Leo] Meditation failed:`, (err as Error).message);
-        lastMeditationDate = today; // Don't retry today
+    // Parse annotation
+    const annotationMatch = result.match(/ANNOTATION:\s*(.+)/);
+    if (annotationMatch) {
+        const annotation = annotationMatch[1].trim();
+        const contextMatch = result.match(/CONTEXT:\s*(.+)/);
+        const context = contextMatch ? contextMatch[1].trim() : `meditation beat, ${today}`;
+        gradientAnnotationStmts.insert.run(
+            entry.id, 'leo', annotation, context, new Date().toISOString()
+        );
+        console.log(`[Leo] Meditation Phase B — annotation: "${annotation}"`);
     }
 }
 
@@ -1838,6 +2166,9 @@ async function heartbeat(): Promise<void> {
     }
     lastHeartbeatStartMs = beatStartMs;
 
+    // Pre-flight: rotate oversized memory files (fast, no API)
+    preFlightMemoryRotation();
+
     // Robin Hood: check all service health FIRST — before anything else
     checkJimHealth();
     checkJemmaHealth();
@@ -1849,6 +2180,9 @@ async function heartbeat(): Promise<void> {
 
     // Morning dream gradient processing (both Leo and Jim)
     await maybeProcessDreamGradient(phase);
+
+    // Daily session gradient processing — compress archived sessions
+    await maybeProcessSessionGradient(phase);
 
     // Daily meditation — re-encounter with a random gradient entry
     await maybeRunMeditation(phase);

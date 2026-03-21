@@ -503,6 +503,48 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
         }
     }
 
+    // Step 5b: Create C0 entries from tagged conversation messages
+    // Tagged messages are the seeds — Darron marking "this moment mattered."
+    // The tagging is the selection. The C0 creation is the first act of compression.
+    try {
+        const taggedMessages = gradientStmts.getUnprocessedTaggedMessages.all() as any[];
+        for (const msg of taggedMessages) {
+            try {
+                // Determine agent from compression_tag prefix (e.g. "jim:warm" → jim, "leo:craft" → leo)
+                const tagAgent = msg.compression_tag.startsWith('jim:') ? 'jim' as const
+                    : msg.compression_tag.startsWith('leo:') ? 'leo' as const
+                    : agent; // Default to current agent
+
+                const sessionLabel = `conv-${msg.conversation_id}`;
+                const entryId = crypto.randomUUID();
+
+                // Create C0 entry — the raw tagged message grounded in the conversation
+                gradientStmts.insert.run(
+                    entryId, tagAgent, sessionLabel, 'c0', msg.content, 'conversation',
+                    null, msg.conversation_id, msg.id,
+                    'original', new Date().toISOString()
+                );
+
+                // Write a compression-time feeling tag from the compression_tag value
+                const tagContent = msg.compression_tag.replace(/^(jim|leo):/, '').trim();
+                if (tagContent) {
+                    feelingTagStmts.insert.run(
+                        entryId, tagAgent, 'compression', tagContent, null, new Date().toISOString()
+                    );
+                }
+
+                console.log(`[Dream] C0 created from tagged message: ${msg.role} in "${msg.conversation_title}" → ${tagAgent}/${sessionLabel}`);
+            } catch (err) {
+                result.errors.push(`C0 for msg ${msg.id}: ${(err as Error).message}`);
+            }
+        }
+        if (taggedMessages.length > 0) {
+            console.log(`[Dream] ${taggedMessages.length} tagged messages → C0 entries`);
+        }
+    } catch (err) {
+        result.errors.push(`C0 tagged messages: ${(err as Error).message}`);
+    }
+
     // Step 6: Check 4K UV marker
     if (fs.existsSync(uvPath)) {
         const uvContent = fs.readFileSync(uvPath, 'utf-8');

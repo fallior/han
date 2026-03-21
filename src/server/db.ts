@@ -666,6 +666,17 @@ export const gradientStmts = {
     `) as any,
     getUVs: db.prepare("SELECT * FROM gradient_entries WHERE agent = ? AND level = 'uv' ORDER BY created_at DESC") as any,
     getRandom: db.prepare('SELECT * FROM gradient_entries ORDER BY RANDOM() LIMIT 1') as any,
+    getUnprocessedTaggedMessages: db.prepare(`
+        SELECT cm.*, c.title as conversation_title
+        FROM conversation_messages cm
+        JOIN conversations c ON cm.conversation_id = c.id
+        WHERE cm.compression_tag IS NOT NULL
+        AND NOT EXISTS (
+            SELECT 1 FROM gradient_entries ge
+            WHERE ge.source_message_id = cm.id
+            AND ge.level = 'c0'
+        )
+    `) as any,
 };
 
 export const feelingTagStmts = {

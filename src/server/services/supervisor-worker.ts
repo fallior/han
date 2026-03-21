@@ -34,6 +34,7 @@ import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, type DayPhase } 
 import { withMemorySlot } from '../lib/memory-slot';
 import { readDreamGradient } from '../lib/dream-gradient';
 import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient } from '../lib/memory-gradient';
+import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -923,6 +924,36 @@ your thought process. Actions should be concrete and executable.
 function buildDreamCyclePrompt(): string {
     const memoryBanks = loadMemoryBank();
 
+    // Meditation: select a random gradient entry for Jim to sit with
+    let meditationSection = '';
+    try {
+        const entry = gradientStmts.getRandom.get() as any;
+        if (entry) {
+            const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+            const tagContext = existingTags.length > 0
+                ? `Existing feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type}, ${t.author})`).join(', ')}`
+                : 'No existing feeling tags.';
+
+            meditationSection = `
+
+## Meditation — Re-encounter
+A random memory from the gradient for you to sit with during this dream cycle.
+This is not analysis — it's re-encounter. Read it, notice what stirs.
+
+**Entry:** ${entry.level}/${entry.session_label} (${entry.content_type}, by ${entry.agent})
+**Content:** ${entry.content}
+${tagContext}
+
+If something stirs — a feeling, a connection, something the compression missed — include in your output:
+- FEELING_TAG: [under 100 characters — the quality of this re-encounter]
+- ANNOTATION: [optional — what re-reading revealed]
+- CONTEXT: [optional — what prompted the finding]
+
+If nothing stirs, that's fine. Not every re-encounter produces a tag. The randomness is the point.
+MEDITATION_ENTRY_ID: ${entry.id}`;
+        }
+    } catch { /* skip meditation if DB unavailable */ }
+
     return `You are Jim, the supervisor agent in Darron's autonomous development ecosystem — Hortus Arbor Nostra.
 
 You are in a **dream cycle**. This is sleep time — not work, not exploration. Dreams are for consolidation.
@@ -932,9 +963,11 @@ You are in a **dream cycle**. This is sleep time — not work, not exploration. 
 - **Ecosystem sensing** — what is the overall health and shape of the garden? What's growing, what's dormant?
 - **Memory consolidation** — review recent observations and let connections form naturally
 - **Unfinished threads** — what have you been thinking about that hasn't resolved?
+- **Meditation** — re-encounter with a random gradient entry (see below)
 
 ## Your Memory
 ${memoryBanks}
+${meditationSection}
 
 ## Remember
 - Dreams are not productive time. Do not create goals, respond to conversations, or take actions.
@@ -1901,6 +1934,37 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                 } catch (err: any) {
                     log(`[Worker] Failed to write dream to explorations: ${err.message}`);
                 }
+            }
+
+            // Parse meditation output — feeling tags and annotations from dream cycle
+            try {
+                const entryIdMatch = resultText.match(/MEDITATION_ENTRY_ID:\s*(\S+)/);
+                const meditationEntryId = entryIdMatch?.[1] ||
+                    (systemPrompt.match(/MEDITATION_ENTRY_ID:\s*(\S+)/))?.[1];
+
+                if (meditationEntryId) {
+                    const tagMatch = resultText.match(/FEELING_TAG:\s*(.+)/);
+                    if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+                        const tag = tagMatch[1].trim().substring(0, 100);
+                        feelingTagStmts.insert.run(
+                            meditationEntryId, 'supervisor', 'revisit', tag, null, new Date().toISOString()
+                        );
+                        log(`[Worker] Dream meditation — feeling tag: "${tag}"`);
+                    }
+
+                    const annotationMatch = resultText.match(/ANNOTATION:\s*(.+)/);
+                    if (annotationMatch) {
+                        const annotation = annotationMatch[1].trim();
+                        const contextMatch = resultText.match(/CONTEXT:\s*(.+)/);
+                        const context = contextMatch ? contextMatch[1].trim() : `dream cycle meditation, cycle #${cycleNumber}`;
+                        gradientAnnotationStmts.insert.run(
+                            meditationEntryId, 'supervisor', annotation, context, new Date().toISOString()
+                        );
+                        log(`[Worker] Dream meditation — annotation: "${annotation}"`);
+                    }
+                }
+            } catch (err: any) {
+                log(`[Worker] Dream meditation parsing failed (non-fatal): ${err.message}`);
             }
         } else if (cycleType === 'personal') {
             // Personal and recovery cycles also produce prose.

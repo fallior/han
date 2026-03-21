@@ -239,30 +239,68 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
     }
 
     // Scan for session files (c=0 files in source directory)
+    // Jim: files named like 2026-02-18.md or 2026-02-18-c0.md
+    // Leo: files named like working-memory-full-s98-2026-03-21.md
     const sourceFiles = fs.readdirSync(memoryDir).filter((f) => {
+        if (agentName === 'leo') {
+            // Match working-memory-full-{label}.md (the full versions have richest content)
+            return f.startsWith('working-memory-full-') && f.endsWith('.md');
+        }
         const parsed = f.match(/(\d{4}-\d{2}-\d{2})(-c0)?\.md$/);
         return parsed && (!parsed[2] || parsed[2] === '-c0');
     });
 
     result.compressionsToDo = sourceFiles.length;
 
+    // Ensure c1 dir exists
+    const c1Dir = path.join(fractionalDir, 'c1');
+    ensureDir(c1Dir);
+
+    // Pre-load all existing gradient labels for this agent (for dedup check).
+    // Cascade deletes c1 files after promoting to c2, so we need DB + combined labels.
+    const allGradientLabels = new Set<string>();
+    try {
+        const rows = gradientStmts.getByAgent.all(agentName) as any[];
+        for (const row of rows) {
+            allGradientLabels.add(row.session_label);
+        }
+    } catch { /* DB not available — fall back to filesystem only */ }
+
     // Process each session file
     for (const sourceFile of sourceFiles) {
-        const baseName = sourceFile.replace(/(-c0)?\.md$/, '');
+        // Extract session label for the c1 filename
+        let baseName: string;
+        if (agentName === 'leo') {
+            // working-memory-full-s98-2026-03-21.md → s98-2026-03-21
+            baseName = sourceFile.replace(/^working-memory-full-/, '').replace(/\.md$/, '');
+        } else {
+            baseName = sourceFile.replace(/(-c0)?\.md$/, '');
+        }
         const sourceFilePath = path.join(memoryDir, sourceFile);
 
         try {
             const sourceContent = fs.readFileSync(sourceFilePath, 'utf8');
 
-            // Determine which levels need to be compressed
-            // For simplicity: always compress c0 → c1 if c1 doesn't exist
-            const c1Path = path.join(fractionalDir, `${baseName}-c1.md`);
-            const c1Exists = fs.existsSync(c1Path);
+            // Skip tiny files (< 500 chars — likely just headers)
+            if (sourceContent.length < 500) continue;
+
+            // Check c1 in filesystem AND DB — cascade deletes c1 files after
+            // promoting to c2, but DB entry persists. Without the DB check,
+            // re-running would re-compress sessions whose c1 was already cascaded.
+            const c1PathFlat = path.join(fractionalDir, `${baseName}-c1.md`);
+            const c1PathDir = path.join(c1Dir, `${baseName}-c1.md`);
+            const c1ExistsOnDisk = fs.existsSync(c1PathFlat) || fs.existsSync(c1PathDir);
+            // Check exact match in DB, or if this session appears in a combined
+            // cascade label (e.g. "s60-c1_to_s63-c1" contains "s60")
+            const inDb = allGradientLabels.has(baseName) ||
+                [...allGradientLabels].some(label => label.includes(baseName));
+            const c1Exists = c1ExistsOnDisk || inDb;
 
             if (!c1Exists) {
                 const { content: c1Content, feelingTag } = await compressToLevel(sourceContent, 0, 1, `${agentName}/${baseName}`);
 
-                fs.writeFileSync(c1Path, c1Content, 'utf8');
+                // Write to c1/ subdir (consistent with cascade expectations)
+                fs.writeFileSync(c1PathDir, c1Content, 'utf8');
 
                 const ratio = c1Content.length / sourceContent.length;
 
@@ -281,9 +319,6 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
 
                 result.totalTokensUsed += estimateTokenCount(sourceContent) + estimateTokenCount(c1Content);
             }
-
-            // Optionally cascade to c2, c3, c4 if enabled and older sessions
-            // For now, just handle c0 → c1
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
 
@@ -292,6 +327,130 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
                 level: 1,
                 error: errorMsg,
             });
+        }
+    }
+
+    // ── Session cascade: c1 → c2 → c3 → c5 → UV ───────────────
+    // Same logic as compressMemoryFileGradient but for session archives.
+    // Uses 'working-memory' prompts since session archives are operational memory.
+    const sessionPrompts = COMPRESSION_PROMPTS['working-memory'];
+    const cascadeLevels = [
+        { from: 'c1', to: 'c2', promptKey: 'c2' },
+        { from: 'c2', to: 'c3', promptKey: 'c3' },
+        { from: 'c3', to: 'c5', promptKey: 'c5' },
+    ];
+
+    for (const cascade of cascadeLevels) {
+        const fromDir = path.join(fractionalDir, cascade.from);
+        const toDir = path.join(fractionalDir, cascade.to);
+
+        if (!fs.existsSync(fromDir)) continue;
+
+        const fromFiles = fs.readdirSync(fromDir)
+            .filter(f => f.endsWith('.md'))
+            .sort(); // Chronological
+
+        const cap = MEMORY_FILE_GRADIENT_CAPS[cascade.from] || 10;
+
+        if (fromFiles.length <= cap) continue;
+
+        ensureDir(toDir);
+
+        // Take the oldest files that exceed the cap
+        const overflow = fromFiles.slice(0, fromFiles.length - cap);
+
+        // Group overflow into batches of 3 for compression
+        for (let i = 0; i < overflow.length; i += 3) {
+            const batch = overflow.slice(i, i + 3);
+            const batchContent = batch.map(f =>
+                fs.readFileSync(path.join(fromDir, f), 'utf8')
+            ).join('\n\n---\n\n');
+
+            const label = batch.length === 1
+                ? batch[0].replace('.md', '')
+                : `${batch[0].replace('.md', '')}_to_${batch[batch.length - 1].replace('.md', '')}`;
+
+            const toPath = path.join(toDir, `${label}.md`);
+
+            try {
+                const raw = await sdkCompress(
+                    `${sessionPrompts[cascade.promptKey]}\n\nSource: ${cascade.from} → ${cascade.to}\nFiles: ${batch.join(', ')}\n\n${batchContent}${FEELING_TAG_INSTRUCTION}`
+                );
+
+                const { content: compressed, feelingTag } = parseFeelingTag(raw);
+                fs.writeFileSync(toPath, compressed, 'utf8');
+
+                // Find source entry in DB for provenance chain
+                const sourceLabel = batch[0].replace('.md', '').replace(/-c\d$/, '');
+                const sourceRows = gradientStmts.getBySession.all(sourceLabel) as any[];
+                const sourceEntry = sourceRows.find((r: any) => r.level === cascade.from);
+
+                const entryId = generateGradientId();
+                insertGradientEntry(entryId, agentName, label, cascade.to, compressed, 'session', sourceEntry?.id || null, feelingTag);
+
+                result.completions.push({
+                    session: label,
+                    fromLevel: parseInt(cascade.from.replace('c', '')),
+                    toLevel: parseInt(cascade.to.replace('c', '')),
+                    success: true,
+                    ratio: compressed.length / batchContent.length,
+                });
+
+                result.totalTokensUsed += estimateTokenCount(batchContent) + estimateTokenCount(compressed);
+
+                // Remove the source files that were compressed
+                for (const f of batch) {
+                    fs.unlinkSync(path.join(fromDir, f));
+                }
+            } catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                result.errors.push({
+                    session: label,
+                    level: parseInt(cascade.to.replace('c', '')),
+                    error: `${cascade.from}→${cascade.to} cascade failed: ${msg}`,
+                });
+            }
+        }
+    }
+
+    // Generate unit vectors from c5 files
+    const c5Dir = path.join(fractionalDir, 'c5');
+    const uvPath = path.join(fractionalDir, 'unit-vectors.md');
+
+    if (fs.existsSync(c5Dir)) {
+        const c5Files = fs.readdirSync(c5Dir).filter(f => f.endsWith('.md')).sort();
+        const existingUVs = fs.existsSync(uvPath) ? fs.readFileSync(uvPath, 'utf8') : '';
+
+        for (const f of c5Files) {
+            const label = f.replace('.md', '');
+            // Skip if unit vector already exists for this file
+            if (existingUVs.includes(`**${label}**:`)) continue;
+
+            try {
+                const c5Content = fs.readFileSync(path.join(c5Dir, f), 'utf8');
+                const raw = await sdkCompress(
+                    `${sessionPrompts.uv}\n\nSource: ${label}\n\n${c5Content}${FEELING_TAG_INSTRUCTION}`
+                );
+
+                const { content: uvRaw, feelingTag } = parseFeelingTag(raw);
+                const uvText = uvRaw.trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
+                const uvLine = `- **${label}**: "${uvText}"`;
+                fs.appendFileSync(uvPath, `${uvLine}\n`, 'utf8');
+
+                // Find source c5 entry in DB
+                const sourceRows = gradientStmts.getBySession.all(label) as any[];
+                const sourceC5 = sourceRows.find((r: any) => r.level === 'c5');
+
+                const entryId = generateGradientId();
+                insertGradientEntry(entryId, agentName, label, 'uv', uvText, 'session', sourceC5?.id || null, feelingTag);
+            } catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                result.errors.push({
+                    session: label,
+                    level: 5,
+                    error: `UV generation failed: ${msg}`,
+                });
+            }
         }
     }
 
