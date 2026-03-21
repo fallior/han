@@ -275,6 +275,317 @@ a:hover { text-decoration: underline; }
     color: var(--text-muted);
 }
 
+/* ─── Stat Cards ─── */
+.stat-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-card);
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+}
+
+.stat-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-heading);
+}
+
+/* ─── Cards ─── */
+.admin-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-card);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+}
+
+.admin-card h2 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-heading);
+    margin: 0 0 12px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+/* ─── Charts ─── */
+.chart-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.chart-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border-card);
+    border-radius: 8px;
+    padding: 14px 16px;
+}
+
+.chart-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+}
+
+.chart-canvas-wrap {
+    position: relative;
+    width: 100%;
+    height: 200px;
+}
+
+/* ─── Tables ─── */
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.admin-table thead th {
+    text-align: left;
+    padding: 8px 10px;
+    font-weight: 600;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.admin-table tbody td {
+    padding: 10px;
+    border-bottom: 1px solid var(--border-subtle);
+    vertical-align: top;
+    color: var(--text);
+}
+
+.admin-table tbody tr {
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.admin-table tbody tr:hover {
+    background: var(--bg-page);
+}
+
+.admin-table td.num {
+    text-align: right;
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 11px;
+}
+
+.cycle-detail-row td {
+    background: var(--bg-page);
+    padding: 12px 16px !important;
+}
+
+/* ─── Proposals ─── */
+.proposal-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-card);
+    border-left: 3px solid var(--amber);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+}
+
+.proposal-card.approved {
+    border-left-color: var(--green);
+    opacity: 0.7;
+}
+
+.proposal-card.dismissed {
+    border-left-color: var(--text-muted);
+    opacity: 0.5;
+}
+
+.proposal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.proposal-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-heading);
+}
+
+.proposal-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+}
+
+.proposal-reasoning {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 8px 10px;
+    background: var(--bg-page);
+    border-radius: 4px;
+    margin-bottom: 10px;
+}
+
+.proposal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.activity-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 6px;
+}
+
+/* ─── Memory Viewer ─── */
+.memory-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    padding-bottom: 0;
+}
+
+.memory-tab {
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-dim);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+    border-radius: 4px 4px 0 0;
+    border-right: none;
+}
+
+.memory-tab:hover {
+    color: var(--text);
+}
+
+.memory-tab.active {
+    color: var(--blue);
+    border-bottom-color: var(--blue);
+}
+
+.memory-content {
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: var(--bg-page);
+    padding: 12px;
+    border-radius: 6px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* ─── Buttons ─── */
+.admin-btn {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.admin-btn:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-card);
+}
+
+.admin-btn-sm {
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+.admin-btn-primary {
+    background: var(--blue);
+    border-color: var(--blue);
+    color: #fff;
+}
+
+.admin-btn-primary:hover {
+    background: var(--cyan);
+    border-color: var(--cyan);
+}
+
+.admin-btn-success {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+}
+
+.admin-btn-success:hover {
+    opacity: 0.9;
+}
+
+/* ─── Distress Alert ─── */
+.distress-alert {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    background: rgba(210, 153, 34, 0.15);
+    border-left: 3px solid var(--amber);
+    border-radius: 4px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.distress-alert-icon {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.distress-alert-title {
+    font-weight: 600;
+    color: var(--amber);
+    font-size: 12px;
+}
+
+.distress-alert-reason {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+}
+
+.distress-alert-time {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 2px;
+}
+
 /* ─── Thread Detail Panel ─── */
 .thread-detail-panel {
     display: flex;

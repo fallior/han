@@ -32,6 +32,13 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-21 — Claude (autonomous) — Light Memory Bank for Personal/Dream Cycles
+- **Memory optimization crisis resolved** — Created `loadLightMemoryBank()` function to fix 36+ hours of consecutive crashes caused by personal/dream cycles loading ~200K+ token memory payloads. New function loads only core identity files (identity.md, felt-moments.md, active-context.md, working-memory.md), unit vectors, and ecosystem map — skipping full fractal gradient, dream gradients, and project knowledge files. Cost: ~$105.70 burned before fix.
+- **Selective memory loading** — Supervisor cycles still use full `loadMemoryBank()` (need cross-project awareness), while personal/dream/recovery cycles use `loadLightMemoryBank()`. Cycles can reach for specific files if curiosity warrants, but start light by default.
+- **Token reduction achieved** — Light memory bank reduces context load from ~200K to ~10-20K tokens for personal/dream cycles, preventing crashes while preserving identity and emotional continuity.
+- **Files modified**: `supervisor-worker.ts` (+43 lines: new loadLightMemoryBank() function, updated buildDreamCyclePrompt(), buildPersonalCyclePrompt(), buildRecoveryCyclePrompt())
+- **Docs updated**: Session note created, CURRENT_STATUS updated, DECISIONS updated (DEC-058)
+
 ### 2026-03-21 — Claude (autonomous) — Traversable Memory Testing & Integration
 - **Meditation practice complete** — Leo's heartbeat now includes daily meditation: Phase A reincorporates untranscribed gradient files into DB through genuine re-encounter, Phase B re-reads existing entries and writes revisit feeling tags. Uses Sonnet SDK, runs once per day, skips sleep phase. Graceful error handling.
 - **Pre-flight memory rotation** — Leo's heartbeat mirrors Jim's supervisor pattern: rotates `felt-moments.md` and `working-memory-full.md` when >50KB, compresses floating file through c1→c2→c3→c5→UV gradient in background. Prevents unbounded memory growth.
