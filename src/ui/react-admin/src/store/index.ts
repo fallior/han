@@ -2,8 +2,38 @@ import { create } from 'zustand';
 import type { StoreApi } from 'zustand';
 import { connectWebSocket } from './websocket';
 import { createWorkshopSlice, type WorkshopSlice } from './workshopSlice';
+import type { Conversation, Message } from '../types';
 
 type WsListener = (data: any) => void;
+
+// ── LocalStorage Keys ──────────────────────────────────────
+const LAST_READ_KEY = 'han-react-admin-last-read';
+
+// ── Helpers ────────────────────────────────────────────────
+
+/**
+ * Load last read timestamps from localStorage
+ */
+function loadLastReadTimestamps(): Record<string, string> {
+  try {
+    const stored = localStorage.getItem(LAST_READ_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch (err) {
+    console.warn('Failed to load last read timestamps from localStorage:', err);
+    return {};
+  }
+}
+
+/**
+ * Save last read timestamps to localStorage
+ */
+function saveLastReadTimestamps(timestamps: Record<string, string>) {
+  try {
+    localStorage.setItem(LAST_READ_KEY, JSON.stringify(timestamps));
+  } catch (err) {
+    console.warn('Failed to save last read timestamps to localStorage:', err);
+  }
+}
 
 interface AppState extends WorkshopSlice {
   // WebSocket connection state

@@ -19,19 +19,19 @@ export interface NestedTabConfig {
 export const workshopPersonaTabs: Record<WorkshopPersona, PersonaTabConfig> = {
   jim: {
     label: 'Supervisor Jim',
-    color: '#b392f0',
+    color: 'purple',
   },
   leo: {
     label: 'Philosopher Leo',
-    color: '#3fb950',
+    color: 'green',
   },
   darron: {
     label: 'Dreamer Darron',
-    color: '#58a6ff',
+    color: 'blue',
   },
   jemma: {
     label: 'Dispatcher Jemma',
-    color: '#d29922',
+    color: 'amber',
   },
 };
 

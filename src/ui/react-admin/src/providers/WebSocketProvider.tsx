@@ -62,7 +62,10 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const reconnectDelayRef = useRef(1000); // Start with 1s delay
   const mountedRef = useRef(true);
 
-  const store = useStore();
+  // Get store methods
+  const currentThreadId = useStore((state) => state.currentThreadId);
+  const addMessageToCurrentThread = useStore((state) => state.addMessageToCurrentThread);
+  const setNeedsRefresh = useStore((state) => state.setNeedsRefresh);
 
   // ============================================================================
   // Connection management
@@ -197,14 +200,14 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     console.log('[WebSocket] Conversation message:', data);
 
     // Always add the message to the store if it's for the current thread
-    const currentThreadId = store.getState().currentThreadId();
-    if (data.conversation_id === currentThreadId) {
-      store.getState().addMessageToCurrentThread(data.message);
+    const threadId = currentThreadId();
+    if (data.conversation_id === threadId) {
+      addMessageToCurrentThread(data.message);
     }
 
     // Set flag so thread list knows to refresh
     // Note: This will be handled by the store's needsRefresh flag
-    store.getState().setNeedsRefresh(true);
+    setNeedsRefresh(true);
   };
 
   // ============================================================================
