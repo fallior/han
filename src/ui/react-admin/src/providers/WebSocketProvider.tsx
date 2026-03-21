@@ -58,7 +58,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const [lastError, setLastError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef(1000); // Start with 1s delay
   const mountedRef = useRef(true);
 
@@ -197,7 +197,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     console.log('[WebSocket] Conversation message:', data);
 
     // Always add the message to the store if it's for the current thread
-    const currentThreadId = store.getState().currentThreadId;
+    const currentThreadId = store.getState().currentThreadId();
     if (data.conversation_id === currentThreadId) {
       store.getState().addMessageToCurrentThread(data.message);
     }
