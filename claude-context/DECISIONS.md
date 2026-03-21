@@ -4549,3 +4549,127 @@ We chose **Vite + React Router + Zustand**.
 
 - DEC-059: React Admin Migration — Parallel Deployment Strategy
 - Session note: `claude-context/session-notes/2026-03-21-autonomous-react-admin-foundation.md`
+
+---
+
+### DEC-062: WebSocket Provider Architecture with Context Pattern
+
+**Date**: 2026-03-21
+**Author**: Claude (autonomous)
+**Status**: Accepted
+
+#### Context
+
+Phase 2 of the React admin migration requires a real-time data layer to solve the core bug: WebSocket messages arriving while the user isn't on the right tab get silently dropped, requiring manual refresh. Need a way to:
+1. Manage WebSocket connection lifecycle in React
+2. Ensure all components can access real-time data regardless of active tab
+3. Separate I/O concerns (WebSocket) from data concerns (Zustand store)
+
+#### Options Considered
+
+**1. React Context Provider (CHOSEN)**
+- ✅ Standard React pattern for global state
+- ✅ Connection lifecycle managed in one place
+- ✅ Easy to test (mock context)
+- ✅ Clean separation: provider handles I/O, store handles data
+- ❌ Additional wrapper layer
+
+**2. Direct Zustand integration**
+- ✅ Fewer layers
+- ❌ Harder to test WebSocket logic
+- ❌ Violates separation of concerns (store should be data, not I/O)
+- ❌ Mixing imperative I/O with declarative state
+
+**3. useEffect in App.tsx**
+- ✅ Simplest implementation
+- ❌ Harder to share connection status with components
+- ❌ Re-mounts on hot reload lose connection
+- ❌ No clean way to provide status to deeply nested components
+
+#### Decision
+
+We chose **React Context Provider pattern**. WebSocket connection managed by `WebSocketProvider`, status exposed via context, messages dispatched to Zustand store.
+
+#### Rationale
+
+**Separation of concerns**: Provider handles I/O (connection, reconnection, message parsing), store handles data (conversations, messages, supervisor status). Components subscribe to store slices, not WebSocket events.
+
+**Testability**: Easy to mock the context for testing. Can test components without real WebSocket by providing mock context values.
+
+**Lifecycle management**: Connection lifecycle centralized in provider — components don't need to manage connection, just consume the data.
+
+**Auto-reconnect with exponential backoff**: Built into provider (start 1s, max 30s), components don't need to handle connection failures.
+
+#### Implementation
+
+**WebSocketProvider** (`providers/WebSocketProvider.tsx`, 141 lines):
+```typescript
+export function WebSocketProvider({ children }: { children: ReactNode }) {
+  const [wsConnected, setWsConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  
+  useEffect(() => {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const token = localStorage.getItem('han-auth-token');
+    const wsUrl = token 
+      ? `${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}`
+      : `${protocol}//${location.host}/ws`;
+    
+    const ws = new WebSocket(wsUrl);
+    ws.onopen = () => setWsConnected(true);
+    ws.onclose = () => {
+      setWsConnected(false);
+      // Exponential backoff reconnect logic
+    };
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      dispatchWsMessage(data, useAdminStore.getState());
+    };
+    
+    wsRef.current = ws;
+    return () => ws.close();
+  }, []);
+  
+  return (
+    <WebSocketContext.Provider value={{ wsConnected }}>
+      {children}
+    </WebSocketContext.Provider>
+  );
+}
+```
+
+**Message dispatcher** (`store/wsDispatcher.ts`, 59 lines):
+```typescript
+export function dispatchWsMessage(data: any, store: AppState) {
+  switch (data.type) {
+    case 'conversation_message':
+      // ALWAYS update store, regardless of active tab
+      store.addConversationMessage(data.conversation_id, message);
+      break;
+    case 'supervisor_cycle':
+      store.updateSupervisorStatus(data);
+      break;
+  }
+}
+```
+
+**Key insight**: WebSocket events write to store unconditionally. No checking `currentModule` like the vanilla admin.ts. React components subscribed to store slices re-render automatically when data changes.
+
+#### Consequences
+
+**Positive:**
+- ✅ **Solves tab-switching bug** — WebSocket messages update store regardless of active tab
+- ✅ **Zero manual refresh** — Components re-render automatically when data changes
+- ✅ **Clean architecture** — Provider handles I/O, store handles data, components consume data
+- ✅ **Easy to test** — Mock context for testing, no real WebSocket needed
+- ✅ **Auto-reconnect** — Exponential backoff reconnect built into provider
+
+**Negative:**
+- ❌ **Additional abstraction layer** — More code than direct WebSocket in App.tsx (acceptable trade-off for testability and separation of concerns)
+
+#### Related
+
+- DEC-059: React Admin Migration — Parallel Deployment Strategy
+- DEC-060: Vite + React Router + Zustand Stack
+- Session note: `claude-context/session-notes/2026-03-21-autonomous-react-admin-phase-2.md`
+

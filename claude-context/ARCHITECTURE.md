@@ -188,16 +188,24 @@ han/
         ├── admin.html            # Admin console (legacy vanilla JS — desktop-optimised)
         ├── app.ts                # Dashboard client logic (compiled to app.js)
         ├── admin.ts              # Admin console logic (legacy — compiled to admin.js)
-        └── react-admin/          # React admin UI (migration in progress)
+        └── react-admin/          # React admin UI (Phase 2 complete — real-time data layer working)
             └── src/
                 ├── App.tsx       # Router + AuthGuard + Layout wrapper
                 ├── main.tsx      # React entry point + WebSocket initialisation
                 ├── store/
-                │   └── index.ts  # Zustand store (WebSocket + conversations + supervisor state)
+                │   ├── index.ts          # Zustand store (all data domains + state slices)
+                │   └── wsDispatcher.ts   # Routes WebSocket messages to correct store slice
+                ├── types/
+                │   └── index.ts          # TypeScript types (Conversation, Message, etc.)
+                ├── providers/
+                │   └── WebSocketProvider.tsx  # WebSocket connection manager with auto-reconnect
+                ├── hooks/
+                │   └── useVisibilitySync.ts   # Visibility-aware sync for missed events
                 ├── components/
                 │   ├── Layout.tsx           # Sidebar + header + main content wrapper
+                │   ├── Sidebar.tsx          # Navigation sidebar
+                │   ├── StatusBar.tsx        # Connection status + supervisor info (reads from store)
                 │   ├── AuthGuard.tsx        # Bearer token authentication
-                │   ├── WebSocketProvider.tsx  # WebSocket connection manager
                 │   ├── shared/              # Reusable components (all tabs)
                 │   │   ├── ThreadListPanel.tsx    # Thread list with period filter + search
                 │   │   ├── ThreadDetailPanel.tsx  # Thread detail with messages + input
@@ -763,6 +771,77 @@ Real-time admin UI updates are implemented via a **signal-based cross-process br
 - Design doc: `docs/websocket-broadcast-design.md`
 - Architecture: `docs/HAN-ECOSYSTEM-COMPLETE.md` Section 26.5
 - Decision record: DEC-054
+
+### React Admin Real-Time Data Layer (Phase 2)
+
+The React admin UI (Phase 2, completed 2026-03-21) implements a real-time data layer that solves the core bug in the vanilla JS admin: WebSocket messages arriving while the user isn't on the active tab get silently dropped, requiring manual refresh.
+
+**Architecture Pattern:**
+
+```
+WebSocket ──▶ WebSocketProvider ──▶ dispatchWsMessage() ──▶ Zustand Store ──▶ React Components
+                     (I/O)               (message routing)        (data)          (subscriptions)
+```
+
+**Key Components:**
+
+1. **WebSocketProvider** (`providers/WebSocketProvider.tsx`)
+   - Manages WebSocket connection lifecycle
+   - Auto-reconnects with exponential backoff (start 1s, max 30s)
+   - Provides connection status via React Context
+   - Passes all incoming messages to Zustand store via dispatcher
+   - Triggers state reconciliation on reconnect
+
+2. **Zustand Store** (`store/index.ts`)
+   - Single source of truth for all data domains
+   - Slices: WebSocket connection, supervisor status, conversations, messages, UI state, unread tracking
+   - Components subscribe to specific slices, re-render only when their data changes
+   - Store updated unconditionally by WebSocket events — no checking `currentModule`
+
+3. **WebSocket Message Dispatcher** (`store/wsDispatcher.ts`)
+   - Routes incoming WebSocket messages to correct store slice based on `type` field
+   - `supervisor_cycle`/`supervisor_action` → updateSupervisorStatus
+   - `conversation_message` → addConversationMessage (always updates, regardless of active tab)
+   - `task_update`/`goal_update` → reserved for future phases
+
+4. **Visibility Sync Hook** (`hooks/useVisibilitySync.ts`)
+   - Belt-and-suspenders approach for reliability
+   - Detects when page becomes visible after being hidden
+   - Re-fetches currently selected conversation to reconcile any missed WebSocket events
+   - Handles edge cases: long periods of inactivity, server restarts, connection drops
+
+**The Bug This Solves:**
+
+Vanilla JS admin (`admin.ts` lines 379-431):
+```typescript
+function handleWsMessage(data: any) {
+  if (data.type === 'conversation_message' && currentModule === 'conversations') {
+    // Re-render — but ONLY if user is on conversations tab
+  }
+  // Otherwise: message silently dropped
+}
+```
+
+React + Zustand:
+```typescript
+function dispatchWsMessage(data: any) {
+  if (data.type === 'conversation_message') {
+    store.addConversationMessage(data.conversation_id, message);
+    // Store updated regardless of active tab
+    // Components subscribed to this conversation re-render automatically
+  }
+}
+```
+
+**Benefits:**
+- Zero manual refresh needed — all components read from central store
+- Tab-switching no longer loses messages
+- Components isolated from I/O concerns — only subscribe to data slices
+- Easy to test — mock the store, not the WebSocket
+
+**Related:**
+- Session note: `claude-context/session-notes/2026-03-21-autonomous-react-admin-phase-2.md`
+- Decision: DEC-062 (WebSocket Provider Architecture with Context Pattern)
 
 ## Git Checkpoint Behavior
 
