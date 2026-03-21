@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
+import { dispatchWsMessage } from '../store/wsDispatcher';
 
 // ============================================================================
 // Types
@@ -7,39 +8,20 @@ import { useStore } from '../store';
 
 export interface WebSocketContextValue {
   connected: boolean;
-  connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
-  lastError: string | null;
-}
-
-interface WebSocketMessage {
-  type: string;
-  data: any;
-}
-
-interface ConversationMessageEvent {
-  conversation_id: string;
-  message: {
-    id: string;
-    conversation_id: string;
-    role: string;
-    content: string;
-    created_at: string;
-    metadata?: Record<string, any>;
-  };
+  reconnecting: boolean;
 }
 
 // ============================================================================
 // Context
 // ============================================================================
 
-const WebSocketContext = createContext<WebSocketContextValue | null>(null);
+const WebSocketContext = createContext<WebSocketContextValue>({
+  connected: false,
+  reconnecting: false,
+});
 
 export function useWebSocket() {
-  const context = useContext(WebSocketContext);
-  if (!context) {
-    throw new Error('useWebSocket must be used within WebSocketProvider');
-  }
-  return context;
+  return useContext(WebSocketContext);
 }
 
 // ============================================================================
@@ -52,20 +34,12 @@ interface WebSocketProviderProps {
 
 export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const [connected, setConnected] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<
-    'connecting' | 'connected' | 'disconnected' | 'error'
-  >('disconnected');
-  const [lastError, setLastError] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<number | null>(null);
-  const reconnectDelayRef = useRef(1000); // Start with 1s delay
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectDelayRef = useRef(1000); // Start at 1s
   const mountedRef = useRef(true);
-
-  // Get store methods
-  const currentThreadId = useStore((state) => state.currentThreadId);
-  const addMessageToCurrentThread = useStore((state) => state.addMessageToCurrentThread);
-  const setNeedsRefresh = useStore((state) => state.setNeedsRefresh);
 
   // ============================================================================
   // Connection management
@@ -74,140 +48,72 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const connect = () => {
     if (!mountedRef.current) return;
 
+    // Build WebSocket URL matching admin.ts:350-356
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const token = localStorage.getItem('han-auth-token');
-    if (!token) {
-      setConnectionStatus('error');
-      setLastError('No authentication token');
-      return;
-    }
+    const wsUrl = token
+      ? `${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}`
+      : `${protocol}//${location.host}/ws`;
 
-    // Build WebSocket URL
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws?token=${encodeURIComponent(token)}`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
 
-    setConnectionStatus('connecting');
-    setLastError(null);
+    ws.addEventListener('open', async () => {
+      if (!mountedRef.current) return;
 
-    try {
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+      console.log('[WebSocket] Connected');
+      setConnected(true);
+      setReconnecting(false);
+      useStore.getState().setWsConnected(true);
+      reconnectDelayRef.current = 1000; // Reset backoff
 
-      ws.onopen = () => {
-        if (!mountedRef.current) return;
-        console.log('[WebSocket] Connected');
-        setConnected(true);
-        setConnectionStatus('connected');
-        setLastError(null);
-        // Reset reconnect delay on successful connection
-        reconnectDelayRef.current = 1000;
-      };
-
-      ws.onmessage = (event) => {
-        if (!mountedRef.current) return;
-
-        try {
-          const message: WebSocketMessage = JSON.parse(event.data);
-          handleMessage(message);
-        } catch (err) {
-          console.error('[WebSocket] Failed to parse message:', err);
+      // On reconnect, fetch conversations to reconcile missed events
+      try {
+        const response = await fetch('/api/conversations', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (response.ok) {
+          const conversations = await response.json();
+          useStore.getState().setConversations(conversations);
         }
-      };
-
-      ws.onerror = (error) => {
-        if (!mountedRef.current) return;
-        console.error('[WebSocket] Error:', error);
-        setConnectionStatus('error');
-        setLastError('WebSocket error');
-      };
-
-      ws.onclose = () => {
-        if (!mountedRef.current) return;
-        console.log('[WebSocket] Disconnected');
-        setConnected(false);
-        setConnectionStatus('disconnected');
-        wsRef.current = null;
-
-        // Schedule reconnection with exponential backoff
-        scheduleReconnect();
-      };
-    } catch (err) {
-      console.error('[WebSocket] Connection failed:', err);
-      setConnectionStatus('error');
-      setLastError(err instanceof Error ? err.message : 'Connection failed');
-      scheduleReconnect();
-    }
-  };
-
-  const scheduleReconnect = () => {
-    if (!mountedRef.current) return;
-
-    // Clear any existing reconnect timeout
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
-
-    const delay = reconnectDelayRef.current;
-    console.log(`[WebSocket] Reconnecting in ${delay}ms`);
-
-    reconnectTimeoutRef.current = setTimeout(() => {
-      if (mountedRef.current) {
-        connect();
-        // Exponential backoff: 1s → 1.5s → 2.25s → ... (capped at 30s)
-        reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 1.5, 30000);
+      } catch (error) {
+        console.error('[WebSocket] Failed to reconcile conversations on reconnect:', error);
       }
-    }, delay);
-  };
+    });
 
-  const disconnect = () => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
+    ws.addEventListener('message', (event) => {
+      if (!mountedRef.current) return;
 
-    if (wsRef.current) {
-      wsRef.current.close();
+      try {
+        const data = JSON.parse(event.data);
+        dispatchWsMessage(data, useStore.getState());
+      } catch (error) {
+        console.error('[WebSocket] Failed to parse message:', error);
+      }
+    });
+
+    ws.addEventListener('close', () => {
+      if (!mountedRef.current) return;
+
+      console.log('[WebSocket] Disconnected');
+      setConnected(false);
+      useStore.getState().setWsConnected(false);
       wsRef.current = null;
-    }
 
-    setConnected(false);
-    setConnectionStatus('disconnected');
-  };
+      // Schedule reconnect with exponential backoff (matching admin.ts:348,366)
+      setReconnecting(true);
+      const delay = reconnectDelayRef.current;
+      console.log(`[WebSocket] Reconnecting in ${delay}ms`);
 
-  // ============================================================================
-  // Message handling
-  // ============================================================================
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectDelayRef.current = Math.min(delay * 1.5, 30000); // Max 30s
+        connect();
+      }, delay);
+    });
 
-  const handleMessage = (message: WebSocketMessage) => {
-    switch (message.type) {
-      case 'conversation_message':
-        handleConversationMessage(message.data as ConversationMessageEvent);
-        break;
-
-      case 'ping':
-        // Respond to ping if needed
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: 'pong' }));
-        }
-        break;
-
-      default:
-        console.log('[WebSocket] Unknown message type:', message.type);
-    }
-  };
-
-  const handleConversationMessage = (data: ConversationMessageEvent) => {
-    console.log('[WebSocket] Conversation message:', data);
-
-    // Always add the message to the store if it's for the current thread
-    const threadId = currentThreadId();
-    if (data.conversation_id === threadId) {
-      addMessageToCurrentThread(data.message);
-    }
-
-    // Set flag so thread list knows to refresh
-    // Note: This will be handled by the store's needsRefresh flag
-    setNeedsRefresh(true);
+    ws.addEventListener('error', (error) => {
+      console.error('[WebSocket] Error:', error);
+    });
   };
 
   // ============================================================================
@@ -220,7 +126,17 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
 
     return () => {
       mountedRef.current = false;
-      disconnect();
+
+      // Cleanup
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
   }, []);
 
@@ -230,8 +146,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
 
   const value: WebSocketContextValue = {
     connected,
-    connectionStatus,
-    lastError,
+    reconnecting,
   };
 
   return (
