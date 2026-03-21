@@ -33,6 +33,17 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-21 — Claude (autonomous) — React Admin UI Foundation (Phase 1)
+- **React migration begins** — Created Vite + React + TypeScript scaffold at `src/ui/react-admin/` as first phase of migrating from 3,975-line vanilla TypeScript admin UI. New UI runs at `/admin-react` alongside existing `/admin` (untouched). Zero disruption migration path with parallel deployment strategy.
+- **Application shell complete** — Layout, Sidebar, StatusBar, AuthGuard components created. 220px sidebar + content area + status bar matches original admin.html structure. HashRouter routing, Zustand state management, WebSocket real-time updates wired.
+- **3/9 modules implemented** — Overview (stat cards, Charts.js graphs, activity feed), Workshop (3-persona tabs, 6 discussion types, thread list/detail), Conversations (thread list, messages, markdown, real-time WS) fully functional. 6 modules scaffolded as placeholders (Projects, Work, Supervisor, Reports, Memory, Products).
+- **CSS architecture extracted** — 2,043 lines of inline CSS from admin.html modularised into 5 CSS files (`variables.css`, `global.css`, `theme.css`, `components.css`, `workshop.css`). All 40+ CSS custom properties preserved for exact visual parity with dark theme.
+- **Express integration** — Added `/admin-react` static route in `server.ts` (lines 140-151) with client-side routing fallback. Build script `build:react-admin` added to server package.json. Original `/admin` route untouched.
+- **Shared components created** — StatCard, Badge, MessageBubble, ThreadListPanel, ThreadDetailPanel in `components/shared/` for reuse across modules. Reduces duplication by ~400 lines.
+- **Files created**: 52 files (Vite scaffold + 48 app files: components, pages, store, styles, lib, hooks, providers, types). **Files modified**: server.ts (+13 lines), server/package.json (+1 script). **Build output**: react-admin-dist/ (~200KB gzipped total).
+- **Next steps**: Phase 2 will port remaining 6 placeholder modules (Work, Projects, Supervisor, Reports, Memory, Products) to match feature parity with original admin.
+- **Docs updated**: Session note created, CURRENT_STATUS updated, DECISIONS updated (DEC-059 parallel deployment strategy, DEC-060 Vite + React Router + Zustand stack)
+
 ### 2026-03-21 — Claude (autonomous) — React Admin Phase 4: Conversations + Memory Discussions Tabs
 - **Conversations tab migrated to React** — Two-column layout with ThreadListPanel (period filter, search, archive toggle) and ThreadDetailPanel (messages, markdown rendering, message input). Real-time WebSocket updates refresh both thread list and selected conversation without manual refresh.
 - **Memory Discussions tab migrated to React** — Same layout as Conversations but filters for `discussion_type='memory'`, uses purple accent colours (var(--purple)), creates threads with memory type. Search and WebSocket updates scoped to memory conversations only.

@@ -26,6 +26,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
     selectedThreadId,
     setCurrentThread,
     addMessageToCurrentThread,
+    setThreads,
   } = useWorkshopStore();
 
   const subscribeWs = useStore((state) => state.subscribeWs);

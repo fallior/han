@@ -13,7 +13,7 @@ export interface GroupedThread {
 }
 
 export interface Thread {
-  id: string;
+  id: number;
   title: string;
   discussion_type: string;
   status: 'open' | 'resolved';
@@ -30,8 +30,8 @@ export interface Thread {
 }
 
 export interface Message {
-  id: string;
-  conversation_id: string;
+  id: number;
+  conversation_id: number;
   role: string;
   content: string;
   created_at: string;
@@ -203,7 +203,7 @@ export async function fetchGroupedThreads(
 /**
  * Fetch single thread with all messages
  */
-export async function fetchThread(id: string): Promise<ThreadDetail> {
+export async function fetchThread(id: number | string): Promise<ThreadDetail> {
   return fetchJSON<ThreadDetail>(`/api/conversations/${id}`);
 }
 
@@ -225,7 +225,7 @@ export async function createThread(
  * Post message to thread
  */
 export async function postMessage(
-  threadId: string,
+  threadId: number | string,
   content: string,
   role: string
 ): Promise<Message> {
@@ -239,28 +239,28 @@ export async function postMessage(
 /**
  * Resolve thread (mark as complete)
  */
-export async function resolveThread(id: string): Promise<void> {
+export async function resolveThread(id: number | string): Promise<void> {
   await apiFetch(`/api/conversations/${id}/resolve`, { method: 'POST' });
 }
 
 /**
  * Reopen resolved thread
  */
-export async function reopenThread(id: string): Promise<void> {
+export async function reopenThread(id: number | string): Promise<void> {
   await apiFetch(`/api/conversations/${id}/reopen`, { method: 'POST' });
 }
 
 /**
  * Archive thread
  */
-export async function archiveThread(id: string): Promise<void> {
+export async function archiveThread(id: number | string): Promise<void> {
   await apiFetch(`/api/conversations/${id}/archive`, { method: 'POST' });
 }
 
 /**
  * Unarchive thread
  */
-export async function unarchiveThread(id: string): Promise<void> {
+export async function unarchiveThread(id: number | string): Promise<void> {
   await apiFetch(`/api/conversations/${id}/unarchive`, { method: 'POST' });
 }
 
@@ -279,13 +279,14 @@ export async function searchThreads(
     limit: limit.toString(),
   });
 
-  const response = await fetchJSON<any>(
+  // TODO: Implement conversation-level search or transform message results to conversation list
+  // For now, just await the call but don't use the response
+  await fetchJSON<any>(
     `/api/conversations/search?${params.toString()}`
   );
 
   // Backend returns message search results, we need to extract unique conversations
   // For now, return empty array until we implement proper conversation-level search
-  // TODO: Implement conversation-level search or transform message results to conversation list
   return [];
 }
 
@@ -300,7 +301,7 @@ export async function fetchJemmaStatus(): Promise<JemmaStatus> {
  * Update thread title
  */
 export async function updateThreadTitle(
-  id: string,
+  id: number | string,
   title: string
 ): Promise<void> {
   await apiFetch(`/api/conversations/${id}`, {
