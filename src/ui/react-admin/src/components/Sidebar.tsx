@@ -13,7 +13,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}
     return root.classList.contains('light-mode') ? 'light' : 'dark';
   });
 
-  const _toggleTheme = () => {
+  const toggleTheme = () => {
     const root = document.documentElement;
     const newTheme = theme === 'dark' ? 'light' : 'dark';
 

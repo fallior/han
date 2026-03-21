@@ -150,7 +150,7 @@ export const useStore = create<AppState>((set, get, api) => ({
   conversations: {},
   conversationMessages: {},
   selectedConversationId: null,
-  lastReadTimestamps: {},
+  lastReadTimestamps: loadLastReadTimestamps(),
 
   // Supervisor initial state
   supervisorStatus: null,
@@ -271,3 +271,15 @@ connectWebSocket(storeApi);
 export type { WorkshopPersona, WorkshopSlice } from './workshopSlice';
 export { workshopPersonaTabs, workshopNestedTabs } from './constants';
 export type { PersonaTabConfig, NestedTabConfig } from './constants';
+
+// Stub methods (to be implemented)
+const stubMethods = {
+  setSupervisorPaused: () => {},
+  updateSupervisorStatus: () => {},
+  setConversations: () => {},
+  setConversationMessages: () => {},
+  setLastReadTimestamp: () => {},
+  updateLastReadTimestamp: () => {},
+  getUnreadCountFor: () => 0,
+  markConversationAsRead: () => {},
+};
