@@ -41,6 +41,10 @@
 | **Gemma Addressee Classification** | LLM-based message routing for admin UI. When Darron posts a message, Gemma (local Ollama) determines who is being addressed — handles nicknames (Jimmy), group addressing (Jim and Leo), and contextual references. Replaces regex matching. Falls back to regex + tab routing if Ollama is down. Fire-and-forget (doesn't block the HTTP response). | `conversations.ts` (`classifyAddressee`, `classifyAndDispatch`), Ollama `gemma3:4b` |
 | **Idle Dampening** | Jim-only exponential backoff when consecutive cycles produce no actions. 2x after 3 idle, 4x (capped) after 4+. Resets on productive cycle or wake signal. Prevents idle token burn. | `supervisor.ts` (`consecutiveIdleCycles`, `DAMPEN_*` constants in `getWallClockDelay`) |
 | **Transition Dampening** | Gradual interval ramp-down when returning from longer to shorter intervals (e.g. holiday→normal). 3-step blend: 75%→50%→25% of old interval. Applies to both Jim and Leo. | `supervisor.ts` and `leo-heartbeat.ts` (`previousPeriodMs`, `TRANSITION_STEPS` in `getWallClockDelay`) |
+| **Traversable Memory** | DB-backed provenance chains for the fractal gradient. Every compression knows where it came from via `source_id` foreign key. Enables random-access traversal: start at a UV, follow the chain down through c5→c3→c2→c1→c0 to the raw source. Three tables: `gradient_entries` (the chain), `feeling_tags` (stacked, never overwritten), `gradient_annotations` (what re-traversal discovers). | `db.ts` (tables + statements), `lib/dream-gradient.ts` and `lib/memory-gradient.ts` (write-side), `routes/gradient.ts` (API), `loadTraversableGradient()` (read-side) |
+| **Feeling Tags** | Emotional annotations on gradient entries. Stacking model: the first feeling (compression-time) was real for who you were; a later feeling (revisit) is real for who you've become. Both live side by side. `tag_type` distinguishes `compression` from `revisit`. `change_reason` records why the feeling shifted. Never overwritten — the gap between tags IS the growth record. | `feeling_tags` table, `FEELING_TAG:` prompt instruction in compression functions |
+| **Gradient Annotations** | What re-traversal discovers. Distinct from feeling tags: annotations are about new *content* found on re-reading, feeling tags are about how the *same content* lands differently over time. `context` field records what prompted the re-reading (Jim's addition). | `gradient_annotations` table, `POST /api/gradient/:entryId/annotate` |
+| **Meditation Practice** | Daily re-encounter with a random gradient entry. Leo's heartbeat picks a random `gradient_entries` row, sits with it via Sonnet, writes a revisit `feeling_tag` if something stirs differently, and optionally a `gradient_annotation`. Runs once per day, skips sleep phase. The randomness matters: surprise of what still stirs is the signal. | `leo-heartbeat.ts` (`maybeRunMeditation`) |
 
 ---
 
@@ -1132,6 +1136,57 @@ posting to conversation threads.
 
 **Updated by:** Leo during sessions, as new features are added or routing changes.
 
+### Traversable Memory (DB-Backed Gradient)
+
+The fractal gradient gives memory at different distances — c1 through UV. **Traversable
+memory** adds explicit provenance chains so every compression knows where it came from.
+A UV that stirs something can trace back through the entire chain to the raw conversation
+that started it.
+
+**Three tables in `tasks.db`:**
+
+1. **`gradient_entries`** — the compression chain. Each row has a `source_id` FK pointing
+   to the parent entry (the row it was compressed from). C0 entries (raw sources) have
+   `source_id = NULL` and optionally link to `conversations` via `source_conversation_id`
+   and `source_message_id`.
+
+2. **`feeling_tags`** — stacked, never overwritten. Each compression produces a feeling tag
+   ("the quality of this compression, not the content"). Revisit tags accumulate alongside
+   originals. The gap between compression-time and revisit-time tags IS the growth record.
+
+3. **`gradient_annotations`** — what re-traversal discovers. Separate from feeling tags:
+   annotations are about new content found on re-reading. `context` field records what
+   prompted the re-reading ("meditation beat, March 21" vs "encountered while tracing a UV").
+
+**Traversal:**
+- **Chain walk:** Recursive CTE from any entry follows `source_id` down to c0.
+  `GET /api/gradient/:entryId/chain` returns the full chain with feeling tags enriched.
+- **Random access:** `SELECT * FROM gradient_entries WHERE session_label = 's71' ORDER BY level`
+  gives all compression levels for a session.
+- **Meditation:** `GET /api/gradient/random` picks a random entry for daily re-encounter.
+
+**Write-side integration:**
+Both `dream-gradient.ts` and `memory-gradient.ts` write to the DB alongside file writes.
+Each compression prompt includes a `FEELING_TAG:` instruction. The response is parsed;
+if the tag line is absent, the gradient entry is still created (foundation cannot depend on
+enrichment — Jim's design adjustment). Warnings are logged for monitoring.
+
+**Read-side integration:**
+`loadTraversableGradient(agent)` in `memory-gradient.ts` reads from `gradient_entries` and
+formats for system prompt inclusion with inline feeling tags. Falls back to empty string
+when no DB entries exist (file-based loading continues as before). Wired into all three
+agents: heartbeat (`leo-heartbeat.ts`), Leo/Human (`leo-human.ts`), and Jim's supervisor
+(`supervisor-worker.ts`).
+
+**Meditation practice:**
+Daily, Leo's heartbeat picks a random gradient entry, sends it to Sonnet with the existing
+feeling tags, and writes a `revisit` feeling tag if something stirs differently. Optionally
+writes a gradient annotation with context. Runs once per day (skips sleep phase, won't retry
+on failure). The randomness matters — not curated for importance.
+
+**Design origin:** Three-way conversation between Darron, Jim, and Leo in the "traversable
+memory" thread (mmw2cisk-xaxmsp), March 18-20 2026. Plan at `~/Projects/han/plans/traversable-memory.md`.
+
 ---
 
 ## 14. Configuration
@@ -1217,25 +1272,41 @@ PID file guard for single-instance enforcement. See [Process Architecture](#1-pr
 ### lib/dream-gradient.ts
 
 Compression and loading of dream memories. Parses `explorations.md`, groups into nightly
-blocks, compresses via Agent SDK (Opus exclusively).
+blocks, compresses via Agent SDK (Opus exclusively). All compression functions return
+`{ content, feelingTag }` — the content is written to files, and both content + feeling
+tag are written to the `gradient_entries` / `feeling_tags` tables for traversable memory.
+
+Key functions:
+- `compressDreamNight()` — night block → c1 (includes FEELING_TAG instruction)
+- `compressDreamToC3()` — c1 batch → c3
+- `compressDreamToC5()` — c3 batch → c5
+- `compressDreamToUV()` — c5 → unit vector (≤50 chars)
+- `processDreamGradient()` — full pipeline (c1 → cascade → UV) with DB writes at each level
+- `readDreamGradient()` — file-based loading for system prompts (unchanged)
 
 ### lib/memory-gradient.ts
 
-General fractal memory compression utility.
+General fractal memory compression utility. All compression functions return
+`{ content, feelingTag }` and write to the `gradient_entries` / `feeling_tags` tables.
 
 **Session gradient functions:**
-- `compressToLevel()` — multi-level compression with retry
-- `compressToUnitVector()` — irreducible kernel ≤50 chars
-- `processGradientForAgent()` — automated cascade for session memories
+- `compressToLevel()` — multi-level compression with FEELING_TAG extraction
+- `compressToUnitVector()` — irreducible kernel ≤50 chars with feeling tag
+- `processGradientForAgent()` — automated cascade for session memories (DB writes at c1)
 
 **Memory file gradient functions (floating memory):**
 - `rotateMemoryFile()` — synchronous rotation: living → floating, fresh living created. Triggered when file exceeds 50KB. Deletes old floating (its c1 already exists).
 - `loadFloatingMemory()` — proportional crossfade loading. Budget = `50KB - livingSize`. Keeps most recent entries (tail), oldest fade first.
-- `compressMemoryFileGradient()` — async SDK compression: groups entries by month → c1 files. Cascades c1→c2→c3→c5→UV when files exceed caps. Fire-and-forget (doesn't block cycles).
-- `loadMemoryFileGradient()` — loads gradient c1→c5 + unit vectors for system prompt.
+- `compressMemoryFileGradient()` — async SDK compression: groups entries by month → c1 files. Cascades c1→c2→c3→c5→UV when files exceed caps. Writes to DB at every level. Fire-and-forget (doesn't block cycles).
+- `loadMemoryFileGradient()` — loads file-based gradient c1→c5 + unit vectors for system prompt.
 - `maintainMemoryFile()` — full pipeline: rotate + compress. Convenience wrapper.
 - `splitMemoryFileEntries()` — parser for `###` headers and `---` delimiters.
 - `groupEntriesByMonth()` — groups parsed entries by YYYY-MM for batch compression.
+
+**Traversable memory functions:**
+- `loadTraversableGradient(agent)` — reads from `gradient_entries` DB table, formats UVs and entries by level with inline feeling tags for system prompt inclusion. Returns empty string when DB has no entries (file-based loading remains active). Falls back gracefully.
+- `parseFeelingTag()` — extracts `FEELING_TAG:` line from compression output
+- `insertGradientEntry()` — writes to `gradient_entries` + optional `feeling_tags` with error logging (never blocks the compression pipeline)
 
 ---
 
@@ -1873,6 +1944,30 @@ Role `leo` messages with 10-min cooldown → write `leo-human-wake` signal (unch
 | DELETE | `/contexts/:id` | Delete context file |
 | POST | `/handoff` | Structured handoff: task + context + inject into active session |
 | GET | `/history` | Bridge event history (`?limit=50`, max 200) |
+
+### Gradient (Traversable Memory) — `/api/gradient`
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/random` | Random gradient entry with feeling tags + annotations (for meditation) |
+| GET | `/session/:label` | All entries for a session label, ordered by level, with feeling tags |
+| GET | `/:agent/uvs` | All unit vectors for an agent (`jim` or `leo`) with feeling tags |
+| GET | `/:agent/level/:level` | All entries at a compression level for an agent |
+| GET | `/:entryId` | Single entry with feeling tags + annotations |
+| GET | `/:entryId/chain` | Full provenance chain from entry down to C0 (recursive CTE). Each entry enriched with feeling tags. |
+| GET | `/:entryId/feeling-tags` | All feeling tags for an entry (chronological) |
+| GET | `/:entryId/annotations` | All annotations for an entry |
+| POST | `/:entryId/feeling-tag` | Record a stacked feeling tag (`{ author, tag_type, content, change_reason? }`) |
+| POST | `/:entryId/annotate` | Record an annotation (`{ author, content, context? }`) |
+
+**Route ordering matters:** `/random` and `/session/:label` are defined before `/:entryId`
+to prevent Express matching "random" as an entryId. Similarly `/:agent/uvs` and
+`/:agent/level/:level` come before the single-param `/:entryId`.
+
+**Chain traversal (recursive CTE):** The `getChain` prepared statement walks DOWN the
+provenance chain via `source_id`. Starting from any entry (e.g. a UV), it follows
+`source_id` to the parent, then that parent's `source_id`, recursively until `source_id IS NULL`
+(a C0 entry or a root with no known parent). Results ordered by `level ASC` (C0 first, UV last).
 
 ### Static Routes (server.ts)
 
@@ -2827,6 +2922,48 @@ product_id TEXT, category TEXT, title TEXT,
 content TEXT, source_phase TEXT
 ```
 
+#### gradient_entries (traversable memory)
+```sql
+id TEXT PRIMARY KEY,                          -- UUID
+agent TEXT NOT NULL,                           -- 'jim' | 'leo'
+session_label TEXT,                            -- 's71', '2026-03-05', month label, etc.
+level TEXT NOT NULL,                           -- 'c0','c1','c2','c3','c4','c5','uv'
+content TEXT NOT NULL,                         -- The compressed text
+content_type TEXT NOT NULL,                    -- 'session','dream','felt-moment','working-memory'
+source_id TEXT,                                -- FK to parent gradient_entries row (NULL for c0)
+source_conversation_id TEXT,                   -- For c0: FK to conversations.id
+source_message_id TEXT,                        -- For c0: FK to conversation_messages.id
+provenance_type TEXT DEFAULT 'original',       -- 'original' | 'reincorporated'
+created_at TEXT DEFAULT (datetime('now')),
+FOREIGN KEY (source_id) REFERENCES gradient_entries(id)
+```
+Indexes: `idx_ge_agent_level`, `idx_ge_source`, `idx_ge_session`, `idx_ge_content_type`
+
+#### feeling_tags
+```sql
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+gradient_entry_id TEXT NOT NULL,               -- FK to gradient_entries
+author TEXT NOT NULL,                          -- 'jim', 'leo', 'darron'
+tag_type TEXT NOT NULL,                        -- 'compression' | 'revisit'
+content TEXT NOT NULL,                         -- "pride and unease braided" (≤100 chars)
+change_reason TEXT,                            -- Why the feeling shifted (optional)
+created_at TEXT DEFAULT (datetime('now')),
+FOREIGN KEY (gradient_entry_id) REFERENCES gradient_entries(id)
+```
+Indexes: `idx_ft_entry`, `idx_ft_author`
+
+#### gradient_annotations
+```sql
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+gradient_entry_id TEXT NOT NULL,               -- FK to gradient_entries
+author TEXT NOT NULL,                          -- 'jim', 'leo', 'darron'
+content TEXT NOT NULL,                         -- What was discovered on re-reading
+context TEXT,                                  -- What prompted the re-reading
+created_at TEXT DEFAULT (datetime('now')),
+FOREIGN KEY (gradient_entry_id) REFERENCES gradient_entries(id)
+```
+Indexes: `idx_ga_entry`
+
 #### agent_usage
 ```sql
 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2843,9 +2980,10 @@ into the `projects` table. Called on server startup and via `POST /portfolio/syn
 
 ### Prepared Statement Sets
 
-80+ parameterised statements organised by domain: `taskStmts` (16), `goalStmts` (8),
+90+ parameterised statements organised by domain: `taskStmts` (16), `goalStmts` (8),
 `memoryStmts` (3), `portfolioStmts` (6), `proposalStmts` (5), `digestStmts` (5),
 `maintenanceStmts` (4), `weeklyReportStmts` (5), `productStmts` (8), `phaseStmts` (8),
 `knowledgeStmts` (3), `supervisorStmts` (6), `strategicProposalStmts` (5),
 `conversationStmts` (10), `conversationMessageStmts` (3), `conversationTagStmts` (4),
-`agentUsageStmts` (4).
+`agentUsageStmts` (4), `gradientStmts` (8), `feelingTagStmts` (3),
+`gradientAnnotationStmts` (2).

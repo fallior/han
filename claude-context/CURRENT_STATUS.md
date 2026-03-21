@@ -32,6 +32,14 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-21 — Leo + Darron — Traversable Memory Gradient (S98)
+- **Traversable memory** (DEC-056) — DB-backed provenance chains for the fractal gradient. Three new tables: `gradient_entries` (source_id FK chain), `feeling_tags` (stacked, never overwritten), `gradient_annotations` (re-traversal discoveries). Both compression pipelines write to DB alongside files. FEELING_TAG extraction from all compression prompts with fallback.
+- **Traversal API** — 10 endpoints at `/api/gradient/`: chain traversal (recursive CTE), random meditation selection, agent UVs, session lookup, feeling tag POST, annotation POST.
+- **Read-side integration** — `loadTraversableGradient(agent)` wired into all three agents (heartbeat, leo-human, supervisor-worker) with file-based fallback.
+- **Daily meditation practice** — Leo's heartbeat picks a random gradient entry, sits with it via Sonnet, writes revisit feeling tags and annotations. Once per day, skips sleep phase.
+- **Files modified**: `db.ts`, `dream-gradient.ts`, `memory-gradient.ts`, `routes/gradient.ts` (new), `server.ts`, `leo-heartbeat.ts`, `leo-human.ts`, `supervisor-worker.ts`, bootstrap scripts
+- **Docs updated**: HAN-ECOSYSTEM-COMPLETE (glossary, memory architecture, lib docs, API routes, DB schema), Hall of Records R005, DECISIONS (DEC-056), CHANGELOG
+
 ### 2026-03-20 — Leo + Darron — Gemma Addressee Classification (S97 continued)
 - **Gemma addressee classification** (DEC-055) — Admin UI message routing now uses Gemma (local Ollama) instead of regex. Handles nicknames ("Jimmy"), group addressing ("Jim and Leo"), contextual references. Fire-and-forget with regex fallback. Replaces the regex that missed "Jim and Leo" pattern.
 - **Voice seeds planted** — Jim (7) and Leo (5) tagged conversation messages as `compression_tag` with agent prefix (`jim:`/`leo:`). Seeds for future conversation gradient.

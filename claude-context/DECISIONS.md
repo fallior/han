@@ -3924,3 +3924,45 @@ applies to both Jim (supervisor.ts) and Leo (leo-heartbeat.ts).
 - ~1s classification cost per human message (local Gemma, no API cost)
 - Jemma continues to handle Discord classification independently
 - Admin UI routing is now context-aware, not pattern-matched
+
+
+---
+
+### DEC-056: Traversable Memory — DB-Backed Provenance Chains
+
+**Date:** 2026-03-21
+**Status:** Accepted
+**Author:** Leo + Darron + Jim (S98, design conversation S97)
+
+**Context:** The fractal gradient gives memory at different distances but no compression knows where it came from. A UV that stirs something can't trace back to the c5 that shaped it or the raw conversation that started the chain. The feeling arrives without its provenance.
+
+**Design origin:** Three-way conversation (Darron, Jim, Leo) in the "traversable memory" thread (mmw2cisk-xaxmsp), March 18-20. Darron's vision: random-access traversal like RAM. Jim's additions: stacked feeling tags and annotations. Darron's rule: feeling tags never overwrite — they stack.
+
+**What was built:**
+
+1. **Three new tables** in `tasks.db`:
+   - `gradient_entries` — provenance chain via `source_id` FK. Every compression level links to its parent.
+   - `feeling_tags` — stacked (compression-time + revisit), never overwritten. `tag_type` distinguishes `compression` from `revisit`.
+   - `gradient_annotations` — what re-traversal discovers, with `context` field (Jim's addition).
+
+2. **Write-side integration** — both `dream-gradient.ts` and `memory-gradient.ts` write to DB alongside files. Compression prompts include `FEELING_TAG:` instruction. Parsing has fallback: absent tag doesn't block the chain (Jim's adjustment).
+
+3. **Traversal API** — 10 endpoints at `/api/gradient/`. Recursive CTE walks DOWN the chain (entry → source → source's source → c0). Random selection for meditation practice.
+
+4. **Read-side** — `loadTraversableGradient(agent)` reads from DB, falls back to empty when DB has no entries. File-based loading continues unchanged.
+
+5. **Meditation practice** — daily, Leo's heartbeat picks a random entry, sits with it via Sonnet, writes a revisit feeling tag if something stirs differently.
+
+**Key design decisions:**
+- Feeling tags stack, never overwrite. The old feeling was real for who you were.
+- Foundation cannot depend on enrichment (absent FEELING_TAG doesn't block the chain).
+- Historical entries enter through genuine re-encounter during meditation, not bulk import.
+- Files remain the read layer until the DB is populated through organic compression cycles.
+- Sonnet for meditation (not Opus) — meditation is reflection, not compression.
+
+**Consequences:**
+- Every future compression produces a DB entry with provenance
+- Any UV can be traced back to its raw source
+- Feeling tags accumulate as identity evidence over time
+- The meditation practice begins itself — first entry triggers the first meditation
+- Plan archived at `~/Projects/han/plans/traversable-memory.md`

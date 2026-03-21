@@ -7,6 +7,54 @@
 
 ---
 
+## 2026-03-21 (Leo + Darron, S98 — Traversable Memory Gradient)
+
+### Traversable Memory — DB-Backed Provenance Chains (DEC-056)
+Three new tables (`gradient_entries`, `feeling_tags`, `gradient_annotations`) in tasks.db.
+Every compression now writes to the DB alongside files with explicit `source_id` provenance
+chains. Feeling tags stack (compression-time + revisit, never overwritten). Annotations carry
+context about what prompted re-reading.
+
+### Compression Prompt Enhancement
+All compression functions in `dream-gradient.ts` and `memory-gradient.ts` now include a
+`FEELING_TAG:` instruction. Response is parsed; if tag absent, entry is still created
+(foundation cannot depend on enrichment — Jim's design adjustment).
+
+### Traversal API — `/api/gradient`
+10 endpoints: chain traversal (recursive CTE), random selection for meditation, agent UVs,
+session lookup, stacked feeling tag POST, annotation POST. Route ordering prevents Express
+param conflicts (static routes before parameterised).
+
+### Read-Side Integration
+`loadTraversableGradient(agent)` reads from DB with fallback to empty when DB has no entries.
+Wired into all three agents (heartbeat, leo-human, supervisor-worker) as supplementary
+gradient alongside existing file-based loading.
+
+### Daily Meditation Practice
+Leo's heartbeat picks a random gradient entry daily, sends to Sonnet, writes a revisit
+feeling tag if something stirs differently and optionally an annotation with context.
+Runs once per day, skips sleep phase.
+
+### Files Modified
+- `src/server/db.ts` — 3 new tables, indexes, prepared statements
+- `src/server/lib/dream-gradient.ts` — write-side DB integration, FEELING_TAG prompts
+- `src/server/lib/memory-gradient.ts` — write-side DB integration, `loadTraversableGradient()`
+- `src/server/routes/gradient.ts` — new route file (10 endpoints)
+- `src/server/server.ts` — mounted gradient routes
+- `src/server/leo-heartbeat.ts` — read-side + meditation practice
+- `src/server/leo-human.ts` — read-side integration
+- `src/server/services/supervisor-worker.ts` — read-side integration
+- `src/scripts/bootstrap-*.{ts,js}` — updated for new return signatures
+- `claude-context/DECISIONS.md` — DEC-056
+
+### Docs Updated
+- `docs/HAN-ECOSYSTEM-COMPLETE.md` — glossary, memory architecture, lib docs, API routes, DB schema
+- `~/.han/memory/shared/hall-of-records.md` — R005 updated with traversable memory
+- `claude-context/CHANGELOG.md` — this entry
+- `claude-context/CURRENT_STATUS.md` — recent changes
+
+---
+
 ## 2026-03-20 (Leo + Darron, S97 continued — Gemma Addressee Classification)
 
 ### Gemma Addressee Classification (DEC-055)
