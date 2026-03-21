@@ -104,6 +104,36 @@ export const useStore = create<AppState>((set, get, api) => ({
   memoryPeriod: 'all',
   wsListeners: new Map(),
 
+  // Supervisor initial state
+  supervisorStatus: null,
+  supervisorCycles: [],
+  supervisorMemory: {},
+  supervisorProposals: [],
+  supervisorHealth: null,
+
+  // Work initial state
+  goals: [],
+  archivedGoals: [],
+  tasks: [],
+  workFilters: { project: 'all', status: 'all', model: 'all' },
+
+  // Reports initial state
+  latestDigest: null,
+  digests: [],
+  latestWeekly: null,
+  weeklies: [],
+  analytics: null,
+
+  // Projects initial state
+  projects: [],
+  portfolio: [],
+  selectedProject: null,
+
+  // Products initial state
+  products: [],
+  selectedProductId: null,
+  selectedProduct: null,
+
   // Conversations actions
   setConversationsSelectedId: (id) => set({ conversationsSelectedId: id }),
   setConversationsPeriod: (period) => set({ conversationsPeriod: period }),
@@ -114,6 +144,36 @@ export const useStore = create<AppState>((set, get, api) => ({
 
   // WebSocket connection action
   setWsConnected: (connected) => set({ wsConnected: connected }),
+
+  // Supervisor actions
+  setSupervisorStatus: (status) => set({ supervisorStatus: status }),
+  setSupervisorCycles: (cycles) => set({ supervisorCycles: cycles }),
+  setSupervisorMemory: (memory) => set({ supervisorMemory: memory }),
+  setSupervisorProposals: (proposals) => set({ supervisorProposals: proposals }),
+  setSupervisorHealth: (health) => set({ supervisorHealth: health }),
+
+  // Work actions
+  setGoals: (goals) => set({ goals }),
+  setArchivedGoals: (goals) => set({ archivedGoals: goals }),
+  setTasks: (tasks) => set({ tasks }),
+  setWorkFilters: (filters) => set({ workFilters: filters }),
+
+  // Reports actions
+  setLatestDigest: (digest) => set({ latestDigest: digest }),
+  setDigests: (digests) => set({ digests }),
+  setLatestWeekly: (weekly) => set({ latestWeekly: weekly }),
+  setWeeklies: (weeklies) => set({ weeklies }),
+  setAnalytics: (analytics) => set({ analytics }),
+
+  // Projects actions
+  setProjects: (projects) => set({ projects }),
+  setPortfolio: (portfolio) => set({ portfolio }),
+  setSelectedProject: (project) => set({ selectedProject: project }),
+
+  // Products actions
+  setProducts: (products) => set({ products }),
+  setSelectedProductId: (id) => set({ selectedProductId: id }),
+  setSelectedProduct: (product) => set({ selectedProduct: product }),
 
   // WebSocket event subscription
   subscribeWs: (type, callback) => {
