@@ -772,9 +772,9 @@ Real-time admin UI updates are implemented via a **signal-based cross-process br
 - Architecture: `docs/HAN-ECOSYSTEM-COMPLETE.md` Section 26.5
 - Decision record: DEC-054
 
-### React Admin Real-Time Data Layer (Phase 2)
+### React Admin UI (Phases 1-5, Complete)
 
-The React admin UI (Phase 2, completed 2026-03-21) implements a real-time data layer that solves the core bug in the vanilla JS admin: WebSocket messages arriving while the user isn't on the active tab get silently dropped, requiring manual refresh.
+The React admin UI migration completed 2026-03-21 with all 9 tabs functional. Phase 2 implemented the real-time data layer that solves the core bug in the vanilla JS admin: WebSocket messages arriving while the user isn't on the active tab get silently dropped, requiring manual refresh. Phases 4-5 completed all remaining tabs (Conversations, Memory, Overview, Supervisor, Work, Reports, Projects, Products) with full feature parity to the original vanilla TypeScript admin.
 
 **Architecture Pattern:**
 
@@ -792,17 +792,19 @@ WebSocket ──▶ WebSocketProvider ──▶ dispatchWsMessage() ──▶ Zu
    - Passes all incoming messages to Zustand store via dispatcher
    - Triggers state reconciliation on reconnect
 
-2. **Zustand Store** (`store/index.ts`)
+2. **Zustand Store** (`store/index.ts`, 344 lines)
    - Single source of truth for all data domains
-   - Slices: WebSocket connection, supervisor status, conversations, messages, UI state, unread tracking
+   - Slices: WebSocket connection, supervisor status, conversations, messages, UI state, unread tracking, workshop state, goals, tasks, work filters, reports (digests/weeklies/analytics), projects, portfolio, products
    - Components subscribe to specific slices, re-render only when their data changes
    - Store updated unconditionally by WebSocket events — no checking `currentModule`
 
 3. **WebSocket Message Dispatcher** (`store/wsDispatcher.ts`)
    - Routes incoming WebSocket messages to correct store slice based on `type` field
-   - `supervisor_cycle`/`supervisor_action` → updateSupervisorStatus
-   - `conversation_message` → addConversationMessage (always updates, regardless of active tab)
-   - `task_update`/`goal_update` → reserved for future phases
+   - `supervisor_cycle`/`supervisor_action` → updateSupervisorStatus (Overview, Supervisor tabs)
+   - `conversation_message` → addConversationMessage (Workshop, Conversations, Memory tabs)
+   - `task_update`/`goal_update` → updateTasks/updateGoals (Work, Projects tabs)
+   - `strategic_proposal` → updateProposals (Supervisor tab)
+   - `product_update` → updateProducts (Products tab)
 
 4. **Visibility Sync Hook** (`hooks/useVisibilitySync.ts`)
    - Belt-and-suspenders approach for reliability
@@ -839,9 +841,29 @@ function dispatchWsMessage(data: any) {
 - Components isolated from I/O concerns — only subscribe to data slices
 - Easy to test — mock the store, not the WebSocket
 
+**Page Modules (9 total):**
+
+1. **Workshop** (Phase 1) — Three-persona tabs (Leo/Jim/Jemma) with six nested discussion types each
+2. **Conversations** (Phase 4) — General async discussion threads with period filter, search, archive
+3. **Memory** (Phase 4) — Memory-focused discussions with same UI as Conversations, purple accent
+4. **Overview** (Phase 5) — Dashboard with stat cards, Charts.js graphs, activity feed
+5. **Supervisor** (Phase 5) — Jim's supervisor health, cycle history, memory viewer, strategic proposals
+6. **Work** (Phase 5) — Goals/tasks kanban board with 4 columns, filters, expandable detail
+7. **Reports** (Phase 5) — Daily digests, weekly reports, analytics with Charts.js graphs
+8. **Projects** (Phase 5) — Portfolio grid showing all registered projects with budget chart
+9. **Products** (Phase 5) — Product pipeline with phase timeline, knowledge entries
+
+**Shared Components:**
+- `Badge` — Status badges (done/running/failed/pending/cancelled)
+- `StatCard` — Stat display cards with icon, label, value, change indicator
+- `ThreadListPanel` — Reusable thread list for Conversations/Memory tabs
+- `ThreadDetailPanel` — Reusable thread detail for Conversations/Memory tabs
+- `MessageBubble` — Chat message display (all conversation-based tabs)
+- `MarkdownRenderer` — Markdown with syntax highlighting (all conversation-based tabs)
+
 **Related:**
-- Session note: `claude-context/session-notes/2026-03-21-autonomous-react-admin-phase-2.md`
-- Decision: DEC-062 (WebSocket Provider Architecture with Context Pattern)
+- Session notes: Phase 1, Phase 2, Phase 4, Phase 5 in `claude-context/session-notes/`
+- Decisions: DEC-059 (parallel deployment), DEC-060 (Vite + React + Zustand), DEC-061 (shared components), DEC-062 (WebSocket provider)
 
 ## Git Checkpoint Behavior
 

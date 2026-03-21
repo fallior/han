@@ -28,12 +28,30 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 | Level 12: Admin Phase 2 | 🟢 Complete | Work, Conversations, Products modules; supervisor responses; real-time WebSocket updates |
 | Level 13: Conversation Search | 🟢 Complete | FTS5 backend, auto-cataloguing (summaries/topics), search APIs, temporal grouping, desktop/mobile UI |
 | React Admin Phase 2 | 🟢 Complete | WebSocket Provider + Zustand state store — real-time data layer |
+| React Admin Phase 3 | 🟢 Complete | Workshop tab — three-persona navigation, six discussion types, dedicated components |
 | React Admin Phase 4 | 🟢 Complete | Conversations + Memory Discussions tabs migrated to React with real-time WebSocket updates |
 | React Admin Phase 5 | 🟢 Complete | Overview, Supervisor, Work, Reports, Projects, Products tabs — migration complete |
 
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-03-21 — Claude (autonomous) — React Admin Phase 3: Workshop Tab Migration
+
+- **Workshop tab complete** — The most complex and highest-value tab migrated to React with full feature parity. This is where Darron spends most of his time interacting with Jim, Leo, and Jemma. The original vanilla admin version (720 lines spanning admin.ts lines 3200-3920) had multiple state interaction bugs due to complex persona + nested tab + period filter + selected thread state management.
+- **Three-persona navigation** — PersonaTabBar component (74 lines) renders 4 persona buttons: Supervisor Jim (purple), Philosopher Leo (green), Dreamer Darron (blue), Dispatcher Jemma (amber). Active persona has 3px solid bottom border in persona colour + bold text. NestedTabBar component (101 lines) dynamically renders 2 sub-tabs per persona (e.g. Jim → Requests/Reports, Leo → Questions/Postulates).
+- **Six discussion types** — Each persona + nested tab combination maps to a `discussion_type` value for API filtering: jim-request, jim-report, leo-question, leo-postulate, darron-thought, darron-musing. Uses shared conversations API (`GET /api/conversations/grouped?type={discussion_type}`).
+- **Dedicated Workshop components** — Unlike Conversations/Memory tabs which share ThreadListPanel/ThreadDetailPanel, Workshop uses dedicated ThreadList (222 lines) and ThreadDetail (189 lines) components. This is necessary because Workshop has nested tabs + persona-specific colours + Jemma special view — making shared components too complex.
+- **ThreadList features** — Period filter buttons (All/Today/This Week/Last Week/This Month/Older with count badges), archive toggle, debounced search (300ms), thread cards with unread dot/title/time/status/count. Active thread highlighted with blue border. Grouped by period server-side.
+- **ThreadDetail features** — Message bubbles with role-based styling (human: blue right-aligned, supervisor: purple left-border, leo: green left-border), markdown rendering, draft persistence in localStorage, resolve/reopen/archive actions, auto-scroll to bottom on new messages.
+- **Jemma special view** — JemmaView component (189 lines) for Dispatcher persona. Instead of conversations API, fetches from `GET /api/jemma/status` and renders Messages tab (recent Discord messages with classification results) + Stats tab (delivery statistics).
+- **Zustand store updates** — Added workshopSlice (92 lines) with state for: persona (jim/leo/darron/jemma), nestedTab (discussion_type), period filter, showArchived, selectedThread (keyed by nested tab). Separate selectedThread map allows switching between nested tabs without losing which thread was selected in each.
+- **Real-time WebSocket updates** — When `conversation_message` event arrives for currently-viewed thread, message appears immediately. Store receives message unconditionally (no checking active tab), components subscribe to conversation state and re-render. Fixes core vanilla admin bug where messages arriving on inactive tab got silently dropped.
+- **Shared components reused** — MessageBubble (72 lines) and MarkdownRenderer (93 lines) used across Workshop, Conversations, and Memory tabs. Reduces duplication, ensures consistent rendering.
+- **Build verification** — Vite build successful, all TypeScript compilation clean, Workshop tab fully functional at `/admin-react#/workshop`. End-to-end test: select persona, select nested tab, select thread, view messages, send message, receive response via WebSocket — all working.
+- **Files created**: WorkshopPage.tsx (79 lines), PersonaTabBar.tsx (74 lines), NestedTabBar.tsx (101 lines), ThreadList.tsx (222 lines), ThreadDetail.tsx (189 lines), JemmaView.tsx (189 lines), workshopSlice.ts (92 lines), workshopStore.ts (95 lines). **Files modified**: store/index.ts (+2 lines: workshop slice import), App.tsx (+2 lines: Workshop route).
+- **Why this matters**: Eliminates the most bug-prone tab in the vanilla admin. Complex state interactions (persona + nested tab + selected thread + period + search + archive) are now managed via Zustand with proper React re-rendering. Darron can now use the Workshop tab without state bugs or manual refresh. Foundation for eventually sunsetting the vanilla admin.
+- **Docs updated**: Session note created, CURRENT_STATUS updated, DECISIONS updated (DEC-063, DEC-064)
 
 ### 2026-03-21 — Claude (autonomous) — React Admin Phase 5: Overview, Supervisor, Reports, Work, Projects, Products Tabs
 - **React admin migration complete** — All 9 tabs now functional in React with feature parity to original vanilla TypeScript admin. Phase 5 implemented the remaining 6 tabs (Overview, Supervisor, Work, Reports, Projects, Products) that were scaffolded as placeholders in Phase 1.
