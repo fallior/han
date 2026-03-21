@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import MarkdownRenderer from './MarkdownRenderer';
 import { formatTime } from '../../utils/formatters';
 
 interface MessageBubbleProps {
