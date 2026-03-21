@@ -1,0 +1,9 @@
+  // New conversation actions
+  setSupervisorPaused: (paused: boolean) => void;
+  updateSupervisorStatus: (status: any) => void;
+  setConversations: (conversations: Record<string, Conversation>) => void;
+  setConversationMessages: (messages: Record<string, Message[]>) => void;
+  setLastReadTimestamp: (conversationId: string, timestamp: string) => void;
+  updateLastReadTimestamp: (conversationId: string) => void;
+  getUnreadCountFor: (conversationId: string) => number;
+  markConversationAsRead: (conversationId: string) => void;

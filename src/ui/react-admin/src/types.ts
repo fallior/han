@@ -11,9 +11,15 @@ export interface ConversationThread {
   updated_at: string;
   message_count: number;
   last_message_at?: string;
+<<<<<<< Updated upstream
   participants?: any;
   summary?: any;
   topics?: any;
+=======
+  participants?: string;
+  summary?: string;
+  topics?: string;
+>>>>>>> Stashed changes
   metadata?: Record<string, any>;
 }
 
@@ -28,7 +34,17 @@ export interface SearchResult {
   conversation_title: string;
   conversation_status: 'open' | 'resolved' | 'archived';
   snippet: string;
+<<<<<<< Updated upstream
   matched_message?: any;
+=======
+  matched_message?: {
+    author: string;
+    role: string;
+    content: string;
+    created_at: string;
+    snippet: string;
+  };
+>>>>>>> Stashed changes
   relevance: number;
   created_at: string;
 }
