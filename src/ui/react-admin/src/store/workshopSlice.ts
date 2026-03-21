@@ -38,7 +38,7 @@ const defaultNestedTabs: Record<WorkshopPersona, string> = {
   jemma: 'jemma-task',
 };
 
-export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSlice> = (set) => ({
+export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSlice> = (set, _get) => ({
   // Initial state
   workshopPersona: 'jim',
   workshopNestedTab: 'jim-request',

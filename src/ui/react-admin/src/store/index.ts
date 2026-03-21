@@ -32,9 +32,9 @@ interface AppState extends WorkshopSlice {
   dispatchWsEvent: (data: any) => void;
 }
 
-export const useStore = create<AppState>((set, get) => ({
+export const useStore = create<AppState>((set, get, api) => ({
   // Spread workshop slice
-  ...createWorkshopSlice(set, get),
+  ...createWorkshopSlice(set, get, api),
 
   // Initial state
   wsConnected: false,
