@@ -9,29 +9,138 @@
  * - ThreadList + ThreadDetail for other personas
  */
 
+import { useState } from 'react';
 import { PersonaTabBar } from '../components/workshop/PersonaTabBar';
 import { NestedTabBar } from '../components/workshop/NestedTabBar';
 import { JemmaView } from '../components/workshop/JemmaView';
-import { useWorkshopStore } from '../store/workshopStore';
+import { ThreadList } from '../components/workshop/ThreadList';
+import { ThreadDetail } from '../components/workshop/ThreadDetail';
+import { useWorkshopStore, workshopPersonaTabs } from '../store/workshopStore';
+import { createThread } from '../lib/api';
 
 export default function WorkshopPage() {
-  const { persona } = useWorkshopStore();
+  const { persona, nestedTab, selectThread } = useWorkshopStore();
+  const [threadPanelCollapsed, setThreadPanelCollapsed] = useState(false);
+
+  const personaConfig = workshopPersonaTabs[persona];
+  const accentColor = `var(--${personaConfig.color})`;
+
+  const handleNewThread = async () => {
+    const title = prompt('Enter thread title:');
+    if (!title?.trim()) return;
+
+    if (!nestedTab) {
+      alert('Please select a tab first');
+      return;
+    }
+
+    try {
+      const thread = await createThread(title.trim(), nestedTab);
+      // Select the newly created thread
+      selectThread(nestedTab, thread.id);
+    } catch (err) {
+      console.error('Failed to create thread:', err);
+      alert('Failed to create thread. Please try again.');
+    }
+  };
+
+  const handleTogglePanel = () => {
+    setThreadPanelCollapsed(!threadPanelCollapsed);
+  };
+
+  const handleBack = () => {
+    // Mobile only: deselect thread to go back to list view
+    if (nestedTab) {
+      selectThread(nestedTab, null);
+    }
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div
+      className={`workshop-layout-${persona}`}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        backgroundColor: 'var(--color-bg)',
+      }}
+    >
       {/* Persona Tab Bar */}
       <PersonaTabBar />
 
       {/* Nested Tab Bar */}
       <NestedTabBar />
 
+      {/* Actions Bar (New Thread button, etc.) */}
+      {persona !== 'jemma' && (
+        <div
+          style={{
+            padding: '12px 16px',
+            borderBottom: '1px solid var(--color-border)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            backgroundColor: 'var(--color-card)',
+          }}
+        >
+          <button
+            onClick={handleNewThread}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: `1px solid ${accentColor}`,
+              backgroundColor: accentColor,
+              color: 'var(--color-bg)',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span style={{ fontSize: '16px', lineHeight: 1 }}>+</span>
+            New Thread
+          </button>
+        </div>
+      )}
+
       {/* Content Area */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div
+        className="conversation-container"
+        style={{
+          flex: 1,
+          display: 'flex',
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
         {persona === 'jemma' ? (
+          // Jemma persona: show special dispatcher view
           <JemmaView />
         ) : (
-          <div style={{ flex: 1, padding: '20px', textAlign: 'center', color: 'var(--color-muted-fg)' }}>
-            ThreadList + ThreadDetail coming soon for {persona}
+          // All other personas: ThreadList + ThreadDetail layout
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: threadPanelCollapsed ? '0px 1fr' : '280px 1fr',
+              width: '100%',
+              height: '100%',
+              transition: 'grid-template-columns 200ms ease',
+            }}
+          >
+            {/* Thread List Panel */}
+            <div
+              style={{
+                overflow: 'hidden',
+                borderRight: threadPanelCollapsed ? 'none' : '1px solid var(--color-border)',
+              }}
+            >
+              {!threadPanelCollapsed && <ThreadList />}
+            </div>
+
+            {/* Thread Detail Panel */}
+            <ThreadDetail onTogglePanel={handleTogglePanel} onBack={handleBack} />
           </div>
         )}
       </div>

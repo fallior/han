@@ -75,6 +75,19 @@ export interface SearchResult {
   total: number;
 }
 
+// Type alias for backward compatibility with ThreadList component
+export type ConversationThread = Thread;
+
+// Grouped threads response structure matching the backend API
+// Backend returns: { success: true, periods: { today: { count, label, conversations }, ... } }
+export interface GroupedThreadsResponse {
+  today?: ConversationThread[];
+  this_week?: ConversationThread[];
+  last_week?: ConversationThread[];
+  this_month?: ConversationThread[];
+  older?: ConversationThread[];
+}
+
 // ============================================================================
 // Configuration
 // ============================================================================
@@ -154,19 +167,37 @@ async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
 
 /**
  * Fetch grouped threads by discussion type
+ * Backend returns: { success: true, periods: { today: { count, label, conversations }, ... } }
+ * We transform it to: { today: [...threads], this_week: [...threads], ... }
  */
 export async function fetchGroupedThreads(
   type: string,
   includeArchived: boolean
-): Promise<GroupedThread[]> {
+): Promise<GroupedThreadsResponse> {
   const params = new URLSearchParams({
     type,
     include_archived: includeArchived.toString(),
   });
 
-  return fetchJSON<GroupedThread[]>(
-    `/api/conversations/grouped?${params.toString()}`
-  );
+  const response = await fetchJSON<{
+    success: boolean;
+    periods: {
+      today: { count: number; label: string; conversations: ConversationThread[] };
+      this_week: { count: number; label: string; conversations: ConversationThread[] };
+      last_week: { count: number; label: string; conversations: ConversationThread[] };
+      this_month: { count: number; label: string; conversations: ConversationThread[] };
+      older: { count: number; label: string; conversations: ConversationThread[] };
+    };
+  }>(`/api/conversations/grouped?${params.toString()}`);
+
+  // Transform backend structure to flat structure
+  return {
+    today: response.periods.today.conversations,
+    this_week: response.periods.this_week.conversations,
+    last_week: response.periods.last_week.conversations,
+    this_month: response.periods.this_month.conversations,
+    older: response.periods.older.conversations,
+  };
 }
 
 /**
