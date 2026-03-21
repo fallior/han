@@ -40,7 +40,7 @@ const defaultNestedTabs: Record<WorkshopPersona, string> = {
   jim: 'jim-request',
   leo: 'leo-question',
   darron: 'darron-exploration',
-  jemma: 'jemma-task',
+  jemma: 'jemma-messages',
 };
 
 export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSlice> = (set, get) => ({

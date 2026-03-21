@@ -50,7 +50,7 @@ export const workshopNestedTabs: Record<WorkshopPersona, NestedTabConfig[]> = {
     { key: 'darron-dream', label: 'Dreams' },
   ],
   jemma: [
-    { key: 'jemma-task', label: 'Tasks' },
-    { key: 'jemma-status', label: 'Status Updates' },
+    { key: 'jemma-messages', label: 'Messages' },
+    { key: 'jemma-stats', label: 'Stats' },
   ],
 };

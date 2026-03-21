@@ -288,11 +288,7 @@
 
 .persona-tab.active {
     font-weight: 600;
-<<<<<<< Updated upstream
     /* Color and border-color set inline via style prop based on persona */
-=======
-    /* Color set inline via style prop based on persona */
->>>>>>> Stashed changes
 }
 
 /* ─── Nested Tab Bar ─── */
@@ -323,11 +319,7 @@
 
 .nested-tab.active {
     font-weight: 500;
-<<<<<<< Updated upstream
     /* Color and border-color set inline via style prop based on persona */
-=======
-    /* Color set inline via style prop based on persona */
->>>>>>> Stashed changes
 }
 
 /* ─── Workshop Layout Accent Tinting - Jim (Purple) ─── */
@@ -464,6 +456,12 @@
 }
 
 /* ─── Responsive (Mobile) ─── */
+
+/* Hide mobile-only elements on desktop */
+.mobile-only {
+    display: none;
+}
+
 @media (max-width: 768px) {
     .workshop-conversation-layout {
         grid-template-columns: 1fr;
@@ -477,7 +475,8 @@
         display: none;
     }
 
-    .thread-back-btn {
+    .thread-back-btn,
+    .mobile-only {
         display: inline-block !important;
     }
 }

@@ -52,10 +52,22 @@ export interface PostMessageRequest {
   role: string;
 }
 
+export interface JemmaMessage {
+  author: string;
+  channel: string;
+  message: string;
+  recipient: string;
+  confidence: number;
+  timestamp: string;
+}
+
 export interface JemmaStatus {
-  status: 'idle' | 'processing' | 'error';
-  current_task?: string;
-  last_activity?: string;
+  success: boolean;
+  status: 'connected' | 'disconnected' | 'unknown';
+  uptime_seconds: number;
+  last_reconciliation: string | null;
+  recent_messages: JemmaMessage[];
+  delivery_stats: Record<string, number>;
 }
 
 export interface SearchResult {
