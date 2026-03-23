@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { ThreadListPanel } from '../components/shared/ThreadListPanel';
 import { ThreadDetailPanel } from '../components/shared/ThreadDetailPanel';
 import { useStore } from '../store';
+import { apiFetch } from '../lib/api';
 import type { ConversationThread, Message, SearchResult } from '../types';
 
 interface Period {
@@ -60,7 +61,7 @@ export default function MemoryPage() {
 
   const fetchGroupedConversations = async () => {
     try {
-      const response = await fetch('/api/conversations/grouped?type=memory');
+      const response = await apiFetch('/api/conversations/grouped?type=memory');
       if (!response.ok) throw new Error('Failed to fetch conversations');
       const data = await response.json();
 
@@ -78,7 +79,7 @@ export default function MemoryPage() {
   const fetchConversationDetail = async (id: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/conversations/${id}`);
+      const response = await apiFetch(`/api/conversations/${id}`);
       if (!response.ok) throw new Error('Failed to fetch conversation');
       const data = await response.json();
 
@@ -111,7 +112,7 @@ export default function MemoryPage() {
     }
 
     try {
-      const response = await fetch(`/api/conversations/search?q=${encodeURIComponent(query)}&type=memory&limit=50`);
+      const response = await apiFetch(`/api/conversations/search?q=${encodeURIComponent(query)}&type=memory&limit=50`);
       if (!response.ok) throw new Error('Search failed');
       const data = await response.json();
       setSearchResults(data.results || []);
@@ -129,7 +130,7 @@ export default function MemoryPage() {
     if (!selectedConversation) return;
 
     try {
-      const response = await fetch(`/api/conversations/${selectedConversation.id}/messages`, {
+      const response = await apiFetch(`/api/conversations/${selectedConversation.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'human', content })
@@ -148,7 +149,7 @@ export default function MemoryPage() {
     if (!selectedConversation) return;
 
     try {
-      const response = await fetch(`/api/conversations/${selectedConversation.id}/resolve`, {
+      const response = await apiFetch(`/api/conversations/${selectedConversation.id}/resolve`, {
         method: 'POST'
       });
 
@@ -168,7 +169,7 @@ export default function MemoryPage() {
     if (!selectedConversation) return;
 
     try {
-      const response = await fetch(`/api/conversations/${selectedConversation.id}/reopen`, {
+      const response = await apiFetch(`/api/conversations/${selectedConversation.id}/reopen`, {
         method: 'POST'
       });
 
@@ -198,7 +199,7 @@ export default function MemoryPage() {
     if (!newThreadTitle.trim()) return;
 
     try {
-      const response = await fetch('/api/conversations', {
+      const response = await apiFetch('/api/conversations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: newThreadTitle, discussion_type: 'memory' })
@@ -227,7 +228,7 @@ export default function MemoryPage() {
   ].filter(Boolean).join(' ');
 
   return (
-    <div className="page-container">
+    <div className="page-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {/* Page Header with New Discussion Button */}
       <div className="page-header" style={{
         display: 'flex',
@@ -255,8 +256,8 @@ export default function MemoryPage() {
         </button>
       </div>
 
-      {/* Two-column layout */}
-      <div className={layoutClasses}>
+      {/* Two-column layout — fills remaining height, each column scrolls independently */}
+      <div className={layoutClasses} style={{ flex: 1, minHeight: 0 }}>
         <ThreadListPanel
           threads={threads}
           periods={periods}

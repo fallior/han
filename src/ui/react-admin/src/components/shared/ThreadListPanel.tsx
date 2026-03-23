@@ -70,38 +70,6 @@ export function ThreadListPanel({
     return new Date(thread.updated_at) > new Date(lastRead);
   };
 
-  const getParticipantAvatars = (participants: string) => {
-    const participantList = participants.split(',').map(p => p.trim());
-    const colorMap: Record<string, string> = {
-      'D': 'var(--blue)',
-      'J': 'var(--purple)',
-      'L': 'var(--green)',
-    };
-
-    return participantList.map((p, idx) => (
-      <div
-        key={idx}
-        className="participant-avatar"
-        style={{ backgroundColor: colorMap[p] || 'var(--text-secondary)' }}
-      >
-        {p}
-      </div>
-    ));
-  };
-
-  const getTopicBadges = (topics: string | undefined) => {
-    if (!topics) return null;
-    const topicList = topics.split(',').map(t => t.trim()).slice(0, 3);
-    return topicList.map((topic, idx) => (
-      <span
-        key={idx}
-        className="topic-badge"
-        style={{ backgroundColor: accentColor }}
-      >
-        {topic}
-      </span>
-    ));
-  };
 
   const renderThreadItem = (thread: ConversationThread) => {
     const unread = isUnread(thread);
@@ -112,36 +80,23 @@ export function ThreadListPanel({
         key={thread.id}
         className={`thread-item ${isSelected ? 'selected' : ''}`}
         onClick={() => onSelectThread(thread.id)}
+        style={{ padding: '10px 12px', cursor: 'pointer', position: 'relative' }}
       >
-        {unread && <div className="unread-dot" style={{ backgroundColor: accentColor }}></div>}
+        {unread && <div className="unread-dot" style={{ backgroundColor: accentColor, position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: '50%' }}></div>}
 
-        <div className="thread-header">
-          <div className="thread-title">{thread.title}</div>
-          <div className="thread-time">{formatTimeSince(thread.updated_at)}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3, flex: 1, minWidth: 0 }}>{thread.title}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>{formatTimeSince(thread.updated_at)}</div>
         </div>
 
-        <div className="thread-meta">
-          <span className={`status-badge status-${thread.status.toLowerCase()}`}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+          <span className={`status-badge status-${thread.status.toLowerCase()}`} style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4 }}>
             {thread.status}
           </span>
-          <div className="participants">
-            {getParticipantAvatars(thread.participants)}
-          </div>
-        </div>
-
-        {thread.summary && (
-          <div className="thread-summary">
-            {thread.summary.length > 120
-              ? thread.summary.substring(0, 120) + '...'
-              : thread.summary}
-          </div>
-        )}
-
-        <div className="thread-footer">
-          <div className="topics">
-            {getTopicBadges(thread.topics)}
-          </div>
-          <div className="message-count">{thread.message_count} messages</div>
+          {thread.participants && (
+            <span style={{ opacity: 0.7 }}>{thread.participants.split(',').map((p: string) => p.trim()).join(' · ')}</span>
+          )}
+          <span>{thread.message_count} msg{thread.message_count !== 1 ? 's' : ''}</span>
         </div>
       </div>
     );

@@ -17,6 +17,7 @@ import { ThreadList } from '../components/workshop/ThreadList';
 import { ThreadDetail } from '../components/workshop/ThreadDetail';
 import { useWorkshopStore, workshopPersonaTabs } from '../store/workshopStore';
 import { createThread } from '../lib/api';
+import '../styles/workshop.css';
 
 export default function WorkshopPage() {
   const { persona, nestedTab, selectThread } = useWorkshopStore();
@@ -61,8 +62,8 @@ export default function WorkshopPage() {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100%',
-        backgroundColor: 'var(--color-bg)',
+        height: 'calc(100vh - 120px)',
+        backgroundColor: 'var(--bg-page)',
       }}
     >
       {/* Persona Tab Bar */}
@@ -76,11 +77,11 @@ export default function WorkshopPage() {
         <div
           style={{
             padding: '12px 16px',
-            borderBottom: '1px solid var(--color-border)',
+            borderBottom: '1px solid var(--border)',
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            backgroundColor: 'var(--color-card)',
+            backgroundColor: 'var(--bg-card)',
           }}
         >
           <button
@@ -90,7 +91,7 @@ export default function WorkshopPage() {
               borderRadius: '6px',
               border: `1px solid ${accentColor}`,
               backgroundColor: accentColor,
-              color: 'var(--color-bg)',
+              color: 'var(--bg-page)',
               fontSize: '13px',
               fontWeight: 600,
               cursor: 'pointer',
@@ -126,6 +127,7 @@ export default function WorkshopPage() {
               gridTemplateColumns: threadPanelCollapsed ? '0px 1fr' : '280px 1fr',
               width: '100%',
               height: '100%',
+              minHeight: 0,
               transition: 'grid-template-columns 200ms ease',
             }}
           >
@@ -133,14 +135,17 @@ export default function WorkshopPage() {
             <div
               style={{
                 overflow: 'hidden',
-                borderRight: threadPanelCollapsed ? 'none' : '1px solid var(--color-border)',
+                minHeight: 0,
+                borderRight: threadPanelCollapsed ? 'none' : '1px solid var(--border)',
               }}
             >
               {!threadPanelCollapsed && <ThreadList />}
             </div>
 
             {/* Thread Detail Panel */}
-            <ThreadDetail onTogglePanel={handleTogglePanel} onBack={handleBack} />
+            <div style={{ minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <ThreadDetail onTogglePanel={handleTogglePanel} onBack={handleBack} />
+            </div>
           </div>
         )}
       </div>

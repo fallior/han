@@ -51,7 +51,7 @@ export function JemmaView() {
 
   if (loading) {
     return (
-      <div style={{ flex: 1, padding: '20px', textAlign: 'center', color: 'var(--color-muted-fg)', fontSize: '13px' }}>
+      <div style={{ flex: 1, padding: '20px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px' }}>
         Loading Jemma status...
       </div>
     );
@@ -88,7 +88,7 @@ interface MessagesTabProps {
 function MessagesTab({ messages }: MessagesTabProps) {
   if (!messages || messages.length === 0) {
     return (
-      <div style={{ padding: '20px', textAlign: 'center', color: 'var(--color-muted-fg)' }}>
+      <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-dim)' }}>
         No recent messages
       </div>
     );
@@ -125,16 +125,16 @@ function MessageCard({ message }: MessageCardProps) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '12px' }}>
         {/* Message content */}
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 600, fontSize: '12px', color: 'var(--color-fg)' }}>
+          <div style={{ fontWeight: 600, fontSize: '12px', color: 'var(--text)' }}>
             {message.author}
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--color-muted-fg)', marginTop: '2px' }}>
+          <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px' }}>
             #{message.channel}
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--color-fg)', marginTop: '6px', lineHeight: 1.4 }}>
+          <div style={{ fontSize: '12px', color: 'var(--text)', marginTop: '6px', lineHeight: 1.4 }}>
             {preview}
           </div>
-          <div style={{ fontSize: '10px', color: 'var(--color-muted-fg)', marginTop: '6px' }}>
+          <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '6px' }}>
             {timestamp}
           </div>
         </div>
@@ -154,7 +154,7 @@ function MessageCard({ message }: MessageCardProps) {
           >
             {message.recipient}
           </span>
-          <span style={{ fontSize: '10px', color: 'var(--color-muted-fg)' }}>
+          <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
             {confidence}% confident
           </span>
         </div>
@@ -183,19 +183,19 @@ function StatsTab({ data }: StatsTabProps) {
     <div style={{ display: 'grid', gap: '16px' }}>
       {/* Connection Status */}
       <div className="admin-card" style={{ padding: '16px' }}>
-        <div style={{ fontWeight: 600, fontSize: '12px', color: 'var(--color-fg)', marginBottom: '12px' }}>
+        <div style={{ fontWeight: 600, fontSize: '12px', color: 'var(--text)', marginBottom: '12px' }}>
           Connection Status
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
-          <div style={{ padding: '10px', background: 'var(--color-card)', borderRadius: '4px', borderLeft: '3px solid var(--amber)' }}>
-            <div style={{ fontSize: '10px', color: 'var(--color-muted-fg)' }}>Status</div>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-fg)', marginTop: '4px' }}>
+          <div style={{ padding: '10px', background: 'var(--bg-card)', borderRadius: '4px', borderLeft: '3px solid var(--amber)' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-dim)' }}>Status</div>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginTop: '4px' }}>
               {gatewayStatus === 'connected' ? '🟢 Connected' : `🔴 ${gatewayStatus}`}
             </div>
           </div>
-          <div style={{ padding: '10px', background: 'var(--color-card)', borderRadius: '4px', borderLeft: '3px solid var(--amber)' }}>
-            <div style={{ fontSize: '10px', color: 'var(--color-muted-fg)' }}>Uptime</div>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-fg)', marginTop: '4px' }}>
+          <div style={{ padding: '10px', background: 'var(--bg-card)', borderRadius: '4px', borderLeft: '3px solid var(--amber)' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-dim)' }}>Uptime</div>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text)', marginTop: '4px' }}>
               {uptime} min
             </div>
           </div>
@@ -204,7 +204,7 @@ function StatsTab({ data }: StatsTabProps) {
 
       {/* Delivery Statistics */}
       <div className="admin-card" style={{ padding: '16px' }}>
-        <div style={{ fontWeight: 600, fontSize: '12px', color: 'var(--color-fg)', marginBottom: '12px' }}>
+        <div style={{ fontWeight: 600, fontSize: '12px', color: 'var(--text)', marginBottom: '12px' }}>
           Delivery Statistics
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
@@ -215,16 +215,16 @@ function StatsTab({ data }: StatsTabProps) {
                 key={recipient}
                 style={{
                   padding: '10px',
-                  background: 'var(--color-card)',
+                  background: 'var(--bg-card)',
                   borderRadius: '4px',
                   borderLeft: '3px solid var(--amber)',
                   textAlign: 'center',
                 }}
               >
-                <div style={{ fontSize: '10px', color: 'var(--color-muted-fg)', textTransform: 'capitalize' }}>
+                <div style={{ fontSize: '10px', color: 'var(--text-dim)', textTransform: 'capitalize' }}>
                   {recipient}
                 </div>
-                <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-fg)', marginTop: '4px' }}>
+                <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text)', marginTop: '4px' }}>
                   {count}
                 </div>
               </div>
@@ -235,10 +235,10 @@ function StatsTab({ data }: StatsTabProps) {
 
       {/* Last Reconciliation */}
       <div className="admin-card" style={{ padding: '16px' }}>
-        <div style={{ fontWeight: 600, fontSize: '12px', color: 'var(--color-fg)', marginBottom: '8px' }}>
+        <div style={{ fontWeight: 600, fontSize: '12px', color: 'var(--text)', marginBottom: '8px' }}>
           Last Reconciliation Poll
         </div>
-        <div style={{ fontSize: '12px', color: 'var(--color-muted-fg)' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
           {lastReconciliation}
         </div>
       </div>

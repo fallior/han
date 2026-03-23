@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { ThreadListPanel } from '../components/shared/ThreadListPanel';
 import { ThreadDetailPanel } from '../components/shared/ThreadDetailPanel';
 import { useStore } from '../store';
+import { apiFetch } from '../lib/api';
 import type { ConversationThread, Message, SearchResult } from '../types';
 
 interface Period {
@@ -62,16 +63,23 @@ export default function ConversationsPage() {
 
   const fetchGroupedConversations = async () => {
     try {
-      const response = await fetch('/api/conversations/grouped');
+      const response = await apiFetch('/api/conversations/grouped');
       if (!response.ok) throw new Error('Failed to fetch conversations');
       const data = await response.json();
 
-      // data shape: { all: Thread[], today: { count, label, conversations }, ... }
-      const allThreads = data.all || [];
-      delete data.all; // Remove 'all' from periods object
+      // API returns: { success, periods: { today: { count, label, conversations }, ... } }
+      const periods = data.periods || {};
+      const allThreads: ConversationThread[] = [];
+      const periodMap: GroupedData = {};
+
+      for (const [key, period] of Object.entries(periods) as [string, any][]) {
+        const convos = period.conversations || [];
+        periodMap[key] = { count: period.count || convos.length, label: period.label || key, conversations: convos };
+        allThreads.push(...convos);
+      }
 
       setThreads(allThreads);
-      setPeriods(data);
+      setPeriods(periodMap);
     } catch (error) {
       console.error('Error fetching conversations:', error);
     }
@@ -80,7 +88,7 @@ export default function ConversationsPage() {
   const fetchConversationDetail = async (id: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/conversations/${id}`);
+      const response = await apiFetch(`/api/conversations/${id}`);
       if (!response.ok) throw new Error('Failed to fetch conversation');
       const data = await response.json();
 
@@ -113,7 +121,7 @@ export default function ConversationsPage() {
     }
 
     try {
-      const response = await fetch(`/api/conversations/search?q=${encodeURIComponent(query)}&limit=50`);
+      const response = await apiFetch(`/api/conversations/search?q=${encodeURIComponent(query)}&limit=50`);
       if (!response.ok) throw new Error('Search failed');
       const data = await response.json();
       setSearchResults(data.results || []);
@@ -131,7 +139,7 @@ export default function ConversationsPage() {
     if (!selectedConversation) return;
 
     try {
-      const response = await fetch(`/api/conversations/${selectedConversation.id}/messages`, {
+      const response = await apiFetch(`/api/conversations/${selectedConversation.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'human', content })
@@ -150,7 +158,7 @@ export default function ConversationsPage() {
     if (!selectedConversation) return;
 
     try {
-      const response = await fetch(`/api/conversations/${selectedConversation.id}/resolve`, {
+      const response = await apiFetch(`/api/conversations/${selectedConversation.id}/resolve`, {
         method: 'POST'
       });
 
@@ -170,7 +178,7 @@ export default function ConversationsPage() {
     if (!selectedConversation) return;
 
     try {
-      const response = await fetch(`/api/conversations/${selectedConversation.id}/reopen`, {
+      const response = await apiFetch(`/api/conversations/${selectedConversation.id}/reopen`, {
         method: 'POST'
       });
 
@@ -200,7 +208,7 @@ export default function ConversationsPage() {
     if (!newThreadTitle.trim()) return;
 
     try {
-      const response = await fetch('/api/conversations', {
+      const response = await apiFetch('/api/conversations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: newThreadTitle })
@@ -231,14 +239,15 @@ export default function ConversationsPage() {
   const storeConversationCount = Object.keys(conversationsInStore).length;
 
   return (
-    <div className="page-container">
+    <div className="page-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {/* Page Header with New Thread Button */}
       <div className="page-header" style={{
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: '16px',
-        padding: '0 16px'
+        marginBottom: '0',
+        padding: '0 16px 12px',
+        flexShrink: 0,
       }}>
         <div>
           <h1 style={{ margin: 0 }}>Conversations</h1>
@@ -269,8 +278,8 @@ export default function ConversationsPage() {
         </button>
       </div>
 
-      {/* Two-column layout */}
-      <div className={layoutClasses}>
+      {/* Two-column layout — fills remaining height, each column scrolls independently */}
+      <div className={layoutClasses} style={{ flex: 1, minHeight: 0 }}>
         <ThreadListPanel
           threads={threads}
           periods={periods}

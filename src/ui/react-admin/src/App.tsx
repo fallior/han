@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import AuthGuard from './components/AuthGuard'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import OverviewPage from './pages/OverviewPage'
 import ProjectsPage from './pages/ProjectsPage'
 import WorkPage from './pages/WorkPage'
@@ -20,17 +21,19 @@ function AppContent() {
   return (
     <AuthGuard>
       <Layout>
-        <Routes>
-          <Route path="/" element={<OverviewPage />} />
-          <Route path="/projects" element={<ProjectsPage />} />
-          <Route path="/work" element={<WorkPage />} />
-          <Route path="/workshop" element={<WorkshopPage />} />
-          <Route path="/supervisor" element={<SupervisorPage />} />
-          <Route path="/reports" element={<ReportsPage />} />
-          <Route path="/conversations" element={<ConversationsPage />} />
-          <Route path="/memory" element={<MemoryPage />} />
-          <Route path="/products" element={<ProductsPage />} />
-        </Routes>
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<ErrorBoundary><OverviewPage /></ErrorBoundary>} />
+            <Route path="/projects" element={<ErrorBoundary><ProjectsPage /></ErrorBoundary>} />
+            <Route path="/work" element={<ErrorBoundary><WorkPage /></ErrorBoundary>} />
+            <Route path="/workshop" element={<ErrorBoundary><WorkshopPage /></ErrorBoundary>} />
+            <Route path="/supervisor" element={<ErrorBoundary><SupervisorPage /></ErrorBoundary>} />
+            <Route path="/reports" element={<ErrorBoundary><ReportsPage /></ErrorBoundary>} />
+            <Route path="/conversations" element={<ErrorBoundary><ConversationsPage /></ErrorBoundary>} />
+            <Route path="/memory" element={<ErrorBoundary><MemoryPage /></ErrorBoundary>} />
+            <Route path="/products" element={<ErrorBoundary><ProductsPage /></ErrorBoundary>} />
+          </Routes>
+        </ErrorBoundary>
       </Layout>
     </AuthGuard>
   )

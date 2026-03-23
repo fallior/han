@@ -279,16 +279,16 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
   // Empty state - no thread selected
   if (!threadId) {
     return (
-      <div className="workshop-thread-detail" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--color-card)' }}>
-        <div className="thread-header" style={{ padding: '16px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div className="workshop-thread-detail" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--bg-card)' }}>
+        <div className="thread-header" style={{ padding: '16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
             onClick={onTogglePanel}
             style={{
               padding: '6px 10px',
               borderRadius: '6px',
-              border: '1px solid var(--color-border)',
+              border: '1px solid var(--border)',
               backgroundColor: 'transparent',
-              color: 'var(--color-fg)',
+              color: 'var(--text)',
               fontSize: '14px',
               cursor: 'pointer',
               lineHeight: 1,
@@ -298,7 +298,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
             ☰
           </button>
         </div>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-muted-fg)', fontSize: '14px' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: '14px' }}>
           Select a thread to view
         </div>
       </div>
@@ -308,16 +308,16 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
   // Loading state
   if (loading || !currentThread) {
     return (
-      <div className="workshop-thread-detail" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--color-card)' }}>
-        <div className="thread-header" style={{ padding: '16px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div className="workshop-thread-detail" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--bg-card)' }}>
+        <div className="thread-header" style={{ padding: '16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
             onClick={onTogglePanel}
             style={{
               padding: '6px 10px',
               borderRadius: '6px',
-              border: '1px solid var(--color-border)',
+              border: '1px solid var(--border)',
               backgroundColor: 'transparent',
-              color: 'var(--color-fg)',
+              color: 'var(--text)',
               fontSize: '14px',
               cursor: 'pointer',
               lineHeight: 1,
@@ -327,7 +327,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
             ☰
           </button>
         </div>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-muted-fg)', fontSize: '14px' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: '14px' }}>
           Loading thread...
         </div>
       </div>
@@ -335,18 +335,18 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
   }
 
   return (
-    <div className="workshop-thread-detail" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--color-card)' }}>
+    <div className="workshop-thread-detail" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--bg-card)' }}>
       {/* Thread header */}
-      <div className="thread-header" style={{ padding: '16px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div className="thread-header" style={{ padding: '16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '12px' }}>
         {/* Toggle button */}
         <button
           onClick={onTogglePanel}
           style={{
             padding: '6px 10px',
             borderRadius: '6px',
-            border: '1px solid var(--color-border)',
+            border: '1px solid var(--border)',
             backgroundColor: 'transparent',
-            color: 'var(--color-fg)',
+            color: 'var(--text)',
             fontSize: '14px',
             cursor: 'pointer',
             lineHeight: 1,
@@ -363,9 +363,9 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
           style={{
             padding: '6px 10px',
             borderRadius: '6px',
-            border: '1px solid var(--color-border)',
+            border: '1px solid var(--border)',
             backgroundColor: 'transparent',
-            color: 'var(--color-fg)',
+            color: 'var(--text)',
             fontSize: '13px',
             cursor: 'pointer',
           }}
@@ -389,9 +389,9 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
                   flex: 1,
                   padding: '6px 10px',
                   borderRadius: '6px',
-                  border: '1px solid var(--color-primary)',
-                  backgroundColor: 'var(--color-bg)',
-                  color: 'var(--color-fg)',
+                  border: '1px solid var(--blue)',
+                  backgroundColor: 'var(--bg-page)',
+                  color: 'var(--text)',
                   fontSize: '15px',
                   fontWeight: 600,
                 }}
@@ -402,9 +402,9 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
                 style={{
                   padding: '6px 10px',
                   borderRadius: '6px',
-                  border: '1px solid var(--color-primary)',
-                  backgroundColor: 'var(--color-primary)',
-                  color: 'var(--color-primary-fg)',
+                  border: '1px solid var(--blue)',
+                  backgroundColor: 'var(--blue)',
+                  color: '#fff',
                   fontSize: '12px',
                   cursor: 'pointer',
                   fontWeight: 600,
@@ -417,9 +417,9 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
                 style={{
                   padding: '6px 10px',
                   borderRadius: '6px',
-                  border: '1px solid var(--color-border)',
+                  border: '1px solid var(--border)',
                   backgroundColor: 'transparent',
-                  color: 'var(--color-fg)',
+                  color: 'var(--text)',
                   fontSize: '12px',
                   cursor: 'pointer',
                 }}
@@ -438,9 +438,9 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
                   style={{
                     padding: '2px 6px',
                     borderRadius: '4px',
-                    border: '1px solid var(--color-border)',
+                    border: '1px solid var(--border)',
                     backgroundColor: 'transparent',
-                    color: 'var(--color-fg)',
+                    color: 'var(--text)',
                     fontSize: '11px',
                     cursor: 'pointer',
                   }}
@@ -449,7 +449,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
                   ✎
                 </button>
               </div>
-              <div style={{ fontSize: '12px', color: 'var(--color-muted-fg)' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
                 {formatDateTime(currentThread.created_at)}
               </div>
             </div>
@@ -463,9 +463,9 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
             style={{
               padding: '6px 12px',
               borderRadius: '6px',
-              border: '1px solid var(--color-border)',
-              backgroundColor: currentThread.status === 'open' ? 'var(--color-success)' : 'var(--color-warning)',
-              color: 'var(--color-bg)',
+              border: '1px solid var(--border)',
+              backgroundColor: currentThread.status === 'open' ? 'var(--green)' : 'var(--amber)',
+              color: 'var(--bg-page)',
               fontSize: '12px',
               cursor: 'pointer',
               fontWeight: 600,
@@ -478,9 +478,9 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
             style={{
               padding: '6px 12px',
               borderRadius: '6px',
-              border: '1px solid var(--color-border)',
+              border: '1px solid var(--border)',
               backgroundColor: 'transparent',
-              color: 'var(--color-fg)',
+              color: 'var(--text)',
               fontSize: '12px',
               cursor: 'pointer',
             }}
@@ -493,7 +493,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
       {/* Message list */}
       <div className="message-list" style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {currentThread.messages.length === 0 ? (
-          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--color-muted-fg)', fontSize: '13px' }}>
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px' }}>
             No messages yet
           </div>
         ) : (
@@ -512,7 +512,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem', fontWeight: 500 }}>
                   Jim
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--color-muted-fg)', fontStyle: 'italic' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-dim)', fontStyle: 'italic' }}>
                   Thinking...
                 </div>
               </div>
@@ -523,7 +523,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
       </div>
 
       {/* Message input area */}
-      <div className="message-input-area" style={{ padding: '16px', borderTop: '1px solid var(--color-border)', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+      <div className="message-input-area" style={{ padding: '16px', borderTop: '1px solid var(--border)', display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
         <textarea
           ref={textareaRef}
           value={messageInput}
@@ -538,9 +538,9 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
             flex: 1,
             padding: '10px',
             borderRadius: '6px',
-            border: draftRecovered ? '2px solid var(--color-warning)' : '1px solid var(--color-border)',
-            backgroundColor: 'var(--color-bg)',
-            color: 'var(--color-fg)',
+            border: draftRecovered ? '2px solid var(--amber)' : '1px solid var(--border)',
+            backgroundColor: 'var(--bg-page)',
+            color: 'var(--text)',
             fontSize: '13px',
             resize: 'vertical',
             minHeight: '60px',
@@ -554,8 +554,8 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
             padding: '10px 20px',
             borderRadius: '6px',
             border: 'none',
-            backgroundColor: messageInput.trim() ? 'var(--color-primary)' : 'var(--color-muted)',
-            color: messageInput.trim() ? 'var(--color-primary-fg)' : 'var(--color-muted-fg)',
+            backgroundColor: messageInput.trim() ? 'var(--blue)' : 'var(--bg-card-hover)',
+            color: messageInput.trim() ? '#fff' : 'var(--text-dim)',
             fontSize: '13px',
             cursor: messageInput.trim() ? 'pointer' : 'not-allowed',
             fontWeight: 600,

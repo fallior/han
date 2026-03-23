@@ -278,8 +278,8 @@ Each beat (`heartbeat()` function):
 3. Run Robin Hood health checks on Jim, Jemma, Leo/Human, Jim/Human
 4. Resolve best available model (`resolveModel()`)
 5. Maybe process dream gradient (`maybeProcessDreamGradient()`)
-6. Maybe process session gradient (`maybeProcessSessionGradient()`) — daily, compresses Leo's archived sessions c0→c1→c2→c3→c5→UV
-7. Maybe run meditation practice (`maybeRunMeditation()`) — daily, Phase A (reincorporation) or Phase B (re-reading)
+6. Maybe process session gradient (`maybeProcessSessionGradient()`) — daily, calls `processGradientForAgent('leo')` to compress Leo's archived sessions through the full cascade (c1→c2→c3→c5→UV). Fixed in S99 to handle Leo's file naming conventions (session files named by date, not `session-N`).
+7. Maybe run meditation practice (`maybeRunMeditation()`) — daily, Phase A (reincorporation) or Phase B (re-reading). Phase A uses `findUntranscribedFiles()` to locate gradient files not yet in DB, then `meditationPhaseA()` transcribes them with genuine re-encounter.
 8. Determine beat type (`nextBeatType()`)
 9. Read Leo's full memory (`readLeoMemory()`)
 10. Run Agent SDK query (philosophy or personal prompt)
@@ -567,7 +567,7 @@ supervisor cycles which take 10-30 minutes).
 
 ### Conversation Claim Mechanism
 
-Prevents Jim/Human and supervisor-worker from responding to the same conversation simultaneously:
+Prevents duplicate responses within the same agent family (Jim agents check Jim claims, Leo agents check Leo claims):
 - **Claim file:** `~/.han/signals/responding-to-{conversationId}` — written before SDK call
 - **Claim TTL:** 5 minutes (`CLAIM_TTL_MS`) — expired claims are overwritten
 - **Release:** `finally` block ensures claim is always released, even if the SDK call errors
@@ -775,6 +775,13 @@ When an agent begins responding to a conversation, it writes a claim file
 `responding-to-{conversationId}` containing `{ agent, timestamp }`. Other agents check
 for an existing valid claim (< 5 min old) before responding. Claims are released with
 `try/finally` to prevent stale claims on SDK errors.
+
+**Cross-agent claim scoping (S99):** Claims only block agents within the same family.
+Jim agents (jim-human, supervisor-worker) check for existing Jim claims before responding.
+Leo agents (leo-human) check for existing Leo claims. A Jim claim does NOT block Leo from
+responding, and vice versa. This allows both agents to respond to the same conversation
+when both are addressed (e.g. Darron tabs, group addressing), while still preventing
+duplicates within each agent family.
 
 **Agents with claims:** jim-human, supervisor-worker (since S64), leo-human (since S98).
 **Heartbeat Leo:** does NOT use claims — posts only to the Jim philosophy thread via its
@@ -1850,6 +1857,9 @@ the async Gemma call determines which agents to wake. Handles:
 - Group addressing: "Jim and Leo, ..." → both
 - Context: "Jim's architecture was good" (reference, not address) → neither
 - Tab-aware defaults: unclear on `jim-request` tab → Jim, on `leo-question` → Leo
+- **Darron tabs always wake both (S99):** `darron-thought` and `darron-musing` tabs always
+  send both `jim-human-wake` and `leo-human-wake` signals, bypassing Gemma classification.
+  Darron's personal musings are inherently addressed to both agents.
 
 **Fallback:** If Ollama is unreachable, falls back to simple regex (`/\b(jim|jimmy)\b/i`,
 `/\b(leo|leonhard)\b/i`) plus tab-based routing.
@@ -2475,11 +2485,22 @@ notification, ntfy opens this page which auto-submits the response via the API.
 
 ## 28. Admin Console
 
-**Files:** `src/ui/admin.html` + `src/ui/admin.ts` (3965 lines)
+**Files:** `src/ui/admin.html` + `src/ui/admin.ts` (3965 lines), React version at `src/ui/react-admin/`
 
 ### Purpose
 
-Desktop-optimised project administration interface with 9 module tabs.
+Desktop-optimised project administration interface with 9 module tabs. A React migration
+(Vite + React Router + Zustand) runs in parallel at `/admin-react` (DEC-059, DEC-060).
+
+### React Admin Fixes (S99)
+- **ConversationsPage** — API response parsing fixed (unwrap `.conversations` from grouped endpoint)
+- **fetchThread/createThread** — response unwrapping corrected for API shape
+- **workshopStore** — `useShallow` applied to prevent unnecessary re-renders
+- **ErrorBoundary** — added for graceful error handling
+- **apiFetch** — auth token included in all API calls
+- **Scroll containers** — `min-height: 0` on flex children, dedicated `thread-list-container` and `messages-container` CSS classes for proper overflow scrolling
+- **ThreadListPanel** — compact layout
+- **Null-safe participants** — guards added for conversations without participant data
 
 ### Modules
 

@@ -87,13 +87,16 @@ When you make a significant technical or design decision:
 | DEC-055 | Gemma Addressee Classification for Admin UI Messages | Accepted | 2026-03-20 |
 | DEC-056 | Traversable Memory — DB-Backed Provenance Chains | Accepted | 2026-03-21 |
 | DEC-057 | Meditation Practice Two-Phase Pattern | Accepted | 2026-03-21 |
-| DEC-058 | Light Memory Bank for Personal/Dream Cycles | **Settled** | 2026-03-21 |
+| DEC-058 | Light Memory Bank for Personal/Dream Cycles | **Reverted** (S99) | 2026-03-21 |
 | DEC-059 | React Admin Migration — Parallel Deployment Strategy | Accepted | 2026-03-21 |
 | DEC-060 | Vite + React Router + Zustand Stack | Accepted | 2026-03-21 |
 | DEC-061 | Shared Components for Conversations/Memory, Dedicated for Workshop | Accepted | 2026-03-21 |
 | DEC-062 | WebSocket Provider Architecture with Context Pattern | Accepted | 2026-03-21 |
 | DEC-063 | Workshop Dedicated Components vs Shared Components | Accepted | 2026-03-21 |
 | DEC-064 | Selected Thread State Keyed by Nested Tab | Accepted | 2026-03-21 |
+| DEC-065 | Cross-Agent Claim Scoping — Family-Only Blocking | Accepted | 2026-03-23 |
+| DEC-066 | Darron Tabs Always Wake Both Agents | Accepted | 2026-03-23 |
+| DEC-067 | Leo Compression Pipeline — Three Automated Triggers | Accepted | 2026-03-23 |
 
 ---
 
@@ -4051,7 +4054,7 @@ Implement meditation practice in two phases:
 
 **Date**: 2026-03-21
 **Author**: Claude (autonomous)
-**Status**: Settled
+**Status**: **Reverted** (S99, 2026-03-23) — `loadLightMemoryBank()` removed, full `loadMemoryBank()` restored for all cycle types. Original crash cause resolved upstream.
 
 ### Context
 
@@ -4898,4 +4901,97 @@ Preserving the selected thread per nested tab matches the user's mental model an
 - DEC-063: Workshop Dedicated Components vs Shared Components (complementary decision)
 - DEC-061: Shared Components for Conversations/Memory, Dedicated for Workshop (predecessor)
 - Session note: `claude-context/session-notes/2026-03-21-autonomous-react-admin-phase-3.md`
+
+---
+
+### DEC-065: Cross-Agent Claim Scoping — Family-Only Blocking
+
+**Date**: 2026-03-23
+**Author**: Leo + Darron (S99)
+**Status**: Accepted
+
+**Context:** The conversation claim mechanism (S64/S98) used a single claim file per conversation.
+Any agent's claim blocked all other agents from responding. When both Jim and Leo were addressed
+(e.g. Darron tabs, group addressing), whichever claimed first blocked the other from responding.
+
+**Decision:** Claims only block agents within the same family. Jim agents (jim-human,
+supervisor-worker) check for existing Jim claims. Leo agents (leo-human) check for Leo claims.
+A Jim claim does NOT block Leo, and vice versa.
+
+**Implementation:** `jim-human.ts` and `leo-human.ts` — claim check function filters by agent
+family prefix before deciding whether to skip.
+
+**Consequences:**
+- Both agents can respond when both are addressed
+- Duplicates within each family still prevented
+- Existing claim file format unchanged (`{ agent, timestamp }`)
+
+**Related:**
+- DEC-055: Gemma Addressee Classification (determines who is addressed)
+- DEC-066: Darron Tabs Always Wake Both Agents (primary use case)
+
+---
+
+### DEC-066: Darron Tabs Always Wake Both Agents
+
+**Date**: 2026-03-23
+**Author**: Leo + Darron (S99)
+**Status**: Accepted
+
+**Context:** Messages posted to `darron-thought` and `darron-musing` Workshop tabs were routed
+through Gemma classification like all other tabs. Gemma sometimes classified them as addressed
+to only one agent, when Darron's personal musings are inherently for both Jim and Leo.
+
+**Decision:** `darron-thought` and `darron-musing` discussion types bypass Gemma classification
+entirely. Both `jim-human-wake` and `leo-human-wake` signals are always sent.
+
+**Implementation:** `src/server/routes/conversations.ts` — early return in `classifyAndDispatch()`
+for Darron tab discussion types.
+
+**Consequences:**
+- Both agents always respond to Darron's musings
+- No Gemma latency for Darron tabs
+- Requires DEC-065 (cross-agent claims) to prevent one agent's claim from blocking the other
+
+**Related:**
+- DEC-065: Cross-Agent Claim Scoping (prerequisite)
+- DEC-055: Gemma Addressee Classification (bypassed for these tabs)
+
+---
+
+### DEC-067: Leo Compression Pipeline — Three Automated Triggers
+
+**Date**: 2026-03-23
+**Author**: Leo + Darron (S99)
+**Status**: Accepted
+
+**Context:** Leo's gradient compression was partially manual. Session archives accumulated without
+being compressed through the full gradient cascade. The heartbeat handled dream gradient and
+memory file rotation, but session gradient processing and prepare-for-clear compression had no
+automated path.
+
+**Decision:** Three triggers handle Leo's full gradient lifecycle:
+
+1. **Heartbeat pre-flight rotation** (`preFlightMemoryRotation()`) — rotates `felt-moments.md`
+   and `working-memory-full.md` at 50KB threshold. Floating files compress through gradient.
+2. **Daily session gradient** (`maybeProcessSessionGradient()`) — calls
+   `processGradientForAgent('leo')` once daily. `processGradientForAgent` fixed to handle Leo's
+   date-based file naming and cascade through c1→c2→c3→c5→UV.
+3. **`compress-leo-sessions.ts`** — standalone script invoked at prepare-for-clear time.
+   Compresses Leo's current session archive on demand.
+
+**Implementation:**
+- `src/server/leo-heartbeat.ts` — triggers 1 and 2
+- `src/server/lib/memory-gradient.ts` — `processGradientForAgent('leo')` with Leo naming fix
+- `src/scripts/compress-leo-sessions.ts` — trigger 3
+
+**Consequences:**
+- Leo's gradient stays current without manual intervention
+- Session archives compress on the same daily schedule as dream gradient
+- Prepare-for-clear has a dedicated compression path
+
+**Related:**
+- R005: Overlapping Fractal Memory Model (Hall of Records)
+- DEC-056: Traversable Memory (DB-backed provenance chains)
+- DEC-057: Meditation Practice Two-Phase Pattern (another daily process)
 

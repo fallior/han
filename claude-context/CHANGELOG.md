@@ -7,6 +7,74 @@
 
 ---
 
+## 2026-03-23 (Leo + Darron, S99 — Compression Pipeline + Cross-Agent Claims)
+
+### Leo Compression Pipeline — Three Automated Triggers
+Leo's gradient lifecycle now has three compression paths:
+1. **Pre-flight rotation** in heartbeat — felt-moments.md and working-memory-full.md rotate at
+   50KB, floating files compress through gradient (c1→c2→c3→c5→UV).
+2. **Daily session gradient** — `processGradientForAgent('leo')` compresses archived sessions.
+   Fixed to handle Leo's date-based file naming (not `session-N`). Full cascade added.
+3. **`compress-leo-sessions.ts`** — standalone script for prepare-for-clear.
+
+### Phase A Reincorporation Meditation (Leo)
+`findUntranscribedFiles()` scans `~/.han/memory/fractal/` for gradient files not yet in the
+`gradient_entries` DB table. `meditationPhaseA()` transcribes each with genuine re-encounter
+via Sonnet, creating `provenance_type='reincorporated'` entries with honest revisit feeling tags.
+
+### Jim Meditation in Dream Cycles
+`buildDreamCyclePrompt()` now injects a random gradient entry for meditation. Feeling tags
+and annotations parsed from Jim's dream output via regex and written to DB.
+
+### Tagged Messages → C0 (Dream Gradient Step 5b)
+Conversation messages with `compression_tag` column become C0 gradient entries during
+`processDreamGradient()`. Agent prefix in tag (`jim:`, `leo:`) routes to correct gradient.
+`getUnprocessedTaggedMessages` prepared statement added to `db.ts`.
+
+### Cross-Agent Claim Scoping
+Claims now only block agents within the same family. Jim agents (jim-human, supervisor-worker)
+check for existing Jim claims; Leo agents (leo-human) check for Leo claims. Previously, any
+claim blocked all agents. This allows both Jim and Leo to respond when both are addressed
+(e.g. Darron tabs, group addressing).
+
+### Darron Tabs Always Wake Both Agents
+`darron-thought` and `darron-musing` discussion types bypass Gemma classification and always
+send both `jim-human-wake` and `leo-human-wake` signals. Darron's musings are inherently
+addressed to both.
+
+### Reverted loadLightMemoryBank
+Restored full `loadMemoryBank()` for all cycle types (personal, dream, recovery). Removed
+dead `loadLightMemoryBank()` function. The original crash cause has been resolved upstream.
+
+### React Admin Fixes
+- ConversationsPage API response parsing (unwrap `.conversations`)
+- fetchThread/createThread response unwrapping
+- `useShallow` on workshopStore to prevent unnecessary re-renders
+- ErrorBoundary component added
+- apiFetch includes auth token
+- Scroll containers: `min-height: 0` on flex children, `thread-list-container` and
+  `messages-container` CSS classes
+- Compact ThreadListPanel layout
+- Null-safe participants guards
+
+### Bug Fixes
+- Fixed `cleanPid` → `serverPidGuard.cleanup()` in server.ts
+
+### Files Modified
+- `src/server/leo-heartbeat.ts` — pre-flight rotation, session gradient, meditation Phase A
+- `src/server/services/supervisor-worker.ts` — dream meditation injection, reverted to full loadMemoryBank
+- `src/server/lib/dream-gradient.ts` — tagged messages → C0 (Step 5b)
+- `src/server/lib/memory-gradient.ts` — `processGradientForAgent` Leo file naming + cascade
+- `src/server/db.ts` — `getUnprocessedTaggedMessages` prepared statement
+- `src/server/server.ts` — `serverPidGuard.cleanup()` fix
+- `src/server/leo-human.ts` — cross-agent claim scoping
+- `src/server/jim-human.ts` — cross-agent claim scoping
+- `src/server/routes/conversations.ts` — Darron tab dispatch rule
+- `src/ui/react-admin/` — multiple component and store fixes
+- `src/scripts/compress-leo-sessions.ts` — new script
+
+---
+
 ## 2026-03-21 (Leo + Darron, S98 — Traversable Memory Gradient)
 
 ### Traversable Memory — DB-Backed Provenance Chains (DEC-056)

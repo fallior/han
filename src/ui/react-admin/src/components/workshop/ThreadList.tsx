@@ -179,9 +179,9 @@ export function ThreadList() {
   };
 
   return (
-    <div className="workshop-thread-list" style={{ width: '280px', display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--color-card)', borderRight: '1px solid var(--color-border)' }}>
+    <div className="workshop-thread-list" style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--bg-card)', borderRight: '1px solid var(--border)' }}>
       {/* Period filter bar */}
-      <div style={{ padding: '12px', borderBottom: '1px solid var(--color-border)' }}>
+      <div style={{ padding: '12px', borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
           {PERIOD_FILTERS.map((filter) => {
             const count = periodCounts[filter.key] || 0;
@@ -194,9 +194,9 @@ export function ThreadList() {
                 style={{
                   padding: '4px 10px',
                   borderRadius: '12px',
-                  border: isActive ? '1px solid var(--color-primary)' : '1px solid var(--color-border)',
-                  backgroundColor: isActive ? 'var(--color-primary)' : 'transparent',
-                  color: isActive ? 'var(--color-primary-fg)' : 'var(--color-fg)',
+                  border: isActive ? '1px solid var(--blue)' : '1px solid var(--border)',
+                  backgroundColor: isActive ? 'var(--blue)' : 'transparent',
+                  color: isActive ? '#fff' : 'var(--text)',
                   fontSize: '13px',
                   fontWeight: isActive ? 600 : 400,
                   cursor: 'pointer',
@@ -209,8 +209,8 @@ export function ThreadList() {
                 {count > 0 && (
                   <span
                     style={{
-                      backgroundColor: isActive ? 'var(--color-primary-fg)' : 'var(--color-muted)',
-                      color: isActive ? 'var(--color-primary)' : 'var(--color-muted-fg)',
+                      backgroundColor: isActive ? '#fff' : 'var(--bg-card-hover)',
+                      color: isActive ? 'var(--blue)' : 'var(--text-dim)',
                       borderRadius: '8px',
                       padding: '0 5px',
                       fontSize: '11px',
@@ -229,16 +229,16 @@ export function ThreadList() {
       </div>
 
       {/* Archive toggle */}
-      <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--color-border)' }}>
+      <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
         <button
           onClick={() => setWorkshopShowArchived(!workshopShowArchived)}
           style={{
             width: '100%',
             padding: '6px 10px',
             borderRadius: '6px',
-            border: workshopShowArchived ? '1px solid var(--color-primary)' : '1px solid var(--color-border)',
-            backgroundColor: workshopShowArchived ? 'var(--color-primary)' : 'transparent',
-            color: workshopShowArchived ? 'var(--color-primary-fg)' : 'var(--color-fg)',
+            border: workshopShowArchived ? '1px solid var(--blue)' : '1px solid var(--border)',
+            backgroundColor: workshopShowArchived ? 'var(--blue)' : 'transparent',
+            color: workshopShowArchived ? '#fff' : 'var(--text)',
             fontSize: '13px',
             fontWeight: workshopShowArchived ? 600 : 400,
             cursor: 'pointer',
@@ -249,7 +249,7 @@ export function ThreadList() {
       </div>
 
       {/* Search bar */}
-      <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--color-border)' }}>
+      <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
         <div style={{ position: 'relative', display: 'flex', gap: '6px', alignItems: 'center' }}>
           <input
             type="text"
@@ -260,9 +260,9 @@ export function ThreadList() {
               flex: 1,
               padding: '6px 10px',
               borderRadius: '6px',
-              border: '1px solid var(--color-border)',
-              backgroundColor: 'var(--color-bg)',
-              color: 'var(--color-fg)',
+              border: '1px solid var(--border)',
+              backgroundColor: 'var(--bg-page)',
+              color: 'var(--text)',
               fontSize: '13px',
             }}
           />
@@ -272,9 +272,9 @@ export function ThreadList() {
               style={{
                 padding: '6px 10px',
                 borderRadius: '6px',
-                border: '1px solid var(--color-border)',
+                border: '1px solid var(--border)',
                 backgroundColor: 'transparent',
-                color: 'var(--color-fg)',
+                color: 'var(--text)',
                 fontSize: '12px',
                 cursor: 'pointer',
               }}
@@ -288,13 +288,13 @@ export function ThreadList() {
       {/* Thread list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
         {loading && (
-          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--color-muted-fg)', fontSize: '13px' }}>
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px' }}>
             Loading threads...
           </div>
         )}
 
         {!loading && displayThreads.length === 0 && (
-          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--color-muted-fg)', fontSize: '13px' }}>
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '13px' }}>
             {searchQuery.trim() ? 'No threads found' : 'No threads in this period'}
           </div>
         )}
@@ -311,8 +311,8 @@ export function ThreadList() {
                 padding: '10px',
                 marginBottom: '6px',
                 borderRadius: '8px',
-                border: isActive ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
-                backgroundColor: isActive ? 'var(--color-muted)' : 'var(--color-bg)',
+                border: isActive ? '2px solid var(--blue)' : '1px solid var(--border)',
+                backgroundColor: isActive ? 'var(--bg-card-hover)' : 'var(--bg-page)',
                 cursor: 'pointer',
                 opacity: thread.archived ? 0.55 : 1,
                 boxShadow: isActive ? '0 2px 8px rgba(59, 130, 246, 0.3)' : 'none',
@@ -329,7 +329,7 @@ export function ThreadList() {
                     width: '8px',
                     height: '8px',
                     borderRadius: '50%',
-                    backgroundColor: 'var(--color-primary)',
+                    backgroundColor: 'var(--blue)',
                   }}
                 />
               )}
@@ -340,15 +340,15 @@ export function ThreadList() {
               </div>
 
               {/* Time + status + archived */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '12px', color: 'var(--color-muted-fg)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '12px', color: 'var(--text-dim)' }}>
                 <span>{timeSince(thread.updated_at)}</span>
 
                 <span
                   style={{
                     padding: '2px 6px',
                     borderRadius: '4px',
-                    backgroundColor: thread.status === 'resolved' ? 'var(--color-success)' : 'var(--color-warning)',
-                    color: 'var(--color-bg)',
+                    backgroundColor: thread.status === 'resolved' ? 'var(--green)' : 'var(--amber)',
+                    color: 'var(--bg-page)',
                     fontSize: '11px',
                     fontWeight: 600,
                   }}
@@ -361,8 +361,8 @@ export function ThreadList() {
                     style={{
                       padding: '2px 6px',
                       borderRadius: '4px',
-                      backgroundColor: 'var(--color-muted)',
-                      color: 'var(--color-muted-fg)',
+                      backgroundColor: 'var(--bg-card-hover)',
+                      color: 'var(--text-dim)',
                       fontSize: '11px',
                       fontWeight: 600,
                     }}

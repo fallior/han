@@ -20,8 +20,8 @@ export function NestedTabBar() {
       style={{
         display: 'flex',
         gap: 0,
-        borderBottom: '1px solid var(--color-border)',
-        background: 'var(--color-bg)',
+        borderBottom: '1px solid var(--border)',
+        background: 'var(--bg-page)',
         padding: '0 8px',
       }}
     >
@@ -39,7 +39,7 @@ export function NestedTabBar() {
               background: 'transparent',
               cursor: 'pointer',
               fontSize: '12px',
-              color: isActive ? color : 'var(--color-muted-fg)',
+              color: isActive ? color : 'var(--text-dim)',
               borderBottom: isActive ? `2px solid ${color}` : 'none',
               transition: 'all 150ms ease',
               marginTop: '8px',

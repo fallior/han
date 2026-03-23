@@ -202,23 +202,30 @@ export async function fetchGroupedThreads(
 
 /**
  * Fetch single thread with all messages
+ * API returns { success, conversation, messages } — merge into flat ThreadDetail
  */
 export async function fetchThread(id: number | string): Promise<ThreadDetail> {
-  return fetchJSON<ThreadDetail>(`/api/conversations/${id}`);
+  const data = await fetchJSON<{ success: boolean; conversation: Thread; messages: Message[] }>(`/api/conversations/${id}`);
+  return {
+    ...data.conversation,
+    messages: data.messages || [],
+  };
 }
 
 /**
  * Create new conversation thread
+ * API returns { success, conversation } — extract the conversation
  */
 export async function createThread(
   title: string,
   discussionType: string
 ): Promise<ThreadDetail> {
-  return fetchJSON<ThreadDetail>('/api/conversations', {
+  const data = await fetchJSON<{ success: boolean; conversation: Thread }>('/api/conversations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, discussion_type: discussionType }),
   });
+  return { ...data.conversation, messages: [] };
 }
 
 /**

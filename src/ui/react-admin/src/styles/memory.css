@@ -6,8 +6,13 @@
     grid-template-columns: 280px 1fr;
     gap: 0;
     flex: 1;
+    min-height: 0;
     overflow: hidden;
     transition: grid-template-columns 0.3s ease;
+}
+
+.md-conversation-layout > * {
+    min-height: 0;
 }
 
 .md-conversation-layout.thread-panel-collapsed {

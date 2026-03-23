@@ -117,9 +117,14 @@ a:hover { text-decoration: underline; }
     grid-template-columns: 280px 1fr;
     gap: 0;
     height: 100%;
+    min-height: 0;
     flex: 1;
     overflow: hidden;
     transition: grid-template-columns 0.3s ease;
+}
+
+.conversation-layout > * {
+    min-height: 0;
 }
 
 .conversation-layout.thread-panel-collapsed,
@@ -139,6 +144,7 @@ a:hover { text-decoration: underline; }
     grid-template-columns: 280px 1fr;
     gap: 0;
     flex: 1;
+    min-height: 0;
     overflow: hidden;
     transition: grid-template-columns 0.3s ease;
 }
@@ -222,6 +228,13 @@ a:hover { text-decoration: underline; }
     background: var(--bg-card);
     border-right: 1px solid var(--border-card);
     overflow: hidden;
+    min-height: 0;
+}
+
+.thread-list-container {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
 }
 
 .thread-list {
@@ -593,6 +606,17 @@ a:hover { text-decoration: underline; }
     flex: 1;
     background: var(--bg-page);
     overflow: hidden;
+    min-height: 0;
+}
+
+.messages-container {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
 #threadDetail,

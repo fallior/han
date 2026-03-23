@@ -39,7 +39,7 @@ export interface WorkshopSlice {
 const defaultNestedTabs: Record<WorkshopPersona, string> = {
   jim: 'jim-request',
   leo: 'leo-question',
-  darron: 'darron-exploration',
+  darron: 'darron-thought',
   jemma: 'jemma-messages',
 };
 

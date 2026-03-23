@@ -1,8 +1,13 @@
 /**
  * Workshop Store Hook
  * Convenience hook to access workshop-specific state from the main store
+ *
+ * Uses useShallow to prevent infinite re-render loops — without it,
+ * the object selector creates a new reference every render, which Zustand
+ * interprets as "state changed", triggering another render (React error #185).
  */
 
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from './index';
 
 /**
@@ -10,7 +15,7 @@ import { useStore } from './index';
  * Returns workshop-related state and actions with cleaner naming
  */
 export function useWorkshopStore() {
-  return useStore((state) => ({
+  return useStore(useShallow((state) => ({
     // State (without workshop prefix for cleaner access)
     persona: state.workshopPersona,
     nestedTab: state.workshopNestedTab,
@@ -35,7 +40,7 @@ export function useWorkshopStore() {
 
     // Computed getters
     currentThreadId: state.currentThreadId,
-  }));
+  })));
 }
 
 // Re-export for convenience

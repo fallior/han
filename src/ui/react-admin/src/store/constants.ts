@@ -43,11 +43,11 @@ export const workshopNestedTabs: Record<WorkshopPersona, NestedTabConfig[]> = {
   ],
   leo: [
     { key: 'leo-question', label: 'Questions' },
-    { key: 'leo-insight', label: 'Insights' },
+    { key: 'leo-postulate', label: 'Postulates' },
   ],
   darron: [
-    { key: 'darron-exploration', label: 'Explorations' },
-    { key: 'darron-dream', label: 'Dreams' },
+    { key: 'darron-thought', label: 'Thoughts' },
+    { key: 'darron-musing', label: 'Musings' },
   ],
   jemma: [
     { key: 'jemma-messages', label: 'Messages' },

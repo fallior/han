@@ -36,6 +36,24 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-23 — Leo + Darron, S99 — Compression Pipeline, Cross-Agent Claims, React Admin Fixes
+
+- **Leo compression pipeline automated** — Three triggers now handle Leo's full gradient lifecycle:
+  1. **Heartbeat pre-flight rotation** (`preFlightMemoryRotation()`) — rotates `felt-moments.md` and `working-memory-full.md` at 50KB, compresses floating files through gradient.
+  2. **Daily session gradient** (`maybeProcessSessionGradient()`) — calls `processGradientForAgent('leo')` with full cascade (c1→c2→c3→c5→UV). Fixed to handle Leo file naming conventions.
+  3. **`compress-leo-sessions.ts`** — standalone script for prepare-for-clear, compresses Leo's session archives on demand.
+- **Phase A reincorporation meditation** — `findUntranscribedFiles()` and `meditationPhaseA()` implemented in `leo-heartbeat.ts`. Locates gradient files not yet in DB, transcribes them with genuine re-encounter and honest revisit feeling tags.
+- **Jim meditation in dream cycle** — `buildDreamCyclePrompt()` in `supervisor-worker.ts` now injects a meditation entry. Feeling tags parsed from dream output and written to DB.
+- **Tagged messages → C0** — Step 5b in `processDreamGradient()` (`dream-gradient.ts`) creates C0 gradient entries from conversation messages with `compression_tag`. Agent prefix (`jim:`, `leo:`) determines gradient ownership.
+- **`getUnprocessedTaggedMessages`** — new prepared statement in `db.ts` for tagged message retrieval.
+- **Reverted `loadLightMemoryBank`** — restored full `loadMemoryBank()` for all cycle types, removed dead function. DEC-058 status updated accordingly.
+- **Fixed `cleanPid` → `serverPidGuard.cleanup()`** in `server.ts` — corrected PID guard cleanup on shutdown.
+- **Cross-agent claim fix** — `leo-human.ts` and `jim-human.ts` updated so claims only block agents within the same family. Jim claims don't block Leo, Leo claims don't block Jim. Allows both to respond when both are addressed.
+- **Darron tabs always wake both** — `darron-thought` and `darron-musing` discussion types in `conversations.ts` bypass Gemma classification and always send both `jim-human-wake` and `leo-human-wake` signals.
+- **React admin fixes** — ConversationsPage API parsing, fetchThread/createThread unwrapping, `useShallow` on workshopStore, ErrorBoundary, apiFetch auth, scroll containers (`min-height:0`, thread-list-container, messages-container CSS), compact ThreadListPanel, null-safe participants.
+- **String Theory postulate** — posted to Philosopher Leo > Postulates conversation thread.
+- **Plans written**: `jemma-unified-dispatch-s99.md`, `change-gradient-s99.md`.
+
 ### 2026-03-21 — Claude (autonomous) — React Admin Phase 3: Workshop Tab Migration
 
 - **Workshop tab complete** — The most complex and highest-value tab migrated to React with full feature parity. This is where Darron spends most of his time interacting with Jim, Leo, and Jemma. The original vanilla admin version (720 lines spanning admin.ts lines 3200-3920) had multiple state interaction bugs due to complex persona + nested tab + period filter + selected thread state management.

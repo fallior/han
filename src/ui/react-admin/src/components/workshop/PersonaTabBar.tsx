@@ -16,8 +16,8 @@ export function PersonaTabBar() {
       style={{
         display: 'flex',
         gap: 0,
-        borderBottom: '2px solid var(--color-border)',
-        background: 'var(--color-muted)',
+        borderBottom: '2px solid var(--border)',
+        background: 'var(--bg-card)',
       }}
     >
       {(Object.entries(workshopPersonaTabs) as [WorkshopPersona, typeof workshopPersonaTabs[WorkshopPersona]][]).map(([key, tab]) => {
@@ -38,7 +38,7 @@ export function PersonaTabBar() {
               cursor: 'pointer',
               fontSize: '13px',
               fontWeight: isActive ? 600 : 400,
-              color: isActive ? color : 'var(--color-muted-fg)',
+              color: isActive ? color : 'var(--text-dim)',
               borderBottom: isActive ? `3px solid ${color}` : 'none',
               transition: 'all 200ms ease',
             }}

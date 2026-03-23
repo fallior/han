@@ -31,6 +31,13 @@ interface AddresseeResult {
 async function classifyAddressee(content: string, discussionType: string): Promise<AddresseeResult> {
     const isJimTab = discussionType === 'jim-request' || discussionType === 'jim-report';
     const isLeoTab = discussionType === 'leo-question' || discussionType === 'leo-postulate';
+    const isDarronTab = discussionType === 'darron-thought' || discussionType === 'darron-musing';
+
+    // Darron's personal tabs always wake both agents — his thoughts are for both colleagues
+    if (isDarronTab) {
+        console.log(`[Conversations] Darron tab (${discussionType}) — waking both Jim and Leo`);
+        return { jim: true, leo: true, reasoning: 'darron-tab: always both' };
+    }
 
     try {
         const res = await fetch(`${OLLAMA_URL}/api/generate`, {
