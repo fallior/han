@@ -20,7 +20,7 @@ import { createThread } from '../lib/api';
 import '../styles/workshop.css';
 
 export default function WorkshopPage() {
-  const { persona, nestedTab, selectThread } = useWorkshopStore();
+  const { persona, nestedTab, selectedThreadId, selectThread } = useWorkshopStore();
   const [threadPanelCollapsed, setThreadPanelCollapsed] = useState(false);
 
   const personaConfig = workshopPersonaTabs[persona];
@@ -122,28 +122,23 @@ export default function WorkshopPage() {
         ) : (
           // All other personas: ThreadList + ThreadDetail layout
           <div
+            className={[
+              'workshop-conversation-layout',
+              threadPanelCollapsed && 'thread-panel-collapsed',
+              selectedThreadId && 'thread-selected',
+            ].filter(Boolean).join(' ')}
             style={{
-              display: 'grid',
-              gridTemplateColumns: threadPanelCollapsed ? '0px 1fr' : '280px 1fr',
               width: '100%',
               height: '100%',
-              minHeight: 0,
-              transition: 'grid-template-columns 200ms ease',
             }}
           >
             {/* Thread List Panel */}
-            <div
-              style={{
-                overflow: 'hidden',
-                minHeight: 0,
-                borderRight: threadPanelCollapsed ? 'none' : '1px solid var(--border)',
-              }}
-            >
-              {!threadPanelCollapsed && <ThreadList />}
+            <div className="thread-list-panel">
+              <ThreadList />
             </div>
 
             {/* Thread Detail Panel */}
-            <div style={{ minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div className="thread-detail-panel" style={{ display: 'flex', flexDirection: 'column' }}>
               <ThreadDetail onTogglePanel={handleTogglePanel} onBack={handleBack} />
             </div>
           </div>

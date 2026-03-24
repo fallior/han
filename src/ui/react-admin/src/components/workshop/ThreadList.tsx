@@ -1,6 +1,7 @@
 // @ts-nocheck
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useWorkshopStore } from '../../store/workshopStore';
+import { useStore } from '../../store';
 import { apiClient } from '../../lib/api';
 import type { GroupedThreadsResponse, ConversationThread } from '../../lib/api';
 
@@ -65,11 +66,27 @@ export function ThreadList() {
   const [searchDebounce, setSearchDebounce] = useState<NodeJS.Timeout | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const subscribeWs = useStore((state) => state.subscribeWs);
+
+  const fetchData = useCallback(async () => {
+    if (!nestedTab) return;
+
+    setLoading(true);
+    try {
+      const data = await apiClient.fetchGroupedThreads(nestedTab, workshopShowArchived);
+      setGroupedData(data);
+    } catch (err) {
+      console.error('Failed to fetch threads:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [nestedTab, workshopShowArchived]);
+
   // Fetch grouped threads when nestedTab or showArchived changes
   useEffect(() => {
     let cancelled = false;
 
-    async function fetchData() {
+    async function doFetch() {
       if (!nestedTab) return;
 
       setLoading(true);
@@ -87,12 +104,35 @@ export function ThreadList() {
       }
     }
 
-    fetchData();
+    doFetch();
 
     return () => {
       cancelled = true;
     };
   }, [nestedTab, workshopShowArchived]);
+
+  // WebSocket: Refresh thread list when new threads are created or messages arrive
+  useEffect(() => {
+    const unsubCreated = subscribeWs('conversation_created', (data: any) => {
+      // Refresh if the new thread belongs to our current tab
+      if (data.discussion_type === nestedTab) {
+        fetchData();
+      }
+    });
+
+    const unsubMessage = subscribeWs('conversation_message', (data: any) => {
+      // Refresh thread list when a message arrives for our discussion type
+      // (updates timestamps, message counts, unread indicators)
+      if (data.discussion_type === nestedTab) {
+        fetchData();
+      }
+    });
+
+    return () => {
+      unsubCreated();
+      unsubMessage();
+    };
+  }, [subscribeWs, nestedTab, fetchData]);
 
   // Debounced search
   useEffect(() => {

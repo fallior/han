@@ -47,3 +47,91 @@
   display: flex;
   flex-direction: column;
 }
+
+/* ─── Mobile hamburger button (hidden on desktop) ─── */
+.mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  padding: 4px;
+  margin-right: 8px;
+  border-radius: 4px;
+}
+
+.mobile-menu-btn:hover {
+  background: var(--sidebar-hover);
+}
+
+/* ─── Mobile sidebar overlay ─── */
+.mobile-sidebar-overlay {
+  display: none;
+}
+
+/* ─── Mobile responsive ─── */
+@media (max-width: 768px) {
+  .admin-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-layout.collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  /* Hide sidebar by default on mobile */
+  .admin-layout > .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 220px;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+  }
+
+  /* Show sidebar when mobile menu is open */
+  .admin-layout.mobile-sidebar-open > .sidebar {
+    transform: translateX(0);
+  }
+
+  /* Overlay behind sidebar */
+  .mobile-sidebar-overlay {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+  }
+
+  /* Always show labels when sidebar is open on mobile */
+  .admin-layout.mobile-sidebar-open .sidebar-label,
+  .admin-layout.mobile-sidebar-open .sidebar-logo-text {
+    display: inline;
+  }
+
+  /* Show the hamburger button */
+  .mobile-menu-btn {
+    display: flex;
+  }
+
+  /* Tighter padding on mobile */
+  .main-header {
+    padding: 8px 12px;
+    min-height: 44px;
+  }
+
+  .main-header h1 {
+    font-size: 16px;
+  }
+
+  .main-content {
+    padding: 12px;
+  }
+}

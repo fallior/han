@@ -36,6 +36,16 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-24 — Leo + Darron, S101 — Jemma Unified Dispatch, React Live Rendering, Heartbeat Broadcast
+
+- **Jemma unified dispatch** — Extracted `services/jemma-dispatch.ts` as shared delivery service. Admin UI messages now route through `deliverMessage()` directly instead of writing signal files from `conversations.ts`. Discord gateway still uses the HTTP endpoint which delegates to the same function. One audit trail (`jemma-delivery-log.json`), one routing brain, zero HTTP self-calls.
+- **React WebSocket fix** — `dispatchWsMessage` in `wsDispatcher.ts` was updating Zustand store buckets but never calling `dispatchWsEvent`, so component `subscribeWs` listeners never fired from server pushes. Added the missing bridge. All conversation pages (Workshop, Conversations, Memory) now receive live updates.
+- **Server broadcasts `conversation_created`** — `POST /api/conversations` now broadcasts a WebSocket event when a new thread is created. ThreadList (Workshop), ConversationsPage, and MemoryPage all subscribe and refresh their lists.
+- **Per-agent thinking indicators** — Workshop ThreadDetail now shows green "Leo Thinking..." and purple "Jim Thinking..." indicators based on discussion type. Darron tabs show both. Each indicator disappears when that agent responds.
+- **Workshop responsive layout** — Grid container now uses `.workshop-conversation-layout` CSS class instead of inline styles. Media query rules for mobile (<768px) now fire correctly: single-column layout, list/detail toggle, back button visible.
+- **Leo heartbeat WebSocket broadcast** — Added `notifyServer()` and `writeBroadcastSignal()` to `postMessageToConversation()` in `leo-heartbeat.ts`. Heartbeat conversation posts now appear in React admin immediately (belt-and-braces: HTTPS POST + signal file, matching leo-human.ts pattern).
+- **Files changed**: `services/jemma-dispatch.ts` (new), `routes/jemma.ts` (simplified to use shared service), `routes/conversations.ts` (direct delivery call, removed fs/path/SIGNALS_DIR), `store/wsDispatcher.ts`, `components/workshop/ThreadList.tsx`, `components/workshop/ThreadDetail.tsx`, `pages/WorkshopPage.tsx`, `pages/ConversationsPage.tsx`, `pages/MemoryPage.tsx`, `index.css`, `leo-heartbeat.ts`.
+
 ### 2026-03-23 — Leo + Darron, S99 — Compression Pipeline, Cross-Agent Claims, React Admin Fixes
 
 - **Leo compression pipeline automated** — Three triggers now handle Leo's full gradient lifecycle:

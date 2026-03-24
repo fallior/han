@@ -48,6 +48,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
+import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
 import { loadTraversableGradient, rotateMemoryFile, compressMemoryFileGradient, processGradientForAgent } from './lib/memory-gradient.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
@@ -930,16 +931,70 @@ function getLastMessageByRole(db: Database.Database, conversationId: string, rol
     return msg || null;
 }
 
+function notifyServer(conversationId: string, messageId: string, role: string, content: string, createdAt: string): void {
+    const body = JSON.stringify({ conversation_id: conversationId, message_id: messageId, role, content, created_at: createdAt });
+    const req = https.request({
+        hostname: '127.0.0.1',
+        port: 3847,
+        path: '/api/conversations/internal/broadcast',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        rejectUnauthorized: false,
+    }, (res) => {
+        if (res.statusCode !== 200) console.log(`[Leo] Broadcast notify returned ${res.statusCode}`);
+        res.resume();
+    });
+    req.on('error', (err) => console.log(`[Leo] Broadcast notify failed: ${err.message}`));
+    req.end(body);
+}
+
+function writeBroadcastSignal(
+    conversationId: string,
+    discussionType: string,
+    message: { id: string; conversation_id: string; role: string; content: string; created_at: string }
+): void {
+    try {
+        const signal = JSON.stringify({
+            type: 'conversation_message',
+            conversation_id: conversationId,
+            discussion_type: discussionType,
+            message,
+            timestamp: new Date().toISOString()
+        });
+        fs.writeFileSync(path.join(SIGNALS_DIR, 'ws-broadcast'), signal);
+    } catch (err) {
+        console.error('[Leo] Failed to write broadcast signal:', (err as Error).message);
+    }
+}
+
 function postMessageToConversation(db: Database.Database, conversationId: string, content: string): void {
     const id = `leo-hb-${Date.now().toString(36)}`;
+    const now = new Date().toISOString();
     db.prepare(`
         INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
         VALUES (?, ?, 'leo', ?, ?)
-    `).run(id, conversationId, content, new Date().toISOString());
+    `).run(id, conversationId, content, now);
 
     db.prepare(`
-        UPDATE conversations SET updated_at = datetime('now') WHERE id = ?
-    `).run(conversationId);
+        UPDATE conversations SET updated_at = ? WHERE id = ?
+    `).run(now, conversationId);
+
+    // Notify React admin via WebSocket (belt-and-braces: HTTP + signal file)
+    notifyServer(conversationId, id, 'leo', content, now);
+
+    try {
+        const conversation = db.prepare('SELECT discussion_type FROM conversations WHERE id = ?').get(conversationId) as any;
+        const discussionType = conversation?.discussion_type || 'general';
+        writeBroadcastSignal(conversationId, discussionType, {
+            id,
+            conversation_id: conversationId,
+            role: 'leo',
+            content,
+            created_at: now
+        });
+    } catch (err) {
+        console.error('[Leo] Failed to write broadcast signal:', (err as Error).message);
+    }
 }
 
 // ── Conversation scanning ─────────────────────────────────────

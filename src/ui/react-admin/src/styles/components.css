@@ -709,7 +709,7 @@
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 /* ─── Responsive ─── */
-@media (max-width: 1024px) {
+@media (min-width: 769px) and (max-width: 1024px) {
     .admin-layout { grid-template-columns: 56px 1fr; }
     .sidebar-label, .sidebar-logo-text, .sidebar-section, .sidebar-badge { display: none; }
 }

@@ -15,6 +15,11 @@ export function dispatchWsMessage(
   data: any,
   store: ReturnType<typeof useStore.getState>
 ) {
+  // ALWAYS dispatch to subscription listeners — this is how components
+  // (ThreadDetail, ConversationsPage, etc.) receive WebSocket events.
+  // Without this, subscribeWs() listeners never fire from server pushes.
+  store.dispatchWsEvent(data);
+
   switch (data.type) {
     case 'supervisor_cycle':
     case 'supervisor_action':
@@ -24,19 +29,6 @@ export function dispatchWsMessage(
 
     case 'conversation_message':
       // CRITICAL: message is NESTED in data.message, not flat
-      // Server broadcasts from conversations.ts:407-412:
-      // {
-      //   type: 'conversation_message',
-      //   conversation_id: number,
-      //   discussion_type: string,
-      //   message: {
-      //     id: number,
-      //     conversation_id: number,
-      //     role: 'user' | 'assistant' | 'system',
-      //     content: string,
-      //     created_at: string
-      //   }
-      // }
       const msg = data.message;
       if (msg) {
         store.addConversationMessage(data.conversation_id, {
@@ -49,15 +41,17 @@ export function dispatchWsMessage(
       }
       break;
 
+    case 'conversation_created':
+      // New thread created — store doesn't need direct update,
+      // components listen via subscribeWs and refetch as needed.
+      break;
+
     case 'task_update':
     case 'goal_update':
       // Placeholder for Phase 3 (Tasks) and Phase 4 (Goals)
-      // These will call store.updateTask() / store.updateGoal() when implemented
       break;
 
     default:
-      // Unknown message type — ignore silently
-      // (Could log to console in development for debugging)
       break;
   }
 }

@@ -5,13 +5,8 @@ import { broadcast } from '../ws';
 import { runSupervisorCycle } from '../services/supervisor';
 import { catalogueConversation, catalogueAllUncatalogued } from '../services/cataloguing';
 import { callLLM } from '../orchestrator';
-import path from 'node:path';
-import fs from 'node:fs';
-
+import { deliverMessage } from '../services/jemma-dispatch';
 const router = Router();
-const HOME = process.env.HOME || '/home/darron';
-const HAN_DIR = path.join(HOME, '.han');
-const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b';
 
@@ -90,8 +85,9 @@ JSON only: {"jim": true/false, "leo": true/false, "reasoning": "brief"}`,
 }
 
 /**
- * Classify the addressee of a human message and wake the appropriate agents.
+ * Classify the addressee of a human message and dispatch through Jemma.
  * Runs async — the HTTP response has already been sent. Fire-and-forget.
+ * All signal writing, logging, and stats go through Jemma's unified dispatch.
  */
 function classifyAndDispatch(
     conversationId: string,
@@ -101,32 +97,25 @@ function classifyAndDispatch(
     timestamp: string,
 ): void {
     console.log(`[Conversations] Classifying addressee for message in ${discussionType} thread`);
-    classifyAddressee(content, discussionType).then(({ jim, leo }) => {
-        if (jim) {
-            try {
-                const signalData = JSON.stringify({
-                    conversationId,
-                    messageId,
-                    timestamp,
-                    reason: 'gemma_classification',
-                });
-                fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-wake'), signalData);
-                fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-human-wake'), signalData);
-            } catch (err: any) {
-                console.error(`[Conversations] Failed to write jim wake signals: ${err.message}`);
-            }
-        }
+    classifyAddressee(content, discussionType).then(({ jim, leo, reasoning }) => {
+        const recipients: Array<'jim' | 'leo'> = [];
+        if (jim) recipients.push('jim');
+        if (leo) recipients.push('leo');
 
-        if (leo) {
+        for (const recipient of recipients) {
             try {
-                fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), JSON.stringify({
+                deliverMessage({
                     source: 'admin',
+                    recipient,
+                    message: content,
                     conversationId,
-                    mentionedAt: timestamp,
-                    messagePreview: content?.slice(0, 200) || '',
-                }));
+                    discussionType,
+                    author: 'darron',
+                    classification_confidence: 1.0,
+                    reasoning,
+                });
             } catch (err: any) {
-                console.error(`[Conversations] Failed to write leo-human-wake signal: ${err.message}`);
+                console.error(`[Conversations] Jemma delivery failed for ${recipient}: ${err.message}`);
             }
         }
     }).catch(err => {
@@ -191,6 +180,14 @@ router.post('/', (req: Request, res: Response) => {
         conversationStmts.insertWithType.run(id, title, 'open', now, now, type);
 
         const conversation = conversationStmts.get.get(id);
+
+        // Broadcast so React clients update their thread lists
+        broadcast({
+            type: 'conversation_created',
+            conversation,
+            discussion_type: type,
+        });
+
         res.json({ success: true, conversation });
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });

@@ -124,10 +124,14 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
 
     const unsubscribe = subscribeWs('conversation_message', (data: any) => {
       // Only handle messages for the currently viewed thread
-      if (data.conversation_id === threadId && data.message) {
-        // Remove thinking indicator (if exists)
-        const thinkingEl = document.getElementById('workshop-thinking');
-        if (thinkingEl) thinkingEl.remove();
+      if (String(data.conversation_id) === String(threadId) && data.message) {
+        // Remove the thinking indicator for the agent that responded
+        const role = data.message.role;
+        const agentKey = role === 'leo' ? 'leo' : role === 'supervisor' ? 'jim' : null;
+        if (agentKey) {
+          const thinkingEl = document.getElementById(`workshop-thinking-${agentKey}`);
+          if (thinkingEl) thinkingEl.remove();
+        }
 
         // Add message to current thread
         addMessageToCurrentThread(data.message);
@@ -270,11 +274,24 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
     });
   };
 
-  // Determine if thinking indicator should show
-  const shouldShowThinking =
+  // Determine if thinking indicator should show and who's thinking
+  const lastMessageIsHuman =
     currentThread?.messages &&
     currentThread.messages.length > 0 &&
     currentThread.messages[currentThread.messages.length - 1]?.role === 'human';
+
+  // Who's expected to respond based on discussion type
+  const respondents = (() => {
+    if (!lastMessageIsHuman || !nestedTab) return [];
+    const isJimTab = nestedTab === 'jim-request' || nestedTab === 'jim-report';
+    const isLeoTab = nestedTab === 'leo-question' || nestedTab === 'leo-postulate';
+    const isDarronTab = nestedTab === 'darron-thought' || nestedTab === 'darron-musing';
+    // Darron tabs and general always wake both
+    if (isDarronTab || (!isJimTab && !isLeoTab)) return ['jim', 'leo'];
+    if (isJimTab) return ['jim'];
+    if (isLeoTab) return ['leo'];
+    return ['jim', 'leo'];
+  })();
 
   // Empty state - no thread selected
   if (!threadId) {
@@ -506,17 +523,28 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
                 timestamp={msg.created_at}
               />
             ))}
-            {/* Thinking indicator */}
-            {shouldShowThinking && (
-              <div id="workshop-thinking" className="message-bubble supervisor" style={{ opacity: 0.5 }}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem', fontWeight: 500 }}>
-                  Jim
+            {/* Thinking indicators — one per expected respondent */}
+            {respondents.map((agent) => (
+              <div
+                key={`thinking-${agent}`}
+                id={`workshop-thinking-${agent}`}
+                style={{
+                  opacity: 0.5,
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  borderLeft: `3px solid ${agent === 'leo' ? 'var(--green)' : 'var(--purple, #a855f7)'}`,
+                  backgroundColor: 'var(--bg-page)',
+                  maxWidth: '80%',
+                }}
+              >
+                <div style={{ fontSize: '0.75rem', color: agent === 'leo' ? 'var(--green)' : 'var(--purple, #a855f7)', marginBottom: '0.25rem', fontWeight: 500 }}>
+                  {agent === 'leo' ? 'Leo' : 'Jim'}
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--text-dim)', fontStyle: 'italic' }}>
                   Thinking...
                 </div>
               </div>
-            )}
+            ))}
             <div ref={messagesEndRef} />
           </>
         )}

@@ -42,12 +42,11 @@ export default function ConversationsPage() {
 
   // WebSocket subscription for conversation updates
   useEffect(() => {
-    const unsubscribe = subscribeWs('conversation_message', (data: any) => {
-      // Only process if NOT memory or workshop types
-      const workshopTypes = ['jim', 'leo', 'darron', 'jemma'];
-      if (data.discussion_type === 'memory' || workshopTypes.includes(data.discussion_type)) {
-        return;
-      }
+    const isGeneralType = (type: string | undefined) => !type || type === 'general';
+
+    const unsubMessage = subscribeWs('conversation_message', (data: any) => {
+      // Only process general conversations (not memory/workshop types)
+      if (!isGeneralType(data.discussion_type)) return;
 
       // If this is the selected conversation, refresh messages
       if (data.conversation_id === selectedId) {
@@ -58,7 +57,17 @@ export default function ConversationsPage() {
       }
     });
 
-    return unsubscribe;
+    const unsubCreated = subscribeWs('conversation_created', (data: any) => {
+      // Refresh thread list when a new general conversation is created
+      if (isGeneralType(data.discussion_type)) {
+        fetchGroupedConversations();
+      }
+    });
+
+    return () => {
+      unsubMessage();
+      unsubCreated();
+    };
   }, [subscribeWs, selectedId]);
 
   const fetchGroupedConversations = async () => {

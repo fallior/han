@@ -41,22 +41,26 @@ export default function MemoryPage() {
 
   // WebSocket subscription for conversation updates
   useEffect(() => {
-    const unsubscribe = subscribeWs('conversation_message', (data: any) => {
-      // Only process if discussion_type is 'memory'
-      if (data.discussion_type !== 'memory') {
-        return;
-      }
+    const unsubMessage = subscribeWs('conversation_message', (data: any) => {
+      if (data.discussion_type !== 'memory') return;
 
-      // If this is the selected conversation, refresh messages
       if (data.conversation_id === selectedId) {
         fetchConversationDetail(data.conversation_id);
       } else {
-        // Otherwise refresh thread list
         fetchGroupedConversations();
       }
     });
 
-    return unsubscribe;
+    const unsubCreated = subscribeWs('conversation_created', (data: any) => {
+      if (data.discussion_type === 'memory') {
+        fetchGroupedConversations();
+      }
+    });
+
+    return () => {
+      unsubMessage();
+      unsubCreated();
+    };
   }, [subscribeWs, selectedId]);
 
   const fetchGroupedConversations = async () => {

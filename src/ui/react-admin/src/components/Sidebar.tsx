@@ -5,9 +5,10 @@ import './Sidebar.css';
 interface SidebarProps {
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  onNavigate?: () => void;
 }
 
-export default function Sidebar({ collapsed = false, onToggleCollapse = () => {} }: SidebarProps) {
+export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}, onNavigate }: SidebarProps) {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const root = document.documentElement;
     return root.classList.contains('light-mode') ? 'light' : 'dark';
@@ -34,7 +35,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}
       </div>
 
       <div className="sidebar-nav">
-        <NavLink to="/" className="sidebar-item" end>
+        <NavLink to="/" className="sidebar-item" end onClick={onNavigate}>
           <span className="sidebar-icon">
             <svg viewBox="0 0 20 20">
               <rect x="2" y="2" width="7" height="7" rx="1.5"/>
@@ -46,7 +47,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}
           <span className="sidebar-label">Overview</span>
         </NavLink>
 
-        <NavLink to="/projects" className="sidebar-item">
+        <NavLink to="/projects" className="sidebar-item" onClick={onNavigate}>
           <span className="sidebar-icon">
             <svg viewBox="0 0 20 20">
               <path d="M2 5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V5z"/>
@@ -55,7 +56,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}
           <span className="sidebar-label">Projects</span>
         </NavLink>
 
-        <NavLink to="/work" className="sidebar-item">
+        <NavLink to="/work" className="sidebar-item" onClick={onNavigate}>
           <span className="sidebar-icon">
             <svg viewBox="0 0 20 20">
               <path d="M3 4h14M3 8h14M3 12h10M3 16h6"/>
@@ -65,7 +66,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}
           <span className="sidebar-label">Work</span>
         </NavLink>
 
-        <NavLink to="/workshop" className="sidebar-item">
+        <NavLink to="/workshop" className="sidebar-item" onClick={onNavigate}>
           <span className="sidebar-icon">
             <svg viewBox="0 0 20 20">
               <path d="M3 6h14M5 6v8a2 2 0 002 2h6a2 2 0 002-2V6M7 6v-2a1 1 0 011-1h4a1 1 0 011 1v2M9 10h2M8 14h4"/>
@@ -74,7 +75,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}
           <span className="sidebar-label">Workshop</span>
         </NavLink>
 
-        <NavLink to="/supervisor" className="sidebar-item">
+        <NavLink to="/supervisor" className="sidebar-item" onClick={onNavigate}>
           <span className="sidebar-icon">
             <svg viewBox="0 0 20 20">
               <circle cx="10" cy="10" r="3"/>
@@ -84,7 +85,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}
           <span className="sidebar-label">Supervisor</span>
         </NavLink>
 
-        <NavLink to="/reports" className="sidebar-item">
+        <NavLink to="/reports" className="sidebar-item" onClick={onNavigate}>
           <span className="sidebar-icon">
             <svg viewBox="0 0 20 20">
               <rect x="3" y="10" width="3" height="7" rx="0.5"/>
@@ -95,7 +96,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}
           <span className="sidebar-label">Reports</span>
         </NavLink>
 
-        <NavLink to="/conversations" className="sidebar-item">
+        <NavLink to="/conversations" className="sidebar-item" onClick={onNavigate}>
           <span className="sidebar-icon">
             <svg viewBox="0 0 20 20">
               <path d="M3 4h10a2 2 0 012 2v4a2 2 0 01-2 2H8l-3 3v-3H3a1 1 0 01-1-1V5a1 1 0 011-1z"/>
@@ -105,7 +106,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}
           <span className="sidebar-label">Conversations</span>
         </NavLink>
 
-        <NavLink to="/memory" className="sidebar-item">
+        <NavLink to="/memory" className="sidebar-item" onClick={onNavigate}>
           <span className="sidebar-icon">
             <svg viewBox="0 0 20 20">
               <path d="M10 2C6 2 3 5 3 8.5c0 2.5 1.5 4.5 3.5 5.5L6 17l2.5-2c.5.1 1 .1 1.5.1 4 0 7-3 7-6.5S14 2 10 2z"/>
@@ -117,7 +118,7 @@ export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}
           <span className="sidebar-label">Memory</span>
         </NavLink>
 
-        <NavLink to="/products" className="sidebar-item">
+        <NavLink to="/products" className="sidebar-item" onClick={onNavigate}>
           <span className="sidebar-icon">
             <svg viewBox="0 0 20 20">
               <path d="M4 4h12l1 3H3l1-3zM3 7h14v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
