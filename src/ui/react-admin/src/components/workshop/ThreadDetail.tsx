@@ -125,15 +125,9 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
     const unsubscribe = subscribeWs('conversation_message', (data: any) => {
       // Only handle messages for the currently viewed thread
       if (String(data.conversation_id) === String(threadId) && data.message) {
-        // Remove the thinking indicator for the agent that responded
-        const role = data.message.role;
-        const agentKey = role === 'leo' ? 'leo' : role === 'supervisor' ? 'jim' : null;
-        if (agentKey) {
-          const thinkingEl = document.getElementById(`workshop-thinking-${agentKey}`);
-          if (thinkingEl) thinkingEl.remove();
-        }
-
-        // Add message to current thread
+        // Add message to current thread — thinking indicators disappear
+        // automatically because respondents is derived from whether the
+        // last message is human (React state, not DOM manipulation)
         addMessageToCurrentThread(data.message);
       }
     });
@@ -527,7 +521,6 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
             {respondents.map((agent) => (
               <div
                 key={`thinking-${agent}`}
-                id={`workshop-thinking-${agent}`}
                 style={{
                   opacity: 0.5,
                   padding: '10px 14px',
