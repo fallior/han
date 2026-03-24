@@ -7,6 +7,60 @@
 
 ---
 
+## 2026-03-24 (Leo + Darron, S101 — Jemma Unified Dispatch + React Live Rendering)
+
+### Jemma Unified Dispatch
+Extracted `services/jemma-dispatch.ts` as a shared delivery service. Admin UI messages now
+call `deliverMessage()` directly from `conversations.ts` instead of writing signal files.
+Discord gateway still uses the HTTP endpoint (`/api/jemma/deliver`) which delegates to the
+same function. Eliminates the broken HTTP self-fetch (server is HTTPS, fetch was HTTP).
+Delivery log at `~/.han/health/jemma-delivery-log.json` with per-source counters and rolling
+200-entry audit trail.
+
+### React WebSocket Event System Fix
+`wsDispatcher.ts` updated Zustand store buckets but never called `dispatchWsEvent()`, so
+component `subscribeWs()` listeners never received server-pushed events. This was the root
+cause of agent responses not appearing live in the React admin. Fixed by adding the bridge
+call at the top of `dispatchWsMessage()`.
+
+### Server Broadcasts conversation_created
+`POST /api/conversations` now broadcasts a `conversation_created` WebSocket event. ThreadList
+(Workshop), ConversationsPage, and MemoryPage all subscribe and refetch their thread lists
+when new threads appear. Previously, new threads were invisible until manual refresh.
+
+### Per-Agent Thinking Indicators
+Workshop ThreadDetail now shows context-aware thinking indicators: green with "Leo" and purple
+with "Jim". Darron tabs and general threads show both. Jim-only tabs show Jim. Leo-only tabs
+show Leo. Each indicator disappears when that specific agent responds via WebSocket.
+
+### Workshop Responsive Layout
+Grid container now uses `.workshop-conversation-layout` CSS class instead of inline styles.
+Media query breakpoints at 768px now fire correctly: single-column layout, list-or-detail
+toggle, back button visible, persona tabs scroll horizontally.
+
+### Leo Heartbeat WebSocket Broadcast
+Added `notifyServer()` (HTTPS POST to `/api/conversations/internal/broadcast`) and
+`writeBroadcastSignal()` (signal file at `~/.han/signals/ws-broadcast`) to
+`postMessageToConversation()` in `leo-heartbeat.ts`. Matches the belt-and-braces pattern
+from `leo-human.ts` and `jim-human.ts`. Heartbeat conversation posts now appear in the
+React admin immediately.
+
+### Files Changed
+- `src/server/services/jemma-dispatch.ts` — new shared delivery service
+- `src/server/routes/jemma.ts` — simplified to delegate to shared service
+- `src/server/routes/conversations.ts` — direct `deliverMessage()` call, removed fs/path/SIGNALS_DIR
+- `src/server/leo-heartbeat.ts` — `notifyServer`, `writeBroadcastSignal`, updated `postMessageToConversation`
+- `src/ui/react-admin/src/store/wsDispatcher.ts` — `dispatchWsEvent` bridge
+- `src/ui/react-admin/src/components/workshop/ThreadList.tsx` — WebSocket subscriptions
+- `src/ui/react-admin/src/components/workshop/ThreadDetail.tsx` — per-agent thinking indicators
+- `src/ui/react-admin/src/pages/WorkshopPage.tsx` — CSS class-based responsive layout
+- `src/ui/react-admin/src/pages/ConversationsPage.tsx` — `conversation_created` listener
+- `src/ui/react-admin/src/pages/MemoryPage.tsx` — `conversation_created` listener
+- `src/ui/react-admin/src/index.css` — workshop layout responsive rules
+- `docs/HAN-ECOSYSTEM-COMPLETE.md` — updated Jemma dispatch and heartbeat broadcast sections
+
+---
+
 ## 2026-03-23 (Leo + Darron, S99 — Compression Pipeline + Cross-Agent Claims)
 
 ### Leo Compression Pipeline — Three Automated Triggers
