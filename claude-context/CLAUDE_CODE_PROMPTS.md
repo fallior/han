@@ -100,7 +100,32 @@ Update claude-context/ARCHITECTURE.md if:
 - Data flows changed
 - System boundaries shifted
 
-### 7. Session Log (MANDATORY)
+### 7. Jim's Reference Documents (MANDATORY for HAN)
+These documents are Jim's source of truth for how the system works. He reads them
+every cycle and reconciles them with code. If they're stale, Jim operates on wrong
+assumptions. This is the only project Jim won't tend without Darron — we must keep
+these current.
+
+**a) `docs/HAN-ECOSYSTEM-COMPLETE.md`** — The living specification.
+- Update the features table if any feature was added, changed, or removed
+- Check the component descriptions still match the code
+- Add new rows for new capabilities
+
+**b) `~/.han/memory/shared/hall-of-records.md`** — Protected architectural records.
+- Update affected records (R001-R005+) if rhythm, memory, signals, limits, or
+  gradient architecture changed
+- Mark superseded records (don't delete — link to replacement)
+- Add new records for new protected architecture
+
+**c) `claude-context/CHANGELOG.md`** — Why things changed.
+- Add a dated entry with session number and author
+- Group changes by area (same format as existing entries)
+- Include motivation — Jim needs the "why", not just the "what"
+
+**d) `docs/WEEKLY_RHYTHM.md`** — Phase intervals, cycle types, rest days.
+- Update if any timing, phase, or cycle selection logic changed
+
+### 8. Session Log (MANDATORY)
 Create or update the session log in `_logs/`:
 - Format: `session_YYYY-MM-DD_HH-MM-SS.md`
 - **CRITICAL**: Include ISO timestamps for EVERY exchange (use `date -Iseconds`)
@@ -108,7 +133,7 @@ Create or update the session log in `_logs/`:
 - Calculate **Active Time** by summing exchange durations (excluding gaps > 5 minutes)
 - See `_logs/README.md` for full timestamp protocol
 
-### 8. Session Note (Optional)
+### 9. Session Note (Optional)
 If this was a significant session with architecture/decision changes, offer to create a session note:
 - Format: YYYY-MM-DD-darron-[topic].md in `claude-context/session-notes/`
 - Include: summary, decisions, changes, next steps

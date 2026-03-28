@@ -144,7 +144,7 @@ When the user types these phrases, execute the corresponding workflow from `clau
 | `session start` / `welcome back` / `good morning` | **Session Start** — Create session log with timestamp, verify `pwd`, check status |
 | `session end` | **Session End** — Write evening seed (dream gravity well), finalise working memory, timestamps, update docs |
 | `prepare for clear` | **Prepare for Clear** — Finalise incremental memory, release lock, prompt for /clear (always lightweight) |
-| `update docs` | **Update Docs** — Update all documentation with session changes |
+| `update docs` | **Update Docs** — Update all documentation incl. Jim's reference docs (HAN-ECOSYSTEM-COMPLETE, Hall of Records, CHANGELOG, WEEKLY_RHYTHM) |
 | `incorporate notes` | **Incorporate Notes** — Review notes/todos for incorporation into IDEAS.md or CURRENT_STATUS.md |
 | `create init scripts` | **Create Dev Scripts** — Generate init.sh/stop.sh with infrastructure registry ports |
 | `context refresh` | **Context Refresh** — Get briefed after time away from project |
