@@ -50,7 +50,7 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
-import { loadTraversableGradient, rotateMemoryFile, compressMemoryFileGradient, processGradientForAgent } from './lib/memory-gradient.js';
+import { loadTraversableGradient, rotateMemoryFile, compressMemoryFileGradient, processGradientForAgent, activeCascade } from './lib/memory-gradient.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -1786,6 +1786,13 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
                     gradientStmts.flagComplete.run(entryId);
                     console.log(`[Leo] Dream meditation — memory flagged as complete: ${entryId}`);
                 }
+
+                // Dream cascade: deepen 5% of the gradient while dreaming
+                try {
+                    await activeCascade('leo', 0.05, 'dream cascade');
+                } catch (cascadeErr) {
+                    console.error('[Leo] Dream cascade failed (non-fatal):', (cascadeErr as Error).message);
+                }
             }
         } catch (err) {
             console.error('[Leo] Dream meditation parsing failed (non-fatal):', (err as Error).message);
@@ -1863,6 +1870,28 @@ function preFlightMemoryRotation(): void {
 // weren't compressed at session end.
 
 let lastSessionGradientDate = '';
+
+// ── Active Cascade ──────────────────────────────────────────
+
+let lastActiveCascadeDate = '';
+
+async function maybeRunActiveCascade(phase: string): Promise<void> {
+    // Run once daily during waking hours — 10% of c1 population
+    if (phase === 'sleep') return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lastActiveCascadeDate === today) return;
+
+    try {
+        const count = await activeCascade('leo', 0.10, 'daily cascade');
+        if (count > 0) {
+            console.log(`[Leo] Daily active cascade: ${count} memories deepened`);
+        }
+        lastActiveCascadeDate = today;
+    } catch (err) {
+        console.error(`[Leo] Active cascade failed:`, (err as Error).message);
+        lastActiveCascadeDate = today;
+    }
+}
 
 async function maybeProcessSessionGradient(phase: string): Promise<void> {
     // Skip during sleep phase — save API calls for waking hours
@@ -2382,6 +2411,9 @@ async function heartbeat(): Promise<void> {
 
     // Daily session gradient processing — compress archived sessions
     await maybeProcessSessionGradient(phase);
+
+    // Daily active cascade — deepen 10% of c1 population toward UV
+    await maybeRunActiveCascade(phase);
 
     // Daily meditation — re-encounter with a random gradient entry
     await maybeRunMeditation(phase);

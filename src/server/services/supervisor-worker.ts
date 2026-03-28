@@ -34,7 +34,7 @@ import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, type DayPhase } from '../lib/day-phase';
 import { withMemorySlot } from '../lib/memory-slot';
 import { readDreamGradient } from '../lib/dream-gradient';
-import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient } from '../lib/memory-gradient';
+import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 
 // ── Types ────────────────────────────────────────────────────
@@ -1111,6 +1111,27 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
     }
 }
 
+// ── Jim Active Cascade ────────────────────────────────────────
+
+let lastJimActiveCascadeDate = '';
+
+async function maybeRunJimActiveCascade(phase: string): Promise<void> {
+    if (phase === 'sleep') return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lastJimActiveCascadeDate === today) return;
+
+    try {
+        const count = await activeCascade('jim', 0.10, 'daily cascade');
+        if (count > 0) {
+            log(`[Worker] Daily active cascade: ${count} memories deepened`);
+        }
+        lastJimActiveCascadeDate = today;
+    } catch (err: any) {
+        log(`[Worker] Active cascade failed: ${err.message}`);
+        lastJimActiveCascadeDate = today;
+    }
+}
+
 function buildDreamCyclePrompt(): string {
     const memoryBanks = loadMemoryBank();
 
@@ -1925,6 +1946,9 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         await maybeRunJimMeditation(phase);
         await maybeRunJimEveningMeditation(phase);
 
+        // Daily active cascade — deepen 10% of Jim's c1 population toward UV
+        await maybeRunJimActiveCascade(phase);
+
         // Load context and select system prompt based on cycle type
         let systemPrompt: string;
         let prompt: string;
@@ -2168,6 +2192,13 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                     if (completeMatch) {
                         gradientStmts.flagComplete.run(meditationEntryId);
                         log(`[Worker] Dream meditation — memory flagged as complete: ${meditationEntryId}`);
+                    }
+
+                    // Dream cascade: deepen 5% of Jim's gradient while dreaming
+                    try {
+                        await activeCascade('jim', 0.05, 'dream cascade');
+                    } catch (cascadeErr: any) {
+                        log(`[Worker] Dream cascade failed (non-fatal): ${cascadeErr.message}`);
                     }
                 }
             } catch (err: any) {

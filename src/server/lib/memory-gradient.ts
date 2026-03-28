@@ -457,6 +457,117 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
     return result;
 }
 
+// ── Active Cascade: Organic Gradient Deepening ────────────────
+//
+// Unlike the mechanical overflow cascade (which waits for 10 c1s to pile up),
+// this function actively walks the gradient, deepening memories one at a time.
+// Called daily (10% of c1 population) and from dreams (5% per encounter).
+//
+// For each selected c1: follow the provenance chain to its deepest descendant,
+// then compress one level deeper. The memory walks toward UV organically.
+
+const NEXT_LEVEL: Record<string, string> = {
+    c1: 'c2', c2: 'c3', c3: 'c5', c5: 'uv',
+};
+
+/**
+ * Actively deepen a percentage of the gradient population.
+ * Picks random c1 entries, follows each to its deepest descendant,
+ * and compresses one level further.
+ *
+ * @param agent - 'jim' or 'leo'
+ * @param percentage - fraction of c1 population to process (0.10 = 10%)
+ * @param context - logging context (e.g. 'daily cascade', 'dream')
+ * @returns number of compressions performed
+ */
+export async function activeCascade(
+    agent: 'jim' | 'leo',
+    percentage: number,
+    context: string = 'active cascade',
+): Promise<number> {
+    // Get all c1 entries for this agent
+    const allC1s = (gradientStmts.getByAgentLevel.all(agent, 'c1') as any[]);
+    if (allC1s.length === 0) return 0;
+
+    // Select a random percentage
+    const count = Math.max(1, Math.ceil(allC1s.length * percentage));
+    const shuffled = allC1s.sort(() => Math.random() - 0.5);
+    const selected = shuffled.slice(0, count);
+
+    let compressed = 0;
+    const prompts = COMPRESSION_PROMPTS['working-memory'];
+
+    for (const c1Entry of selected) {
+        try {
+            // Follow the provenance chain to the deepest descendant
+            let current = c1Entry;
+            let depth = 0;
+            const maxDepth = 10; // Safety limit
+
+            while (depth < maxDepth) {
+                // Find any child entry that has this entry as source
+                const child = (gradientStmts.getByAgent.all(agent) as any[])
+                    .find((e: any) => e.source_id === current.id);
+                if (!child) break;
+                current = child;
+                depth++;
+            }
+
+            // current is now the deepest descendant
+            const currentLevel = current.level;
+            const nextLevel = NEXT_LEVEL[currentLevel];
+
+            // Already at UV — skip
+            if (!nextLevel || currentLevel === 'uv') continue;
+
+            // Compress to next level
+            const promptText = nextLevel === 'uv'
+                ? prompts.uv
+                : prompts[nextLevel] || prompts.c2;
+
+            const raw = await sdkCompress(
+                `${promptText}\n\nSource: ${currentLevel} → ${nextLevel} (${context})\nAgent: ${agent}\nOriginal session: ${c1Entry.session_label}\n\n${current.content}${FEELING_TAG_INSTRUCTION}`
+            );
+
+            const { content: compressedContent, feelingTag } = parseFeelingTag(raw);
+
+            // Write to DB
+            const entryId = generateGradientId();
+            const label = `${c1Entry.session_label}-${nextLevel}`;
+            insertGradientEntry(
+                entryId, agent, label, nextLevel, compressedContent,
+                current.content_type || 'session', current.id, feelingTag
+            );
+
+            // Also write to filesystem for gradient loading
+            const homeDir = process.env.HOME || '/root';
+            const fractionalDir = path.join(homeDir, '.han', 'memory', 'fractal', agent);
+            const levelDir = path.join(fractionalDir, nextLevel === 'uv' ? '' : nextLevel);
+            if (nextLevel !== 'uv') {
+                fs.mkdirSync(levelDir, { recursive: true });
+                fs.writeFileSync(path.join(levelDir, `${label}.md`), compressedContent);
+            } else {
+                // Append to unit-vectors.md
+                const uvPath = path.join(fractionalDir, 'unit-vectors.md');
+                const uvLine = `- **${c1Entry.session_label}**: "${compressedContent.replace(/"/g, "'").trim()}"\n`;
+                fs.appendFileSync(uvPath, uvLine);
+            }
+
+            compressed++;
+            console.log(`[Gradient] ${context}: ${agent} ${currentLevel}→${nextLevel} for ${c1Entry.session_label} (depth ${depth})`);
+
+        } catch (err) {
+            console.error(`[Gradient] ${context} failed for ${c1Entry.session_label}:`, (err as Error).message);
+        }
+    }
+
+    if (compressed > 0) {
+        console.log(`[Gradient] ${context}: ${compressed}/${count} compressions for ${agent} (from ${allC1s.length} c1s)`);
+    }
+
+    return compressed;
+}
+
 // ── Function 4: Helper utilities ───────────────────────────────
 
 /**
