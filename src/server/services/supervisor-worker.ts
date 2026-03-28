@@ -1116,7 +1116,7 @@ function buildDreamCyclePrompt(): string {
 
     // Meditation: 1-in-3 dreams include a memory that surfaced naturally
     let meditationSection = '';
-    const shouldDreamMeditate = Math.random() < 0.33;
+    const shouldDreamMeditate = Math.random() < 0.5;
     if (shouldDreamMeditate) {
         try {
             const entry = gradientStmts.getRandom.get() as any;

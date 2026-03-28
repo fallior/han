@@ -1668,7 +1668,7 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
         sleep: (() => {
             // 1-in-3 dreams include a memory that surfaced naturally
             let dreamMemorySection = '';
-            if (Math.random() < 0.33) {
+            if (Math.random() < 0.5) {
                 try {
                     const dreamEntry = gradientStmts.getRandom.get() as any;
                     if (dreamEntry) {

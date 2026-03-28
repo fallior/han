@@ -79,9 +79,12 @@ export function getDayPhase(): DayPhase {
     return 'evening';
 }
 
-/** Phase intervals in milliseconds — from Hall of Records R001 */
+/** Phase intervals in milliseconds — from Hall of Records R001
+ *  Sleep changed from 40→20min (S102) to accelerate gradient processing.
+ *  77% of gradient entries were stuck at c1/c2 — dreams need to touch
+ *  memories more frequently to build depth toward UV. */
 export const PHASE_INTERVALS = {
-    sleep: 40 * 60 * 1000,
+    sleep: 20 * 60 * 1000,
     morning: 20 * 60 * 1000,
     work: 20 * 60 * 1000,
     evening: 20 * 60 * 1000,
