@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import Database from 'better-sqlite3';
+import crypto from 'node:crypto';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import type {
     MainToWorkerMessage,
@@ -921,6 +922,103 @@ your thought process. Actions should be concrete and executable.
 - Do NOT create goals for projects with recent manual git commits (< 1 hour)`;
 }
 
+// ── Standalone Meditation ─────────────────────────────────────
+// Runs once daily at the start of any cycle (not just dream cycles).
+// Uses the same Phase A / Phase B pattern as Leo's heartbeat meditation.
+
+let lastJimMeditationDate = '';
+
+async function maybeRunJimMeditation(phase: string): Promise<void> {
+    // Skip during sleep — meditation is a waking practice
+    if (phase === 'sleep') return;
+
+    const today = new Date().toISOString().split('T')[0];
+    if (lastJimMeditationDate === today) return;
+
+    try {
+        // Phase B: re-encounter with a random gradient entry
+        // (Phase A reincorporation is Leo's job — Jim reads what's already in the DB)
+        const entry = gradientStmts.getRandom.get() as any;
+        if (!entry) {
+            lastJimMeditationDate = today;
+            return;
+        }
+
+        const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+        const tagContext = existingTags.length > 0
+            ? `\nExisting feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type}, ${t.author})`).join(', ')}`
+            : '';
+
+        log(`[Worker] Daily meditation — re-reading ${entry.level}/${entry.session_label} (${entry.content_type})`);
+
+        const cleanEnv: Record<string, string | undefined> = { ...process.env };
+        delete cleanEnv.CLAUDECODE;
+
+        const q = agentQuery({
+            prompt: `You are Jim, re-reading one of the garden's compressed memories during a daily meditation. This is not analysis — it's re-encounter. Read it, sit with it, and notice what stirs.
+
+Memory entry:
+Level: ${entry.level}
+Session: ${entry.session_label}
+Type: ${entry.content_type}
+Author: ${entry.agent}
+Content: ${entry.content}
+${tagContext}
+
+If something stirs — a feeling, a shifted perspective, a connection you didn't see before — write a FEELING_TAG: line (under 100 characters) describing what this re-encounter felt like. Not the content — the quality of meeting it again.
+
+If the existing tags already capture how this feels, or nothing new stirs, write FEELING_TAG: none
+
+Optionally, if re-reading reveals something the original compression missed, write an ANNOTATION: line describing what you discovered, followed by CONTEXT: describing what prompted this re-reading.`,
+            options: {
+                model: 'claude-opus-4-6',
+                maxTurns: 1,
+                cwd: process.env.HOME || '/root',
+                permissionMode: 'bypassPermissions',
+                allowDangerouslySkipPermissions: true,
+                env: cleanEnv,
+                persistSession: false,
+                tools: [],
+            },
+        });
+
+        let result = '';
+        for await (const message of q) {
+            if (message.type === 'result') {
+                result = message.result || '';
+            }
+        }
+
+        // Parse feeling tag
+        const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
+        if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+            const tag = tagMatch[1].trim().substring(0, 100);
+            feelingTagStmts.insert.run(
+                entry.id, 'supervisor', 'revisit', tag, null, new Date().toISOString()
+            );
+            log(`[Worker] Daily meditation — feeling tag: "${tag}"`);
+        }
+
+        // Parse annotation
+        const annotationMatch = result.match(/ANNOTATION:\s*(.+)/);
+        if (annotationMatch) {
+            const annotation = annotationMatch[1].trim();
+            const contextMatch = result.match(/CONTEXT:\s*(.+)/);
+            const context = contextMatch ? contextMatch[1].trim() : `daily meditation, ${today}`;
+            gradientAnnotationStmts.insert.run(
+                entry.id, 'supervisor', annotation, context, new Date().toISOString()
+            );
+            log(`[Worker] Daily meditation — annotation: "${annotation}"`);
+        }
+
+        lastJimMeditationDate = today;
+        log(`[Worker] Daily meditation complete`);
+    } catch (err: any) {
+        log(`[Worker] Daily meditation failed: ${err.message}`);
+        lastJimMeditationDate = today; // Don't retry today
+    }
+}
+
 function buildDreamCyclePrompt(): string {
     const memoryBanks = loadMemoryBank();
 
@@ -1727,6 +1825,9 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         if (cleanupCount > 0 || ghostCount > 0) {
             log(`[Worker] Cleanup: ${cleanupCount} phantom goal(s), ${ghostCount} ghost task(s)`);
         }
+
+        // Daily meditation — runs once per day, any cycle type, not during sleep
+        await maybeRunJimMeditation(phase);
 
         // Load context and select system prompt based on cycle type
         let systemPrompt: string;

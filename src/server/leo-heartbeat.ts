@@ -2064,7 +2064,7 @@ Label: ${file.label}
 Content:
 ${content}`,
         options: {
-            model: 'claude-sonnet-4-6',
+            model: 'claude-opus-4-6',
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
@@ -2147,7 +2147,7 @@ If the existing tags already capture how this feels, or nothing new stirs, write
 
 Optionally, if re-reading reveals something the original compression missed, write an ANNOTATION: line describing what you discovered, followed by CONTEXT: describing what prompted this re-reading.`,
         options: {
-            model: 'claude-sonnet-4-6',
+            model: 'claude-opus-4-6',
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
