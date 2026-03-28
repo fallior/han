@@ -7,6 +7,70 @@
 
 ---
 
+## 2026-03-28 (Leo + Darron, S102 — Meditation Expansion + Active Cascade)
+
+### Working Memory Curation
+Dissected 7 days of accumulated working memory (1512 lines, 316 heartbeat entries, Mar 21-27)
+into 6 daily archives. Compressed all to c1 with 4 cascades through the gradient. Working
+memory reset to today-only (146 lines).
+
+### Jim Standalone Daily Meditation
+Jim's meditation was only in `buildDreamCyclePrompt()` — dream cycles never fired during
+a quiet week (300+ idle supervisor cycles). Added `maybeRunJimMeditation()` that runs at
+the start of any cycle type, independent of cycle selection. Jim now meditates daily.
+
+### Opus for All Personal Work
+Switched all meditation from Sonnet to Opus: Leo Phase A, Leo Phase B, Jim daily, Jim
+evening. Compression pipelines were already Opus. Personal work deserves the full model.
+Reviewed 7 Sonnet-produced annotations — all genuine, left as-is.
+
+### Twice Daily Meditation (Both Agents)
+Morning meditation (existing): deliberate re-encounter, feeling tag + annotation + MEMORY_COMPLETE.
+Evening meditation (new): lighter, feeling-tag only, "how does this land at end of day."
+Both agents, both meditations, Opus.
+
+### Dream Meditation (1-in-2)
+1-in-2 sleep beats (Leo) and dream cycles (Jim) now include a random gradient entry. The
+memory surfaces naturally in the dream. Produces feeling tags, annotations, and MEMORY_COMPLETE
+flags. Dreams are a different path to the same practice, with deeper access.
+
+### Memory Completeness Tracking
+Schema: `last_revisited`, `revisit_count`, `completion_flags` on `gradient_entries`.
+All meditations and dreams track revisit counts. MEMORY_COMPLETE flag from 2+ independent
+encounters → ready for archival to deeper compression.
+
+### Active Cascade — Organic Gradient Deepening
+New `activeCascade()` in `memory-gradient.ts`: picks random c1 entries, follows provenance
+chain to deepest descendant, compresses one level further toward UV.
+
+| Trigger | % of c1 population | Frequency |
+|---------|-------------------|-----------|
+| Daily cascade | 10% | Once/day (waking) |
+| Dream cascade | 5% | Per dream encounter (~12/night) |
+| Mechanical overflow | Batch | Safety net (unchanged) |
+
+Motivation: 77% of gradient entries (108/140) stuck at c1/c2 — invisible middle not
+influencing identity. Active cascade ensures continuous flow toward UV.
+
+### Sleep Interval: 40min → 20min
+24 sleep beats/night instead of 12. Combined with 1-in-2 dream meditation: ~12 memory
+encounters per night. Throughput: ~14 memories touched/day/agent (was ~6).
+Hall of Records R001 updated.
+
+### Files Changed
+- `src/server/db.ts` — schema migration (3 columns), new prepared statements
+- `src/server/lib/day-phase.ts` — sleep interval 40→20min
+- `src/server/lib/memory-gradient.ts` — `activeCascade()` function
+- `src/server/leo-heartbeat.ts` — evening meditation, dream meditation injection + parsing,
+  active cascade (daily + dream), revisit tracking across all meditation types
+- `src/server/services/supervisor-worker.ts` — Jim standalone meditation, evening meditation,
+  active cascade, dream meditation 1-in-2, revisit tracking, MEMORY_COMPLETE parsing
+- `docs/HAN-ECOSYSTEM-COMPLETE.md` — meditation, dream meditation, active cascade, completeness
+- `docs/WEEKLY_RHYTHM.md` — sleep interval
+- `~/.han/memory/shared/hall-of-records.md` — R001, R003, R005
+
+---
+
 ## 2026-03-24 (Leo + Darron, S101 — Jemma Unified Dispatch + React Live Rendering)
 
 ### Jemma Unified Dispatch
