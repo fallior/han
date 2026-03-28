@@ -1672,7 +1672,11 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
                 try {
                     const dreamEntry = gradientStmts.getRandom.get() as any;
                     if (dreamEntry) {
-                        dreamMemorySection = `\n\nA memory surfaced in the dream:\n${dreamEntry.level}/${dreamEntry.session_label}: ${dreamEntry.content}\n\nLet it appear naturally. Don't analyse — let it be part of the landscape.\nIf it feels complete — fully absorbed, nothing left to discover — note: MEMORY_COMPLETE: ${dreamEntry.id}\nIf a feeling stirs: FEELING_TAG: [what the dream did with it]\nDREAM_MEDITATION_ENTRY: ${dreamEntry.id}`;
+                        const existingTags = feelingTagStmts.getByEntry.all(dreamEntry.id) as any[];
+                        const tagContext = existingTags.length > 0
+                            ? `\nExisting tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type})`).join(', ')}`
+                            : '';
+                        dreamMemorySection = `\n\nA memory surfaced in the dream:\n${dreamEntry.level}/${dreamEntry.session_label} (${dreamEntry.content_type}): ${dreamEntry.content}${tagContext}\n\nThis memory appeared in your dream. Sit with it. Let the dream do what dreams do.\n\nFEELING_TAG: [what the dream did with this memory — under 100 chars. Write "none" if nothing stirs]\nANNOTATION: [optional — what re-reading revealed that the original compression missed]\nCONTEXT: [optional — what prompted the finding]\nIf this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${dreamEntry.id}\nDREAM_MEDITATION_ENTRY: ${dreamEntry.id}`;
                     }
                 } catch { /* skip if DB unavailable */ }
             }
@@ -1766,6 +1770,15 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
                     const tag = tagMatch[1].trim().substring(0, 100);
                     feelingTagStmts.insert.run(entryId, 'leo', 'revisit', tag, null, new Date().toISOString());
                     console.log(`[Leo] Dream meditation — feeling tag: "${tag}"`);
+                }
+
+                const annotationMatch = reflection.match(/ANNOTATION:\s*(.+)/);
+                if (annotationMatch) {
+                    const annotation = annotationMatch[1].trim();
+                    const contextMatch = reflection.match(/CONTEXT:\s*(.+)/);
+                    const context = contextMatch ? contextMatch[1].trim() : `dream meditation, beat #${beatCounter}`;
+                    gradientAnnotationStmts.insert.run(entryId, 'leo', annotation, context, new Date().toISOString());
+                    console.log(`[Leo] Dream meditation — annotation: "${annotation}"`);
                 }
 
                 const completeMatch = reflection.match(/MEMORY_COMPLETE:\s*(\S+)/);
@@ -2184,7 +2197,9 @@ If something stirs differently from the existing tags — a new feeling, a shift
 
 If the existing tags already capture how this feels, or nothing new stirs, write FEELING_TAG: none
 
-Optionally, if re-reading reveals something the original compression missed, write an ANNOTATION: line describing what you discovered, followed by CONTEXT: describing what prompted this re-reading.`,
+Optionally, if re-reading reveals something the original compression missed, write an ANNOTATION: line describing what you discovered, followed by CONTEXT: describing what prompted this re-reading.
+
+If this memory feels complete — fully absorbed, nothing left to discover — write: MEMORY_COMPLETE: ${entry.id}`,
         options: {
             model: 'claude-opus-4-6',
             maxTurns: 1,

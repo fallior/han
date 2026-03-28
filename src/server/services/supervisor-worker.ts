@@ -969,7 +969,9 @@ If something stirs — a feeling, a shifted perspective, a connection you didn't
 
 If the existing tags already capture how this feels, or nothing new stirs, write FEELING_TAG: none
 
-Optionally, if re-reading reveals something the original compression missed, write an ANNOTATION: line describing what you discovered, followed by CONTEXT: describing what prompted this re-reading.`,
+Optionally, if re-reading reveals something the original compression missed, write an ANNOTATION: line describing what you discovered, followed by CONTEXT: describing what prompted this re-reading.
+
+If this memory feels complete — fully absorbed, nothing left to discover — write: MEMORY_COMPLETE: ${entry.id}`,
             options: {
                 model: 'claude-opus-4-6',
                 maxTurns: 1,
