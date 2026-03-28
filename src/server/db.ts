@@ -596,6 +596,17 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_source ON gradient_entries(source_id)
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_session ON gradient_entries(session_label)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_content_type ON gradient_entries(content_type)`);
 
+// Migration: add meditation tracking columns (safe to re-run)
+try {
+    db.exec(`ALTER TABLE gradient_entries ADD COLUMN last_revisited TEXT`);
+} catch { /* column already exists */ }
+try {
+    db.exec(`ALTER TABLE gradient_entries ADD COLUMN revisit_count INTEGER DEFAULT 0`);
+} catch { /* column already exists */ }
+try {
+    db.exec(`ALTER TABLE gradient_entries ADD COLUMN completion_flags INTEGER DEFAULT 0`);
+} catch { /* column already exists */ }
+
 db.exec(`CREATE TABLE IF NOT EXISTS feeling_tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     gradient_entry_id TEXT NOT NULL,
@@ -666,6 +677,9 @@ export const gradientStmts = {
     `) as any,
     getUVs: db.prepare("SELECT * FROM gradient_entries WHERE agent = ? AND level = 'uv' ORDER BY created_at DESC") as any,
     getRandom: db.prepare('SELECT * FROM gradient_entries ORDER BY RANDOM() LIMIT 1') as any,
+    recordRevisit: db.prepare(`UPDATE gradient_entries SET last_revisited = ?, revisit_count = revisit_count + 1 WHERE id = ?`) as any,
+    flagComplete: db.prepare(`UPDATE gradient_entries SET completion_flags = completion_flags + 1 WHERE id = ?`) as any,
+    getCompleted: db.prepare(`SELECT * FROM gradient_entries WHERE completion_flags >= 2 AND revisit_count >= 3 AND level IN ('c1', 'c2') ORDER BY last_revisited ASC`) as any,
     getUnprocessedTaggedMessages: db.prepare(`
         SELECT cm.*, c.title as conversation_title
         FROM conversation_messages cm

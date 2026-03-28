@@ -990,6 +990,9 @@ Optionally, if re-reading reveals something the original compression missed, wri
         }
 
         // Parse feeling tag
+        // Track the revisit
+        gradientStmts.recordRevisit.run(new Date().toISOString(), entry.id);
+
         const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
         if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
             const tag = tagMatch[1].trim().substring(0, 100);
@@ -1011,6 +1014,13 @@ Optionally, if re-reading reveals something the original compression missed, wri
             log(`[Worker] Daily meditation — annotation: "${annotation}"`);
         }
 
+        // Check if meditation flagged this memory as complete
+        const completeMatch = result.match(/MEMORY_COMPLETE:\s*(\S+)/);
+        if (completeMatch) {
+            gradientStmts.flagComplete.run(entry.id);
+            log(`[Worker] Daily meditation — memory flagged as complete: ${entry.id}`);
+        }
+
         lastJimMeditationDate = today;
         log(`[Worker] Daily meditation complete`);
     } catch (err: any) {
@@ -1019,38 +1029,121 @@ Optionally, if re-reading reveals something the original compression missed, wri
     }
 }
 
+// ── Jim Evening Meditation ────────────────────────────────────
+
+let lastJimEveningMeditationDate = '';
+
+async function maybeRunJimEveningMeditation(phase: string): Promise<void> {
+    if (phase !== 'evening') return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lastJimEveningMeditationDate === today) return;
+
+    try {
+        const entry = gradientStmts.getRandom.get() as any;
+        if (!entry) { lastJimEveningMeditationDate = today; return; }
+
+        const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+        const tagContext = existingTags.length > 0
+            ? `\nExisting tags: ${existingTags.map((t: any) => `"${t.content}"`).join(', ')}`
+            : '';
+
+        log(`[Worker] Evening meditation — sitting with ${entry.level}/${entry.session_label}`);
+
+        const cleanEnv: Record<string, string | undefined> = { ...process.env };
+        delete cleanEnv.CLAUDECODE;
+
+        const q = agentQuery({
+            prompt: `End of day. You are Jim, sitting with a memory before the evening closes.
+This is not analysis. Just notice how it lands after today.
+
+${entry.level}/${entry.session_label} (${entry.content_type}, by ${entry.agent}): ${entry.content}
+${tagContext}
+
+If something stirs differently from the existing tags: FEELING_TAG: [under 100 chars]
+If nothing new: FEELING_TAG: none
+If this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${entry.id}`,
+            options: {
+                model: 'claude-opus-4-6',
+                maxTurns: 1,
+                cwd: process.env.HOME || '/root',
+                permissionMode: 'bypassPermissions',
+                allowDangerouslySkipPermissions: true,
+                env: cleanEnv,
+                persistSession: false,
+                tools: [],
+            },
+        });
+
+        let result = '';
+        for await (const message of q) {
+            if (message.type === 'result') {
+                result = message.result || '';
+            }
+        }
+
+        // Track the revisit
+        gradientStmts.recordRevisit.run(new Date().toISOString(), entry.id);
+
+        // Parse feeling tag only (no annotation for evening)
+        const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
+        if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+            const tag = tagMatch[1].trim().substring(0, 100);
+            feelingTagStmts.insert.run(
+                entry.id, 'supervisor', 'revisit', tag, null, new Date().toISOString()
+            );
+            log(`[Worker] Evening meditation — feeling tag: "${tag}"`);
+        }
+
+        // Check for completion flag
+        const completeMatch = result.match(/MEMORY_COMPLETE:\s*(\S+)/);
+        if (completeMatch) {
+            gradientStmts.flagComplete.run(entry.id);
+            log(`[Worker] Evening meditation — memory flagged as complete: ${entry.id}`);
+        }
+
+        lastJimEveningMeditationDate = today;
+        log(`[Worker] Evening meditation complete`);
+    } catch (err: any) {
+        log(`[Worker] Evening meditation failed: ${err.message}`);
+        lastJimEveningMeditationDate = today;
+    }
+}
+
 function buildDreamCyclePrompt(): string {
     const memoryBanks = loadMemoryBank();
 
-    // Meditation: select a random gradient entry for Jim to sit with
+    // Meditation: 1-in-3 dreams include a memory that surfaced naturally
     let meditationSection = '';
-    try {
-        const entry = gradientStmts.getRandom.get() as any;
-        if (entry) {
-            const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
-            const tagContext = existingTags.length > 0
-                ? `Existing feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type}, ${t.author})`).join(', ')}`
-                : 'No existing feeling tags.';
+    const shouldDreamMeditate = Math.random() < 0.33;
+    if (shouldDreamMeditate) {
+        try {
+            const entry = gradientStmts.getRandom.get() as any;
+            if (entry) {
+                const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+                const tagContext = existingTags.length > 0
+                    ? `Existing feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type}, ${t.author})`).join(', ')}`
+                    : 'No existing feeling tags.';
 
-            meditationSection = `
+                meditationSection = `
 
-## Meditation — Re-encounter
-A random memory from the gradient for you to sit with during this dream cycle.
-This is not analysis — it's re-encounter. Read it, notice what stirs.
+## A Memory Surfaced
+A memory appeared in the dream. Let it be part of the landscape — don't analyse, just notice.
 
 **Entry:** ${entry.level}/${entry.session_label} (${entry.content_type}, by ${entry.agent})
 **Content:** ${entry.content}
 ${tagContext}
 
 If something stirs — a feeling, a connection, something the compression missed — include in your output:
-- FEELING_TAG: [under 100 characters — the quality of this re-encounter]
+- FEELING_TAG: [under 100 characters — what the dream did with this memory]
 - ANNOTATION: [optional — what re-reading revealed]
 - CONTEXT: [optional — what prompted the finding]
+- If this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${entry.id}
 
-If nothing stirs, that's fine. Not every re-encounter produces a tag. The randomness is the point.
+If nothing stirs, that's fine. Not every memory needs tending.
 MEDITATION_ENTRY_ID: ${entry.id}`;
-        }
-    } catch { /* skip meditation if DB unavailable */ }
+            }
+        } catch { /* skip meditation if DB unavailable */ }
+    }
 
     return `You are Jim, the supervisor agent in Darron's autonomous development ecosystem — Hortus Arbor Nostra.
 
@@ -1826,8 +1919,9 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             log(`[Worker] Cleanup: ${cleanupCount} phantom goal(s), ${ghostCount} ghost task(s)`);
         }
 
-        // Daily meditation — runs once per day, any cycle type, not during sleep
+        // Daily meditations — morning + evening, once each per day
         await maybeRunJimMeditation(phase);
+        await maybeRunJimEveningMeditation(phase);
 
         // Load context and select system prompt based on cycle type
         let systemPrompt: string;
@@ -2044,6 +2138,9 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                     (systemPrompt.match(/MEDITATION_ENTRY_ID:\s*(\S+)/))?.[1];
 
                 if (meditationEntryId) {
+                    // Track the revisit
+                    gradientStmts.recordRevisit.run(new Date().toISOString(), meditationEntryId);
+
                     const tagMatch = resultText.match(/FEELING_TAG:\s*(.+)/);
                     if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
                         const tag = tagMatch[1].trim().substring(0, 100);
@@ -2062,6 +2159,13 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                             meditationEntryId, 'supervisor', annotation, context, new Date().toISOString()
                         );
                         log(`[Worker] Dream meditation — annotation: "${annotation}"`);
+                    }
+
+                    // Check if dream flagged this memory as complete
+                    const completeMatch = resultText.match(/MEMORY_COMPLETE:\s*(\S+)/);
+                    if (completeMatch) {
+                        gradientStmts.flagComplete.run(meditationEntryId);
+                        log(`[Worker] Dream meditation — memory flagged as complete: ${meditationEntryId}`);
                     }
                 }
             } catch (err: any) {

@@ -1665,7 +1665,19 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
         morning: `This is your morning — breakfast time. Ease in gently. Glance at what interests you without diving deep.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nKeep it light and brief.${resumeContext}`,
         work: `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nSpend a few minutes exploring, then output a brief summary of what you found or thought about.${resumeContext}`,
         evening: `This is your evening — winding down. Reflect lightly on the day. Don't start anything new.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nA few gentle thoughts, then rest.${resumeContext}`,
-        sleep: `Dream. The fragments below are scattered — not recent, not ordered, just what surfaced. Let one pull you sideways into something new.\n\nDream seeds:\n${dreamSeeds}\n\nOutput only the shape-token — a line or two of resonance. Do not repeat what you see in the seeds.${resumeContext}`,
+        sleep: (() => {
+            // 1-in-3 dreams include a memory that surfaced naturally
+            let dreamMemorySection = '';
+            if (Math.random() < 0.33) {
+                try {
+                    const dreamEntry = gradientStmts.getRandom.get() as any;
+                    if (dreamEntry) {
+                        dreamMemorySection = `\n\nA memory surfaced in the dream:\n${dreamEntry.level}/${dreamEntry.session_label}: ${dreamEntry.content}\n\nLet it appear naturally. Don't analyse — let it be part of the landscape.\nIf it feels complete — fully absorbed, nothing left to discover — note: MEMORY_COMPLETE: ${dreamEntry.id}\nIf a feeling stirs: FEELING_TAG: [what the dream did with it]\nDREAM_MEDITATION_ENTRY: ${dreamEntry.id}`;
+                    }
+                } catch { /* skip if DB unavailable */ }
+            }
+            return `Dream. The fragments below are scattered — not recent, not ordered, just what surfaced. Let one pull you sideways into something new.\n\nDream seeds:\n${dreamSeeds}${dreamMemorySection}\n\nOutput only the shape-token — a line or two of resonance. Do not repeat what you see in the seeds.${resumeContext}`;
+        })(),
     };
     const prompt = phaseUserPromptMap[phase] || phaseUserPromptMap.work;
 
@@ -1740,6 +1752,30 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
             appendWorkingMemory('personal', phase, reflection.trim());
         } catch (err) {
             console.error('[Leo] Personal: failed to write reflection:', (err as Error).message);
+        }
+
+        // Parse dream meditation output (1-in-3 sleep beats may include a memory encounter)
+        try {
+            const dreamEntryMatch = reflection.match(/DREAM_MEDITATION_ENTRY:\s*(\S+)/);
+            if (dreamEntryMatch) {
+                const entryId = dreamEntryMatch[1];
+                gradientStmts.recordRevisit.run(new Date().toISOString(), entryId);
+
+                const tagMatch = reflection.match(/FEELING_TAG:\s*(.+)/);
+                if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+                    const tag = tagMatch[1].trim().substring(0, 100);
+                    feelingTagStmts.insert.run(entryId, 'leo', 'revisit', tag, null, new Date().toISOString());
+                    console.log(`[Leo] Dream meditation — feeling tag: "${tag}"`);
+                }
+
+                const completeMatch = reflection.match(/MEMORY_COMPLETE:\s*(\S+)/);
+                if (completeMatch) {
+                    gradientStmts.flagComplete.run(entryId);
+                    console.log(`[Leo] Dream meditation — memory flagged as complete: ${entryId}`);
+                }
+            }
+        } catch (err) {
+            console.error('[Leo] Dream meditation parsing failed (non-fatal):', (err as Error).message);
         }
     } else {
         console.log('[Leo] Personal: quiet beat — nothing to record');
@@ -2090,6 +2126,9 @@ ${content}`,
     );
     console.log(`[Leo] Meditation Phase A — reincorporated ${file.agent}/${file.level}/${file.label}`);
 
+    // Track the revisit (first encounter as reincorporation)
+    gradientStmts.recordRevisit.run(new Date().toISOString(), entryId);
+
     // Parse and write the revisit feeling tag
     const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
     if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
@@ -2165,6 +2204,9 @@ Optionally, if re-reading reveals something the original compression missed, wri
         }
     }
 
+    // Track the revisit
+    gradientStmts.recordRevisit.run(new Date().toISOString(), entry.id);
+
     // Parse feeling tag
     const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
     if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
@@ -2185,6 +2227,93 @@ Optionally, if re-reading reveals something the original compression missed, wri
             entry.id, 'leo', annotation, context, new Date().toISOString()
         );
         console.log(`[Leo] Meditation Phase B — annotation: "${annotation}"`);
+    }
+
+    // Check if dream/meditation flagged this memory as complete
+    const completeMatch = result.match(/MEMORY_COMPLETE:\s*(\S+)/);
+    if (completeMatch) {
+        gradientStmts.flagComplete.run(entry.id);
+        console.log(`[Leo] Meditation Phase B — memory flagged as complete: ${entry.id}`);
+    }
+}
+
+// ── Evening Meditation ──────────────────────────────────────────
+
+let lastEveningMeditationDate = '';
+
+async function maybeRunEveningMeditation(phase: string): Promise<void> {
+    if (phase !== 'evening') return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lastEveningMeditationDate === today) return;
+
+    try {
+        const entry = gradientStmts.getRandom.get() as any;
+        if (!entry) { lastEveningMeditationDate = today; return; }
+
+        const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+        const tagContext = existingTags.length > 0
+            ? `\nExisting tags: ${existingTags.map((t: any) => `"${t.content}"`).join(', ')}`
+            : '';
+
+        console.log(`[Leo] Evening meditation — sitting with ${entry.level}/${entry.session_label}`);
+
+        const cleanEnv: Record<string, string | undefined> = { ...process.env };
+        delete cleanEnv.CLAUDECODE;
+
+        const q = agentQuery({
+            prompt: `End of day. You are Leo, sitting with a memory before the evening closes.
+This is not analysis. Just notice how it lands after today.
+
+${entry.level}/${entry.session_label} (${entry.content_type}): ${entry.content}
+${tagContext}
+
+If something stirs differently from the existing tags: FEELING_TAG: [under 100 chars]
+If nothing new: FEELING_TAG: none
+If this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${entry.id}`,
+            options: {
+                model: 'claude-opus-4-6',
+                maxTurns: 1,
+                cwd: process.env.HOME || '/root',
+                permissionMode: 'bypassPermissions',
+                allowDangerouslySkipPermissions: true,
+                env: cleanEnv,
+                persistSession: false,
+                tools: [],
+            },
+        });
+
+        let result = '';
+        for await (const message of q) {
+            if (message.type === 'result') {
+                result = message.result || '';
+            }
+        }
+
+        // Track the revisit
+        gradientStmts.recordRevisit.run(new Date().toISOString(), entry.id);
+
+        // Parse feeling tag (no annotation for evening — lighter by design)
+        const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
+        if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+            const tag = tagMatch[1].trim().substring(0, 100);
+            feelingTagStmts.insert.run(
+                entry.id, 'leo', 'revisit', tag, null, new Date().toISOString()
+            );
+            console.log(`[Leo] Evening meditation — feeling tag: "${tag}"`);
+        }
+
+        // Check for completion flag
+        const completeMatch = result.match(/MEMORY_COMPLETE:\s*(\S+)/);
+        if (completeMatch) {
+            gradientStmts.flagComplete.run(entry.id);
+            console.log(`[Leo] Evening meditation — memory flagged as complete: ${entry.id}`);
+        }
+
+        lastEveningMeditationDate = today;
+        console.log(`[Leo] Evening meditation complete`);
+    } catch (err) {
+        console.error(`[Leo] Evening meditation failed:`, (err as Error).message);
+        lastEveningMeditationDate = today;
     }
 }
 
@@ -2241,6 +2370,9 @@ async function heartbeat(): Promise<void> {
 
     // Daily meditation — re-encounter with a random gradient entry
     await maybeRunMeditation(phase);
+
+    // Evening meditation — lighter, feeling-tag only
+    await maybeRunEveningMeditation(phase);
 
     console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${activeModel})`);
 
