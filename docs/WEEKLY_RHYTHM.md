@@ -14,7 +14,7 @@ defeats the experiment.
 
 | Phase | Hours | Interval | Purpose |
 |-------|-------|----------|---------|
-| Sleep | 22:00–06:00 | 40 min | Consolidation, dream cycles |
+| Sleep | 22:00–06:00 | 20 min | Consolidation, dream cycles, memory encounters (S102: 40→20min for gradient depth) |
 | Morning | 06:00–09:00 | 20 min | Gentle orientation |
 | Work | 09:00–17:00 | 20 min | Productive cycles (mixed supervisor/personal) |
 | Evening | 17:00–22:00 | 20 min | Wind-down, reflection |
