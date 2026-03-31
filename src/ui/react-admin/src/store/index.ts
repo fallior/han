@@ -217,7 +217,11 @@ export const useStore = create<AppState>((set, get, api) => ({
 
   // Conversation actions
   setConversations: (conversations) => {
-    const conversationsById = conversations.reduce((acc, conv) => {
+    // Guard: API may return { conversations: [...] } instead of an array
+    const convArray = Array.isArray(conversations)
+      ? conversations
+      : ((conversations as any)?.conversations || []);
+    const conversationsById = convArray.reduce((acc: Record<string, Conversation>, conv: Conversation) => {
       acc[conv.id] = conv;
       return acc;
     }, {} as Record<string, Conversation>);
@@ -236,6 +240,8 @@ export const useStore = create<AppState>((set, get, api) => ({
   addConversationMessage: (conversationId, message) => {
     set((state) => {
       const existing = state.conversationMessages[conversationId] || [];
+      // Deduplicate — the same message can arrive via both HTTP broadcast and signal file
+      if (existing.some((m) => m.id === message.id)) return state;
       return {
         conversationMessages: {
           ...state.conversationMessages,

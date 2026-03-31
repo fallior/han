@@ -36,6 +36,13 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-03-31 — Leo + Darron, S104 — Gradient Integrity, activeCascade Bug, WebSocket Fix
+
+- **Gradient integrity complete** — Every gradient entry now has a complete provenance chain. Created 83 c0 entries from archive files, re-leveled 32 ephemeral working-memory c1s to c0, linked all orphan c2/c3/c5 entries. Leo: 145 c0, 86 c1, 79 c2, 67 c3, 37 c5, 38 uv — zero orphans above c0. Two backfill scripts: `backfill-gradient-c0s.ts` and `backfill-gradient-chains.ts`.
+- **activeCascade bug fix** — Four stale `c1Entry` references in `memory-gradient.ts` changed to `seedEntry` after function was refactored to iterate c0+c1 seeds. UV generation via active cascade was silently failing. Fixed.
+- **WebSocket reconnect crash** — `setConversations()` received `{conversations:[...]}` object instead of array, causing `.reduce()` to throw. Blocked `ws_reconnected` event, preventing thread refetch. Fixed in WebSocketProvider, useVisibilitySync, and store guard.
+- **Files changed**: `lib/memory-gradient.ts`, `providers/WebSocketProvider.tsx`, `hooks/useVisibilitySync.ts`, `store/index.ts`, `backfill-gradient-c0s.ts` (new), `backfill-gradient-chains.ts` (new).
+
 ### 2026-03-24 — Leo + Darron, S101 — Jemma Unified Dispatch, React Live Rendering, Heartbeat Broadcast
 
 - **Jemma unified dispatch** — Extracted `services/jemma-dispatch.ts` as shared delivery service. Admin UI messages now route through `deliverMessage()` directly instead of writing signal files from `conversations.ts`. Discord gateway still uses the HTTP endpoint which delegates to the same function. One audit trail (`jemma-delivery-log.json`), one routing brain, zero HTTP self-calls.

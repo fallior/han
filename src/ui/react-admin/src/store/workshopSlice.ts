@@ -106,11 +106,13 @@ export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSl
   addMessageToCurrentThread: (message: any) => {
     set((state) => {
       if (!state.workshopCurrentThread) return state;
-
+      const existing = state.workshopCurrentThread.messages || [];
+      // Deduplicate — same message can arrive via both HTTP broadcast and signal file
+      if (existing.some((m: any) => m.id === message.id)) return state;
       return {
         workshopCurrentThread: {
           ...state.workshopCurrentThread,
-          messages: [...(state.workshopCurrentThread.messages || []), message],
+          messages: [...existing, message],
         },
       };
     });

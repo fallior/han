@@ -178,7 +178,10 @@ export function deliverMessage(req: DeliveryRequest): DeliveryResult {
                 conversationStmts.updateTimestamp.run(now, convId);
             }
 
-            // Write signal files to wake Jim + Jim/Human
+            // Write signal file to wake Jim/Human only.
+            // jim-wake (supervisor) is NOT signalled — conversation responses are
+            // Jim/Human's job. The supervisor's respond_conversation action is a
+            // duplicate path that caused double-responses (diagnosed S103).
             const jimSignalData = {
                 source: effectiveSource,
                 conversationId: convId,
@@ -188,7 +191,6 @@ export function deliverMessage(req: DeliveryRequest): DeliveryResult {
                 confidence: classification_confidence,
                 mentionedAt: new Date().toISOString()
             };
-            writeSignalFile('jim-wake', jimSignalData);
             writeSignalFile('jim-human-wake', jimSignalData);
 
             delivered = true;
@@ -197,6 +199,8 @@ export function deliverMessage(req: DeliveryRequest): DeliveryResult {
         }
     } else if (recipient === 'leo') {
         try {
+            // Leo/Human only — leo-wake (heartbeat) not signalled for conversations.
+            // Heartbeat Leo has a system prompt boundary forbidding conversation responses.
             const leoSignalData = {
                 source: effectiveSource,
                 ...(effectiveConvId ? { conversationId: effectiveConvId } : {}),
@@ -207,7 +211,6 @@ export function deliverMessage(req: DeliveryRequest): DeliveryResult {
                 confidence: classification_confidence,
                 mentionedAt: new Date().toISOString()
             };
-            writeSignalFile('leo-wake', leoSignalData);
             writeSignalFile('leo-human-wake', leoSignalData);
 
             delivered = true;

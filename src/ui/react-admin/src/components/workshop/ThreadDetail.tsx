@@ -122,7 +122,7 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
   useEffect(() => {
     if (!threadId) return;
 
-    const unsubscribe = subscribeWs('conversation_message', (data: any) => {
+    const unsubMessage = subscribeWs('conversation_message', (data: any) => {
       // Only handle messages for the currently viewed thread
       if (String(data.conversation_id) === String(threadId) && data.message) {
         // Add message to current thread — thinking indicators disappear
@@ -132,7 +132,20 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
       }
     });
 
-    return unsubscribe;
+    // On WS reconnect, refetch the current thread to catch messages missed during disconnect
+    const unsubReconnect = subscribeWs('ws_reconnected', async () => {
+      try {
+        const thread = await fetchThread(threadId as string);
+        setCurrentThread(thread);
+      } catch (err) {
+        console.error('Failed to refetch thread on reconnect:', err);
+      }
+    });
+
+    return () => {
+      unsubMessage();
+      unsubReconnect();
+    };
   }, [threadId, addMessageToCurrentThread, subscribeWs]);
 
   const handleSend = async () => {

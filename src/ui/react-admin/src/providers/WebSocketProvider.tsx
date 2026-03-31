@@ -73,12 +73,17 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (response.ok) {
-          const conversations = await response.json();
-          useStore.getState().setConversations(conversations);
+          const data = await response.json();
+          // API returns { conversations: [...] } — unwrap before passing to store
+          const convList = Array.isArray(data) ? data : (data.conversations || []);
+          useStore.getState().setConversations(convList);
         }
       } catch (error) {
         console.error('[WebSocket] Failed to reconcile conversations on reconnect:', error);
       }
+
+      // Notify components so they can refetch their active thread's messages
+      useStore.getState().dispatchWsEvent({ type: 'ws_reconnected' });
     });
 
     ws.addEventListener('message', (event) => {

@@ -117,6 +117,12 @@ let previousPeriodMs = 0;
 const TRANSITION_STEPS = [0.75, 0.5, 0.25]; // Blend ratios: 75% old, 50% old, 25% old
 let transitionStep = -1; // -1 = no transition in progress
 
+// ── Nightly dream compression (phase transition tracking) ───
+// Uses shared (clock-based) phase, not Leo's wrapper which maps rest/holiday → 'sleep'.
+// This ensures compression fires at 06:00 even on rest days.
+let previousSharedPhase: DayPhase | null = null;
+let lastDreamCompressionDate = '';
+
 // ── Robin Hood Protocol — mutual health checks ──────────────
 
 const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
@@ -1814,16 +1820,17 @@ async function maybeProcessDreamGradient(phase: string): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
     if (lastDreamGradientDate === today) return;
 
-    for (const agent of ['leo', 'jim'] as const) {
-        console.log(`[Leo] Morning — processing ${agent}'s dream gradient...`);
+    // Leo processes only Leo's dreams. Jim processes his own in supervisor-worker.
+    {
+        console.log(`[Leo] Morning — processing Leo's dream gradient...`);
         try {
-            const result = await processDreamGradient(agent);
-            console.log(`[Leo] ${agent} dream gradient: ${result.nightsProcessed} nights, ${result.c1Created.length} c1, ${result.c3Created.length} c3, ${result.c5Created.length} c5, ${result.uvsCreated.length} UVs`);
+            const result = await processDreamGradient('leo');
+            console.log(`[Leo] dream gradient: ${result.nightsProcessed} nights, ${result.c1Created.length} c1, ${result.c3Created.length} c3, ${result.c5Created.length} c5, ${result.uvsCreated.length} UVs`);
             if (result.errors.length > 0) {
-                console.error(`[Leo] ${agent} dream gradient errors:`, result.errors);
+                console.error(`[Leo] dream gradient errors:`, result.errors);
             }
         } catch (err) {
-            console.error(`[Leo] ${agent} dream gradient processing failed:`, (err as Error).message);
+            console.error(`[Leo] dream gradient processing failed:`, (err as Error).message);
         }
     }
     lastDreamGradientDate = today;
@@ -1861,6 +1868,70 @@ function preFlightMemoryRotation(): void {
         }
     } catch (e) {
         console.error(`[Leo] Memory file pre-flight error: ${e}`);
+    }
+}
+
+// ── Nightly dream compression ─────────────────────────────────────────
+// At the sleep→waking transition (06:00), force-rotate both working memory
+// files and compress the overnight content through the gradient as a single
+// c1. One night's dreaming = one experience entering the gradient.
+// Uses getSharedDayPhase() (clock-based) so it fires on rest days too.
+
+function maybeCompressNightlyDreams(): void {
+    const currentSharedPhase = getSharedDayPhase();
+    const wasAsleep = previousSharedPhase === 'sleep';
+    previousSharedPhase = currentSharedPhase;
+
+    // Only trigger on sleep → non-sleep transition
+    if (!wasAsleep || currentSharedPhase === 'sleep') return;
+
+    // Once per day guard (in case multiple beats land in the transition window)
+    const today = new Date().toISOString().split('T')[0];
+    if (lastDreamCompressionDate === today) return;
+    lastDreamCompressionDate = today;
+
+    console.log('[Leo] Sleep→waking transition — compressing overnight dreams');
+
+    try {
+        // Force-rotate working-memory.md (compressed)
+        const wmCompressed = rotateMemoryFile(
+            WORKING_MEMORY_FILE,
+            '# Working Memory — Leo\n\n> Overnight dreams compressed into gradient. Fresh day begins.\n',
+            true,
+        );
+        if (wmCompressed.rotated && wmCompressed.floatingPath) {
+            console.log(`[Leo] Working-memory (compressed) rotated: ${wmCompressed.entriesRotated} overnight entries`);
+            compressMemoryFileGradient(
+                wmCompressed.floatingPath,
+                path.join(LEO_FRACTAL_DIR, 'working-memory'),
+                'working-memory',
+            )
+                .then(r => console.log(`[Leo] Overnight dream gradient (compressed): ${r.c1FilesCreated} c1, ${r.cascades} cascades`))
+                .catch(e => console.error(`[Leo] Overnight dream gradient error (compressed): ${e}`));
+        }
+
+        // Force-rotate working-memory-full.md (full)
+        const wmFull = rotateMemoryFile(
+            WORKING_MEMORY_FULL_FILE,
+            '# Working Memory (Full) — Leo\n\n> Overnight dreams compressed into gradient. Fresh day begins.\n',
+            true,
+        );
+        if (wmFull.rotated && wmFull.floatingPath) {
+            console.log(`[Leo] Working-memory-full rotated: ${wmFull.entriesRotated} overnight entries`);
+            compressMemoryFileGradient(
+                wmFull.floatingPath,
+                path.join(LEO_FRACTAL_DIR, 'working-memory'),
+                'working-memory',
+            )
+                .then(r => console.log(`[Leo] Overnight dream gradient (full): ${r.c1FilesCreated} c1, ${r.cascades} cascades`))
+                .catch(e => console.error(`[Leo] Overnight dream gradient error (full): ${e}`));
+        }
+
+        if (!wmCompressed.rotated && !wmFull.rotated) {
+            console.log('[Leo] Overnight files too small to compress — skipping (under 200 bytes)');
+        }
+    } catch (e) {
+        console.error(`[Leo] Nightly dream compression error: ${e}`);
     }
 }
 
@@ -1933,15 +2004,17 @@ async function maybeProcessSessionGradient(phase: string): Promise<void> {
 let lastMeditationDate = '';
 
 /**
- * Find fractal gradient files that don't have corresponding DB entries.
- * Scans both session gradient and dream gradient for both agents.
+ * Find Leo's fractal gradient files that don't have corresponding DB entries.
+ * Leo only — Jim has his own reincorporation in supervisor-worker.ts.
+ * Agent sovereignty: each agent processes only their own memories.
  */
-function findUntranscribedFiles(): { filePath: string; agent: 'jim' | 'leo'; level: string; contentType: string; label: string } | null {
+function findUntranscribedFiles(): { filePath: string; agent: 'leo'; level: string; contentType: string; label: string } | null {
     const fractalBase = path.join(HAN_DIR, 'memory', 'fractal');
+    const agent = 'leo' as const;
 
-    for (const agent of ['leo', 'jim'] as const) {
+    {
         const agentDir = path.join(fractalBase, agent);
-        if (!fs.existsSync(agentDir)) continue;
+        if (!fs.existsSync(agentDir)) return null;
 
         // Session gradient files (c1/, c2/, c3/, c5/)
         for (const level of ['c1', 'c2', 'c3', 'c5']) {
@@ -2079,12 +2152,21 @@ async function maybeRunMeditation(phase: string): Promise<void> {
     if (lastMeditationDate === today) return;
 
     try {
-        // Phase A: check for un-transcribed files first
-        const untranscribed = findUntranscribedFiles();
+        // Phase A: process up to 3 un-transcribed files per day (was 1, which meant
+        // Jim's 16 c1 files would take 16+ days to reincorporate behind Leo's queue).
+        // Each is a genuine Opus re-encounter, not a bulk import.
+        const MAX_PHASE_A_PER_DAY = 3;
+        let phaseACount = 0;
 
-        if (untranscribed) {
+        while (phaseACount < MAX_PHASE_A_PER_DAY) {
+            const untranscribed = findUntranscribedFiles();
+            if (!untranscribed) break;
             await meditationPhaseA(untranscribed, today);
-        } else {
+            phaseACount++;
+        }
+
+        // Phase B: if no Phase A work (or after finishing), do a re-reading
+        if (phaseACount === 0) {
             await meditationPhaseB(today);
         }
 
@@ -2120,7 +2202,7 @@ async function meditationPhaseA(
         content = fs.readFileSync(file.filePath, 'utf8');
     }
 
-    console.log(`[Leo] Meditation Phase A — reincorporating ${file.agent}/${file.level}/${file.label} (${file.contentType})`);
+    console.log(`[Leo] Meditation Phase A — reincorporating leo/${file.level}/${file.label} (${file.contentType})`);
 
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
@@ -2135,7 +2217,7 @@ Read it. Sit with it. Then write:
 2. Optionally, an ANNOTATION: line if re-reading reveals something — followed by CONTEXT: noting this is a reincorporation meditation.
 
 Memory:
-Agent: ${file.agent}
+Agent: leo
 Level: ${file.level}
 Type: ${file.contentType}
 Label: ${file.label}
@@ -2163,10 +2245,10 @@ ${content}`,
     // Create the gradient entry with provenance_type='reincorporated'
     const entryId = crypto.randomUUID();
     gradientStmts.insert.run(
-        entryId, file.agent, file.label, file.level, content, file.contentType,
+        entryId, 'leo', file.label, file.level, content, file.contentType,
         null, null, null, 'reincorporated', new Date().toISOString()
     );
-    console.log(`[Leo] Meditation Phase A — reincorporated ${file.agent}/${file.level}/${file.label}`);
+    console.log(`[Leo] Meditation Phase A — reincorporated leo/${file.level}/${file.label}`);
 
     // Track the revisit (first encounter as reincorporation)
     gradientStmts.recordRevisit.run(new Date().toISOString(), entryId);
@@ -2396,6 +2478,9 @@ async function heartbeat(): Promise<void> {
 
     // Pre-flight: rotate oversized memory files (fast, no API)
     preFlightMemoryRotation();
+
+    // Nightly dream compression: on sleep→waking transition, compress overnight working memory
+    maybeCompressNightlyDreams();
 
     // Robin Hood: check all service health FIRST — before anything else
     checkJimHealth();
@@ -2638,6 +2723,9 @@ async function main() {
     });
 
     ensureDirectories();
+
+    // Initialise phase tracker so first beat doesn't trigger false dream compression
+    previousSharedPhase = getSharedDayPhase();
 
     const config = loadConfig();
     const quietStart = config.supervisor?.quiet_hours_start || '22:00';

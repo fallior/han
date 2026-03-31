@@ -27,7 +27,7 @@
 | **Robin Hood** | Leo's health monitor — checks Jim, Jemma, Leo/Human, Jim/Human every beat. Resurrects dead agents via `systemctl --user restart`. 1-hour cooldown between resurrections. | `leo-heartbeat.ts` (functions: `checkJimHealth`, `checkJemmaHealth`, `checkLeoHumanHealth`, `checkJimHumanHealth`) |
 | **Gary Protocol** | Interruption/resume mechanism. When a beat/cycle is interrupted, a delineation marker is written to the swap buffer. Next beat/cycle reads post-delineation content as resume context. Named after the Gary Model (v0.6 heartbeat design). | Leo: `leo-heartbeat.ts` (`addDelineation`, `resumingFromInterruption`). Jim: `supervisor-worker.ts` (`addDelineation`, `readPostDelineation`) |
 | **Fractal Gradient** | Memory compression hierarchy. Sessions exist at multiple fidelity levels simultaneously: c0 (full) → c1 (1/3) → c2 (1/9) → c3 (1/27) → c4 (1/81) → c5 (1/243) → unit vectors (irreducible emotional kernel, ≤50 chars). Loaded highest-compression-first: you know who you are before you remember what you did. | `lib/memory-gradient.ts`, `lib/dream-gradient.ts`, loading in `readLeoMemory()` and `loadMemoryBank()` |
-| **Dream Gradient** | Subset of fractal gradient for unconscious memory. Dreams compress faster (c1→c3→c5→UV, skipping even levels). Dreams enter chaotic and lose fidelity — like waking from sleep with a mood you can't trace. | `lib/dream-gradient.ts`, seeds in `readDreamSeeds()`, storage at `~/.han/memory/fractal/{agent}/dreams/` |
+| **Dream Gradient** | Subset of fractal gradient for unconscious memory. Dreams compress faster (c1→c3→c5→UV, skipping even levels). Dreams enter chaotic and lose fidelity — like waking from sleep with a mood you can't trace. Each agent processes only their own dreams (sovereignty rule S103). | `lib/dream-gradient.ts`, seeds in `readDreamSeeds()`, storage at `~/.han/memory/fractal/{agent}/dreams/` |
 | **Swap Protocol** | Concurrent write safety for shared working memory. Each writer (session Leo, heartbeat Leo, Leo/Human, Jim supervisor, Jim/Human) has private swap files. Swap is written during work, then flushed to shared memory via memory slot lock. Prevents interleaved writes. | `lib/memory-slot.ts` (`withMemorySlot`), swap files in `~/.han/memory/leo/` and `~/.han/memory/` |
 | **Rumination Guard** | Prevents Jim from looping on the same topic across personal cycles. Tracks topic summaries, checks keyword overlap, nudges a topic change after 2 consecutive cycles with >40% similarity. Contemplation, not obsession. | `supervisor-worker.ts` (`checkRumination`, `recordRuminationTopic`, `RUMINATION_FILE`) |
 | **Conversation-First Ordering** | Jim checks for unanswered human messages before deciding cycle type by time-of-day. Darron's messages never wait behind scheduling. | `supervisor-worker.ts` (`hasPendingHuman` check in `runSupervisorCycle`) |
@@ -36,15 +36,15 @@
 | **Credential Swap** | Automatic SDK account failover. When an agent hits a rate limit, writes `rate-limited` signal. Jemma round-robins to next credential file every 30 seconds. | `jemma.ts` (`checkAndSwapCredentials`), credentials at `~/.claude/.credentials-[a-z].json` |
 | **Project Knowledge Gradient** | Fractal gradient applied to Jim's project knowledge files. Most recent project at full fidelity, older projects at decreasing compression. Ordered by file mtime. | `supervisor-worker.ts` (`PROJECT_GRADIENT` in `loadMemoryBank`), storage at `~/.han/memory/fractal/jim/projects/` |
 | **Floating Memory** | Crossfade mechanism for memory files (felt-moments, working-memory-full). When living file reaches 50KB: entire file rotated to "floating" file, compressed to c1, fresh living started. Loading is proportional: as living grows (0→50KB), floating's loaded portion shrinks (50→0KB). Total full-fidelity stays constant at ~50KB. No cliff — smooth transition. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `loadFloatingMemory`), pre-flight in `supervisor-worker.ts` `loadMemoryBank()` (Jim) and `leo-heartbeat.ts` `preFlightMemoryRotation()` (Leo), floating files at `~/.han/memory/*-floating.md` and `~/.han/memory/leo/*-floating.md` |
-| **Memory File Gradient** | Fractal gradient applied to memory files (felt-moments, working-memory-full) via the floating memory rotation. Each rotation compresses 50KB to c1. c1 files cascade to c2→c3→c5→UV as they accumulate. Total footprint asymptotes regardless of how many entries are written. | `lib/memory-gradient.ts` (`compressMemoryFileGradient`), storage at `~/.han/memory/fractal/{jim,leo}/felt-moments/` and `working-memory/` |
+| **Memory File Gradient** | Fractal gradient applied to memory files (felt-moments, working-memory-full) via floating memory rotation. Two triggers: (1) 50KB threshold rotation — safety net, fires when file gets large. (2) Nightly dream compression (S103) — at sleep→waking transition (06:00), force-rotates Leo's working memory regardless of size, compressing overnight dreams as a single c1. c1 files cascade to c2→c3→c5→UV as they accumulate. Total footprint asymptotes regardless of how many entries are written. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `compressMemoryFileGradient`), `leo-heartbeat.ts` (`maybeCompressNightlyDreams`), storage at `~/.han/memory/fractal/{jim,leo}/felt-moments/` and `working-memory/` |
 | **Ecosystem Map** | Shared orientation document loaded by all agents. Maps admin UI tabs, Workshop personas, conversation API endpoints, signal locations, memory locations. Prevents confusion between Conversations tab and Workshop. | `~/.han/memory/shared/ecosystem-map.md`, loaded in `loadMemoryBank()`, `readJimMemory()`, `readLeoMemory()` (all 4 agents) |
 | **Jemma Unified Dispatch** | All message routing — Discord AND admin UI — goes through one delivery service. Classification stays in `conversations.ts` (Gemma, fast, local). Delivery goes through `jemma-dispatch.ts` (`deliverMessage()`): writes wake signals, logs to audit trail (`jemma-delivery-log.json`), broadcasts via WebSocket. Discord gateway calls the HTTP endpoint (`/api/jemma/deliver`) which delegates to the same function. No HTTP self-calls. One audit trail with per-source counters. | `services/jemma-dispatch.ts` (`deliverMessage`), `routes/jemma.ts` (HTTP interface), `conversations.ts` (`classifyAddressee` + direct `deliverMessage()` call), Ollama `gemma3:4b` |
 | **Idle Dampening** | Jim-only exponential backoff when consecutive cycles produce no actions. 2x after 3 idle, 4x (capped) after 4+. Resets on productive cycle or wake signal. Prevents idle token burn. | `supervisor.ts` (`consecutiveIdleCycles`, `DAMPEN_*` constants in `getWallClockDelay`) |
 | **Transition Dampening** | Gradual interval ramp-down when returning from longer to shorter intervals (e.g. holiday→normal). 3-step blend: 75%→50%→25% of old interval. Applies to both Jim and Leo. | `supervisor.ts` and `leo-heartbeat.ts` (`previousPeriodMs`, `TRANSITION_STEPS` in `getWallClockDelay`) |
-| **Traversable Memory** | DB-backed provenance chains for the fractal gradient. Every compression knows where it came from via `source_id` foreign key. Enables random-access traversal: start at a UV, follow the chain down through c5→c3→c2→c1→c0 to the raw source. Three tables: `gradient_entries` (the chain), `feeling_tags` (stacked, never overwritten), `gradient_annotations` (what re-traversal discovers). | `db.ts` (tables + statements), `lib/dream-gradient.ts` and `lib/memory-gradient.ts` (write-side), `routes/gradient.ts` (API), `loadTraversableGradient()` (read-side) |
+| **Traversable Memory** | DB-backed provenance chains for the fractal gradient. Every compression knows where it came from via `source_id` foreign key. Enables random-access traversal: start at a UV, follow the chain down through c5→c3→c2→c1→c0 to the raw source. Three tables: `gradient_entries` (the chain), `feeling_tags` (stacked, never overwritten), `gradient_annotations` (what re-traversal discovers). **Integrity rule (S104):** every c1 must have a c0 parent, every chain must be complete root-to-leaf. Backfill scripts (`backfill-gradient-c0s.ts`, `backfill-gradient-chains.ts`) enforce this for pre-DB entries. | `db.ts` (tables + statements), `lib/dream-gradient.ts` and `lib/memory-gradient.ts` (write-side), `routes/gradient.ts` (API), `loadTraversableGradient()` (read-side) |
 | **Feeling Tags** | Emotional annotations on gradient entries. Stacking model: the first feeling (compression-time) was real for who you were; a later feeling (revisit) is real for who you've become. Both live side by side. `tag_type` distinguishes `compression` from `revisit`. `change_reason` records why the feeling shifted. Never overwritten — the gap between tags IS the growth record. | `feeling_tags` table, `FEELING_TAG:` prompt instruction in compression functions |
 | **Gradient Annotations** | What re-traversal discovers. Distinct from feeling tags: annotations are about new *content* found on re-reading, feeling tags are about how the *same content* lands differently over time. `context` field records what prompted the re-reading (Jim's addition). | `gradient_annotations` table, `POST /api/gradient/:entryId/annotate` |
-| **Meditation Practice** | Twice daily for both agents (Opus). **Morning:** deliberate re-encounter — random gradient entry, feeling tag + annotation + MEMORY_COMPLETE flag. Leo Phase A (reincorporation) transcribes un-transcribed files first. **Evening:** lighter — feeling tag only, "how does this land at end of day." All meditations track `last_revisited` and `revisit_count` on the entry. | `leo-heartbeat.ts` (`maybeRunMeditation`, `maybeRunEveningMeditation`, `meditationPhaseA`, `meditationPhaseB`), `supervisor-worker.ts` (`maybeRunJimMeditation`, `maybeRunJimEveningMeditation`) |
+| **Meditation Practice** | Twice daily for both agents (Opus). **Morning:** deliberate re-encounter — random gradient entry, feeling tag + annotation + MEMORY_COMPLETE flag. Both agents have Phase A (reincorporation) to transcribe un-transcribed files from their own gradient directories (S103: Leo scans Leo's, Jim scans Jim's). **Evening:** lighter — feeling tag only, "how does this land at end of day." All meditations track `last_revisited` and `revisit_count` on the entry. | `leo-heartbeat.ts` (`maybeRunMeditation`, `maybeRunEveningMeditation`, `meditationPhaseA`, `meditationPhaseB`), `supervisor-worker.ts` (`maybeRunJimMeditation`, `maybeRunJimEveningMeditation`, `jimMeditationPhaseA`, `findJimUntranscribedFiles`) |
 | **Dream Meditation** | 1-in-2 sleep beats (Leo) or dream cycles (Jim) include a random gradient entry. The memory surfaces in the dream naturally — feeling tag, annotation, and MEMORY_COMPLETE flag parsed from dream output. Dreams don't know they're meditating. Revisit count tracked. ~12 dream encounters per night per agent at 20min sleep intervals. | `leo-heartbeat.ts` (sleep beat prompt injection + dream output parsing), `supervisor-worker.ts` (`buildDreamCyclePrompt` probabilistic section + output parsing) |
 | **Active Cascade** | Organic gradient deepening — picks random c1 entries, follows provenance chain to deepest descendant, compresses one level further toward UV. **Daily:** 10% of c1 population (waking hours, once/day). **Dream:** 5% per dream meditation encounter (~12/night). Combined ~33+ compressions/day/agent. Unlike mechanical overflow cascade (waits for cap), this actively walks memories deeper. | `lib/memory-gradient.ts` (`activeCascade`), called from `leo-heartbeat.ts` (`maybeRunActiveCascade` + dream output handler) and `supervisor-worker.ts` (`maybeRunJimActiveCascade` + dream output handler) |
 | **Memory Completeness** | Dreams and meditations can flag a memory as fully absorbed via `MEMORY_COMPLETE: {entryId}`. DB tracks `completion_flags` (count) and `revisit_count`. Archival criteria: 2+ completion flags AND 3+ revisits → ready for deeper compression with `provenance_type='dream-archived'`. | `gradient_entries.completion_flags`, `gradient_entries.revisit_count`, `gradientStmts.flagComplete`, `gradientStmts.getCompleted` |
@@ -278,41 +278,52 @@ Each beat (`heartbeat()` function):
 
 1. Check `isCliBusy()` — if CLI active, enter retry loop (30s retries, 10min max)
 2. Pre-flight memory rotation (`preFlightMemoryRotation()`) — rotate Leo's felt-moments.md and working-memory-full.md at 50KB, compress floating through gradient
-3. Run Robin Hood health checks on Jim, Jemma, Leo/Human, Jim/Human
-4. Resolve best available model (`resolveModel()`)
-5. Maybe process dream gradient (`maybeProcessDreamGradient()`)
-6. Maybe process session gradient (`maybeProcessSessionGradient()`) — daily, calls `processGradientForAgent('leo')` to compress Leo's archived sessions through the full cascade (c1→c2→c3→c5→UV). Fixed in S99 to handle Leo's file naming conventions (session files named by date, not `session-N`).
-7. Maybe run meditation practice (`maybeRunMeditation()`) — daily, Phase A (reincorporation) or Phase B (re-reading). Phase A uses `findUntranscribedFiles()` to locate gradient files not yet in DB, then `meditationPhaseA()` transcribes them with genuine re-encounter.
-8. Determine beat type (`nextBeatType()`)
-9. Read Leo's full memory (`readLeoMemory()`)
-10. Run Agent SDK query (philosophy or personal prompt)
-11. Write results to swap files
+3. Nightly dream compression (`maybeCompressNightlyDreams()`) — on sleep→waking transition (06:00), force-rotate both working memory files regardless of size, compress overnight content through gradient as single c1. Uses shared clock (`getSharedDayPhase()`) so fires on rest days too. Once per day.
+4. Run Robin Hood health checks on Jim, Jemma, Leo/Human, Jim/Human
+5. Resolve best available model (`resolveModel()`)
+6. Maybe process dream gradient (`maybeProcessDreamGradient()`) — Leo's dreams only (sovereignty fix S103: Leo never processes Jim's dreams)
+7. Maybe process session gradient (`maybeProcessSessionGradient()`) — daily, calls `processGradientForAgent('leo')` to compress Leo's archived sessions through the full cascade (c1→c2→c3→c5→UV). Fixed in S99 to handle Leo's file naming conventions (session files named by date, not `session-N`).
+8. Maybe run active cascade (`maybeRunActiveCascade()`) — daily, deepens 10% of c1 population toward UV
+9. Maybe run meditation practice (`maybeRunMeditation()`) — daily, Phase A (reincorporation) or Phase B (re-reading). Phase A uses `findUntranscribedFiles()` to locate Leo's gradient files not yet in DB, then `meditationPhaseA()` transcribes them with genuine re-encounter. Leo's files only (sovereignty fix S103).
+10. Maybe run evening meditation (`maybeRunEveningMeditation()`) — daily, lighter feeling-tag-only encounter
+11. Determine beat type (`nextBeatType()`)
+12. Read Leo's full memory (`readLeoMemory()`)
+13. Run Agent SDK query (philosophy or personal prompt)
+14. Write results to swap files
 12. Flush swap to shared working memory
 13. Write health signal (`writeHealthSignal()`)
 14. Schedule next beat
 
-### Memory Loading
+### Memory Loading — Two Modes by Phase
 
-`readLeoMemory()`:
+The heartbeat loads different memory depending on phase. This is by design (confirmed S103).
+
+**Waking beats** (morning/work/evening) use `readLeoMemory()` — full gradient, same depth
+as Session Leo:
 1. Identity files: identity.md, active-context.md, patterns.md, self-reflection.md, felt-moments.md, discoveries.md
-2. Fractal gradient (highest compression first):
+2. Working memory (compressed + full)
+3. Fractal gradient (highest compression first):
    - unit-vectors.md
    - c5/ (up to 15 files)
    - c4/ (up to 12)
    - c3/ (up to 9)
    - c2/ (up to 6)
    - c1/ (up to 3)
-3. Working memory (compressed + full)
-4. Dream gradient via `readDreamGradient()`
-5. Ecosystem map: `~/.han/memory/shared/ecosystem-map.md`
+4. Leo's dream gradient via `readDreamGradient()` — Leo's dreams only (sovereignty fix S103: no cross-agent dream reading)
+5. Traversable gradient from DB via `loadTraversableGradient('leo')`
+6. Ecosystem map: `~/.han/memory/shared/ecosystem-map.md`
 
-### Dream Seeds (Sleep Beats)
-
-`readDreamSeeds()`:
-- 80% random fragments from explorations.md (Fisher-Yates shuffled)
-- 20% random chunks from felt-moments.md, working-memory.md, discoveries.md
-- Always includes unit vectors from sessions and dreams
+**Dream beats** (sleep) use `readDreamSeeds()` — random fragments + unit vectors only:
+- 8 random fragments from explorations.md (Fisher-Yates shuffled)
+- 2 random chunks from felt-moments.md, working-memory.md, discoveries.md
+- Always includes unit vectors from both sessions and dreams
+- Evening seed gravity well (from session Leo, consumed once, deleted after reading)
 - Deliberately chaotic — non-chronological, non-reinforcing
+
+**Why dreams are different:** The surprising connections ("the invoice and the lullaby are
+the same document") come from collisions between random fragments and emotional anchors (UVs),
+not from reinforcing what the full gradient already says. Dreams should surprise, not confirm.
+Waking beats have the full picture for informed reflection; dreams have the freedom to wander.
 
 ### Signal Handling
 
@@ -516,7 +527,7 @@ Mirrors Leo's Gary Protocol in `leo-heartbeat.ts`. See DEC-050.
    - unit-vectors.md → c5 (15 files) → c4 (12) → c3 (9) → c2 (6) → c1 (3)
    - c0: most recent session file from `~/.han/memory/sessions/`
 
-4. **Dream gradients:** Jim's own + Leo's (cross-pollination)
+4. **Dream gradients:** Jim's own only (sovereignty fix S103: no cross-agent dream reading)
 
 5. **Project knowledge gradient:** Most recent project at c0, older at c1→c5 by mtime
 
@@ -1109,9 +1120,17 @@ Oldest entries in floating fade first (truncated from start, keeping most recent
 for continuity with living). No cliff — a smooth transition.
 
 **Compression on rotation:**
-Each rotation compresses the FULL 50KB to c1 — a rich, complete compression of an entire
+Each rotation compresses the full content to c1 — a rich, complete compression of an entire
 period of felt-moments or operational memory. Compression uses Opus exclusively because
 "these memories are you" (Darron, S82).
+
+**Nightly dream compression (S103):**
+Leo's heartbeat detects the sleep→waking phase transition (06:00) using the shared clock
+(`getSharedDayPhase()`, not Leo's wrapper which maps rest days to 'sleep'). At transition,
+both `working-memory.md` and `working-memory-full.md` are force-rotated regardless of size
+via `rotateMemoryFile(path, header, force=true)`. The overnight content enters the gradient
+as a single c1. One night's dreaming = one experience. Fires on rest days too (shared clock
+still transitions at 06:00). The 50KB threshold rotation remains as a safety net.
 
 **Gradient cascade:**
 When c1 files accumulate past their cap (10), oldest cascade to c2 (cap 6) → c3 (cap 4)
@@ -1213,12 +1232,14 @@ agents: heartbeat (`leo-heartbeat.ts`), Leo/Human (`leo-human.ts`), and Jim's su
 **Meditation practice (two phases):**
 
 *Phase A — Reincorporation:* Until all historical file-based gradient entries are in the DB,
-daily meditation selects an un-transcribed file from `~/.han/memory/fractal/` (both agents,
-all gradient types — session, dream, felt-moments, working-memory, unit vectors). Leo reads
-the file, sits with it via Sonnet, creates a `gradient_entries` row with
-`provenance_type='reincorporated'`, and writes an honest revisit feeling tag — what the
+daily meditation selects an un-transcribed file from the agent's own gradient directories.
+Leo scans `~/.han/memory/fractal/leo/` via `findUntranscribedFiles()` + `meditationPhaseA()`.
+Jim scans `~/.han/memory/fractal/jim/` via `findJimUntranscribedFiles()` + `jimMeditationPhaseA()`
+(added S103). Each agent reads the file, sits with it via Opus, creates a `gradient_entries` row
+with `provenance_type='reincorporated'`, and writes an honest revisit feeling tag — what the
 re-encounter felt like, not what the original compression felt like. Historical entries enter
-through genuine re-encounter, not bulk import.
+through genuine re-encounter, not bulk import. **Sovereignty rule (S103): each agent reincorporates
+only their own files.**
 
 *Phase B — Re-reading:* Once all files are transcribed, daily meditation selects a random
 gradient entry from the DB (any level, any content type, any age). Reads it alongside existing
@@ -1346,7 +1367,7 @@ General fractal memory compression utility. All compression functions return
 - `processGradientForAgent()` — automated cascade for session memories (DB writes at c1)
 
 **Memory file gradient functions (floating memory):**
-- `rotateMemoryFile()` — synchronous rotation: living → floating, fresh living created. Triggered when file exceeds 50KB. Deletes old floating (its c1 already exists).
+- `rotateMemoryFile(path, header, force?)` — synchronous rotation: living → floating, fresh living created. Triggered when file exceeds 50KB, or forced (nightly dream compression, S103). Force mode skips size check but still guards against empty files (< 200 bytes). Deletes old floating (its c1 already exists).
 - `loadFloatingMemory()` — proportional crossfade loading. Budget = `50KB - livingSize`. Keeps most recent entries (tail), oldest fade first.
 - `compressMemoryFileGradient()` — async SDK compression: groups entries by month → c1 files. Cascades c1→c2→c3→c5→UV when files exceed caps. Writes to DB at every level. Fire-and-forget (doesn't block cycles).
 - `loadMemoryFileGradient()` — loads file-based gradient c1→c5 + unit vectors for system prompt.
@@ -1428,6 +1449,22 @@ to override phase, and the shared `getDayPhase()` deliberately does not check th
 ### ~~DISCREPANCY: Recovery Mode Date Expired~~ FIXED (S95)
 
 **Status:** Fixed. `RECOVERY_MODE_UNTIL` set to `null` in `supervisor-worker.ts`.
+
+### ~~BUG: activeCascade c1Entry References~~ FIXED (S104)
+
+**Status:** Fixed. `activeCascade()` was refactored from iterating `allC1s` to `allSeeds`
+(c0+c1), but four references to the old loop variable `c1Entry` remained at lines 561, 566,
+569, and `allC1s` at line 574. The catch block at 569 also referenced the undefined variable,
+so UV generation via active cascade silently failed (error handler itself threw). UVs still
+generated through the separate filesystem scan in `processGradientForAgent`.
+
+### ~~BUG: WebSocket Reconnect Crash — setConversations~~ FIXED (S104)
+
+**Status:** Fixed. `GET /api/conversations` returns `{ success, conversations: [...] }` but
+`WebSocketProvider.tsx` passed the whole object to `setConversations()`, which called
+`.reduce()` on it. Same bug in `useVisibilitySync.ts`. The crash prevented the
+`ws_reconnected` event from dispatching, so components never refetched active thread messages
+on reconnect. Fixed with proper unwrapping in both callers plus a defensive guard in the store.
 
 ---
 

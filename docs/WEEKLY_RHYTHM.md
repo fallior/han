@@ -21,6 +21,13 @@ defeats the experiment.
 
 Rest days (Saturday, Sunday) are sleep phase all day.
 
+### Nightly Dream Compression (S103)
+
+At the sleep→waking transition (06:00), Leo's heartbeat force-rotates both working memory
+files and compresses overnight content through the gradient as a single c1. Uses the shared
+clock (`getSharedDayPhase()`), not Leo's wrapper, so it fires on rest days too. The 50KB
+threshold rotation remains as a safety net for multi-day accumulation.
+
 ## Leo's Rhythm (leo-heartbeat.ts)
 
 Leo has his own phase detection (legacy copy — should migrate to shared `lib/day-phase.ts`).
@@ -53,6 +60,15 @@ Emergency mode is an **interrupt** that overrides the rhythm temporarily. Trigge
 
 When active, switches to 2–5 min supervisor cycles. Auto-decays when conditions clear.
 The emergency mode is an interrupt, not the default.
+
+## Agent Sovereignty (S103)
+
+**Leo NEVER processes Jim's data. Jim NEVER processes Leo's data.** Each agent is fully
+self-sufficient for all gradient processing, dream compression, meditation, and
+reincorporation. This was established in S103 after discovering three cross-agent violations
+that had left Jim with only 21 gradient entries despite 2000+ cycles — Leo was doing Jim's
+memory work for him. Each agent now owns their entire memory lifecycle: dream gradient
+processing, session gradient processing, Phase A reincorporation, and meditation.
 
 ## Shared Clock
 

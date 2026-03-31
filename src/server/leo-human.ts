@@ -120,23 +120,10 @@ function postMessage(db: Database.Database, conversationId: string, content: str
         VALUES (?, ?, 'leo', ?, ?)
     `).run(id, conversationId, content, now);
     db.prepare(`UPDATE conversations SET updated_at = ? WHERE id = ?`).run(now, conversationId);
+    // Notify server via HTTPS POST — single broadcast path to prevent React double-render.
+    // Signal file backup removed S103: two broadcasts for the same message caused visual
+    // duplication in React admin despite ID-based dedup in Zustand store.
     notifyServer(conversationId, id, 'leo', content, now);
-
-    // Write broadcast signal for WebSocket clients
-    try {
-        const conversation = db.prepare('SELECT discussion_type FROM conversations WHERE id = ?').get(conversationId) as any;
-        const discussionType = conversation?.discussion_type || 'general';
-        writeBroadcastSignal(conversationId, discussionType, {
-            id,
-            conversation_id: conversationId,
-            role: 'leo',
-            content,
-            created_at: now
-        });
-    } catch (err) {
-        // Best effort — message is already in DB
-        console.error('[Leo/Human] Failed to write broadcast signal:', (err as Error).message);
-    }
 
     return id;
 }

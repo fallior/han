@@ -34,8 +34,10 @@ export function useVisibilitySync() {
         // Re-fetch conversation list
         const conversationsResponse = await fetch('/api/conversations', { headers });
         if (conversationsResponse.ok) {
-          const conversations = await conversationsResponse.json();
-          setConversations(conversations);
+          const data = await conversationsResponse.json();
+          // API returns { conversations: [...] } — unwrap before passing to store
+          const convList = Array.isArray(data) ? data : (data.conversations || []);
+          setConversations(convList);
         }
 
         // If a conversation is selected, re-fetch its messages

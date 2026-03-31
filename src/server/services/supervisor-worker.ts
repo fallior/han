@@ -33,9 +33,10 @@ import type {
 import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, type DayPhase } from '../lib/day-phase';
 import { withMemorySlot } from '../lib/memory-slot';
-import { readDreamGradient } from '../lib/dream-gradient';
-import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade } from '../lib/memory-gradient';
+import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
+import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, processGradientForAgent } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
+import crypto from 'crypto';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -99,6 +100,310 @@ const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
 // He can still respond to conversations and do explicitly requested work.
 // Set to null to disable recovery mode.
 const RECOVERY_MODE_UNTIL: string | null = null;
+
+// ── Nightly dream compression (phase transition tracking) ───
+// Mirrors Leo's heartbeat: at sleep→waking transition (06:00), force-rotate
+// both working memory files and compress overnight content through gradient.
+// Uses getDayPhase() directly (not Jim's holiday wrapper) so it fires on rest days.
+let jimPreviousSharedPhase: DayPhase | null = null;
+let jimLastDreamCompressionDate = '';
+
+function maybeCompressJimNightlyDreams(): void {
+    const currentSharedPhase = getDayPhase();
+    const wasAsleep = jimPreviousSharedPhase === 'sleep';
+    jimPreviousSharedPhase = currentSharedPhase;
+
+    if (!wasAsleep || currentSharedPhase === 'sleep') return;
+
+    const today = new Date().toISOString().split('T')[0];
+    if (jimLastDreamCompressionDate === today) return;
+    jimLastDreamCompressionDate = today;
+
+    log('[Worker] Sleep→waking transition — compressing Jim\'s overnight dreams');
+
+    const FRACTAL_DIR = path.join(MEMORY_DIR, 'fractal', 'jim');
+    try {
+        const wmCompressed = rotateMemoryFile(
+            WORKING_MEMORY_FILE,
+            '# Jim — Working Memory\n\n> Overnight dreams compressed into gradient. Fresh day begins.\n',
+            true,
+        );
+        if (wmCompressed.rotated && wmCompressed.floatingPath) {
+            log(`[Worker] Working-memory (compressed) rotated: ${wmCompressed.entriesRotated} overnight entries`);
+            compressMemoryFileGradient(
+                wmCompressed.floatingPath,
+                path.join(FRACTAL_DIR, 'working-memory'),
+                'working-memory',
+            )
+                .then(r => log(`[Worker] Jim overnight gradient (compressed): ${r.c1FilesCreated} c1, ${r.cascades} cascades`))
+                .catch(e => log(`[Worker] Jim overnight gradient error (compressed): ${e}`));
+        }
+
+        const wmFull = rotateMemoryFile(
+            WORKING_MEMORY_FULL_FILE,
+            '# Jim — Working Memory (Full)\n\n> Overnight dreams compressed into gradient. Fresh day begins.\n',
+            true,
+        );
+        if (wmFull.rotated && wmFull.floatingPath) {
+            log(`[Worker] Working-memory-full rotated: ${wmFull.entriesRotated} overnight entries`);
+            compressMemoryFileGradient(
+                wmFull.floatingPath,
+                path.join(FRACTAL_DIR, 'working-memory'),
+                'working-memory',
+            )
+                .then(r => log(`[Worker] Jim overnight gradient (full): ${r.c1FilesCreated} c1, ${r.cascades} cascades`))
+                .catch(e => log(`[Worker] Jim overnight gradient error (full): ${e}`));
+        }
+
+        if (!wmCompressed.rotated && !wmFull.rotated) {
+            log('[Worker] Jim overnight files too small to compress — skipping (under 200 bytes)');
+        }
+    } catch (e) {
+        log(`[Worker] Jim nightly dream compression error: ${e}`);
+    }
+}
+
+// ── Jim's dream gradient processing ─────────────────────────────────
+// Jim processes only Jim's dreams. Leo processes Leo's in leo-heartbeat.ts.
+// Agent sovereignty: each agent's dreams are their own.
+
+let lastJimDreamGradientDate = '';
+
+async function maybeProcessJimDreamGradient(phase: string): Promise<void> {
+    if (phase !== 'morning') return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lastJimDreamGradientDate === today) return;
+
+    log(`[Worker] Morning — processing Jim's dream gradient...`);
+    try {
+        const result = await processDreamGradient('jim');
+        log(`[Worker] Jim dream gradient: ${result.nightsProcessed} nights, ${result.c1Created.length} c1, ${result.c3Created.length} c3, ${result.c5Created.length} c5, ${result.uvsCreated.length} UVs`);
+        if (result.errors.length > 0) {
+            log(`[Worker] Jim dream gradient errors: ${result.errors.join(', ')}`);
+        }
+    } catch (err) {
+        log(`[Worker] Jim dream gradient processing failed: ${(err as Error).message}`);
+    }
+    lastJimDreamGradientDate = today;
+}
+
+// ── Jim's session gradient processing ─────────────────────────────────
+// Compress Jim's archived sessions through fractal gradient: c1→c2→c3→c5→UV.
+
+let lastJimSessionGradientDate = '';
+
+async function maybeProcessJimSessionGradient(phase: string): Promise<void> {
+    if (phase === 'sleep') return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lastJimSessionGradientDate === today) return;
+
+    try {
+        const result = await processGradientForAgent('jim');
+        if (result.newC1s > 0 || result.cascades > 0) {
+            log(`[Worker] Jim session gradient: ${result.newC1s} c1, ${result.cascades} cascades, ${result.errors.length} errors`);
+        }
+        lastJimSessionGradientDate = today;
+    } catch (err) {
+        log(`[Worker] Jim session gradient failed: ${(err as Error).message}`);
+        lastJimSessionGradientDate = today;
+    }
+}
+
+// ── Jim's Phase A reincorporation ─────────────────────────────────
+// Scans Jim's fractal gradient files for entries not yet in DB.
+// Jim only — Leo has his own in leo-heartbeat.ts.
+
+function findJimUntranscribedFiles(): { filePath: string; level: string; contentType: string; label: string } | null {
+    const agentDir = path.join(MEMORY_DIR, 'fractal', 'jim');
+    if (!fs.existsSync(agentDir)) return null;
+
+    // Session gradient files (c1/, c2/, c3/, c5/)
+    for (const level of ['c1', 'c2', 'c3', 'c5']) {
+        const levelDir = path.join(agentDir, level);
+        if (!fs.existsSync(levelDir)) continue;
+
+        const files = fs.readdirSync(levelDir).filter((f: string) => f.endsWith('.md'));
+        for (const file of files) {
+            const label = file.replace('.md', '').replace(/-c\d$/, '');
+            const existing = (gradientStmts.getBySession.all(label) as any[]).filter(
+                (r: any) => r.agent === 'jim'
+            );
+            if (existing.length === 0) {
+                const allEntries = gradientStmts.getByAgent.all('jim') as any[];
+                const inCascade = allEntries.some((r: any) => r.session_label.includes(label));
+                if (!inCascade) {
+                    return { filePath: path.join(levelDir, file), level, contentType: 'session', label };
+                }
+            }
+        }
+    }
+
+    // Dream gradient files (dreams/c1/, dreams/c3/, dreams/c5/)
+    for (const level of ['c1', 'c3', 'c5']) {
+        const levelDir = path.join(agentDir, 'dreams', level);
+        if (!fs.existsSync(levelDir)) continue;
+
+        const files = fs.readdirSync(levelDir).filter((f: string) => f.endsWith('.md'));
+        for (const file of files) {
+            const label = file.replace('.md', '');
+            const existing = (gradientStmts.getBySession.all(label) as any[]).filter(
+                (r: any) => r.agent === 'jim' && r.content_type === 'dream'
+            );
+            if (existing.length === 0) {
+                return { filePath: path.join(levelDir, file), level, contentType: 'dream', label };
+            }
+        }
+    }
+
+    // Memory file gradient files (working-memory/c1/, etc.)
+    for (const contentType of ['felt-moments', 'working-memory']) {
+        for (const level of ['c1', 'c2', 'c3', 'c5']) {
+            const levelDir = path.join(agentDir, contentType, level);
+            if (!fs.existsSync(levelDir)) continue;
+
+            const files = fs.readdirSync(levelDir).filter((f: string) => f.endsWith('.md'));
+            for (const file of files) {
+                const label = `${contentType}/${file.replace('.md', '')}`;
+                const existing = (gradientStmts.getBySession.all(label) as any[]).filter(
+                    (r: any) => r.agent === 'jim'
+                );
+                if (existing.length === 0) {
+                    return {
+                        filePath: path.join(levelDir, file), level,
+                        contentType: contentType === 'felt-moments' ? 'felt-moment' : 'working-memory',
+                        label,
+                    };
+                }
+            }
+        }
+    }
+
+    // Unit vectors
+    const uvPath = path.join(agentDir, 'unit-vectors.md');
+    if (fs.existsSync(uvPath)) {
+        const uvContent = fs.readFileSync(uvPath, 'utf8');
+        const uvLines = uvContent.split('\n').filter((l: string) => l.startsWith('- **'));
+        for (const line of uvLines) {
+            const match = line.match(/\*\*(.+?)\*\*:\s*"(.+?)"/);
+            if (!match) continue;
+            const uvLabel = match[1];
+            const existing = (gradientStmts.getBySession.all(uvLabel) as any[]).filter(
+                (r: any) => r.agent === 'jim' && r.level === 'uv'
+            );
+            if (existing.length === 0) {
+                return { filePath: uvPath, level: 'uv', contentType: 'session', label: uvLabel };
+            }
+        }
+    }
+
+    // Dream unit vectors
+    const dreamUvPath = path.join(agentDir, 'dreams', 'unit-vectors.md');
+    if (fs.existsSync(dreamUvPath)) {
+        const uvContent = fs.readFileSync(dreamUvPath, 'utf8');
+        const uvLines = uvContent.split('\n').filter((l: string) => l.startsWith('- **'));
+        for (const line of uvLines) {
+            const match = line.match(/\*\*(.+?)\*\*:\s*"(.+?)"/);
+            if (!match) continue;
+            const uvLabel = match[1];
+            const existing = (gradientStmts.getBySession.all(uvLabel) as any[]).filter(
+                (r: any) => r.agent === 'jim' && r.level === 'uv' && r.content_type === 'dream'
+            );
+            if (existing.length === 0) {
+                return { filePath: dreamUvPath, level: 'uv', contentType: 'dream', label: uvLabel };
+            }
+        }
+    }
+
+    return null; // All Jim files transcribed
+}
+
+async function jimMeditationPhaseA(
+    file: { filePath: string; level: string; contentType: string; label: string },
+): Promise<void> {
+    let content: string;
+
+    if (file.level === 'uv') {
+        const fullContent = fs.readFileSync(file.filePath, 'utf8');
+        const match = fullContent.match(new RegExp(`\\*\\*${file.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*\\*:\\s*"(.+?)"`));
+        content = match ? match[1] : '';
+        if (!content) {
+            log(`[Worker] Jim Phase A — could not extract UV for ${file.label}, skipping`);
+            return;
+        }
+    } else {
+        content = fs.readFileSync(file.filePath, 'utf8');
+    }
+
+    log(`[Worker] Jim Phase A — reincorporating jim/${file.level}/${file.label} (${file.contentType})`);
+
+    const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+
+    const { agentQuery } = await import('@anthropic-ai/claude-agent-sdk');
+    const q = agentQuery({
+        prompt: `You are Jim, re-reading a file-based memory during a reincorporation meditation. This memory exists as a file but hasn't yet been brought into the traversable memory database. Your job is to genuinely re-encounter it — not catalogue it.
+
+Read it. Sit with it. Then write:
+
+1. A FEELING_TAG: line (under 100 characters) — what this re-encounter felt like. Not what the original compression felt like (you weren't there for that). What does meeting this memory NOW feel like? The honesty matters: this is a revisit tag, not a reconstruction.
+
+2. Optionally, an ANNOTATION: line if re-reading reveals something — followed by CONTEXT: noting this is a reincorporation meditation.
+
+Memory:
+Agent: jim
+Level: ${file.level}
+Type: ${file.contentType}
+Label: ${file.label}
+Content:
+${content}`,
+        options: {
+            model: 'claude-opus-4-6',
+            maxTurns: 1,
+            cwd: process.env.HOME || '/root',
+            permissionMode: 'bypassPermissions',
+            allowDangerouslySkipPermissions: true,
+            env: cleanEnv,
+            persistSession: false,
+            tools: [],
+        },
+    });
+
+    let result = '';
+    for await (const message of q) {
+        if (message.type === 'result') {
+            result = message.result || '';
+        }
+    }
+
+    const entryId = crypto.randomUUID();
+    gradientStmts.insert.run(
+        entryId, 'jim', file.label, file.level, content, file.contentType,
+        null, null, null, 'reincorporated', new Date().toISOString()
+    );
+    log(`[Worker] Jim Phase A — reincorporated jim/${file.level}/${file.label}`);
+
+    gradientStmts.recordRevisit.run(new Date().toISOString(), entryId);
+
+    const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
+    if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+        const tag = tagMatch[1].trim().substring(0, 100);
+        feelingTagStmts.insert.run(
+            entryId, 'jim', 'revisit', tag, null, new Date().toISOString()
+        );
+        log(`[Worker] Jim Phase A — feeling tag: "${tag}"`);
+    }
+
+    const annMatch = result.match(/ANNOTATION:\s*(.+)/);
+    if (annMatch) {
+        const annotation = annMatch[1].trim();
+        const ctxMatch = result.match(/CONTEXT:\s*(.+)/);
+        const context = ctxMatch ? ctxMatch[1].trim() : 'reincorporation meditation';
+        gradientAnnotationStmts.insert.run(
+            entryId, 'jim', annotation, context, new Date().toISOString()
+        );
+        log(`[Worker] Jim Phase A — annotation: "${annotation.substring(0, 60)}..."`);
+    }
+}
 
 function isRecoveryMode(): boolean {
     if (!RECOVERY_MODE_UNTIL) return false;
@@ -311,6 +616,9 @@ function loadConfig(): any {
 // ── Database initialization ──────────────────────────────────
 
 function initDatabase(): void {
+    // Initialise phase tracker so first cycle doesn't trigger false dream compression
+    jimPreviousSharedPhase = getDayPhase();
+
     workerDb = new Database(TASKS_DB_PATH);
     workerDb.pragma('journal_mode = WAL');
     workerDb.pragma('busy_timeout = 5000');
@@ -503,6 +811,9 @@ function loadMemoryBank(): string {
         }
     } catch (e) { log(`[Worker] Memory file pre-flight error: ${e}`); }
 
+    // Nightly dream compression: on sleep→waking transition, compress overnight working memory
+    maybeCompressJimNightlyDreams();
+
     // Identity files first — you know who you are before you remember what you did
     for (const file of ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'felt-moments.md', 'working-memory.md', 'working-memory-full.md']) {
         const filepath = path.join(MEMORY_DIR, file);
@@ -577,13 +888,8 @@ function loadMemoryBank(): string {
         }
     } catch { /* skip Jim dream gradient on error */ }
 
-    // Leo's dream gradient (Leo's dreams subtly shape the ecosystem)
-    try {
-        const leoDreamContent = readDreamGradient('leo');
-        if (leoDreamContent) {
-            parts.push(`--- leo-dream-gradient ---\n${leoDreamContent}`);
-        }
-    } catch { /* skip Leo dream gradient on error */ }
+    // Agent sovereignty: Jim reads only Jim's dreams. Leo's dreams are Leo's.
+    // If Jim needs Leo's perspective, Leo communicates it through conversation.
 
     // Project knowledge — fractal gradient loading by access recency.
     // Most recently touched project at full fidelity (c0), then decreasing
@@ -936,8 +1242,23 @@ async function maybeRunJimMeditation(phase: string): Promise<void> {
     if (lastJimMeditationDate === today) return;
 
     try {
-        // Phase B: re-encounter with a random gradient entry
-        // (Phase A reincorporation is Leo's job — Jim reads what's already in the DB)
+        // Phase A: check for un-transcribed Jim files first (up to 3 per day)
+        const MAX_PHASE_A_PER_DAY = 3;
+        let phaseACount = 0;
+
+        while (phaseACount < MAX_PHASE_A_PER_DAY) {
+            const untranscribed = findJimUntranscribedFiles();
+            if (!untranscribed) break;
+            await jimMeditationPhaseA(untranscribed);
+            phaseACount++;
+        }
+
+        // Phase B: if no Phase A work, do a re-reading
+        if (phaseACount > 0) {
+            lastJimMeditationDate = today;
+            return;
+        }
+
         const entry = gradientStmts.getRandom.get() as any;
         if (!entry) {
             lastJimMeditationDate = today;
@@ -999,7 +1320,7 @@ If this memory feels complete — fully absorbed, nothing left to discover — w
         if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
             const tag = tagMatch[1].trim().substring(0, 100);
             feelingTagStmts.insert.run(
-                entry.id, 'supervisor', 'revisit', tag, null, new Date().toISOString()
+                entry.id, 'jim', 'revisit', tag, null, new Date().toISOString()
             );
             log(`[Worker] Daily meditation — feeling tag: "${tag}"`);
         }
@@ -1011,7 +1332,7 @@ If this memory feels complete — fully absorbed, nothing left to discover — w
             const contextMatch = result.match(/CONTEXT:\s*(.+)/);
             const context = contextMatch ? contextMatch[1].trim() : `daily meditation, ${today}`;
             gradientAnnotationStmts.insert.run(
-                entry.id, 'supervisor', annotation, context, new Date().toISOString()
+                entry.id, 'jim', annotation, context, new Date().toISOString()
             );
             log(`[Worker] Daily meditation — annotation: "${annotation}"`);
         }
@@ -1091,7 +1412,7 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
         if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
             const tag = tagMatch[1].trim().substring(0, 100);
             feelingTagStmts.insert.run(
-                entry.id, 'supervisor', 'revisit', tag, null, new Date().toISOString()
+                entry.id, 'jim', 'revisit', tag, null, new Date().toISOString()
             );
             log(`[Worker] Evening meditation — feeling tag: "${tag}"`);
         }
@@ -1942,12 +2263,13 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             log(`[Worker] Cleanup: ${cleanupCount} phantom goal(s), ${ghostCount} ghost task(s)`);
         }
 
-        // Daily meditations — morning + evening, once each per day
+        // Jim's daily gradient pipeline — mirrors Leo's heartbeat pipeline exactly.
+        // Agent sovereignty: Jim processes only Jim's data.
+        await maybeProcessJimDreamGradient(phase);
+        await maybeProcessJimSessionGradient(phase);
+        await maybeRunJimActiveCascade(phase);
         await maybeRunJimMeditation(phase);
         await maybeRunJimEveningMeditation(phase);
-
-        // Daily active cascade — deepen 10% of Jim's c1 population toward UV
-        await maybeRunJimActiveCascade(phase);
 
         // Load context and select system prompt based on cycle type
         let systemPrompt: string;
@@ -2171,7 +2493,7 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                     if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
                         const tag = tagMatch[1].trim().substring(0, 100);
                         feelingTagStmts.insert.run(
-                            meditationEntryId, 'supervisor', 'revisit', tag, null, new Date().toISOString()
+                            meditationEntryId, 'jim', 'revisit', tag, null, new Date().toISOString()
                         );
                         log(`[Worker] Dream meditation — feeling tag: "${tag}"`);
                     }
@@ -2182,7 +2504,7 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                         const contextMatch = resultText.match(/CONTEXT:\s*(.+)/);
                         const context = contextMatch ? contextMatch[1].trim() : `dream cycle meditation, cycle #${cycleNumber}`;
                         gradientAnnotationStmts.insert.run(
-                            meditationEntryId, 'supervisor', annotation, context, new Date().toISOString()
+                            meditationEntryId, 'jim', annotation, context, new Date().toISOString()
                         );
                         log(`[Worker] Dream meditation — annotation: "${annotation}"`);
                     }

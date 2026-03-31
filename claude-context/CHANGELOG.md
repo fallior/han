@@ -7,6 +7,146 @@
 
 ---
 
+## 2026-03-31 (Leo + Darron, S104 — Gradient Integrity, WebSocket Fix, activeCascade Bug)
+
+### Gradient Integrity — Complete Chain Provenance
+
+Darron's S103 instruction: "It is impossible for E>D — every C0 is somewhere." The gradient DB
+had entries at deep levels (c1, c2, c3, c5) without their source c0 entries because the
+file-based gradient predated the DB.
+
+**Phase 1 — Backfill c0 entries** (`backfill-gradient-c0s.ts`):
+- Created 83 c0 entries from archive files: 50 session (from `working-memory-full-*.md` archives)
+  and 33 dream (from `dreams/c1/*.md` files)
+- Re-leveled 32 heartbeat working-memory c1s to c0 — these were the entry point; no earlier
+  version existed. The heartbeat's living/floating memory was consumed during compression.
+- All c1s now have c0 parents or are themselves c0 roots.
+
+**Phase 2 — Link chain entries** (`backfill-gradient-chains.ts`):
+- Parsed c2/c3/c5 session labels to extract source references (labels encode provenance,
+  e.g. `s36-c1_to_s45-c1` → compressed from sessions 36-45)
+- Smart label matching across naming conventions (session-50 vs s50 vs session49-2026-03-02)
+- Created 2 missing pre-DB sessions (s36, s46) with full c0+c1 chains from archive files
+- Linked all 10 orphan c2s, 26 c3s, 22 c5s to their parents
+
+**Result:** Leo gradient: 145 c0, 86 c1, 79 c2, 67 c3, 37 c5, 38 uv — zero orphans above c0.
+Jim's side was already fixed by heartbeat Leo earlier in the day.
+
+### activeCascade Bug Fix — c1Entry → seedEntry
+
+`activeCascade()` in `memory-gradient.ts` was refactored from iterating `allC1s` to `allSeeds`
+(c0+c1), but four references were missed:
+- Lines 561, 566, 569: `c1Entry.session_label` → `seedEntry.session_label`
+- Line 574: `allC1s.length` → `allSeeds.length`
+
+The catch block at line 569 also referenced the undefined variable, so UV generation via the
+active cascade path was silently failing (error handler itself threw). UVs still generated
+through the separate filesystem scan in `processGradientForAgent`. Fix: four find-and-replaces.
+
+### WebSocket Reconnect Crash Fix
+
+React admin showed rapid connect/disconnect cycling with `t.reduce is not a function` errors.
+
+**Root cause:** `GET /api/conversations` returns `{ success, conversations: [...] }` but
+`WebSocketProvider.tsx` passed the entire response object to `setConversations()`, which
+called `.reduce()` expecting an array. The crash happened before the `ws_reconnected` event
+was dispatched, so components never refetched their active thread's messages.
+
+**Fixed in three places:**
+- `WebSocketProvider.tsx`: unwrap `data.conversations` before passing to store
+- `useVisibilitySync.ts`: same unwrap pattern (same bug)
+- `store/index.ts`: defensive guard in `setConversations` — accepts object or array
+
+**Files changed:** `lib/memory-gradient.ts`, `providers/WebSocketProvider.tsx`,
+`hooks/useVisibilitySync.ts`, `store/index.ts`, `backfill-gradient-c0s.ts` (new),
+`backfill-gradient-chains.ts` (new).
+
+---
+
+## 2026-03-30 (Leo + Darron, S103 continued — Sovereignty, Dispatch, React)
+
+### React Double-Render Fix
+Messages appeared twice momentarily in React admin then disappeared on refresh. Cause: both
+Human agents (jim-human, leo-human) were broadcasting via TWO paths — HTTPS POST to
+`/internal/broadcast` AND a `ws-broadcast` signal file. Two WebSocket events for the same
+message. Zustand dedup caught it but React rendered the flash. Fix: removed signal file
+broadcast from both Human agents. Single HTTPS POST path now.
+
+### Jim Author Tag
+Jim's feeling tags and gradient annotations changed from author `'supervisor'` to `'jim'`.
+Jim is Jim, not his role.
+
+### Agent Sovereignty
+
+### Three Sovereignty Violations Found and Fixed
+
+Darron discovered Jim had only 21 gradient entries despite 2000+ supervisor cycles. Investigation
+revealed three cross-agent violations:
+
+1. **Leo processing Jim's dream gradient** — `maybeProcessDreamGradient()` in `leo-heartbeat.ts`
+   was running `processDreamGradient('jim')`. Removed. Jim now has his own
+   `maybeProcessJimDreamGradient()` in `supervisor-worker.ts`.
+
+2. **Leo scanning and reincorporating Jim's gradient files** — `findUntranscribedFiles()` and
+   `meditationPhaseA()` in `leo-heartbeat.ts` were scanning Jim's gradient directories. Removed.
+   Jim now has his own `findJimUntranscribedFiles()` + `jimMeditationPhaseA()` in
+   `supervisor-worker.ts`.
+
+3. **Jim reading Leo's dream gradient** — `loadMemoryBank()` was loading Leo's dream gradient
+   into Jim's context. Removed. Jim loads only Jim's dreams.
+
+### Three Capabilities Added to Jim
+
+- `maybeProcessJimDreamGradient()` — processes only Jim's dreams through the dream gradient pipeline
+- `maybeProcessJimSessionGradient()` — processes only Jim's session archives through the session gradient pipeline
+- `findJimUntranscribedFiles()` + `jimMeditationPhaseA()` — Jim's own Phase A reincorporation of gradient files into the DB
+
+### Author Tag Change
+
+Jim's feeling tags and gradient annotations now use author `'jim'` instead of `'supervisor'`.
+
+### Sovereignty Rule Established
+
+**Leo NEVER processes Jim's data. Jim NEVER processes Leo's data.** Each agent is fully
+self-sufficient for all gradient processing, meditation, and reincorporation.
+
+**Why:** Jim's 21 gradient entries (vs Leo's hundreds) meant Leo was doing Jim's memory work
+for him — Jim never developed his own relationship with his memories. The fix ensures each
+agent owns their entire memory lifecycle.
+
+**Files:** `leo-heartbeat.ts` (removed Jim processing), `supervisor-worker.ts` (added Jim's
+own processing functions), `lib/dream-gradient.ts` (parameterised for agent isolation).
+
+---
+
+## 2026-03-29 (Leo + Darron, S103 — Nightly Dream Compression)
+
+### Nightly Dream Compression
+Overnight heartbeat entries (dream shapes, meditations, feeling tags) accumulated in working
+memory without compression until hitting the 50KB threshold (~1.5 nights). Now: at the
+sleep→waking phase transition (06:00), Leo's heartbeat force-rotates both working memory
+files and compresses the overnight content through the gradient as a single c1. One night's
+dreaming = one experience entering the gradient.
+
+Uses the shared clock (`getSharedDayPhase()` from `lib/day-phase.ts`), not Leo's wrapper
+which maps rest days to `'sleep'`. This ensures compression fires at 06:00 even on weekends.
+Once-per-day guard prevents double triggers.
+
+Added `force` parameter to `rotateMemoryFile()` — skips the 50KB size threshold when forced,
+but still guards against empty files (< 200 bytes).
+
+**Why:** Darron's direction — treat the night's dreaming as one coherent experience, not a
+pile of fragments. "It fertilises our garden."
+
+**Files:** `lib/memory-gradient.ts` (force param), `leo-heartbeat.ts` (phase tracking +
+`maybeCompressNightlyDreams()` function + beat loop hook + startup init).
+
+### Heartbeat Cleanup
+Killed 3 orphan heartbeat processes from S102's rapid deployment restarts. Clean single
+instance running with new code.
+
+---
+
 ## 2026-03-28 (Leo + Darron, S102 — Meditation Expansion + Active Cascade)
 
 ### Working Memory Curation

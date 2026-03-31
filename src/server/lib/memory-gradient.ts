@@ -467,16 +467,17 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
 // then compress one level deeper. The memory walks toward UV organically.
 
 const NEXT_LEVEL: Record<string, string> = {
-    c1: 'c2', c2: 'c3', c3: 'c5', c5: 'uv',
+    c0: 'c1', c1: 'c2', c2: 'c3', c3: 'c5', c5: 'uv',
 };
 
 /**
  * Actively deepen a percentage of the gradient population.
- * Picks random c1 entries, follows each to its deepest descendant,
- * and compresses one level further.
+ * Picks random c0 and c1 entries, follows each to its deepest descendant,
+ * and compresses one level further. c0→c1 compresses raw memories into
+ * first summaries. c1→c2→c3→c5→UV deepens existing compressions.
  *
  * @param agent - 'jim' or 'leo'
- * @param percentage - fraction of c1 population to process (0.10 = 10%)
+ * @param percentage - fraction of seed population to process (0.10 = 10%)
  * @param context - logging context (e.g. 'daily cascade', 'dream')
  * @returns number of compressions performed
  */
@@ -485,22 +486,24 @@ export async function activeCascade(
     percentage: number,
     context: string = 'active cascade',
 ): Promise<number> {
-    // Get all c1 entries for this agent
+    // Get all c0 and c1 entries for this agent (both are seed levels for the cascade)
+    const allC0s = (gradientStmts.getByAgentLevel.all(agent, 'c0') as any[]);
     const allC1s = (gradientStmts.getByAgentLevel.all(agent, 'c1') as any[]);
-    if (allC1s.length === 0) return 0;
+    const allSeeds = [...allC0s, ...allC1s];
+    if (allSeeds.length === 0) return 0;
 
     // Select a random percentage
-    const count = Math.max(1, Math.ceil(allC1s.length * percentage));
-    const shuffled = allC1s.sort(() => Math.random() - 0.5);
+    const count = Math.max(1, Math.ceil(allSeeds.length * percentage));
+    const shuffled = allSeeds.sort(() => Math.random() - 0.5);
     const selected = shuffled.slice(0, count);
 
     let compressed = 0;
     const prompts = COMPRESSION_PROMPTS['working-memory'];
 
-    for (const c1Entry of selected) {
+    for (const seedEntry of selected) {
         try {
             // Follow the provenance chain to the deepest descendant
-            let current = c1Entry;
+            let current = seedEntry;
             let depth = 0;
             const maxDepth = 10; // Safety limit
 
@@ -520,20 +523,26 @@ export async function activeCascade(
             // Already at UV — skip
             if (!nextLevel || currentLevel === 'uv') continue;
 
+            // For c0→c1 compression, truncate very large c0 entries to fit in context
+            let sourceContent = current.content;
+            if (currentLevel === 'c0' && sourceContent.length > 50000) {
+                sourceContent = sourceContent.substring(0, 50000) + '\n\n[... truncated for compression — full content in c0 entry]';
+            }
+
             // Compress to next level
             const promptText = nextLevel === 'uv'
                 ? prompts.uv
                 : prompts[nextLevel] || prompts.c2;
 
             const raw = await sdkCompress(
-                `${promptText}\n\nSource: ${currentLevel} → ${nextLevel} (${context})\nAgent: ${agent}\nOriginal session: ${c1Entry.session_label}\n\n${current.content}${FEELING_TAG_INSTRUCTION}`
+                `${promptText}\n\nSource: ${currentLevel} → ${nextLevel} (${context})\nAgent: ${agent}\nOriginal session: ${seedEntry.session_label}\n\n${sourceContent}${FEELING_TAG_INSTRUCTION}`
             );
 
             const { content: compressedContent, feelingTag } = parseFeelingTag(raw);
 
             // Write to DB
             const entryId = generateGradientId();
-            const label = `${c1Entry.session_label}-${nextLevel}`;
+            const label = `${seedEntry.session_label}-${nextLevel}`;
             insertGradientEntry(
                 entryId, agent, label, nextLevel, compressedContent,
                 current.content_type || 'session', current.id, feelingTag
@@ -549,20 +558,20 @@ export async function activeCascade(
             } else {
                 // Append to unit-vectors.md
                 const uvPath = path.join(fractionalDir, 'unit-vectors.md');
-                const uvLine = `- **${c1Entry.session_label}**: "${compressedContent.replace(/"/g, "'").trim()}"\n`;
+                const uvLine = `- **${seedEntry.session_label}**: "${compressedContent.replace(/"/g, "'").trim()}"\n`;
                 fs.appendFileSync(uvPath, uvLine);
             }
 
             compressed++;
-            console.log(`[Gradient] ${context}: ${agent} ${currentLevel}→${nextLevel} for ${c1Entry.session_label} (depth ${depth})`);
+            console.log(`[Gradient] ${context}: ${agent} ${currentLevel}→${nextLevel} for ${seedEntry.session_label} (depth ${depth})`);
 
         } catch (err) {
-            console.error(`[Gradient] ${context} failed for ${c1Entry.session_label}:`, (err as Error).message);
+            console.error(`[Gradient] ${context} failed for ${seedEntry.session_label}:`, (err as Error).message);
         }
     }
 
     if (compressed > 0) {
-        console.log(`[Gradient] ${context}: ${compressed}/${count} compressions for ${agent} (from ${allC1s.length} c1s)`);
+        console.log(`[Gradient] ${context}: ${compressed}/${count} compressions for ${agent} (from ${allSeeds.length} seeds)`);
     }
 
     return compressed;
@@ -755,13 +764,18 @@ function groupEntriesByMonth(entries: MemoryFileEntry[]): Map<string, MemoryFile
 export function rotateMemoryFile(
     filePath: string,
     fileHeader: string = '',
+    force: boolean = false,
 ): { rotated: boolean; floatingPath?: string; entriesRotated: number } {
     if (!fs.existsSync(filePath)) {
         return { rotated: false, entriesRotated: 0 };
     }
 
     const stat = fs.statSync(filePath);
-    if (stat.size <= MEMORY_FILE_SIZE_THRESHOLD) {
+    // Force mode: still skip if file is nearly empty (just headers, < 200 bytes)
+    if (force && stat.size < 200) {
+        return { rotated: false, entriesRotated: 0 };
+    }
+    if (!force && stat.size <= MEMORY_FILE_SIZE_THRESHOLD) {
         return { rotated: false, entriesRotated: 0 };
     }
 
