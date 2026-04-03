@@ -918,6 +918,10 @@ export function initSupervisor(): void {
 
     console.log('[Supervisor] Initialised — memory banks at', MEMORY_DIR);
 
+    // Write a fresh health signal on startup so Robin Hood doesn't flag stale data
+    // from a previous process between restart and first cycle completion
+    writeJimHealthSignal(cycleCount, 'starting', 0, 0);
+
     // Start signal watcher to detect CLI stop and jim-wake signals
     startSupervisorSignalWatcher();
 

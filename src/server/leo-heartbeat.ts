@@ -2763,6 +2763,10 @@ async function main() {
 ╚══════════════════════════════════════════════════════╝
 `);
 
+    // Write a fresh health signal on startup so Robin Hood doesn't flag stale data
+    // from a previous process between restart and first beat completion
+    writeHealthSignal(null);
+
     // Start the signal file watcher for near-instant mention response
     startSignalWatcher();
 
