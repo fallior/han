@@ -128,9 +128,16 @@ export function ThreadList() {
       }
     });
 
+    // On WS reconnect (e.g. after server restart), refetch thread list
+    // to catch anything missed while disconnected
+    const unsubReconnect = subscribeWs('ws_reconnected', () => {
+      fetchData();
+    });
+
     return () => {
       unsubCreated();
       unsubMessage();
+      unsubReconnect();
     };
   }, [subscribeWs, nestedTab, fetchData]);
 

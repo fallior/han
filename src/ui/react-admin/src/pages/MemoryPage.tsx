@@ -57,9 +57,18 @@ export default function MemoryPage() {
       }
     });
 
+    // On WS reconnect, refetch everything to catch missed messages
+    const unsubReconnect = subscribeWs('ws_reconnected', () => {
+      fetchGroupedConversations();
+      if (selectedId) {
+        fetchConversationDetail(selectedId);
+      }
+    });
+
     return () => {
       unsubMessage();
       unsubCreated();
+      unsubReconnect();
     };
   }, [subscribeWs, selectedId]);
 
