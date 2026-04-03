@@ -1466,11 +1466,12 @@ generated through the separate filesystem scan in `processGradientForAgent`.
 
 ### ~~BUG: WebSocket Reconnect Crash — setConversations~~ FIXED (S104)
 
-**Status:** Fixed. `GET /api/conversations` returns `{ success, conversations: [...] }` but
-`WebSocketProvider.tsx` passed the whole object to `setConversations()`, which called
-`.reduce()` on it. Same bug in `useVisibilitySync.ts`. The crash prevented the
-`ws_reconnected` event from dispatching, so components never refetched active thread messages
-on reconnect. Fixed with proper unwrapping in both callers plus a defensive guard in the store.
+**Status:** Fixed (S104 + S108). S104 fixed the crash: `GET /api/conversations` returns
+`{ success, conversations: [...] }` but `WebSocketProvider.tsx` passed the whole object to
+`setConversations()`. Fixed with proper unwrapping. S108 completed the fix: Workshop
+`ThreadList` and `MemoryPage` were missing `ws_reconnected` listeners — after server restart
+the thread list and Memory page stayed stale even though ThreadDetail and ConversationsPage
+refetched. All four conversation-displaying components now refetch on reconnect.
 
 ---
 
