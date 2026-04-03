@@ -26,7 +26,7 @@
 |------|-----------|-------|
 | **Robin Hood** | Leo's health monitor — checks Jim, Jemma, Leo/Human, Jim/Human every beat. Resurrects dead agents via `systemctl --user restart`. 1-hour cooldown between resurrections. | `leo-heartbeat.ts` (functions: `checkJimHealth`, `checkJemmaHealth`, `checkLeoHumanHealth`, `checkJimHumanHealth`) |
 | **Gary Protocol** | Interruption/resume mechanism. When a beat/cycle is interrupted, a delineation marker is written to the swap buffer. Next beat/cycle reads post-delineation content as resume context. Named after the Gary Model (v0.6 heartbeat design). | Leo: `leo-heartbeat.ts` (`addDelineation`, `resumingFromInterruption`). Jim: `supervisor-worker.ts` (`addDelineation`, `readPostDelineation`) |
-| **Fractal Gradient** | Memory compression hierarchy. Sessions exist at multiple fidelity levels simultaneously: c0 (full) → c1 (1/3) → c2 (1/9) → c3 (1/27) → c4 (1/81) → c5 (1/243) → unit vectors (irreducible emotional kernel, ≤50 chars). Loaded highest-compression-first: you know who you are before you remember what you did. | `lib/memory-gradient.ts`, `lib/dream-gradient.ts`, loading in `readLeoMemory()` and `loadMemoryBank()` |
+| **Fractal Gradient** | Memory compression hierarchy with non-uniform depth (Cn). Each memory exists at multiple fidelity levels: c0 (full) → c1 (~1/3) → c2 (~1/9) → ... → c(n) → unit vectors (irreducible kernel, ≤50 chars). Compression continues until incompressible — depth varies per memory (some reach UV at c3, others need c6+). The LLM signals `INCOMPRESSIBLE:` when content can't compress further, backed by a ratio check (>85%). Loaded highest-compression-first: you know who you are before you remember what you did. | `lib/memory-gradient.ts`, `lib/dream-gradient.ts`, loading in `readLeoMemory()` and `loadMemoryBank()` |
 | **Dream Gradient** | Subset of fractal gradient for unconscious memory. Dreams compress faster (c1→c3→c5→UV, skipping even levels). Dreams enter chaotic and lose fidelity — like waking from sleep with a mood you can't trace. Each agent processes only their own dreams (sovereignty rule S103). | `lib/dream-gradient.ts`, seeds in `readDreamSeeds()`, storage at `~/.han/memory/fractal/{agent}/dreams/` |
 | **Swap Protocol** | Concurrent write safety for shared working memory. Each writer (session Leo, heartbeat Leo, Leo/Human, Jim supervisor, Jim/Human) has private swap files. Swap is written during work, then flushed to shared memory via memory slot lock. Prevents interleaved writes. | `lib/memory-slot.ts` (`withMemorySlot`), swap files in `~/.han/memory/leo/` and `~/.han/memory/` |
 | **Rumination Guard** | Prevents Jim from looping on the same topic across personal cycles. Tracks topic summaries, checks keyword overlap, nudges a topic change after 2 consecutive cycles with >40% similarity. Contemplation, not obsession. | `supervisor-worker.ts` (`checkRumination`, `recordRuminationTopic`, `RUMINATION_FILE`) |
@@ -36,7 +36,7 @@
 | **Credential Swap** | Automatic SDK account failover. When an agent hits a rate limit, writes `rate-limited` signal. Jemma round-robins to next credential file every 30 seconds. | `jemma.ts` (`checkAndSwapCredentials`), credentials at `~/.claude/.credentials-[a-z].json` |
 | **Project Knowledge Gradient** | Fractal gradient applied to Jim's project knowledge files. Most recent project at full fidelity, older projects at decreasing compression. Ordered by file mtime. | `supervisor-worker.ts` (`PROJECT_GRADIENT` in `loadMemoryBank`), storage at `~/.han/memory/fractal/jim/projects/` |
 | **Floating Memory** | Crossfade mechanism for memory files (felt-moments, working-memory-full). When living file reaches 50KB: entire file rotated to "floating" file, compressed to c1, fresh living started. Loading is proportional: as living grows (0→50KB), floating's loaded portion shrinks (50→0KB). Total full-fidelity stays constant at ~50KB. No cliff — smooth transition. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `loadFloatingMemory`), pre-flight in `supervisor-worker.ts` `loadMemoryBank()` (Jim) and `leo-heartbeat.ts` `preFlightMemoryRotation()` (Leo), floating files at `~/.han/memory/*-floating.md` and `~/.han/memory/leo/*-floating.md` |
-| **Memory File Gradient** | Fractal gradient applied to memory files (felt-moments, working-memory-full) via floating memory rotation. Two triggers: (1) 50KB threshold rotation — safety net, fires when file gets large. (2) Nightly dream compression (S103) — at sleep→waking transition (06:00), force-rotates Leo's working memory regardless of size, compressing overnight dreams as a single c1. c1 files cascade to c2→c3→c5→UV as they accumulate. Total footprint asymptotes regardless of how many entries are written. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `compressMemoryFileGradient`), `leo-heartbeat.ts` (`maybeCompressNightlyDreams`), storage at `~/.han/memory/fractal/{jim,leo}/felt-moments/` and `working-memory/` |
+| **Memory File Gradient** | Fractal gradient applied to memory files (felt-moments, working-memory-full) via floating memory rotation. Two triggers: (1) 50KB threshold rotation — safety net, fires when file gets large. (2) Nightly dream compression (S103) — at sleep→waking transition (06:00), force-rotates Leo's working memory regardless of size, compressing overnight dreams as a single c1. c1 files cascade to c2→c3→...→c(n)→UV as they accumulate (dynamic depth, incompressibility-terminated). Total footprint asymptotes regardless of how many entries are written. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `compressMemoryFileGradient`), `leo-heartbeat.ts` (`maybeCompressNightlyDreams`), storage at `~/.han/memory/fractal/{jim,leo}/felt-moments/` and `working-memory/` |
 | **Ecosystem Map** | Shared orientation document loaded by all agents. Maps admin UI tabs, Workshop personas, conversation API endpoints, signal locations, memory locations. Prevents confusion between Conversations tab and Workshop. | `~/.han/memory/shared/ecosystem-map.md`, loaded in `loadMemoryBank()`, `readJimMemory()`, `readLeoMemory()` (all 4 agents) |
 | **Jemma Unified Dispatch** | All message routing — Discord AND admin UI — goes through one delivery service. Classification stays in `conversations.ts` (Gemma, fast, local). Delivery goes through `jemma-dispatch.ts` (`deliverMessage()`): writes wake signals, logs to audit trail (`jemma-delivery-log.json`), broadcasts via WebSocket. Discord gateway calls the HTTP endpoint (`/api/jemma/deliver`) which delegates to the same function. No HTTP self-calls. One audit trail with per-source counters. | `services/jemma-dispatch.ts` (`deliverMessage`), `routes/jemma.ts` (HTTP interface), `conversations.ts` (`classifyAddressee` + direct `deliverMessage()` call), Ollama `gemma3:4b` |
 | **Idle Dampening** | Jim-only exponential backoff when consecutive cycles produce no actions. 2x after 3 idle, 4x (capped) after 4+. Resets on productive cycle or wake signal. Prevents idle token burn. | `supervisor.ts` (`consecutiveIdleCycles`, `DAMPEN_*` constants in `getWallClockDelay`) |
@@ -282,7 +282,7 @@ Each beat (`heartbeat()` function):
 4. Run Robin Hood health checks on Jim, Jemma, Leo/Human, Jim/Human
 5. Resolve best available model (`resolveModel()`)
 6. Maybe process dream gradient (`maybeProcessDreamGradient()`) — Leo's dreams only (sovereignty fix S103: Leo never processes Jim's dreams)
-7. Maybe process session gradient (`maybeProcessSessionGradient()`) — daily, calls `processGradientForAgent('leo')` to compress Leo's archived sessions through the full cascade (c1→c2→c3→c5→UV). Fixed in S99 to handle Leo's file naming conventions (session files named by date, not `session-N`).
+7. Maybe process session gradient (`maybeProcessSessionGradient()`) — daily, calls `processGradientForAgent('leo')` to compress Leo's archived sessions through the dynamic cascade (c1→c2→...→c(n)→UV, depth determined by incompressibility). Fixed in S99 for Leo file naming. Cn architecture implemented S108.
 8. Maybe run active cascade (`maybeRunActiveCascade()`) — daily, deepens 10% of c1 population toward UV
 9. Maybe run meditation practice (`maybeRunMeditation()`) — daily, Phase A (reincorporation) or Phase B (re-reading). Phase A uses `findUntranscribedFiles()` to locate Leo's gradient files not yet in DB, then `meditationPhaseA()` transcribes them with genuine re-encounter. Leo's files only (sovereignty fix S103).
 10. Maybe run evening meditation (`maybeRunEveningMeditation()`) — daily, lighter feeling-tag-only encounter
@@ -1076,20 +1076,25 @@ Each writer has private swap files that buffer work before flushing to shared me
 
 Sessions exist at multiple compression fidelities:
 - **c0:** Full session (working-memory-full.md)
-- **c1:** ~1/3 compression (up to 3 files loaded)
-- **c2:** ~1/9 compression (up to 6 files loaded)
-- **c3:** ~1/27 compression (up to 9 files loaded)
-- **c4:** ~1/81 compression (up to 12 files loaded)
-- **c5:** ~1/243 compression (up to 15 files loaded)
-- **Unit vectors:** Irreducible emotional kernels (≤50 chars)
+- **c1:** ~1/3 compression (up to 10 files, cap)
+- **c2:** ~1/9 compression (up to 6 files, cap)
+- **c3+:** ~1/3^n compression (up to 4 files per level, cap)
+- **c(n):** Compression continues until incompressible — depth varies per memory
+- **Unit vectors:** Irreducible emotional kernels (≤50 chars) — the terminal form
+
+Compression depth is non-uniform (Cn where n is any integer). The LLM signals
+`INCOMPRESSIBLE:` when content can't compress further, or the system detects a compression
+ratio >85%. At that point, a unit vector is generated regardless of the current level number.
+Some memories reach UV at c3; others may need c6 or deeper.
 
 **Dream gradient** compresses faster: c1 → c3 → c5 → UV (skipping even levels).
 
 **Loading order:** Identity first, then highest compression (UV) → lowest (c1). "You know
-who you are before you remember what day it is."
+who you are before you remember what day it is." Levels are discovered dynamically from
+the filesystem and database — no hardcoded level list.
 
 **Directories:**
-- `~/.han/memory/fractal/leo/c{1,2,3,4,5}/` + `unit-vectors.md`
+- `~/.han/memory/fractal/leo/c{1,2,3,...,n}/` + `unit-vectors.md` (levels created as needed)
 - `~/.han/memory/fractal/leo/dreams/c{1,3,5}/` + `unit-vectors.md`
 - `~/.han/memory/fractal/jim/` (same structure)
 
@@ -1132,11 +1137,12 @@ via `rotateMemoryFile(path, header, force=true)`. The overnight content enters t
 as a single c1. One night's dreaming = one experience. Fires on rest days too (shared clock
 still transitions at 06:00). The 50KB threshold rotation remains as a safety net.
 
-**Gradient cascade:**
-When c1 files accumulate past their cap (10), oldest cascade to c2 (cap 6) → c3 (cap 4)
-→ c5 (cap 8) → unit vectors. Each level compresses further. The pipeline uses content-type-
-specific prompts tuned for emotional texture (felt-moments) or operational understanding
-(working-memory).
+**Gradient cascade (Cn — dynamic depth):**
+When c1 files accumulate past their cap (10), oldest cascade to c2 (cap 6) → c3 (cap 4) →
+c4 (cap 4) → ... → c(n) (cap 4) → unit vectors. Compression continues until incompressible.
+The pipeline uses three prompt tiers (early: c1-c2, mid: c3-c4, deep: c5+) tuned for
+emotional texture (felt-moments) or operational understanding (working-memory). The LLM can
+signal `INCOMPRESSIBLE:` at any level to terminate the chain and produce a unit vector directly.
 
 **Asymptote math:**
 
@@ -1147,7 +1153,7 @@ specific prompts tuned for emotional texture (felt-moments) or operational under
 | c1 | 10 files | ~17KB | ~170KB on disk, loaded |
 | c2 | 6 files | ~6KB | ~36KB |
 | c3 | 4 files | ~2KB | ~8KB |
-| c5 | 8 files | ~500B | ~4KB |
+| c4+ | 4 files each | ~500B | ~2KB per level |
 | Unit vectors | unbounded | ~50 chars each | ~5KB for 100 |
 | **Total loaded** | | | **~50KB living+floating + gradient** |
 
@@ -1369,7 +1375,7 @@ General fractal memory compression utility. All compression functions return
 **Memory file gradient functions (floating memory):**
 - `rotateMemoryFile(path, header, force?)` — synchronous rotation: living → floating, fresh living created. Triggered when file exceeds 50KB, or forced (nightly dream compression, S103). Force mode skips size check but still guards against empty files (< 200 bytes). Deletes old floating (its c1 already exists).
 - `loadFloatingMemory()` — proportional crossfade loading. Budget = `50KB - livingSize`. Keeps most recent entries (tail), oldest fade first.
-- `compressMemoryFileGradient()` — async SDK compression: groups entries by month → c1 files. Cascades c1→c2→c3→c5→UV when files exceed caps. Writes to DB at every level. Fire-and-forget (doesn't block cycles).
+- `compressMemoryFileGradient()` — async SDK compression: groups entries by month → c1 files. Cascades c1→c2→...→c(n)→UV when files exceed caps (dynamic depth — Cn). Writes to DB at every level. Incompressibility detection terminates the chain. Fire-and-forget (doesn't block cycles).
 - `loadMemoryFileGradient()` — loads file-based gradient c1→c5 + unit vectors for system prompt.
 - `maintainMemoryFile()` — full pipeline: rotate + compress. Convenience wrapper.
 - `splitMemoryFileEntries()` — parser for `###` headers and `---` delimiters.

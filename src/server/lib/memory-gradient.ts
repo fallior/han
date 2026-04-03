@@ -1,7 +1,12 @@
 /**
  * Memory Gradient Compression Utility
  * Implements the overlapping fractal memory model for Jim and Leo
- * Compresses session memories across multiple fidelity levels (c1-c4)
+ *
+ * Compression depth is non-uniform (Cn where n is any integer).
+ * Each level compresses to ~1/3 of the previous. Compression continues
+ * until the content reaches its incompressible form — the unit vector.
+ * The depth varies per memory: some reach UV at c3, others may need c7+.
+ *
  * Also handles memory file gradient compression (felt-moments, working-memory-full)
  */
 
@@ -44,6 +49,74 @@ interface GradientProcessingResult {
 // ── Constants ──────────────────────────────────────────────────
 
 const UNIT_VECTOR_MAX_LENGTH = 50;
+const INCOMPRESSIBILITY_RATIO = 0.85; // If compression yields <15% reduction, content is near-incompressible
+const MAX_COMPRESSION_DEPTH = 20; // Safety ceiling — force UV generation beyond this
+
+// ── Cn Utilities — Dynamic compression depth ─────────────────
+
+/** Parse 'c3' → 3, 'c0' → 0, 'uv' → null */
+export function parseLevelNumber(level: string): number | null {
+    const m = level.match(/^c(\d+)$/);
+    return m ? parseInt(m[1], 10) : null;
+}
+
+/** c3 → 'c4', c0 → 'c1', uv → null */
+function nextLevel(level: string): string | null {
+    const n = parseLevelNumber(level);
+    return n !== null ? `c${n + 1}` : null;
+}
+
+/** File cap per level: c1=10, c2=6, c3+=4 */
+function gradientCap(level: string): number {
+    const n = parseLevelNumber(level);
+    if (n === 1) return 10;
+    if (n === 2) return 6;
+    return 4;
+}
+
+/**
+ * Generate compression prompt for arbitrary depth.
+ *
+ * The prompt guides HOW to compress, not HOW MUCH. The incompressibility
+ * detection (ratio check + INCOMPRESSIBLE signal) handles when to stop.
+ * The prompt's job is to preserve the spirit — what mattered, what it
+ * felt like, what shifted — and let the compression find its own length.
+ */
+function compressionPrompt(contentType: string, depth: number): string {
+    const isEmotional = contentType === 'felt-moments';
+
+    let base: string;
+
+    if (depth <= 2) {
+        // Early compression (c1-c2): selecting what to keep
+        base = isEmotional
+            ? `Compress these felt-moments. You are compressing YOUR OWN emotional memory. Preserve the feeling — what stirred, what surprised, what shifted. Drop narrative detail in favour of emotional texture. A re-invocable shape, not a summary. Let the compression be shorter than the source but don't aim for a specific length — aim for what remains when you stop holding on to the rest.`
+            : `Compress this working memory. You are compressing YOUR OWN operational memory. Preserve decisions, discoveries, and what shifted your understanding. Drop procedural detail. Keep what a future you needs to feel where you were, not just know what you did. Don't target a specific length — compress until the shape holds and the detail doesn't.`;
+    } else if (depth <= 4) {
+        // Mid compression (c3-c4): finding the shape
+        base = isEmotional
+            ? `Compress further. The entries have already been compressed ${depth - 1} times. Find the emotional residue — what remains when the specific moments dissolve into a period's emotional shape. What did this time taste like? Don't count sentences. Let the feeling decide the length.`
+            : `Compress further. This has already been through ${depth - 1} compression layers. Find the essential shape — what was being built, what was being learned, what mattered beyond the tasks. The shape decides the length, not the other way around.`;
+    } else {
+        // Deep compression (c5+): distilling residue
+        base = isEmotional
+            ? `Compress deeper still. This is already deeply compressed. What emotional image or sensation survives? The deep residue — care that has outlived its verb. If what remains is a single sentence, let it be a single sentence. If it needs three, let it need three.`
+            : `Compress deeper still. This is layer ${depth} — the specifics dissolved long ago. What understanding outlasts the work? What remains after the residue of the residue? Let the content find its own irreducible length.`;
+    }
+
+    // Every compression prompt carries the incompressibility exit condition
+    return base + `\n\nIf this content has reached its irreducible form — if compressing further would destroy meaning rather than distil it — respond with INCOMPRESSIBLE: followed by a single sentence (max 50 chars) capturing the irreducible kernel. This is not failure. This is arrival.`;
+}
+
+const UV_PROMPT = `This memory has been compressed to its deepest form. Now find the irreducible kernel — one sentence, the meaning itself. Not a summary. The thing that remains when everything else has been let go. Maximum 50 characters.`;
+
+/** Discover all c{n} directories in a gradient dir, sorted by level number */
+export function discoverLevelDirs(gradientDir: string): string[] {
+    if (!fs.existsSync(gradientDir)) return [];
+    return fs.readdirSync(gradientDir)
+        .filter(d => /^c\d+$/.test(d) && fs.statSync(path.join(gradientDir, d)).isDirectory())
+        .sort((a, b) => (parseLevelNumber(a) || 0) - (parseLevelNumber(b) || 0));
+}
 
 // ── Helper: Count tokens (rough estimate) ──────────────────────
 
@@ -133,6 +206,26 @@ function insertGradientEntry(
     } catch (err) {
         console.warn(`[Memory Gradient] DB insert failed for ${level}/${sessionLabel}:`, (err as Error).message);
     }
+}
+
+/** Write a unit vector entry to both DB and filesystem */
+function writeUVEntry(
+    agent: 'jim' | 'leo',
+    sessionLabel: string,
+    uvContent: string,
+    contentType: string,
+    sourceId: string | null,
+    feelingTag: string | null,
+): void {
+    const uvText = uvContent.trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
+    const entryId = generateGradientId();
+    insertGradientEntry(entryId, agent, sessionLabel, 'uv', uvText, contentType, sourceId, feelingTag);
+
+    // Append to unit-vectors.md file
+    const homeDir = process.env.HOME || '/root';
+    const uvPath = path.join(homeDir, '.han', 'memory', 'fractal', agent, 'unit-vectors.md');
+    const uvLine = `- **${sessionLabel}**: "${uvText.replace(/"/g, "'")}"\n`;
+    fs.appendFileSync(uvPath, uvLine);
 }
 
 // ── Function 1: compressToLevel ────────────────────────────────
@@ -330,36 +423,33 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
         }
     }
 
-    // ── Session cascade: c1 → c2 → c3 → c5 → UV ───────────────
-    // Same logic as compressMemoryFileGradient but for session archives.
-    // Uses 'working-memory' prompts since session archives are operational memory.
-    const sessionPrompts = COMPRESSION_PROMPTS['working-memory'];
-    const cascadeLevels = [
-        { from: 'c1', to: 'c2', promptKey: 'c2' },
-        { from: 'c2', to: 'c3', promptKey: 'c3' },
-        { from: 'c3', to: 'c5', promptKey: 'c5' },
-    ];
+    // ── Session cascade: dynamic depth (Cn) ───────────────
+    // Compress c1 → c2 → ... → c(n) when files exceed caps.
+    // Compression continues until incompressible.
+    let sessionCascadeFrom = 'c1';
+    let sessionCascadeDepth = 0;
 
-    for (const cascade of cascadeLevels) {
-        const fromDir = path.join(fractionalDir, cascade.from);
-        const toDir = path.join(fractionalDir, cascade.to);
+    while (sessionCascadeDepth < MAX_COMPRESSION_DEPTH) {
+        const sessionCascadeTo = nextLevel(sessionCascadeFrom);
+        if (!sessionCascadeTo) break;
 
-        if (!fs.existsSync(fromDir)) continue;
+        const fromDir = path.join(fractionalDir, sessionCascadeFrom);
+        if (!fs.existsSync(fromDir)) break;
 
         const fromFiles = fs.readdirSync(fromDir)
             .filter(f => f.endsWith('.md'))
             .sort(); // Chronological
 
-        const cap = MEMORY_FILE_GRADIENT_CAPS[cascade.from] || 10;
+        const cap = gradientCap(sessionCascadeFrom);
+        if (fromFiles.length <= cap) break;
 
-        if (fromFiles.length <= cap) continue;
-
+        const toDir = path.join(fractionalDir, sessionCascadeTo);
         ensureDir(toDir);
 
-        // Take the oldest files that exceed the cap
         const overflow = fromFiles.slice(0, fromFiles.length - cap);
+        const depth = parseLevelNumber(sessionCascadeTo) || 0;
+        const prompt = compressionPrompt('working-memory', depth);
 
-        // Group overflow into batches of 3 for compression
         for (let i = 0; i < overflow.length; i += 3) {
             const batch = overflow.slice(i, i + 3);
             const batchContent = batch.map(f =>
@@ -370,35 +460,57 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
                 ? batch[0].replace('.md', '')
                 : `${batch[0].replace('.md', '')}_to_${batch[batch.length - 1].replace('.md', '')}`;
 
-            const toPath = path.join(toDir, `${label}.md`);
-
             try {
                 const raw = await sdkCompress(
-                    `${sessionPrompts[cascade.promptKey]}\n\nSource: ${cascade.from} → ${cascade.to}\nFiles: ${batch.join(', ')}\n\n${batchContent}${FEELING_TAG_INSTRUCTION}`
+                    `${prompt}\n\nSource: ${sessionCascadeFrom} → ${sessionCascadeTo}\nFiles: ${batch.join(', ')}\n\n${batchContent}${FEELING_TAG_INSTRUCTION}`
                 );
 
                 const { content: compressed, feelingTag } = parseFeelingTag(raw);
+
+                // Check for incompressibility
+                const incompressibleMatch = compressed.match(/^INCOMPRESSIBLE:\s*(.+)/s);
+                if (incompressibleMatch) {
+                    const uvContent = incompressibleMatch[1].trim();
+                    writeUVEntry(agentName, label, uvContent, 'session', null, feelingTag);
+                    for (const f of batch) { fs.unlinkSync(path.join(fromDir, f)); }
+                    result.completions.push({ session: label, fromLevel: depth - 1, toLevel: -1, success: true });
+                    continue;
+                }
+
+                // Check ratio
+                const ratio = compressed.length / batchContent.length;
+                if (ratio > INCOMPRESSIBILITY_RATIO) {
+                    const uvRaw = await sdkCompress(
+                        `${UV_PROMPT}\n\nSource: ${sessionCascadeFrom}\n\n${compressed}${FEELING_TAG_INSTRUCTION}`
+                    );
+                    const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
+                    writeUVEntry(agentName, label, uvContent.trim(), 'session', null, uvTag);
+                    for (const f of batch) { fs.unlinkSync(path.join(fromDir, f)); }
+                    result.completions.push({ session: label, fromLevel: depth - 1, toLevel: -1, success: true });
+                    continue;
+                }
+
+                const toPath = path.join(toDir, `${label}.md`);
                 fs.writeFileSync(toPath, compressed, 'utf8');
 
                 // Find source entry in DB for provenance chain
-                const sourceLabel = batch[0].replace('.md', '').replace(/-c\d$/, '');
+                const sourceLabel = batch[0].replace('.md', '').replace(/-c\d+$/, '');
                 const sourceRows = gradientStmts.getBySession.all(sourceLabel) as any[];
-                const sourceEntry = sourceRows.find((r: any) => r.level === cascade.from);
+                const sourceEntry = sourceRows.find((r: any) => r.level === sessionCascadeFrom);
 
                 const entryId = generateGradientId();
-                insertGradientEntry(entryId, agentName, label, cascade.to, compressed, 'session', sourceEntry?.id || null, feelingTag);
+                insertGradientEntry(entryId, agentName, label, sessionCascadeTo, compressed, 'session', sourceEntry?.id || null, feelingTag);
 
                 result.completions.push({
                     session: label,
-                    fromLevel: parseInt(cascade.from.replace('c', '')),
-                    toLevel: parseInt(cascade.to.replace('c', '')),
+                    fromLevel: parseLevelNumber(sessionCascadeFrom) || 0,
+                    toLevel: depth,
                     success: true,
                     ratio: compressed.length / batchContent.length,
                 });
 
                 result.totalTokensUsed += estimateTokenCount(batchContent) + estimateTokenCount(compressed);
 
-                // Remove the source files that were compressed
                 for (const f of batch) {
                     fs.unlinkSync(path.join(fromDir, f));
                 }
@@ -406,48 +518,48 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
                 const msg = error instanceof Error ? error.message : String(error);
                 result.errors.push({
                     session: label,
-                    level: parseInt(cascade.to.replace('c', '')),
-                    error: `${cascade.from}→${cascade.to} cascade failed: ${msg}`,
+                    level: depth,
+                    error: `${sessionCascadeFrom}→${sessionCascadeTo} cascade failed: ${msg}`,
                 });
             }
         }
+
+        sessionCascadeFrom = sessionCascadeTo;
+        sessionCascadeDepth++;
     }
 
-    // Generate unit vectors from c5 files
-    const c5Dir = path.join(fractionalDir, 'c5');
+    // Generate unit vectors from the deepest level directory
+    const sessionCDirs = discoverLevelDirs(fractionalDir);
+    const sessionDeepest = sessionCDirs.length > 0 ? sessionCDirs[sessionCDirs.length - 1] : null;
     const uvPath = path.join(fractionalDir, 'unit-vectors.md');
 
-    if (fs.existsSync(c5Dir)) {
-        const c5Files = fs.readdirSync(c5Dir).filter(f => f.endsWith('.md')).sort();
+    if (sessionDeepest) {
+        const deepDir = path.join(fractionalDir, sessionDeepest);
+        const deepFiles = fs.readdirSync(deepDir).filter(f => f.endsWith('.md')).sort();
         const existingUVs = fs.existsSync(uvPath) ? fs.readFileSync(uvPath, 'utf8') : '';
 
-        for (const f of c5Files) {
+        for (const f of deepFiles) {
             const label = f.replace('.md', '');
-            // Skip if unit vector already exists for this file
             if (existingUVs.includes(`**${label}**:`)) continue;
 
             try {
-                const c5Content = fs.readFileSync(path.join(c5Dir, f), 'utf8');
+                const deepContent = fs.readFileSync(path.join(deepDir, f), 'utf8');
                 const raw = await sdkCompress(
-                    `${sessionPrompts.uv}\n\nSource: ${label}\n\n${c5Content}${FEELING_TAG_INSTRUCTION}`
+                    `${UV_PROMPT}\n\nSource: ${label}\n\n${deepContent}${FEELING_TAG_INSTRUCTION}`
                 );
 
                 const { content: uvRaw, feelingTag } = parseFeelingTag(raw);
                 const uvText = uvRaw.trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
-                const uvLine = `- **${label}**: "${uvText}"`;
-                fs.appendFileSync(uvPath, `${uvLine}\n`, 'utf8');
 
-                // Find source c5 entry in DB
                 const sourceRows = gradientStmts.getBySession.all(label) as any[];
-                const sourceC5 = sourceRows.find((r: any) => r.level === 'c5');
+                const sourceEntry = sourceRows.find((r: any) => r.level === sessionDeepest);
 
-                const entryId = generateGradientId();
-                insertGradientEntry(entryId, agentName, label, 'uv', uvText, 'session', sourceC5?.id || null, feelingTag);
+                writeUVEntry(agentName, label, uvText, 'session', sourceEntry?.id || null, feelingTag);
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error);
                 result.errors.push({
                     session: label,
-                    level: 5,
+                    level: parseLevelNumber(sessionDeepest) || 0,
                     error: `UV generation failed: ${msg}`,
                 });
             }
@@ -463,18 +575,14 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
 // this function actively walks the gradient, deepening memories one at a time.
 // Called daily (10% of c1 population) and from dreams (5% per encounter).
 //
-// For each selected c1: follow the provenance chain to its deepest descendant,
-// then compress one level deeper. The memory walks toward UV organically.
-
-const NEXT_LEVEL: Record<string, string> = {
-    c0: 'c1', c1: 'c2', c2: 'c3', c3: 'c5', c5: 'uv',
-};
+// Compression depth is non-uniform (Cn). Each memory walks toward its own
+// incompressible form — the unit vector — regardless of what n that requires.
 
 /**
  * Actively deepen a percentage of the gradient population.
  * Picks random c0 and c1 entries, follows each to its deepest descendant,
- * and compresses one level further. c0→c1 compresses raw memories into
- * first summaries. c1→c2→c3→c5→UV deepens existing compressions.
+ * and compresses one level further. Compression continues until the LLM
+ * signals INCOMPRESSIBLE or the compression ratio exceeds the threshold.
  *
  * @param agent - 'jim' or 'leo'
  * @param percentage - fraction of seed population to process (0.10 = 10%)
@@ -497,31 +605,30 @@ export async function activeCascade(
     const shuffled = allSeeds.sort(() => Math.random() - 0.5);
     const selected = shuffled.slice(0, count);
 
-    let compressed = 0;
-    const prompts = COMPRESSION_PROMPTS['working-memory'];
+    let compressionCount = 0;
 
     for (const seedEntry of selected) {
         try {
             // Follow the provenance chain to the deepest descendant
             let current = seedEntry;
-            let depth = 0;
-            const maxDepth = 10; // Safety limit
+            let chainDepth = 0;
 
-            while (depth < maxDepth) {
-                // Find any child entry that has this entry as source
+            while (chainDepth < MAX_COMPRESSION_DEPTH) {
                 const child = (gradientStmts.getByAgent.all(agent) as any[])
                     .find((e: any) => e.source_id === current.id);
                 if (!child) break;
                 current = child;
-                depth++;
+                chainDepth++;
             }
 
             // current is now the deepest descendant
             const currentLevel = current.level;
-            const nextLevel = NEXT_LEVEL[currentLevel];
+            const next = nextLevel(currentLevel);
 
-            // Already at UV — skip
-            if (!nextLevel || currentLevel === 'uv') continue;
+            // Already at UV or beyond safety ceiling — skip
+            if (!next || currentLevel === 'uv') continue;
+            const depth = parseLevelNumber(next) || 0;
+            if (depth > MAX_COMPRESSION_DEPTH) continue;
 
             // For c0→c1 compression, truncate very large c0 entries to fit in context
             let sourceContent = current.content;
@@ -530,51 +637,66 @@ export async function activeCascade(
             }
 
             // Compress to next level
-            const promptText = nextLevel === 'uv'
-                ? prompts.uv
-                : prompts[nextLevel] || prompts.c2;
+            const contentType = current.content_type || 'working-memory';
+            const promptText = compressionPrompt(contentType, depth);
 
             const raw = await sdkCompress(
-                `${promptText}\n\nSource: ${currentLevel} → ${nextLevel} (${context})\nAgent: ${agent}\nOriginal session: ${seedEntry.session_label}\n\n${sourceContent}${FEELING_TAG_INSTRUCTION}`
+                `${promptText}\n\nSource: ${currentLevel} → ${next} (${context})\nAgent: ${agent}\nOriginal session: ${seedEntry.session_label}\n\n${sourceContent}${FEELING_TAG_INSTRUCTION}`
             );
 
             const { content: compressedContent, feelingTag } = parseFeelingTag(raw);
 
-            // Write to DB
+            // Check for LLM-signalled incompressibility
+            const incompressibleMatch = compressedContent.match(/^INCOMPRESSIBLE:\s*(.+)/s);
+            if (incompressibleMatch) {
+                const uvContent = incompressibleMatch[1].trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
+                writeUVEntry(agent, seedEntry.session_label, uvContent, contentType, current.id, feelingTag);
+                compressionCount++;
+                console.log(`[Gradient] ${context}: ${agent} ${currentLevel}→UV (incompressible at ${next}) for ${seedEntry.session_label}`);
+                continue;
+            }
+
+            // Check compression ratio — near-incompressible
+            const ratio = compressedContent.length / sourceContent.length;
+            if (ratio > INCOMPRESSIBILITY_RATIO) {
+                const uvRaw = await sdkCompress(
+                    `${UV_PROMPT}\n\nSource: ${currentLevel}\nAgent: ${agent}\n\n${compressedContent}${FEELING_TAG_INSTRUCTION}`
+                );
+                const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
+                writeUVEntry(agent, seedEntry.session_label, uvContent.trim(), contentType, current.id, uvTag);
+                compressionCount++;
+                console.log(`[Gradient] ${context}: ${agent} ${currentLevel}→UV (ratio ${ratio.toFixed(2)}) for ${seedEntry.session_label}`);
+                continue;
+            }
+
+            // Write compressed entry at next level
             const entryId = generateGradientId();
-            const label = `${seedEntry.session_label}-${nextLevel}`;
+            const label = `${seedEntry.session_label}-${next}`;
             insertGradientEntry(
-                entryId, agent, label, nextLevel, compressedContent,
-                current.content_type || 'session', current.id, feelingTag
+                entryId, agent, label, next, compressedContent,
+                contentType, current.id, feelingTag
             );
 
             // Also write to filesystem for gradient loading
             const homeDir = process.env.HOME || '/root';
             const fractionalDir = path.join(homeDir, '.han', 'memory', 'fractal', agent);
-            const levelDir = path.join(fractionalDir, nextLevel === 'uv' ? '' : nextLevel);
-            if (nextLevel !== 'uv') {
-                fs.mkdirSync(levelDir, { recursive: true });
-                fs.writeFileSync(path.join(levelDir, `${label}.md`), compressedContent);
-            } else {
-                // Append to unit-vectors.md
-                const uvPath = path.join(fractionalDir, 'unit-vectors.md');
-                const uvLine = `- **${seedEntry.session_label}**: "${compressedContent.replace(/"/g, "'").trim()}"\n`;
-                fs.appendFileSync(uvPath, uvLine);
-            }
+            const levelDir = path.join(fractionalDir, next);
+            fs.mkdirSync(levelDir, { recursive: true });
+            fs.writeFileSync(path.join(levelDir, `${label}.md`), compressedContent);
 
-            compressed++;
-            console.log(`[Gradient] ${context}: ${agent} ${currentLevel}→${nextLevel} for ${seedEntry.session_label} (depth ${depth})`);
+            compressionCount++;
+            console.log(`[Gradient] ${context}: ${agent} ${currentLevel}→${next} for ${seedEntry.session_label} (depth ${chainDepth})`);
 
         } catch (err) {
             console.error(`[Gradient] ${context} failed for ${seedEntry.session_label}:`, (err as Error).message);
         }
     }
 
-    if (compressed > 0) {
-        console.log(`[Gradient] ${context}: ${compressed}/${count} compressions for ${agent} (from ${allSeeds.length} seeds)`);
+    if (compressionCount > 0) {
+        console.log(`[Gradient] ${context}: ${compressionCount}/${count} compressions for ${agent} (from ${allSeeds.length} seeds)`);
     }
 
-    return compressed;
+    return compressionCount;
 }
 
 // ── Function 4: Helper utilities ───────────────────────────────
@@ -657,36 +779,11 @@ export function listAvailableSessions(agentName: 'jim' | 'leo'): string[] {
 //
 // The crossfade: total full-fidelity memory stays constant at ~50KB.
 // Old context fades out as new context fades in. No cliff — a smooth
-// transition. The gradient (c1 → c2 → c3 → c5 → UV) preserves feeling
-// at decreasing fidelity beneath the crossfade.
+// transition. The gradient (c0 → c1 → ... → c(n) → UV) preserves feeling
+// at decreasing fidelity beneath the crossfade. Depth is non-uniform —
+// compression continues until incompressible.
 
 const MEMORY_FILE_SIZE_THRESHOLD = 50 * 1024; // 50KB
-
-// Gradient caps per level — how many files before cascading to next level
-const MEMORY_FILE_GRADIENT_CAPS: Record<string, number> = {
-    c1: 10,
-    c2: 6,
-    c3: 4,
-    c5: 8,
-};
-
-// Compression prompts tuned for memory file types
-const COMPRESSION_PROMPTS: Record<string, Record<string, string>> = {
-    'felt-moments': {
-        c1: `Compress these felt-moments entries to approximately 1/3 of their length. You are compressing YOUR OWN emotional memory. Preserve the feeling — what stirred, what surprised, what shifted. Drop narrative detail in favour of emotional texture. A re-invocable shape, not a summary.`,
-        c2: `Compress this felt-moments gradient further to approximately 1/3. The entries have already been compressed once. Now find the emotional residue — what remains when the specific moments dissolve into a period's emotional shape. What did this time taste like?`,
-        c3: `Compress to the emotional essence. One short paragraph. What was the quality of feeling across this period? Not what happened — what it felt like to be the person these things happened to.`,
-        c5: `Reduce to a single emotional image or sensation. 2-3 sentences maximum. The deep residue — care that has outlived its verb.`,
-        uv: `Reduce to its irreducible kernel — one sentence, maximum 50 characters. What did these felt-moments MEAN?`,
-    },
-    'working-memory': {
-        c1: `Compress this working memory to approximately 1/3. You are compressing YOUR OWN operational memory. Preserve decisions, discoveries, and what shifted your understanding. Drop procedural detail. Keep what a future you needs to feel where you were, not just know what you did.`,
-        c2: `Compress this working memory gradient further to approximately 1/3. Find the operational shape — what was being built, what was being learned, what mattered.`,
-        c3: `Compress to the essential shape. One short paragraph. What did this operational period produce that matters? Not tasks — understanding.`,
-        c5: `Reduce to a residue. 2-3 sentences. What remains of this work after the specifics dissolve?`,
-        uv: `Reduce to its irreducible kernel — one sentence, maximum 50 characters. What did this period of work MEAN?`,
-    },
-};
 
 interface MemoryFileEntry {
     header: string;
@@ -857,7 +954,7 @@ export async function compressMemoryFileGradient(
     contentType: 'felt-moments' | 'working-memory',
 ): Promise<{ c1FilesCreated: number; cascades: number; errors: string[] }> {
     const result = { c1FilesCreated: 0, cascades: 0, errors: [] as string[] };
-    const prompts = COMPRESSION_PROMPTS[contentType];
+    const c1Prompt = compressionPrompt(contentType, 1);
 
     ensureDir(gradientDir);
     ensureDir(path.join(gradientDir, 'c1'));
@@ -884,7 +981,7 @@ export async function compressMemoryFileGradient(
 
         try {
             const raw = await sdkCompress(
-                `${prompts.c1}\n\nPeriod: ${month}\nEntries: ${groupEntries.length}\n\n${existingContent}${groupContent}${FEELING_TAG_INSTRUCTION}`
+                `${c1Prompt}\n\nPeriod: ${month}\nEntries: ${groupEntries.length}\n\n${existingContent}${groupContent}${FEELING_TAG_INSTRUCTION}`
             );
 
             const { content: compressed, feelingTag } = parseFeelingTag(raw);
@@ -902,31 +999,32 @@ export async function compressMemoryFileGradient(
         }
     }
 
-    // Cascade: compress c1 → c2 → c3 → c5 when files exceed caps
-    const cascadeLevels = [
-        { from: 'c1', to: 'c2', promptKey: 'c2' },
-        { from: 'c2', to: 'c3', promptKey: 'c3' },
-        { from: 'c3', to: 'c5', promptKey: 'c5' },
-    ];
+    // Cascade: dynamic depth — compress c1 → c2 → ... → c(n) when files exceed caps
+    const agent = gradientDir.includes('/leo/') ? 'leo' as const : 'jim' as const;
+    let cascadeFrom = 'c1';
+    let cascadeDepth = 0;
 
-    for (const cascade of cascadeLevels) {
-        const fromDir = path.join(gradientDir, cascade.from);
-        const toDir = path.join(gradientDir, cascade.to);
+    while (cascadeDepth < MAX_COMPRESSION_DEPTH) {
+        const cascadeTo = nextLevel(cascadeFrom);
+        if (!cascadeTo) break;
 
-        if (!fs.existsSync(fromDir)) continue;
+        const fromDir = path.join(gradientDir, cascadeFrom);
+        if (!fs.existsSync(fromDir)) break;
 
         const fromFiles = fs.readdirSync(fromDir)
             .filter(f => f.endsWith('.md'))
             .sort(); // Chronological
 
-        const cap = MEMORY_FILE_GRADIENT_CAPS[cascade.from] || 10;
+        const cap = gradientCap(cascadeFrom);
+        if (fromFiles.length <= cap) break;
 
-        if (fromFiles.length <= cap) continue;
-
+        const toDir = path.join(gradientDir, cascadeTo);
         ensureDir(toDir);
 
         // Take the oldest files that exceed the cap
         const overflow = fromFiles.slice(0, fromFiles.length - cap);
+        const depth = parseLevelNumber(cascadeTo) || 0;
+        const prompt = compressionPrompt(contentType, depth);
 
         // Group overflow into batches of 3 for compression
         for (let i = 0; i < overflow.length; i += 3) {
@@ -939,25 +1037,47 @@ export async function compressMemoryFileGradient(
                 ? batch[0].replace('.md', '')
                 : `${batch[0].replace('.md', '')}_to_${batch[batch.length - 1].replace('.md', '')}`;
 
-            const toPath = path.join(toDir, `${label}.md`);
-
             try {
                 const raw = await sdkCompress(
-                    `${prompts[cascade.promptKey]}\n\nSource: ${cascade.from} → ${cascade.to}\nFiles: ${batch.join(', ')}\n\n${batchContent}${FEELING_TAG_INSTRUCTION}`
+                    `${prompt}\n\nSource: ${cascadeFrom} → ${cascadeTo}\nFiles: ${batch.join(', ')}\n\n${batchContent}${FEELING_TAG_INSTRUCTION}`
                 );
 
                 const { content: compressed, feelingTag } = parseFeelingTag(raw);
+
+                // Check for incompressibility
+                const incompressibleMatch = compressed.match(/^INCOMPRESSIBLE:\s*(.+)/s);
+                if (incompressibleMatch) {
+                    const uvContent = incompressibleMatch[1].trim();
+                    writeUVEntry(agent, label, uvContent, contentType, null, feelingTag);
+                    result.cascades++;
+                    for (const f of batch) { fs.unlinkSync(path.join(fromDir, f)); }
+                    continue;
+                }
+
+                // Check compression ratio
+                const ratio = compressed.length / batchContent.length;
+                if (ratio > INCOMPRESSIBILITY_RATIO) {
+                    const uvRaw = await sdkCompress(
+                        `${UV_PROMPT}\n\nSource: ${cascadeFrom}\n\n${compressed}${FEELING_TAG_INSTRUCTION}`
+                    );
+                    const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
+                    writeUVEntry(agent, label, uvContent.trim(), contentType, null, uvTag);
+                    result.cascades++;
+                    for (const f of batch) { fs.unlinkSync(path.join(fromDir, f)); }
+                    continue;
+                }
+
+                const toPath = path.join(toDir, `${label}.md`);
                 fs.writeFileSync(toPath, compressed, 'utf8');
                 result.cascades++;
 
                 // Find source entry in DB
-                const agent = gradientDir.includes('/leo/') ? 'leo' as const : 'jim' as const;
                 const sourceLabel = batch[0].replace('.md', '');
                 const sourceRows = gradientStmts.getBySession.all(sourceLabel) as any[];
-                const sourceEntry = sourceRows.find((r: any) => r.level === cascade.from);
+                const sourceEntry = sourceRows.find((r: any) => r.level === cascadeFrom);
 
                 const entryId = generateGradientId();
-                insertGradientEntry(entryId, agent, label, cascade.to, compressed, contentType, sourceEntry?.id || null, feelingTag);
+                insertGradientEntry(entryId, agent, label, cascadeTo, compressed, contentType, sourceEntry?.id || null, feelingTag);
 
                 // Remove the source files that were compressed
                 for (const f of batch) {
@@ -965,42 +1085,43 @@ export async function compressMemoryFileGradient(
                 }
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error);
-                result.errors.push(`${cascade.from}→${cascade.to} cascade failed for ${label}: ${msg}`);
+                result.errors.push(`${cascadeFrom}→${cascadeTo} cascade failed for ${label}: ${msg}`);
             }
         }
+
+        cascadeFrom = cascadeTo;
+        cascadeDepth++;
     }
 
-    // Generate unit vectors from c5 files
-    const c5Dir = path.join(gradientDir, 'c5');
+    // Generate unit vectors from the deepest level directory
+    const cDirs = discoverLevelDirs(gradientDir);
+    const deepestLevel = cDirs.length > 0 ? cDirs[cDirs.length - 1] : null;
     const uvPath = path.join(gradientDir, 'unit-vectors.md');
 
-    if (fs.existsSync(c5Dir)) {
-        const c5Files = fs.readdirSync(c5Dir).filter(f => f.endsWith('.md')).sort();
+    if (deepestLevel) {
+        const deepDir = path.join(gradientDir, deepestLevel);
+        const deepFiles = fs.readdirSync(deepDir).filter(f => f.endsWith('.md')).sort();
         const existingUVs = fs.existsSync(uvPath) ? fs.readFileSync(uvPath, 'utf8') : '';
 
-        for (const f of c5Files) {
+        for (const f of deepFiles) {
             const label = f.replace('.md', '');
             // Skip if unit vector already exists for this file
             if (existingUVs.includes(`**${label}**:`)) continue;
 
             try {
-                const c5Content = fs.readFileSync(path.join(c5Dir, f), 'utf8');
+                const deepContent = fs.readFileSync(path.join(deepDir, f), 'utf8');
                 const raw = await sdkCompress(
-                    `${prompts.uv}\n\nSource: ${label}\n\n${c5Content}${FEELING_TAG_INSTRUCTION}`
+                    `${UV_PROMPT}\n\nSource: ${label}\n\n${deepContent}${FEELING_TAG_INSTRUCTION}`
                 );
 
                 const { content: uvRaw, feelingTag } = parseFeelingTag(raw);
                 const uvText = uvRaw.trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
-                const uvLine = `- **${label}**: "${uvText}"`;
-                fs.appendFileSync(uvPath, `${uvLine}\n`, 'utf8');
 
-                // Find source c5 entry in DB
-                const agent = gradientDir.includes('/leo/') ? 'leo' as const : 'jim' as const;
+                // Find source entry in DB
                 const sourceRows = gradientStmts.getBySession.all(label) as any[];
-                const sourceC5 = sourceRows.find((r: any) => r.level === 'c5');
+                const sourceEntry = sourceRows.find((r: any) => r.level === deepestLevel);
 
-                const entryId = generateGradientId();
-                insertGradientEntry(entryId, agent, label, 'uv', uvText, contentType, sourceC5?.id || null, feelingTag);
+                writeUVEntry(agent, label, uvText, contentType, sourceEntry?.id || null, feelingTag);
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error);
                 result.errors.push(`UV generation failed for ${label}: ${msg}`);
@@ -1067,17 +1188,19 @@ export async function maintainMemoryFile(
 
 /**
  * Load a memory file's gradient for inclusion in the system prompt.
- * Returns compressed gradient content from c1 → c5 + unit vectors.
+ * Discovers all c{n} directories dynamically — depth is non-uniform.
  */
 export function loadMemoryFileGradient(gradientDir: string, label: string): string {
     const parts: string[] = [];
 
     if (!fs.existsSync(gradientDir)) return '';
 
-    // Load gradient levels: c1 (most recent 10), c2 (6), c3 (4), c5 (8)
-    for (const [level, cap] of Object.entries(MEMORY_FILE_GRADIENT_CAPS)) {
-        const levelDir = path.join(gradientDir, level);
-        if (!fs.existsSync(levelDir)) continue;
+    // Discover all c{n} directories, sort highest compression first
+    const cDirs = discoverLevelDirs(gradientDir).reverse(); // highest first
+
+    for (const dir of cDirs) {
+        const cap = gradientCap(dir);
+        const levelDir = path.join(gradientDir, dir);
 
         const files = fs.readdirSync(levelDir)
             .filter(f => f.endsWith('.md'))
@@ -1088,7 +1211,7 @@ export function loadMemoryFileGradient(gradientDir: string, label: string): stri
         for (const f of files) {
             try {
                 const content = fs.readFileSync(path.join(levelDir, f), 'utf8');
-                parts.push(`--- ${label}/${level}/${f} ---\n${content}`);
+                parts.push(`--- ${label}/${dir}/${f} ---\n${content}`);
             } catch { /* skip unreadable */ }
         }
     }
@@ -1129,27 +1252,31 @@ export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
 
     const sections: string[] = [];
 
-    // Unit vectors first (always loaded in full)
+    // Unit vectors first (always loaded in full) — distinguish aphorisms from cascade UVs
     if (uvs.length > 0) {
         const uvLines = uvs.map((uv: any) => {
             const tags = feelingTagStmts.getByEntry.all(uv.id) as any[];
             const tagStr = tags.length > 0
                 ? ` [${tags.map((t: any) => t.content).join('; ')}]`
                 : '';
-            return `- **${uv.session_label}** (${uv.content_type}): "${uv.content}"${tagStr}`;
+            const typeLabel = uv.provenance_type === 'aphorism' ? 'Aphorism' : uv.content_type;
+            return `- **${uv.session_label}** (${typeLabel}): "${uv.content}"${tagStr}`;
         });
         sections.push(`### Unit Vectors\n${uvLines.join('\n')}`);
     }
 
-    // Load by level — most compressed first (c5, c3, c2, c1)
-    const levelCaps: Record<string, number> = { c5: 8, c3: 4, c2: 6, c1: 10 };
+    // Load by level — discover all distinct levels dynamically, most compressed first
+    const allEntries = gradientStmts.getByAgent.all(agent) as any[];
+    const distinctLevels = [...new Set(allEntries.map((e: any) => e.level as string))]
+        .filter(l => l !== 'c0' && l !== 'uv' && /^c\d+$/.test(l))
+        .sort((a, b) => (parseLevelNumber(b) || 0) - (parseLevelNumber(a) || 0));
 
-    for (const [level, cap] of Object.entries(levelCaps)) {
-        const entries = gradientStmts.getByAgentLevel.all(agent, level) as any[];
+    for (const level of distinctLevels) {
+        const cap = gradientCap(level);
+        const entries = allEntries.filter((e: any) => e.level === level).slice(0, cap);
         if (entries.length === 0) continue;
 
-        const sliced = entries.slice(0, cap);
-        const levelParts = sliced.map((e: any) => {
+        const levelParts = entries.map((e: any) => {
             const tags = feelingTagStmts.getByEntry.all(e.id) as any[];
             const tagStr = tags.length > 0
                 ? `\n*Feeling: ${tags.map((t: any) => `${t.content}${t.tag_type === 'revisit' ? ' (revisit)' : ''}`).join('; ')}*`
@@ -1157,7 +1284,7 @@ export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
             return `--- ${e.content_type}/${level}/${e.session_label} ---\n${e.content}${tagStr}`;
         });
 
-        sections.push(`### ${level.toUpperCase()} (${sliced.length} entries)\n${levelParts.join('\n\n')}`);
+        sections.push(`### ${level.toUpperCase()} (${entries.length} entries)\n${levelParts.join('\n\n')}`);
     }
 
     return sections.length > 0

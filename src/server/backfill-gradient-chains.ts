@@ -174,7 +174,8 @@ function findParent(entry: any): string | null {
     const level = entry.level;
 
     // Determine parent level
-    const parentLevel = level === 'c2' ? 'c1' : level === 'c3' ? 'c2' : level === 'c5' ? 'c3' : null;
+    const n = level.match(/^c(\d+)$/);
+    const parentLevel = n ? (parseInt(n[1]) > 1 ? `c${parseInt(n[1]) - 1}` : 'c0') : null;
     if (!parentLevel) return null;
 
     // Parse source labels from the entry label
@@ -229,7 +230,11 @@ function findParent(entry: any): string | null {
 
 console.log(`Mode: ${dryRun ? 'DRY RUN' : 'LIVE'}\n`);
 
-const levels = ['c2', 'c3', 'c5'];
+// Discover all levels that exist above c1
+const allLevels = [...new Set((db.prepare('SELECT DISTINCT level FROM gradient_entries WHERE agent = ?').all('leo') as any[]).map((e: any) => e.level as string))]
+    .filter(l => /^c\d+$/.test(l) && parseInt(l.replace('c','')) > 1)
+    .sort((a, b) => parseInt(a.replace('c','')) - parseInt(b.replace('c','')));
+const levels = allLevels;
 let totalLinked = 0;
 let totalCreated = 0;
 let totalNotFound = 0;

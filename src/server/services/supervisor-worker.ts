@@ -217,8 +217,9 @@ function findJimUntranscribedFiles(): { filePath: string; level: string; content
     const agentDir = path.join(MEMORY_DIR, 'fractal', 'jim');
     if (!fs.existsSync(agentDir)) return null;
 
-    // Session gradient files (c1/, c2/, c3/, c5/)
-    for (const level of ['c1', 'c2', 'c3', 'c5']) {
+    // Session gradient files (dynamically discovered cN/ directories)
+    const sessionLevelDirs = fs.existsSync(agentDir) ? fs.readdirSync(agentDir).filter((d: string) => /^c\d+$/.test(d)) : [];
+    for (const level of sessionLevelDirs) {
         const levelDir = path.join(agentDir, level);
         if (!fs.existsSync(levelDir)) continue;
 
@@ -257,7 +258,9 @@ function findJimUntranscribedFiles(): { filePath: string; level: string; content
 
     // Memory file gradient files (working-memory/c1/, etc.)
     for (const contentType of ['felt-moments', 'working-memory']) {
-        for (const level of ['c1', 'c2', 'c3', 'c5']) {
+        const contentDir = path.join(agentDir, contentType);
+        const memLevelDirs = fs.existsSync(contentDir) ? fs.readdirSync(contentDir).filter((d: string) => /^c\d+$/.test(d)) : [];
+        for (const level of memLevelDirs) {
             const levelDir = path.join(agentDir, contentType, level);
             if (!fs.existsSync(levelDir)) continue;
 
