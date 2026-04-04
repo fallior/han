@@ -381,6 +381,20 @@ function releaseConversationClaim(conversationId: string): void {
 async function respondToConversation(db: Database.Database, conversationId: string): Promise<void> {
     const title = getConversationTitle(db, conversationId);
 
+    // Check if the last human message is explicitly addressed to Jim only.
+    // If Darron says "Jim" or "Hey Jim" without mentioning Leo, this one's not for us.
+    const recentForCheck = getRecentMessages(db, conversationId, 10).reverse();
+    const lastHumanMsg = recentForCheck.filter(m => m.role === 'human').pop();
+    if (lastHumanMsg) {
+        const text = lastHumanMsg.content.toLowerCase();
+        const mentionsJim = /\bjim\b|\bjimmy\b/.test(text);
+        const mentionsLeo = /\bleo\b|\bleonhard\b/.test(text);
+        if (mentionsJim && !mentionsLeo) {
+            console.log(`[Leo/Human] Message addressed to Jim only in "${title}" — standing down`);
+            return;
+        }
+    }
+
     // Claim this conversation to prevent concurrent responses from heartbeat
     if (!claimConversation(conversationId)) {
         console.log(`[Leo/Human] Could not claim "${title}" — another agent is responding`);

@@ -381,6 +381,19 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         return;
     }
 
+    // Check if the last human message is explicitly addressed to Leo only.
+    // If Darron says "Leo" or "Hey Leo" without mentioning Jim, this one's not for us.
+    const lastHumanMsg = recentMessages.filter(m => m.role === 'human').pop();
+    if (lastHumanMsg) {
+        const text = lastHumanMsg.content.toLowerCase();
+        const mentionsJim = /\bjim\b|\bjimmy\b/.test(text);
+        const mentionsLeo = /\bleo\b|\bleonhard\b/.test(text);
+        if (mentionsLeo && !mentionsJim) {
+            console.log(`[Jim/Human] Message addressed to Leo only in "${title}" — standing down`);
+            return;
+        }
+    }
+
     // Dedup: check if ANY supervisor (jim-human or supervisor-worker) already responded
     // since the last human/leo message. Previously only checked jim-human- prefixed IDs,
     // which missed responses from supervisor cycles (which use generateId()).
