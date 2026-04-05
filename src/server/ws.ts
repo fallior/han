@@ -80,6 +80,7 @@ type GetInitialStateFn = () => InitialState;
 
 interface AliveWebSocket extends WebSocket {
     isAlive: boolean;
+    missedPings: number;
 }
 
 // ── Authentication helpers ────────────────────────────────
@@ -194,21 +195,44 @@ export function createWebSocketServer(
             ws.send(JSON.stringify({ type: 'terminal', content: null, session: null } satisfies TerminalMessage));
         }
 
-        // Heartbeat
+        // Heartbeat — track missed pings for graceful tolerance
         ws.isAlive = true;
-        ws.on('pong', () => { ws.isAlive = true; });
+        ws.missedPings = 0;
+        ws.on('pong', () => { ws.isAlive = true; ws.missedPings = 0; });
+
+        // Application-level ping from client (browser WebSocket can't send
+        // protocol pongs reliably over Tailscale/mobile). Client sends
+        // {"type":"ping"}, we respond with {"type":"pong"}.
+        ws.on('message', (data: Buffer | string) => {
+            try {
+                const msg = JSON.parse(typeof data === 'string' ? data : data.toString());
+                if (msg.type === 'ping') {
+                    ws.send(JSON.stringify({ type: 'pong' }));
+                    ws.isAlive = true;
+                    ws.missedPings = 0;
+                }
+            } catch { /* not JSON — ignore */ }
+        });
 
         ws.on('close', () => {
             console.log('WebSocket client disconnected');
         });
     });
 
-    // Heartbeat interval -- detect dead connections (iOS Safari drops silently)
+    // Heartbeat interval — allow 3 missed pings before termination.
+    // Interval is 30s, so a client gets 90s of silence before being killed.
+    // This is more tolerant of network blips, device sleep, and Tailscale hiccups.
     heartbeatTimer = setInterval(() => {
         if (!wss) return;
         wss.clients.forEach((ws) => {
             const aws = ws as AliveWebSocket;
-            if (aws.isAlive === false) return aws.terminate();
+            if (aws.isAlive === false) {
+                aws.missedPings = (aws.missedPings || 0) + 1;
+                if (aws.missedPings >= 3) {
+                    console.log(`WebSocket client terminated after ${aws.missedPings} missed pings`);
+                    return aws.terminate();
+                }
+            }
             aws.isAlive = false;
             aws.ping();
         });

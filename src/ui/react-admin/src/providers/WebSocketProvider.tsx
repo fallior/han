@@ -67,6 +67,19 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       useStore.getState().setWsConnected(true);
       reconnectDelayRef.current = 1000; // Reset backoff
 
+      // Application-level keepalive — sends {"type":"ping"} every 20s.
+      // Browser WebSocket handles protocol-level pong automatically, but
+      // this is belt-and-braces: the server also accepts app-level pings
+      // and resets its missed-ping counter. Keeps the connection alive
+      // across Tailscale, mobile sleep, and network blips.
+      const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 20000);
+      // Store ref for cleanup
+      (ws as any)._pingInterval = pingInterval;
+
       // On reconnect, fetch conversations to reconcile missed events
       try {
         const response = await fetch('/api/conversations', {
@@ -103,6 +116,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       console.log('[WebSocket] Disconnected');
       setConnected(false);
       useStore.getState().setWsConnected(false);
+      if ((ws as any)._pingInterval) clearInterval((ws as any)._pingInterval);
       wsRef.current = null;
 
       // Schedule reconnect with exponential backoff (matching admin.ts:348,366)
