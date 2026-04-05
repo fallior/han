@@ -486,4 +486,69 @@
     .mobile-only {
         display: inline-block !important;
     }
+
+    /* ─── Mobile Reading Optimisation ─── */
+    /* Maximise reading area like Discord — ~90% screen for content */
+
+    /* Compact persona tabs */
+    .persona-tab-bar {
+        border-bottom-width: 1px;
+    }
+    .persona-tab {
+        padding: 8px 4px;
+        font-size: 12px;
+    }
+
+    /* Compact nested tabs */
+    .nested-tab-bar {
+        padding: 0 4px;
+    }
+    .nested-tab {
+        padding: 6px 8px;
+        font-size: 11px;
+    }
+
+    /* Compact thread header — single line */
+    .thread-header {
+        padding: 8px 12px;
+        gap: 8px;
+    }
+    .thread-header h2 {
+        font-size: 14px !important;
+    }
+
+    /* Messages take full width — no 80% cap on mobile */
+    .message-bubble {
+        max-width: 100%;
+        padding: 10px 12px;
+        font-size: 14px;
+        border-radius: 6px;
+    }
+
+    /* Tighter message list padding */
+    .message-list {
+        padding: 8px;
+        gap: 8px;
+    }
+
+    /* Compact compose area */
+    .message-input-area {
+        padding: 8px;
+        gap: 6px;
+    }
+    .message-input {
+        padding: 8px 10px;
+        font-size: 14px;
+        min-height: 36px;
+    }
+}
+
+/* iPad / tablet tweaks */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .message-bubble {
+        max-width: 90%;
+    }
+    .message-list {
+        padding: 12px;
+    }
 }
