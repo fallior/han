@@ -143,8 +143,29 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     mountedRef.current = true;
     connect();
 
+    // Reconnect immediately when device wakes from sleep/hibernate.
+    // Browser timers pause during sleep — the scheduled reconnect might
+    // not fire for minutes. visibilitychange fires instantly on wake.
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && mountedRef.current) {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          console.log('[WebSocket] Page visible, connection dead — reconnecting now');
+          // Cancel any pending delayed reconnect
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+          }
+          reconnectDelayRef.current = 1000; // Reset backoff
+          connect();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       mountedRef.current = false;
+      document.removeEventListener('visibilitychange', handleVisibility);
 
       // Cleanup
       if (reconnectTimeoutRef.current) {
