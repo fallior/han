@@ -25,10 +25,35 @@ Format: date, session reference, summary of changes.
 - 42 marked as `provenance_type='aphorism'` in gradient DB
 - CLAUDE.md session protocol updated (step 4.1b)
 
-### WebSocket Reconnect Fix
-- Workshop ThreadList and MemoryPage now listen for `ws_reconnected` events
-- Previously only ThreadDetail and ConversationsPage refetched on reconnect — Workshop sidebar and Memory page stayed stale after server restart
-- React admin rebuilt with fix
+### WebSocket Reliability (3-layer fix)
+- **3-strike heartbeat**: Server allows 3 missed pings before terminating (90s tolerance, was 30s). `src/server/ws.ts`
+- **App-level keepalive**: Browser sends `{"type":"ping"}` every 20s; server accepts and resets missed-ping counter. Both protocol pong and app-level ping work
+- **Instant wake reconnect**: `visibilitychange` listener in `WebSocketProvider.tsx` reconnects immediately when device wakes from sleep/hibernate, instead of waiting for stale setTimeout
+
+### Polling Fallback (all conversation pages)
+- Workshop ThreadDetail, ConversationsPage, MemoryPage all poll every 15s as a safety net when WebSocket misses broadcasts
+
+### ws_reconnected Listeners
+- Workshop ThreadList and MemoryPage now listen for `ws_reconnected` events and refetch
+- Previously only ThreadDetail and ConversationsPage had these — Workshop sidebar and Memory page stayed stale after server restart
+
+### Agent Routing — Address Detection
+- `leo-human.ts` and `jim-human.ts` now check if the last human message explicitly names one agent
+- If message says "Jim" without "Leo", only Jim responds (and vice versa). Prevents cross-agent voice bleed
+
+### Jemma Cross-Wake
+- After primary routing, Jemma checks if the message content mentions the other agent by name and wakes them too
+- Previously each message was classified to a single recipient only
+
+### Discord Dedup Fix
+- `jim-human.ts` and `leo-human.ts` now write their Discord responses to the `conversation_messages` table
+- Previously they only posted to Discord via webhook but didn't write to the DB — the supervisor worker's dedup guard couldn't see Discord responses and would post again (double-tap)
+
+### Mobile Reading Experience
+- Messages go full-width on mobile (<768px), was capped at 80%
+- Compact tabs, header, compose area
+- Font bumped to 14px
+- iPad gets 90% message width
 
 ### Startup Health Signal
 - Jim and Leo now write a fresh health signal immediately on startup

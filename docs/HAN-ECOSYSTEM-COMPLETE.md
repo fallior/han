@@ -599,6 +599,12 @@ When Jim/Human responds, it broadcasts to admin UI clients via two mechanisms:
 
 Both include `discussion_type` from the conversation record so the admin UI routes the update to the correct module (Conversations, Memory Discussions, or Workshop).
 
+**Discord response DB write (S108):** When responding to a Discord message, `jim-human.ts`
+(and `leo-human.ts`) now write their response to the `conversation_messages` table in
+addition to posting via Discord webhook. Previously Discord responses were only posted to
+Discord — the supervisor worker's dedup guard couldn't see them in the DB and would post a
+duplicate response (double-tap bug).
+
 ### Memory Loading
 
 Reads Jim's memory banks:
@@ -709,6 +715,11 @@ code uses Agent SDK for Haiku classification.
 | Darron | ntfy.sh push notification |
 | Sevn/Six | HTTP POST to configured endpoints with bearer tokens |
 | Ignore | Logged but not delivered |
+
+**Cross-wake (S108):** After primary routing, Jemma checks if the message content mentions
+the other agent by name. If a message classified to Jim also contains "Leo" (or vice versa),
+Jemma wakes the other agent too. Previously each message was routed to a single recipient
+only, meaning group-addressed Discord messages could miss one agent.
 
 ### Credential Swap
 
@@ -1466,12 +1477,13 @@ generated through the separate filesystem scan in `processGradientForAgent`.
 
 ### ~~BUG: WebSocket Reconnect Crash — setConversations~~ FIXED (S104)
 
-**Status:** Fixed (S104 + S108). S104 fixed the crash: `GET /api/conversations` returns
+**Status:** Fully resolved (S104 + S108). S104 fixed the crash: `GET /api/conversations` returns
 `{ success, conversations: [...] }` but `WebSocketProvider.tsx` passed the whole object to
-`setConversations()`. Fixed with proper unwrapping. S108 completed the fix: Workshop
-`ThreadList` and `MemoryPage` were missing `ws_reconnected` listeners — after server restart
-the thread list and Memory page stayed stale even though ThreadDetail and ConversationsPage
-refetched. All four conversation-displaying components now refetch on reconnect.
+`setConversations()`. Fixed with proper unwrapping. S108 completed the fix with a multi-layer
+reliability approach: (1) all four conversation-displaying components now refetch on
+`ws_reconnected`, (2) 3-strike heartbeat tolerance on server (90s vs 30s), (3) app-level
+keepalive ping every 20s, (4) instant wake reconnect via `visibilitychange` listener,
+(5) 15-second polling fallback on all conversation pages as safety net.
 
 ---
 
@@ -1914,6 +1926,12 @@ the async Gemma call determines which agents to wake. Handles:
 **Fallback:** If Ollama is unreachable, falls back to simple regex (`/\b(jim|jimmy)\b/i`,
 `/\b(leo|leonhard)\b/i`) plus tab-based routing.
 
+**Agent-side address detection (S108):** Even after Gemma classification wakes an agent,
+`leo-human.ts` and `jim-human.ts` perform a final check: if the last human message explicitly
+names one agent without mentioning the other (e.g. "Jim, what do you think?"), the unnamed
+agent skips its response. This prevents cross-agent voice bleed when Gemma's classification
+is overly generous.
+
 Role `leo` messages with 10-min cooldown → write `leo-human-wake` signal (unchanged).
 
 ### Prompts & Terminal — `/api/prompts`, `/api/respond`, `/api/status`
@@ -2138,11 +2156,22 @@ const server = useHttps
 | `jemma_delivery` | `recipient`, `channel`, `author`, `message_preview`, `classification_confidence` | Server → Client | Jemma routed a Discord message |
 | `proposal_update` | `proposal` | Server → Client | Proposal status changed |
 
+### Server Heartbeat (3-Strike Protocol)
+
+The server pings each WebSocket client every 30s. Clients that miss **3 consecutive pings** (90s total) are terminated. Previously a single missed pong (30s) would disconnect — too aggressive for mobile devices that sleep briefly.
+
+**App-level keepalive:** The browser also sends `{"type":"ping"}` every 20s. The server accepts this as proof of life and resets the missed-ping counter. Both protocol-level pong AND app-level ping keep the connection alive — belt and braces.
+
 ### Client Reconnection
 
 - Base reconnect delay: 1000ms
 - Max reconnect delay: 30000ms
 - Exponential backoff with jitter
+- **Instant wake reconnect (S108):** `visibilitychange` listener in `WebSocketProvider.tsx` detects when the device wakes from sleep/hibernate and triggers immediate reconnection, rather than waiting for a stale setTimeout to fire
+
+### Polling Fallback (S108)
+
+All conversation-displaying components (Workshop ThreadDetail, ConversationsPage, MemoryPage) poll every 15 seconds as a safety net. If a WebSocket broadcast is missed (e.g. during brief disconnection), the poll catches it within 15s. This complements — not replaces — the WebSocket real-time path.
 
 ---
 
@@ -2541,6 +2570,12 @@ notification, ntfy opens this page which auto-submits the response via the API.
 
 Desktop-optimised project administration interface with 9 module tabs. A React migration
 (Vite + React Router + Zustand) runs in parallel at `/admin-react` (DEC-059, DEC-060).
+
+### Mobile Reading Experience (S108)
+- Messages go full-width on mobile (<768px), previously capped at 80%
+- Compact tabs, header, and compose area for smaller screens
+- Font bumped to 14px for readability
+- iPad gets 90% message width
 
 ### React Admin Fixes (S99)
 - **ConversationsPage** — API response parsing fixed (unwrap `.conversations` from grouped endpoint)
