@@ -459,6 +459,21 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
 
     const responseText = resultMessage?.result || '';
     if (responseText && responseText.trim().length > 20) {
+        // Post-generation dedup: check AGAIN if heartbeat Leo responded
+        // while we were thinking. Prevents double-tap when both processes
+        // receive the wake signal simultaneously.
+        const freshMessages = getRecentMessages(db, conversationId, 20).reverse();
+        const freshLastHuman = freshMessages.filter(m => m.role === 'human' || m.role === 'supervisor').pop();
+        if (freshLastHuman) {
+            const alreadyAnswered = freshMessages.some(m =>
+                m.role === 'leo' && m.created_at > freshLastHuman.created_at
+            );
+            if (alreadyAnswered) {
+                console.log(`[Leo/Human] Heartbeat Leo already responded to "${title}" while I was thinking — discarding my response`);
+                return;
+            }
+        }
+
         postMessage(db, conversationId, responseText.trim());
         responseCount++;
         console.log(`[Leo/Human] Responded to "${title}" (${responseText.trim().length} chars)`);
