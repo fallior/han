@@ -581,6 +581,20 @@ async function routeMessage(message: any): Promise<void> {
       await deliverToLeo(message, classification, channelName);
     }
   }
+
+  // If the message mentions the OTHER agent by name, wake them too.
+  // Darron often addresses both agents in one message — "Leo do X, Jim what do you think?"
+  const content = message.content.toLowerCase();
+  const mentionsJim = /\bjim\b|\bjimmy\b/.test(content);
+  const mentionsLeo = /\bleo\b|\bleonhard\b/.test(content);
+  if (mentionsJim && recipient !== 'jim' && channelOwner !== 'jim') {
+    console.log(`[Jemma] Message also mentions Jim — waking Jim`);
+    await deliverToJim(message, classification, channelName);
+  }
+  if (mentionsLeo && recipient !== 'leo' && channelOwner !== 'leo') {
+    console.log(`[Jemma] Message also mentions Leo — waking Leo`);
+    await deliverToLeo(message, classification, channelName);
+  }
 }
 
 async function reconcileMessages(): Promise<void> {
