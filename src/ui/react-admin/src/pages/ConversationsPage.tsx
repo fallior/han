@@ -72,10 +72,17 @@ export default function ConversationsPage() {
       }
     });
 
+    // Polling fallback for when WebSocket misses broadcasts
+    const pollInterval = setInterval(() => {
+      fetchGroupedConversations();
+      if (selectedId) fetchConversationDetail(selectedId);
+    }, 15000);
+
     return () => {
       unsubMessage();
       unsubCreated();
       unsubReconnect();
+      clearInterval(pollInterval);
     };
   }, [subscribeWs, selectedId]);
 

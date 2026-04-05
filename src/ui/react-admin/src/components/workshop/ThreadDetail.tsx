@@ -142,9 +142,23 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
       }
     });
 
+    // Polling fallback — if WebSocket misses a broadcast (silent disconnect,
+    // IPC failure, etc.), the poll catches it. Compares message count to avoid
+    // unnecessary re-renders when nothing changed.
+    const pollInterval = setInterval(async () => {
+      try {
+        const thread = await fetchThread(threadId as string);
+        if (thread && currentThread &&
+            thread.messages.length !== currentThread.messages.length) {
+          setCurrentThread(thread);
+        }
+      } catch { /* silent — poll is best-effort */ }
+    }, 15000); // 15 seconds
+
     return () => {
       unsubMessage();
       unsubReconnect();
+      clearInterval(pollInterval);
     };
   }, [threadId, addMessageToCurrentThread, subscribeWs]);
 
