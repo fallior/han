@@ -551,6 +551,21 @@ CRITICAL: Output ONLY your Discord message. Keep it concise and conversational. 
         if (posted) {
             responseCount++;
             console.log(`[Jim/Human] Posted to Discord #${channelName} (${responseText.trim().length} chars)`);
+
+            // Also write to the conversation DB so the supervisor worker's dedup
+            // guard sees it and doesn't double-respond. Find or create the Discord
+            // conversation thread for this channel.
+            try {
+                const db = new Database(DB_PATH);
+                const convId = signal.conversationId || '';
+                if (convId) {
+                    postMessage(db, convId, responseText.trim());
+                    console.log(`[Jim/Human] Also recorded Discord response in conversation ${convId}`);
+                }
+                db.close();
+            } catch (err) {
+                console.warn(`[Jim/Human] Failed to record Discord response in DB:`, (err as Error).message);
+            }
         } else {
             console.error(`[Jim/Human] Failed to post to Discord #${channelName}`);
         }

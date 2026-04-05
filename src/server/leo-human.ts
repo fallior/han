@@ -545,6 +545,19 @@ CRITICAL: Output ONLY your Discord message. Keep it concise and conversational. 
         if (posted) {
             responseCount++;
             console.log(`[Leo/Human] Posted to Discord #${channelName} (${responseText.trim().length} chars)`);
+
+            // Also write to the conversation DB so heartbeat's dedup guard
+            // sees it and doesn't double-respond
+            try {
+                const db = getDb();
+                const convId = signal.conversationId || '';
+                if (convId) {
+                    postMessage(db, convId, responseText.trim());
+                    console.log(`[Leo/Human] Also recorded Discord response in conversation ${convId}`);
+                }
+            } catch (err) {
+                console.warn(`[Leo/Human] Failed to record Discord response in DB:`, (err as Error).message);
+            }
         } else {
             console.error(`[Leo/Human] Failed to post to Discord #${channelName}`);
         }
