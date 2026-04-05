@@ -109,14 +109,17 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
     }
   }, [messageInput, draftKey]);
 
-  // Auto-scroll to bottom on messages change
+  // Auto-scroll to bottom only when NEW messages arrive (not on every poll/refetch)
+  const prevMessageCountRef = useRef(0);
   useEffect(() => {
-    if (currentThread?.messages) {
+    const count = currentThread?.messages?.length || 0;
+    if (count > prevMessageCountRef.current) {
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
     }
-  }, [currentThread?.messages]);
+    prevMessageCountRef.current = count;
+  }, [currentThread?.messages?.length]);
 
   // WebSocket: Listen for new messages and add them to current thread
   useEffect(() => {
