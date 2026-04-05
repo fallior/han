@@ -111,7 +111,7 @@ function getConversationTitle(db: Database.Database, conversationId: string): st
 }
 
 // ── Conversation claim mechanism ──────────────────────────────
-// Prevents duplicate responses when both jim-human and supervisor-worker
+// Prevents duplicate responses when multiple Jim processes
 // try to respond to the same conversation concurrently.
 
 function claimConversation(conversationId: string): boolean {
@@ -122,12 +122,10 @@ function claimConversation(conversationId: string): boolean {
             const content = fs.readFileSync(claimPath, 'utf8');
             const claim = JSON.parse(content);
             if (Date.now() - claim.timestamp < CLAIM_TTL_MS) {
-                // Only blocked by our own agent family (jim-human, supervisor).
-                // Leo's claims don't block Jim — both agents can respond to the
-                // same thread when Darron addresses both.
-                const isJimFamily = claim.agent === 'jim-human' || claim.agent === 'supervisor';
-                if (isJimFamily) {
-                    console.log(`[Jim/Human] Conversation ${conversationId} already claimed by ${claim.agent}`);
+                // Only blocked by Jim. Leo's claims don't block Jim — both
+                // agents can respond to the same thread when Darron addresses both.
+                if (claim.agent === 'jim') {
+                    console.log(`[Jim/Human] Conversation ${conversationId} already claimed by jim`);
                     return false;
                 }
                 // Leo has a claim — Jim can still respond independently
@@ -137,7 +135,7 @@ function claimConversation(conversationId: string): boolean {
         }
         // Write our claim
         fs.writeFileSync(claimPath, JSON.stringify({
-            agent: 'jim-human',
+            agent: 'jim',
             timestamp: Date.now(),
             pid: process.pid
         }));
@@ -155,7 +153,7 @@ function releaseConversationClaim(conversationId: string): void {
             const content = fs.readFileSync(claimPath, 'utf8');
             const claim = JSON.parse(content);
             // Only release if we own the claim
-            if (claim.agent === 'jim-human') {
+            if (claim.agent === 'jim') {
                 fs.unlinkSync(claimPath);
             }
         }
@@ -163,7 +161,7 @@ function releaseConversationClaim(conversationId: string): void {
 }
 
 function postMessage(db: Database.Database, conversationId: string, content: string): string {
-    const id = `jim-human-${Date.now().toString(36)}`;
+    const id = `jim-${Date.now().toString(36)}`;
     const now = new Date().toISOString();
     db.prepare(`
         INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
@@ -394,9 +392,7 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         }
     }
 
-    // Dedup: check if ANY supervisor (jim-human or supervisor-worker) already responded
-    // since the last human/leo message. Previously only checked jim-human- prefixed IDs,
-    // which missed responses from supervisor cycles (which use generateId()).
+    // Dedup: check if Jim already responded since the last human/leo message.
     const lastNonJim = recentMessages.filter(m => m.role === 'human' || m.role === 'leo').pop();
     if (lastNonJim) {
         const supervisorResponses = recentMessages.filter(m =>
@@ -409,7 +405,7 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         }
     }
 
-    // Claim this conversation to prevent concurrent responses from supervisor-worker
+    // Claim this conversation to prevent concurrent responses from other Jim processes
     if (!claimConversation(conversationId)) {
         console.log(`[Jim/Human] Could not claim "${title}" — another agent is responding`);
         return;
@@ -466,7 +462,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
 
         const responseText = resultMessage?.result || '';
         if (responseText && responseText.trim().length > 20) {
-            // Post-generation dedup: check AGAIN if supervisor-worker responded
+            // Post-generation dedup: check AGAIN if Jim responded elsewhere
             // while we were thinking. Prevents double-tap when both processes
             // receive the wake signal simultaneously.
             const freshMessages = getRecentMessages(db, conversationId, 20).reverse();

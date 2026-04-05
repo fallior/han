@@ -113,7 +113,7 @@ function getConversationTitle(db: Database.Database, conversationId: string): st
 }
 
 function postMessage(db: Database.Database, conversationId: string, content: string): string {
-    const id = `leo-human-${Date.now().toString(36)}`;
+    const id = `leo-${Date.now().toString(36)}`;
     const now = new Date().toISOString();
     db.prepare(`
         INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
@@ -330,7 +330,7 @@ function readSignal(): SignalData | null {
 }
 
 /// ── Conversation claim mechanism ──────────────────────────────
-// Prevents duplicate responses when both leo-human and heartbeat Leo
+// Prevents duplicate responses when multiple Leo processes
 // try to respond to the same conversation concurrently.
 
 function claimConversation(conversationId: string): boolean {
@@ -340,12 +340,10 @@ function claimConversation(conversationId: string): boolean {
             const content = fs.readFileSync(claimPath, 'utf8');
             const claim = JSON.parse(content);
             if (Date.now() - claim.timestamp < CLAIM_TTL_MS) {
-                // Only blocked by our own agent family (leo-human, heartbeat).
-                // Jim's claims don't block Leo — both agents can respond to the
-                // same thread when Darron addresses both.
-                const isLeoFamily = claim.agent === 'leo-human' || claim.agent === 'leo-heartbeat';
-                if (isLeoFamily) {
-                    console.log(`[Leo/Human] Conversation ${conversationId} already claimed by ${claim.agent}`);
+                // Only blocked by Leo. Jim's claims don't block Leo — both
+                // agents can respond to the same thread when Darron addresses both.
+                if (claim.agent === 'leo') {
+                    console.log(`[Leo/Human] Conversation ${conversationId} already claimed by leo`);
                     return false;
                 }
                 // Jim has a claim — Leo can still respond independently
@@ -354,7 +352,7 @@ function claimConversation(conversationId: string): boolean {
             // Expired claim — overwrite
         }
         fs.writeFileSync(claimPath, JSON.stringify({
-            agent: 'leo-human',
+            agent: 'leo',
             timestamp: Date.now(),
         }));
         return true;
@@ -369,7 +367,7 @@ function releaseConversationClaim(conversationId: string): void {
         if (fs.existsSync(claimPath)) {
             const content = fs.readFileSync(claimPath, 'utf8');
             const claim = JSON.parse(content);
-            if (claim.agent === 'leo-human') {
+            if (claim.agent === 'leo') {
                 fs.unlinkSync(claimPath);
             }
         }
@@ -395,7 +393,7 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         }
     }
 
-    // Claim this conversation to prevent concurrent responses from heartbeat
+    // Claim this conversation to prevent concurrent responses from other Leo processes
     if (!claimConversation(conversationId)) {
         console.log(`[Leo/Human] Could not claim "${title}" — another agent is responding`);
         return;
@@ -459,7 +457,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
 
     const responseText = resultMessage?.result || '';
     if (responseText && responseText.trim().length > 20) {
-        // Post-generation dedup: check AGAIN if heartbeat Leo responded
+        // Post-generation dedup: check AGAIN if Leo responded elsewhere
         // while we were thinking. Prevents double-tap when both processes
         // receive the wake signal simultaneously.
         const freshMessages = getRecentMessages(db, conversationId, 20).reverse();
@@ -469,7 +467,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
                 m.role === 'leo' && m.created_at > freshLastHuman.created_at
             );
             if (alreadyAnswered) {
-                console.log(`[Leo/Human] Heartbeat Leo already responded to "${title}" while I was thinking — discarding my response`);
+                console.log(`[Leo/Human] Leo already responded to "${title}" while I was thinking — discarding my response`);
                 return;
             }
         }

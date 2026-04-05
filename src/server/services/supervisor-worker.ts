@@ -485,7 +485,7 @@ function readPostDelineation(): string | null {
 }
 
 // ── Conversation claim mechanism ─────────────────────────────
-// Prevents duplicate responses when both jim-human and supervisor-worker
+// Prevents duplicate responses when multiple Jim processes
 // try to respond to the same conversation concurrently.
 const CLAIM_TTL_MS = 5 * 60 * 1000; // 5 min claim expiry
 
@@ -501,7 +501,7 @@ function claimConversation(conversationId: string): boolean {
             }
         }
         fs.writeFileSync(claimPath, JSON.stringify({
-            agent: 'supervisor-worker',
+            agent: 'jim',
             timestamp: Date.now(),
             pid: process.pid
         }));
@@ -517,7 +517,7 @@ function releaseConversationClaim(conversationId: string): void {
         if (fs.existsSync(claimPath)) {
             const content = fs.readFileSync(claimPath, 'utf8');
             const claim = JSON.parse(content);
-            if (claim.agent === 'supervisor-worker') {
+            if (claim.agent === 'jim') {
                 fs.unlinkSync(claimPath);
             }
         }
@@ -2040,8 +2040,7 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
                         break;
                     }
 
-                    // Dedup guard: check if ANY supervisor response exists since the last human/leo message.
-                    // Previously only checked jim-human- prefixed IDs, missing supervisor-worker responses.
+                    // Dedup guard: check if Jim already responded since the last human/leo message.
                     try {
                         const recentMsgs = conversationMessageStmts.getRecent?.all(action.conversation_id, 20) as any[] || [];
                         const lastNonJim = recentMsgs.find((m: any) => m.role === 'human' || m.role === 'leo');
@@ -2058,7 +2057,7 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
                         }
                     } catch { /* dedup check failed — proceed anyway */ }
 
-                    // Claim this conversation to prevent jim-human from responding concurrently
+                    // Claim this conversation to prevent other Jim processes from responding concurrently
                     if (!claimConversation(action.conversation_id)) {
                         summaries.push(`respond_conversation: skipped (claimed by another agent for ${action.conversation_id})`);
                         break;
