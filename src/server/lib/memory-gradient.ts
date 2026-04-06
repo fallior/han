@@ -147,7 +147,7 @@ async function sdkCompress(prompt: string): Promise<string> {
 
     let result = '';
     for await (const message of q) {
-        if (message.type === 'result') {
+        if (message.type === 'result' && message.subtype === 'success') {
             result = message.result || '';
         }
     }

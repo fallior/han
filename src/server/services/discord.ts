@@ -100,6 +100,132 @@ export async function fetchDiscordContext(channelId: string, limit: number = 10)
     }
 }
 
+// ── Webhook Auto-Provisioning ─────────────────────────────────
+
+const PERSONAS = ['leo', 'jim', 'jemma'] as const;
+
+/**
+ * Fetch a Discord channel's name via the REST API.
+ */
+async function fetchChannelName(channelId: string, botToken: string): Promise<string | null> {
+    try {
+        const res = await fetch(`https://discord.com/api/v10/channels/${channelId}`, {
+            headers: { 'Authorization': `Bot ${botToken}` },
+            signal: AbortSignal.timeout(10000),
+        });
+        if (!res.ok) {
+            console.error(`[Discord] Failed to fetch channel ${channelId}: ${res.status}`);
+            return null;
+        }
+        const ch = await res.json() as any;
+        return ch.name || null;
+    } catch (err) {
+        console.error('[Discord] Channel name fetch error:', (err as Error).message);
+        return null;
+    }
+}
+
+/**
+ * Create a Discord webhook for a persona in a channel.
+ */
+async function createWebhook(channelId: string, persona: string, botToken: string): Promise<string | null> {
+    const displayName = persona.charAt(0).toUpperCase() + persona.slice(1);
+    try {
+        const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/webhooks`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bot ${botToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ name: displayName }),
+            signal: AbortSignal.timeout(10000),
+        });
+        if (!res.ok) {
+            console.error(`[Discord] Failed to create webhook for ${persona} in ${channelId}: ${res.status}`);
+            return null;
+        }
+        const wh = await res.json() as any;
+        return `https://discord.com/api/webhooks/${wh.id}/${wh.token}`;
+    } catch (err) {
+        console.error(`[Discord] Webhook creation error for ${persona}:`, (err as Error).message);
+        return null;
+    }
+}
+
+/**
+ * Save the full config back to disk.
+ */
+function saveConfig(config: any): void {
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+}
+
+/**
+ * Ensure a Discord channel is registered in config with webhooks for all personas.
+ * If the channel ID is unknown, fetches its name from Discord. If any persona is
+ * missing a webhook for this channel, creates one. Updates config.json in place.
+ *
+ * Called by Jemma dispatch before signalling agents, so by the time an agent wakes
+ * up to respond, the webhook is already there.
+ */
+export async function ensureChannelWebhooks(channelId: string): Promise<string | null> {
+    const fullConfig = (() => {
+        try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')); }
+        catch { return {}; }
+    })();
+
+    const discord = fullConfig.discord || {};
+    const channels: Record<string, string> = discord.channels || {};
+    const webhooks: Record<string, Record<string, string>> = discord.webhooks || {};
+    const botToken = discord.bot_token;
+
+    if (!botToken) {
+        console.warn('[Discord] No bot_token — cannot auto-provision webhooks');
+        return null;
+    }
+
+    // Check if channel is already mapped
+    let channelName: string | null = null;
+    for (const [name, id] of Object.entries(channels)) {
+        if (id === channelId) { channelName = name; break; }
+    }
+
+    // Fetch channel name from Discord if not in config
+    if (!channelName) {
+        channelName = await fetchChannelName(channelId, botToken);
+        if (!channelName) {
+            console.error(`[Discord] Cannot resolve channel ${channelId} — auto-provision failed`);
+            return null;
+        }
+        channels[channelName] = channelId;
+        console.log(`[Discord] Auto-registered channel: ${channelName} = ${channelId}`);
+    }
+
+    // Ensure webhooks exist for all personas
+    let configChanged = !channels[channelName] || channels[channelName] !== channelId;
+    for (const persona of PERSONAS) {
+        if (!webhooks[persona]) webhooks[persona] = {};
+        if (webhooks[persona][channelName]) continue;
+
+        const url = await createWebhook(channelId, persona, botToken);
+        if (url) {
+            webhooks[persona][channelName] = url;
+            configChanged = true;
+            console.log(`[Discord] Auto-created webhook: ${persona}/${channelName}`);
+        }
+    }
+
+    // Save if anything changed
+    if (configChanged) {
+        discord.channels = channels;
+        discord.webhooks = webhooks;
+        fullConfig.discord = discord;
+        saveConfig(fullConfig);
+        console.log(`[Discord] Config updated with channel ${channelName} and webhooks`);
+    }
+
+    return channelName;
+}
+
 // ── Webhook Posting ───────────────────────────────────────────
 
 /**

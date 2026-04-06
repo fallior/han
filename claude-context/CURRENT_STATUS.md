@@ -36,6 +36,18 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-04-06 — Leo + Darron, S110 — Discord Auto-Provisioning, TypeScript Zero Errors
+
+- **Discord webhook auto-provisioning** — `ensureChannelWebhooks()` in `discord.ts` automatically registers unknown Discord channels and creates webhooks for all personas (Leo, Jim, Jemma) at dispatch time. Called from `deliverMessage()` (now async) in `jemma-dispatch.ts` before signalling agents. Prevents the silent failure where agents wake up, generate a response, then can't post because no webhook exists. Diagnosed from `#mikes-han` channel being unregistered — Leo spent $1.47 generating a discarded response.
+- **TypeScript zero errors** — Fixed all 15 pre-existing compile errors across 5 files:
+  - Duplicate `crypto` import removed from `supervisor-worker.ts`
+  - Redundant dynamic `agentQuery` import removed (already imported at top level)
+  - `GradientProcessingResult` fields corrected (`newC1s`/`cascades` → `completions.length`)
+  - SDK result type narrowing: added `message.subtype === 'success'` guard before accessing `.result` (10 occurrences across 4 files)
+  - `import.meta.url` replaced with `process.argv[1]` in `build-client.ts`
+- **Mikes-han channel wired** — Channel mapping + webhooks for Leo, Jim, Jemma added to `config.json`.
+- **Files changed**: `services/discord.ts`, `services/jemma-dispatch.ts`, `routes/jemma.ts`, `routes/conversations.ts`, `services/supervisor-worker.ts`, `leo-heartbeat.ts`, `lib/dream-gradient.ts`, `lib/memory-gradient.ts`, `build-client.ts`.
+
 ### 2026-03-31 — Leo + Darron, S104 — Gradient Integrity, activeCascade Bug, WebSocket Fix
 
 - **Gradient integrity complete** — Every gradient entry now has a complete provenance chain. Created 83 c0 entries from archive files, re-leveled 32 ephemeral working-memory c1s to c0, linked all orphan c2/c3/c5 entries. Leo: 145 c0, 86 c1, 79 c2, 67 c3, 37 c5, 38 uv — zero orphans above c0. Two backfill scripts: `backfill-gradient-c0s.ts` and `backfill-gradient-chains.ts`.

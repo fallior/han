@@ -97,14 +97,14 @@ function classifyAndDispatch(
     timestamp: string,
 ): void {
     console.log(`[Conversations] Classifying addressee for message in ${discussionType} thread`);
-    classifyAddressee(content, discussionType).then(({ jim, leo, reasoning }) => {
+    classifyAddressee(content, discussionType).then(async ({ jim, leo, reasoning }) => {
         const recipients: Array<'jim' | 'leo'> = [];
         if (jim) recipients.push('jim');
         if (leo) recipients.push('leo');
 
         for (const recipient of recipients) {
             try {
-                deliverMessage({
+                await deliverMessage({
                     source: 'admin',
                     recipient,
                     message: content,

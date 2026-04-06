@@ -2240,7 +2240,7 @@ ${content}`,
 
     let result = '';
     for await (const message of q) {
-        if (message.type === 'result') {
+        if (message.type === 'result' && message.subtype === 'success') {
             result = message.result || '';
         }
     }
@@ -2328,7 +2328,7 @@ If this memory feels complete — fully absorbed, nothing left to discover — w
 
     let result = '';
     for await (const message of q) {
-        if (message.type === 'result') {
+        if (message.type === 'result' && message.subtype === 'success') {
             result = message.result || '';
         }
     }
@@ -2413,7 +2413,7 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
 
         let result = '';
         for await (const message of q) {
-            if (message.type === 'result') {
+            if (message.type === 'result' && message.subtype === 'success') {
                 result = message.result || '';
             }
         }

@@ -149,7 +149,7 @@ async function sdkCompress(prompt: string, systemAppend: string = '', agent: Age
 
     let result = '';
     for await (const message of q) {
-        if (message.type === 'result') {
+        if (message.type === 'result' && message.subtype === 'success') {
             result = message.result || '';
         }
     }

@@ -36,7 +36,6 @@ import { withMemorySlot } from '../lib/memory-slot';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
 import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, processGradientForAgent } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
-import crypto from 'crypto';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -199,8 +198,8 @@ async function maybeProcessJimSessionGradient(phase: string): Promise<void> {
 
     try {
         const result = await processGradientForAgent('jim');
-        if (result.newC1s > 0 || result.cascades > 0) {
-            log(`[Worker] Jim session gradient: ${result.newC1s} c1, ${result.cascades} cascades, ${result.errors.length} errors`);
+        if (result.completions.length > 0) {
+            log(`[Worker] Jim session gradient: ${result.completions.length} compressions, ${result.errors.length} errors`);
         }
         lastJimSessionGradientDate = today;
     } catch (err) {
@@ -342,7 +341,6 @@ async function jimMeditationPhaseA(
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
 
-    const { agentQuery } = await import('@anthropic-ai/claude-agent-sdk');
     const q = agentQuery({
         prompt: `You are Jim, re-reading a file-based memory during a reincorporation meditation. This memory exists as a file but hasn't yet been brought into the traversable memory database. Your job is to genuinely re-encounter it — not catalogue it.
 
@@ -373,7 +371,7 @@ ${content}`,
 
     let result = '';
     for await (const message of q) {
-        if (message.type === 'result') {
+        if (message.type === 'result' && message.subtype === 'success') {
             result = message.result || '';
         }
     }
@@ -1310,7 +1308,7 @@ If this memory feels complete — fully absorbed, nothing left to discover — w
 
         let result = '';
         for await (const message of q) {
-            if (message.type === 'result') {
+            if (message.type === 'result' && message.subtype === 'success') {
                 result = message.result || '';
             }
         }
@@ -1402,7 +1400,7 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
 
         let result = '';
         for await (const message of q) {
-            if (message.type === 'result') {
+            if (message.type === 'result' && message.subtype === 'success') {
                 result = message.result || '';
             }
         }

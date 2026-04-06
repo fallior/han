@@ -4,9 +4,8 @@
  */
 import esbuild from 'esbuild';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = path.dirname(process.argv[1]);
 
 esbuild.buildSync({
     entryPoints: [path.join(__dirname, '..', 'ui', 'app.ts')],

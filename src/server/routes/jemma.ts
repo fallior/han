@@ -26,7 +26,7 @@ function isLocalhost(req: Request): boolean {
  * Used by the external Jemma Discord gateway (jemma.ts service).
  * Admin UI dispatch uses deliverMessage() directly — no HTTP round-trip.
  */
-router.post('/deliver', (req: Request, res: Response) => {
+router.post('/deliver', async (req: Request, res: Response) => {
     try {
         if (!isLocalhost(req)) {
             return res.status(403).json({
@@ -78,7 +78,7 @@ router.post('/deliver', (req: Request, res: Response) => {
             });
         }
 
-        const result = deliverMessage({
+        const result = await deliverMessage({
             source: source === 'admin' ? 'admin' : 'discord',
             recipient,
             message,

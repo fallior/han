@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { db, conversationStmts, conversationMessageStmts, HAN_DIR } from '../db';
 import { broadcast } from '../ws';
 import { generateId } from './planning';
+import { ensureChannelWebhooks } from './discord';
 
 // ── Directories ──────────────────────────────────────────────
 
@@ -124,8 +125,11 @@ export interface DeliveryResult {
 /**
  * Deliver a classified message to the appropriate agent.
  * Called directly by conversations.ts (admin) and via HTTP by jemma.ts (Discord).
+ *
+ * For Discord sources, auto-provisions channel mappings and webhooks for all
+ * personas before dispatching — so agents always have a webhook to post with.
  */
-export function deliverMessage(req: DeliveryRequest): DeliveryResult {
+export async function deliverMessage(req: DeliveryRequest): Promise<DeliveryResult> {
     const {
         source,
         recipient,
@@ -144,6 +148,18 @@ export function deliverMessage(req: DeliveryRequest): DeliveryResult {
     const effectiveConvId = adminConversationId || conversation_id;
 
     console.log(`[Jemma] Delivering: source=${effectiveSource} recipient=${recipient} author=${author}${reasoning ? ` reason="${reasoning}"` : ''}`);
+
+    // Auto-provision webhooks for new Discord channels
+    if (effectiveSource === 'discord' && channel) {
+        try {
+            const resolvedName = await ensureChannelWebhooks(channel);
+            if (resolvedName) {
+                console.log(`[Jemma] Channel ${channel} ready as "${resolvedName}" — webhooks ensured`);
+            }
+        } catch (err: any) {
+            console.warn(`[Jemma] Webhook auto-provision failed (non-fatal): ${err.message}`);
+        }
+    }
 
     let delivered = false;
 
