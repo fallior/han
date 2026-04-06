@@ -7,6 +7,43 @@
 
 ---
 
+## 2026-04-06 (Leo + Darron, S110 — Discord Auto-Provisioning, TypeScript Zero Errors)
+
+### Discord Webhook Auto-Provisioning
+
+The `#mikes-han` Discord channel was created but never registered in `config.json`. When
+someone posted there, Jemma correctly dispatched to both Jim and Leo, but neither could
+respond — no channel mapping and no webhook URL. Leo spent $1.47 generating a response that
+was silently discarded.
+
+**Fix:** `ensureChannelWebhooks()` in `discord.ts`. Before dispatching any Discord signal,
+Jemma now checks if the channel is registered in config. If not:
+1. Fetches the channel name from Discord API
+2. Creates webhooks for all personas (Leo/Jim/Jemma or Sevn/Six/Jemma)
+3. Updates `config.json` with channel mapping and webhook URLs
+
+`deliverMessage()` in `jemma-dispatch.ts` is now async, with the ensure call running before
+the signal file is written. By the time an agent wakes up, the webhook is guaranteed to exist.
+
+**Files changed:** `services/discord.ts`, `services/jemma-dispatch.ts`, `routes/jemma.ts`,
+`routes/conversations.ts`.
+
+### TypeScript Zero Errors
+
+Fixed all 15 pre-existing compile errors across 5 files:
+
+| Error | Fix | Files |
+|-------|-----|-------|
+| Duplicate `import crypto from 'crypto'` | Removed — `node:crypto` already imported | `supervisor-worker.ts` |
+| Redundant dynamic `agentQuery` import | Removed — already imported at top level | `supervisor-worker.ts` |
+| `GradientProcessingResult.newC1s/cascades` | Changed to `completions.length` (actual type) | `supervisor-worker.ts` |
+| `SDKResultMessage.result` on union type | Added `message.subtype === 'success'` guard | 4 files, 10 occurrences |
+| `import.meta.url` in CJS context | Replaced with `process.argv[1]` | `build-client.ts` |
+
+Same fixes applied to mikes-han repo (with six/sevn agent names).
+
+---
+
 ## 2026-03-31 (Leo + Darron, S104 — Gradient Integrity, WebSocket Fix, activeCascade Bug)
 
 ### Gradient Integrity — Complete Chain Provenance
