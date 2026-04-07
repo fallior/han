@@ -766,23 +766,24 @@ export function listAvailableSessions(agentName: 'jim' | 'leo'): string[] {
 
 // ── Memory File Gradient Compression ────────────────────────────
 //
-// Floating memory design: memory files (felt-moments, working-memory-full)
-// grow continuously. When a file reaches the threshold (50KB), it rotates:
+// Rolling window design (S112, 2026-04-07):
+// Memory files grow continuously. When a file exceeds the ceiling
+// (headSize + tailSize), the oldest ~tailSize bytes are archived and
+// compressed to c1. The newest ~headSize bytes are retained in the
+// living file. The living file is never emptied — always contains at
+// least headSize of recent memory.
 //
-//   1. The FULL 50KB is compressed to c1 (rich, complete compression)
-//   2. The living file becomes the "floating" file (degrading c0)
-//   3. A fresh living file starts empty
-//   4. As living grows, floating's loaded portion shrinks proportionally:
-//      - Living 0KB  + Floating 50KB  = 50KB total full-fidelity
-//      - Living 25KB + Floating 25KB  = 50KB total full-fidelity
-//      - Living 50KB + Floating 0KB   = 50KB total (triggers rotation)
+// Default: 50KB head + 50KB tail = 100KB ceiling.
+// Variable tail:head ratios supported (1:1, 1:2, 1:3, etc.).
+// 50KB blocks are discrete compression units for isotropic gradient input.
 //
-// The crossfade: total full-fidelity memory stays constant at ~50KB.
-// Old context fades out as new context fades in. No cliff — a smooth
-// transition. The gradient (c0 → c1 → ... → c(n) → UV) preserves feeling
-// at decreasing fidelity beneath the crossfade. Depth is non-uniform —
-// compression continues until incompressible.
+// Replaces the old floating/crossfade design and the 6am clock-based wipe.
+// No clock triggers. No empty files. Continuous rolling window.
 
+const ROLLING_WINDOW_HEAD_DEFAULT = 50 * 1024; // 50KB — retained (newest)
+const ROLLING_WINDOW_TAIL_DEFAULT = 50 * 1024; // 50KB — archived for compression (oldest)
+
+// Legacy threshold — used by rotateMemoryFile (kept for backward compat)
 const MEMORY_FILE_SIZE_THRESHOLD = 50 * 1024; // 50KB
 
 interface MemoryFileEntry {
@@ -904,11 +905,98 @@ export function rotateMemoryFile(
 }
 
 /**
- * Load floating memory with proportional degradation.
- * As living file grows, less of the floating file is loaded —
- * keeping the most recent entries (closest to current living).
+ * Rolling window memory rotation.
  *
- * Total full-fidelity: living_size + floating_loaded ≈ THRESHOLD
+ * When a memory file exceeds (headSize + tailSize):
+ *   1. Split entries: keep newest ~headSize bytes, archive oldest as a discrete block
+ *   2. Write archived entries to a temp file for c0 archival + c1 compression
+ *   3. Rewrite living file with only the kept entries (+ header)
+ *   4. Return archive path for gradient compression
+ *
+ * The living file always retains at least headSize bytes of recent memory.
+ * No clock-based wipes. No empty files. Continuous rolling window.
+ * 50KB archive blocks are discrete compression units for isotropic gradient input.
+ *
+ * @param filePath - Path to the living memory file
+ * @param fileHeader - Header text for the rewritten living file
+ * @param headSize - Bytes to retain (newest entries). Default 50KB.
+ * @param tailSize - Bytes that trigger archival (oldest entries). Default 50KB.
+ */
+export function rollingWindowRotate(
+    filePath: string,
+    fileHeader: string = '',
+    headSize: number = ROLLING_WINDOW_HEAD_DEFAULT,
+    tailSize: number = ROLLING_WINDOW_TAIL_DEFAULT,
+): { rotated: boolean; archivePath?: string; entriesArchived: number; entriesKept: number } {
+    if (!fs.existsSync(filePath)) {
+        return { rotated: false, entriesArchived: 0, entriesKept: 0 };
+    }
+
+    const stat = fs.statSync(filePath);
+    const ceiling = headSize + tailSize;
+
+    if (stat.size <= ceiling) {
+        return { rotated: false, entriesArchived: 0, entriesKept: 0 };
+    }
+
+    const content = fs.readFileSync(filePath, 'utf8');
+    const entries = splitMemoryFileEntries(content);
+
+    if (entries.length < 2) {
+        // Can't split a single entry — let it grow until next entry is added
+        return { rotated: false, entriesArchived: 0, entriesKept: 0 };
+    }
+
+    // Walk from the start (oldest), accumulating ~tailSize bytes to archive.
+    // Always archive at least one entry. Split at entry boundaries — never mid-entry.
+    // This produces consistent ~tailSize archive blocks (discrete compression units)
+    // for isotropic gradient input. If the file is much larger than the ceiling,
+    // the next heartbeat pass will trim another block.
+    let archivedBytes = 0;
+    let splitIndex = 0;
+
+    for (let i = 0; i < entries.length; i++) {
+        const entryBytes = Buffer.byteLength(entries[i].content, 'utf8');
+        // Always include at least the first (oldest) entry; then keep adding while under tailSize
+        if (archivedBytes > 0 && archivedBytes + entryBytes > tailSize) {
+            break;
+        }
+        archivedBytes += entryBytes;
+        splitIndex = i + 1;
+    }
+
+    // Must have entries to archive AND entries to keep
+    if (splitIndex <= 0 || splitIndex >= entries.length) {
+        return { rotated: false, entriesArchived: 0, entriesKept: entries.length };
+    }
+
+    const toArchive = entries.slice(0, splitIndex);
+    const toKeep = entries.slice(splitIndex);
+
+    // Write archive file for c0 archival + c1 compression
+    const dir = path.dirname(filePath);
+    const baseName = path.basename(filePath, '.md');
+    const archivePath = path.join(dir, `${baseName}-rolling-archive.md`);
+
+    const archiveContent = toArchive.map(e => e.content).join('\n\n---\n\n');
+    fs.writeFileSync(archivePath, archiveContent, 'utf8');
+
+    // Rewrite living file with kept entries (header + entries)
+    const header = fileHeader || `# ${baseName}\n`;
+    const keptContent = header + '\n' + toKeep.map(e => e.content).join('\n\n');
+    fs.writeFileSync(filePath, keptContent, 'utf8');
+
+    return {
+        rotated: true,
+        archivePath,
+        entriesArchived: toArchive.length,
+        entriesKept: toKeep.length,
+    };
+}
+
+/**
+ * Load floating memory with proportional degradation.
+ * @deprecated Use rollingWindowRotate instead. Kept for backward compatibility.
  *
  * @returns Content string to include in system prompt, or empty string
  */

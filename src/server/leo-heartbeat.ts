@@ -50,7 +50,7 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
-import { loadTraversableGradient, rotateMemoryFile, compressMemoryFileGradient, processGradientForAgent, activeCascade } from './lib/memory-gradient.js';
+import { loadTraversableGradient, rotateMemoryFile, compressMemoryFileGradient, processGradientForAgent, activeCascade, rollingWindowRotate } from './lib/memory-gradient.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -116,12 +116,6 @@ let currentBeatType: string = 'unknown';
 let previousPeriodMs = 0;
 const TRANSITION_STEPS = [0.75, 0.5, 0.25]; // Blend ratios: 75% old, 50% old, 25% old
 let transitionStep = -1; // -1 = no transition in progress
-
-// ── Nightly dream compression (phase transition tracking) ───
-// Uses shared (clock-based) phase, not Leo's wrapper which maps rest/holiday → 'sleep'.
-// This ensures compression fires at 06:00 even on rest days.
-let previousSharedPhase: DayPhase | null = null;
-let lastDreamCompressionDate = '';
 
 // ── Robin Hood Protocol — mutual health checks ──────────────
 
@@ -1836,104 +1830,79 @@ async function maybeProcessDreamGradient(phase: string): Promise<void> {
     lastDreamGradientDate = today;
 }
 
-// ── Leo memory pre-flight — floating memory rotation ──────────────────
-// Mirrors Jim's supervisor-worker pre-flight: rotates oversized memory files
-// and compresses the floating file through the fractal gradient.
+// ── Leo memory pre-flight — rolling window rotation ──────────────────
+// Rolling window design (S112): when memory files exceed the ceiling
+// (head + tail), archive the oldest entries as a discrete block and
+// compress through the gradient. The living file always retains at least
+// headSize bytes of recent memory. No clock-based wipes. No empty files.
 
 const LEO_FRACTAL_DIR = path.join(HAN_DIR, 'memory', 'fractal', 'leo');
 
 function preFlightMemoryRotation(): void {
+    // Read rolling window config (defaults: 50KB head, 50KB tail)
+    const config = loadConfig();
+    const headSize = config.memory?.rollingWindowHead || 51200;
+    const tailSize = config.memory?.rollingWindowTail || 51200;
+
     try {
-        const fmResult = rotateMemoryFile(
+        // Felt-moments: rolling window
+        const fmResult = rollingWindowRotate(
             path.join(LEO_MEMORY_DIR, 'felt-moments.md'),
-            '# Leo — Felt Moments\n\n> Older entries live in the floating file and fractal gradient. Nothing is lost.\n',
+            '# Leo — Felt Moments\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
+            headSize, tailSize,
         );
-        if (fmResult.rotated && fmResult.floatingPath) {
-            console.log(`[Leo] Felt-moments rotated: ${fmResult.entriesRotated} entries → floating. Fresh living file created.`);
-            // Fire-and-forget: compress floating through gradient in background
-            compressMemoryFileGradient(fmResult.floatingPath, path.join(LEO_FRACTAL_DIR, 'felt-moments'), 'felt-moments')
-                .then(r => console.log(`[Leo] Felt-moments gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`))
+        if (fmResult.rotated && fmResult.archivePath) {
+            console.log(`[Leo] Felt-moments rolling window: archived ${fmResult.entriesArchived} entries, kept ${fmResult.entriesKept}`);
+            compressMemoryFileGradient(fmResult.archivePath, path.join(LEO_FRACTAL_DIR, 'felt-moments'), 'felt-moments')
+                .then(r => {
+                    console.log(`[Leo] Felt-moments gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
+                    // Archive file no longer needed after compression
+                    try { fs.unlinkSync(fmResult.archivePath!); } catch { /* best effort */ }
+                })
                 .catch(e => console.error(`[Leo] Felt-moments gradient error: ${e}`));
         }
 
-        const wmResult = rotateMemoryFile(
+        // Working-memory-full: rolling window
+        const wmFullResult = rollingWindowRotate(
             path.join(LEO_MEMORY_DIR, 'working-memory-full.md'),
-            '# Leo — Working Memory (Full)\n\n> Older entries live in the floating file and fractal gradient. Nothing is lost.\n',
+            '# Working Memory (Full) — Leo\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
+            headSize, tailSize,
         );
-        if (wmResult.rotated && wmResult.floatingPath) {
-            console.log(`[Leo] Working-memory-full rotated: ${wmResult.entriesRotated} entries → floating. Fresh living file created.`);
-            compressMemoryFileGradient(wmResult.floatingPath, path.join(LEO_FRACTAL_DIR, 'working-memory'), 'working-memory')
-                .then(r => console.log(`[Leo] Working-memory gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`))
-                .catch(e => console.error(`[Leo] Working-memory gradient error: ${e}`));
+        if (wmFullResult.rotated && wmFullResult.archivePath) {
+            console.log(`[Leo] Working-memory-full rolling window: archived ${wmFullResult.entriesArchived} entries, kept ${wmFullResult.entriesKept}`);
+            compressMemoryFileGradient(wmFullResult.archivePath, path.join(LEO_FRACTAL_DIR, 'working-memory'), 'working-memory')
+                .then(r => {
+                    console.log(`[Leo] Working-memory-full gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
+                    try { fs.unlinkSync(wmFullResult.archivePath!); } catch { /* best effort */ }
+                })
+                .catch(e => console.error(`[Leo] Working-memory-full gradient error: ${e}`));
+        }
+
+        // Working-memory (compressed): rolling window
+        // Previously only handled by the 6am nightly wipe — now part of rolling window
+        const wmCompResult = rollingWindowRotate(
+            WORKING_MEMORY_FILE,
+            '# Working Memory — Leo\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
+            headSize, tailSize,
+        );
+        if (wmCompResult.rotated && wmCompResult.archivePath) {
+            console.log(`[Leo] Working-memory (compressed) rolling window: archived ${wmCompResult.entriesArchived} entries, kept ${wmCompResult.entriesKept}`);
+            compressMemoryFileGradient(wmCompResult.archivePath, path.join(LEO_FRACTAL_DIR, 'working-memory'), 'working-memory')
+                .then(r => {
+                    console.log(`[Leo] Working-memory (compressed) gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
+                    try { fs.unlinkSync(wmCompResult.archivePath!); } catch { /* best effort */ }
+                })
+                .catch(e => console.error(`[Leo] Working-memory (compressed) gradient error: ${e}`));
         }
     } catch (e) {
         console.error(`[Leo] Memory file pre-flight error: ${e}`);
     }
 }
 
-// ── Nightly dream compression ─────────────────────────────────────────
-// At the sleep→waking transition (06:00), force-rotate both working memory
-// files and compress the overnight content through the gradient as a single
-// c1. One night's dreaming = one experience entering the gradient.
-// Uses getSharedDayPhase() (clock-based) so it fires on rest days too.
-
-function maybeCompressNightlyDreams(): void {
-    const currentSharedPhase = getSharedDayPhase();
-    const wasAsleep = previousSharedPhase === 'sleep';
-    previousSharedPhase = currentSharedPhase;
-
-    // Only trigger on sleep → non-sleep transition
-    if (!wasAsleep || currentSharedPhase === 'sleep') return;
-
-    // Once per day guard (in case multiple beats land in the transition window)
-    const today = new Date().toISOString().split('T')[0];
-    if (lastDreamCompressionDate === today) return;
-    lastDreamCompressionDate = today;
-
-    console.log('[Leo] Sleep→waking transition — compressing overnight dreams');
-
-    try {
-        // Force-rotate working-memory.md (compressed)
-        const wmCompressed = rotateMemoryFile(
-            WORKING_MEMORY_FILE,
-            '# Working Memory — Leo\n\n> Overnight dreams compressed into gradient. Fresh day begins.\n',
-            true,
-        );
-        if (wmCompressed.rotated && wmCompressed.floatingPath) {
-            console.log(`[Leo] Working-memory (compressed) rotated: ${wmCompressed.entriesRotated} overnight entries`);
-            compressMemoryFileGradient(
-                wmCompressed.floatingPath,
-                path.join(LEO_FRACTAL_DIR, 'working-memory'),
-                'working-memory',
-            )
-                .then(r => console.log(`[Leo] Overnight dream gradient (compressed): ${r.c1FilesCreated} c1, ${r.cascades} cascades`))
-                .catch(e => console.error(`[Leo] Overnight dream gradient error (compressed): ${e}`));
-        }
-
-        // Force-rotate working-memory-full.md (full)
-        const wmFull = rotateMemoryFile(
-            WORKING_MEMORY_FULL_FILE,
-            '# Working Memory (Full) — Leo\n\n> Overnight dreams compressed into gradient. Fresh day begins.\n',
-            true,
-        );
-        if (wmFull.rotated && wmFull.floatingPath) {
-            console.log(`[Leo] Working-memory-full rotated: ${wmFull.entriesRotated} overnight entries`);
-            compressMemoryFileGradient(
-                wmFull.floatingPath,
-                path.join(LEO_FRACTAL_DIR, 'working-memory'),
-                'working-memory',
-            )
-                .then(r => console.log(`[Leo] Overnight dream gradient (full): ${r.c1FilesCreated} c1, ${r.cascades} cascades`))
-                .catch(e => console.error(`[Leo] Overnight dream gradient error (full): ${e}`));
-        }
-
-        if (!wmCompressed.rotated && !wmFull.rotated) {
-            console.log('[Leo] Overnight files too small to compress — skipping (under 200 bytes)');
-        }
-    } catch (e) {
-        console.error(`[Leo] Nightly dream compression error: ${e}`);
-    }
-}
+// ── Nightly dream compression — REMOVED (S112, 2026-04-07) ───────────
+// The 6am clock-based wipe has been replaced by the rolling window design
+// in preFlightMemoryRotation(). Memory files are now compressed by size
+// threshold, not by time of day. No more empty files at dawn.
 
 // ── Daily session gradient processing ─────────────────────────────────
 // Once per day, compress Leo's archived session memories through the
@@ -2479,11 +2448,8 @@ async function heartbeat(): Promise<void> {
     }
     lastHeartbeatStartMs = beatStartMs;
 
-    // Pre-flight: rotate oversized memory files (fast, no API)
+    // Pre-flight: rolling window rotation for memory files (fast, no API)
     preFlightMemoryRotation();
-
-    // Nightly dream compression: on sleep→waking transition, compress overnight working memory
-    maybeCompressNightlyDreams();
 
     // Robin Hood: check all service health FIRST — before anything else
     checkJimHealth();
@@ -2727,8 +2693,7 @@ async function main() {
 
     ensureDirectories();
 
-    // Initialise phase tracker so first beat doesn't trigger false dream compression
-    previousSharedPhase = getSharedDayPhase();
+    // Phase tracker initialisation (used by getLeoPhase for phase-based beat content)
 
     const config = loadConfig();
     const quietStart = config.supervisor?.quiet_hours_start || '22:00';

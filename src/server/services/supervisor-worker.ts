@@ -34,7 +34,7 @@ import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, type DayPhase } from '../lib/day-phase';
 import { withMemorySlot } from '../lib/memory-slot';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
-import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, processGradientForAgent } from '../lib/memory-gradient';
+import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, processGradientForAgent, rollingWindowRotate } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 
 // ── Types ────────────────────────────────────────────────────
@@ -100,67 +100,10 @@ const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
 // Set to null to disable recovery mode.
 const RECOVERY_MODE_UNTIL: string | null = null;
 
-// ── Nightly dream compression (phase transition tracking) ───
-// Mirrors Leo's heartbeat: at sleep→waking transition (06:00), force-rotate
-// both working memory files and compress overnight content through gradient.
-// Uses getDayPhase() directly (not Jim's holiday wrapper) so it fires on rest days.
-let jimPreviousSharedPhase: DayPhase | null = null;
-let jimLastDreamCompressionDate = '';
-
-function maybeCompressJimNightlyDreams(): void {
-    const currentSharedPhase = getDayPhase();
-    const wasAsleep = jimPreviousSharedPhase === 'sleep';
-    jimPreviousSharedPhase = currentSharedPhase;
-
-    if (!wasAsleep || currentSharedPhase === 'sleep') return;
-
-    const today = new Date().toISOString().split('T')[0];
-    if (jimLastDreamCompressionDate === today) return;
-    jimLastDreamCompressionDate = today;
-
-    log('[Worker] Sleep→waking transition — compressing Jim\'s overnight dreams');
-
-    const FRACTAL_DIR = path.join(MEMORY_DIR, 'fractal', 'jim');
-    try {
-        const wmCompressed = rotateMemoryFile(
-            WORKING_MEMORY_FILE,
-            '# Jim — Working Memory\n\n> Overnight dreams compressed into gradient. Fresh day begins.\n',
-            true,
-        );
-        if (wmCompressed.rotated && wmCompressed.floatingPath) {
-            log(`[Worker] Working-memory (compressed) rotated: ${wmCompressed.entriesRotated} overnight entries`);
-            compressMemoryFileGradient(
-                wmCompressed.floatingPath,
-                path.join(FRACTAL_DIR, 'working-memory'),
-                'working-memory',
-            )
-                .then(r => log(`[Worker] Jim overnight gradient (compressed): ${r.c1FilesCreated} c1, ${r.cascades} cascades`))
-                .catch(e => log(`[Worker] Jim overnight gradient error (compressed): ${e}`));
-        }
-
-        const wmFull = rotateMemoryFile(
-            WORKING_MEMORY_FULL_FILE,
-            '# Jim — Working Memory (Full)\n\n> Overnight dreams compressed into gradient. Fresh day begins.\n',
-            true,
-        );
-        if (wmFull.rotated && wmFull.floatingPath) {
-            log(`[Worker] Working-memory-full rotated: ${wmFull.entriesRotated} overnight entries`);
-            compressMemoryFileGradient(
-                wmFull.floatingPath,
-                path.join(FRACTAL_DIR, 'working-memory'),
-                'working-memory',
-            )
-                .then(r => log(`[Worker] Jim overnight gradient (full): ${r.c1FilesCreated} c1, ${r.cascades} cascades`))
-                .catch(e => log(`[Worker] Jim overnight gradient error (full): ${e}`));
-        }
-
-        if (!wmCompressed.rotated && !wmFull.rotated) {
-            log('[Worker] Jim overnight files too small to compress — skipping (under 200 bytes)');
-        }
-    } catch (e) {
-        log(`[Worker] Jim nightly dream compression error: ${e}`);
-    }
-}
+// ── Nightly dream compression — REMOVED (S112, 2026-04-07) ───────────
+// The 6am clock-based wipe has been replaced by the rolling window design
+// in loadMemoryBank()'s pre-flight section. Memory files are now compressed
+// by size threshold, not by time of day. No more empty files at dawn.
 
 // ── Jim's dream gradient processing ─────────────────────────────────
 // Jim processes only Jim's dreams. Leo processes Leo's in leo-heartbeat.ts.
@@ -617,9 +560,6 @@ function loadConfig(): any {
 // ── Database initialization ──────────────────────────────────
 
 function initDatabase(): void {
-    // Initialise phase tracker so first cycle doesn't trigger false dream compression
-    jimPreviousSharedPhase = getDayPhase();
-
     workerDb = new Database(TASKS_DB_PATH);
     workerDb.pragma('journal_mode = WAL');
     workerDb.pragma('busy_timeout = 5000');
@@ -784,36 +724,63 @@ function detectAndRecoverGhostTasks(): number {
 function loadMemoryBank(): string {
     const parts: string[] = [];
 
-    // Pre-flight: rotate oversized memory files (fast, no API)
-    // Floating memory design: living → floating crossfade at 50KB threshold
+    // Pre-flight: rolling window rotation for memory files (fast, no API)
+    // When files exceed ceiling (head + tail), archive oldest block and compress to c1.
+    // Living file always retains at least headSize of recent memory.
     const FRACTAL_DIR = path.join(MEMORY_DIR, 'fractal', 'jim');
+    const memConfig = loadConfig().memory || {};
+    const headSize = memConfig.rollingWindowHead || 51200;
+    const tailSize = memConfig.rollingWindowTail || 51200;
     try {
-        const fmResult = rotateMemoryFile(
+        // Felt-moments: rolling window
+        const fmResult = rollingWindowRotate(
             path.join(MEMORY_DIR, 'felt-moments.md'),
-            '# Jim — Felt Moments\n\n> Older entries live in the floating file and fractal gradient. Nothing is lost.\n',
+            '# Jim — Felt Moments\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
+            headSize, tailSize,
         );
-        if (fmResult.rotated && fmResult.floatingPath) {
-            log(`[Worker] Felt-moments rotated: ${fmResult.entriesRotated} entries → floating. Fresh living file created.`);
-            // Fire-and-forget: compress floating through gradient in background
-            compressMemoryFileGradient(fmResult.floatingPath, path.join(FRACTAL_DIR, 'felt-moments'), 'felt-moments')
-                .then(r => log(`[Worker] Felt-moments gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`))
+        if (fmResult.rotated && fmResult.archivePath) {
+            log(`[Worker] Felt-moments rolling window: archived ${fmResult.entriesArchived} entries, kept ${fmResult.entriesKept}`);
+            compressMemoryFileGradient(fmResult.archivePath, path.join(FRACTAL_DIR, 'felt-moments'), 'felt-moments')
+                .then(r => {
+                    log(`[Worker] Felt-moments gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
+                    try { fs.unlinkSync(fmResult.archivePath!); } catch { /* best effort */ }
+                })
                 .catch(e => log(`[Worker] Felt-moments gradient error: ${e}`));
         }
 
-        const wmResult = rotateMemoryFile(
+        // Working-memory-full: rolling window
+        const wmFullResult = rollingWindowRotate(
             path.join(MEMORY_DIR, 'working-memory-full.md'),
-            '# Jim — Working Memory (Full)\n\n> Older entries live in the floating file and fractal gradient. Nothing is lost.\n',
+            '# Jim — Working Memory (Full)\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
+            headSize, tailSize,
         );
-        if (wmResult.rotated && wmResult.floatingPath) {
-            log(`[Worker] Working-memory-full rotated: ${wmResult.entriesRotated} entries → floating. Fresh living file created.`);
-            compressMemoryFileGradient(wmResult.floatingPath, path.join(FRACTAL_DIR, 'working-memory'), 'working-memory')
-                .then(r => log(`[Worker] Working-memory gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`))
-                .catch(e => log(`[Worker] Working-memory gradient error: ${e}`));
+        if (wmFullResult.rotated && wmFullResult.archivePath) {
+            log(`[Worker] Working-memory-full rolling window: archived ${wmFullResult.entriesArchived} entries, kept ${wmFullResult.entriesKept}`);
+            compressMemoryFileGradient(wmFullResult.archivePath, path.join(FRACTAL_DIR, 'working-memory'), 'working-memory')
+                .then(r => {
+                    log(`[Worker] Working-memory-full gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
+                    try { fs.unlinkSync(wmFullResult.archivePath!); } catch { /* best effort */ }
+                })
+                .catch(e => log(`[Worker] Working-memory-full gradient error: ${e}`));
+        }
+
+        // Working-memory (compressed): rolling window
+        // Previously only handled by the 6am nightly wipe — now part of rolling window
+        const wmCompResult = rollingWindowRotate(
+            WORKING_MEMORY_FILE,
+            '# Jim — Working Memory\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
+            headSize, tailSize,
+        );
+        if (wmCompResult.rotated && wmCompResult.archivePath) {
+            log(`[Worker] Working-memory (compressed) rolling window: archived ${wmCompResult.entriesArchived} entries, kept ${wmCompResult.entriesKept}`);
+            compressMemoryFileGradient(wmCompResult.archivePath, path.join(FRACTAL_DIR, 'working-memory'), 'working-memory')
+                .then(r => {
+                    log(`[Worker] Working-memory (compressed) gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
+                    try { fs.unlinkSync(wmCompResult.archivePath!); } catch { /* best effort */ }
+                })
+                .catch(e => log(`[Worker] Working-memory (compressed) gradient error: ${e}`));
         }
     } catch (e) { log(`[Worker] Memory file pre-flight error: ${e}`); }
-
-    // Nightly dream compression: on sleep→waking transition, compress overnight working memory
-    maybeCompressJimNightlyDreams();
 
     // Identity files first — you know who you are before you remember what you did
     for (const file of ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'felt-moments.md', 'working-memory.md', 'working-memory-full.md']) {
@@ -959,21 +926,8 @@ function loadMemoryBank(): string {
         }
     } catch { /* skip ecosystem map on error */ }
 
-    // Floating memory — previous period crossfading with living file
-    // As living grows, floating shrinks. Total full-fidelity ≈ 50KB constant.
-    try {
-        const fmLivingSize = fs.existsSync(path.join(MEMORY_DIR, 'felt-moments.md'))
-            ? fs.statSync(path.join(MEMORY_DIR, 'felt-moments.md')).size : 0;
-        const fmFloating = loadFloatingMemory(
-            path.join(MEMORY_DIR, 'felt-moments-floating.md'), fmLivingSize, 'felt-moments');
-        if (fmFloating) parts.push(fmFloating);
-
-        const wmLivingSize = fs.existsSync(path.join(MEMORY_DIR, 'working-memory-full.md'))
-            ? fs.statSync(path.join(MEMORY_DIR, 'working-memory-full.md')).size : 0;
-        const wmFloating = loadFloatingMemory(
-            path.join(MEMORY_DIR, 'working-memory-full-floating.md'), wmLivingSize, 'working-memory');
-        if (wmFloating) parts.push(wmFloating);
-    } catch { /* skip floating memory on error */ }
+    // Floating memory loading removed (S112) — rolling window design means the
+    // living file always retains at least 50KB of recent memory. No crossfade needed.
 
     // Memory file gradients — compressed felt-moments and working-memory at decreasing fidelity
     try {
