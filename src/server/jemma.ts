@@ -48,6 +48,7 @@ const HAN_DIR = path.join(HOME, '.han');
 const CONFIG_PATH = path.join(HAN_DIR, 'config.json');
 const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
 const HEALTH_DIR = path.join(HAN_DIR, 'health');
+const DOWNLOADS_DIR = path.join(HAN_DIR, 'downloads', 'discord');
 const HEALTH_FILE = path.join(HEALTH_DIR, 'jemma-health.json');
 const LAST_SEEN_FILE = path.join(HEALTH_DIR, 'jemma-last-seen.json');
 
@@ -191,11 +192,13 @@ function writeHealthFile(status: 'ok' | 'error', lastError?: string): void {
 
 function updateMessageLog(message: any, recipient: string, confidence: number): void {
   try {
+    const attachmentCount = message.attachments?.length || 0;
     recentMessages.unshift({
       timestamp: new Date().toISOString(),
       author: message.author.username,
       channel: message.channel_id,
-      message: message.content,
+      message: message.content || '',
+      attachments: attachmentCount > 0 ? message.attachments.map((a: any) => a.filename) : undefined,
       recipient,
       confidence,
     });
@@ -227,6 +230,72 @@ function updateDeliveryStats(recipient: string): void {
   }
 }
 
+// ── Attachment handling ──────────────────────────────────────────
+
+interface DiscordAttachment {
+  id: string;
+  filename: string;
+  size: number;
+  url: string;
+  content_type?: string;
+}
+
+/**
+ * Format attachment metadata into a text summary for inclusion in messages.
+ * Returns empty string if no attachments.
+ */
+function formatAttachments(attachments: DiscordAttachment[]): string {
+  if (!attachments || attachments.length === 0) return '';
+  const lines = attachments.map(a => {
+    const sizeKB = Math.round(a.size / 1024);
+    const type = a.content_type || 'unknown type';
+    return `  - ${a.filename} (${type}, ${sizeKB}KB)`;
+  });
+  return '\n[Attachments]\n' + lines.join('\n');
+}
+
+/**
+ * Download attachments from Discord CDN to ~/.han/downloads/discord/.
+ * Returns array of local file paths for successfully downloaded files.
+ */
+async function downloadAttachments(attachments: DiscordAttachment[], channelName: string): Promise<string[]> {
+  if (!attachments || attachments.length === 0) return [];
+
+  fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
+  const downloaded: string[] = [];
+
+  for (const att of attachments) {
+    try {
+      // Sanitise filename — prefix with channel and date for uniqueness
+      const date = new Date().toISOString().split('T')[0];
+      const safeName = att.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const localName = `${date}_${channelName}_${safeName}`;
+      const localPath = path.join(DOWNLOADS_DIR, localName);
+
+      // Skip if already downloaded (idempotent)
+      if (fs.existsSync(localPath)) {
+        downloaded.push(localPath);
+        continue;
+      }
+
+      const res = await fetch(att.url, { signal: AbortSignal.timeout(30000) });
+      if (!res.ok) {
+        console.warn(`[Jemma] Failed to download ${att.filename}: HTTP ${res.status}`);
+        continue;
+      }
+
+      const buffer = Buffer.from(await res.arrayBuffer());
+      fs.writeFileSync(localPath, buffer);
+      downloaded.push(localPath);
+      console.log(`[Jemma] Downloaded attachment: ${att.filename} → ${localPath} (${Math.round(buffer.length / 1024)}KB)`);
+    } catch (err) {
+      console.warn(`[Jemma] Failed to download ${att.filename}:`, (err as Error).message);
+    }
+  }
+
+  return downloaded;
+}
+
 function resolveChannelName(channelId: string): string {
   const config = loadConfig();
   const idToName = Object.entries(config.discord?.channels || {}).reduce(
@@ -248,9 +317,11 @@ function buildClassificationPrompt(message: any): string {
     ? `${realName} (@${message.author.username})`
     : message.author.username;
 
+  const attachmentInfo = formatAttachments(message.attachments || []);
+
   return `Classify this Discord message and determine the recipient.
 
-Message Content: "${message.content}"
+Message Content: "${message.content}"${attachmentInfo}
 Author: ${authorDisplay}${message.author.bot ? ' (BOT)' : ''}
 Channel: ${channelDisplay}
 
@@ -362,7 +433,7 @@ async function deliverToJim(message: any, classification: ClassificationResult, 
   try {
     const payload = {
       recipient: 'jim',
-      message: message.content,
+      message: message._enrichedContent || message.content,
       channel: message.channel_id,
       channelName,
       author: message.author.username,
@@ -380,7 +451,7 @@ async function deliverToJim(message: any, classification: ClassificationResult, 
       throw new Error(`Server returned ${res.status}`);
     }
 
-    console.log(`[Jemma] Delivered to Jim (#${channelName} — ${message.author.username}: ${message.content.slice(0, 40)}...)`);
+    console.log(`[Jemma] Delivered to Jim (#${channelName} — ${message.author.username}: ${(message.content || '').slice(0, 40)}...)`);
   } catch (err) {
     console.warn('[Jemma] Failed to deliver to Jim via server, writing signal file');
     try {
@@ -390,7 +461,7 @@ async function deliverToJim(message: any, classification: ClassificationResult, 
         channelId: message.channel_id,
         channelName,
         author: message.author.username,
-        content: message.content,
+        content: message._enrichedContent || message.content,
         timestamp: message.timestamp,
       });
       fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-wake'), signalData);
@@ -403,6 +474,7 @@ async function deliverToJim(message: any, classification: ClassificationResult, 
 
 async function deliverToLeo(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
   try {
+    const enrichedContent = message._enrichedContent || message.content;
     const signalData = JSON.stringify({
       source: 'discord',
       recipient: 'leo',
@@ -410,13 +482,13 @@ async function deliverToLeo(message: any, classification: ClassificationResult, 
       channelName,
       author: message.author.username,
       mentionedAt: message.timestamp,
-      messagePreview: message.content.slice(0, 200),
+      messagePreview: enrichedContent.slice(0, 500),
     });
 
     fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-wake'), signalData);
     fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), signalData);
 
-    console.log(`[Jemma] Woke Leo (#${channelName} — ${message.author.username}: ${message.content.slice(0, 40)}...)`);
+    console.log(`[Jemma] Woke Leo (#${channelName} — ${message.author.username}: ${(message.content || '').slice(0, 40)}...)`);
   } catch (err) {
     console.error('[Jemma] Failed to write Leo signal files:', (err as Error).message);
   }
@@ -427,7 +499,8 @@ function deliverToDarron(message: any, classification: ClassificationResult, cha
     const config = loadConfig();
     if (!config.ntfy_topic) return;
 
-    const ntfyMsg = `#${channelName} — ${message.author.username}: ${message.content.slice(0, 100)}`;
+    const contentPreview = (message._enrichedContent || message.content || '').slice(0, 100);
+    const ntfyMsg = `#${channelName} — ${message.author.username}: ${contentPreview}`;
     execFileSync('curl', [
       '-s',
       '-d', ntfyMsg,
@@ -462,7 +535,7 @@ async function deliverToSevn(message: any, classification: ClassificationResult,
         'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
-        text: `Discord #${channelName}: ${message.author.username} — ${message.content}`,
+        text: `Discord #${channelName}: ${message.author.username} — ${message._enrichedContent || message.content}`,
         mode: 'now',
         channelName,
       }),
@@ -497,7 +570,7 @@ async function deliverToSix(message: any, classification: ClassificationResult, 
         'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
-        text: `Discord #${channelName}: ${message.author.username} — ${message.content}`,
+        text: `Discord #${channelName}: ${message.author.username} — ${message._enrichedContent || message.content}`,
         mode: 'now',
         channelName,
       }),
@@ -520,8 +593,9 @@ async function routeMessage(message: any): Promise<void> {
     return;
   }
 
-  // Ignore empty messages
-  if (!message.content || message.content.trim().length === 0) {
+  // Ignore empty messages (but not attachment-only messages)
+  const hasAttachments = message.attachments && message.attachments.length > 0;
+  if ((!message.content || message.content.trim().length === 0) && !hasAttachments) {
     return;
   }
 
@@ -541,6 +615,21 @@ async function routeMessage(message: any): Promise<void> {
   const channelName = resolveChannelName(message.channel_id);
   const recipient = classification.recipient.toLowerCase();
   console.log(`[Jemma] Routed to ${recipient} (confidence: ${classification.confidence}, reason: ${classification.reasoning})`);
+
+  // Download attachments and enrich message content
+  const attachments: DiscordAttachment[] = message.attachments || [];
+  let downloadedPaths: string[] = [];
+  if (attachments.length > 0) {
+    downloadedPaths = await downloadAttachments(attachments, channelName);
+    // Append attachment info to message content so agents see it
+    const attachmentSuffix = formatAttachments(attachments);
+    const pathInfo = downloadedPaths.length > 0
+      ? '\n[Downloaded to]\n' + downloadedPaths.map(p => `  - ${p}`).join('\n')
+      : '';
+    message._enrichedContent = (message.content || '') + attachmentSuffix + pathInfo;
+  } else {
+    message._enrichedContent = message.content || '';
+  }
 
   // Update tracking
   updateMessageLog(message, recipient, classification.confidence);
@@ -584,7 +673,7 @@ async function routeMessage(message: any): Promise<void> {
 
   // If the message mentions the OTHER agent by name, wake them too.
   // Darron often addresses both agents in one message — "Leo do X, Jim what do you think?"
-  const content = message.content.toLowerCase();
+  const content = (message.content || '').toLowerCase();
   const mentionsJim = /\bjim\b|\bjimmy\b/.test(content);
   const mentionsLeo = /\bleo\b|\bleonhard\b/.test(content);
   if (mentionsJim && recipient !== 'jim' && channelOwner !== 'jim') {
@@ -741,7 +830,7 @@ async function handleGatewayMessage(data: GatewayMessage): Promise<void> {
         } else if (data.t === 'MESSAGE_CREATE') {
           const message = data.d;
           console.log(
-            `[Jemma] MESSAGE from @${message.author.username} in #${message.channel_id}: ${message.content.slice(0, 50)}...`
+            `[Jemma] MESSAGE from @${message.author.username} in #${message.channel_id}: ${(message.content || '').slice(0, 50)}${message.attachments?.length ? ` [+${message.attachments.length} attachment(s)]` : ''}...`
           );
           await routeMessage(message);
           writeHealthFile('ok');

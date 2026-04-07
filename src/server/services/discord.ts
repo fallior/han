@@ -26,6 +26,7 @@ interface DiscordMessage {
     author: string;
     content: string;
     timestamp: string;
+    attachments?: { filename: string; url: string; content_type?: string; size: number }[];
 }
 
 // ── Config ────────────────────────────────────────────────────
@@ -89,11 +90,28 @@ export async function fetchDiscordContext(channelId: string, limit: number = 10)
         }
 
         const messages = await res.json() as any[];
-        return messages.map(m => ({
-            author: m.author?.username || 'unknown',
-            content: m.content || '',
-            timestamp: m.timestamp,
-        }));
+        return messages.map(m => {
+            const attachments = (m.attachments || []).map((a: any) => ({
+                filename: a.filename,
+                url: a.url,
+                content_type: a.content_type,
+                size: a.size,
+            }));
+            // Append attachment summary to content so agents see it in context
+            let content = m.content || '';
+            if (attachments.length > 0) {
+                const attSummary = attachments.map((a: any) =>
+                    `  - ${a.filename} (${a.content_type || 'unknown'}, ${Math.round(a.size / 1024)}KB)`
+                ).join('\n');
+                content += `\n[Attachments]\n${attSummary}`;
+            }
+            return {
+                author: m.author?.username || 'unknown',
+                content,
+                timestamp: m.timestamp,
+                attachments: attachments.length > 0 ? attachments : undefined,
+            };
+        });
     } catch (err) {
         console.error('[Discord] Context fetch error:', (err as Error).message);
         return [];
