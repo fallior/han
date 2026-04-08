@@ -7,6 +7,68 @@
 
 ---
 
+## 2026-04-08 (Leo + Darron, S117 — Infrastructure, Onboarding, Memory Tuning)
+
+### Jemma Reconnect — Fatal Close Code Handling
+
+Jemma was crash-looping on Discord close code 4014 (MESSAGE_CONTENT intent disabled).
+The reconnect logic treated all close codes as retriable, burning cycles indefinitely.
+
+**Fix:** Fatal codes (4004, 4010-4014) now exit immediately — let systemd restart, but
+the fix is in the Developer Portal, not code. Session-invalidating codes (4007, 4009)
+reset sessionId and lastSequence before reconnect so Jemma sends IDENTIFY instead of RESUME.
+
+**File changed:** `src/server/jemma.ts`
+
+### Conversation Creation Dedup
+
+Race condition: concurrent requests could create duplicate threads with the same title
+and discussion_type. Now checks for existing thread created within 60 seconds before
+inserting.
+
+**File changed:** `src/server/routes/conversations.ts`
+
+### Tailscale API Routes
+
+New routes at `/api/tailscale` for managing the tailnet from the admin UI: list/authorise/
+remove devices, create auth keys, get/update ACLs, DNS configuration. Backed by Tailscale
+API token from `.env`.
+
+**Files added:** `src/server/routes/tailscale.ts`, `src/server/services/tailscale.ts`
+**File changed:** `src/server/server.ts` (route mount)
+
+### Discord Webhook Avatars
+
+Persona avatars (Leo: Euler's Identity v5, Jim: Starfleet badge v3) are now set at webhook
+creation time. Loaded from `_screenshots/` as base64 data URIs and passed to the Discord
+API. Every message carries the avatar automatically.
+
+**File changed:** `src/server/services/discord.ts`
+
+### Rolling Window Memory — 25K:25K Experiment
+
+Changed `config.json` memory section from 50K:50K to 25K:25K. 50KB ceiling instead of
+100KB. Rotations happen twice as often, feeding the fractal gradient more frequently.
+Monitoring for adverse effects on arrival quality.
+
+### han.db Now Tracked in Git
+
+Removed `*.db` from `.gitignore`. Darron: "the risk is minimal but to lose task.db would
+be devastating." The database is now version-controlled.
+
+### Docs Trigger — `docs` Shorthand
+
+Added `docs` as alias for `update docs` in CLAUDE.md. Description now explicitly lists
+every doc checked: HAN-ECOSYSTEM-COMPLETE, Hall of Records, CHANGELOG, WEEKLY_RHYTHM,
+CURRENT_STATUS, DECISIONS, learnings/INDEX, ARCHITECTURE.
+
+### Holiday Mode
+
+Both Leo and Jim on holiday until 2026-04-10T14:00 AEST. Signal files at
+`~/.han/signals/holiday-{agent}`. Affects heartbeat/supervisor intervals only (80 minutes).
+
+---
+
 ## 2026-04-06 (Leo + Darron, S110 — Discord Auto-Provisioning, TypeScript Zero Errors)
 
 ### Discord Webhook Auto-Provisioning

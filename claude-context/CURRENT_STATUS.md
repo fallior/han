@@ -36,6 +36,17 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-04-08 — Leo + Darron, S117 — Infrastructure, Onboarding, Memory Tuning
+
+- **Jemma reconnect** — fatal close codes (4004, 4010-4014) exit immediately; session-invalidating codes reset state
+- **Conversation dedup** — 60s window prevents duplicate thread creation
+- **Tailscale API** — new routes for device/key/ACL/DNS management
+- **Discord avatars** — persona avatars set at webhook creation time
+- **25K:25K rolling window** — experimental, monitoring for adverse effects
+- **han.db tracked** — removed *.db from gitignore
+- **`docs` trigger** — shorthand for `update docs` with explicit checklist
+- **Holiday mode** — Leo and Jim on holiday until 2026-04-10T14:00 AEST
+
 ### 2026-04-06 — Leo + Darron, S110 — Discord Auto-Provisioning, TypeScript Zero Errors
 
 - **Discord webhook auto-provisioning** — `ensureChannelWebhooks()` in `discord.ts` automatically registers unknown Discord channels and creates webhooks for all personas (Leo, Jim, Jemma) at dispatch time. Called from `deliverMessage()` (now async) in `jemma-dispatch.ts` before signalling agents. Prevents the silent failure where agents wake up, generate a response, then can't post because no webhook exists. Diagnosed from `#mikes-han` channel being unregistered — Leo spent $1.47 generating a discarded response.

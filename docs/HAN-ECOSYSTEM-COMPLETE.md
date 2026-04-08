@@ -73,7 +73,7 @@
 17. [Database](#17-database)
 18. [Known Bugs & Discrepancies](#18-known-bugs--discrepancies)
 19. [How to Start and Stop Everything](#19-how-to-start-and-stop)
-20. [The han CLI Script](#20-the-han-cli-script)
+20. [The han CLI Script](#20-the-han-cli-script) — also `claude-logged` wrapper
 21. [Orchestrator (orchestrator.ts)](#21-orchestrator)
 22. [Planning & Task Execution (planning.ts)](#22-planning--task-execution)
 23. [Services Layer](#23-services-layer)
