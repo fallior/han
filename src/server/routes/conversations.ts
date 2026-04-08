@@ -174,9 +174,21 @@ router.post('/', (req: Request, res: Response) => {
         const { title, discussion_type } = req.body;
         if (!title) return res.status(400).json({ success: false, error: 'title is required' });
 
+        const type = discussion_type || 'general';
+
+        // Dedup: if a thread with the same title and type was created in the last 60s, return it
+        const cutoff = new Date(Date.now() - 60000).toISOString();
+        const existing = db.prepare(
+            `SELECT id FROM conversations WHERE title = ? AND discussion_type = ? AND created_at > ? LIMIT 1`
+        ).get(title, type, cutoff) as { id: string } | undefined;
+
+        if (existing) {
+            const conversation = conversationStmts.get.get(existing.id);
+            return res.json({ success: true, conversation, deduplicated: true });
+        }
+
         const id = generateId();
         const now = new Date().toISOString();
-        const type = discussion_type || 'general';
         conversationStmts.insertWithType.run(id, title, 'open', now, now, type);
 
         const conversation = conversationStmts.get.get(id);
