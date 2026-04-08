@@ -898,8 +898,31 @@ function connect(): void {
       heartbeatTimer = null;
     }
 
-    // Reconnect with exponential backoff
+    // Fatal Discord close codes — retrying will never succeed
+    const fatalCodes: Record<number, string> = {
+      4004: 'Authentication failed (invalid token)',
+      4010: 'Invalid shard',
+      4011: 'Sharding required',
+      4012: 'Invalid API version',
+      4013: 'Invalid intents',
+      4014: 'Disallowed intent (enable in Developer Portal)',
+    };
+
+    if (fatalCodes[code]) {
+      console.error(`[Jemma] FATAL: ${fatalCodes[code]} (code ${code}). Will not reconnect.`);
+      writeHealthFile('error', `Fatal Discord error: ${fatalCodes[code]} (code ${code})`);
+      process.exit(1);  // Let systemd restart — but the fix is in the Developer Portal, not code
+    }
+
+    // Non-fatal: reconnect with exponential backoff
     if (reconnectAttempts < maxReconnectAttempts) {
+      // Reset session state on codes that invalidate the session
+      if (code === 4007 || code === 4009) {
+        sessionId = null;
+        lastSequence = null;
+        console.log(`[Jemma] Session invalidated (code ${code}), will IDENTIFY on reconnect`);
+      }
+
       const delay = reconnectDelays[Math.min(reconnectAttempts, reconnectDelays.length - 1)];
       console.log(`[Jemma] Reconnecting in ${delay}ms...`);
       setTimeout(connect, delay);
