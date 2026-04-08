@@ -5,5 +5,7 @@ src/ui/react-admin/node_modules/
 _screenshots/
 _logs/
 .env
-*.db
 limits.pdf
+mikes-han-credentials.md
+cloudflare/**/node_modules/
+cloudflare/**/.wrangler/
