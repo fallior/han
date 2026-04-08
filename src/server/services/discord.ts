@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const CONFIG_PATH = path.join(process.env.HOME || '/home/darron', '.han', 'config.json');
+const AVATARS_DIR = path.join(__dirname, '..', '..', '..', '_screenshots');
 
 interface DiscordConfig {
     bot_token?: string;
@@ -123,6 +124,33 @@ export async function fetchDiscordContext(channelId: string, limit: number = 10)
 const PERSONAS = ['leo', 'jim', 'jemma'] as const;
 
 /**
+ * Avatar file mapping — persona → filename in _screenshots/.
+ * Leo: Euler's Identity (v5, SVG-rendered). Jim: Starfleet badge (v3, FLUX).
+ * Set on webhooks at creation time so every message carries the avatar automatically.
+ */
+const PERSONA_AVATARS: Record<string, string> = {
+    leo: 'leo-avatar-v5.png',
+    jim: 'jim-avatar-v3.png',
+};
+
+/**
+ * Load a persona's avatar as a Discord-compatible data URI (data:image/png;base64,...).
+ * Returns null if the file doesn't exist (e.g. Jemma has no custom avatar).
+ */
+function loadAvatarDataUri(persona: string): string | null {
+    const filename = PERSONA_AVATARS[persona];
+    if (!filename) return null;
+    const avatarPath = path.join(AVATARS_DIR, filename);
+    try {
+        const data = fs.readFileSync(avatarPath);
+        return `data:image/png;base64,${data.toString('base64')}`;
+    } catch {
+        console.warn(`[Discord] Avatar not found for ${persona}: ${avatarPath}`);
+        return null;
+    }
+}
+
+/**
  * Fetch a Discord channel's name via the REST API.
  */
 async function fetchChannelName(channelId: string, botToken: string): Promise<string | null> {
@@ -148,14 +176,18 @@ async function fetchChannelName(channelId: string, botToken: string): Promise<st
  */
 async function createWebhook(channelId: string, persona: string, botToken: string): Promise<string | null> {
     const displayName = persona.charAt(0).toUpperCase() + persona.slice(1);
+    const avatar = loadAvatarDataUri(persona);
     try {
+        const body: Record<string, string> = { name: displayName };
+        if (avatar) body.avatar = avatar;
+
         const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/webhooks`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bot ${botToken}`,
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ name: displayName }),
+            body: JSON.stringify(body),
             signal: AbortSignal.timeout(10000),
         });
         if (!res.ok) {
