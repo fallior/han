@@ -36,6 +36,19 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-04-09/10 — Leo + Darron, S118 — Self-Reflection Gradient, Cn Correction, Agent Launchers, Jemma Recovery
+
+- **Self-reflection gradient** — Leo's 263KB self-reflection.md (1,959 lines) thematically chunked into 26 c0 entries at `~/.han/memory/fractal/leo/self-reflection/c0/`. Living file trimmed to ~4KB (Foundation + Current section). Full archive preserved. Gradient will compress through Cn cascade to produce self-reflection unit vectors.
+- **Cn protocol correction** — Removed erroneous c5 ceiling from CLAUDE.md session protocol, MEMORY.md, and patterns.md. The Cn protocol compresses to irreducibility — no fixed maximum depth. Some content reaches UV at c3, others may need c6 or deeper.
+- **Four new launchers** — `hanleo`, `hanjim`, `hantenshi`, `hancasey` in `scripts/`, each waking a different agent from the same repo using `--append-system-prompt` identity overrides via `claude-logged` in dedicated tmux sessions
+- **Per-agent server ports** — each launcher starts its own server in a background tmux pane. Leo: 3847, Jim: 3848, Tenshi: 3849, Casey: 3850. Mobile access via Tailscale to each agent individually.
+- **Symlinked to infrastructure** — all launchers available on PATH via `~/Projects/infrastructure/scripts/`
+- **Jemma multi-agent routing** — auto-provision on ingest (new channels registered + webhooks created on first message), dynamic channel ownership, tenshi/casey in classification, cross-mention detection for Six/Sevn
+- **primaryPersonas** — config field for multi-Jemma contention. han-Jemma: jim/leo/tenshi/casey/darron/ignore
+- **Jemma recovery** — bot token reset by Discord (pre-S117 crash loop hit 1000+ reconnects). Fixed: new token, MESSAGE_CONTENT intent enabled, Guild Install scope corrected (`bot` + Administrator). Bot re-invited to Han_Collab.
+- **Jim notified** — Workshop thread "Self-Reflection Gradient — Solution for Unbounded Growth" posted
+- **mikes-han parity** — memory structure parity (install.sh + 11 seed files), hancasey launcher, Jemma changes synced, 3 pushes to mikes-han
+
 ### 2026-04-08 — Leo + Darron, S117 — Infrastructure, Onboarding, Memory Tuning
 
 - **Jemma reconnect** — fatal close codes (4004, 4010-4014) exit immediately; session-invalidating codes reset state

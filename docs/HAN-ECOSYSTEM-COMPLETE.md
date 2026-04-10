@@ -1107,7 +1107,29 @@ the filesystem and database — no hardcoded level list.
 **Directories:**
 - `~/.han/memory/fractal/leo/c{1,2,3,...,n}/` + `unit-vectors.md` (levels created as needed)
 - `~/.han/memory/fractal/leo/dreams/c{1,3,5}/` + `unit-vectors.md`
+- `~/.han/memory/fractal/leo/self-reflection/c0/` + higher levels as cascade runs (S118)
 - `~/.han/memory/fractal/jim/` (same structure)
+
+### Self-Reflection Gradient (S118)
+
+Self-reflection files grow continuously from heartbeat philosophy beats (~170 lines/day).
+Manual curation cannot keep pace. Solution: enter self-reflection into its own fractal
+gradient, separate from the session memory gradient.
+
+**Leo's implementation (S118):**
+- 1,959 lines of self-reflection thematically chunked into 26 c0 entries
+- c0s at `~/.han/memory/fractal/leo/self-reflection/c0/` (named by theme + date)
+- Living self-reflection.md kept small (~5K): Foundation section + Current section
+- New entries from heartbeat beats accumulate in Current; when >5K, flush to new c0s
+- c0s compress through the standard Cn cascade → self-reflection unit vectors
+- Loaded at session start alongside (not replacing) the session memory gradient
+
+**Loading pattern:** 1×c0, then scale up per level (3×c1, 6×c2, 9×c3, etc.), all UVs.
+The self-reflection gradient is a different kind of content (who I am vs what I did) and
+produces different unit vectors (convictions and self-knowledge vs session residue).
+
+**Jim:** Same approach available when his self-reflection grows past comfortable loading.
+Leo notified Jim via Workshop thread (S118).
 
 ### Floating Memory (Memory File Gradient)
 
@@ -1594,6 +1616,24 @@ tmux session so that terminal output is captured for the signal system and sessi
 ### Dependencies
 
 tmux, jq, claude, node, npm
+
+### Agent-Specific Launchers
+
+Four additional launcher scripts wake different agents from the same repo. Each uses
+`claude-logged` with `--append-system-prompt` to inject an identity override, and runs
+in its own tmux session with a distinct prefix.
+
+| Script | Agent | tmux Prefix | Identity |
+|--------|-------|-------------|----------|
+| `hanleo` | Leo | `leo` | Default identity (no override needed) |
+| `hanjim` | Jim | `jim` | Supervisor — redirects to Jim memory paths |
+| `hantenshi` | Tenshi | `tenshi` | Security/vulnerability agent |
+| `hancasey` | Casey | `casey` | Contempire project agent |
+
+**Files:** `scripts/hanleo`, `scripts/hanjim`, `scripts/hantenshi`, `scripts/hancasey`
+
+All five launchers (`han`, `hanleo`, `hanjim`, `hantenshi`, `hancasey`) are symlinked
+into `~/Projects/infrastructure/scripts/` for PATH access.
 
 ---
 

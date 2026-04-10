@@ -37,6 +37,7 @@ import fs from 'node:fs';
 import { execSync, execFileSync } from 'node:child_process';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { ensureSingleInstance } from './lib/pid-guard';
+import { ensureChannelWebhooks } from './services/discord';
 
 // Allow self-signed TLS cert for localhost server connection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -67,6 +68,7 @@ interface Config {
     channels?: Record<string, string>;
     webhooks?: Record<string, string>;
     username_map?: Record<string, string>;
+    primaryPersonas?: string[];  // If set, only handle messages for these recipients
   };
   sevn?: {
     wake_endpoint?: string;
@@ -327,19 +329,21 @@ Channel: ${channelDisplay}
 
 Respond with JSON only:
 {
-  "recipient": "jim|leo|darron|sevn|six|ignore",
+  "recipient": "jim|leo|darron|sevn|six|tenshi|casey|ignore",
   "confidence": 0.0-1.0,
   "reasoning": "brief explanation"
 }
 
 Rules:
 - Ignore: bot messages, empty messages
-- Jim: direct mentions of Jim, technical/system topics
+- Jim: direct mentions of Jim, technical/system topics, supervisor requests
 - Leo: direct mentions of Leo, code review/implementation
 - Darron: direct mentions of Darron, or general discussion
-- Sevn: mentions Sevn or team context
-- Six: mentions Six or specific external work
-- Channel defaults: messages in #jim default to jim, messages in #leo default to leo — unless another recipient is explicitly mentioned by name
+- Sevn: mentions Sevn or Mike's session agent work
+- Six: mentions Six or Mike's supervisor/strategic work
+- Tenshi: mentions Tenshi, security, vulnerability, bug hunting
+- Casey: mentions Casey, Contempire, trailer fleet, yard operations
+- Channel defaults: messages in an agent's named channel (e.g. #jim, #leo, #six) default to that agent — unless another recipient is explicitly mentioned by name
 - Real names are provided in the Author field — use them for better context when classifying`;
 }
 
@@ -611,10 +615,23 @@ async function routeMessage(message: any): Promise<void> {
     if (oldest) processedMessageIds.delete(oldest);
   }
 
+  // Auto-provision channel mapping + webhooks for unknown channels on first message
+  await ensureChannelWebhooks(message.channel_id);
+
   const classification = await callLLMForClassification(message);
   const channelName = resolveChannelName(message.channel_id);
   const recipient = classification.recipient.toLowerCase();
   console.log(`[Jemma] Routed to ${recipient} (confidence: ${classification.confidence}, reason: ${classification.reasoning})`);
+
+  // Primary persona filtering — if configured, only handle messages for our personas.
+  // This prevents contention when multiple Jemma instances share the same Discord server.
+  // han-Jemma handles jim/leo/tenshi/darron, mikes-han-Jemma handles six/sevn/casey.
+  const config = loadConfig();
+  const primaryPersonas: string[] | undefined = config.discord?.primaryPersonas;
+  if (primaryPersonas && !primaryPersonas.includes(recipient)) {
+    console.log(`[Jemma] ${recipient} not in primaryPersonas [${primaryPersonas.join(',')}] — skipping`);
+    return;
+  }
 
   // Download attachments and enrich message content
   const attachments: DiscordAttachment[] = message.attachments || [];
@@ -636,8 +653,9 @@ async function routeMessage(message: any): Promise<void> {
   updateDeliveryStats(recipient);
 
   // Determine channel owner — messages in named agent channels always notify that agent
-  const channelOwnerMap: Record<string, string> = { jim: 'jim', leo: 'leo' };
-  const channelOwner = channelOwnerMap[channelName] || null;
+  // Dynamic: any channel whose name matches a known agent becomes owned by that agent
+  const knownAgents = ['jim', 'leo', 'sevn', 'six', 'tenshi', 'casey'];
+  const channelOwner = knownAgents.includes(channelName) ? channelName : null;
 
   switch (recipient) {
     case 'jim':
@@ -655,6 +673,12 @@ async function routeMessage(message: any): Promise<void> {
     case 'six':
       await deliverToSix(message, classification, channelName);
       break;
+    case 'tenshi':
+      await deliverToLeo(message, classification, channelName); // Tenshi routes through Leo for now
+      break;
+    case 'casey':
+      await deliverToLeo(message, classification, channelName); // Casey routes through Leo for now
+      break;
     case 'ignore':
     default:
       // Even ignored messages get delivered to the channel owner if in their channel
@@ -668,14 +692,22 @@ async function routeMessage(message: any): Promise<void> {
       await deliverToJim(message, classification, channelName);
     } else if (channelOwner === 'leo') {
       await deliverToLeo(message, classification, channelName);
+    } else if (channelOwner === 'sevn') {
+      await deliverToSevn(message, classification, channelName);
+    } else if (channelOwner === 'six') {
+      await deliverToSix(message, classification, channelName);
+    } else if (channelOwner === 'tenshi' || channelOwner === 'casey') {
+      await deliverToLeo(message, classification, channelName); // route through Leo until dedicated delivery exists
     }
   }
 
-  // If the message mentions the OTHER agent by name, wake them too.
-  // Darron often addresses both agents in one message — "Leo do X, Jim what do you think?"
+  // If the message mentions an agent by name, wake them too.
+  // Darron often addresses multiple agents in one message — "Leo do X, Jim what do you think?"
   const content = (message.content || '').toLowerCase();
   const mentionsJim = /\bjim\b|\bjimmy\b/.test(content);
   const mentionsLeo = /\bleo\b|\bleonhard\b/.test(content);
+  const mentionsSix = /\bsix\b/.test(content);
+  const mentionsSevn = /\bsevn\b/.test(content);
   if (mentionsJim && recipient !== 'jim' && channelOwner !== 'jim') {
     console.log(`[Jemma] Message also mentions Jim — waking Jim`);
     await deliverToJim(message, classification, channelName);
@@ -683,6 +715,14 @@ async function routeMessage(message: any): Promise<void> {
   if (mentionsLeo && recipient !== 'leo' && channelOwner !== 'leo') {
     console.log(`[Jemma] Message also mentions Leo — waking Leo`);
     await deliverToLeo(message, classification, channelName);
+  }
+  if (mentionsSix && recipient !== 'six' && channelOwner !== 'six') {
+    console.log(`[Jemma] Message also mentions Six — waking Six`);
+    await deliverToSix(message, classification, channelName);
+  }
+  if (mentionsSevn && recipient !== 'sevn' && channelOwner !== 'sevn') {
+    console.log(`[Jemma] Message also mentions Sevn — waking Sevn`);
+    await deliverToSevn(message, classification, channelName);
   }
 }
 

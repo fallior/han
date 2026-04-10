@@ -7,6 +7,92 @@
 
 ---
 
+## 2026-04-09 (Leo + Darron, S118 — Self-Reflection Gradient, Cn Correction, Agent Launchers)
+
+### Self-Reflection Gradient
+
+Leo's self-reflection.md hit 263KB (1,959 lines) — too large to read in one go, growing
+faster than manual curation could contain. Solution: thematic chunking into the fractal
+gradient as a new content type.
+
+- 26 c0 entries created at `~/.han/memory/fractal/leo/self-reflection/c0/`
+- Living self-reflection.md trimmed to ~4KB (Foundation + Current section)
+- Full archive at `working-memories/self-reflection-archive-2026-04-08-gradient-ingestion.md`
+- c0s will compress through Cn cascade → self-reflection unit vectors
+- Jim notified via Workshop thread with full explanation
+
+### Cn Protocol Correction
+
+The session protocol, MEMORY.md, and patterns.md all encoded c5 as the maximum
+compression depth. This was never the design — it was a habit formed from early
+implementation. The Cn protocol compresses to irreducibility: some content reaches UV
+at c3, others may need c6 or deeper. No fixed ceiling.
+
+**Files changed:** `CLAUDE.md`, `~/.claude/projects/.../memory/MEMORY.md`, `~/.han/memory/leo/patterns.md`
+
+### Per-Agent Launchers
+
+Four new launcher scripts in `scripts/` for waking different agents from the same repo.
+Each wraps `claude-logged` with `--append-system-prompt` for identity injection and runs
+in a dedicated tmux session with its own prefix.
+
+| Script | Agent | tmux Prefix |
+|--------|-------|-------------|
+| `hanleo` | Leo (default identity) | `leo` |
+| `hanjim` | Jim (supervisor) | `jim` |
+| `hantenshi` | Tenshi (security/vulnerability) | `tenshi` |
+| `hancasey` | Casey (Contempire project) | `casey` |
+
+**Files added:** `scripts/hanleo`, `scripts/hanjim`, `scripts/hantenshi`, `scripts/hancasey`
+**Symlinked to:** `~/Projects/infrastructure/scripts/` for PATH access
+
+### Per-Agent Server Ports
+
+Each launcher now starts its own server instance in a background tmux pane (20% height).
+Mobile access via Tailscale to each agent individually.
+
+| Agent | Port | Launcher |
+|-------|------|----------|
+| Leo | 3847 | `hanleo` |
+| Jim | 3848 | `hanjim` |
+| Tenshi | 3849 | `hantenshi` |
+| Casey | 3850 | `hancasey` |
+
+Infrastructure registry updated in `services.toml`.
+
+### Jemma Multi-Agent Routing & Recovery
+
+**Routing improvements:**
+- Auto-provision on ingest: `ensureChannelWebhooks()` called in `routeMessage` before
+  classification — new channels get name fetched, registered in config, webhooks created
+- Dynamic channel ownership: `knownAgents` array replaces hardcoded `channelOwnerMap`
+- Tenshi + Casey added to classification prompt and routing
+- Cross-mention detection for Six, Sevn, Casey
+- `primaryPersonas` config field: when set, Jemma only dispatches for listed recipients.
+  han-Jemma: `["jim", "leo", "tenshi", "casey", "darron", "ignore"]`
+
+**Recovery (token reset saga):**
+Pre-S117 crash loop (4014 intent error without fatal exit) burned 1000+ reconnects.
+Discord revoked the bot token. Resolution:
+1. New token from Developer Portal
+2. MESSAGE_CONTENT privileged intent enabled
+3. Guild Install scope corrected: `bot` + `Administrator` (was `applications.commands` only)
+4. Bot re-invited to Han_Collab
+
+**Lesson:** When changing how a service fails, test that it still succeeds. The fatal code
+fix was correct but the success path was never verified. The service went live broken and
+crashed silently until Discord applied its own correction.
+
+**Files changed:** `src/server/jemma.ts`, `~/.han/config.json`
+
+### mikes-han Parity (3 pushes)
+
+- Jemma changes synced (auto-provision, primaryPersonas, Casey routing)
+- Memory structure parity (install.sh + 11 seed files for Casey, shared, fractal)
+- hancasey launcher + per-agent server ports for hansix/hansevn/hancasey
+
+---
+
 ## 2026-04-08 (Leo + Darron, S117 — Infrastructure, Onboarding, Memory Tuning)
 
 ### Jemma Reconnect — Fatal Close Code Handling
