@@ -40,6 +40,13 @@ export function isOnHoliday(agent?: string): boolean {
     return fs.existsSync(signalPath);
 }
 
+/** Check if an agent is in working bee mode. Signal file: ~/.han/signals/working-bee-{agent} */
+export function isWorkingBee(agent?: string): boolean {
+    if (!agent) return false;
+    const signalPath = path.join(HAN_DIR, 'signals', `working-bee-${agent}`);
+    return fs.existsSync(signalPath);
+}
+
 export function getDayPhase(): DayPhase {
     // Rest days follow normal time-of-day phases — rest ≠ sleep.
     // The only difference is longer intervals (see getPhaseInterval).

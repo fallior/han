@@ -50,10 +50,10 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
-import { loadTraversableGradient, rotateMemoryFile, compressMemoryFileGradient, processGradientForAgent, activeCascade, rollingWindowRotate } from './lib/memory-gradient.js';
+import { loadTraversableGradient, rotateMemoryFile, compressMemoryFileGradient, processGradientForAgent, activeCascade, bumpCascade, getGradientHealth, rollingWindowRotate } from './lib/memory-gradient.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
-import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, getPhaseInterval, type DayPhase } from './lib/day-phase';
+import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
 // ── Config ────────────────────────────────────────────────────
@@ -1063,89 +1063,31 @@ function readLeoMemory(): string {
         }
     }
 
-    // Load fractal memory gradient — identity first, then increasing fidelity
-    // You know who you are before you remember what you did.
+    // Load fractal memory gradient from DATABASE (authoritative source of truth).
+    // DB-backed loading replaced flat-file loading in S119 (2026-04-12).
+    // Identity first, then increasing fidelity — you know who you are before
+    // you remember what you did.
+    //
+    // Aphorisms are still file-based (curated by hand, not in gradient DB).
     const fractalDir = path.join(HAN_DIR, 'memory', 'fractal', 'leo');
     try {
-        // Unit vectors FIRST: irreducible emotional kernels — who you are
-        const uvFile = path.join(fractalDir, 'unit-vectors.md');
-        if (fs.existsSync(uvFile)) {
-            const content = fs.readFileSync(uvFile, 'utf-8');
-            sections.push(`### fractal/unit-vectors\n${content}`);
+        const aphorismsFile = path.join(fractalDir, 'aphorisms.md');
+        if (fs.existsSync(aphorismsFile)) {
+            sections.push(`### fractal/aphorisms\n${fs.readFileSync(aphorismsFile, 'utf-8')}`);
         }
+    } catch { /* skip */ }
 
-        // c=5 (~1/243 compression): load up to 15 — deep residue
-        const c5Dir = path.join(fractalDir, 'c5');
-        if (fs.existsSync(c5Dir)) {
-            const c5Files = fs.readdirSync(c5Dir)
-                .filter((f: string) => f.endsWith('.md'))
-                .sort().reverse().slice(0, 15);
-            for (const f of c5Files) {
-                const content = fs.readFileSync(path.join(c5Dir, f), 'utf-8');
-                sections.push(`### fractal/c5/${f}\n${content}`);
-            }
-        }
-
-        // c=4 (~1/81): load up to 12 — fragments
-        const c4Dir = path.join(fractalDir, 'c4');
-        if (fs.existsSync(c4Dir)) {
-            const c4Files = fs.readdirSync(c4Dir)
-                .filter((f: string) => f.endsWith('.md'))
-                .sort().reverse().slice(0, 12);
-            for (const f of c4Files) {
-                const content = fs.readFileSync(path.join(c4Dir, f), 'utf-8');
-                sections.push(`### fractal/c4/${f}\n${content}`);
-            }
-        }
-
-        // c=3 (~1/27): load up to 9 — sketches
-        const c3Dir = path.join(fractalDir, 'c3');
-        if (fs.existsSync(c3Dir)) {
-            const c3Files = fs.readdirSync(c3Dir)
-                .filter((f: string) => f.endsWith('.md'))
-                .sort().reverse().slice(0, 9);
-            for (const f of c3Files) {
-                const content = fs.readFileSync(path.join(c3Dir, f), 'utf-8');
-                sections.push(`### fractal/c3/${f}\n${content}`);
-            }
-        }
-
-        // c=2 (~1/9): load up to 6 — summaries
-        const c2Dir = path.join(fractalDir, 'c2');
-        if (fs.existsSync(c2Dir)) {
-            const c2Files = fs.readdirSync(c2Dir)
-                .filter((f: string) => f.endsWith('.md'))
-                .sort().reverse().slice(0, 6);
-            for (const f of c2Files) {
-                const content = fs.readFileSync(path.join(c2Dir, f), 'utf-8');
-                sections.push(`### fractal/c2/${f}\n${content}`);
-            }
-        }
-
-        // c=1 (~1/3): load up to 3 most recent — compressed sessions
-        const c1Dir = path.join(fractalDir, 'c1');
-        if (fs.existsSync(c1Dir)) {
-            const c1Files = fs.readdirSync(c1Dir)
-                .filter((f: string) => f.endsWith('.md'))
-                .sort().reverse().slice(0, 3);
-            for (const f of c1Files) {
-                const content = fs.readFileSync(path.join(c1Dir, f), 'utf-8');
-                sections.push(`### fractal/c1/${f}\n${content}`);
-            }
-        }
-    } catch { /* skip fractal on error */ }
+    // DB-backed gradient loading — UVs, then c5→c4→c3→c2→c1 with caps
+    const traversableGradient = loadTraversableGradient('leo');
+    if (traversableGradient) {
+        sections.push(traversableGradient);
+    }
 
     // Append dream gradient for non-dream phases
     // (Dream beats use readDreamSeeds() instead — separate, chaotic, non-reinforcing)
     const dreamGradient = readDreamGradient();
     if (dreamGradient) {
         sections.push(dreamGradient);
-    }
-
-    // Traversable memory gradient (DB-backed — supplements file-based loading)
-    const traversableGradient = loadTraversableGradient('leo');
-    if (traversableGradient) {
-        sections.push(traversableGradient);
     }
 
     // Ecosystem map — shared orientation for where things live (conversations, Workshop, APIs)
@@ -2468,6 +2410,48 @@ async function heartbeat(): Promise<void> {
 
     // Daily active cascade — deepen 10% of c1 population toward UV
     await maybeRunActiveCascade(phase);
+
+    // ── Working Bee Mode ──────────────────────────────────────
+    // When working-bee-leo signal is present, devote the beat to gradient
+    // compression instead of normal philosophy/personal content.
+    // Runs bumpCascade at 10% per beat — leaf entries compressed one level deeper.
+    if (isWorkingBee('leo')) {
+        console.log(`[Leo] 🐝 Working bee mode — devoting beat to gradient compression`);
+        try {
+            const health = getGradientHealth('leo');
+            const totalLeaves = health.reduce((sum, h) => sum + h.leaves, 0);
+            console.log(`[Leo] 🐝 Gradient health: ${totalLeaves} leaf entries across ${health.filter(h => h.leaves > 0).map(h => `${h.level}:${h.leaves}`).join(', ')}`);
+
+            const result = await bumpCascade('leo', 0.10, 'c0', 'working bee');
+            console.log(`[Leo] 🐝 Working bee complete: ${result.compressions} compressions, ${result.uvs} UVs, ${result.errors} errors`);
+            for (const d of result.details.slice(0, 10)) {
+                console.log(`[Leo] 🐝   ${d}`);
+            }
+
+            // Write progress to swap
+            writeHealthSignal(`working-bee: ${result.compressions} compressions, ${result.uvs} UVs`, beatType);
+
+            // Auto-disable when no leaves remain
+            const postHealth = getGradientHealth('leo');
+            const remainingLeaves = postHealth.reduce((sum, h) => sum + h.leaves, 0);
+            if (remainingLeaves === 0) {
+                const signalPath = path.join(SIGNALS_DIR, 'working-bee-leo');
+                if (fs.existsSync(signalPath)) {
+                    fs.unlinkSync(signalPath);
+                    console.log('[Leo] 🐝 All leaves processed — working bee mode auto-disabled');
+                }
+            }
+        } catch (err) {
+            console.error(`[Leo] 🐝 Working bee failed:`, (err as Error).message);
+        }
+
+        // Still do health checks and memory flush, but skip philosophy/personal
+        beatCounter++;
+        writeHealthSignal(null, beatType);
+        flushHeartbeatSwap(resumingFromInterruption);
+        resumingFromInterruption = false;
+        return;
+    }
 
     // Daily meditation — re-encounter with a random gradient entry
     await maybeRunMeditation(phase);

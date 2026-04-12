@@ -5,10 +5,26 @@
 
 import { Router, Request, Response } from 'express';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
+import { loadTraversableGradient } from '../lib/memory-gradient.js';
 
 const router = Router();
 
 // ── Static routes FIRST (before parameterised) ─────────────────
+
+/** Full assembled gradient for session loading (used by CLAUDE.md protocol) */
+router.get('/load/:agent', (req: Request, res: Response) => {
+    const { agent } = req.params;
+    if (agent !== 'jim' && agent !== 'leo') {
+        return res.status(400).json({ error: 'Agent must be jim or leo' });
+    }
+
+    const gradient = loadTraversableGradient(agent);
+    if (!gradient) {
+        return res.status(404).json({ error: `No gradient entries for ${agent}` });
+    }
+
+    res.type('text/plain').send(gradient);
+});
 
 /** Random entry for meditation selection */
 router.get('/random', (_req: Request, res: Response) => {

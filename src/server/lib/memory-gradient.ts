@@ -699,7 +699,165 @@ export async function activeCascade(
     return compressionCount;
 }
 
-// ── Function 4: Helper utilities ───────────────────────────────
+// ── Function 4: Bump Algorithm — Demand-Driven Compression ──────
+//
+// Darron's design (S119, 2026-04-12):
+// When a new memory enters at cx, compress the displaced entry to cx+1.
+// This ensures every memory is represented at every compression level
+// it naturally reaches. No memory gets stuck — the system compresses
+// by living.
+//
+// The working bee mode processes leaf entries (entries with no children)
+// in percentage-based batches. Each batch runs through the agent's loaded
+// context, so compression quality benefits from the current gradient state.
+
+/**
+ * Find and compress leaf entries — memories that have stopped cascading.
+ * A "leaf" is any non-UV entry with no children in the gradient.
+ * These are memories stuck at an intermediate level.
+ *
+ * @param agent - 'jim' or 'leo'
+ * @param percentage - fraction of leaf population to process (0.10 = 10%)
+ * @param startLevel - begin scanning from this level (default 'c0')
+ * @param context - logging context
+ * @returns summary of compressions performed
+ */
+export async function bumpCascade(
+    agent: 'jim' | 'leo',
+    percentage: number = 0.10,
+    startLevel: string = 'c0',
+    context: string = 'bump cascade',
+): Promise<{ compressions: number; uvs: number; errors: number; details: string[] }> {
+    const result = { compressions: 0, uvs: 0, errors: 0, details: [] as string[] };
+
+    // Scan each level from startLevel upward, finding leaves
+    let currentLevel = startLevel;
+    let totalLeaves = 0;
+    let totalProcessed = 0;
+
+    while (parseLevelNumber(currentLevel) !== null) {
+        const leaves = (gradientStmts.getLeafEntries.all(agent, currentLevel) as any[]);
+        if (leaves.length === 0) {
+            const next = nextLevel(currentLevel);
+            if (!next) break;
+            currentLevel = next;
+            continue;
+        }
+
+        totalLeaves += leaves.length;
+        const count = Math.max(1, Math.ceil(leaves.length * percentage));
+        // Process oldest first (already sorted ASC by created_at)
+        const batch = leaves.slice(0, count);
+
+        for (const entry of batch) {
+            const next = nextLevel(entry.level);
+            if (!next) continue;
+
+            const depth = parseLevelNumber(next);
+            if (depth === null || depth > MAX_COMPRESSION_DEPTH) continue;
+
+            try {
+                // Truncate very large entries for context
+                let sourceContent = entry.content;
+                if (sourceContent.length > 50000) {
+                    sourceContent = sourceContent.substring(0, 50000) +
+                        '\n\n[... truncated for compression — full content in DB]';
+                }
+
+                const contentType = entry.content_type || 'working-memory';
+                const promptText = compressionPrompt(contentType, depth);
+
+                const raw = await sdkCompress(
+                    `${promptText}\n\nSource: ${entry.level} → ${next} (${context})\nAgent: ${agent}\nSession: ${entry.session_label}\n\n${sourceContent}${FEELING_TAG_INSTRUCTION}`
+                );
+
+                const { content: compressed, feelingTag } = parseFeelingTag(raw);
+
+                // Check for incompressibility signal
+                const incompressibleMatch = compressed.match(/^INCOMPRESSIBLE:\s*(.+)/s);
+                if (incompressibleMatch) {
+                    const uvContent = incompressibleMatch[1].trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
+                    writeUVEntry(agent, entry.session_label, uvContent, contentType, entry.id, feelingTag);
+                    result.uvs++;
+                    result.details.push(`${entry.level}→UV (incompressible) ${entry.session_label}`);
+                    totalProcessed++;
+                    continue;
+                }
+
+                // Check compression ratio — near-incompressible
+                const ratio = compressed.length / sourceContent.length;
+                if (ratio > INCOMPRESSIBILITY_RATIO) {
+                    const uvRaw = await sdkCompress(
+                        `${UV_PROMPT}\n\nSource: ${entry.level}\nAgent: ${agent}\n\n${compressed}${FEELING_TAG_INSTRUCTION}`
+                    );
+                    const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
+                    writeUVEntry(agent, entry.session_label, uvContent.trim(), contentType, entry.id, uvTag);
+                    result.uvs++;
+                    result.details.push(`${entry.level}→UV (ratio ${ratio.toFixed(2)}) ${entry.session_label}`);
+                    totalProcessed++;
+                    continue;
+                }
+
+                // Write compressed entry at next level to DB
+                const entryId = generateGradientId();
+                const label = `${entry.session_label}-${next}`;
+                insertGradientEntry(
+                    entryId, agent, label, next, compressed,
+                    contentType, entry.id, feelingTag
+                );
+
+                // Also write to filesystem for gradient loading compatibility
+                const homeDir = process.env.HOME || '/root';
+                const fracDir = path.join(homeDir, '.han', 'memory', 'fractal', agent, next);
+                fs.mkdirSync(fracDir, { recursive: true });
+                fs.writeFileSync(path.join(fracDir, `${label}.md`), compressed);
+
+                result.compressions++;
+                result.details.push(`${entry.level}→${next} ${entry.session_label} (ratio ${ratio.toFixed(2)})`);
+                totalProcessed++;
+
+            } catch (err) {
+                result.errors++;
+                result.details.push(`ERROR ${entry.level}→${next} ${entry.session_label}: ${(err as Error).message}`);
+            }
+        }
+
+        const next = nextLevel(currentLevel);
+        if (!next) break;
+        currentLevel = next;
+    }
+
+    if (totalProcessed > 0) {
+        console.log(`[Gradient] ${context}: ${agent} — ${result.compressions} compressions, ${result.uvs} UVs, ${result.errors} errors (from ${totalLeaves} leaves)`);
+    }
+
+    return result;
+}
+
+/**
+ * Get a summary of the gradient state for an agent — leaf counts by level.
+ * Useful for dashboards and working bee progress tracking.
+ */
+export function getGradientHealth(agent: 'jim' | 'leo'): { level: string; total: number; leaves: number }[] {
+    const levels = ['c0', 'c1', 'c2', 'c3', 'c4', 'c5'];
+    const health: { level: string; total: number; leaves: number }[] = [];
+
+    for (const level of levels) {
+        const total = (gradientStmts.getByAgentLevel.all(agent, level) as any[]).length;
+        const leaves = (gradientStmts.getLeafEntries.all(agent, level) as any[]).length;
+        if (total > 0) {
+            health.push({ level, total, leaves });
+        }
+    }
+
+    // Add UV count
+    const uvs = (gradientStmts.getUVs.all(agent) as any[]).length;
+    health.push({ level: 'uv', total: uvs, leaves: 0 });
+
+    return health;
+}
+
+// ── Function 5: Helper utilities ───────────────────────────────
 
 /**
  * Get all fractal memory files for a given agent

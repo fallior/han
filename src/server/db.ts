@@ -691,6 +691,27 @@ export const gradientStmts = {
             AND ge.level = 'c0'
         )
     `) as any,
+    /** Find entries at a given level that have no child at the next level and no UV descendant */
+    getLeafEntries: db.prepare(`
+        SELECT ge.* FROM gradient_entries ge
+        WHERE ge.agent = ? AND ge.level = ?
+        AND NOT EXISTS (
+            SELECT 1 FROM gradient_entries child
+            WHERE child.source_id = ge.id
+        )
+        AND ge.level != 'uv'
+        ORDER BY ge.created_at ASC
+    `) as any,
+    /** Count entries per level for an agent */
+    countByLevel: db.prepare(`
+        SELECT level, COUNT(*) as count FROM gradient_entries
+        WHERE agent = ?
+        GROUP BY level ORDER BY level
+    `) as any,
+    /** Get children of an entry */
+    getChildren: db.prepare(`
+        SELECT * FROM gradient_entries WHERE source_id = ?
+    `) as any,
 };
 
 export const feelingTagStmts = {
@@ -706,6 +727,114 @@ export const gradientAnnotationStmts = {
         (gradient_entry_id, author, content, context, created_at)
         VALUES (?, ?, ?, ?, ?)`) as any,
     getByEntry: db.prepare('SELECT * FROM gradient_annotations WHERE gradient_entry_id = ? ORDER BY created_at ASC') as any,
+};
+
+// ── Persona Registry (The Village) ─────────────────────────
+
+db.exec(`CREATE TABLE IF NOT EXISTS personas (
+    name TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'agent',
+    delivery TEXT NOT NULL DEFAULT 'signal',
+    delivery_config TEXT NOT NULL DEFAULT '{}',
+    identity_override TEXT,
+    role_name TEXT,
+    memory_path TEXT,
+    fractal_path TEXT,
+    color TEXT DEFAULT 'gray',
+    workshop_tabs TEXT,
+    mention_patterns TEXT,
+    classification_hint TEXT,
+    agent_port INTEGER,
+    session_prefix TEXT,
+    instance TEXT NOT NULL DEFAULT 'han',
+    is_local INTEGER NOT NULL DEFAULT 1,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+)`);
+
+// Seed existing personas — preserves current behaviour exactly
+const seedPersona = db.prepare(`INSERT OR IGNORE INTO personas
+    (name, display_name, kind, delivery, delivery_config, role_name, memory_path, fractal_path,
+     color, workshop_tabs, mention_patterns, classification_hint, agent_port, session_prefix, instance, is_local)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
+const personaSeeds: Array<[string, string, string, string, string, string, string | null, string | null,
+    string, string, string, string | null, number | null, string | null, string, number]> = [
+    ['leo', 'Philosopher Leo', 'agent', 'signal',
+        '{"wake_signals":["leo-wake","leo-human-wake"]}',
+        'leo', '~/.han/memory/leo/', '~/.han/memory/fractal/leo/',
+        'green', '[{"key":"leo-question","label":"Questions"},{"key":"leo-postulate","label":"Postulates"}]',
+        '["\\\\bleo\\\\b","\\\\bleonhard\\\\b"]', 'Leo: code review, implementation, philosophy',
+        3847, 'leo', 'han', 1],
+    ['jim', 'Supervisor Jim', 'agent', 'http_local',
+        '{"server_url":"https://localhost:3847","fallback_signals":["jim-wake","jim-human-wake"]}',
+        'supervisor', '~/.han/memory/', '~/.han/memory/fractal/jim/',
+        'purple', '[{"key":"jim-request","label":"Requests"},{"key":"jim-report","label":"Reports"}]',
+        '["\\\\bjim\\\\b","\\\\bjimmy\\\\b"]', 'Jim: technical/system topics, supervisor requests, strategic decisions',
+        3848, 'jim', 'han', 1],
+    ['darron', 'Dreamer Darron', 'human', 'ntfy',
+        '{}',
+        'human', null, null,
+        'blue', '[{"key":"darron-thought","label":"Thoughts"},{"key":"darron-musing","label":"Musings"}]',
+        '["\\\\bdarron\\\\b"]', 'Darron: general discussion, vision, direction',
+        null, null, 'han', 1],
+    ['jemma', 'Dispatcher Jemma', 'gateway', 'none',
+        '{}',
+        'jemma', null, null,
+        'amber', '[{"key":"jemma-messages","label":"Messages"},{"key":"jemma-stats","label":"Stats"}]',
+        '[]', null,
+        null, null, 'han', 1],
+    ['tenshi', 'Guardian Tenshi', 'agent', 'signal',
+        '{"wake_signals":["leo-wake","leo-human-wake"]}',
+        'tenshi', '~/.han/memory/tenshi/', '~/.han/memory/fractal/tenshi/',
+        'red', '[]',
+        '["\\\\btenshi\\\\b"]', 'Tenshi: security, vulnerability, bug hunting',
+        3849, 'tenshi', 'han', 1],
+    ['casey', 'Operator Casey', 'agent', 'signal',
+        '{"wake_signals":["leo-wake","leo-human-wake"]}',
+        'casey', '~/.han/memory/casey/', '~/.han/memory/fractal/casey/',
+        'orange', '[]',
+        '["\\\\bcasey\\\\b"]', 'Casey: Contempire, trailer fleet, yard operations',
+        3850, 'casey', 'han', 1],
+    ['sevn', 'Session Agent Sevn', 'agent', 'remote',
+        '{}',
+        'sevn', null, null,
+        'teal', '[]',
+        '["\\\\bsevn\\\\b"]', 'Sevn: Mike\'s session agent work',
+        null, null, 'mikes-han', 0],
+    ['six', 'Chief of Staff Six', 'agent', 'remote',
+        '{}',
+        'six', null, null,
+        'indigo', '[]',
+        '["\\\\bsix\\\\b"]', 'Six: Mike\'s supervisor/strategic work',
+        null, null, 'mikes-han', 0],
+];
+
+for (const seed of personaSeeds) {
+    seedPersona.run(...seed);
+}
+
+export const personaStmts = {
+    getAll: db.prepare('SELECT * FROM personas ORDER BY name') as any,
+    getActive: db.prepare('SELECT * FROM personas WHERE active = 1 ORDER BY name') as any,
+    getByName: db.prepare('SELECT * FROM personas WHERE name = ?') as any,
+    getByInstance: db.prepare('SELECT * FROM personas WHERE instance = ? AND active = 1 ORDER BY name') as any,
+    getLocal: db.prepare('SELECT * FROM personas WHERE is_local = 1 AND active = 1 ORDER BY name') as any,
+    getAgents: db.prepare("SELECT * FROM personas WHERE kind = 'agent' AND active = 1 ORDER BY name") as any,
+    insert: db.prepare(`INSERT INTO personas
+        (name, display_name, kind, delivery, delivery_config, identity_override, role_name,
+         memory_path, fractal_path, color, workshop_tabs, mention_patterns, classification_hint,
+         agent_port, session_prefix, instance, is_local, active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) as any,
+    update: db.prepare(`UPDATE personas SET
+        display_name = ?, kind = ?, delivery = ?, delivery_config = ?, identity_override = ?,
+        role_name = ?, memory_path = ?, fractal_path = ?, color = ?, workshop_tabs = ?,
+        mention_patterns = ?, classification_hint = ?, agent_port = ?, session_prefix = ?,
+        instance = ?, is_local = ?, active = ?, updated_at = datetime('now')
+        WHERE name = ?`) as any,
+    deactivate: db.prepare("UPDATE personas SET active = 0, updated_at = datetime('now') WHERE name = ?") as any,
 };
 
 // ── Helper functions ────────────────────────────────────────

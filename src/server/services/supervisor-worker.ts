@@ -31,10 +31,10 @@ import type {
     LogMessage
 } from './supervisor-protocol';
 import { postToDiscord, resolveChannelName } from './discord';
-import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, type DayPhase } from '../lib/day-phase';
+import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, type DayPhase } from '../lib/day-phase';
 import { withMemorySlot } from '../lib/memory-slot';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
-import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, processGradientForAgent, rollingWindowRotate } from '../lib/memory-gradient';
+import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, bumpCascade, getGradientHealth, processGradientForAgent, rollingWindowRotate } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 
 // ── Types ────────────────────────────────────────────────────
@@ -792,61 +792,24 @@ function loadMemoryBank(): string {
         } catch { /* skip unreadable files */ }
     }
 
-    // Fractal memory gradient — loaded feeling first (highest compression → lowest)
-    // See Hall of Records R005: unit vectors first, then c5→c4→c3→c2→c1→c0
+    // Fractal memory gradient — loaded from DATABASE (authoritative source of truth).
+    // DB-backed loading replaced flat-file loading in S119 (2026-04-12).
+    // Identity first, then increasing fidelity — UVs, then c5→c4→c3→c2→c1.
+    //
+    // Aphorisms are still file-based (curated by hand, not in gradient DB).
     try {
-        const agentName = 'jim';
-        const fractalDir = path.join(MEMORY_DIR, 'fractal', agentName);
-
-        // Unit vectors first — irreducible emotional kernels
-        try {
-            const unitVectorsFile = path.join(fractalDir, 'unit-vectors.md');
-            if (fs.existsSync(unitVectorsFile) && fs.statSync(unitVectorsFile).size > 0) {
-                const uvContent = fs.readFileSync(unitVectorsFile, 'utf8');
-                parts.push(`--- fractal/unit-vectors ---\n${uvContent}`);
-            }
-        } catch { /* skip unit vectors on error */ }
-
-        // Gradient levels: highest compression → lowest (c5→c4→c3→c2→c1)
-        const gradientLevels = [
-            { level: 'c5', count: 15 },
-            { level: 'c4', count: 12 },
-            { level: 'c3', count: 9 },
-            { level: 'c2', count: 6 },
-            { level: 'c1', count: 3 },
-        ];
-
-        for (const { level, count } of gradientLevels) {
-            try {
-                const dir = path.join(fractalDir, level);
-                if (fs.existsSync(dir)) {
-                    const files = fs.readdirSync(dir)
-                        .filter(f => f.endsWith('.md'))
-                        .sort()
-                        .reverse()
-                        .slice(0, count);
-                    for (const f of files) {
-                        const content = fs.readFileSync(path.join(dir, f), 'utf8');
-                        parts.push(`--- fractal/${level} (${f}) ---\n${content}`);
-                    }
-                }
-            } catch { /* skip on error */ }
+        const fractalDir = path.join(MEMORY_DIR, 'fractal', 'jim');
+        const aphorismsFile = path.join(fractalDir, 'aphorisms.md');
+        if (fs.existsSync(aphorismsFile)) {
+            parts.push(`--- fractal/aphorisms ---\n${fs.readFileSync(aphorismsFile, 'utf-8')}`);
         }
+    } catch { /* skip */ }
 
-        // c=0 (full): most recent session from sessions/
-        try {
-            if (fs.existsSync(SESSIONS_DIR)) {
-                const sessionFiles = fs.readdirSync(SESSIONS_DIR)
-                    .filter(f => f.endsWith('.md') && f.match(/^\d{4}-\d{2}-\d{2}\.md$/))
-                    .sort()
-                    .reverse();
-                if (sessionFiles.length > 0) {
-                    const c0Content = fs.readFileSync(path.join(SESSIONS_DIR, sessionFiles[0]), 'utf8');
-                    parts.push(`--- fractal/c0 (${sessionFiles[0]}) ---\n${c0Content}`);
-                }
-            }
-        } catch { /* skip c0 on error */ }
-    } catch { /* skip fractal gradient on error */ }
+    // DB-backed gradient loading — UVs, then c5→c4→c3→c2→c1 with caps
+    try {
+        const jimGradient = loadTraversableGradient('jim');
+        if (jimGradient) parts.push(jimGradient);
+    } catch { /* skip gradient on error */ }
 
     // Jim's own dream gradient (his dreams shape his waking identity)
     try {
@@ -938,11 +901,7 @@ function loadMemoryBank(): string {
         if (wmGradient) parts.push(wmGradient);
     } catch { /* skip memory file gradients on error */ }
 
-    // Traversable memory gradient (DB-backed — supplements file-based loading)
-    try {
-        const jimTraversable = loadTraversableGradient('jim');
-        if (jimTraversable) parts.push(jimTraversable);
-    } catch { /* skip traversable gradient on error */ }
+    // DB-backed gradient is now the primary load (above). No duplicate needed.
 
     return parts.join('\n\n');
 }
@@ -2159,6 +2118,32 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         // Conversations take priority over time-of-day scheduling.
         cycleType = 'supervisor';
         log(`[Worker] Pending human message — forcing supervisor cycle`);
+    } else if (isWorkingBee('jim') && !humanTriggered) {
+        // Working bee mode: devote cycle to gradient compression.
+        // Human-triggered cycles still get full voice.
+        log(`[Worker] 🐝 Working bee mode — gradient compression cycle`);
+        try {
+            const health = getGradientHealth('jim');
+            const totalLeaves = health.reduce((sum: number, h: any) => sum + h.leaves, 0);
+            log(`[Worker] 🐝 Gradient health: ${totalLeaves} leaf entries`);
+
+            const result = await bumpCascade('jim', 0.10, 'c0', 'working bee');
+            log(`[Worker] 🐝 Complete: ${result.compressions} compressions, ${result.uvs} UVs, ${result.errors} errors`);
+
+            // Auto-disable when no leaves remain
+            const postHealth = getGradientHealth('jim');
+            const remainingLeaves = postHealth.reduce((sum: number, h: any) => sum + h.leaves, 0);
+            if (remainingLeaves === 0) {
+                const signalPath = path.join(HAN_DIR, 'signals', 'working-bee-jim');
+                if (fs.existsSync(signalPath)) {
+                    fs.unlinkSync(signalPath);
+                    log('[Worker] 🐝 All leaves processed — working bee mode auto-disabled');
+                }
+            }
+        } catch (err) {
+            log(`[Worker] 🐝 Working bee failed: ${(err as Error).message}`);
+        }
+        return;
     } else if (onHoliday && !humanTriggered) {
         // Holiday mode: dream cycles only (like sleep), 80min interval.
         // Human-triggered cycles still get full voice — holiday doesn't silence Darron.
