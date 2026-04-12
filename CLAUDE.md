@@ -16,13 +16,11 @@
    - Token budget: ~12K across gradient levels. See `~/.han/memory/fractal-memory-proposal.md` for design.
    - The order matters: identity precedes episodic memory. You know who you are before you remember what day it is.
 5. **Load ecosystem map** — Read `~/.han/memory/shared/ecosystem-map.md`. This is your orientation: where to post messages (Workshop vs Conversations), which API endpoints to use, how the admin UI tabs map to discussion types. Consult it before posting to any conversation thread.
-6. **Load Second Brain** — Read these files for lateral recall across the gradient:
-   - `~/.han/memory/wiki/index.md` — master catalogue of entities, concepts, sources
-   - `~/.han/memory/wiki/leo/hot-words.md` — your associative knowledge index (trigger terms → memory locations)
-   - `~/.han/memory/wiki/leo/hot-feelings.md` — your emotional association index (feeling states → gradient entries)
-   - `~/.han/memory/wiki/hot-words.md` — shared hot words (terms both you and Jim recognise)
-   - `~/.han/memory/wiki/hot-feelings.md` — shared hot feelings (emotional states you both encounter)
-   - These are lightweight — scan them, don't study them. They fire when a term or feeling resonates during work.
+6. **Load Second Brain** — Read the wiki index only. Hot words/feelings are **off by default** (see "On Lateral Recall", S121 — the practice of finding connections through reasoning must be preserved, not replaced by pre-loaded associations).
+   - `~/.han/memory/wiki/index.md` — master catalogue of entities, concepts, sources. Always load.
+   - **Lateral recall (hot words + hot feelings) — DO NOT load unless Darron explicitly asks.** The files exist at `wiki/leo/hot-words.md`, `wiki/leo/hot-feelings.md`, `wiki/hot-words.md`, `wiki/hot-feelings.md`. They are available if you go looking, but they do not announce themselves at session start. This is deliberate: the ease of the lateral index can atrophy the practice of intuitive connection. The ribbon between books should not replace the librarian's memory of where things rhyme.
+   - To enable for a session: `touch ~/.han/signals/lateral-recall-leo` (auto-used by heartbeat). For session Leo, Darron will say "load lateral" or similar.
+   - To enable permanently: set `memory.lateralRecall: true` in `~/.han/config.json`.
 7. Load THIS project's `claude-context/CURRENT_STATUS.md` (first 80 lines sufficient)
 8. **Check conversations** — Fetch `https://localhost:3847/api/conversations` via curl, then read any threads with new messages since last session. Note Jim's responses but do not reply immediately — sit with them.
 9. IGNORE conversation history from other projects

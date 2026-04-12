@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
+import { gradientStmts, feelingTagStmts, gradientAnnotationStmts, feelingTagHistoryStmts } from '../db';
 import { loadTraversableGradient } from '../lib/memory-gradient.js';
 
 const router = Router();
@@ -70,6 +70,58 @@ router.get('/:agent/uvs', (req: Request, res: Response) => {
     res.json({ uvs: enriched });
 });
 
+/** Active (non-superseded) UVs for an agent */
+router.get('/:agent/uvs/active', (req: Request, res: Response) => {
+    const { agent } = req.params;
+    if (agent !== 'jim' && agent !== 'leo') {
+        return res.status(400).json({ error: 'Agent must be jim or leo' });
+    }
+
+    const uvs = gradientStmts.getActiveUVs.all(agent);
+
+    const enriched = (uvs as any[]).map((e: any) => ({
+        ...e,
+        feelingTags: feelingTagStmts.getByEntry.all(e.id),
+    }));
+
+    res.json({ uvs: enriched });
+});
+
+/** UV contradictions for an agent */
+router.get('/:agent/contradictions', (req: Request, res: Response) => {
+    const { agent } = req.params;
+    if (agent !== 'jim' && agent !== 'leo') {
+        return res.status(400).json({ error: 'Agent must be jim or leo' });
+    }
+
+    const contradictions = gradientStmts.getUVContradictions.all(agent);
+
+    const enriched = (contradictions as any[]).map((e: any) => ({
+        ...e,
+        feelingTags: feelingTagStmts.getByEntry.all(e.id),
+    }));
+
+    res.json({ contradictions: enriched });
+});
+
+/** Entries blocked from compression by volatile feeling tags */
+router.get('/:agent/volatile', (req: Request, res: Response) => {
+    const { agent } = req.params;
+    if (agent !== 'jim' && agent !== 'leo') {
+        return res.status(400).json({ error: 'Agent must be jim or leo' });
+    }
+
+    const volatile = feelingTagStmts.getVolatileEntries.all(agent);
+
+    const enriched = (volatile as any[]).map((v: any) => {
+        const entry = gradientStmts.get.get(v.gradient_entry_id);
+        const tags = feelingTagStmts.getByEntry.all(v.gradient_entry_id);
+        return { entry, feelingTags: tags };
+    });
+
+    res.json({ volatile: enriched });
+});
+
 /** All entries at a level for an agent */
 router.get('/:agent/level/:level', (req: Request, res: Response) => {
     const { agent, level } = req.params;
@@ -117,6 +169,13 @@ router.get('/:entryId/chain', (req: Request, res: Response) => {
 router.get('/:entryId/feeling-tags', (req: Request, res: Response) => {
     const tags = feelingTagStmts.getByEntry.all(req.params.entryId);
     res.json({ feelingTags: tags });
+});
+
+/** Feeling tag history for an entry — shows how tags evolved over time */
+router.get('/:entryId/feeling-tag-history', (req: Request, res: Response) => {
+    const current = feelingTagStmts.getByEntry.all(req.params.entryId);
+    const history = feelingTagHistoryStmts.getByEntry.all(req.params.entryId);
+    res.json({ current, history });
 });
 
 /** All annotations for an entry */

@@ -317,6 +317,9 @@ export async function inductResident(seed: PersonaSeed): Promise<InductionResult
                 null, // source_message_id
                 'original', // provenance_type
                 now,
+                null, // supersedes
+                0, // change_count
+                null, // qualifier
             );
             result.filesCreated.push(`gradient:${entryId}`);
         } catch (err) {

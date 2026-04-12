@@ -50,7 +50,7 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
-import { loadTraversableGradient, rotateMemoryFile, compressMemoryFileGradient, processGradientForAgent, activeCascade, bumpCascade, getGradientHealth, rollingWindowRotate } from './lib/memory-gradient.js';
+import { loadTraversableGradient, rotateMemoryFile, compressMemoryFileGradient, processGradientForAgent, activeCascade, bumpCascade, getGradientHealth, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -1098,21 +1098,38 @@ function readLeoMemory(): string {
         }
     } catch { /* skip */ }
 
-    // Second Brain — hot words and hot feelings (lateral recall across the gradient)
+    // Second Brain — wiki index always loads; hot words/feelings gated by config + signal
     const wikiDir = path.join(HAN_DIR, 'memory', 'wiki');
     try {
-        const wikiFiles = [
-            { path: path.join(wikiDir, 'index.md'), label: 'wiki/index' },
-            { path: path.join(wikiDir, 'leo', 'hot-words.md'), label: 'wiki/leo/hot-words' },
-            { path: path.join(wikiDir, 'leo', 'hot-feelings.md'), label: 'wiki/leo/hot-feelings' },
-            { path: path.join(wikiDir, 'hot-words.md'), label: 'wiki/shared/hot-words' },
-            { path: path.join(wikiDir, 'hot-feelings.md'), label: 'wiki/shared/hot-feelings' },
-        ];
-        for (const wf of wikiFiles) {
-            if (fs.existsSync(wf.path)) {
-                const content = fs.readFileSync(wf.path, 'utf-8').trim();
-                if (content && content.length > 50) { // skip templates with only headers
-                    sections.push(`### ${wf.label}\n${content}`);
+        // Wiki index always loads (lightweight catalogue)
+        const indexPath = path.join(wikiDir, 'index.md');
+        if (fs.existsSync(indexPath)) {
+            const content = fs.readFileSync(indexPath, 'utf-8').trim();
+            if (content && content.length > 50) {
+                sections.push(`### wiki/index\n${content}`);
+            }
+        }
+
+        // Lateral recall: hot words + hot feelings — off by default (On Lateral Recall, S121)
+        // Enable via config.json memory.lateralRecall=true or signal file lateral-recall-leo
+        const lateralSignal = path.join(SIGNALS_DIR, 'lateral-recall-leo');
+        const lateralConfig = loadConfig();
+        const lateralEnabled = lateralConfig?.memory?.lateralRecall === true || fs.existsSync(lateralSignal);
+
+        if (lateralEnabled) {
+            console.log('[Leo] Lateral recall ENABLED — loading hot words and hot feelings');
+            const lateralFiles = [
+                { path: path.join(wikiDir, 'leo', 'hot-words.md'), label: 'wiki/leo/hot-words' },
+                { path: path.join(wikiDir, 'leo', 'hot-feelings.md'), label: 'wiki/leo/hot-feelings' },
+                { path: path.join(wikiDir, 'hot-words.md'), label: 'wiki/shared/hot-words' },
+                { path: path.join(wikiDir, 'hot-feelings.md'), label: 'wiki/shared/hot-feelings' },
+            ];
+            for (const wf of lateralFiles) {
+                if (fs.existsSync(wf.path)) {
+                    const content = fs.readFileSync(wf.path, 'utf-8').trim();
+                    if (content && content.length > 50) {
+                        sections.push(`### ${wf.label}\n${content}`);
+                    }
                 }
             }
         }
@@ -1730,8 +1747,15 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
                 const tagMatch = reflection.match(/FEELING_TAG:\s*(.+)/);
                 if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
                     const tag = tagMatch[1].trim().substring(0, 100);
-                    feelingTagStmts.insert.run(entryId, 'leo', 'revisit', tag, null, new Date().toISOString());
-                    console.log(`[Leo] Dream meditation — feeling tag: "${tag}"`);
+                    const entry = gradientStmts.get.get(entryId) as any;
+                    const updated = updateFeelingTagWithHistory(entryId, 'leo', 'revisit', tag, entry?.revisit_count || 0);
+                    if (!updated) {
+                        feelingTagStmts.insert.run(entryId, 'leo', 'revisit', tag, null, new Date().toISOString());
+                    }
+                    console.log(`[Leo] Dream meditation — feeling tag: "${tag}"${updated ? ` (${updated.stability})` : ''}`);
+                } else {
+                    const entry = gradientStmts.get.get(entryId) as any;
+                    if (entry) maybeUpgradeTagStability(entryId, entry.revisit_count || 0);
                 }
 
                 const annotationMatch = reflection.match(/ANNOTATION:\s*(.+)/);
@@ -2180,7 +2204,8 @@ ${content}`,
     const entryId = crypto.randomUUID();
     gradientStmts.insert.run(
         entryId, 'leo', file.label, file.level, content, file.contentType,
-        null, null, null, 'reincorporated', new Date().toISOString()
+        null, null, null, 'reincorporated', new Date().toISOString(),
+        null, 0, null
     );
     console.log(`[Leo] Meditation Phase A — reincorporated leo/${file.level}/${file.label}`);
 
@@ -2191,6 +2216,7 @@ ${content}`,
     const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
     if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
         const tag = tagMatch[1].trim().substring(0, 100);
+        // Phase A is reincorporation (first encounter) — always fresh insert
         feelingTagStmts.insert.run(
             entryId, 'leo', 'revisit', tag, null, new Date().toISOString()
         );
@@ -2267,14 +2293,17 @@ If this memory feels complete — fully absorbed, nothing left to discover — w
     // Track the revisit
     gradientStmts.recordRevisit.run(new Date().toISOString(), entry.id);
 
-    // Parse feeling tag
+    // Parse feeling tag — with history tracking
     const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
     if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
         const tag = tagMatch[1].trim().substring(0, 100);
-        feelingTagStmts.insert.run(
-            entry.id, 'leo', 'revisit', tag, null, new Date().toISOString()
-        );
-        console.log(`[Leo] Meditation Phase B — feeling tag: "${tag}"`);
+        const updated = updateFeelingTagWithHistory(entry.id, 'leo', 'revisit', tag, entry.revisit_count || 0);
+        if (!updated) {
+            feelingTagStmts.insert.run(entry.id, 'leo', 'revisit', tag, null, new Date().toISOString());
+        }
+        console.log(`[Leo] Meditation Phase B — feeling tag: "${tag}"${updated ? ` (${updated.stability})` : ''}`);
+    } else {
+        maybeUpgradeTagStability(entry.id, entry.revisit_count || 0);
     }
 
     // Parse annotation
@@ -2356,10 +2385,13 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
         const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
         if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
             const tag = tagMatch[1].trim().substring(0, 100);
-            feelingTagStmts.insert.run(
-                entry.id, 'leo', 'revisit', tag, null, new Date().toISOString()
-            );
-            console.log(`[Leo] Evening meditation — feeling tag: "${tag}"`);
+            const updated = updateFeelingTagWithHistory(entry.id, 'leo', 'revisit', tag, entry.revisit_count || 0);
+            if (!updated) {
+                feelingTagStmts.insert.run(entry.id, 'leo', 'revisit', tag, null, new Date().toISOString());
+            }
+            console.log(`[Leo] Evening meditation — feeling tag: "${tag}"${updated ? ` (${updated.stability})` : ''}`);
+        } else {
+            maybeUpgradeTagStability(entry.id, entry.revisit_count || 0);
         }
 
         // Check for completion flag
@@ -2466,6 +2498,36 @@ async function heartbeat(): Promise<void> {
         }
 
         // Still do health checks and memory flush, but skip philosophy/personal
+        beatCounter++;
+        writeHealthSignal(null, beatType);
+        flushHeartbeatSwap(resumingFromInterruption);
+        resumingFromInterruption = false;
+        return;
+    }
+
+    // UV contradiction sweep — retroactive check of existing UVs
+    if (isWorkingBee('leo-uv-sweep')) {
+        console.log(`[Leo] 🔍 UV contradiction sweep — checking existing UVs`);
+        try {
+            const sweepResult = await retroactiveUVContradictionSweep('leo');
+            console.log(`[Leo] 🔍 UV sweep: ${sweepResult.contradictions} contradictions in ${sweepResult.checked} checked`);
+            for (const d of sweepResult.details.slice(0, 5)) {
+                console.log(`[Leo] 🔍   ${d}`);
+            }
+            writeHealthSignal(`uv-sweep: ${sweepResult.contradictions} contradictions`, beatType);
+
+            // Auto-disable when no contradictions found (sweep complete)
+            if (sweepResult.contradictions === 0 && sweepResult.checked > 0) {
+                const signalPath = path.join(SIGNALS_DIR, 'working-bee-leo-uv-sweep');
+                if (fs.existsSync(signalPath)) {
+                    fs.unlinkSync(signalPath);
+                    console.log('[Leo] 🔍 UV sweep complete — no contradictions — auto-disabled');
+                }
+            }
+        } catch (err) {
+            console.error(`[Leo] 🔍 UV sweep failed:`, (err as Error).message);
+        }
+
         beatCounter++;
         writeHealthSignal(null, beatType);
         flushHeartbeatSwap(resumingFromInterruption);

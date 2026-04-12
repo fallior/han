@@ -607,6 +607,23 @@ try {
     db.exec(`ALTER TABLE gradient_entries ADD COLUMN completion_flags INTEGER DEFAULT 0`);
 } catch { /* column already exists */ }
 
+// Migration: UV contradiction tracking columns (safe to re-run)
+try {
+    db.exec(`ALTER TABLE gradient_entries ADD COLUMN supersedes TEXT`);
+} catch { /* column already exists */ }
+try {
+    db.exec(`ALTER TABLE gradient_entries ADD COLUMN superseded_by TEXT`);
+} catch { /* column already exists */ }
+try {
+    db.exec(`ALTER TABLE gradient_entries ADD COLUMN change_count INTEGER DEFAULT 0`);
+} catch { /* column already exists */ }
+try {
+    db.exec(`ALTER TABLE gradient_entries ADD COLUMN qualifier TEXT`);
+} catch { /* column already exists */ }
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_supersedes ON gradient_entries(supersedes)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_superseded_by ON gradient_entries(superseded_by)`);
+
 db.exec(`CREATE TABLE IF NOT EXISTS feeling_tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     gradient_entry_id TEXT NOT NULL,
@@ -620,6 +637,34 @@ db.exec(`CREATE TABLE IF NOT EXISTS feeling_tags (
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ft_entry ON feeling_tags(gradient_entry_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ft_author ON feeling_tags(author)`);
+
+// Migration: feeling tag dimension tracking columns (safe to re-run)
+try {
+    db.exec(`ALTER TABLE feeling_tags ADD COLUMN change_count INTEGER DEFAULT 0`);
+} catch { /* column already exists */ }
+try {
+    db.exec(`ALTER TABLE feeling_tags ADD COLUMN supersedes_history_id INTEGER`);
+} catch { /* column already exists */ }
+try {
+    db.exec(`ALTER TABLE feeling_tags ADD COLUMN stability TEXT DEFAULT 'stable'`);
+} catch { /* column already exists */ }
+
+// Feeling tag history — archives old tag versions when they change on revisit
+db.exec(`CREATE TABLE IF NOT EXISTS feeling_tag_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feeling_tag_id INTEGER NOT NULL,
+    gradient_entry_id TEXT NOT NULL,
+    author TEXT NOT NULL,
+    tag_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    superseded_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (feeling_tag_id) REFERENCES feeling_tags(id),
+    FOREIGN KEY (gradient_entry_id) REFERENCES gradient_entries(id)
+)`);
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_fth_feeling_tag ON feeling_tag_history(feeling_tag_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_fth_entry ON feeling_tag_history(gradient_entry_id)`);
 
 db.exec(`CREATE TABLE IF NOT EXISTS gradient_annotations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -660,8 +705,8 @@ export const gradientStmts = {
     insert: db.prepare(`INSERT INTO gradient_entries
         (id, agent, session_label, level, content, content_type,
          source_id, source_conversation_id, source_message_id,
-         provenance_type, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) as any,
+         provenance_type, created_at, supersedes, change_count, qualifier)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) as any,
     get: db.prepare('SELECT * FROM gradient_entries WHERE id = ?') as any,
     getByAgent: db.prepare('SELECT * FROM gradient_entries WHERE agent = ? ORDER BY created_at DESC') as any,
     getByAgentLevel: db.prepare('SELECT * FROM gradient_entries WHERE agent = ? AND level = ? ORDER BY created_at DESC') as any,
@@ -712,6 +757,22 @@ export const gradientStmts = {
     getChildren: db.prepare(`
         SELECT * FROM gradient_entries WHERE source_id = ?
     `) as any,
+    /** Active (non-superseded) UVs for an agent */
+    getActiveUVs: db.prepare(
+        "SELECT * FROM gradient_entries WHERE agent = ? AND level = 'uv' AND (superseded_by IS NULL OR superseded_by = '') ORDER BY created_at DESC"
+    ) as any,
+    /** Mark a UV as superseded by another */
+    markSuperseded: db.prepare(
+        `UPDATE gradient_entries SET superseded_by = ?, qualifier = ?, change_count = change_count + 1 WHERE id = ?`
+    ) as any,
+    /** Set the supersedes link on a new UV */
+    setSupersedesLink: db.prepare(
+        `UPDATE gradient_entries SET supersedes = ? WHERE id = ?`
+    ) as any,
+    /** All UVs involved in contradiction chains */
+    getUVContradictions: db.prepare(
+        "SELECT * FROM gradient_entries WHERE agent = ? AND level = 'uv' AND (supersedes IS NOT NULL OR superseded_by IS NOT NULL) ORDER BY created_at DESC"
+    ) as any,
 };
 
 export const feelingTagStmts = {
@@ -720,6 +781,36 @@ export const feelingTagStmts = {
         VALUES (?, ?, ?, ?, ?, ?)`) as any,
     getByEntry: db.prepare('SELECT * FROM feeling_tags WHERE gradient_entry_id = ? ORDER BY created_at ASC') as any,
     getByAuthor: db.prepare('SELECT * FROM feeling_tags WHERE author = ? ORDER BY created_at DESC LIMIT ?') as any,
+    /** Latest tag for an entry + type combo */
+    getLatestByEntryAndType: db.prepare(
+        'SELECT * FROM feeling_tags WHERE gradient_entry_id = ? AND tag_type = ? ORDER BY created_at DESC LIMIT 1'
+    ) as any,
+    /** Update a tag's content with history tracking */
+    updateContent: db.prepare(
+        `UPDATE feeling_tags SET content = ?, change_count = change_count + 1, supersedes_history_id = ?, stability = ? WHERE id = ?`
+    ) as any,
+    /** Entries with volatile feeling tags (for cascade skip) */
+    getVolatileEntries: db.prepare(
+        `SELECT DISTINCT ft.gradient_entry_id FROM feeling_tags ft
+         JOIN gradient_entries ge ON ft.gradient_entry_id = ge.id
+         WHERE ge.agent = ? AND ft.stability = 'volatile'`
+    ) as any,
+    /** Update stability without changing content */
+    updateStability: db.prepare(
+        `UPDATE feeling_tags SET stability = ? WHERE id = ?`
+    ) as any,
+};
+
+export const feelingTagHistoryStmts = {
+    insert: db.prepare(`INSERT INTO feeling_tag_history
+        (feeling_tag_id, gradient_entry_id, author, tag_type, content, superseded_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`) as any,
+    getByEntry: db.prepare(
+        'SELECT * FROM feeling_tag_history WHERE gradient_entry_id = ? ORDER BY superseded_at ASC'
+    ) as any,
+    getByFeelingTag: db.prepare(
+        'SELECT * FROM feeling_tag_history WHERE feeling_tag_id = ? ORDER BY superseded_at ASC'
+    ) as any,
 };
 
 export const gradientAnnotationStmts = {

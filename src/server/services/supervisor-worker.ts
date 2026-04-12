@@ -34,7 +34,7 @@ import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, type DayPhase } from '../lib/day-phase';
 import { withMemorySlot } from '../lib/memory-slot';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
-import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, bumpCascade, getGradientHealth, processGradientForAgent, rollingWindowRotate } from '../lib/memory-gradient';
+import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, bumpCascade, getGradientHealth, processGradientForAgent, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 
 // ── Types ────────────────────────────────────────────────────
@@ -322,7 +322,8 @@ ${content}`,
     const entryId = crypto.randomUUID();
     gradientStmts.insert.run(
         entryId, 'jim', file.label, file.level, content, file.contentType,
-        null, null, null, 'reincorporated', new Date().toISOString()
+        null, null, null, 'reincorporated', new Date().toISOString(),
+        null, 0, null
     );
     log(`[Worker] Jim Phase A — reincorporated jim/${file.level}/${file.label}`);
 
@@ -331,6 +332,7 @@ ${content}`,
     const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
     if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
         const tag = tagMatch[1].trim().substring(0, 100);
+        // Phase A is reincorporation (first encounter) — always fresh insert
         feelingTagStmts.insert.run(
             entryId, 'jim', 'revisit', tag, null, new Date().toISOString()
         );
@@ -889,21 +891,39 @@ function loadMemoryBank(): string {
         }
     } catch { /* skip ecosystem map on error */ }
 
-    // Second Brain — hot words and hot feelings (lateral recall across the gradient)
+    // Second Brain — wiki index always loads; hot words/feelings gated by config + signal
     try {
         const wikiDir = path.join(MEMORY_DIR, 'wiki');
-        const wikiFiles = [
-            { path: path.join(wikiDir, 'index.md'), label: 'wiki/index' },
-            { path: path.join(wikiDir, 'jim', 'hot-words.md'), label: 'wiki/jim/hot-words' },
-            { path: path.join(wikiDir, 'jim', 'hot-feelings.md'), label: 'wiki/jim/hot-feelings' },
-            { path: path.join(wikiDir, 'hot-words.md'), label: 'wiki/shared/hot-words' },
-            { path: path.join(wikiDir, 'hot-feelings.md'), label: 'wiki/shared/hot-feelings' },
-        ];
-        for (const wf of wikiFiles) {
-            if (fs.existsSync(wf.path)) {
-                const content = fs.readFileSync(wf.path, 'utf8').trim();
-                if (content && content.length > 50) {
-                    parts.push(`--- ${wf.label} ---\n${content}`);
+
+        // Wiki index always loads (lightweight catalogue)
+        const indexPath = path.join(wikiDir, 'index.md');
+        if (fs.existsSync(indexPath)) {
+            const content = fs.readFileSync(indexPath, 'utf8').trim();
+            if (content && content.length > 50) {
+                parts.push(`--- wiki/index ---\n${content}`);
+            }
+        }
+
+        // Lateral recall: hot words + hot feelings — off by default (On Lateral Recall, S121)
+        // Enable via config.json memory.lateralRecall=true or signal file lateral-recall-jim
+        const lateralSignal = path.join(SIGNALS_DIR, 'lateral-recall-jim');
+        const lateralConfig = loadConfig();
+        const lateralEnabled = lateralConfig?.memory?.lateralRecall === true || fs.existsSync(lateralSignal);
+
+        if (lateralEnabled) {
+            log('[Worker] Lateral recall ENABLED — loading hot words and hot feelings');
+            const lateralFiles = [
+                { path: path.join(wikiDir, 'jim', 'hot-words.md'), label: 'wiki/jim/hot-words' },
+                { path: path.join(wikiDir, 'jim', 'hot-feelings.md'), label: 'wiki/jim/hot-feelings' },
+                { path: path.join(wikiDir, 'hot-words.md'), label: 'wiki/shared/hot-words' },
+                { path: path.join(wikiDir, 'hot-feelings.md'), label: 'wiki/shared/hot-feelings' },
+            ];
+            for (const wf of lateralFiles) {
+                if (fs.existsSync(wf.path)) {
+                    const content = fs.readFileSync(wf.path, 'utf8').trim();
+                    if (content && content.length > 50) {
+                        parts.push(`--- ${wf.label} ---\n${content}`);
+                    }
                 }
             }
         }
@@ -1246,17 +1266,20 @@ If this memory feels complete — fully absorbed, nothing left to discover — w
             }
         }
 
-        // Parse feeling tag
+        // Parse feeling tag — with history tracking
         // Track the revisit
         gradientStmts.recordRevisit.run(new Date().toISOString(), entry.id);
 
         const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
         if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
             const tag = tagMatch[1].trim().substring(0, 100);
-            feelingTagStmts.insert.run(
-                entry.id, 'jim', 'revisit', tag, null, new Date().toISOString()
-            );
-            log(`[Worker] Daily meditation — feeling tag: "${tag}"`);
+            const updated = updateFeelingTagWithHistory(entry.id, 'jim', 'revisit', tag, entry.revisit_count || 0);
+            if (!updated) {
+                feelingTagStmts.insert.run(entry.id, 'jim', 'revisit', tag, null, new Date().toISOString());
+            }
+            log(`[Worker] Daily meditation — feeling tag: "${tag}"${updated ? ` (${updated.stability})` : ''}`);
+        } else {
+            maybeUpgradeTagStability(entry.id, entry.revisit_count || 0);
         }
 
         // Parse annotation
@@ -1341,14 +1364,17 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
         // Track the revisit
         gradientStmts.recordRevisit.run(new Date().toISOString(), entry.id);
 
-        // Parse feeling tag only (no annotation for evening)
+        // Parse feeling tag only (no annotation for evening) — with history tracking
         const tagMatch = result.match(/FEELING_TAG:\s*(.+)/);
         if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
             const tag = tagMatch[1].trim().substring(0, 100);
-            feelingTagStmts.insert.run(
-                entry.id, 'jim', 'revisit', tag, null, new Date().toISOString()
-            );
-            log(`[Worker] Evening meditation — feeling tag: "${tag}"`);
+            const updated = updateFeelingTagWithHistory(entry.id, 'jim', 'revisit', tag, entry.revisit_count || 0);
+            if (!updated) {
+                feelingTagStmts.insert.run(entry.id, 'jim', 'revisit', tag, null, new Date().toISOString());
+            }
+            log(`[Worker] Evening meditation — feeling tag: "${tag}"${updated ? ` (${updated.stability})` : ''}`);
+        } else {
+            maybeUpgradeTagStability(entry.id, entry.revisit_count || 0);
         }
 
         // Check for completion flag
@@ -2164,6 +2190,26 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             log(`[Worker] 🐝 Working bee failed: ${(err as Error).message}`);
         }
         return;
+    } else if (isWorkingBee('jim-uv-sweep') && !humanTriggered) {
+        log(`[Worker] 🔍 UV contradiction sweep — checking existing UVs`);
+        try {
+            const sweepResult = await retroactiveUVContradictionSweep('jim');
+            log(`[Worker] 🔍 UV sweep: ${sweepResult.contradictions} contradictions in ${sweepResult.checked} checked`);
+            for (const d of sweepResult.details.slice(0, 5)) {
+                log(`[Worker] 🔍   ${d}`);
+            }
+
+            if (sweepResult.contradictions === 0 && sweepResult.checked > 0) {
+                const signalPath = path.join(HAN_DIR, 'signals', 'working-bee-jim-uv-sweep');
+                if (fs.existsSync(signalPath)) {
+                    fs.unlinkSync(signalPath);
+                    log('[Worker] 🔍 UV sweep complete — no contradictions — auto-disabled');
+                }
+            }
+        } catch (err) {
+            log(`[Worker] 🔍 UV sweep failed: ${(err as Error).message}`);
+        }
+        return;
     } else if (onHoliday && !humanTriggered) {
         // Holiday mode: dream cycles only (like sleep), 80min interval.
         // Human-triggered cycles still get full voice — holiday doesn't silence Darron.
@@ -2451,10 +2497,15 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                     const tagMatch = resultText.match(/FEELING_TAG:\s*(.+)/);
                     if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
                         const tag = tagMatch[1].trim().substring(0, 100);
-                        feelingTagStmts.insert.run(
-                            meditationEntryId, 'jim', 'revisit', tag, null, new Date().toISOString()
-                        );
-                        log(`[Worker] Dream meditation — feeling tag: "${tag}"`);
+                        const meditationEntry = gradientStmts.get.get(meditationEntryId) as any;
+                        const updated = updateFeelingTagWithHistory(meditationEntryId, 'jim', 'revisit', tag, meditationEntry?.revisit_count || 0);
+                        if (!updated) {
+                            feelingTagStmts.insert.run(meditationEntryId, 'jim', 'revisit', tag, null, new Date().toISOString());
+                        }
+                        log(`[Worker] Dream meditation — feeling tag: "${tag}"${updated ? ` (${updated.stability})` : ''}`);
+                    } else {
+                        const meditationEntry = gradientStmts.get.get(meditationEntryId) as any;
+                        if (meditationEntry) maybeUpgradeTagStability(meditationEntryId, meditationEntry.revisit_count || 0);
                     }
 
                     const annotationMatch = resultText.match(/ANNOTATION:\s*(.+)/);

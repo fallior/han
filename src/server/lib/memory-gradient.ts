@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
-import { gradientStmts, feelingTagStmts } from '../db';
+import { gradientStmts, feelingTagStmts, feelingTagHistoryStmts } from '../db';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -192,11 +192,15 @@ function insertGradientEntry(
     contentType: string,
     sourceId: string | null,
     feelingTag: string | null,
+    supersedes: string | null = null,
+    changeCount: number = 0,
+    qualifier: string | null = null,
 ): void {
     try {
         gradientStmts.insert.run(
             id, agent, sessionLabel, level, content, contentType,
-            sourceId, null, null, 'original', new Date().toISOString()
+            sourceId, null, null, 'original', new Date().toISOString(),
+            supersedes, changeCount, qualifier
         );
         if (feelingTag) {
             feelingTagStmts.insert.run(
@@ -208,7 +212,7 @@ function insertGradientEntry(
     }
 }
 
-/** Write a unit vector entry to both DB and filesystem */
+/** Write a unit vector entry to both DB and filesystem. Returns the entry ID. */
 function writeUVEntry(
     agent: 'jim' | 'leo',
     sessionLabel: string,
@@ -216,7 +220,7 @@ function writeUVEntry(
     contentType: string,
     sourceId: string | null,
     feelingTag: string | null,
-): void {
+): string {
     const uvText = uvContent.trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
     const entryId = generateGradientId();
     insertGradientEntry(entryId, agent, sessionLabel, 'uv', uvText, contentType, sourceId, feelingTag);
@@ -226,6 +230,237 @@ function writeUVEntry(
     const uvPath = path.join(homeDir, '.han', 'memory', 'fractal', agent, 'unit-vectors.md');
     const uvLine = `- **${sessionLabel}**: "${uvText.replace(/"/g, "'")}"\n`;
     fs.appendFileSync(uvPath, uvLine);
+
+    return entryId;
+}
+
+// ── Feeling Tag Dimension Tracking ────────────────────────────
+
+/**
+ * Update a feeling tag with history tracking.
+ * Archives the old content to feeling_tag_history, updates the live tag,
+ * and sets stability to 'volatile'.
+ * Returns null if no existing tag found or content hasn't changed.
+ */
+export function updateFeelingTagWithHistory(
+    entryId: string,
+    author: string,
+    tagType: 'compression' | 'revisit',
+    newContent: string,
+    revisitCount: number = 0,
+): { historyId: number; stability: string } | null {
+    const existing = feelingTagStmts.getLatestByEntryAndType.get(entryId, tagType) as any;
+
+    if (!existing) return null;  // No existing tag — caller should insert fresh
+
+    // Content unchanged — no update needed
+    if (existing.content.trim() === newContent.trim()) return null;
+
+    // Archive old content to history
+    const now = new Date().toISOString();
+    const historyResult = feelingTagHistoryStmts.insert.run(
+        existing.id, entryId, existing.author, existing.tag_type,
+        existing.content, now, existing.created_at
+    );
+    const historyId = Number(historyResult.lastInsertRowid);
+
+    // Update the live tag — always volatile at change time
+    const stability = 'volatile';
+    feelingTagStmts.updateContent.run(newContent, historyId, stability, existing.id);
+
+    console.log(`[Gradient] Feeling tag updated: "${existing.content}" → "${newContent}" (${stability}, change #${(existing.change_count || 0) + 1})`);
+
+    return { historyId, stability };
+}
+
+/**
+ * Check and upgrade tag stability on revisit when the tag DIDN'T change.
+ * volatile → settling after 3 unchanged revisits
+ * settling → stable after 6 unchanged revisits
+ */
+export function maybeUpgradeTagStability(entryId: string, revisitCount: number): void {
+    const tags = feelingTagStmts.getByEntry.all(entryId) as any[];
+    for (const tag of tags) {
+        if (!tag.stability || tag.stability === 'stable') continue;
+
+        const changeCount = tag.change_count || 0;
+        // revisitCount - changeCount approximates how many revisits since last change
+        const revisitsSinceChange = revisitCount - changeCount;
+
+        if (tag.stability === 'volatile' && revisitsSinceChange >= 3) {
+            feelingTagStmts.updateStability.run('settling', tag.id);
+        } else if (tag.stability === 'settling' && revisitsSinceChange >= 6) {
+            feelingTagStmts.updateStability.run('stable', tag.id);
+        }
+    }
+}
+
+// ── UV Contradiction Checking ─────────────────────────────────
+
+/**
+ * Check a newly created UV against existing active UVs for contradictions.
+ * Uses Haiku for cost-efficient semantic comparison.
+ */
+async function checkUVContradiction(
+    agent: 'jim' | 'leo',
+    newUvId: string,
+    newUvContent: string,
+): Promise<{ contradicted: boolean; supersededId?: string }> {
+    const existingUVs = (gradientStmts.getActiveUVs.all(agent) as any[])
+        .filter((uv: any) => uv.id !== newUvId);
+
+    if (existingUVs.length === 0) return { contradicted: false };
+
+    // Build comparison list (limit to 50 most recent to keep prompt manageable)
+    const candidates = existingUVs.slice(0, 50);
+    const uvList = candidates.map((uv: any, i: number) =>
+        `${i + 1}. [${uv.id}] "${uv.content}"`
+    ).join('\n');
+
+    const prompt = `You are checking whether a new unit vector contradicts any existing ones.
+
+New UV: "${newUvContent}"
+
+Existing UVs:
+${uvList}
+
+A contradiction means the new UV makes an old one no longer true — not merely different or complementary, but actually superseded. Growth beyond a previous position counts as contradiction.
+
+Respond with ONLY valid JSON, no markdown fences:
+If contradicted: {"contradicted": true, "superseded_id": "<id of contradicted UV>", "reason": "<brief explanation>"}
+If none contradicted: {"contradicted": false}`;
+
+    try {
+        const cleanEnv: Record<string, string | undefined> = { ...process.env };
+        delete cleanEnv.CLAUDECODE;
+
+        const q = agentQuery({
+            prompt,
+            options: {
+                model: 'claude-haiku-4-5-20251001',
+                maxTurns: 1,
+                cwd: process.env.HOME || '/root',
+                permissionMode: 'bypassPermissions',
+                allowDangerouslySkipPermissions: true,
+                env: cleanEnv,
+                persistSession: false,
+                tools: [],
+            },
+        });
+
+        let result = '';
+        for await (const message of q) {
+            if (message.type === 'result' && message.subtype === 'success') {
+                result = message.result || '';
+            }
+        }
+
+        // Parse JSON — handle markdown fences if Haiku includes them
+        const jsonStr = result.replace(/```json\s*/g, '').replace(/```/g, '').trim();
+        const parsed = JSON.parse(jsonStr);
+
+        if (parsed.contradicted && parsed.superseded_id) {
+            // Verify the superseded_id actually exists in our candidates
+            const valid = candidates.some((uv: any) => uv.id === parsed.superseded_id);
+            if (valid) {
+                gradientStmts.markSuperseded.run(newUvId, 'was-true-when', parsed.superseded_id);
+                gradientStmts.setSupersedesLink.run(parsed.superseded_id, newUvId);
+                console.log(`[Gradient] UV contradiction: "${newUvContent}" supersedes [${parsed.superseded_id}] — ${parsed.reason}`);
+                return { contradicted: true, supersededId: parsed.superseded_id };
+            }
+        }
+    } catch (err) {
+        console.warn('[Gradient] UV contradiction check — parse/call failed:', (err as Error).message);
+    }
+
+    return { contradicted: false };
+}
+
+/**
+ * Retroactive UV contradiction sweep — processes active UVs in batches.
+ * For working bee mode.
+ */
+export async function retroactiveUVContradictionSweep(
+    agent: 'jim' | 'leo',
+): Promise<{ checked: number; contradictions: number; details: string[] }> {
+    const uvs = (gradientStmts.getActiveUVs.all(agent) as any[]);
+    const result = { checked: 0, contradictions: 0, details: [] as string[] };
+
+    if (uvs.length < 2) return result;
+
+    // Process in batches of 20
+    const batchSize = 20;
+    for (let i = 0; i < uvs.length; i += batchSize) {
+        const batch = uvs.slice(i, i + batchSize);
+        if (batch.length < 2) break;
+
+        const uvList = batch.map((uv: any, idx: number) =>
+            `${idx + 1}. [${uv.id}] "${uv.content}" (${uv.session_label})`
+        ).join('\n');
+
+        const prompt = `Review these unit vectors for internal contradictions. A contradiction means one UV has been superseded by another — not merely different, but the later one makes the earlier one no longer true.
+
+UVs (ordered by age, newest first):
+${uvList}
+
+For each contradiction found, output a JSON line:
+{"older_id": "<id>", "newer_id": "<id>", "reason": "<brief>"}
+
+If no contradictions: {"none": true}
+
+Respond with ONLY valid JSON lines, no markdown fences.`;
+
+        try {
+            const cleanEnv: Record<string, string | undefined> = { ...process.env };
+            delete cleanEnv.CLAUDECODE;
+
+            const q = agentQuery({
+                prompt,
+                options: {
+                    model: 'claude-haiku-4-5-20251001',
+                    maxTurns: 1,
+                    cwd: process.env.HOME || '/root',
+                    permissionMode: 'bypassPermissions',
+                    allowDangerouslySkipPermissions: true,
+                    env: cleanEnv,
+                    persistSession: false,
+                    tools: [],
+                },
+            });
+
+            let responseText = '';
+            for await (const message of q) {
+                if (message.type === 'result' && message.subtype === 'success') {
+                    responseText = message.result || '';
+                }
+            }
+
+            result.checked += batch.length;
+
+            // Parse each line as JSON
+            const lines = responseText.replace(/```json\s*/g, '').replace(/```/g, '').trim().split('\n');
+            for (const line of lines) {
+                try {
+                    const parsed = JSON.parse(line.trim());
+                    if (parsed.none) continue;
+                    if (parsed.older_id && parsed.newer_id) {
+                        const olderValid = batch.some((uv: any) => uv.id === parsed.older_id);
+                        const newerValid = batch.some((uv: any) => uv.id === parsed.newer_id);
+                        if (olderValid && newerValid) {
+                            gradientStmts.markSuperseded.run(parsed.newer_id, 'was-true-when', parsed.older_id);
+                            gradientStmts.setSupersedesLink.run(parsed.older_id, parsed.newer_id);
+                            result.contradictions++;
+                            result.details.push(`"${batch.find((u: any) => u.id === parsed.newer_id)?.content}" supersedes "${batch.find((u: any) => u.id === parsed.older_id)?.content}" — ${parsed.reason}`);
+                        }
+                    }
+                } catch { /* skip unparseable lines */ }
+            }
+        } catch (err) {
+            result.details.push(`ERROR batch ${i}: ${(err as Error).message}`);
+        }
+    }
+
+    return result;
 }
 
 // ── Function 1: compressToLevel ────────────────────────────────
@@ -609,6 +844,13 @@ export async function activeCascade(
 
     for (const seedEntry of selected) {
         try {
+            // Check feeling tag stability — volatile entries are still metabolising
+            const seedTags = feelingTagStmts.getByEntry.all(seedEntry.id) as any[];
+            if (seedTags.some((t: any) => t.stability === 'volatile')) {
+                console.log(`[Gradient] Skipping ${seedEntry.session_label} — volatile feeling tag`);
+                continue;
+            }
+
             // Follow the provenance chain to the deepest descendant
             let current = seedEntry;
             let chainDepth = 0;
@@ -650,7 +892,8 @@ export async function activeCascade(
             const incompressibleMatch = compressedContent.match(/^INCOMPRESSIBLE:\s*(.+)/s);
             if (incompressibleMatch) {
                 const uvContent = incompressibleMatch[1].trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
-                writeUVEntry(agent, seedEntry.session_label, uvContent, contentType, current.id, feelingTag);
+                const acUvId1 = writeUVEntry(agent, seedEntry.session_label, uvContent, contentType, current.id, feelingTag);
+                await checkUVContradiction(agent, acUvId1, uvContent);
                 compressionCount++;
                 console.log(`[Gradient] ${context}: ${agent} ${currentLevel}→UV (incompressible at ${next}) for ${seedEntry.session_label}`);
                 continue;
@@ -663,7 +906,8 @@ export async function activeCascade(
                     `${UV_PROMPT}\n\nSource: ${currentLevel}\nAgent: ${agent}\n\n${compressedContent}${FEELING_TAG_INSTRUCTION}`
                 );
                 const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
-                writeUVEntry(agent, seedEntry.session_label, uvContent.trim(), contentType, current.id, uvTag);
+                const acUvId2 = writeUVEntry(agent, seedEntry.session_label, uvContent.trim(), contentType, current.id, uvTag);
+                await checkUVContradiction(agent, acUvId2, uvContent.trim());
                 compressionCount++;
                 console.log(`[Gradient] ${context}: ${agent} ${currentLevel}→UV (ratio ${ratio.toFixed(2)}) for ${seedEntry.session_label}`);
                 continue;
@@ -750,6 +994,13 @@ export async function bumpCascade(
         const batch = leaves.slice(0, count);
 
         for (const entry of batch) {
+            // Check feeling tag stability — volatile entries are still metabolising
+            const entryTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+            if (entryTags.some((t: any) => t.stability === 'volatile')) {
+                result.details.push(`SKIP ${entry.level}/${entry.session_label} (volatile feeling tag — still metabolising)`);
+                continue;
+            }
+
             const next = nextLevel(entry.level);
             if (!next) continue;
 
@@ -777,7 +1028,8 @@ export async function bumpCascade(
                 const incompressibleMatch = compressed.match(/^INCOMPRESSIBLE:\s*(.+)/s);
                 if (incompressibleMatch) {
                     const uvContent = incompressibleMatch[1].trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
-                    writeUVEntry(agent, entry.session_label, uvContent, contentType, entry.id, feelingTag);
+                    const uvId = writeUVEntry(agent, entry.session_label, uvContent, contentType, entry.id, feelingTag);
+                    await checkUVContradiction(agent, uvId, uvContent);
                     result.uvs++;
                     result.details.push(`${entry.level}→UV (incompressible) ${entry.session_label}`);
                     totalProcessed++;
@@ -791,7 +1043,8 @@ export async function bumpCascade(
                         `${UV_PROMPT}\n\nSource: ${entry.level}\nAgent: ${agent}\n\n${compressed}${FEELING_TAG_INSTRUCTION}`
                     );
                     const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
-                    writeUVEntry(agent, entry.session_label, uvContent.trim(), contentType, entry.id, uvTag);
+                    const uvId2 = writeUVEntry(agent, entry.session_label, uvContent.trim(), contentType, entry.id, uvTag);
+                    await checkUVContradiction(agent, uvId2, uvContent.trim());
                     result.uvs++;
                     result.details.push(`${entry.level}→UV (ratio ${ratio.toFixed(2)}) ${entry.session_label}`);
                     totalProcessed++;
@@ -1498,17 +1751,33 @@ export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
 
     const sections: string[] = [];
 
-    // Unit vectors first (always loaded in full) — distinguish aphorisms from cascade UVs
-    if (uvs.length > 0) {
-        const uvLines = uvs.map((uv: any) => {
+    // Unit vectors — split into active and superseded
+    const activeUVs = uvs.filter((uv: any) => !uv.superseded_by);
+    const supersededUVs = uvs.filter((uv: any) => uv.superseded_by);
+
+    if (activeUVs.length > 0) {
+        const uvLines = activeUVs.map((uv: any) => {
             const tags = feelingTagStmts.getByEntry.all(uv.id) as any[];
             const tagStr = tags.length > 0
                 ? ` [${tags.map((t: any) => t.content).join('; ')}]`
                 : '';
             const typeLabel = uv.provenance_type === 'aphorism' ? 'Aphorism' : uv.content_type;
-            return `- **${uv.session_label}** (${typeLabel}): "${uv.content}"${tagStr}`;
+            const supersedesStr = uv.supersedes ? ` ⊕ supersedes [${uv.supersedes}]` : '';
+            return `- **${uv.session_label}** (${typeLabel}): "${uv.content}"${tagStr}${supersedesStr}`;
         });
         sections.push(`### Unit Vectors\n${uvLines.join('\n')}`);
+    }
+
+    if (supersededUVs.length > 0) {
+        const uvLines = supersededUVs.map((uv: any) => {
+            const tags = feelingTagStmts.getByEntry.all(uv.id) as any[];
+            const tagStr = tags.length > 0
+                ? ` [${tags.map((t: any) => t.content).join('; ')}]`
+                : '';
+            const typeLabel = uv.provenance_type === 'aphorism' ? 'Aphorism' : uv.content_type;
+            return `- **${uv.session_label}** (${typeLabel}): "${uv.content}" ⊘ ${uv.qualifier || 'was-true-when'}${tagStr}`;
+        });
+        sections.push(`### Unit Vectors (Was-True-When)\n${uvLines.join('\n')}`);
     }
 
     // Load by level — discover all distinct levels dynamically, most compressed first
@@ -1525,7 +1794,11 @@ export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
         const levelParts = entries.map((e: any) => {
             const tags = feelingTagStmts.getByEntry.all(e.id) as any[];
             const tagStr = tags.length > 0
-                ? `\n*Feeling: ${tags.map((t: any) => `${t.content}${t.tag_type === 'revisit' ? ' (revisit)' : ''}`).join('; ')}*`
+                ? `\n*Feeling: ${tags.map((t: any) => {
+                    const stabilityMark = t.stability && t.stability !== 'stable' ? ` [${t.stability}]` : '';
+                    const changeMark = t.change_count > 0 ? ` (×${t.change_count})` : '';
+                    return `${t.content}${t.tag_type === 'revisit' ? ' (revisit)' : ''}${stabilityMark}${changeMark}`;
+                }).join('; ')}*`
                 : '';
             return `--- ${e.content_type}/${level}/${e.session_label} ---\n${e.content}${tagStr}`;
         });

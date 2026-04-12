@@ -93,7 +93,8 @@ function insertGradientEntry(
     try {
         gradientStmts.insert.run(
             id, agent, sessionLabel, level, content, contentType,
-            sourceId, null, null, 'original', new Date().toISOString()
+            sourceId, null, null, 'original', new Date().toISOString(),
+            null, 0, null
         );
         if (feelingTag) {
             feelingTagStmts.insert.run(
@@ -522,7 +523,8 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
                 gradientStmts.insert.run(
                     entryId, tagAgent, sessionLabel, 'c0', msg.content, 'conversation',
                     null, msg.conversation_id, msg.id,
-                    'original', new Date().toISOString()
+                    'original', new Date().toISOString(),
+                    null, 0, null
                 );
 
                 // Write a compression-time feeling tag from the compression_tag value
