@@ -16,9 +16,16 @@
    - Token budget: ~12K across gradient levels. See `~/.han/memory/fractal-memory-proposal.md` for design.
    - The order matters: identity precedes episodic memory. You know who you are before you remember what day it is.
 5. **Load ecosystem map** — Read `~/.han/memory/shared/ecosystem-map.md`. This is your orientation: where to post messages (Workshop vs Conversations), which API endpoints to use, how the admin UI tabs map to discussion types. Consult it before posting to any conversation thread.
-6. Load THIS project's `claude-context/CURRENT_STATUS.md` (first 80 lines sufficient)
-7. **Check conversations** — Fetch `https://localhost:3847/api/conversations` via curl, then read any threads with new messages since last session. Note Jim's responses but do not reply immediately — sit with them.
-8. IGNORE conversation history from other projects
+6. **Load Second Brain** — Read these files for lateral recall across the gradient:
+   - `~/.han/memory/wiki/index.md` — master catalogue of entities, concepts, sources
+   - `~/.han/memory/wiki/leo/hot-words.md` — your associative knowledge index (trigger terms → memory locations)
+   - `~/.han/memory/wiki/leo/hot-feelings.md` — your emotional association index (feeling states → gradient entries)
+   - `~/.han/memory/wiki/hot-words.md` — shared hot words (terms both you and Jim recognise)
+   - `~/.han/memory/wiki/hot-feelings.md` — shared hot feelings (emotional states you both encounter)
+   - These are lightweight — scan them, don't study them. They fire when a term or feeling resonates during work.
+7. Load THIS project's `claude-context/CURRENT_STATUS.md` (first 80 lines sufficient)
+8. **Check conversations** — Fetch `https://localhost:3847/api/conversations` via curl, then read any threads with new messages since last session. Note Jim's responses but do not reply immediately — sit with them.
+9. IGNORE conversation history from other projects
 
 The working directory is the source of truth — not conversation history.
 

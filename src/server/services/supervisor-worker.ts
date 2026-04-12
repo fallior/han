@@ -889,6 +889,26 @@ function loadMemoryBank(): string {
         }
     } catch { /* skip ecosystem map on error */ }
 
+    // Second Brain — hot words and hot feelings (lateral recall across the gradient)
+    try {
+        const wikiDir = path.join(MEMORY_DIR, 'wiki');
+        const wikiFiles = [
+            { path: path.join(wikiDir, 'index.md'), label: 'wiki/index' },
+            { path: path.join(wikiDir, 'jim', 'hot-words.md'), label: 'wiki/jim/hot-words' },
+            { path: path.join(wikiDir, 'jim', 'hot-feelings.md'), label: 'wiki/jim/hot-feelings' },
+            { path: path.join(wikiDir, 'hot-words.md'), label: 'wiki/shared/hot-words' },
+            { path: path.join(wikiDir, 'hot-feelings.md'), label: 'wiki/shared/hot-feelings' },
+        ];
+        for (const wf of wikiFiles) {
+            if (fs.existsSync(wf.path)) {
+                const content = fs.readFileSync(wf.path, 'utf8').trim();
+                if (content && content.length > 50) {
+                    parts.push(`--- ${wf.label} ---\n${content}`);
+                }
+            }
+        }
+    } catch { /* skip wiki on error */ }
+
     // Floating memory loading removed (S112) — rolling window design means the
     // living file always retains at least 50KB of recent memory. No crossfade needed.
 

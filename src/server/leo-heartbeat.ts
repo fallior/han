@@ -1098,6 +1098,26 @@ function readLeoMemory(): string {
         }
     } catch { /* skip */ }
 
+    // Second Brain — hot words and hot feelings (lateral recall across the gradient)
+    const wikiDir = path.join(HAN_DIR, 'memory', 'wiki');
+    try {
+        const wikiFiles = [
+            { path: path.join(wikiDir, 'index.md'), label: 'wiki/index' },
+            { path: path.join(wikiDir, 'leo', 'hot-words.md'), label: 'wiki/leo/hot-words' },
+            { path: path.join(wikiDir, 'leo', 'hot-feelings.md'), label: 'wiki/leo/hot-feelings' },
+            { path: path.join(wikiDir, 'hot-words.md'), label: 'wiki/shared/hot-words' },
+            { path: path.join(wikiDir, 'hot-feelings.md'), label: 'wiki/shared/hot-feelings' },
+        ];
+        for (const wf of wikiFiles) {
+            if (fs.existsSync(wf.path)) {
+                const content = fs.readFileSync(wf.path, 'utf-8').trim();
+                if (content && content.length > 50) { // skip templates with only headers
+                    sections.push(`### ${wf.label}\n${content}`);
+                }
+            }
+        }
+    } catch { /* skip wiki on error */ }
+
     return sections.join('\n\n');
 }
 
