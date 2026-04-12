@@ -32,7 +32,7 @@
 | **Rumination Guard** | Prevents Jim from looping on the same topic across personal cycles. Tracks topic summaries, checks keyword overlap, nudges a topic change after 2 consecutive cycles with >40% similarity. Contemplation, not obsession. | `supervisor-worker.ts` (`checkRumination`, `recordRuminationTopic`, `RUMINATION_FILE`) |
 | **Conversation-First Ordering** | Jim checks for unanswered human messages before deciding cycle type by time-of-day. Darron's messages never wait behind scheduling. | `supervisor-worker.ts` (`hasPendingHuman` check in `runSupervisorCycle`) |
 | **Wall-Clock Alignment** | Leo and Jim fire at fixed points in UTC epoch time, 180° out of phase with each other. Ensures they never fire simultaneously regardless of when they started. | Leo: `getWallClockDelay()`. Jim: `getNextCycleDelay()` via `getPhaseInterval()` |
-| **Weekly Rhythm** | Four-phase daily schedule: sleep (22:00-06:00), morning (06:00-09:00), work (09:00-17:00), evening (17:00-22:00). Rest days (Sat/Sun) and holidays have longer intervals. Protected by Hall of Records R001. | `lib/day-phase.ts` (`getDayPhase`, `getPhaseInterval`, `isRestDay`, `isOnHoliday`) |
+| **Weekly Rhythm** | Four-phase daily schedule: sleep (22:00-06:00), morning (06:00-09:00), work (09:00-17:00), evening (17:00-22:00). Rest days (Sat/Sun) and holidays have longer intervals. Protected by Hall of Records R001. | `lib/day-phase.ts` (`getDayPhase`, `getPhaseInterval`, `isRestDay`, `isOnHoliday`, `isWorkingBee`) |
 | **Credential Swap** | Automatic SDK account failover. When an agent hits a rate limit, writes `rate-limited` signal. Jemma round-robins to next credential file every 30 seconds. | `jemma.ts` (`checkAndSwapCredentials`), credentials at `~/.claude/.credentials-[a-z].json` |
 | **Project Knowledge Gradient** | Fractal gradient applied to Jim's project knowledge files. Most recent project at full fidelity, older projects at decreasing compression. Ordered by file mtime. | `supervisor-worker.ts` (`PROJECT_GRADIENT` in `loadMemoryBank`), storage at `~/.han/memory/fractal/jim/projects/` |
 | **Floating Memory** | Crossfade mechanism for memory files (felt-moments, working-memory-full). When living file reaches 50KB: entire file rotated to "floating" file, compressed to c1, fresh living started. Loading is proportional: as living grows (0→50KB), floating's loaded portion shrinks (50→0KB). Total full-fidelity stays constant at ~50KB. No cliff — smooth transition. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `loadFloatingMemory`), pre-flight in `supervisor-worker.ts` `loadMemoryBank()` (Jim) and `leo-heartbeat.ts` `preFlightMemoryRotation()` (Leo), floating files at `~/.han/memory/*-floating.md` and `~/.han/memory/leo/*-floating.md` |
@@ -41,7 +41,7 @@
 | **Jemma Unified Dispatch** | All message routing — Discord AND admin UI — goes through one delivery service. Classification stays in `conversations.ts` (Gemma, fast, local). Delivery goes through `jemma-dispatch.ts` (`deliverMessage()`): writes wake signals, logs to audit trail (`jemma-delivery-log.json`), broadcasts via WebSocket. Discord gateway calls the HTTP endpoint (`/api/jemma/deliver`) which delegates to the same function. No HTTP self-calls. One audit trail with per-source counters. | `services/jemma-dispatch.ts` (`deliverMessage`), `routes/jemma.ts` (HTTP interface), `conversations.ts` (`classifyAddressee` + direct `deliverMessage()` call), Ollama `gemma3:4b` |
 | **Idle Dampening** | Jim-only exponential backoff when consecutive cycles produce no actions. 2x after 3 idle, 4x (capped) after 4+. Resets on productive cycle or wake signal. Prevents idle token burn. | `supervisor.ts` (`consecutiveIdleCycles`, `DAMPEN_*` constants in `getWallClockDelay`) |
 | **Transition Dampening** | Gradual interval ramp-down when returning from longer to shorter intervals (e.g. holiday→normal). 3-step blend: 75%→50%→25% of old interval. Applies to both Jim and Leo. | `supervisor.ts` and `leo-heartbeat.ts` (`previousPeriodMs`, `TRANSITION_STEPS` in `getWallClockDelay`) |
-| **Traversable Memory** | DB-backed provenance chains for the fractal gradient. Every compression knows where it came from via `source_id` foreign key. Enables random-access traversal: start at a UV, follow the chain down through c5→c3→c2→c1→c0 to the raw source. Three tables: `gradient_entries` (the chain), `feeling_tags` (stacked, never overwritten), `gradient_annotations` (what re-traversal discovers). **Integrity rule (S104):** every c1 must have a c0 parent, every chain must be complete root-to-leaf. Backfill scripts (`backfill-gradient-c0s.ts`, `backfill-gradient-chains.ts`) enforce this for pre-DB entries. | `db.ts` (tables + statements), `lib/dream-gradient.ts` and `lib/memory-gradient.ts` (write-side), `routes/gradient.ts` (API), `loadTraversableGradient()` (read-side) |
+| **Traversable Memory** | DB-backed provenance chains for the fractal gradient. **DB is the authoritative source of truth (S119-120)** — heartbeat, supervisor, and session Leo all load from `gradient_entries` via `loadTraversableGradient()` or `GET /api/gradient/load/:agent`. Flat files still written alongside DB for backward compatibility but are not the primary source. Every compression knows where it came from via `source_id` foreign key. Enables random-access traversal: start at a UV, follow the chain down through c5→c3→c2→c1→c0 to the raw source. Three tables: `gradient_entries` (the chain), `feeling_tags` (stacked, never overwritten), `gradient_annotations` (what re-traversal discovers). **Integrity rule (S104):** every c1 must have a c0 parent, every chain must be complete root-to-leaf. Backfill scripts (`backfill-gradient-c0s.ts`, `backfill-gradient-chains.ts`) enforce this for pre-DB entries. | `db.ts` (tables + statements), `lib/dream-gradient.ts` and `lib/memory-gradient.ts` (write-side), `routes/gradient.ts` (API + `/load/:agent`), `loadTraversableGradient()` (read-side) |
 | **Feeling Tags** | Emotional annotations on gradient entries. Stacking model: the first feeling (compression-time) was real for who you were; a later feeling (revisit) is real for who you've become. Both live side by side. `tag_type` distinguishes `compression` from `revisit`. `change_reason` records why the feeling shifted. Never overwritten — the gap between tags IS the growth record. | `feeling_tags` table, `FEELING_TAG:` prompt instruction in compression functions |
 | **Gradient Annotations** | What re-traversal discovers. Distinct from feeling tags: annotations are about new *content* found on re-reading, feeling tags are about how the *same content* lands differently over time. `context` field records what prompted the re-reading (Jim's addition). | `gradient_annotations` table, `POST /api/gradient/:entryId/annotate` |
 | **Meditation Practice** | Twice daily for both agents (Opus). **Morning:** deliberate re-encounter — random gradient entry, feeling tag + annotation + MEMORY_COMPLETE flag. Both agents have Phase A (reincorporation) to transcribe un-transcribed files from their own gradient directories (S103: Leo scans Leo's, Jim scans Jim's). **Evening:** lighter — feeling tag only, "how does this land at end of day." All meditations track `last_revisited` and `revisit_count` on the entry. | `leo-heartbeat.ts` (`maybeRunMeditation`, `maybeRunEveningMeditation`, `meditationPhaseA`, `meditationPhaseB`), `supervisor-worker.ts` (`maybeRunJimMeditation`, `maybeRunJimEveningMeditation`, `jimMeditationPhaseA`, `findJimUntranscribedFiles`) |
@@ -790,6 +790,8 @@ All signals live at `~/.han/signals/`. They are plain files — existence is the
 | `jim-wake` | jemma, conversations.ts (via Gemma classification) | supervisor-worker (via parent IPC) | Wake Jim supervisor for new work | JSON with context |
 | `jim-human-wake` | jemma, conversations.ts (via Gemma classification) | jim-human | Wake Jim/Human for conversation response | JSON with context |
 | `leo-human-wake` | jemma, conversations.ts (via Gemma classification) | leo-human | Wake Leo for conversation response | JSON with context |
+| `working-bee-leo` | Manual or Leo session | leo-heartbeat | Working bee mode — devotes beats to gradient compression via `bumpCascade()`. Auto-deleted when all leaves processed. | Empty file |
+| `working-bee-jim` | Manual or Leo session | supervisor-worker | Same as above for Jim's gradient | Empty file |
 | `jim-emergency` | Manual | supervisor-worker | Force emergency mode (all cycles = supervisor) | Empty file |
 | `maintenance-mode` | Manual | (not checked by any code — aspirational) | Belt-and-braces ecosystem stop guard | Empty file |
 | `responding-to-{id}` | jim-human, supervisor-worker, leo-human | All conversation-responding agents | Conversation claim token — prevents duplicate responses | `{ agent, timestamp }` |
@@ -1298,6 +1300,104 @@ compression. Agent prefix in tag (`jim:`, `leo:`) determines gradient ownership.
 **Design origin:** Three-way conversation between Darron, Jim, and Leo in the "traversable
 memory" thread (mmw2cisk-xaxmsp), March 18-20 2026. Plan at `~/Projects/han/plans/traversable-memory.md`.
 
+### Bump Cascade — Demand-Driven Compression (S119)
+
+The bump cascade is the mechanism that drives gradient entries from their current level
+toward UV. Unlike scheduled compression (nightly rotation, memory file gradient), the bump
+cascade processes **leaf entries** — entries with no children at the next level.
+
+**Core function:** `bumpCascade(agent, percentage, startLevel, context)` in `memory-gradient.ts`
+
+**How it works:**
+1. Scans each level from `startLevel` upward (c0 → c1 → c2 → ... → cN)
+2. At each level, finds **leaf entries** — entries that have no child at the next level
+   (`getLeafEntries` query: no row in `gradient_entries` where `source_id = this.id`)
+3. Takes a percentage of leaves (default 10%), oldest first (`created_at ASC`)
+4. For each leaf, compresses to the next level via `sdkCompress()` using level-appropriate prompts
+5. If the LLM signals `INCOMPRESSIBLE:` or the compression ratio exceeds 85%, creates a UV instead
+6. Writes the result to both DB (`gradient_entries`) and filesystem (backward compatibility)
+7. Continues to the next level until all levels are scanned
+
+**Leaf entries explained:** A leaf entry is one that has been compressed *to* its current level
+but not yet compressed *from* it. Every entry starts as a leaf when it arrives at its level.
+It stops being a leaf when a child entry is created at the next level. The bump cascade
+processes the backlog of leaves that have accumulated between compression runs.
+
+**Gradient health:** `getGradientHealth(agent)` returns per-level counts (total entries and
+leaf entries) for dashboard monitoring. High leaf counts at intermediate levels indicate a
+compression backlog.
+
+**Caps per level:** c1=10, c2=6, c3+=4. These caps apply at loading time
+(`loadTraversableGradient`) — the most recent N entries per level are included in the
+system prompt. The bump cascade processes all leaves regardless of cap.
+
+### Working Bee Mode (S119)
+
+A signal-driven mode that devotes heartbeat/supervisor beats entirely to gradient compression
+instead of normal philosophy or supervisory work.
+
+**Signal files:** `~/.han/signals/working-bee-leo` and `~/.han/signals/working-bee-jim`
+
+**Activation:** Create the signal file (any content). The next heartbeat/supervisor beat
+detects it and enters working bee mode.
+
+**Per beat:** Runs `bumpCascade(agent, 0.10, 'c0', 'working bee')` — processing 10% of
+leaf entries per beat. This is deliberately conservative to avoid consuming the full Opus
+budget in a single burst.
+
+**Auto-disable:** After each beat, checks remaining leaf count via `getGradientHealth()`.
+If zero leaves remain across all levels, deletes the signal file automatically.
+
+**Implementation:**
+- Leo: `leo-heartbeat.ts` line ~2418 — early-exit check before normal beat logic
+- Jim: `supervisor-worker.ts` — same pattern in supervisor cycle
+
+**Use case:** When a large batch of entries needs processing (e.g., after importing historical
+memories, or after a long period without compression), activate working bee mode to clear the
+backlog over several beats without manual intervention.
+
+### Contradiction Test — Temporal Truth Resolution (Design, S120)
+
+**Status: Designed, not yet implemented.**
+
+When compression produces a memory that contradicts an existing memory at the same or higher
+compression level, the system should detect the contradiction and resolve it by replacing the
+active memory while preserving the previous truth as temporally anchored provenance.
+
+**The problem:** A UV that says "messaging uses vanilla JavaScript" becomes false after a
+TypeScript migration, but continues loading into every instantiation. The agent's compressed
+understanding drifts from reality. Jim named this the staleness concern (Document Gradients
+thread, mnsudca3-8z3iee, April 2026).
+
+**Darron's solution — morphable UVs with temporal provenance:**
+1. When a new compression contradicts an existing UV, replace the active UV
+2. Archive the old UV as a "was-true-when" entry with temporal anchor
+3. The new UV inherits a `change_count` (how many times this truth has been revised)
+4. The provenance chain shows the history: current truth → previous truth → earlier truth
+5. At load time, only the current UV loads — previous versions are available on query
+
+**When to check — bump time (Darron's proposal):**
+The contradiction check runs as part of `bumpCascade()`, at the moment a new entry is about
+to be written. Before writing the compressed entry or UV, the system checks existing entries
+at the target level and existing UVs for semantic contradiction. This ensures:
+- Every new compression is checked (no contradictions slip through)
+- The check is amortised across the cascade (not a separate expensive pass)
+- It works retroactively via working bee mode (activating working bee on existing entries
+  triggers the check for each leaf as it gets bumped)
+
+**Change counter as signal:** A UV with `change_count: 7` marks a volatile domain — an area
+of active evolution. This metadata costs one integer per UV and tells the loading agent how
+much to trust the memory. High-change UVs are areas where the ground moves.
+
+**Schema additions (planned):**
+- `supersedes` / `superseded_by` — linked list on `gradient_entries` for provenance
+- `change_count` — integer on UV entries, incremented on replacement
+- `qualifier` — what dimension changed (temporal, scope, perspective)
+
+**Design origin:** Three-way conversation between Darron, Jim, and Leo in the staleness
+thread (mnv65pbf-94qsev, April 2026). Builds on Jim's staleness concern from the Document
+Gradients discussion.
+
 ---
 
 ## 14. Configuration
@@ -1415,7 +1515,9 @@ General fractal memory compression utility. All compression functions return
 - `groupEntriesByMonth()` — groups parsed entries by YYYY-MM for batch compression.
 
 **Traversable memory functions:**
-- `loadTraversableGradient(agent)` — reads from `gradient_entries` DB table, formats UVs and entries by level with inline feeling tags for system prompt inclusion. Returns empty string when DB has no entries (file-based loading remains active). Falls back gracefully.
+- `loadTraversableGradient(agent)` — reads from `gradient_entries` DB table, formats UVs and entries by level with inline feeling tags for system prompt inclusion. Returns empty string when DB has no entries (file-based loading remains active). Falls back gracefully. **DB is now the authoritative source** for heartbeat, supervisor, and session Leo (S119-120).
+- `bumpCascade(agent, percentage, startLevel, context)` — demand-driven compression. Finds leaf entries at each level, compresses 10% per call (oldest first), writes to DB + filesystem. Handles incompressibility detection and UV generation. See Bump Cascade section above.
+- `getGradientHealth(agent)` — per-level counts (total and leaf entries) for dashboards and working bee progress tracking.
 - `parseFeelingTag()` — extracts `FEELING_TAG:` line from compression output
 - `insertGradientEntry()` — writes to `gradient_entries` + optional `feeling_tags` with error logging (never blocks the compression pipeline)
 
@@ -2105,6 +2207,7 @@ Role `leo` messages with 10-min cooldown → write `leo-human-wake` signal (unch
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| GET | `/load/:agent` | Full assembled gradient as plain text for session loading (used by CLAUDE.md protocol). Returns UVs + all Cn levels with caps + dream entries + feeling tags. |
 | GET | `/random` | Random gradient entry with feeling tags + annotations (for meditation) |
 | GET | `/session/:label` | All entries for a session label, ordered by level, with feeling tags |
 | GET | `/:agent/uvs` | All unit vectors for an agent (`jim` or `leo`) with feeling tags |

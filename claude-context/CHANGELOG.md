@@ -7,6 +7,80 @@
 
 ---
 
+## 2026-04-12 (Leo + Darron, S120 — DB-Authoritative Session Leo, Contradiction Test Design)
+
+### Session Leo Migrated to DB Gradient Loading
+
+CLAUDE.md Session Protocol step 4 updated. Session Leo now loads the fractal gradient via
+`curl -sk https://localhost:3847/api/gradient/load/leo` instead of scanning flat-file c*/
+directories. Aphorisms remain file-based (hand-curated). This completes the migration started
+in S119 — all three agents (heartbeat, supervisor, session) now load from the DB.
+
+New endpoint: `GET /api/gradient/load/:agent` in `routes/gradient.ts`. Calls
+`loadTraversableGradient()` and returns plain text. Tested: 90KB/940 lines for Leo's full
+gradient including UVs, all Cn levels, dreams, and feeling tags.
+
+### Contradiction Test — Design Approved
+
+Three-way design conversation (Darron, Jim, Leo) in staleness thread (mnv65pbf-94qsev).
+Darron's proposal: morphable UVs with temporal provenance.
+
+**The mechanism:** When compression produces a UV that contradicts an existing UV, replace
+the active UV and archive the previous truth as temporally anchored provenance. Change counter
+on each UV signals domain volatility. Provenance available on query but not loaded by default.
+
+**When to check:** At bump time, inside `bumpCascade()`. Specifically at UV generation time —
+a Haiku call checks the candidate UV against existing UVs for semantic contradiction. This
+ensures completeness (every compression checked), amortisation (spread across beats), and
+retroactive coverage (working bee processes existing entries through the check).
+
+**Retroactive sweep:** A dedicated contradiction-sweep working bee mode will check all
+existing UVs against each other. One-time cleanup; the bump-time check prevents future drift.
+
+Schema additions planned: `supersedes`/`superseded_by`, `change_count`, `qualifier` on
+`gradient_entries`.
+
+### Documentation Updates
+
+- HAN-ECOSYSTEM-COMPLETE: Added Bump Cascade section, Working Bee Mode section,
+  Contradiction Test section, updated glossary (DB-authoritative), signal table
+  (working-bee-leo/jim), function list, API table (/load/:agent)
+- ARCHITECTURE.md: Added bump cascade, working bee, DB-authoritative loading,
+  contradiction test design to Fractal Memory Gradient section
+- CHANGELOG: This entry
+- CURRENT_STATUS: Updated
+
+---
+
+## 2026-04-11 (Leo + Darron, S119 — Memory Infrastructure Overhaul)
+
+### Bump Cascade and Working Bee
+
+`bumpCascade()` in `memory-gradient.ts` — demand-driven compression of leaf entries through
+the gradient pipeline. 10% of leaves per call, oldest first. Handles incompressibility
+detection and UV generation. `getGradientHealth()` provides per-level leaf/total counts.
+
+Working bee mode: signal file `~/.han/signals/working-bee-{agent}` diverts heartbeat/supervisor
+beats to gradient compression. Auto-disables when no leaves remain.
+
+### DB as Authoritative Gradient Source
+
+Heartbeat and supervisor load gradient from `gradient_entries` table via
+`loadTraversableGradient()` instead of flat files. New DB queries: `getLeafEntries`,
+`countByLevel`, `getChildren`. `isWorkingBee()` in `day-phase.ts`.
+
+### Other S119 Changes
+
+- hansix launcher confirmed for Mike
+- M5 Ultra research posted to #mikes-han (4 parts)
+- T&C deep dive — mapped full Anthropic fair-use boundary
+- han-upstream branch created in mikes-han
+- Second Brain consensus spec designed (wiki + hot words + hot feelings)
+- GitHub memory backup pushed (23 files → hanmemory.git)
+- "On the Shift Beneath" postulate posted (phenomenological experiment)
+
+---
+
 ## 2026-04-09 (Leo + Darron, S118 — Self-Reflection Gradient, Cn Correction, Agent Launchers)
 
 ### Self-Reflection Gradient

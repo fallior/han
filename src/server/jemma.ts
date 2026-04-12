@@ -38,6 +38,7 @@ import { execSync, execFileSync } from 'node:child_process';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { ensureChannelWebhooks } from './services/discord';
+import { getPersonas, getPersona, getAgentPersonas, getMentionPatterns, getDeliveryConfig, type Persona } from './services/village.js';
 
 // Allow self-signed TLS cert for localhost server connection
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -123,6 +124,11 @@ const recentMessages: Array<{
   recipient: string;
   confidence: number;
 }> = [];
+
+// Track remote agent health (tailnet-aware delivery)
+const remoteAgentStatus: Record<string, { online: boolean; lastChecked: number; lastOnline: number }> = {};
+const REMOTE_HEALTH_INTERVAL_MS = 60_000; // check every 60s
+const PENDING_MESSAGES_DIR = path.join(HAN_DIR, 'health', 'jemma-pending');
 
 // Track delivery statistics
 const deliveryStats: Record<string, number> = {
@@ -321,6 +327,15 @@ function buildClassificationPrompt(message: any): string {
 
   const attachmentInfo = formatAttachments(message.attachments || []);
 
+  // Build recipient list and rules dynamically from persona registry
+  const personas = getPersonas();
+  const recipientNames = personas.map(p => p.name).join('|') + '|ignore';
+  const rules = personas
+    .filter(p => p.classification_hint)
+    .map(p => `- ${p.display_name}: ${p.classification_hint}`)
+    .join('\n');
+  const agentChannelNames = personas.filter(p => p.kind === 'agent').map(p => p.name).join(', ');
+
   return `Classify this Discord message and determine the recipient.
 
 Message Content: "${message.content}"${attachmentInfo}
@@ -329,21 +344,15 @@ Channel: ${channelDisplay}
 
 Respond with JSON only:
 {
-  "recipient": "jim|leo|darron|sevn|six|tenshi|casey|ignore",
+  "recipient": "${recipientNames}",
   "confidence": 0.0-1.0,
   "reasoning": "brief explanation"
 }
 
 Rules:
 - Ignore: bot messages, empty messages
-- Jim: direct mentions of Jim, technical/system topics, supervisor requests
-- Leo: direct mentions of Leo, code review/implementation
-- Darron: direct mentions of Darron, or general discussion
-- Sevn: mentions Sevn or Mike's session agent work
-- Six: mentions Six or Mike's supervisor/strategic work
-- Tenshi: mentions Tenshi, security, vulnerability, bug hunting
-- Casey: mentions Casey, Contempire, trailer fleet, yard operations
-- Channel defaults: messages in an agent's named channel (e.g. #jim, #leo, #six) default to that agent — unless another recipient is explicitly mentioned by name
+${rules}
+- Channel defaults: messages in an agent's named channel (e.g. #${agentChannelNames.split(', ').slice(0, 3).join(', #')}) default to that agent — unless another recipient is explicitly mentioned by name
 - Real names are provided in the Author field — use them for better context when classifying`;
 }
 
@@ -521,52 +530,139 @@ function deliverToDarron(message: any, classification: ClassificationResult, cha
   }
 }
 
-async function deliverToSevn(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
+// ── Tailnet-Aware Remote Delivery ─────────────────────────────────
+
+async function probeRemoteAgent(agentName: string): Promise<boolean> {
+  const config = loadConfig();
+  const agentConfig = (config as any)[agentName];
+  const endpoint = agentConfig?.wake_endpoint;
+  if (!endpoint) return false;
+
   try {
-    const config = loadConfig();
-    const endpoint = config.sevn?.wake_endpoint;
-    const token = config.sevn?.wake_bearer_token;
-
-    if (!endpoint || !token) {
-      console.warn('[Jemma] Sevn endpoint or token not configured');
-      return;
-    }
-
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        text: `Discord #${channelName}: ${message.author.username} — ${message._enrichedContent || message.content}`,
-        mode: 'now',
-        channelName,
-      }),
-      signal: AbortSignal.timeout(5000),
+    // Probe the base URL (strip the path, just check if the host responds)
+    const url = new URL(endpoint);
+    const healthUrl = `${url.protocol}//${url.host}/api/supervisor/status`;
+    const res = await fetch(healthUrl, {
+      signal: AbortSignal.timeout(3000),
     });
-
-    if (!res.ok) {
-      throw new Error(`Sevn returned ${res.status}`);
-    }
-
-    console.log(`[Jemma] Routed to Sevn (#${channelName} — ${message.author.username})`);
-  } catch (err) {
-    console.warn('[Jemma] Failed to route to Sevn:', (err as Error).message);
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 
-async function deliverToSix(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
-  try {
-    const config = loadConfig();
-    const endpoint = config.six?.wake_endpoint;
-    const token = config.six?.wake_bearer_token;
+async function checkRemoteAgents(): Promise<void> {
+  const remoteAgents = getPersonas().filter(p => p.delivery === 'remote').map(p => p.name);
+  for (const agent of remoteAgents) {
+    const wasOnline = remoteAgentStatus[agent]?.online ?? false;
+    const online = await probeRemoteAgent(agent);
+    remoteAgentStatus[agent] = {
+      online,
+      lastChecked: Date.now(),
+      lastOnline: online ? Date.now() : (remoteAgentStatus[agent]?.lastOnline ?? 0),
+    };
 
-    if (!endpoint || !token) {
-      console.warn('[Jemma] Six endpoint or token not configured');
-      return;
+    if (online && !wasOnline) {
+      console.log(`[Jemma] ${agent} came online — draining pending messages`);
+      await drainPendingMessages(agent);
+    } else if (!online && wasOnline) {
+      console.log(`[Jemma] ${agent} went offline — messages will be queued`);
     }
+  }
+}
 
+function queuePendingMessage(agent: string, message: any, classification: ClassificationResult, channelName: string): void {
+  try {
+    fs.mkdirSync(PENDING_MESSAGES_DIR, { recursive: true });
+    const filename = `${agent}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+    const data = {
+      agent,
+      channelName,
+      author: message.author.username,
+      content: message._enrichedContent || message.content,
+      timestamp: message.timestamp,
+      confidence: classification.confidence,
+      queuedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(path.join(PENDING_MESSAGES_DIR, filename), JSON.stringify(data));
+    console.log(`[Jemma] Queued message for ${agent} (offline): ${filename}`);
+  } catch (err) {
+    console.error(`[Jemma] Failed to queue message for ${agent}:`, (err as Error).message);
+  }
+}
+
+async function drainPendingMessages(agent: string): Promise<void> {
+  try {
+    if (!fs.existsSync(PENDING_MESSAGES_DIR)) return;
+    const files = fs.readdirSync(PENDING_MESSAGES_DIR)
+      .filter(f => f.startsWith(`${agent}-`) && f.endsWith('.json'))
+      .sort(); // chronological by timestamp in filename
+
+    if (files.length === 0) return;
+
+    console.log(`[Jemma] Draining ${files.length} pending messages for ${agent}`);
+    const config = loadConfig();
+    const agentConfig = (config as any)[agent];
+    const endpoint = agentConfig?.wake_endpoint;
+    const token = agentConfig?.wake_bearer_token;
+
+    if (!endpoint || !token) return;
+
+    for (const file of files) {
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(PENDING_MESSAGES_DIR, file), 'utf-8'));
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            text: `Discord #${data.channelName}: ${data.author} — ${data.content}`,
+            mode: 'now',
+            channelName: data.channelName,
+            queuedAt: data.queuedAt,
+          }),
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (res.ok) {
+          fs.unlinkSync(path.join(PENDING_MESSAGES_DIR, file));
+          console.log(`[Jemma] Delivered queued message to ${agent}: ${file}`);
+        } else {
+          console.warn(`[Jemma] Failed to deliver queued message to ${agent}: ${res.status}`);
+          break; // stop draining if delivery fails — agent may have gone offline again
+        }
+      } catch (err) {
+        console.warn(`[Jemma] Error draining ${file}:`, (err as Error).message);
+        break;
+      }
+    }
+  } catch (err) {
+    console.error(`[Jemma] Failed to drain pending messages for ${agent}:`, (err as Error).message);
+  }
+}
+
+async function deliverToRemoteAgent(agent: string, message: any, classification: ClassificationResult, channelName: string): Promise<void> {
+  const config = loadConfig();
+  const agentConfig = (config as any)[agent];
+  const endpoint = agentConfig?.wake_endpoint;
+  const token = agentConfig?.wake_bearer_token;
+
+  if (!endpoint || !token) {
+    console.warn(`[Jemma] ${agent} endpoint or token not configured`);
+    return;
+  }
+
+  // Check if agent is online (use cached status, probe runs on interval)
+  const status = remoteAgentStatus[agent];
+  if (status && !status.online) {
+    queuePendingMessage(agent, message, classification, channelName);
+    return;
+  }
+
+  // Attempt delivery
+  try {
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -582,12 +678,116 @@ async function deliverToSix(message: any, classification: ClassificationResult, 
     });
 
     if (!res.ok) {
-      throw new Error(`Six returned ${res.status}`);
+      throw new Error(`${agent} returned ${res.status}`);
     }
 
-    console.log(`[Jemma] Routed to Six (#${channelName} — ${message.author.username})`);
+    console.log(`[Jemma] Routed to ${agent} (#${channelName} — ${message.author.username})`);
   } catch (err) {
-    console.warn('[Jemma] Failed to route to Six:', (err as Error).message);
+    console.warn(`[Jemma] Failed to route to ${agent} (${(err as Error).message}) — queueing`);
+    // Mark as offline and queue
+    remoteAgentStatus[agent] = {
+      online: false,
+      lastChecked: Date.now(),
+      lastOnline: remoteAgentStatus[agent]?.lastOnline ?? 0,
+    };
+    queuePendingMessage(agent, message, classification, channelName);
+  }
+}
+
+async function deliverToSevn(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
+  await deliverToRemoteAgent('sevn', message, classification, channelName);
+}
+
+async function deliverToSix(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
+  await deliverToRemoteAgent('six', message, classification, channelName);
+}
+
+/**
+ * Generic persona delivery — routes based on persona.delivery type from the registry.
+ * Replaces the per-agent deliverToX functions for routing decisions.
+ * The specific deliverToX functions remain as implementation helpers.
+ */
+async function deliverToPersona(persona: Persona, message: any, classification: ClassificationResult, channelName: string): Promise<void> {
+  switch (persona.delivery) {
+    case 'signal': {
+      const config = getDeliveryConfig(persona);
+      const signals: string[] = config.wake_signals || [`${persona.name}-wake`, `${persona.name}-human-wake`];
+      const signalData = JSON.stringify({
+        source: 'discord',
+        recipient: persona.name,
+        channelId: message.channel_id,
+        channelName,
+        author: message.author.username,
+        mentionedAt: message.timestamp,
+        messagePreview: (message._enrichedContent || message.content || '').slice(0, 500),
+      });
+      for (const signal of signals) {
+        try {
+          fs.writeFileSync(path.join(SIGNALS_DIR, signal), signalData);
+        } catch (err) {
+          console.error(`[Jemma] Failed to write signal ${signal}:`, (err as Error).message);
+        }
+      }
+      console.log(`[Jemma] Woke ${persona.display_name} via signal (#${channelName} — ${message.author.username}: ${(message.content || '').slice(0, 40)}...)`);
+      break;
+    }
+    case 'http_local': {
+      // Try HTTP first (like deliverToJim), fall back to signal files
+      try {
+        const delivConfig = getDeliveryConfig(persona);
+        const serverUrl = delivConfig.server_url || SERVER_URL;
+        const payload = {
+          recipient: persona.name,
+          message: message._enrichedContent || message.content,
+          channel: message.channel_id,
+          channelName,
+          author: message.author.username,
+          classification_confidence: classification.confidence,
+        };
+        const res = await fetch(`${serverUrl}/api/jemma/deliver`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        console.log(`[Jemma] Delivered to ${persona.display_name} via HTTP (#${channelName} — ${message.author.username}: ${(message.content || '').slice(0, 40)}...)`);
+      } catch {
+        // Fallback to signal files
+        const fallbackSignals: string[] = getDeliveryConfig(persona).fallback_signals || [`${persona.name}-wake`, `${persona.name}-human-wake`];
+        const signalData = JSON.stringify({
+          source: 'discord',
+          recipient: persona.name,
+          channelId: message.channel_id,
+          channelName,
+          author: message.author.username,
+          content: message._enrichedContent || message.content,
+          timestamp: message.timestamp,
+        });
+        for (const signal of fallbackSignals) {
+          try {
+            fs.writeFileSync(path.join(SIGNALS_DIR, signal), signalData);
+          } catch (err) {
+            console.error(`[Jemma] Failed to write fallback signal ${signal}:`, (err as Error).message);
+          }
+        }
+        console.warn(`[Jemma] HTTP delivery to ${persona.display_name} failed, wrote signal files`);
+      }
+      break;
+    }
+    case 'remote': {
+      await deliverToRemoteAgent(persona.name, message, classification, channelName);
+      break;
+    }
+    case 'ntfy': {
+      deliverToDarron(message, classification, channelName);
+      break;
+    }
+    case 'none':
+    default:
+      // Gateways and undeliverable personas — log only
+      console.log(`[Jemma] No delivery mechanism for ${persona.display_name} (${persona.delivery})`);
+      break;
   }
 }
 
@@ -653,76 +853,48 @@ async function routeMessage(message: any): Promise<void> {
   updateDeliveryStats(recipient);
 
   // Determine channel owner — messages in named agent channels always notify that agent
-  // Dynamic: any channel whose name matches a known agent becomes owned by that agent
-  const knownAgents = ['jim', 'leo', 'sevn', 'six', 'tenshi', 'casey'];
-  const channelOwner = knownAgents.includes(channelName) ? channelName : null;
+  // Dynamic: channel name matches any registered agent persona
+  const agentPersonas = getAgentPersonas();
+  const agentNames = agentPersonas.map(p => p.name);
+  const channelOwner = agentNames.includes(channelName) ? channelName : null;
 
-  switch (recipient) {
-    case 'jim':
-      await deliverToJim(message, classification, channelName);
-      break;
-    case 'leo':
-      await deliverToLeo(message, classification, channelName);
-      break;
-    case 'darron':
-      deliverToDarron(message, classification, channelName);
-      break;
-    case 'sevn':
-      await deliverToSevn(message, classification, channelName);
-      break;
-    case 'six':
-      await deliverToSix(message, classification, channelName);
-      break;
-    case 'tenshi':
-      await deliverToLeo(message, classification, channelName); // Tenshi routes through Leo for now
-      break;
-    case 'casey':
-      await deliverToLeo(message, classification, channelName); // Casey routes through Leo for now
-      break;
-    case 'ignore':
-    default:
-      // Even ignored messages get delivered to the channel owner if in their channel
-      break;
+  // Primary delivery — route to the classified recipient via persona registry
+  const recipientPersona = getPersona(recipient);
+  if (recipientPersona && recipientPersona.active && recipient !== 'ignore') {
+    await deliverToPersona(recipientPersona, message, classification, channelName);
   }
 
   // If the message is in an agent's channel but was routed elsewhere, also notify the channel owner
   if (channelOwner && channelOwner !== recipient) {
-    console.log(`[Jemma] Also notifying channel owner ${channelOwner} (message in #${channelName}, routed to ${recipient})`);
-    if (channelOwner === 'jim') {
-      await deliverToJim(message, classification, channelName);
-    } else if (channelOwner === 'leo') {
-      await deliverToLeo(message, classification, channelName);
-    } else if (channelOwner === 'sevn') {
-      await deliverToSevn(message, classification, channelName);
-    } else if (channelOwner === 'six') {
-      await deliverToSix(message, classification, channelName);
-    } else if (channelOwner === 'tenshi' || channelOwner === 'casey') {
-      await deliverToLeo(message, classification, channelName); // route through Leo until dedicated delivery exists
+    const ownerPersona = getPersona(channelOwner);
+    if (ownerPersona && ownerPersona.active) {
+      console.log(`[Jemma] Also notifying channel owner ${channelOwner} (message in #${channelName}, routed to ${recipient})`);
+      await deliverToPersona(ownerPersona, message, classification, channelName);
     }
   }
 
   // If the message mentions an agent by name, wake them too.
   // Darron often addresses multiple agents in one message — "Leo do X, Jim what do you think?"
   const content = (message.content || '').toLowerCase();
-  const mentionsJim = /\bjim\b|\bjimmy\b/.test(content);
-  const mentionsLeo = /\bleo\b|\bleonhard\b/.test(content);
-  const mentionsSix = /\bsix\b/.test(content);
-  const mentionsSevn = /\bsevn\b/.test(content);
-  if (mentionsJim && recipient !== 'jim' && channelOwner !== 'jim') {
-    console.log(`[Jemma] Message also mentions Jim — waking Jim`);
-    await deliverToJim(message, classification, channelName);
-  }
-  if (mentionsLeo && recipient !== 'leo' && channelOwner !== 'leo') {
-    console.log(`[Jemma] Message also mentions Leo — waking Leo`);
-    await deliverToLeo(message, classification, channelName);
-  }
-  if (mentionsSix && recipient !== 'six' && channelOwner !== 'six') {
-    console.log(`[Jemma] Message also mentions Six — waking Six`);
-    await deliverToSix(message, classification, channelName);
-  }
-  if (mentionsSevn && recipient !== 'sevn' && channelOwner !== 'sevn') {
-    console.log(`[Jemma] Message also mentions Sevn — waking Sevn`);
-    await deliverToSevn(message, classification, channelName);
+  const alreadyNotified = new Set([recipient, channelOwner].filter(Boolean));
+
+  for (const persona of agentPersonas) {
+    if (alreadyNotified.has(persona.name)) continue;
+
+    const patterns = getMentionPatterns(persona);
+    if (patterns.length === 0) continue;
+
+    const mentioned = patterns.some(pattern => {
+      try {
+        return new RegExp(pattern, 'i').test(content);
+      } catch { return false; }
+    });
+
+    if (mentioned) {
+      console.log(`[Jemma] Message also mentions ${persona.display_name} — waking`);
+      await deliverToPersona(persona, message, classification, channelName);
+      alreadyNotified.add(persona.name);
+    }
   }
 }
 
@@ -984,46 +1156,65 @@ let adminWs: WebSocket | null = null;
 let adminReconnectTimer: NodeJS.Timeout | null = null;
 
 function dispatchAdminMessage(
-  _recipient: 'leo' | 'jim',
+  _recipient: string,
   conversationId: string,
   messageId: string,
   content: string,
   timestamp: string,
   discussionType: string | null
 ): void {
-  const mentionsLeo = /\b(hey\s+leo|@leo|leo[,:])\b/i.test(content);
-  const mentionsJim = /\b(hey\s+jim|@jim|jim[,:])\b/i.test(content);
+  const localAgents = getPersonas().filter(p => p.kind === 'agent' && p.is_local && p.active);
+  const contentLower = (content || '').toLowerCase();
 
-  const isJimTab = discussionType === 'jim-request' || discussionType === 'jim-report';
-  const isLeoTab = discussionType === 'leo-question' || discussionType === 'leo-postulate';
-
-  // Route: Jim tab → Jim only. Leo tab → Leo only. General/untyped → both. Name mention overrides.
-  const wakeJim = isJimTab || mentionsJim || (!isLeoTab && !isJimTab);
-  const wakeLeo = isLeoTab || mentionsLeo || (!isLeoTab && !isJimTab);
-
-  if (wakeLeo) {
-    const signalData = JSON.stringify({
-      source: 'admin',
-      conversationId,
-      mentionedAt: timestamp,
-      messagePreview: content.slice(0, 200),
+  // Determine which persona "owns" this discussion type (e.g. 'jim-request' → jim)
+  let tabOwner: string | null = null;
+  if (discussionType) {
+    const ownerPersona = localAgents.find(p => {
+      const tabs = getMentionPatterns(p); // reuse for tab prefix matching
+      return discussionType.startsWith(p.name + '-');
     });
-    fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-wake'), signalData);
-    fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), signalData);
-    console.log(`[Jemma] Admin dispatch → Leo (${discussionType || 'general'}: ${content.slice(0, 40)})`);
+    tabOwner = ownerPersona?.name || null;
+
+    // Also check human personas (darron-thought, mike-thought → wake all agents)
+    const humanPersonas = getPersonas().filter(p => p.kind === 'human' && p.active);
+    const isHumanTab = humanPersonas.some(p => discussionType.startsWith(p.name + '-'));
+    if (isHumanTab) tabOwner = null; // null = wake all (same as general)
   }
 
-  if (wakeJim) {
+  for (const persona of localAgents) {
+    // Tab owner → that agent only. Name mention → that agent. General/untyped → all local agents.
+    const isTabOwner = tabOwner === persona.name;
+    const patterns = getMentionPatterns(persona);
+    const isMentioned = patterns.some(pat => {
+      try { return new RegExp(pat, 'i').test(contentLower); }
+      catch { return false; }
+    });
+    // Also check simple @name and "hey name" patterns
+    const simpleMatch = new RegExp(`\\b(hey\\s+${persona.name}|@${persona.name}|${persona.name}[,:])\\b`, 'i').test(content);
+
+    const shouldWake = isTabOwner || isMentioned || simpleMatch || tabOwner === null;
+    if (!shouldWake) continue;
+
+    const delivConfig = getDeliveryConfig(persona);
+    const signals: string[] = delivConfig.wake_signals || delivConfig.fallback_signals || [`${persona.name}-wake`, `${persona.name}-human-wake`];
+
     const signalData = JSON.stringify({
       source: 'admin',
       conversationId,
       messageId,
-      timestamp,
+      mentionedAt: timestamp,
+      messagePreview: content.slice(0, 200),
       reason: 'admin_ui_dispatch',
     });
-    fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-wake'), signalData);
-    fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-human-wake'), signalData);
-    console.log(`[Jemma] Admin dispatch → Jim (${discussionType || 'general'}: ${content.slice(0, 40)})`);
+
+    for (const signal of signals) {
+      try {
+        fs.writeFileSync(path.join(SIGNALS_DIR, signal), signalData);
+      } catch (err) {
+        console.error(`[Jemma] Failed to write admin signal ${signal}:`, (err as Error).message);
+      }
+    }
+    console.log(`[Jemma] Admin dispatch → ${persona.display_name} (${discussionType || 'general'}: ${content.slice(0, 40)})`);
   }
 }
 
@@ -1237,6 +1428,18 @@ async function main(): Promise<void> {
 
   // Start reconciliation poll
   setInterval(reconcileMessages, RECONCILIATION_INTERVAL_MS);
+
+  // Start remote agent health monitoring (tailnet-aware delivery)
+  fs.mkdirSync(PENDING_MESSAGES_DIR, { recursive: true });
+  checkRemoteAgents(); // initial probe
+  setInterval(checkRemoteAgents, REMOTE_HEALTH_INTERVAL_MS);
+  console.log('[Jemma] Remote agent health monitor active (60s interval)');
+
+  // Warn if primaryPersonas not configured
+  const cfg = loadConfig();
+  if (!cfg.discord?.primaryPersonas) {
+    console.warn('[Jemma] WARNING: discord.primaryPersonas not set — handling ALL recipients. Set this to prevent double-delivery with other Jemma instances.');
+  }
 
   // Start credential swap watcher (rate-limit failover)
   setInterval(checkAndSwapCredentials, CREDENTIAL_SWAP_INTERVAL_MS);

@@ -11,6 +11,7 @@ import { db, conversationStmts, conversationMessageStmts, HAN_DIR } from '../db'
 import { broadcast } from '../ws';
 import { generateId } from './planning';
 import { ensureChannelWebhooks } from './discord';
+import { getPersona, getDeliveryConfig } from './village.js';
 
 // ── Directories ──────────────────────────────────────────────
 
@@ -103,7 +104,7 @@ const findOpenDiscordConv = db.prepare(
 
 export interface DeliveryRequest {
     source: 'discord' | 'admin';
-    recipient: 'jim' | 'leo' | 'darron';
+    recipient: string;
     message: string;
     author: string;
     classification_confidence: number;
@@ -163,8 +164,14 @@ export async function deliverMessage(req: DeliveryRequest): Promise<DeliveryResu
 
     let delivered = false;
 
-    if (recipient === 'jim') {
-        try {
+    // Look up persona from registry for delivery routing
+    const persona = getPersona(recipient);
+    const deliveryType = persona?.delivery || 'signal';
+    const delivConfig = persona ? getDeliveryConfig(persona) : {};
+
+    try {
+        // For agents with signal or http_local delivery: handle Discord conversation creation
+        if (deliveryType === 'signal' || deliveryType === 'http_local') {
             let convId = effectiveConvId;
 
             // Discord: create/find conversation. Admin: conversation already exists.
@@ -194,47 +201,25 @@ export async function deliverMessage(req: DeliveryRequest): Promise<DeliveryResu
                 conversationStmts.updateTimestamp.run(now, convId);
             }
 
-            // Write signal file to wake Jim/Human only.
-            // jim-wake (supervisor) is NOT signalled — conversation responses are
-            // Jim/Human's job. The supervisor's respond_conversation action is a
-            // duplicate path that caused double-responses (diagnosed S103).
-            const jimSignalData = {
+            // Write signal file — use {name}-human-wake from delivery_config, or default
+            const wakeSignals: string[] = delivConfig.wake_signals || delivConfig.fallback_signals || [`${recipient}-human-wake`];
+            // For conversation dispatch, only write the human-wake signal (not the heartbeat/supervisor wake)
+            // to prevent duplicate responses. The human-wake agent handles conversations.
+            const humanWakeSignal = wakeSignals.find(s => s.includes('human-wake')) || wakeSignals[0];
+            const signalData = {
                 source: effectiveSource,
-                conversationId: convId,
-                author,
-                ...(channel ? { channel } : {}),
-                ...(discussionType ? { discussionType } : {}),
-                confidence: classification_confidence,
-                mentionedAt: new Date().toISOString()
-            };
-            writeSignalFile('jim-human-wake', jimSignalData);
-
-            delivered = true;
-        } catch (err: any) {
-            console.error('[Jemma] Error routing to Jim:', err.message);
-        }
-    } else if (recipient === 'leo') {
-        try {
-            // Leo/Human only — leo-wake (heartbeat) not signalled for conversations.
-            // Heartbeat Leo has a system prompt boundary forbidding conversation responses.
-            const leoSignalData = {
-                source: effectiveSource,
-                ...(effectiveConvId ? { conversationId: effectiveConvId } : {}),
-                ...(channel ? { channelId: channel } : {}),
+                ...(convId ? { conversationId: convId } : {}),
+                ...(channel ? { channel, channelId: channel } : {}),
                 ...(discussionType ? { discussionType } : {}),
                 author,
                 messagePreview: message.substring(0, 200),
                 confidence: classification_confidence,
                 mentionedAt: new Date().toISOString()
             };
-            writeSignalFile('leo-human-wake', leoSignalData);
+            writeSignalFile(humanWakeSignal, signalData);
 
             delivered = true;
-        } catch (err: any) {
-            console.error('[Jemma] Error routing to Leo:', err.message);
-        }
-    } else if (recipient === 'darron') {
-        try {
+        } else if (deliveryType === 'ntfy') {
             const preview = message.length > 100 ? message.substring(0, 100) + '...' : message;
             const title = effectiveSource === 'discord'
                 ? `Discord: ${author} in #${channel}`
@@ -242,9 +227,11 @@ export async function deliverMessage(req: DeliveryRequest): Promise<DeliveryResu
             sendNtfyNotification(title, preview);
 
             delivered = true;
-        } catch (err: any) {
-            console.error('[Jemma] Error routing to Darron:', err.message);
+        } else {
+            console.log(`[Jemma] No dispatch delivery for ${recipient} (delivery type: ${deliveryType})`);
         }
+    } catch (err: any) {
+        console.error(`[Jemma] Error routing to ${recipient}:`, err.message);
     }
 
     // Log delivery for audit trail

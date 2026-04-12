@@ -48,6 +48,7 @@ import conversationsRouter from './routes/conversations';
 import jemmaRouter from './routes/jemma';
 import gradientRouter from './routes/gradient';
 import tailscaleRouter from './routes/tailscale';
+import villageRouter from './routes/village';
 
 // ── Single instance lock ─────────────────────────────────
 
@@ -116,6 +117,7 @@ app.use('/api/jemma', jemmaRouter);
 app.use('/api/gradient', gradientRouter);
 app.use('/api', portfolioRouter);
 app.use('/api/tailscale', tailscaleRouter);
+app.use('/api/village', villageRouter);
 
 // Serve the UI
 const UI_PATH = path.join(UI_DIR, 'index.html');

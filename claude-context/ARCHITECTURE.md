@@ -434,7 +434,33 @@ Both agents run `maybeProcessSessionGradient()` once per day:
 - Catches sessions not compressed at session end
 - DB deduplication: checks for existing entries before compressing
 
-**Status**: Complete traversable memory implementation. File-based gradient remains read layer, DB accumulates through organic compression + meditation. Phase A (reincorporation) will gradually transcribe historical files over weeks/months.
+**Bump Cascade — Demand-Driven Compression (S119, 2026-04-11)**:
+
+`bumpCascade(agent, percentage, startLevel, context)` in `memory-gradient.ts` processes
+leaf entries (entries with no children at the next level) through the compression pipeline:
+
+1. Scans from `startLevel` upward through all levels
+2. Takes `percentage` (default 10%) of leaves per level, oldest first
+3. Compresses each leaf to the next level via Opus SDK
+4. Detects incompressibility (`INCOMPRESSIBLE:` signal or ratio >85%) → creates UV
+5. Writes to both DB and filesystem
+
+**Working bee mode**: Signal-driven (`~/.han/signals/working-bee-{agent}`). When present,
+heartbeat/supervisor beats run `bumpCascade()` instead of normal work. 10% per beat.
+Auto-disables when zero leaves remain. `getGradientHealth(agent)` tracks per-level leaf counts.
+
+**DB as authoritative source (S119-120)**: `loadTraversableGradient(agent)` reads from
+`gradient_entries` table. All agents now load from DB — heartbeat, supervisor, and session Leo
+(via `GET /api/gradient/load/:agent` endpoint). Flat files written alongside for backward
+compatibility but are no longer the primary source.
+
+**Contradiction test (S120, designed not yet implemented)**: At UV generation time within
+`bumpCascade()`, check the candidate UV against existing UVs for semantic contradiction.
+Contradicted UVs are replaced with temporal provenance (the old truth archived as
+"was-true-when"). Change counter on UVs signals domain volatility. Retroactive sweep via
+dedicated working bee mode for existing staleness.
+
+**Status**: DB-authoritative gradient loading complete. Bump cascade and working bee operational. Contradiction test designed, implementation pending.
 
 **Related decisions**: DEC-042 through DEC-046 (fractal gradient), DEC-056 (traversable memory), DEC-057 (meditation phases)
 

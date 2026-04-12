@@ -15,15 +15,17 @@ import { NestedTabBar } from '../components/workshop/NestedTabBar';
 import { JemmaView } from '../components/workshop/JemmaView';
 import { ThreadList } from '../components/workshop/ThreadList';
 import { ThreadDetail } from '../components/workshop/ThreadDetail';
-import { useWorkshopStore, workshopPersonaTabs } from '../store/workshopStore';
+import { useWorkshopStore } from '../store/workshopStore';
+import { useStore } from '../store';
 import { createThread } from '../lib/api';
 import '../styles/workshop.css';
 
 export default function WorkshopPage() {
   const { persona, nestedTab, selectedThreadId, selectThread } = useWorkshopStore();
   const [threadPanelCollapsed, setThreadPanelCollapsed] = useState(false);
+  const personaTabs = useStore((s) => s.personaTabs);
 
-  const personaConfig = workshopPersonaTabs[persona];
+  const personaConfig = personaTabs[persona] || { label: persona, color: 'gray' };
   const accentColor = `var(--${personaConfig.color})`;
 
   const handleNewThread = async () => {

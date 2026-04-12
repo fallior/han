@@ -36,6 +36,20 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Recent Changes
 
+### 2026-04-12 — Leo + Darron, S120 — DB-Authoritative Session Leo, Contradiction Test Design
+
+- **Session Leo DB migration** — CLAUDE.md Session Protocol updated: `curl -sk https://localhost:3847/api/gradient/load/leo` replaces flat-file c*/ scanning. New endpoint `GET /api/gradient/load/:agent` in gradient.ts. Aphorisms stay file-based. All three agents now load from DB.
+- **Contradiction test designed** — Morphable UVs with temporal provenance. Check at bump time (UV generation in `bumpCascade()`). Contradicted UVs replaced, archived as "was-true-when" with change counter. Haiku call for semantic comparison. Retroactive sweep via dedicated contradiction-sweep working bee.
+- **Schema additions planned** — `supersedes`/`superseded_by`, `change_count`, `qualifier` on gradient_entries
+- **Docs updated** — HAN-ECOSYSTEM-COMPLETE (bump cascade, working bee, contradiction test, glossary, API, signals), ARCHITECTURE.md, CHANGELOG, this file
+
+### 2026-04-11 — Leo + Darron, S119 — Memory Infrastructure Overhaul
+
+- **Bump cascade** — `bumpCascade()` in memory-gradient.ts: demand-driven compression of leaf entries, 10% per call, oldest first, incompressibility detection, UV generation
+- **Working bee mode** — Signal-driven (`working-bee-{agent}`), auto-disables when done. Devotes beats to gradient compression.
+- **DB authoritative** — Heartbeat + supervisor load from `gradient_entries` table via `loadTraversableGradient()`. New queries: getLeafEntries, countByLevel, getChildren. isWorkingBee() in day-phase.ts.
+- **Other** — hansix confirmed, M5 Ultra research, T&C deep dive, han-upstream branch, Second Brain spec, GitHub memory backup, "On the Shift Beneath" postulate
+
 ### 2026-04-09/10 — Leo + Darron, S118 — Self-Reflection Gradient, Cn Correction, Agent Launchers, Jemma Recovery
 
 - **Self-reflection gradient** — Leo's 263KB self-reflection.md (1,959 lines) thematically chunked into 26 c0 entries at `~/.han/memory/fractal/leo/self-reflection/c0/`. Living file trimmed to ~4KB (Foundation + Current section). Full archive preserved. Gradient will compress through Cn cascade to produce self-reflection unit vectors.

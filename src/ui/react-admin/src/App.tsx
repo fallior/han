@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import AuthGuard from './components/AuthGuard'
@@ -13,10 +14,26 @@ import MemoryPage from './pages/MemoryPage'
 import ProductsPage from './pages/ProductsPage'
 import { WebSocketProvider } from './providers/WebSocketProvider'
 import { useVisibilitySync } from './hooks/useVisibilitySync'
+import { useStore } from './store'
 
 function AppContent() {
   // Enable visibility sync for tab switching
   useVisibilitySync()
+
+  // Load persona registry from API on mount
+  const loadPersonas = useStore((s) => s.loadPersonas)
+  const personasLoaded = useStore((s) => s.personasLoaded)
+  useEffect(() => {
+    if (personasLoaded) return
+    fetch('/api/village/personas')
+      .then(res => res.json())
+      .then(data => {
+        if (data.personas) {
+          loadPersonas(data.personas)
+        }
+      })
+      .catch(err => console.warn('[App] Failed to load personas:', err.message))
+  }, [loadPersonas, personasLoaded])
 
   return (
     <AuthGuard>

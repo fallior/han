@@ -66,6 +66,74 @@
   let workshopSelectedThread = {};
   let workshopPeriod = "all";
   let workshopShowArchived = false;
+  let _personaTabs = {
+    jim: { label: "Supervisor Jim", color: "var(--purple)" },
+    leo: { label: "Philosopher Leo", color: "var(--green)" },
+    darron: { label: "Dreamer Darron", color: "var(--blue)" },
+    jemma: { label: "Dispatcher Jemma", color: "var(--amber)" }
+  };
+  let _nestedTabs = {
+    jim: [{ key: "jim-request", label: "Requests" }, { key: "jim-report", label: "Reports" }],
+    leo: [{ key: "leo-question", label: "Questions" }, { key: "leo-postulate", label: "Postulates" }],
+    darron: [{ key: "darron-thought", label: "Thoughts" }, { key: "darron-musing", label: "Musings" }],
+    jemma: [{ key: "jemma-messages", label: "Messages" }, { key: "jemma-stats", label: "Stats" }]
+  };
+  let _roleMap = {
+    human: { label: "Darron", color: "rgba(255,255,255,0.6)" },
+    supervisor: { label: "Jim", color: "var(--text-muted)" },
+    leo: { label: "Leo", color: "rgba(56,207,135,0.6)" }
+  };
+  let _deliveryRecipients = ["jim", "leo", "darron", "sevn", "six", "ignored"];
+  async function loadPersonaRegistry() {
+    try {
+      const res = await fetch("/api/village/personas");
+      if (!res.ok) return;
+      const data = await res.json();
+      const personas = data.personas || [];
+      const tabs = {};
+      const nested = {};
+      const roles = {
+        human: { label: "Darron", color: "rgba(255,255,255,0.6)" },
+        supervisor: { label: "Jim", color: "var(--text-muted)" }
+      };
+      const recipients = [];
+      for (const p of personas) {
+        if (!p.active) continue;
+        const workshopTabsParsed = p.workshop_tabs_parsed || [];
+        if (workshopTabsParsed.length > 0 || p.kind === "gateway") {
+          tabs[p.name] = { label: p.display_name, color: `var(--${p.color})` };
+        }
+        if (workshopTabsParsed.length > 0) {
+          nested[p.name] = workshopTabsParsed;
+        }
+        const roleName = p.role_name || p.name;
+        const shortLabel = p.display_name.split(" ").pop() || p.name;
+        roles[roleName] = { label: shortLabel, color: `var(--${p.color})` };
+        if (p.name !== "jemma") recipients.push(p.name);
+      }
+      recipients.push("ignored");
+      if (Object.keys(tabs).length > 0) _personaTabs = tabs;
+      if (Object.keys(nested).length > 0) _nestedTabs = nested;
+      _roleMap = roles;
+      _deliveryRecipients = recipients;
+      console.log(`[Admin] Loaded ${personas.length} personas from registry`);
+    } catch (err) {
+      console.warn("[Admin] Failed to load persona registry, using fallbacks");
+    }
+  }
+  function getRoleLabel(role) {
+    const info = _roleMap[role];
+    return info?.label || role.charAt(0).toUpperCase() + role.slice(1);
+  }
+  function getRoleLabelColor(role) {
+    const info = _roleMap[role];
+    return info?.color || "var(--text-muted)";
+  }
+  function getRoleBubbleClass(role) {
+    if (role === "human") return "message-bubble human";
+    if (role === "leo") return "message-bubble leo";
+    return "message-bubble supervisor";
+  }
   function markThreadRead(conversationId) {
     localStorage.setItem(`lastRead:${conversationId}`, (/* @__PURE__ */ new Date()).toISOString());
   }
@@ -2009,11 +2077,9 @@
         html += `<div style="padding:16px;color:var(--text-muted);text-align:center;font-size:12px">No messages yet</div>`;
       } else {
         for (const msg of messages) {
-          const isHuman = msg.role === "human";
-          const isLeo = msg.role === "leo";
-          const bubbleClass = isHuman ? "message-bubble human" : isLeo ? "message-bubble leo" : "message-bubble supervisor";
-          const label = isHuman ? "Darron" : isLeo ? "Leo" : "Jim";
-          const labelColor = isHuman ? "rgba(255,255,255,0.6)" : isLeo ? "rgba(56,207,135,0.6)" : "var(--text-muted)";
+          const bubbleClass = getRoleBubbleClass(msg.role);
+          const label = getRoleLabel(msg.role);
+          const labelColor = getRoleLabelColor(msg.role);
           html += `<div class="${bubbleClass}">
                     <div style="font-size:10px;color:${labelColor};margin-bottom:4px">${label} \xB7 ${formatTime(msg.created_at)}</div>
                     <div class="message-content" style="word-break:break-word;line-height:1.5">${renderMarkdown(msg.content)}</div>
@@ -2172,8 +2238,8 @@
           const isSelected = selectedConversationId === convId;
           const statusBadgeClass = result.conversation_status === "open" ? "badge-running" : "badge-done";
           const statusText = result.conversation_status === "open" ? "Open" : "Resolved";
-          const roleColor = result.matched_message?.role === "human" ? "var(--blue)" : result.matched_message?.role === "leo" ? "var(--green)" : "var(--purple)";
-          const roleLabel = result.matched_message?.role === "human" ? "Darron" : result.matched_message?.role === "leo" ? "Leo" : "Jim";
+          const roleColor = getRoleLabelColor(result.matched_message?.role || "supervisor");
+          const roleLabel = getRoleLabel(result.matched_message?.role || "supervisor");
           html += `<div class="search-result-card ${isSelected ? "active" : ""}" data-thread-id="${convId}" onclick="selectConversationThread('${convId}')" style="background:var(--bg-page);border:1px solid var(--border-subtle);border-radius:6px;padding:12px;cursor:pointer;transition:background 0.15s;margin-bottom:8px">
                     <div class="search-result-header" style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;gap:8px">
                         <div style="flex:1;min-width:0">
@@ -2391,11 +2457,9 @@
         html += `<div style="padding:16px;color:var(--text-muted);text-align:center;font-size:12px">No messages yet. Start thinking aloud.</div>`;
       } else {
         for (const msg of messages) {
-          const isHuman = msg.role === "human";
-          const isLeo = msg.role === "leo";
-          const bubbleClass = isHuman ? "message-bubble human" : isLeo ? "message-bubble leo" : "message-bubble supervisor";
-          const label = isHuman ? "Darron" : isLeo ? "Leo" : "Jim";
-          const labelColor = isHuman ? "rgba(255,255,255,0.6)" : isLeo ? "rgba(56,207,135,0.6)" : "var(--text-muted)";
+          const bubbleClass = getRoleBubbleClass(msg.role);
+          const label = getRoleLabel(msg.role);
+          const labelColor = getRoleLabelColor(msg.role);
           html += `<div class="${bubbleClass}">
                     <div style="font-size:10px;color:${labelColor};margin-bottom:4px">${label} \xB7 ${formatTime(msg.created_at)}</div>
                     <div class="message-content" style="word-break:break-word;line-height:1.5">${renderMarkdown(msg.content)}</div>
@@ -2552,8 +2616,8 @@
           const snippet = result.matched_message?.snippet || result.matched_message?.content || "";
           const highlightedSnippet = snippet.replace(/<mark>/g, '<strong style="background:rgba(179,146,240,0.3);color:var(--purple)">').replace(/<\/mark>/g, "</strong>");
           const isSelected = selectedMemoryDiscussionId === convId;
-          const roleColor = result.matched_message?.role === "human" ? "var(--blue)" : result.matched_message?.role === "leo" ? "var(--green)" : "var(--purple)";
-          const roleLabel = result.matched_message?.role === "human" ? "Darron" : result.matched_message?.role === "leo" ? "Leo" : "Jim";
+          const roleColor = getRoleLabelColor(result.matched_message?.role || "supervisor");
+          const roleLabel = getRoleLabel(result.matched_message?.role || "supervisor");
           html += `<div class="search-result-card ${isSelected ? "active" : ""}" data-thread-id="${convId}" onclick="selectMemoryThread('${convId}')">
                     <div class="search-result-header">
                         <div style="flex:1;min-width:0">
@@ -2610,30 +2674,8 @@
     const layout = document.querySelector(".md-conversation-layout");
     if (layout) layout.classList.remove("thread-selected");
   };
-  const workshopPersonaTabs = {
-    jim: { label: "Supervisor Jim", color: "var(--purple)" },
-    leo: { label: "Philosopher Leo", color: "var(--green)" },
-    darron: { label: "Dreamer Darron", color: "var(--blue)" },
-    jemma: { label: "Dispatcher Jemma", color: "var(--amber)" }
-  };
-  const workshopNestedTabs = {
-    jim: [
-      { key: "jim-request", label: "Requests" },
-      { key: "jim-report", label: "Reports" }
-    ],
-    leo: [
-      { key: "leo-question", label: "Questions" },
-      { key: "leo-postulate", label: "Postulates" }
-    ],
-    darron: [
-      { key: "darron-thought", label: "Thoughts" },
-      { key: "darron-musing", label: "Musings" }
-    ],
-    jemma: [
-      { key: "jemma-messages", label: "Messages" },
-      { key: "jemma-stats", label: "Stats" }
-    ]
-  };
+  const workshopPersonaTabs = _personaTabs;
+  const workshopNestedTabs = _nestedTabs;
   async function loadJemmaWorkshop(content) {
     try {
       let html = `<div class="fade-in conversation-container workshop-layout-jemma">
@@ -2738,7 +2780,7 @@
       html += `<div class="admin-card" style="padding:16px">
             <div style="font-weight:600;font-size:12px;color:var(--text-primary);margin-bottom:12px">Delivery Statistics</div>
             <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px">`;
-      const recipients = ["jim", "leo", "darron", "sevn", "six", "ignored"];
+      const recipients = _deliveryRecipients;
       for (const recipient of recipients) {
         const count = stats[recipient] || 0;
         html += `<div style="padding:10px;background:var(--bg-card);border-radius:4px;border-left:3px solid var(--amber);text-align:center">
@@ -3020,11 +3062,9 @@
         html += `<div style="padding:16px;color:var(--text-muted);text-align:center;font-size:12px">No messages yet</div>`;
       } else {
         for (const msg of messages) {
-          const isHuman = msg.role === "human";
-          const isLeo = msg.role === "leo";
-          const bubbleClass = isHuman ? "message-bubble human" : isLeo ? "message-bubble leo" : "message-bubble supervisor";
-          const label = isHuman ? "Darron" : isLeo ? "Leo" : "Jim";
-          const labelColor = isHuman ? "rgba(255,255,255,0.6)" : isLeo ? "rgba(56,207,135,0.6)" : "var(--text-muted)";
+          const bubbleClass = getRoleBubbleClass(msg.role);
+          const label = getRoleLabel(msg.role);
+          const labelColor = getRoleLabelColor(msg.role);
           html += `<div class="${bubbleClass}">
                     <div style="font-size:10px;color:${labelColor};margin-bottom:4px">${label} \xB7 ${formatTime(msg.created_at)}</div>
                     <div class="message-content" style="word-break:break-word;line-height:1.5">${renderMarkdown(msg.content)}</div>
@@ -3244,8 +3284,8 @@
           const highlightedSnippet = snippet.replace(/<mark>/g, '<strong style="background:rgba(179,146,240,0.3);color:var(--purple)">').replace(/<\/mark>/g, "</strong>");
           const currentThreadId = workshopSelectedThread[workshopNestedTab] || null;
           const isSelected = currentThreadId === convId;
-          const roleColor = result.matched_message?.role === "human" ? "var(--blue)" : result.matched_message?.role === "leo" ? "var(--green)" : "var(--purple)";
-          const roleLabel = result.matched_message?.role === "human" ? "Darron" : result.matched_message?.role === "leo" ? "Leo" : "Jim";
+          const roleColor = getRoleLabelColor(result.matched_message?.role || "supervisor");
+          const roleLabel = getRoleLabel(result.matched_message?.role || "supervisor");
           html += `<div class="search-result-card ${isSelected ? "active" : ""}" data-thread-id="${convId}" onclick="selectWorkshopThread('${convId}')">
                     <div class="search-result-header">
                         <div style="flex:1;min-width:0">
@@ -3284,6 +3324,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     initTheme();
     initChartDefaults();
+    loadPersonaRegistry();
     document.querySelectorAll(".sidebar-item[data-module]").forEach((el) => {
       el.addEventListener("click", (e) => {
       });

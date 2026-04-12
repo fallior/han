@@ -6,6 +6,7 @@ import { runSupervisorCycle } from '../services/supervisor';
 import { catalogueConversation, catalogueAllUncatalogued } from '../services/cataloguing';
 import { callLLM } from '../orchestrator';
 import { deliverMessage } from '../services/jemma-dispatch';
+import { getPersonas, getAgentPersonas, getMentionPatterns } from '../services/village.js';
 const router = Router();
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b';
@@ -18,21 +19,34 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b';
 // Falls back to tab-based routing + simple regex if Ollama is down.
 
 interface AddresseeResult {
-    jim: boolean;
-    leo: boolean;
+    recipients: string[];  // List of persona names to wake
     reasoning: string;
 }
 
 async function classifyAddressee(content: string, discussionType: string): Promise<AddresseeResult> {
-    const isJimTab = discussionType === 'jim-request' || discussionType === 'jim-report';
-    const isLeoTab = discussionType === 'leo-question' || discussionType === 'leo-postulate';
-    const isDarronTab = discussionType === 'darron-thought' || discussionType === 'darron-musing';
+    const localAgents = getAgentPersonas().filter(p => p.is_local);
+    const humanPersonas = getPersonas().filter(p => p.kind === 'human');
 
-    // Darron's personal tabs always wake both agents — his thoughts are for both colleagues
-    if (isDarronTab) {
-        console.log(`[Conversations] Darron tab (${discussionType}) — waking both Jim and Leo`);
-        return { jim: true, leo: true, reasoning: 'darron-tab: always both' };
+    // Detect tab ownership: discussion_type prefix matches a persona name
+    const tabOwner = localAgents.find(p => discussionType.startsWith(p.name + '-'));
+    const isHumanTab = humanPersonas.some(p => discussionType.startsWith(p.name + '-'));
+
+    // Human's personal tabs always wake all local agents
+    if (isHumanTab) {
+        const allNames = localAgents.map(p => p.name);
+        console.log(`[Conversations] Human tab (${discussionType}) — waking all: ${allNames.join(', ')}`);
+        return { recipients: allNames, reasoning: 'human-tab: always all local agents' };
     }
+
+    // Build dynamic classification prompt from persona registry
+    const agentList = localAgents.map(p => {
+        const patterns = getMentionPatterns(p);
+        const aliases = patterns.map(pat => pat.replace(/\\b/g, '').replace(/\|/g, '/')).join(', ');
+        return `${p.display_name}${aliases ? ` (also ${aliases})` : ''}`;
+    }).join(', ');
+
+    const agentFields = localAgents.map(p => `"${p.name}": true/false`).join(', ');
+    const defaultAgent = tabOwner ? tabOwner.name : 'both';
 
     try {
         const res = await fetch(`${OLLAMA_URL}/api/generate`, {
@@ -40,7 +54,7 @@ async function classifyAddressee(content: string, discussionType: string): Promi
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: OLLAMA_MODEL,
-                prompt: `You route messages to team members. The team: Jim (also Jimmy), Leo (also Leonhard).
+                prompt: `You route messages to team members. The team: ${agentList}.
 
 Thread type: "${discussionType}"
 Message: "${content.slice(0, 500)}"
@@ -48,13 +62,11 @@ Message: "${content.slice(0, 500)}"
 Who is being ASKED TO RESPOND? Set true for each person who should reply.
 
 IMPORTANT:
-- "Jim and Leo, ..." or "Hey Jim and Hey Leo" → BOTH true (addressing the group)
-- "Jimmy" → jim true
-- "Leo, what do you think" → leo true
+- Addressing multiple people → set all mentioned to true
 - Talking ABOUT someone's past work without asking them → false
-- If no one is clearly addressed, default: ${isJimTab ? 'jim' : isLeoTab ? 'leo' : 'both'}
+- If no one is clearly addressed, default: ${defaultAgent}
 
-JSON only: {"jim": true/false, "leo": true/false, "reasoning": "brief"}`,
+JSON only: {${agentFields}, "reasoning": "brief"}`,
                 stream: false,
                 format: 'json',
             }),
@@ -65,20 +77,34 @@ JSON only: {"jim": true/false, "leo": true/false, "reasoning": "brief"}`,
 
         const data = await res.json() as any;
         const result = JSON.parse(data.response);
-        console.log(`[Conversations] Gemma addressee: jim=${result.jim} leo=${result.leo} — ${result.reasoning}`);
+        const recipients = localAgents
+            .filter(p => result[p.name])
+            .map(p => p.name);
+        console.log(`[Conversations] Gemma addressee: ${recipients.join(', ')} — ${result.reasoning}`);
         return {
-            jim: !!result.jim,
-            leo: !!result.leo,
+            recipients: recipients.length > 0 ? recipients : localAgents.map(p => p.name),
             reasoning: result.reasoning || '',
         };
     } catch (err: any) {
         // Fallback: tab-based routing + simple name matching
         console.warn(`[Conversations] Gemma classification failed (${err.message}), using fallback`);
-        const mentionsJim = /\b(jim|jimmy)\b/i.test(content);
-        const mentionsLeo = /\b(leo|leonhard)\b/i.test(content);
+        const contentLower = content.toLowerCase();
+
+        if (tabOwner) {
+            return { recipients: [tabOwner.name], reasoning: 'fallback: tab owner' };
+        }
+
+        // Check mention patterns for each agent
+        const mentioned = localAgents.filter(p => {
+            const patterns = getMentionPatterns(p);
+            return patterns.some(pat => {
+                try { return new RegExp(pat, 'i').test(contentLower); }
+                catch { return false; }
+            });
+        }).map(p => p.name);
+
         return {
-            jim: isJimTab || mentionsJim || (!isLeoTab && !isJimTab),
-            leo: isLeoTab || mentionsLeo || (!isLeoTab && !isJimTab),
+            recipients: mentioned.length > 0 ? mentioned : localAgents.map(p => p.name),
             reasoning: 'fallback: regex + tab routing',
         };
     }
@@ -97,11 +123,7 @@ function classifyAndDispatch(
     timestamp: string,
 ): void {
     console.log(`[Conversations] Classifying addressee for message in ${discussionType} thread`);
-    classifyAddressee(content, discussionType).then(async ({ jim, leo, reasoning }) => {
-        const recipients: Array<'jim' | 'leo'> = [];
-        if (jim) recipients.push('jim');
-        if (leo) recipients.push('leo');
-
+    classifyAddressee(content, discussionType).then(async ({ recipients, reasoning }) => {
         for (const recipient of recipients) {
             try {
                 await deliverMessage({

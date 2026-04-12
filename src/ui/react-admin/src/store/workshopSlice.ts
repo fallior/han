@@ -1,12 +1,14 @@
 import { type StateCreator } from 'zustand';
+import { type PersonaApiEntry, buildPersonaTabs, buildNestedTabs, buildRoleMap, workshopPersonaTabs, workshopNestedTabs } from './constants';
 
 /**
  * Workshop tab state slice
  * Manages persona selection, nested tabs, thread lists, and current thread
+ * Persona data loaded dynamically from /api/village/personas
  */
 
-// Type definitions
-export type WorkshopPersona = 'jim' | 'leo' | 'darron' | 'jemma';
+// WorkshopPersona is now a string — any persona name from the registry
+export type WorkshopPersona = string;
 
 export interface WorkshopSlice {
   // State
@@ -20,6 +22,12 @@ export interface WorkshopSlice {
   workshopCurrentThread: any | null;
   workshopNeedsRefresh: boolean;
 
+  // Dynamic persona data (loaded from API)
+  personaTabs: Record<string, { label: string; color: string }>;
+  nestedTabs: Record<string, Array<{ key: string; label: string }>>;
+  roleMap: Record<string, { label: string; color: string }>;
+  personasLoaded: boolean;
+
   // Actions
   setPersona: (persona: WorkshopPersona) => void;
   setNestedTab: (tab: string) => void;
@@ -30,21 +38,14 @@ export interface WorkshopSlice {
   setCurrentThread: (thread: any | null) => void;
   addMessageToCurrentThread: (message: any) => void;
   setNeedsRefresh: (needsRefresh: boolean) => void;
+  loadPersonas: (personas: PersonaApiEntry[]) => void;
 
   // Computed getters
   currentThreadId: () => number | string | null;
 }
 
-// Default nested tab for each persona
-const defaultNestedTabs: Record<WorkshopPersona, string> = {
-  jim: 'jim-request',
-  leo: 'leo-question',
-  darron: 'darron-thought',
-  jemma: 'jemma-messages',
-};
-
 export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSlice> = (set, get) => ({
-  // Initial state
+  // Initial state — uses hardcoded fallbacks until API loads
   workshopPersona: 'jim',
   workshopNestedTab: 'jim-request',
   workshopPeriod: 'all',
@@ -55,11 +56,24 @@ export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSl
   workshopCurrentThread: null,
   workshopNeedsRefresh: false,
 
+  // Persona data — starts with fallbacks, replaced by API data
+  personaTabs: workshopPersonaTabs,
+  nestedTabs: workshopNestedTabs,
+  roleMap: {
+    human: { label: 'Darron', color: 'blue' },
+    supervisor: { label: 'Jim', color: 'purple' },
+    leo: { label: 'Leo', color: 'green' },
+  },
+  personasLoaded: false,
+
   // Actions
   setPersona: (persona: WorkshopPersona) => {
+    const state = get();
+    const tabs = state.nestedTabs[persona];
+    const defaultTab = tabs?.[0]?.key || `${persona}-notes`;
     set({
       workshopPersona: persona,
-      workshopNestedTab: defaultNestedTabs[persona],
+      workshopNestedTab: defaultTab,
     });
   },
 
@@ -107,7 +121,6 @@ export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSl
     set((state) => {
       if (!state.workshopCurrentThread) return state;
       const existing = state.workshopCurrentThread.messages || [];
-      // Deduplicate — same message can arrive via both HTTP broadcast and signal file
       if (existing.some((m: any) => m.id === message.id)) return state;
       return {
         workshopCurrentThread: {
@@ -120,6 +133,24 @@ export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSl
 
   setNeedsRefresh: (needsRefresh: boolean) => {
     set({ workshopNeedsRefresh: needsRefresh });
+  },
+
+  /** Load persona data from API — replaces hardcoded tabs/colors */
+  loadPersonas: (personas: PersonaApiEntry[]) => {
+    const tabs = buildPersonaTabs(personas);
+    const nested = buildNestedTabs(personas);
+    const roles = buildRoleMap(personas);
+    set({
+      personaTabs: Object.keys(tabs).length > 0 ? tabs : workshopPersonaTabs,
+      nestedTabs: Object.keys(nested).length > 0 ? nested : workshopNestedTabs,
+      roleMap: {
+        // Keep hardcoded human/supervisor role mappings as base
+        human: { label: 'Darron', color: 'blue' },
+        supervisor: { label: 'Jim', color: 'purple' },
+        ...roles,
+      },
+      personasLoaded: true,
+    });
   },
 
   // Computed getters

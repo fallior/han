@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import MarkdownRenderer from './MarkdownRenderer';
 import { formatTime } from '../../utils/formatters';
+import { useStore } from '../../store';
 
 interface MessageBubbleProps {
   role: string;
@@ -8,35 +9,24 @@ interface MessageBubbleProps {
   timestamp: string;
 }
 
-const getRoleLabel = (role: string): string => {
-  switch (role) {
-    case 'human':
-      return 'Darron';
-    case 'supervisor':
-      return 'Jim';
-    case 'leo':
-      return 'Leo';
-    default:
-      return role;
-  }
-};
-
-const getLabelColor = (role: string): string => {
-  switch (role) {
-    case 'human':
-      return 'rgba(255,255,255,0.6)';
-    case 'leo':
-      return 'rgba(56,207,135,0.6)';
-    case 'supervisor':
-      return 'var(--text-muted)';
-    default:
-      return 'var(--text-muted)';
-  }
+// CSS color name/var → rgba for label display
+const colorToRgba: Record<string, string> = {
+  green: 'rgba(56,207,135,0.6)',
+  purple: 'var(--text-muted)',
+  blue: 'rgba(255,255,255,0.6)',
+  amber: 'rgba(245,158,11,0.6)',
+  red: 'rgba(239,68,68,0.6)',
+  orange: 'rgba(249,115,22,0.6)',
+  teal: 'rgba(20,184,166,0.6)',
+  indigo: 'rgba(99,102,241,0.6)',
+  gray: 'var(--text-muted)',
 };
 
 export const MessageBubble = memo(({ role, content, timestamp }: MessageBubbleProps) => {
-  const roleLabel = getRoleLabel(role);
-  const labelColor = getLabelColor(role);
+  const roleMap = useStore((s) => s.roleMap);
+  const info = roleMap[role];
+  const roleLabel = info?.label || role.charAt(0).toUpperCase() + role.slice(1);
+  const labelColor = info ? (colorToRgba[info.color] || info.color) : 'var(--text-muted)';
   const bubbleClass = `message-bubble ${role}`;
 
   return (

@@ -304,17 +304,28 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
     currentThread.messages.length > 0 &&
     currentThread.messages[currentThread.messages.length - 1]?.role === 'human';
 
-  // Who's expected to respond based on discussion type
+  // Who's expected to respond based on discussion type — registry-driven
+  const personaTabs = useStore((s) => s.personaTabs);
+  const nestedTabsMap = useStore((s) => s.nestedTabs);
   const respondents = (() => {
     if (!lastMessageIsHuman || !nestedTab) return [];
-    const isJimTab = nestedTab === 'jim-request' || nestedTab === 'jim-report';
-    const isLeoTab = nestedTab === 'leo-question' || nestedTab === 'leo-postulate';
-    const isDarronTab = nestedTab === 'darron-thought' || nestedTab === 'darron-musing';
-    // Darron tabs and general always wake both
-    if (isDarronTab || (!isJimTab && !isLeoTab)) return ['jim', 'leo'];
-    if (isJimTab) return ['jim'];
-    if (isLeoTab) return ['leo'];
-    return ['jim', 'leo'];
+    // Find which persona owns this tab by prefix match
+    const agentNames = Object.keys(personaTabs).filter(name => {
+      const tabs = nestedTabsMap[name];
+      return tabs?.some(t => t.key === nestedTab);
+    });
+    // If tab belongs to a specific agent, only that agent responds
+    if (agentNames.length === 1) {
+      const owner = agentNames[0];
+      // Human/gateway tabs → all non-human/non-gateway agents respond
+      const ownerInfo = personaTabs[owner];
+      // Simple heuristic: if the tab key starts with a known agent name, that agent responds
+      return [owner];
+    }
+    // Default: all agents with workshop tabs (excluding humans and gateways)
+    return Object.keys(personaTabs).filter(name =>
+      name !== 'jemma' && name !== 'darron' && nestedTabsMap[name]?.length > 0
+    );
   })();
 
   // Empty state - no thread selected
@@ -548,26 +559,31 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
               />
             ))}
             {/* Thinking indicators — one per expected respondent */}
-            {respondents.map((agent) => (
+            {respondents.map((agent) => {
+              const agentInfo = personaTabs[agent];
+              const agentColor = agentInfo ? `var(--${agentInfo.color}, var(--text-muted))` : 'var(--text-muted)';
+              const agentLabel = agentInfo?.label?.split(' ').pop() || agent;
+              return (
               <div
                 key={`thinking-${agent}`}
                 style={{
                   opacity: 0.5,
                   padding: '10px 14px',
                   borderRadius: '8px',
-                  borderLeft: `3px solid ${agent === 'leo' ? 'var(--green)' : 'var(--purple, #a855f7)'}`,
+                  borderLeft: `3px solid ${agentColor}`,
                   backgroundColor: 'var(--bg-page)',
                   maxWidth: '80%',
                 }}
               >
-                <div style={{ fontSize: '0.75rem', color: agent === 'leo' ? 'var(--green)' : 'var(--purple, #a855f7)', marginBottom: '0.25rem', fontWeight: 500 }}>
-                  {agent === 'leo' ? 'Leo' : 'Jim'}
+                <div style={{ fontSize: '0.75rem', color: agentColor, marginBottom: '0.25rem', fontWeight: 500 }}>
+                  {agentLabel}
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--text-dim)', fontStyle: 'italic' }}>
                   Thinking...
                 </div>
               </div>
-            ))}
+            );
+            })}
             <div ref={messagesEndRef} />
           </>
         )}

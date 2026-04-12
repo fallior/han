@@ -1,14 +1,16 @@
 /**
  * PersonaTabBar Component
  *
- * Top-level tabs for switching between personas (Jim, Leo, Darron, Jemma)
- * Each persona has a distinct color and nested tabs
+ * Top-level tabs for switching between personas — dynamically loaded from the
+ * persona registry via /api/village/personas. Falls back to hardcoded defaults.
  */
 
-import { useWorkshopStore, workshopPersonaTabs, type WorkshopPersona } from '../../store/workshopStore';
+import { useStore } from '../../store';
 
 export function PersonaTabBar() {
-  const { persona, setPersona } = useWorkshopStore();
+  const persona = useStore((s) => s.workshopPersona);
+  const setPersona = useStore((s) => s.setPersona);
+  const personaTabs = useStore((s) => s.personaTabs);
 
   return (
     <div
@@ -20,7 +22,7 @@ export function PersonaTabBar() {
         background: 'var(--bg-card)',
       }}
     >
-      {(Object.entries(workshopPersonaTabs) as [WorkshopPersona, typeof workshopPersonaTabs[WorkshopPersona]][]).map(([key, tab]) => {
+      {Object.entries(personaTabs).map(([key, tab]) => {
         const isActive = persona === key;
         const color = `var(--${tab.color})`;
 

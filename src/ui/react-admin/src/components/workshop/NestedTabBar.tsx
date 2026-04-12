@@ -1,17 +1,21 @@
 /**
  * NestedTabBar Component
  *
- * Second-level tabs that change based on the selected persona
- * Example: Jim has "Requests" and "Reports"
+ * Second-level tabs that change based on the selected persona.
+ * Now reads dynamically from persona registry via the store.
  */
 
-import { useWorkshopStore, workshopPersonaTabs, workshopNestedTabs } from '../../store/workshopStore';
+import { useStore } from '../../store';
 
 export function NestedTabBar() {
-  const { persona, nestedTab, setNestedTab } = useWorkshopStore();
+  const persona = useStore((s) => s.workshopPersona);
+  const nestedTab = useStore((s) => s.workshopNestedTab);
+  const setNestedTab = useStore((s) => s.setNestedTab);
+  const personaTabs = useStore((s) => s.personaTabs);
+  const nestedTabsMap = useStore((s) => s.nestedTabs);
 
-  const personaConfig = workshopPersonaTabs[persona];
-  const nestedTabs = workshopNestedTabs[persona];
+  const personaConfig = personaTabs[persona] || { label: persona, color: 'gray' };
+  const tabs = nestedTabsMap[persona] || [];
   const color = `var(--${personaConfig.color})`;
 
   return (
@@ -25,7 +29,7 @@ export function NestedTabBar() {
         padding: '0 8px',
       }}
     >
-      {nestedTabs.map((tab) => {
+      {tabs.map((tab) => {
         const isActive = nestedTab === tab.key;
 
         return (

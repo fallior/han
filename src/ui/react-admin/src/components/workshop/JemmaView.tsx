@@ -208,7 +208,7 @@ function StatsTab({ data }: StatsTabProps) {
           Delivery Statistics
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-          {['jim', 'leo', 'darron', 'sevn', 'six', 'ignored'].map((recipient) => {
+          {[...Object.keys(useStore.getState().personaTabs).filter(n => n !== 'jemma'), 'ignored'].map((recipient) => {
             const count = stats[recipient] || 0;
             return (
               <div
