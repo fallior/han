@@ -261,6 +261,20 @@ Decisions marked **Needs Discussion** are open for reconsideration but still req
 
 This is not optional. Changing settled decisions without warning causes real stress and wasted time.
 
+### Pre-Commit Declaration (Darron's instruction, S123)
+
+**Before presenting any commit for Darron's approval**, Leo must:
+1. State which DECISIONS.md entries were checked
+2. Confirm no Settled decisions were touched — or if they were, name them explicitly and get approval before committing
+
+This is because Darron cannot read full diffs. He relies on Leo to self-audit. The commit message is not sufficient — Leo must say it out loud in the conversation before asking Darron to approve.
+
+**Protected files** — any commit touching these requires explicit settled-decision check:
+- `src/server/lib/memory-gradient.ts` (DEC-068, DEC-069)
+- `src/server/db.ts` (DEC-068, DEC-069)
+- `CLAUDE.md` session protocol section (gradient spec)
+- `claude-context/DECISIONS.md` itself
+
 ## Conventions
 
 - **British English** spelling

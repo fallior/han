@@ -1089,9 +1089,10 @@ Each writer has private swap files that buffer work before flushing to shared me
 
 Sessions exist at multiple compression fidelities:
 - **c0:** Full session (working-memory-full.md)
-- **c1:** ~1/3 compression (up to 10 files, cap)
-- **c2:** ~1/9 compression (up to 6 files, cap)
-- **c3+:** ~1/3^n compression (up to 4 files per level, cap)
+- **c1:** ~1/3 compression (3 files loaded — DEC-068)
+- **c2:** ~1/9 compression (6 files loaded — DEC-068)
+- **c3+:** ~1/3^n compression (9 files loaded per level — DEC-068)
+- *(Note: current `gradientCap()` implementation uses c1=10, c3+=4 — drift from spec, see DEC-068)*
 - **c(n):** Compression continues until incompressible — depth varies per memory
 - **Unit vectors:** Irreducible emotional kernels (≤50 chars) — the terminal form
 
@@ -1185,10 +1186,10 @@ signal `INCOMPRESSIBLE:` at any level to terminate the chain and produce a unit 
 |-------|-----|----------------|--------|
 | Living file | 1 (growing) | 0-50KB | ~25KB avg |
 | Floating file | 1 (shrinking) | 50-0KB loaded | ~25KB avg |
-| c1 | 10 files | ~17KB | ~170KB on disk, loaded |
-| c2 | 6 files | ~6KB | ~36KB |
-| c3 | 4 files | ~2KB | ~8KB |
-| c4+ | 4 files each | ~500B | ~2KB per level |
+| c1 | 3 files (spec) | ~17KB | ~51KB loaded |
+| c2 | 6 files (spec) | ~6KB | ~36KB |
+| c3 | 9 files (spec) | ~2KB | ~18KB |
+| c4+ | increasing per level | ~500B | ~grows with depth |
 | Unit vectors | unbounded | ~50 chars each | ~5KB for 100 |
 | **Total loaded** | | | **~50KB living+floating + gradient** |
 
