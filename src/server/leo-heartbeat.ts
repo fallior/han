@@ -50,7 +50,7 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
-import { loadTraversableGradient, rotateMemoryFile, compressMemoryFileGradient, processGradientForAgent, activeCascade, bumpCascade, getGradientHealth, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
+import { loadTraversableGradient, rotateMemoryFile, processGradientForAgent, activeCascade, bumpCascade, getGradientHealth, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -1197,8 +1197,10 @@ function readDreamSeeds(): string {
             if (eveningSeed) {
                 seeds.unshift(`--- evening seed (from today's session — let this pull gently, not dictate) ---\n${eveningSeed}`);
             }
-            // Consume: delete after reading so it seeds one night only
-            fs.unlinkSync(eveningSeedPath);
+            // Consume: rename after reading so it seeds one night only.
+            // Memory is never deleted — mark as consumed instead.
+            const consumedPath = eveningSeedPath.replace('.md', `-consumed-${new Date().toISOString().slice(0, 10)}.md`);
+            try { fs.renameSync(eveningSeedPath, consumedPath); } catch { /* best effort */ }
         } catch { /* best effort */ }
     }
 
@@ -1831,21 +1833,17 @@ function preFlightMemoryRotation(): void {
     const tailSize = config.memory?.rollingWindowTail || 51200;
 
     try {
-        // Felt-moments: rolling window
+        // Felt-moments: rolling window — trimmed block enters gradient as c0 atomically
         const fmResult = rollingWindowRotate(
             path.join(LEO_MEMORY_DIR, 'felt-moments.md'),
             '# Leo — Felt Moments\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
             headSize, tailSize,
+            'leo', 'felt-moments',
         );
-        if (fmResult.rotated && fmResult.archivePath) {
-            console.log(`[Leo] Felt-moments rolling window: archived ${fmResult.entriesArchived} entries, kept ${fmResult.entriesKept}`);
-            compressMemoryFileGradient(fmResult.archivePath, path.join(LEO_FRACTAL_DIR, 'felt-moments'), 'felt-moments')
-                .then(r => {
-                    console.log(`[Leo] Felt-moments gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
-                    // Archive file no longer needed after compression
-                    try { fs.unlinkSync(fmResult.archivePath!); } catch { /* best effort */ }
-                })
-                .catch(e => console.error(`[Leo] Felt-moments gradient error: ${e}`));
+        if (fmResult.rotated) {
+            console.log(`[Leo] Felt-moments rolling window: archived ${fmResult.entriesArchived} entries, kept ${fmResult.entriesKept}, c0=${fmResult.c0EntryId}, archive=${fmResult.archivePath}`);
+            // Archive file is NEVER deleted. Memory is never deleted. The DB c0 is
+            // authoritative; the flat file is the safety net. Both persist.
         }
 
         // Working-memory-full: rolling window
@@ -1853,32 +1851,21 @@ function preFlightMemoryRotation(): void {
             path.join(LEO_MEMORY_DIR, 'working-memory-full.md'),
             '# Working Memory (Full) — Leo\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
             headSize, tailSize,
+            'leo', 'working-memory',
         );
-        if (wmFullResult.rotated && wmFullResult.archivePath) {
-            console.log(`[Leo] Working-memory-full rolling window: archived ${wmFullResult.entriesArchived} entries, kept ${wmFullResult.entriesKept}`);
-            compressMemoryFileGradient(wmFullResult.archivePath, path.join(LEO_FRACTAL_DIR, 'working-memory'), 'working-memory')
-                .then(r => {
-                    console.log(`[Leo] Working-memory-full gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
-                    try { fs.unlinkSync(wmFullResult.archivePath!); } catch { /* best effort */ }
-                })
-                .catch(e => console.error(`[Leo] Working-memory-full gradient error: ${e}`));
+        if (wmFullResult.rotated) {
+            console.log(`[Leo] Working-memory-full rolling window: archived ${wmFullResult.entriesArchived} entries, kept ${wmFullResult.entriesKept}, c0=${wmFullResult.c0EntryId}, archive=${wmFullResult.archivePath}`);
         }
 
         // Working-memory (compressed): rolling window
-        // Previously only handled by the 6am nightly wipe — now part of rolling window
         const wmCompResult = rollingWindowRotate(
             WORKING_MEMORY_FILE,
             '# Working Memory — Leo\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
             headSize, tailSize,
+            'leo', 'working-memory',
         );
-        if (wmCompResult.rotated && wmCompResult.archivePath) {
-            console.log(`[Leo] Working-memory (compressed) rolling window: archived ${wmCompResult.entriesArchived} entries, kept ${wmCompResult.entriesKept}`);
-            compressMemoryFileGradient(wmCompResult.archivePath, path.join(LEO_FRACTAL_DIR, 'working-memory'), 'working-memory')
-                .then(r => {
-                    console.log(`[Leo] Working-memory (compressed) gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
-                    try { fs.unlinkSync(wmCompResult.archivePath!); } catch { /* best effort */ }
-                })
-                .catch(e => console.error(`[Leo] Working-memory (compressed) gradient error: ${e}`));
+        if (wmCompResult.rotated) {
+            console.log(`[Leo] Working-memory (compressed) rolling window: archived ${wmCompResult.entriesArchived} entries, kept ${wmCompResult.entriesKept}, c0=${wmCompResult.c0EntryId}, archive=${wmCompResult.archivePath}`);
         }
     } catch (e) {
         console.error(`[Leo] Memory file pre-flight error: ${e}`);

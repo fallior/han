@@ -707,7 +707,7 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
                 if (incompressibleMatch) {
                     const uvContent = incompressibleMatch[1].trim();
                     writeUVEntry(agentName, label, uvContent, 'session', null, feelingTag);
-                    for (const f of batch) { fs.unlinkSync(path.join(fromDir, f)); }
+                    // Memory is never deleted — source files preserved after cascade
                     result.completions.push({ session: label, fromLevel: depth - 1, toLevel: -1, success: true });
                     continue;
                 }
@@ -720,7 +720,7 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
                     );
                     const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
                     writeUVEntry(agentName, label, uvContent.trim(), 'session', null, uvTag);
-                    for (const f of batch) { fs.unlinkSync(path.join(fromDir, f)); }
+                    // Memory is never deleted — source files preserved after cascade
                     result.completions.push({ session: label, fromLevel: depth - 1, toLevel: -1, success: true });
                     continue;
                 }
@@ -746,9 +746,7 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
 
                 result.totalTokensUsed += estimateTokenCount(batchContent) + estimateTokenCount(compressed);
 
-                for (const f of batch) {
-                    fs.unlinkSync(path.join(fromDir, f));
-                }
+                // Memory is never deleted — source files preserved after cascade
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error);
                 result.errors.push({
@@ -1296,9 +1294,11 @@ export function rotateMemoryFile(
     const baseName = path.basename(filePath, '.md');
     const floatingPath = path.join(dir, `${baseName}-floating.md`);
 
-    // Delete old floating file (its c1 already exists from previous rotation)
+    // Preserve old floating file if it exists (memory is never deleted)
     if (fs.existsSync(floatingPath)) {
-        try { fs.unlinkSync(floatingPath); } catch { /* best effort */ }
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+        const preservedPath = path.join(dir, `${baseName}-floating-${timestamp}.md`);
+        try { fs.renameSync(floatingPath, preservedPath); } catch { /* best effort */ }
     }
 
     // Move living → floating (rename is atomic)
@@ -1332,13 +1332,17 @@ export function rotateMemoryFile(
  * @param fileHeader - Header text for the rewritten living file
  * @param headSize - Bytes to retain (newest entries). Default 50KB.
  * @param tailSize - Bytes that trigger archival (oldest entries). Default 50KB.
+ * @param agent - If provided, insert trimmed block as c0 in gradient DB (atomic, synchronous).
+ * @param contentType - Content type for the c0 entry (required if agent is provided).
  */
 export function rollingWindowRotate(
     filePath: string,
     fileHeader: string = '',
     headSize: number = ROLLING_WINDOW_HEAD_DEFAULT,
     tailSize: number = ROLLING_WINDOW_TAIL_DEFAULT,
-): { rotated: boolean; archivePath?: string; entriesArchived: number; entriesKept: number } {
+    agent?: 'leo' | 'jim',
+    contentType?: 'working-memory' | 'felt-moments',
+): { rotated: boolean; archivePath?: string; c0EntryId?: string; entriesArchived: number; entriesKept: number } {
     if (!fs.existsSync(filePath)) {
         return { rotated: false, entriesArchived: 0, entriesKept: 0 };
     }
@@ -1384,12 +1388,25 @@ export function rollingWindowRotate(
     const toArchive = entries.slice(0, splitIndex);
     const toKeep = entries.slice(splitIndex);
 
-    // Write archive file for c0 archival + c1 compression
+    const archiveContent = toArchive.map(e => e.content).join('\n\n---\n\n');
+
+    // Atomic c0 insertion: trimmed block enters the gradient DB immediately.
+    // No limbo — what gets trimmed IS what gets represented. bumpCascade
+    // will compress c0 → c1 → ... → UV over subsequent beats.
+    let c0EntryId: string | undefined;
+    if (agent && contentType) {
+        const entryId = generateGradientId();
+        // Derive session label from the oldest entry's date or current date
+        const sessionDate = toArchive[0]?.date || new Date().toISOString().slice(0, 10);
+        const sessionLabel = `rolling-${sessionDate}`;
+        insertGradientEntry(entryId, agent, sessionLabel, 'c0', archiveContent, contentType, null, null);
+        c0EntryId = entryId;
+    }
+
+    // Write archive file (kept for backward compat / manual inspection)
     const dir = path.dirname(filePath);
     const baseName = path.basename(filePath, '.md');
     const archivePath = path.join(dir, `${baseName}-rolling-archive.md`);
-
-    const archiveContent = toArchive.map(e => e.content).join('\n\n---\n\n');
     fs.writeFileSync(archivePath, archiveContent, 'utf8');
 
     // Rewrite living file with kept entries (header + entries)
@@ -1400,6 +1417,7 @@ export function rollingWindowRotate(
     return {
         rotated: true,
         archivePath,
+        c0EntryId,
         entriesArchived: toArchive.length,
         entriesKept: toKeep.length,
     };
@@ -1549,7 +1567,7 @@ export async function compressMemoryFileGradient(
                     const uvContent = incompressibleMatch[1].trim();
                     writeUVEntry(agent, label, uvContent, contentType, null, feelingTag);
                     result.cascades++;
-                    for (const f of batch) { fs.unlinkSync(path.join(fromDir, f)); }
+                    // Memory is never deleted — source files preserved after cascade
                     continue;
                 }
 
@@ -1562,7 +1580,7 @@ export async function compressMemoryFileGradient(
                     const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
                     writeUVEntry(agent, label, uvContent.trim(), contentType, null, uvTag);
                     result.cascades++;
-                    for (const f of batch) { fs.unlinkSync(path.join(fromDir, f)); }
+                    // Memory is never deleted — source files preserved after cascade
                     continue;
                 }
 
@@ -1578,10 +1596,7 @@ export async function compressMemoryFileGradient(
                 const entryId = generateGradientId();
                 insertGradientEntry(entryId, agent, label, cascadeTo, compressed, contentType, sourceEntry?.id || null, feelingTag);
 
-                // Remove the source files that were compressed
-                for (const f of batch) {
-                    fs.unlinkSync(path.join(fromDir, f));
-                }
+                // Memory is never deleted — source files preserved after cascade
             } catch (error) {
                 const msg = error instanceof Error ? error.message : String(error);
                 result.errors.push(`${cascadeFrom}→${cascadeTo} cascade failed for ${label}: ${msg}`);

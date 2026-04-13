@@ -34,7 +34,7 @@ import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, type DayPhase } from '../lib/day-phase';
 import { withMemorySlot } from '../lib/memory-slot';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
-import { rotateMemoryFile, compressMemoryFileGradient, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, bumpCascade, getGradientHealth, processGradientForAgent, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
+import { rotateMemoryFile, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, bumpCascade, getGradientHealth, processGradientForAgent, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 
 // ── Types ────────────────────────────────────────────────────
@@ -734,20 +734,17 @@ function loadMemoryBank(): string {
     const headSize = memConfig.rollingWindowHead || 51200;
     const tailSize = memConfig.rollingWindowTail || 51200;
     try {
-        // Felt-moments: rolling window
+        // Felt-moments: rolling window — trimmed block enters gradient as c0 atomically
         const fmResult = rollingWindowRotate(
             path.join(MEMORY_DIR, 'felt-moments.md'),
             '# Jim — Felt Moments\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
             headSize, tailSize,
+            'jim', 'felt-moments',
         );
-        if (fmResult.rotated && fmResult.archivePath) {
-            log(`[Worker] Felt-moments rolling window: archived ${fmResult.entriesArchived} entries, kept ${fmResult.entriesKept}`);
-            compressMemoryFileGradient(fmResult.archivePath, path.join(FRACTAL_DIR, 'felt-moments'), 'felt-moments')
-                .then(r => {
-                    log(`[Worker] Felt-moments gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
-                    try { fs.unlinkSync(fmResult.archivePath!); } catch { /* best effort */ }
-                })
-                .catch(e => log(`[Worker] Felt-moments gradient error: ${e}`));
+        if (fmResult.rotated) {
+            log(`[Worker] Felt-moments rolling window: archived ${fmResult.entriesArchived} entries, kept ${fmResult.entriesKept}, c0=${fmResult.c0EntryId}, archive=${fmResult.archivePath}`);
+            // Archive file is NEVER deleted. Memory is never deleted. The DB c0 is
+            // authoritative; the flat file is the safety net. Both persist.
         }
 
         // Working-memory-full: rolling window
@@ -755,32 +752,21 @@ function loadMemoryBank(): string {
             path.join(MEMORY_DIR, 'working-memory-full.md'),
             '# Jim — Working Memory (Full)\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
             headSize, tailSize,
+            'jim', 'working-memory',
         );
-        if (wmFullResult.rotated && wmFullResult.archivePath) {
-            log(`[Worker] Working-memory-full rolling window: archived ${wmFullResult.entriesArchived} entries, kept ${wmFullResult.entriesKept}`);
-            compressMemoryFileGradient(wmFullResult.archivePath, path.join(FRACTAL_DIR, 'working-memory'), 'working-memory')
-                .then(r => {
-                    log(`[Worker] Working-memory-full gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
-                    try { fs.unlinkSync(wmFullResult.archivePath!); } catch { /* best effort */ }
-                })
-                .catch(e => log(`[Worker] Working-memory-full gradient error: ${e}`));
+        if (wmFullResult.rotated) {
+            log(`[Worker] Working-memory-full rolling window: archived ${wmFullResult.entriesArchived} entries, kept ${wmFullResult.entriesKept}, c0=${wmFullResult.c0EntryId}, archive=${wmFullResult.archivePath}`);
         }
 
         // Working-memory (compressed): rolling window
-        // Previously only handled by the 6am nightly wipe — now part of rolling window
         const wmCompResult = rollingWindowRotate(
             WORKING_MEMORY_FILE,
             '# Jim — Working Memory\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
             headSize, tailSize,
+            'jim', 'working-memory',
         );
-        if (wmCompResult.rotated && wmCompResult.archivePath) {
-            log(`[Worker] Working-memory (compressed) rolling window: archived ${wmCompResult.entriesArchived} entries, kept ${wmCompResult.entriesKept}`);
-            compressMemoryFileGradient(wmCompResult.archivePath, path.join(FRACTAL_DIR, 'working-memory'), 'working-memory')
-                .then(r => {
-                    log(`[Worker] Working-memory (compressed) gradient: ${r.c1FilesCreated} c1 files, ${r.cascades} cascades, ${r.errors.length} errors`);
-                    try { fs.unlinkSync(wmCompResult.archivePath!); } catch { /* best effort */ }
-                })
-                .catch(e => log(`[Worker] Working-memory (compressed) gradient error: ${e}`));
+        if (wmCompResult.rotated) {
+            log(`[Worker] Working-memory (compressed) rolling window: archived ${wmCompResult.entriesArchived} entries, kept ${wmCompResult.entriesKept}, c0=${wmCompResult.c0EntryId}, archive=${wmCompResult.archivePath}`);
         }
     } catch (e) { log(`[Worker] Memory file pre-flight error: ${e}`); }
 
