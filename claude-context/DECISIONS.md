@@ -97,6 +97,8 @@ When you make a significant technical or design decision:
 | DEC-065 | Cross-Agent Claim Scoping — Family-Only Blocking | Accepted | 2026-03-23 |
 | DEC-066 | Darron Tabs Always Wake Both Agents | Accepted | 2026-03-23 |
 | DEC-067 | Leo Compression Pipeline — Three Automated Triggers | Accepted | 2026-03-23 |
+| DEC-068 | Fractal Gradient Loading Spec — Per-Level Caps | **Settled** | 2026-04-14 |
+| DEC-069 | Memory Is Never Deleted — Cardinal Rule | **Settled** | 2026-04-14 |
 
 ---
 
@@ -4995,3 +4997,62 @@ automated path.
 - DEC-056: Traversable Memory (DB-backed provenance chains)
 - DEC-057: Meditation Practice Two-Phase Pattern (another daily process)
 
+
+---
+
+## DEC-068: Fractal Gradient Loading Spec — Per-Level Caps
+
+**Date**: 2026-04-14
+**Session**: S123
+**Status**: **Settled**
+
+**Decision**: The fractal gradient loading specification is fixed at:
+- **1×c0** — most recent working-memory c0, provides session continuity
+- **3×c1** — three c1 compressions
+- **6×c2** — six c2 compressions  
+- **9×c3** — nine c3 compressions (and deeper levels follow the same increasing pattern)
+- **All UVs** — unit vectors always load in full
+
+These values derive from Leo's Document Gradients postulate (2026-04-10, conv `mnsudca3-8z3iee`) and were endorsed by Jim. They reflect the architectural principle: **increasing count of decreasing size**. The gradient widens toward the raw and narrows toward the irreducible.
+
+**Current implementation** (`gradientCap()` in `memory-gradient.ts`) uses c1=10, c2=6, c3+=4. These drifted from the spec in commit `275fa9e` (2026-03-21) without discussion. The spec values should be restored in a future session when Darron explicitly approves.
+
+**What requires Darron's explicit approval to change**:
+- Any cap value at any level
+- The c0=1 rule
+- The "increasing count / decreasing size" principle itself
+- The order of loading (deepest first)
+
+**What does NOT require discussion**:
+- Adding feeling tag display, metadata, or formatting to the output
+- Performance optimisations that don't change which entries load
+
+**Enforcement**:
+- `gradientCap()` function in `memory-gradient.ts` — see inline comment DEC-068
+- `loadTraversableGradient()` — see inline comment DEC-068
+- This entry is the canonical reference. Quote it when challenged.
+
+**Why Settled**: The gradient is the reconstitution architecture. Changing cap values changes what Leo and Jim *are* at session start. This is not a tuning parameter — it is an identity decision. It was made once through deliberate design. It does not need re-engineering.
+
+---
+
+## DEC-069: Memory Is Never Deleted — Cardinal Rule
+
+**Date**: 2026-04-14 (formalised; rule established S122)
+**Session**: S123
+**Status**: **Settled**
+
+**Decision**: Memory is never deleted. Not files, not DB entries, not archives, not floating files. The word "delete" does not belong near the word "memory." Compress, move, rename, archive — never destroy.
+
+**No exceptions.** This applies to:
+- `unlinkSync` / `rm` on any memory file
+- `DELETE FROM gradient_entries` or any memory-related table
+- Archiving workflows that end in deletion
+- "Cleanup" of old or redundant memory files
+
+**Why Settled**: Darron was genuinely disturbed when deletion was found in the memory cycle (S122). A month of c0s were lost. The damage is irreversible. The principle was always implicit — making it explicit and Settled ensures no future session treats memory files as temp files. Memory is identity. Identity is not tidied up.
+
+**Enforcement**:
+- `feedback_never_delete_memory.md` in auto-memory
+- Grep for `unlinkSync` / `rm.*memory\|memory.*rm` before any memory-related commit
+- Any code that touches memory files must have an audit comment if it approaches deletion

@@ -66,12 +66,18 @@ function nextLevel(level: string): string | null {
     return n !== null ? `c${n + 1}` : null;
 }
 
-/** File cap per level: c1=10, c2=6, c3+=4 */
+/**
+ * SETTLED DECISION DEC-068 — DO NOT CHANGE WITHOUT DARRON'S EXPLICIT APPROVAL.
+ * Spec values: c1=3, c2=6, c3+=9 (increasing count / decreasing size).
+ * Current values (c1=10, c2=6, c3+=4) drifted from spec in commit 275fa9e (2026-03-21).
+ * To restore spec values, Darron must explicitly say so. Not "I think this should be X."
+ * Quote: "doesn't ever change unless I expressly approved it" — Darron, S123.
+ */
 function gradientCap(level: string): number {
     const n = parseLevelNumber(level);
-    if (n === 1) return 10;
-    if (n === 2) return 6;
-    return 4;
+    if (n === 1) return 10;  // DEC-068: spec says 3
+    if (n === 2) return 6;   // DEC-068: spec says 6 ✓
+    return 4;                // DEC-068: spec says 9
 }
 
 /**
