@@ -773,6 +773,13 @@ export const gradientStmts = {
     getUVContradictions: db.prepare(
         "SELECT * FROM gradient_entries WHERE agent = ? AND level = 'uv' AND (supersedes IS NOT NULL OR superseded_by IS NOT NULL) ORDER BY created_at DESC"
     ) as any,
+    /** Most recent c0 — working-memory first, then any other type by date */
+    getMostRecentC0: db.prepare(
+        `SELECT * FROM gradient_entries
+         WHERE agent = ? AND level = 'c0'
+         ORDER BY CASE content_type WHEN 'working-memory' THEN 0 WHEN 'session' THEN 1 ELSE 2 END ASC, created_at DESC
+         LIMIT 1`
+    ) as any,
 };
 
 export const feelingTagStmts = {

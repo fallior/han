@@ -65,17 +65,10 @@ export default function MemoryPage() {
       }
     });
 
-    // Polling fallback for when WebSocket misses broadcasts
-    const pollInterval = setInterval(() => {
-      fetchGroupedConversations();
-      if (selectedId) fetchConversationDetail(selectedId);
-    }, 15000);
-
     return () => {
       unsubMessage();
       unsubCreated();
       unsubReconnect();
-      clearInterval(pollInterval);
     };
   }, [subscribeWs, selectedId]);
 
@@ -85,12 +78,19 @@ export default function MemoryPage() {
       if (!response.ok) throw new Error('Failed to fetch conversations');
       const data = await response.json();
 
-      // data shape: { all: Thread[], today: { count, label, conversations }, ... }
-      const allThreads = data.all || [];
-      delete data.all; // Remove 'all' from periods object
+      // API returns: { success, periods: { today: { count, label, conversations }, ... } }
+      const periods = data.periods || {};
+      const allThreads: ConversationThread[] = [];
+      const periodMap: GroupedData = {};
+
+      for (const [key, period] of Object.entries(periods) as [string, any][]) {
+        const convos = period.conversations || [];
+        periodMap[key] = { count: period.count || convos.length, label: period.label || key, conversations: convos };
+        allThreads.push(...convos);
+      }
 
       setThreads(allThreads);
-      setPeriods(data);
+      setPeriods(periodMap);
     } catch (error) {
       console.error('Error fetching conversations:', error);
     }

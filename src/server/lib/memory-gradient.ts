@@ -1821,6 +1821,17 @@ export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
         sections.push(`### ${level.toUpperCase()} (${entries.length} entries)\n${levelParts.join('\n\n')}`);
     }
 
+    // Most recent c0 — 1 entry, working-memory preferred, then session, then any
+    const c0Count = (gradientStmts.getByAgentLevel.all(agent, 'c0') as any[]).length;
+    const c0 = gradientStmts.getMostRecentC0.get(agent);
+    if (c0) {
+        const tags = feelingTagStmts.getByEntry.all(c0.id) as any[];
+        const tagStr = tags.length > 0
+            ? `\n*Feeling: ${tags.map((t: any) => t.content).join('; ')}*`
+            : '';
+        sections.push(`### Most Recent C0 (1 of ${c0Count} — ${c0.content_type}/${c0.session_label})\n${c0.content}${tagStr}`);
+    }
+
     return sections.length > 0
         ? `\n## Traversable Memory Gradient (${agent})\n\n${sections.join('\n\n')}`
         : '';
