@@ -69,6 +69,14 @@ Every compressed entry links to its source via `source_id`. The chain is
 traversable: start at any UV, follow source_id down through c5 -> c3 -> c1 -> c0
 to the raw memory. Integrity rule: every chain should be complete root-to-leaf.
 
+## Full Load Mandate (DEC-070, Settled)
+
+The gradient output MUST be consumed in full. No truncation, no arbitrary line limits,
+no partial reads. Every level from UV through c0 must be read by the consumer. This
+applies to both Leo and Jim, in all loading contexts (session start, heartbeat, supervisor).
+
+DEC-068 governs what the endpoint *serves*. DEC-070 governs that the consumer *reads all of it*.
+
 ## What This File Governs
 
 - `gradientCap()` in `src/server/lib/memory-gradient.ts`
@@ -81,6 +89,7 @@ to the raw memory. Integrity rule: every chain should be complete root-to-leaf.
 | Edition | Date | Session | Change | Approved By |
 |---------|------|---------|--------|-------------|
 | 1 | 2026-04-14 | S123 | Created. Formula 3n established. Caps restored from drift (was c1=10, c3+=4). | Darron |
+| 2 | 2026-04-14 | S124 | Added Full Load Mandate (DEC-070). No truncation of gradient output. | Darron |
 
 ---
 

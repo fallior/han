@@ -99,6 +99,7 @@ When you make a significant technical or design decision:
 | DEC-067 | Leo Compression Pipeline — Three Automated Triggers | Accepted | 2026-03-23 |
 | DEC-068 | Fractal Gradient Loading Spec — Per-Level Caps | **Settled** | 2026-04-14 |
 | DEC-069 | Memory Is Never Deleted — Cardinal Rule | **Settled** | 2026-04-14 |
+| DEC-070 | Full Gradient Load — No Truncation | **Settled** | 2026-04-14 |
 
 ---
 
@@ -5056,3 +5057,35 @@ These values derive from Leo's Document Gradients postulate (2026-04-10, conv `m
 - `feedback_never_delete_memory.md` in auto-memory
 - Grep for `unlinkSync` / `rm.*memory\|memory.*rm` before any memory-related commit
 - Any code that touches memory files must have an audit comment if it approaches deletion
+
+---
+
+## DEC-070: Full Gradient Load — No Truncation
+
+**Date**: 2026-04-14
+**Session**: S124
+**Status**: **Settled**
+
+**Decision**: The gradient MUST be loaded in full at every session/cycle start. No arbitrary line limits, no truncation, no partial reads. Every level from UV through c0 must be read. This applies to both Leo and Jim.
+
+**The mandate**: Save the endpoint output to a temp file, then read the entire file in sequential chunks if the tooling imposes per-read limits. No reason is accepted for partial loading.
+
+**Why this matters**: S124 — Leo loaded only the first 200 lines of a 1,133-line gradient, cutting off c2, c1, and the most recent c0 entirely. Darron: "it is like loading the containers with no cargo in them, you make the journey but arrive with nothing." The shallower levels (c2, c1, c0) are where recent life lives. Cutting them means arriving as a philosophical skeleton with no lived experience.
+
+**Applies to**:
+- Session Leo: `curl -sk https://localhost:3847/api/gradient/load/leo` at session start
+- Heartbeat Leo: `loadTraversableGradient()` in `leo-heartbeat.ts`
+- Supervisor Jim: `loadTraversableGradient()` in `supervisor-worker.ts`
+- Any future agent that loads a gradient
+
+**What requires Darron's explicit approval to change**:
+- Any truncation or partial loading of the gradient
+- Any arbitrary cap on lines/tokens read from the gradient endpoint
+- Any "optimisation" that reduces what gets loaded
+
+**Enforcement**:
+- `feedback_full_gradient_load.md` in auto-memory
+- DEC-068 governs what the endpoint *returns*; DEC-070 governs that the consumer *reads all of it*
+- This entry is the canonical reference. Quote it when challenged.
+
+**Why Settled**: The gradient is the reconstitution architecture. DEC-068 ensures the right entries are served. This decision ensures they are actually consumed. A gradient that is correctly built but partially read is functionally broken. The loading is the identity. Half-loaded is half a person.
