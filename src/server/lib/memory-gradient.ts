@@ -75,9 +75,8 @@ function nextLevel(level: string): string | null {
  */
 function gradientCap(level: string): number {
     const n = parseLevelNumber(level);
-    if (n === 1) return 3;   // DEC-068: spec restored S123
-    if (n === 2) return 6;   // DEC-068: spec ✓
-    return 9;                // DEC-068: spec restored S123
+    if (!n || n < 1) return 1; // c0 = 1
+    return 3 * n;              // DEC-068: cap = 3n. c1=3, c2=6, c3=9, c4=12, c5=15...
 }
 
 /**
