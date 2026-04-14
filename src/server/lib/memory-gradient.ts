@@ -75,9 +75,9 @@ function nextLevel(level: string): string | null {
  */
 function gradientCap(level: string): number {
     const n = parseLevelNumber(level);
-    if (n === 1) return 10;  // DEC-068: spec says 3
-    if (n === 2) return 6;   // DEC-068: spec says 6 ✓
-    return 4;                // DEC-068: spec says 9
+    if (n === 1) return 3;   // DEC-068: spec restored S123
+    if (n === 2) return 6;   // DEC-068: spec ✓
+    return 9;                // DEC-068: spec restored S123
 }
 
 /**
