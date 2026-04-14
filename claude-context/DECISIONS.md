@@ -5015,7 +5015,7 @@ automated path.
 
 These values derive from Leo's Document Gradients postulate (2026-04-10, conv `mnsudca3-8z3iee`) and were endorsed by Jim. They reflect the architectural principle: **increasing count of decreasing size**. The gradient widens toward the raw and narrows toward the irreducible.
 
-**Current implementation** (`gradientCap()` in `memory-gradient.ts`) uses c1=10, c2=6, c3+=4. These drifted from the spec in commit `275fa9e` (2026-03-21) without discussion. The spec values should be restored in a future session when Darron explicitly approves.
+**Implementation restored S123** — `gradientCap()` now returns `3 * n` (c1=3, c2=6, c3=9, c4=12...) with c0=1. Previously drifted to c1=10, c3+=4 in commit `275fa9e` (2026-03-21). Restored with Darron's explicit approval. Canonical definition in `docs/GRADIENT_SPEC.md`.
 
 **What requires Darron's explicit approval to change**:
 - Any cap value at any level

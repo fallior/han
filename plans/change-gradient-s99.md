@@ -117,7 +117,7 @@ Same cascade pattern as the memory gradient:
 - **c5**: Residue — 2-3 sentences
 - **UV**: Irreducible kernel — one sentence, what this period of changes MEANT
 
-Cascade caps (same as memory gradient): 10 c1, 6 c2, 4 c3, 8 c5.
+Cascade caps (same as memory gradient): 10 c1, 6 c2, 4 c3, 8 c5. *(Note: these values were pre-spec. Corrected to 3n in S123. See GRADIENT_SPEC.md.)*
 Compression runs daily alongside the memory gradient (heartbeat for Leo's projects,
 supervisor for Jim's).
 

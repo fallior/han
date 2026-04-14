@@ -1089,10 +1089,11 @@ Each writer has private swap files that buffer work before flushing to shared me
 
 Sessions exist at multiple compression fidelities:
 - **c0:** Full session (working-memory-full.md)
-- **c1:** ~1/3 compression (3 files loaded — DEC-068)
-- **c2:** ~1/9 compression (6 files loaded — DEC-068)
-- **c3+:** ~1/3^n compression (9 files loaded per level — DEC-068)
-- *(Note: current `gradientCap()` implementation uses c1=10, c3+=4 — drift from spec, see DEC-068)*
+- **c0:** Full session (1 entry loaded — most recent working-memory)
+- **c1:** ~1/3 compression (3 entries loaded)
+- **c2:** ~1/9 compression (6 entries loaded)
+- **c3+:** ~1/3^n compression (cap = 3n per level: c3=9, c4=12, c5=15...)
+- Cap formula: **c0=1, then 3n**. All UVs. See `GRADIENT_SPEC.md` (DEC-068, Settled).
 - **c(n):** Compression continues until incompressible — depth varies per memory
 - **Unit vectors:** Irreducible emotional kernels (≤50 chars) — the terminal form
 
@@ -1174,8 +1175,8 @@ as a single c1. One night's dreaming = one experience. Fires on rest days too (s
 still transitions at 06:00). The 50KB threshold rotation remains as a safety net.
 
 **Gradient cascade (Cn — dynamic depth):**
-When c1 files accumulate past their cap (10), oldest cascade to c2 (cap 6) → c3 (cap 4) →
-c4 (cap 4) → ... → c(n) (cap 4) → unit vectors. Compression continues until incompressible.
+When entries accumulate past their level cap (3n: c1=3, c2=6, c3=9...), oldest cascade to the
+next level → ... → c(n) → unit vectors. Compression continues until incompressible.
 The pipeline uses three prompt tiers (early: c1-c2, mid: c3-c4, deep: c5+) tuned for
 emotional texture (felt-moments) or operational understanding (working-memory). The LLM can
 signal `INCOMPRESSIBLE:` at any level to terminate the chain and produce a unit vector directly.
@@ -1186,10 +1187,12 @@ signal `INCOMPRESSIBLE:` at any level to terminate the chain and produce a unit 
 |-------|-----|----------------|--------|
 | Living file | 1 (growing) | 0-50KB | ~25KB avg |
 | Floating file | 1 (shrinking) | 50-0KB loaded | ~25KB avg |
-| c1 | 3 files (spec) | ~17KB | ~51KB loaded |
-| c2 | 6 files (spec) | ~6KB | ~36KB |
-| c3 | 9 files (spec) | ~2KB | ~18KB |
-| c4+ | increasing per level | ~500B | ~grows with depth |
+| c0 | 1 (most recent) | ~15KB | ~15KB |
+| c1 | 3 (3×1) | ~5KB | ~15KB |
+| c2 | 6 (3×2) | ~2KB | ~12KB |
+| c3 | 9 (3×3) | ~800B | ~7KB |
+| c4 | 12 (3×4) | ~400B | ~5KB |
+| c5 | 15 (3×5) | ~200B | ~3KB |
 | Unit vectors | unbounded | ~50 chars each | ~5KB for 100 |
 | **Total loaded** | | | **~50KB living+floating + gradient** |
 
@@ -1328,9 +1331,10 @@ processes the backlog of leaves that have accumulated between compression runs.
 leaf entries) for dashboard monitoring. High leaf counts at intermediate levels indicate a
 compression backlog.
 
-**Caps per level:** c1=10, c2=6, c3+=4. These caps apply at loading time
-(`loadTraversableGradient`) — the most recent N entries per level are included in the
-system prompt. The bump cascade processes all leaves regardless of cap.
+**Caps per level:** c0=1, then 3n (c1=3, c2=6, c3=9, c4=12, c5=15...), all UVs. These caps
+apply at loading time (`loadTraversableGradient`) — the most recent N entries per level are
+included in the system prompt. The bump cascade processes all leaves regardless of cap.
+See `GRADIENT_SPEC.md` for the canonical definition (DEC-068, Settled).
 
 ### Working Bee Mode (S119)
 

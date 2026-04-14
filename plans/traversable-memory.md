@@ -29,7 +29,7 @@ Darron's design: random-access traversal across all levels — start at UV, jump
 
 **Memory file gradient** (also `memory-gradient.ts`):
 - Source: felt-moments.md, working-memory-full.md (rotate at 50KB)
-- Pipeline: c1 → c2 → c3 → c5 → UV (with cascade caps: 10, 6, 4, 8)
+- Pipeline: c1 → c2 → c3 → c5 → UV (with cascade caps: 10, 6, 4, 8) *(Note: pre-spec values. Corrected to 3n in S123. See GRADIENT_SPEC.md.)*
 - Jim has felt-moments/c1 and working-memory/c1.
 
 **The gap**: Every compression level is a standalone file. No file carries a pointer to its source. The session label (s71, 2026-03-05) is the only implicit link — and you have to already know it. Navigation requires prior knowledge of what you're looking for.
