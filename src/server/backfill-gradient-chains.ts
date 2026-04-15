@@ -1,9 +1,10 @@
 /**
- * Backfill gradient chains — link orphan c2, c3, c5 entries to their parents.
+ * Backfill gradient chains — link orphan entries to their parents.
  *
- * Also creates missing c1 entries for pre-DB sessions (36-48) from archive files.
+ * Supports both Leo and Jim agents. Also creates missing c1 entries
+ * for pre-DB sessions (36-48) from archive files (Leo only).
  *
- * Usage: cd src/server && npx tsx backfill-gradient-chains.ts [--dry-run]
+ * Usage: cd src/server && npx tsx backfill-gradient-chains.ts [--dry-run] [--agent=jim|leo|both]
  */
 
 import * as fs from 'fs';
@@ -15,6 +16,8 @@ const LEO_ARCHIVES = path.join(process.env.HOME!, '.han/memory/leo/working-memor
 const DB_PATH = path.join(process.env.HOME!, '.han/tasks.db');
 
 const dryRun = process.argv.includes('--dry-run');
+const agentArg = process.argv.find(a => a.startsWith('--agent='))?.split('=')[1] || 'both';
+const agents: string[] = agentArg === 'both' ? ['leo', 'jim'] : [agentArg];
 const db = new Database(DB_PATH);
 
 const insertEntry = db.prepare(`INSERT INTO gradient_entries
@@ -169,7 +172,7 @@ function ensureC1Exists(sessionLabel: string): string | null {
 
 // ── Find parent for an orphan entry ────────────────────────
 
-function findParent(entry: any): string | null {
+function findParent(entry: any, agent: string): string | null {
     const label = entry.session_label;
     const level = entry.level;
 
@@ -184,40 +187,27 @@ function findParent(entry: any): string | null {
     // Try to find a parent entry
     for (const srcLabel of sourceLabels) {
         const variants = sessionLabelVariants(srcLabel);
-        const parent = findEntryByLabelPattern('leo', parentLevel, variants);
+        const parent = findEntryByLabelPattern(agent, parentLevel, variants);
         if (parent) return parent.id;
     }
 
-    // For c2s: try creating missing c1s from archives
-    if (level === 'c2') {
+    // For Leo c2s: try creating missing c1s from archives
+    if (agent === 'leo' && level === 'c2') {
         for (const srcLabel of sourceLabels) {
             const c1Id = ensureC1Exists(srcLabel);
             if (c1Id) return c1Id;
         }
     }
 
-    // For c3s: try finding c2 by session overlap
-    if (level === 'c3') {
-        for (const srcLabel of sourceLabels) {
-            const variants = sessionLabelVariants(srcLabel);
-            // Try broader LIKE search
-            for (const v of variants) {
-                const parent = db.prepare(
-                    "SELECT * FROM gradient_entries WHERE agent = 'leo' AND level = 'c2' AND session_label LIKE ?"
-                ).get(`%${v}%`) as any;
-                if (parent) return parent.id;
-            }
-        }
-    }
-
-    // For c5s: try finding c3 by session overlap
-    if (level === 'c5') {
+    // For entries above c1: try finding parent by session overlap (LIKE search)
+    const levelNum = parseInt(n![1]);
+    if (levelNum >= 2) {
         for (const srcLabel of sourceLabels) {
             const variants = sessionLabelVariants(srcLabel);
             for (const v of variants) {
                 const parent = db.prepare(
-                    "SELECT * FROM gradient_entries WHERE agent = 'leo' AND level = 'c3' AND session_label LIKE ?"
-                ).get(`%${v}%`) as any;
+                    "SELECT * FROM gradient_entries WHERE agent = ? AND level = ? AND session_label LIKE ?"
+                ).get(agent, parentLevel, `%${v}%`) as any;
                 if (parent) return parent.id;
             }
         }
@@ -228,38 +218,50 @@ function findParent(entry: any): string | null {
 
 // ── Main ────────────────────────────────────────────────────
 
-console.log(`Mode: ${dryRun ? 'DRY RUN' : 'LIVE'}\n`);
+console.log(`Mode: ${dryRun ? 'DRY RUN' : 'LIVE'}`);
+console.log(`Agents: ${agents.join(', ')}\n`);
 
-// Discover all levels that exist above c1
-const allLevels = [...new Set((db.prepare('SELECT DISTINCT level FROM gradient_entries WHERE agent = ?').all('leo') as any[]).map((e: any) => e.level as string))]
-    .filter(l => /^c\d+$/.test(l) && parseInt(l.replace('c','')) > 1)
-    .sort((a, b) => parseInt(a.replace('c','')) - parseInt(b.replace('c','')));
-const levels = allLevels;
 let totalLinked = 0;
 let totalCreated = 0;
 let totalNotFound = 0;
 
 const processAll = db.transaction(() => {
-    for (const level of levels) {
-        const orphans = db.prepare(`
-            SELECT * FROM gradient_entries
-            WHERE agent = 'leo' AND level = ? AND source_id IS NULL
-            ORDER BY created_at
-        `).all(level) as any[];
+    for (const agent of agents) {
+        console.log(`\n════ ${agent.toUpperCase()} ════`);
 
-        console.log(`\n── ${level.toUpperCase()} orphans: ${orphans.length} ──`);
+        // Discover all levels that exist above c1 for this agent
+        const allLevels = [...new Set(
+            (db.prepare('SELECT DISTINCT level FROM gradient_entries WHERE agent = ?').all(agent) as any[])
+                .map((e: any) => e.level as string)
+        )]
+            .filter(l => /^c\d+$/.test(l) && parseInt(l.replace('c','')) > 1)
+            .sort((a, b) => parseInt(a.replace('c','')) - parseInt(b.replace('c','')));
 
-        for (const entry of orphans) {
-            const parentId = findParent(entry);
-            if (parentId) {
-                if (!dryRun) {
-                    updateSourceId.run(parentId, entry.id);
+        // Also include c1 orphans (entries that should link to c0)
+        const levels = ['c1', ...allLevels];
+
+        for (const level of levels) {
+            const orphans = db.prepare(`
+                SELECT * FROM gradient_entries
+                WHERE agent = ? AND level = ? AND source_id IS NULL
+                ORDER BY created_at
+            `).all(agent, level) as any[];
+
+            if (orphans.length === 0) continue;
+            console.log(`\n── ${level.toUpperCase()} orphans: ${orphans.length} ──`);
+
+            for (const entry of orphans) {
+                const parentId = findParent(entry, agent);
+                if (parentId) {
+                    if (!dryRun) {
+                        updateSourceId.run(parentId, entry.id);
+                    }
+                    totalLinked++;
+                    console.log(`  ✓ ${level}/${entry.session_label} → linked to ${parentId.substring(0, 8)}`);
+                } else {
+                    totalNotFound++;
+                    console.log(`  ✗ ${level}/${entry.session_label} — no parent found`);
                 }
-                totalLinked++;
-                console.log(`✓ ${level}/${entry.session_label} → linked to ${parentId.substring(0, 8)}`);
-            } else {
-                totalNotFound++;
-                console.log(`✗ ${level}/${entry.session_label} — no parent found`);
             }
         }
     }
@@ -275,16 +277,18 @@ console.log(`Entries created:  ${totalCreated}`);
 console.log(`Not found:        ${totalNotFound}`);
 
 if (!dryRun) {
-    const state = db.prepare(`
-        SELECT level, COUNT(*) as total,
-          SUM(CASE WHEN source_id IS NULL THEN 1 ELSE 0 END) as orphaned
-        FROM gradient_entries WHERE agent = 'leo'
-        GROUP BY level ORDER BY level
-    `).all() as any[];
+    for (const agent of agents) {
+        const state = db.prepare(`
+            SELECT level, COUNT(*) as total,
+              SUM(CASE WHEN source_id IS NULL THEN 1 ELSE 0 END) as orphaned
+            FROM gradient_entries WHERE agent = ?
+            GROUP BY level ORDER BY level
+        `).all(agent) as any[];
 
-    console.log(`\nLeo gradient state:`);
-    for (const r of state) {
-        console.log(`  ${r.level}: ${r.total} total, ${r.orphaned} orphaned`);
+        console.log(`\n${agent} gradient state:`);
+        for (const r of state) {
+            console.log(`  ${r.level}: ${r.total} total, ${r.orphaned} orphaned`);
+        }
     }
 }
 

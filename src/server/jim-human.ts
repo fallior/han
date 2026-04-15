@@ -24,6 +24,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
 import { withMemorySlot } from './lib/memory-slot';
+import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
 
 // ── Config ────────────────────────────────────────────────────
@@ -231,26 +232,11 @@ function readJimMemory(): string {
         } catch { /* skip */ }
     }
 
-    // Load fractal gradient (c1 only)
-    const c1Dir = path.join(JIM_MEMORY_DIR, 'fractal', 'jim', 'c1');
-    try {
-        if (fs.existsSync(c1Dir)) {
-            const c1Files = fs.readdirSync(c1Dir)
-                .filter((f: string) => f.endsWith('.md'))
-                .sort().reverse().slice(0, 3);
-            for (const f of c1Files) {
-                sections.push(`### fractal/c1/${f}\n${fs.readFileSync(path.join(c1Dir, f), 'utf-8')}`);
-            }
-        }
-    } catch { /* skip */ }
-
-    // Unit vectors
-    const uvPath = path.join(JIM_MEMORY_DIR, 'fractal', 'jim', 'unit-vectors.md');
-    try {
-        if (fs.existsSync(uvPath)) {
-            sections.push(`### unit-vectors\n${fs.readFileSync(uvPath, 'utf-8')}`);
-        }
-    } catch { /* skip */ }
+    // Traversable memory gradient (DB-backed — DEC-070: full gradient, every agent)
+    const traversableGradient = loadTraversableGradient('jim');
+    if (traversableGradient) {
+        sections.push(traversableGradient);
+    }
 
     // Ecosystem map — shared orientation for where things live (conversations, Workshop, APIs)
     try {

@@ -1404,7 +1404,7 @@ function buildDreamCyclePrompt(): string {
 
     // Meditation: 1-in-3 dreams include a memory that surfaced naturally
     let meditationSection = '';
-    const shouldDreamMeditate = Math.random() < 0.5;
+    const shouldDreamMeditate = Math.random() < 0.33;
     if (shouldDreamMeditate) {
         try {
             const entry = gradientStmts.getRandom.get() as any;
@@ -1683,8 +1683,9 @@ function isEmergencyMode(): boolean {
         ).get() as any;
         const goalCount = meaningfulGoals?.count || 0;
 
-        // Emergency when: running tasks, large pending queue, or active goals
-        return running > 0 || pending > 5 || goalCount > 0;
+        // Emergency when: running tasks, large pending queue, or multiple active goals
+        // goalCount > 1: a single decomposing goal shouldn't suppress dreaming (Jim + Darron, S125)
+        return running > 0 || pending > 5 || goalCount > 1;
     } catch {
         return false;
     }

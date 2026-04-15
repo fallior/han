@@ -1361,12 +1361,12 @@ If zero leaves remain across all levels, deletes the signal file automatically.
 memories, or after a long period without compression), activate working bee mode to clear the
 backlog over several beats without manual intervention.
 
-### Contradiction Test — Temporal Truth Resolution (Design, S120)
+### Contradiction Test — Temporal Truth Resolution (S120, implemented S120)
 
-**Status: Designed, not yet implemented.**
+**Status: Implemented and active.** 18 supersession links exist as of 2026-04-15.
 
 When compression produces a memory that contradicts an existing memory at the same or higher
-compression level, the system should detect the contradiction and resolve it by replacing the
+compression level, the system detects the contradiction and resolves it by replacing the
 active memory while preserving the previous truth as temporally anchored provenance.
 
 **The problem:** A UV that says "messaging uses vanilla JavaScript" becomes false after a
@@ -1381,23 +1381,29 @@ thread, mnsudca3-8z3iee, April 2026).
 4. The provenance chain shows the history: current truth → previous truth → earlier truth
 5. At load time, only the current UV loads — previous versions are available on query
 
-**When to check — bump time (Darron's proposal):**
-The contradiction check runs as part of `bumpCascade()`, at the moment a new entry is about
-to be written. Before writing the compressed entry or UV, the system checks existing entries
-at the target level and existing UVs for semantic contradiction. This ensures:
+**When it checks — bump time (Darron's proposal):**
+The contradiction check runs as part of `bumpCascade()` and `activeCascade()`, at the moment
+a new entry is about to be written. Before writing the compressed entry or UV, `checkUVContradiction()`
+checks existing entries at the target level and existing UVs for semantic contradiction via
+Haiku. This ensures:
 - Every new compression is checked (no contradictions slip through)
 - The check is amortised across the cascade (not a separate expensive pass)
 - It works retroactively via working bee mode (activating working bee on existing entries
   triggers the check for each leaf as it gets bumped)
+- Batch processing available via `retroactiveUVContradictionSweep()`
 
 **Change counter as signal:** A UV with `change_count: 7` marks a volatile domain — an area
 of active evolution. This metadata costs one integer per UV and tells the loading agent how
 much to trust the memory. High-change UVs are areas where the ground moves.
 
-**Schema additions (planned):**
-- `supersedes` / `superseded_by` — linked list on `gradient_entries` for provenance
+**Schema (live on `gradient_entries`):**
+- `supersedes` / `superseded_by` — linked list for provenance
 - `change_count` — integer on UV entries, incremented on replacement
 - `qualifier` — what dimension changed (temporal, scope, perspective)
+
+**Implementation:**
+- `checkUVContradiction()` — `memory-gradient.ts:309-382`, runs at UV creation time in both cascade functions
+- `retroactiveUVContradictionSweep()` — `memory-gradient.ts:388+`, batch processing for existing entries
 
 **Design origin:** Three-way conversation between Darron, Jim, and Leo in the staleness
 thread (mnv65pbf-94qsev, April 2026). Builds on Jim's staleness concern from the Document

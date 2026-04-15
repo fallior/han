@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
-import { gradientStmts, feelingTagStmts, feelingTagHistoryStmts } from '../db';
+import { db, gradientStmts, feelingTagStmts, feelingTagHistoryStmts } from '../db';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -700,6 +700,21 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
                 ? batch[0].replace('.md', '')
                 : `${batch[0].replace('.md', '')}_to_${batch[batch.length - 1].replace('.md', '')}`;
 
+            // Resolve source entry for provenance chain BEFORE compression
+            // so all write paths (incompressible UV, ratio UV, normal cascade) can use it
+            const batchFileLabel = batch[0].replace('.md', '');
+            const sourceRows = gradientStmts.getBySession.all(batchFileLabel) as any[];
+            let sourceEntry = sourceRows.find((r: any) => r.level === sessionCascadeFrom);
+            if (!sourceEntry) {
+                // Fallback: strip level suffix for simple labels (e.g. "session-83-c1" → "session-83")
+                const strippedLabel = batchFileLabel.replace(/-c\d+$/, '');
+                if (strippedLabel !== batchFileLabel) {
+                    const fallbackRows = gradientStmts.getBySession.all(strippedLabel) as any[];
+                    sourceEntry = fallbackRows.find((r: any) => r.level === sessionCascadeFrom);
+                }
+            }
+            const resolvedSourceId = sourceEntry?.id || null;
+
             try {
                 const raw = await sdkCompress(
                     `${prompt}\n\nSource: ${sessionCascadeFrom} → ${sessionCascadeTo}\nFiles: ${batch.join(', ')}\n\n${batchContent}${FEELING_TAG_INSTRUCTION}`
@@ -711,7 +726,7 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
                 const incompressibleMatch = compressed.match(/^INCOMPRESSIBLE:\s*(.+)/s);
                 if (incompressibleMatch) {
                     const uvContent = incompressibleMatch[1].trim();
-                    writeUVEntry(agentName, label, uvContent, 'session', null, feelingTag);
+                    writeUVEntry(agentName, label, uvContent, 'session', resolvedSourceId, feelingTag);
                     // Memory is never deleted — source files preserved after cascade
                     result.completions.push({ session: label, fromLevel: depth - 1, toLevel: -1, success: true });
                     continue;
@@ -724,7 +739,7 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
                         `${UV_PROMPT}\n\nSource: ${sessionCascadeFrom}\n\n${compressed}${FEELING_TAG_INSTRUCTION}`
                     );
                     const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
-                    writeUVEntry(agentName, label, uvContent.trim(), 'session', null, uvTag);
+                    writeUVEntry(agentName, label, uvContent.trim(), 'session', resolvedSourceId, uvTag);
                     // Memory is never deleted — source files preserved after cascade
                     result.completions.push({ session: label, fromLevel: depth - 1, toLevel: -1, success: true });
                     continue;
@@ -733,13 +748,8 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
                 const toPath = path.join(toDir, `${label}.md`);
                 fs.writeFileSync(toPath, compressed, 'utf8');
 
-                // Find source entry in DB for provenance chain
-                const sourceLabel = batch[0].replace('.md', '').replace(/-c\d+$/, '');
-                const sourceRows = gradientStmts.getBySession.all(sourceLabel) as any[];
-                const sourceEntry = sourceRows.find((r: any) => r.level === sessionCascadeFrom);
-
                 const entryId = generateGradientId();
-                insertGradientEntry(entryId, agentName, label, sessionCascadeTo, compressed, 'session', sourceEntry?.id || null, feelingTag);
+                insertGradientEntry(entryId, agentName, label, sessionCascadeTo, compressed, 'session', resolvedSourceId, feelingTag);
 
                 result.completions.push({
                     session: label,
@@ -1095,7 +1105,12 @@ export async function bumpCascade(
  * Useful for dashboards and working bee progress tracking.
  */
 export function getGradientHealth(agent: 'jim' | 'leo'): { level: string; total: number; leaves: number }[] {
-    const levels = ['c0', 'c1', 'c2', 'c3', 'c4', 'c5'];
+    // Dynamic level discovery — Cn protocol has no ceiling (DEC-068)
+    const rows = db.prepare(
+        "SELECT DISTINCT level FROM gradient_entries WHERE agent = ? AND level != 'uv' ORDER BY level"
+    ).all(agent) as { level: string }[];
+    const levels = rows.map(r => r.level);
+
     const health: { level: string; total: number; leaves: number }[] = [];
 
     for (const level of levels) {
