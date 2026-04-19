@@ -39,5 +39,6 @@ export interface Message {
   role: string;
   content: string;
   created_at: string;
+  listen_count?: number;
   metadata?: Record<string, any>;
 }

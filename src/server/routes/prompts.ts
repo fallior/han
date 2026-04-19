@@ -163,6 +163,24 @@ router.get('/api/terminal', (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/terminal/history -- Get the tail of the persistent terminal log
+ * Query params: lines (default 200)
+ * Returns the last N lines of terminal-log-v2.txt — scrollback across /clear
+ */
+router.get('/api/terminal/history', (req: Request, res: Response) => {
+    const TERMINAL_LOG = path.join(HAN_DIR, 'terminal-log-v2.txt');
+    const requestedLines = Math.min(Number(req.query.lines) || 200, 2000);
+    try {
+        const data = fs.readFileSync(TERMINAL_LOG, 'utf8');
+        const allLines = data.split('\n');
+        const tail = allLines.slice(-requestedLines).join('\n');
+        res.json({ success: true, content: tail, totalLines: allLines.length });
+    } catch {
+        res.json({ success: true, content: '', totalLines: 0 });
+    }
+});
+
+/**
  * GET /quick -- Quick-response page for ntfy.sh action buttons
  * Opens in phone browser, fires API call, shows result
  */

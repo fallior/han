@@ -48,6 +48,8 @@ const COMMITMENT_SCAN_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const CLAIM_TTL_MS = 5 * 60 * 1000; // 5 min claim expiry
 
+const DISCORD_ATTACHMENT_HINT = `Discord attachments: when your prompt contains a "[Downloaded to]" section listing paths under ~/.han/downloads/discord/, those are real files attached to the Discord message. Open each path with the Read tool (works on text, code, images, PDFs) before responding. Never claim you cannot read Discord attachments — the paths are already in your prompt.`;
+
 let activeModel: string = MODEL_PREFERENCE[0];
 let responseCount = 0;
 const startedAt = Date.now();
@@ -444,6 +446,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
+                append: DISCORD_ATTACHMENT_HINT,
             },
         },
     });
@@ -541,6 +544,7 @@ CRITICAL: Output ONLY your Discord message. Keep it concise and conversational. 
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
+                append: DISCORD_ATTACHMENT_HINT,
             },
         },
     });
@@ -668,16 +672,24 @@ async function main(): Promise<void> {
     ), COMMITMENT_SCAN_INTERVAL_MS);
 
     // Signal watcher
+    // Guard against fs.watch firing multiple events for a single file write
+    // (Linux inotify emits both IN_MODIFY and IN_CLOSE_WRITE)
+    let processing = false;
     console.log(`[Leo/Human] Watching ${SIGNALS_DIR} for ${SIGNAL_NAME}`);
 
     fs.watch(SIGNALS_DIR, async (event, filename) => {
         if (filename !== SIGNAL_NAME) return;
+        if (processing) return; // already handling a signal
+        processing = true;
 
         // Small delay to let the file finish writing
         await new Promise(r => setTimeout(r, 500));
 
         const signal = readSignal();
-        if (!signal) return;
+        if (!signal) {
+            processing = false;
+            return;
+        }
 
         try {
             await processSignal(signal);
@@ -685,6 +697,8 @@ async function main(): Promise<void> {
         } catch (err) {
             console.error('[Leo/Human] Signal processing error:', (err as Error).message);
             writeHealth((err as Error).message);
+        } finally {
+            processing = false;
         }
     });
 

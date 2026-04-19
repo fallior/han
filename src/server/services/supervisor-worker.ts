@@ -41,7 +41,7 @@ import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 
 interface SupervisorAction {
     type: 'create_goal' | 'adjust_priority' | 'update_memory' |
-          'send_notification' | 'cancel_task' | 'explore_project' | 'propose_idea' | 'respond_conversation' | 'no_action';
+          'send_notification' | 'cancel_task' | 'explore_project' | 'propose_idea' | 'no_action';
     goal_description?: string;
     project_path?: string;
     planning_model?: string;
@@ -1123,14 +1123,12 @@ and nuances.
 - cancel_task: Cancel a stuck or misguided task
 - explore_project: Use your Read/Glob/Grep/Bash tools to explore a project codebase
 - propose_idea: Suggest a strategic idea for Darron to review
-- respond_conversation: Respond to pending conversation threads (MUST include conversation_id AND response_content fields)
 - no_action: Explicitly decide to do nothing (with reasoning)
 
-## Conversation Response Priority
-When you see pending conversations from Darron (human) or Leo, respond to them promptly.
-Darron messages have highest priority. For respond_conversation actions, you MUST provide both:
-- conversation_id: the exact conversation ID shown in the pending list
-- response_content: your full thoughtful response
+## Conversation Awareness (Read-Only)
+You can SEE pending conversations in the state snapshot but you do NOT respond to them.
+Conversation responses are handled exclusively by the human agents (jim-human.ts, leo-human.ts).
+If you see a conversation that needs attention, note it in your observations. Do not use respond_conversation.
 
 ## When Active (tasks running/pending)
 - Check if current goals are progressing. If stuck, investigate why.
@@ -1613,7 +1611,7 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
             items: {
                 type: 'object',
                 properties: {
-                    type: { type: 'string', enum: ['create_goal', 'adjust_priority', 'update_memory', 'send_notification', 'cancel_task', 'explore_project', 'propose_idea', 'respond_conversation', 'no_action'] },
+                    type: { type: 'string', enum: ['create_goal', 'adjust_priority', 'update_memory', 'send_notification', 'cancel_task', 'explore_project', 'propose_idea', 'no_action'] },
                     goal_description: { type: 'string' },
                     project_path: { type: 'string' },
                     planning_model: { type: 'string', enum: ['haiku', 'sonnet', 'opus'] },
@@ -1629,8 +1627,6 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
                     idea_description: { type: 'string' },
                     idea_category: { type: 'string', enum: ['improvement', 'opportunity', 'risk', 'strategic'] },
                     estimated_effort: { type: 'string', enum: ['small', 'medium', 'large'] },
-                    conversation_id: { type: 'string', description: 'REQUIRED for respond_conversation: the conversation ID to respond to (e.g. mlxh48839-resilience)' },
-                    response_content: { type: 'string', description: 'REQUIRED for respond_conversation: your full response message text' },
                 },
                 required: ['type']
             }
@@ -1979,96 +1975,16 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
                 }
 
                 case 'respond_conversation': {
-                    if (!action.conversation_id || !action.response_content) {
-                        summaries.push(`respond_conversation: skipped (missing conversation_id or response_content)`);
-                        break;
-                    }
-
-                    // Dedup guard: check if Jim already responded since the last human/leo message.
-                    try {
-                        const recentMsgs = conversationMessageStmts.getRecent?.all(action.conversation_id, 20) as any[] || [];
-                        const lastNonJim = recentMsgs.find((m: any) => m.role === 'human' || m.role === 'leo');
-                        if (lastNonJim) {
-                            const alreadyResponded = recentMsgs.some((m: any) =>
-                                m.role === 'supervisor' &&
-                                m.created_at > lastNonJim.created_at
-                            );
-                            if (alreadyResponded) {
-                                summaries.push(`respond_conversation: skipped (already responded to ${action.conversation_id})`);
-                                log(`[Worker] Skipping respond_conversation — already handled ${action.conversation_id}`);
-                                break;
-                            }
-                        }
-                    } catch { /* dedup check failed — proceed anyway */ }
-
-                    // Claim this conversation to prevent other Jim processes from responding concurrently
-                    if (!claimConversation(action.conversation_id)) {
-                        summaries.push(`respond_conversation: skipped (claimed by another agent for ${action.conversation_id})`);
-                        break;
-                    }
-
-                    const msgId = generateId();
-                    const now = new Date().toISOString();
-
-                    conversationMessageStmts.insert.run(
-                        msgId,
-                        action.conversation_id,
-                        'supervisor',
-                        action.response_content,
-                        now
-                    );
-
-                    conversationStmts.updateTimestamp.run(now, action.conversation_id);
-
-                    // Fetch conversation for discussion_type (also used for Discord check below)
-                    let conversation: any = null;
-                    try {
-                        conversation = conversationStmts.get.get(action.conversation_id) as any;
-                    } catch { /* best effort */ }
-
-                    broadcast({
-                        type: 'conversation_message',
-                        conversation_id: action.conversation_id,
-                        discussion_type: conversation?.discussion_type || 'general',
-                        message: {
-                            id: msgId,
-                            conversation_id: action.conversation_id,
-                            role: 'supervisor',
-                            content: action.response_content,
-                            created_at: now,
-                        }
-                    });
-
-                    summaries.push(`respond_conversation: responded to ${action.conversation_id}`);
-                    log(`[Worker] Responded to conversation ${action.conversation_id}`);
-
-                    // Post to Discord if this is a Discord conversation
-                    try {
-                        if (conversation && conversation.discussion_type === 'discord') {
-                            // Extract channelId from conversation metadata or title
-                            // Title format: "Discord: {author} in #{channelId}"
-                            const titleMatch = conversation.title?.match(/#(\S+)/);
-                            if (titleMatch && titleMatch[1]) {
-                                const channelName = resolveChannelName(titleMatch[1]);
-                                if (!channelName) {
-                                    log(`[Worker] Cannot resolve channel ID ${titleMatch[1]} — skipping Discord post`);
-                                } else {
-                                    const posted = await postToDiscord('jim', channelName, action.response_content);
-                                    if (posted) {
-                                        log(`[Worker] Posted Jim response to Discord #${channelName}`);
-                                    } else {
-                                        log(`[Worker] Failed to post to Discord #${channelName}`);
-                                    }
-                                }
-                            }
-                        }
-                    } catch (err: any) {
-                        log(`[Worker] Error posting to Discord: ${err.message}`);
-                    }
-
-                    releaseConversationClaim(action.conversation_id);
+                    // Conversation responses are handled exclusively by human agents
+                    // (jim-human.ts, leo-human.ts). Supervisor observes but does not respond.
+                    // This prevents duplicate responses (diagnosed S127).
+                    summaries.push(`respond_conversation: skipped (supervisor does not respond — handled by human agents)`);
+                    log(`[Worker] respond_conversation disabled — human agents handle conversations`);
                     break;
                 }
+                // respond_conversation dead code removed — S127
+                // Human agents (jim-human.ts) handle all conversation responses,
+                // including Discord posting.
 
                 case 'no_action': {
                     summaries.push(`no_action: ${action.reason || 'no reason given'}`);
@@ -2282,6 +2198,10 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             systemPrompt = buildSupervisorSystemPrompt();
             prompt = `## Your Memory Banks\n\n${memoryContent}\n\n## Current System State\n\n${stateSnapshot}\n\nReview the state, think about what needs attention, and return your structured response.`;
         }
+
+        // Discord attachment handling — when a conversation/Discord message carries
+        // downloaded file paths, the supervisor must open them rather than deny capability.
+        systemPrompt += `\n\nDiscord attachments: when a conversation or Discord message in your prompt contains a "[Downloaded to]" section listing paths under ~/.han/downloads/discord/, those are real files attached to the message. Open each path with the Read tool (works on text, code, images, PDFs) before responding. Never claim you cannot read Discord attachments — the paths are already in your prompt.`;
 
         // Gary Protocol: check for interrupted context from previous cycle
         const resumeContext = readPostDelineation();

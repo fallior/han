@@ -3482,6 +3482,32 @@
 
         async function loadPersistedTerminal() {
             try {
+                // Load scrollback history first (persists across /clear)
+                const histRes = await fetch(`${API_BASE}/api/terminal/history?lines=500`);
+                const histData = await histRes.json();
+                if (histData.success && histData.content) {
+                    // Render history as a scrollback block before the live terminal
+                    const histLines = histData.content.split('\n');
+                    for (const line of histLines) {
+                        const div = document.createElement('div');
+                        div.textContent = line;
+                        (div as any)._text = line;
+                        div.style.opacity = '0.6';
+                        termContent.appendChild(div);
+                        renderedLines.push(div);
+                    }
+                    // Add separator
+                    const sep = document.createElement('div');
+                    sep.textContent = '─── live ───';
+                    sep.style.color = 'var(--text-dim)';
+                    sep.style.textAlign = 'center';
+                    sep.style.padding = '4px 0';
+                    (sep as any)._text = '__separator__';
+                    termContent.appendChild(sep);
+                    renderedLines.push(sep);
+                }
+
+                // Then load current live snapshot
                 const res = await fetch(`${API_BASE}/api/terminal`);
                 const data = await res.json();
                 if (data.success && data.content) {

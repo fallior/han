@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { db, conversationStmts, conversationMessageStmts } from '../db';
+import { db, conversationStmts, conversationMessageStmts, conversationLoopStmts } from '../db';
 import { generateId } from '../services/planning';
 import { broadcast } from '../ws';
 import { runSupervisorCycle } from '../services/supervisor';
 import { catalogueConversation, catalogueAllUncatalogued } from '../services/cataloguing';
+import { autoGenerateTts, autoTagLoop } from './voice';
 import { callLLM } from '../orchestrator';
 import { deliverMessage } from '../services/jemma-dispatch';
 import { getPersonas, getAgentPersonas, getMentionPatterns } from '../services/village.js';
@@ -455,24 +456,34 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         // then wake the appropriate agents. Falls back to tab-based + regex if Ollama is down.
         if (finalRole === 'human') {
             classifyAndDispatch(req.params.id, messageId, content, discussionType, now);
-        }
 
-        if (finalRole === 'leo') {
-            // Cooldown-aware wake for Leo — respect 10-min contemplation interval
-            const LEO_COOLDOWN_MS = 10 * 60 * 1000;
-            const lastResponse = conversationMessageStmts.getLastSupervisorResponse.get(req.params.id) as any;
-            if (lastResponse) {
-                const elapsed = Date.now() - new Date(lastResponse.created_at).getTime();
-                if (elapsed < LEO_COOLDOWN_MS) {
-                    const delay = LEO_COOLDOWN_MS - elapsed;
-                    setTimeout(() => runSupervisorCycle().catch(() => {}), delay);
-                } else {
-                    runSupervisorCycle().catch(() => {});
-                }
-            } else {
-                runSupervisorCycle().catch(() => {});
+            // Voice Phase 1b: Create loop + auto-tag on human message (opens a new loop)
+            try {
+                const next = conversationLoopStmts.getNextLoopNumber.get(req.params.id) as any;
+                const loopId = generateId();
+                conversationLoopStmts.insert.run(
+                    loopId, req.params.id, next.next, messageId, null, 0, now
+                );
+                // Auto-tag via LLM in background (non-blocking)
+                autoTagLoop(loopId, content).catch(err =>
+                    console.error('[Voice] Auto-tag failed:', err.message)
+                );
+            } catch (err: any) {
+                console.error('[Voice] Loop creation failed:', err.message);
             }
         }
+
+        // Voice Phase 1b: Auto-generate TTS on agent message post
+        if (finalRole === 'supervisor' || finalRole === 'leo') {
+            autoGenerateTts(messageId, req.params.id).catch(err =>
+                console.error('[Voice] Auto-generate TTS failed:', err.message)
+            );
+        }
+
+        // NOTE: Supervisor cycle is NOT triggered from message post.
+        // Human agents (leo-human.ts, jim-human.ts) handle conversation responses.
+        // The supervisor observes conversations during its periodic cycle but does
+        // not respond directly — this prevents duplicate responses (diagnosed S127).
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -763,6 +774,15 @@ router.post('/internal/broadcast', (req: Request, res: Response) => {
         });
 
         res.json({ success: true });
+
+        // Voice Phase 1b: Auto-generate TTS for agent messages posted by external processes
+        // (leo-human, jim-human, leo-heartbeat all insert directly into DB then call this endpoint)
+        const finalRole = role || 'supervisor';
+        if (finalRole === 'supervisor' || finalRole === 'leo') {
+            autoGenerateTts(message_id, conversation_id).catch(err =>
+                console.error('[Voice] Auto-generate TTS failed (broadcast):', err.message)
+            );
+        }
     } catch (err: any) {
         console.error('[Routes] Internal broadcast error:', err);
         res.status(500).json({ success: false, error: err.message });

@@ -49,6 +49,7 @@ import jemmaRouter from './routes/jemma';
 import gradientRouter from './routes/gradient';
 import tailscaleRouter from './routes/tailscale';
 import villageRouter from './routes/village';
+import voiceRouter from './routes/voice';
 
 // ── Single instance lock ─────────────────────────────────
 
@@ -119,6 +120,10 @@ app.use('/api', portfolioRouter);
 app.use('/api/tailscale', tailscaleRouter);
 app.use('/api/village', villageRouter);
 
+// Voice routes — STT needs raw body parser for audio uploads
+app.use('/api/voice/stt', express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '25mb' }));
+app.use('/api/voice', voiceRouter);
+
 // Serve the UI
 const UI_PATH = path.join(UI_DIR, 'index.html');
 app.get('/', (_req, res) => {
@@ -188,11 +193,11 @@ try {
 // ── Terminal broadcast (200ms loop) ──────────────────────
 
 function broadcastTerminal() {
-    if (!wss || wss.clients.size === 0) return;
+    const hasClients = wss && wss.clients.size > 0;
 
     const session = getActiveSession();
     if (!session) {
-        if (getLastBroadcastContent() !== null) {
+        if (hasClients && getLastBroadcastContent() !== null) {
             setLastBroadcastContent(null as any);
             wsBroadcastTerminal(null, null);
         }
@@ -210,8 +215,13 @@ function broadcastTerminal() {
         fs.writeFileSync(path.join(HAN_DIR, 'terminal.txt'), result.content);
     } catch { /* best effort */ }
 
+    // Always record to persistent log, regardless of WS clients
     appendToLog(result.content);
-    wsBroadcastTerminal(result.content, result.session);
+
+    // Only broadcast to WS if clients are connected
+    if (hasClients) {
+        wsBroadcastTerminal(result.content, result.session);
+    }
 }
 
 // ── Scheduled intervals ──────────────────────────────────

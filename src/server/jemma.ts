@@ -1239,27 +1239,9 @@ function connectAdminWs(): void {
     try {
       const event = JSON.parse(data.toString());
       console.log(`[Jemma] Admin WS event: ${event.type}`);
-      if (event.type !== 'conversation_message') return;
-
-      const msg = event.message;
-      if (!msg || msg.role !== 'human') return;
-
-      // Fetch conversation to get discussion_type
-      fetch(`${SERVER_URL}/api/conversations/${event.conversation_id}`, {
-        headers: { 'Accept': 'application/json' },
-      })
-        .then(res => res.json())
-        .then((conv: any) => {
-          const discussionType = conv?.conversation?.discussion_type
-            || conv?.discussion_type
-            || null;
-          dispatchAdminMessage('jim', event.conversation_id, msg.id, msg.content, msg.created_at, discussionType);
-        })
-        .catch(err => {
-          // Fallback: dispatch without discussion_type — will wake both agents for safety
-          console.warn(`[Jemma] Could not fetch conversation ${event.conversation_id}: ${(err as Error).message}`);
-          dispatchAdminMessage('jim', event.conversation_id, msg.id, msg.content, msg.created_at, null);
-        });
+      // NOTE: Admin conversation messages are dispatched by conversations.ts directly
+      // via classifyAndDispatch(). Jemma does NOT re-dispatch them — that caused
+      // duplicate agent responses (two signals written for the same message). S127 fix.
     } catch (err) {
       console.error('[Jemma] Admin WS message error:', (err as Error).message);
     }

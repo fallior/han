@@ -357,6 +357,27 @@ if (!conversationCols.includes('archived_at')) {
     console.log('[DB] Migration complete: archived_at column added');
 }
 
+// Voice integration — listen_count on conversation_messages (S125)
+const msgCols = (db.pragma("table_info('conversation_messages')") as any[]).map((col: any) => col.name);
+if (!msgCols.includes('listen_count')) {
+    console.log('[DB] Adding listen_count column to conversation_messages...');
+    db.exec(`ALTER TABLE conversation_messages ADD COLUMN listen_count INTEGER DEFAULT 0`);
+    console.log('[DB] Migration complete: listen_count column added');
+}
+
+// Voice integration — conversation_loops table (S127, Phase 1b)
+db.exec(`CREATE TABLE IF NOT EXISTS conversation_loops (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    loop_number INTEGER NOT NULL,
+    human_message_id TEXT NOT NULL,
+    tag TEXT,
+    message_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_loops_conversation ON conversation_loops(conversation_id)`);
+
 // FTS5 virtual table for conversation messages
 // Note: FTS5 tables can't be checked with pragma table_info, so we use a try-catch approach
 try {
@@ -563,6 +584,16 @@ export const conversationMessageStmts = {
     insert: db.prepare('INSERT INTO conversation_messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)') as any,
     getPending: db.prepare(`SELECT cm.* FROM conversation_messages cm JOIN conversations c ON cm.conversation_id = c.id WHERE c.status = 'open' AND cm.role IN ('human', 'leo') AND NOT EXISTS (SELECT 1 FROM conversation_messages cm2 WHERE cm2.conversation_id = cm.conversation_id AND cm2.role = 'supervisor' AND cm2.created_at > cm.created_at) ORDER BY cm.created_at ASC`) as any,
     getLastSupervisorResponse: db.prepare('SELECT created_at FROM conversation_messages WHERE conversation_id = ? AND role = \'supervisor\' ORDER BY created_at DESC LIMIT 1') as any,
+};
+
+export const conversationLoopStmts = {
+    insert: db.prepare('INSERT INTO conversation_loops (id, conversation_id, loop_number, human_message_id, tag, message_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)') as any,
+    getByConversation: db.prepare('SELECT * FROM conversation_loops WHERE conversation_id = ? ORDER BY loop_number ASC') as any,
+    getById: db.prepare('SELECT * FROM conversation_loops WHERE id = ?') as any,
+    getLatest: db.prepare('SELECT * FROM conversation_loops WHERE conversation_id = ? ORDER BY loop_number DESC LIMIT 1') as any,
+    updateTag: db.prepare('UPDATE conversation_loops SET tag = ? WHERE id = ?') as any,
+    incrementMessageCount: db.prepare('UPDATE conversation_loops SET message_count = message_count + 1 WHERE id = ?') as any,
+    getNextLoopNumber: db.prepare('SELECT COALESCE(MAX(loop_number), 0) + 1 as next FROM conversation_loops WHERE conversation_id = ?') as any,
 };
 
 export const conversationTagStmts = {

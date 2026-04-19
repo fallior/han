@@ -79,56 +79,132 @@ export function formatExport(content: string, session: string): string {
            '```\n' + clean + '\n```\n';
 }
 
-// Append-only terminal log with timestamps
-const TERMINAL_LOG = path.join(HAN_DIR, 'terminal-log.txt');
-let lastLoggedLines: string[] = [];
+// Smart terminal log — uses tmux diff semantics to record only meaningful changes
+// Old file (terminal-log.txt) kept as archive. New file records cleanly.
+const TERMINAL_LOG = path.join(HAN_DIR, 'terminal-log-v2.txt');
+let prevCapture: string[] = [];
 let lastTimestamp = 0;
 const TIMESTAMP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+// Action verb pattern — these overwrite in-place but we want to capture them.
+// Includes in-progress verbs (Percolating...) and completion verbs (Worked for 2m).
+// The final "Worked for" line with token counts is the keeper; minor duplication
+// from in-progress verbs is acceptable — dedup later if needed.
+const ACTION_VERB_RE = /^\s*[✻✶✽⠋⠙⠹●◉]\s*(Worked|Cooked|Churned|Brewed|Shimmied|Calculated|Percolated|Baked|Crunched|Toiled|Crafted|Polished|Simmered|Contemplated|Meditated|Marinated|Choreographed|Percolating|Shimmying|Brewing|Choreographing|Simmering|Polishing|Contemplating|Meditating|Marinating|Toiling|Crafting|Working|Cooking|Churning|Calculating|Mulling|Reasoning)/i;
+
+// Noise patterns — never write these to the log
+const NOISE_RE = [
+    /^\s*[⏵⏴].*bypass permissions/,           // permission mode indicator
+    /^\s*esc to interrupt\s*$/,                 // hint
+    /^\s*shift\+tab to cycle\s*$/,              // hint
+    /^[\s│─┌┐└┘├┤┬┴┼╔╗╚╝║═▐▛▜▝▘]+$/,         // box-drawing only
+    /^\s*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*$/,                  // lone spinner chars
+];
+
+function isNoise(line: string): boolean {
+    return NOISE_RE.some(re => re.test(line));
+}
 
 export function appendToLog(content: string): void {
     try {
         const lines = content.split('\n');
         const now = Date.now();
 
-        // Find new lines by matching the tail of lastLoggedLines against lines
-        let newStart = 0;
-        if (lastLoggedLines.length > 0) {
-            // Find where lastLoggedLines ends within current content
-            const lastFew = lastLoggedLines.slice(-20);
+        // First capture — write everything (minus noise), this is session start
+        if (prevCapture.length === 0) {
+            let output = `\n--- ${new Date().toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' })} ---\n`;
+            lastTimestamp = now;
+            for (const line of lines) {
+                if (!isNoise(line)) output += line + '\n';
+            }
+            fs.appendFileSync(TERMINAL_LOG, output);
+            prevCapture = lines.slice();
+            return;
+        }
+
+        // Compare only the LAST LINE of the previous capture against the current
+        // capture. Find where that line appears in the current content — everything
+        // after it is new. This is simple and robust:
+        //   - When the terminal scrolls, old last line is now higher up, new content below
+        //   - When in-place overwrite happens, old last line is still there (or replaced)
+        //
+        // The last non-empty line of prev is the anchor. If we can't find it,
+        // this is a major screen change (compaction) — write everything new.
+
+        const toWrite: string[] = [];
+
+        // Find last non-empty line from previous capture as our anchor
+        let anchor = '';
+        for (let i = prevCapture.length - 1; i >= 0; i--) {
+            if (prevCapture[i].trim() !== '') {
+                anchor = prevCapture[i];
+                break;
+            }
+        }
+
+        if (!anchor) {
+            // Previous was all empty — write everything
+            for (const line of lines) {
+                if (!isNoise(line) && line.trim() !== '') toWrite.push(line);
+            }
+        } else {
+            // Find the anchor in current capture (search from the end)
+            let anchorIdx = -1;
             for (let i = lines.length - 1; i >= 0; i--) {
-                if (lines[i] === lastFew[lastFew.length - 1]) {
-                    // Check if the preceding lines match too
-                    let match = true;
-                    for (let j = 1; j < lastFew.length && i - j >= 0; j++) {
-                        if (lines[i - j] !== lastFew[lastFew.length - 1 - j]) {
-                            match = false;
-                            break;
-                        }
+                if (lines[i] === anchor) {
+                    anchorIdx = i;
+                    break;
+                }
+            }
+
+            if (anchorIdx >= 0) {
+                // Found anchor — new content is everything after it
+                for (let i = anchorIdx + 1; i < lines.length; i++) {
+                    if (!isNoise(lines[i]) && lines[i].trim() !== '') {
+                        toWrite.push(lines[i]);
                     }
-                    if (match) {
-                        newStart = i + 1;
-                        break;
+                }
+
+                // Check the line AT anchorIdx — if it changed (anchor was the
+                // second-to-last line and the last line changed in place), check
+                // for action verbs in lines near the bottom that differ from prev
+                const prevLastIdx = prevCapture.length - 1;
+                const checkFrom = Math.max(0, anchorIdx - 5);
+                const checkTo = Math.min(anchorIdx, prevCapture.length);
+                for (let i = checkFrom; i < checkTo; i++) {
+                    const prevLine = prevCapture[prevCapture.length - (anchorIdx - i) - 1];
+                    if (prevLine && lines[i] !== prevLine && ACTION_VERB_RE.test(lines[i])) {
+                        toWrite.push(lines[i]);
+                    }
+                }
+            } else {
+                // Anchor not found — major screen change (compaction/context refresh).
+                // Write all new non-noise content.
+                toWrite.push('─── context refreshed ───');
+                for (const line of lines) {
+                    if (!isNoise(line) && line.trim() !== '') {
+                        toWrite.push(line);
                     }
                 }
             }
         }
 
-        if (newStart >= lines.length && lastLoggedLines.length > 0) return; // nothing new
-
-        const newLines = lastLoggedLines.length === 0 ? lines : lines.slice(newStart);
-        if (newLines.length === 0) return;
+        if (toWrite.length === 0) {
+            prevCapture = lines.slice();
+            return;
+        }
 
         let output = '';
 
-        // Add timestamp every 5 minutes
+        // Timestamp every 5 minutes
         if (now - lastTimestamp >= TIMESTAMP_INTERVAL) {
             output += `\n--- ${new Date().toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' })} ---\n`;
             lastTimestamp = now;
         }
 
-        output += newLines.join('\n') + '\n';
+        output += toWrite.join('\n') + '\n';
         fs.appendFileSync(TERMINAL_LOG, output);
-        lastLoggedLines = lines;
+        prevCapture = lines.slice();
     } catch { /* best effort */ }
 }
 

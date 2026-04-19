@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { apiFetch } from './api'
 import { Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import AuthGuard from './components/AuthGuard'
@@ -25,7 +26,7 @@ function AppContent() {
   const personasLoaded = useStore((s) => s.personasLoaded)
   useEffect(() => {
     if (personasLoaded) return
-    fetch('/api/village/personas')
+    apiFetch('/api/village/personas')
       .then(res => res.json())
       .then(data => {
         if (data.personas) {
