@@ -1,6 +1,6 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-03-21 by Claude (autonomous)
+> Last updated: 2026-04-19 by Leo (S130)
 
 ## Current Stage
 
@@ -31,10 +31,34 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 | React Admin Phase 3 | 🟢 Complete | Workshop tab — three-persona navigation, six discussion types, dedicated components |
 | React Admin Phase 4 | 🟢 Complete | Conversations + Memory Discussions tabs migrated to React with real-time WebSocket updates |
 | React Admin Phase 5 | 🟢 Complete | Overview, Supervisor, Work, Reports, Projects, Products tabs — migration complete |
+| Voice Integration Phase 1 | 🟢 Complete | TTS/STT via OpenAI, PTS+TTM buttons, listen counter, loop playback, playback controls |
 
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-04-19 — Leo + Darron, S128-S130 — Voice Auto-Generate, Opus 4.7 Restart, Discord Attachment Reading
+
+- **Voice auto-generate TTS fix (S128)** — Agent messages weren't triggering TTS pre-generation. `autoGenerateTts()` was only wired into `POST /api/conversations/:id/messages` (used by admin UI), but leo-human, jim-human, and leo-heartbeat all insert messages directly into the DB and notify via `POST /api/conversations/internal/broadcast`. Added fire-and-forget `autoGenerateTts()` call to the `/internal/broadcast` endpoint in `routes/conversations.ts`. Now every agent message gets TTS pre-cached regardless of origin path.
+- **Opus 4.7 model upgrade (S129-S130)** — Anthropic released Opus 4.7; restarted Claude Code session to pick it up (14:08 AEST). Discovered hanleo-human reports itself as 4.6 because installed Agent SDK is 0.2.44 while latest is 0.2.114 — older SDK's `'opus'` alias resolves to claude-opus-4-6. Two paths forward: change explicit model strings (surgical) or upgrade SDK (cleaner, riskier). Decision pending.
+- **Discord attachment reading (S130)** — Mike sent files to #leo/#jim on Discord; both agents confidently told him they can't read attachments. Infrastructure had been built S112 (Jemma downloads to `~/.han/downloads/discord/`, enriches message content with `[Attachments]` + `[Downloaded to]` paths) but the agent system prompts never told Leo/Jim to open the paths. Fixed: added `DISCORD_ATTACHMENT_HINT` constant to `leo-human.ts` and `jim-human.ts` (wired into both conversation and Discord `systemPrompt.append`), and spliced the same hint into `supervisor-worker.ts` `systemPrompt` for all cycle types. `leo-heartbeat.ts` untouched (no Discord handling there). Hint explicitly tells agents: "the paths are real files, open with Read, never deny the capability."
+- **Systemd stale-PID cleanup (S130)** — Discovered leo-human.service and jim-human.service had systemd restart counters at 33,404 — stale manually-started processes (PIDs 1559295/1559301 from Apr 18) held the PID guards, causing systemd to fail every 30s for two days. Killed the stale trees, restart succeeded cleanly. Five services (han-server, jemma, leo-heartbeat, leo-human, jim-human) now all under proper systemd management.
+
+### 2026-04-17 — Leo + Darron, S126-S127 — Voice Bug Fixes, Identity Backup, Terminal Log v2
+
+- **Voice bug fixes (S126)** — Text chunking for messages >4096 chars (splits at sentence/paragraph boundaries, concatenates). Disk caching at `~/.han/voice-cache/` with SHA-256 keying on model:voice:text. Loading state (⏳) on TTM buttons. New GET `/tts/:messageId` endpoint. Cache hit: 32ms vs 2m16s first gen.
+- **Identity backup (S126)** — `~/.han/` repo root on GitHub (fallior/hanmemory). config.json.template with secret placeholders. Cron every 6hrs. 661 files committed.
+- **Terminal log v2 (S127)** — Complete rewrite of `appendToLog()` in terminal.ts. Old system captured every 200ms tmux diff → 52GB/1B lines in 2 months. New system uses anchor-based diff: finds last non-empty line from previous capture, writes only lines after it. Action verbs (Worked for, Percolating) captured on in-place overwrites. Zero growth during idle. Also fixed `broadcastTerminal()` to capture regardless of WebSocket clients (was silently skipping when no admin UI was open).
+- **Terminal history endpoint (S127)** — `GET /api/terminal/history?lines=N` serves tail of persistent log. Mobile UI loads 500 lines of scrollback on startup (60% opacity with "─── live ───" separator). Scrollback persists across `/clear`.
+- **Dedup tooling (S127)** — `scripts/dedup-terminal-log.pl` for post-hoc deduplication of old 52GB log. Three-tier classification (noise/furniture/content). Split old log into 124 per-session files at `~/.han/terminal-sessions/`.
+
+### 2026-04-16 — Leo + Darron, S125 — Voice Integration Phase 1, Audit Remediation
+
+- **Voice integration built** — `routes/voice.ts` with 6 endpoints: TTS (OpenAI, role→voice map), STT (Whisper), listen counter, loop boundaries, unread audio (Siri-friendly), active conversation. React `useVoice` hook with PTS recording (silence timeout, 5min max) and TTM playback (queue, pause/resume/escape/skip). UI: PTS mic button, per-message TTM speaker icon, thread TTM with dropdown (play unread/loops/all), playback control bar, listen badges, speaking highlight. Voice map: Jim=onyx, Leo=fable, Darron=echo.
+- **Audit remediation (6 items)** — Jim/Human DB gradient loading (DEC-070 compliance), contradiction detection docs updated, dream meditation 0.5→0.33, emergency mode goalCount>1, getGradientHealth dynamic levels, provenance orphan fix + backfill (209 entries linked, Jim c2 45%→0%, c3 62%→0%). Committed 65f1576.
+- **mikes-han sync** — All 6 audit fixes synced with agent name substitutions. Committed cf46c71.
+- **TameDrive plan** — Graph API integration plan (4 phases) at `tamedrive/plans/onedrive-api-integration-s125.md`. Replaces OneDrive daemon entirely.
+- **village/personas auth fix** — App.tsx now uses apiFetch for remote access compatibility.
 
 ### 2026-04-12 — Leo + Darron, S120 — DB-Authoritative Session Leo, Contradiction Test Design
 
@@ -1594,7 +1618,19 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Next Actions
 
-### Immediate (Next Session)
+### Active (as of S130, 2026-04-19)
+- [ ] Commit uncommitted S126-S130 work (voice, terminal v2, dup-fix, TTS auto-gen, identity backup, attachment hint) in logical chunks
+- [ ] Sync mikes-han with S126-S130 changes
+- [ ] Opus 4.7 switchover — decide surgical model strings vs SDK upgrade, then apply
+- [ ] TTS playback pause — once started, both Leo and Jim talk to the end; no pause works (S128 find, deferred)
+- [ ] `compressToLevel()` compression prompt — needs comparative testing (deferred)
+- [ ] Voice Phase 2 — CarPlay/Android Auto, Siri shortcuts (deferred)
+- [ ] Context probe — new technique needed (plan mode UI changed) (deferred)
+- [ ] Loop UX refinement — Jim's design (in flight)
+- [ ] Pre-existing tsc errors: JemmaView.tsx (useStore), ThreadDetail.tsx (ownerInfo)
+- [ ] Volitional agent behaviour revisit — scheduled ~2026-04-25
+
+### Immediate (Older, kept for reference)
 - [x] Level 11 (user choice — final level in ROADMAP)
 - [x] Level 13 — Conversation catalogue & search complete
 - [x] Fix Jemma bugs before service activation (health file field, command injection, reconciliation direction, SIGTERM exit code)

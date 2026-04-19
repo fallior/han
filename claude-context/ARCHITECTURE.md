@@ -114,7 +114,7 @@ Agents resolve the channel ID from Jemma's signal file against this map to deter
   - Conversations: `conversations`, `conversation_messages`
   - Portfolio: `projects`, `products`, `product_phases`, `product_knowledge`
   - Reporting: `digests`, `maintenance_runs`, `weekly_reports`
-- **Plain text**: Terminal capture files (`terminal.txt`, `terminal-log.txt`)
+- **Plain text**: Terminal snapshot (`terminal.txt` — live, overwritten each capture), persistent log (`terminal-log-v2.txt` — append-only, anchor-based dedup)
 - **Memory banks**: Per-agent state in `~/.han/memory/` (identity, active-context, patterns, self-reflection)
 
 ### Autonomous Execution (Level 7+)
@@ -145,6 +145,7 @@ han/
 │   ├── start-server.sh           # Quick server start
 │   ├── han                               # CLI launcher
 │   ├── build-client.js           # Client TypeScript compilation
+│   ├── dedup-terminal-log.pl     # Post-hoc dedup of old terminal log (noise/furniture/content)
 │   └── jemma.service             # Systemd user service for Jemma
 └── src/
     ├── hooks/
@@ -168,7 +169,8 @@ han/
     │   │   ├── analytics.ts      # Metrics + cost tracking + velocity
     │   │   ├── proposals.ts      # Task proposal extraction + management
     │   │   ├── bridge.ts         # Claude Code handoff + context export
-    │   │   ├── prompts.ts        # Pending/resolved prompt management
+    │   │   ├── prompts.ts        # Pending/resolved prompt management + terminal history
+    │   │   ├── voice.ts          # TTS (OpenAI), STT (Whisper), listen counter, caching
     │   │   └── jemma.ts          # Discord message delivery endpoint
     │   ├── services/
     │   │   ├── supervisor.ts     # Persistent Opus supervisor agent
@@ -181,7 +183,7 @@ han/
     │   │   ├── maintenance.ts    # Periodic portfolio maintenance tasks
     │   │   ├── reports.ts        # Report generation + analytics
     │   │   ├── git.ts            # Git checkpoint creation + rollback
-    │   │   └── terminal.ts       # Terminal output mirroring
+    │   │   └── terminal.ts       # Terminal capture, anchor-based persistent log, history
     │   └── package.json          # Server dependencies
     └── ui/
         ├── index.html            # Command Centre dashboard
@@ -256,11 +258,13 @@ han/
 
 ### Terminal Broadcast (Always-On Mirror)
 
-1. **1-second interval** on server captures tmux pane content via `tmux capture-pane -p -e`
+1. **200ms interval** on server captures tmux pane content via `tmux capture-pane -p -S -`
 2. **Content diffing** — only broadcasts when content has changed
 3. **WebSocket push** — `{ type: 'terminal', content, session }` sent to all connected clients
 4. **No-session detection** — broadcasts `{ type: 'terminal', content: null }` when no tmux session exists
 5. **Direct keystroke injection** — `POST /api/keys` sends keys to active session independent of prompts
+6. **Persistent logging** — `terminal-log-v2.txt` records all meaningful content changes using anchor-based diff (finds last line from previous capture, writes only new lines after it). Action verbs captured on in-place overwrite. Zero growth during idle. Always runs regardless of WebSocket clients.
+7. **History endpoint** — `GET /api/terminal/history?lines=N` serves scrollback from persistent log. Mobile UI loads 500 lines on startup for continuity across `/clear`.
 
 ### UI States
 
@@ -269,6 +273,14 @@ han/
 | No Session | Empty placeholder | Hidden | "No active session" / "history" |
 | Watching | Live terminal (xterm.js) | Visible | "Watching session" / "history" |
 | Prompt Active | Live terminal (xterm.js) | Visible | "Permission required" / "keys sent to session" |
+
+### Voice Integration
+
+- **TTS**: OpenAI `tts-1` model. Role→voice map: Jim=onyx, Leo=fable, Darron=echo. Text chunking at sentence/paragraph boundaries for messages >4096 chars. Chunks generated sequentially, concatenated into one MP3.
+- **STT**: OpenAI Whisper via `POST /api/voice/stt`.
+- **Caching**: Disk cache at `~/.han/voice-cache/` keyed on SHA-256 of `model:voice:text`. Two-level directory (first 2 hex chars). Individual chunks + full concatenation cached.
+- **React hook**: `useVoice` — PTS (Press to Start) recording with silence timeout, TTM (Talk to Me) playback with queue, pause/resume/escape/skip. Listen counter tracks playback completion.
+- **Endpoints**: `POST /api/voice/tts`, `GET /tts/:messageId`, `POST /api/voice/stt`, `POST /api/voice/listen/:messageId`, `GET /api/voice/loops/:conversationId`, `GET /api/voice/unread/:conversationId`, `GET /api/voice/active`, `GET /api/voice/cache/stats`.
 
 ### Ghost Task Detection (Autonomous Recovery)
 

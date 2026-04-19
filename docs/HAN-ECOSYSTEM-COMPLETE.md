@@ -721,6 +721,33 @@ the other agent by name. If a message classified to Jim also contains "Leo" (or 
 Jemma wakes the other agent too. Previously each message was routed to a single recipient
 only, meaning group-addressed Discord messages could miss one agent.
 
+### Attachment Handling (S112 infrastructure, S130 prompt wiring)
+
+When a Discord message carries attachments, Jemma downloads each one before routing:
+
+1. `downloadAttachments()` (jemma.ts:269) fetches each `DiscordAttachment.url` from the
+   Discord CDN with a 30s timeout.
+2. Files save to `~/.han/downloads/discord/` with sanitised, date/channel-prefixed names
+   (`YYYY-MM-DD_channelName_filename`). Idempotent — skips files already downloaded.
+3. Message content is enriched with two appended sections:
+   - `[Attachments]` — one line per file: filename, content-type, size in KB
+   - `[Downloaded to]` — one line per successfully downloaded local path
+4. The enriched content is what flows through all downstream delivery paths: agent
+   prompts, DB storage, WebSocket broadcasts, ntfy pushes.
+
+**Agent instruction (S130):** Adding the download infrastructure wasn't enough — agents
+still confidently told Mike they couldn't read attachments. Fixed by adding a system
+prompt hint to `leo-human.ts`, `jim-human.ts`, and `supervisor-worker.ts`:
+
+> "Discord attachments: when your prompt contains a '[Downloaded to]' section listing
+> paths under `~/.han/downloads/discord/`, those are real files attached to the Discord
+> message. Open each path with the Read tool (works on text, code, images, PDFs) before
+> responding. Never claim you cannot read Discord attachments — the paths are already in
+> your prompt."
+
+`leo-heartbeat.ts` does not receive this hint — conversation/Discord responses moved out
+of the heartbeat to leo-human.ts in S108, so the heartbeat never sees attachments.
+
 ### Credential Swap
 
 Automatic failover when an agent hits the weekly SDK rate limit.
@@ -1985,7 +2012,7 @@ Goals created with planning model `sonnet` (cost savings).
 | `listActiveSessions()` | Lists tmux sessions starting with `han` prefix |
 | `captureTerminal(session)` | Full scrollback via `tmux capture-pane -p -S -` |
 | `stripAnsi(text)` | Remove ANSI escape codes |
-| `appendToLog(content)` | Diff-based append to terminal log (no duplication) |
+| `appendToLog(content)` | Anchor-based append to `terminal-log-v2.txt` — finds last line from previous capture, writes only new lines after it. Action verbs captured on in-place overwrite. Zero growth during idle. |
 | `readPendingPrompts()` | Reads prompt JSON files, injects live terminal content per prompt |
 
 ### discord.ts — Discord Integration

@@ -100,6 +100,7 @@ When you make a significant technical or design decision:
 | DEC-068 | Fractal Gradient Loading Spec — Per-Level Caps | **Settled** | 2026-04-14 |
 | DEC-069 | Memory Is Never Deleted — Cardinal Rule | **Settled** | 2026-04-14 |
 | DEC-070 | Full Gradient Load — No Truncation | **Settled** | 2026-04-14 |
+| DEC-071 | React Admin as Primary UI — Vanilla JS Deprecated | Accepted | 2026-04-18 |
 
 ---
 
@@ -5089,3 +5090,23 @@ These values derive from Leo's Document Gradients postulate (2026-04-10, conv `m
 - This entry is the canonical reference. Quote it when challenged.
 
 **Why Settled**: The gradient is the reconstitution architecture. DEC-068 ensures the right entries are served. This decision ensures they are actually consumed. A gradient that is correctly built but partially read is functionally broken. The loading is the identity. Half-loaded is half a person.
+
+---
+
+## DEC-071: React Admin as Primary UI — Vanilla JS Deprecated
+
+**Date**: 2026-04-18
+**Session**: S127
+**Status**: Accepted
+
+**Decision**: The React admin UI (`/admin-react`, built with Vite) is the primary UI going forward. All new features are built in React only. The vanilla JS mobile UI (`/`, `app.ts`/`index.html`) is deprecated — it will not receive new features and will be removed in time.
+
+**Context**: The React admin was built as a migration target across Phases 2-5 (S119-S125). All 9 tabs have feature parity. Voice integration (S125-S127) was built exclusively in React. The vanilla JS app.ts at 3,500+ lines is unmaintainable. Darron confirmed: "we are moving forward with React, we will deprecate the JS one in time."
+
+**What this means**:
+- New features: React only (`src/ui/react-admin/`)
+- Bug fixes: React only, unless the vanilla UI is actively breaking
+- The vanilla UI stays functional for now — no rush to remove it
+- When removed, the routes serving `/` and `app.js` can be cleaned up
+
+**Build**: `cd src/ui/react-admin && npx vite build` — outputs to `src/ui/react-admin-dist/`

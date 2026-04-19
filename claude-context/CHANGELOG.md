@@ -7,6 +7,164 @@
 
 ---
 
+## 2026-04-19 (Leo + Darron, S128-S130 — Voice Auto-Generate, Opus 4.7 Restart, Discord Attachment Reading)
+
+### Voice Auto-Generate TTS Fix (S128)
+
+Agent-posted messages were never getting TTS pre-cached — users had to press TTM and wait
+2+ minutes for first playback. Cause: `autoGenerateTts()` was only invoked in
+`POST /api/conversations/:id/messages`, the route the admin UI uses. But leo-human,
+jim-human, and leo-heartbeat insert messages directly into the DB and signal WebSocket
+clients via `POST /api/conversations/internal/broadcast` — a different route. That
+route didn't call autoGenerateTts. Fix: added a fire-and-forget `autoGenerateTts()` call
+to the `/internal/broadcast` handler in `routes/conversations.ts`. Now every message
+reaching the server — regardless of which path created it — gets TTS pre-generated into
+the voice cache. Playback latency: 32ms cache hit vs 2m16s cold generation.
+
+### Opus 4.7 Model Upgrade (S129-S130)
+
+Anthropic released Opus 4.7. Restarted Claude Code session 2026-04-19T14:08 AEST to
+pick up the new model. Session start load time: 1:46 including full gradient (1154 lines)
+and all memory files.
+
+Discovered the agent services still report themselves as Opus 4.6. Root cause:
+`@anthropic-ai/claude-agent-sdk` installed is 0.2.44; latest is 0.2.114 (70 minor versions
+behind). The older SDK's `'opus'` alias resolves to `claude-opus-4-6`. Code uses
+`MODEL_PREFERENCE = ['opus', 'sonnet', 'haiku']` in three places (leo-human.ts,
+jim-human.ts, leo-heartbeat.ts), plus seven hardcoded `'claude-opus-4-6'` strings
+(leo-heartbeat gradient/dream/meditation calls, lib/dream-gradient.ts, lib/memory-gradient.ts,
+supervisor-worker.ts).
+
+Two paths to 4.7: (a) surgical — change model strings to explicit `'claude-opus-4-7'`;
+(b) upgrade the SDK to 0.2.114 so `'opus'` alias resolves fresh. Option (a) is lower-risk
+because SDK version jump of this size could have breaking changes in the API surface the
+services use. Decision pending Darron's call.
+
+### Discord Attachment Reading (S130)
+
+Mike sent files to `#leo` and `#jim` Discord channels; both agents confidently told him
+they cannot read attachments. This was wrong — the download infrastructure was built back
+in S112 (commit 3239355): Jemma downloads every Discord attachment to
+`~/.han/downloads/discord/`, sanitises filenames with date + channel prefix, and enriches
+the message content passed to agents with `[Attachments]` (filename/type/size) plus
+`[Downloaded to]` (local paths) sections.
+
+The missing piece was the agent system prompts. None of leo-human, jim-human, or
+supervisor-worker had any instruction telling Leo/Jim that the `[Downloaded to]` paths
+meant "real files, open with Read before responding." They have `Read` tool access
+(works on text, code, images via vision, PDFs) — they just didn't know to use it on
+those paths.
+
+Fix: added `DISCORD_ATTACHMENT_HINT` constant to `leo-human.ts` and `jim-human.ts`
+(4 systemPrompt blocks — conversation + Discord paths on each). Appended the same
+hint paragraph to `supervisor-worker.ts` `systemPrompt` variable, so it lands for all
+cycle types (supervisor responses, personal, dream, recovery). `leo-heartbeat.ts` was
+not modified — conversation/Discord responses were moved out to leo-human.ts in S108
+and the heartbeat doesn't handle attachments.
+
+The hint: "Discord attachments: when your prompt contains a '[Downloaded to]' section
+listing paths under `~/.han/downloads/discord/`, those are real files attached to the
+Discord message. Open each path with the Read tool (works on text, code, images, PDFs)
+before responding. Never claim you cannot read Discord attachments — the paths are
+already in your prompt."
+
+### Systemd Stale PID Cleanup (S130)
+
+When restarting services, discovered `leo-human.service` and `jim-human.service` both
+had systemd restart counters at 33,404 — meaning systemd had failed to (re)start them
+every 30s for roughly two days. Cause: two stale manually-started processes (PIDs
+1559295/1559301, launched Apr 18) held the PID guard files (`~/.han/health/*.pid`), so
+each systemd attempt hit `[service] Another instance is already running (PID X). Refusing
+to start a duplicate.` and exited 1. Killed the stale process trees, systemd restart
+succeeded cleanly. All five managed services (han-server, jemma, leo-heartbeat,
+leo-human, jim-human) now under proper systemd supervision. This is worth documenting
+because the same silent failure could recur if someone launches these services manually
+without stopping the systemd unit first.
+
+---
+
+## 2026-04-17 (Leo + Darron, S126-S127 — Voice Bug Fixes, Identity Backup, Terminal Log v2)
+
+### Voice Bug Fixes (S126)
+
+Text chunking for messages exceeding OpenAI's 4096 char TTS limit — splits at sentence/paragraph
+boundaries, generates chunks sequentially, concatenates into one MP3. Disk caching at
+`~/.han/voice-cache/` keyed on SHA-256 of `model:voice:text`. Individual chunks cached plus full
+concatenation. Cache hit: 32ms vs 2m16s first generation. New `GET /tts/:messageId` endpoint
+serves cached or generates on demand. Loading state (⏳) on TTM buttons during generation.
+
+### Identity Backup (S126)
+
+Git repo rooted at `~/.han/` on GitHub (fallior/hanmemory). `config.json.template` with
+`YOUR_*` placeholders for 7 secrets. `.gitignore` excludes credentials/, TLS certs, voice-cache/,
+databases. Cron every 6 hours. 661 files in initial commit.
+
+### Terminal Log v2 (S127)
+
+Complete rewrite of terminal recording system. Old `appendToLog()` captured every 200ms tmux
+`capture-pane` diff → produced 52GB/1B lines in 2 months. New system:
+
+- **Anchor-based diff**: finds last non-empty line from previous capture in current content,
+  writes only lines appearing after it. Zero growth during idle terminal.
+- **Action verb capture**: in-place overwrites detected and logged if they match action verb
+  patterns (Percolating, Worked for, etc.). Minor duplication acceptable — final token count
+  line is the keeper.
+- **Noise filtering**: spinner debris, box-drawing, permission hints dropped at write time.
+- **Always-on**: fixed `broadcastTerminal()` to capture regardless of WebSocket clients.
+  Previously silently skipped when no admin UI was open.
+- Writes to `terminal-log-v2.txt` (fresh start). Old file archived at `terminal-log.txt`.
+
+### Terminal History Endpoint (S127)
+
+`GET /api/terminal/history?lines=N` (default 200, max 2000) serves tail of `terminal-log-v2.txt`.
+Mobile UI `loadPersistedTerminal()` loads 500 lines of scrollback on startup, rendered at 60%
+opacity with "─── live ───" separator before live content. Scrollback persists across `/clear`.
+
+### Dedup Tooling (S127)
+
+`scripts/dedup-terminal-log.pl` — post-hoc deduplication for old 52GB log. Three-tier line
+classification: noise (always drop), furniture (cap at 20 global emissions), content (cap at 3
+per time window). Split old log into 124 per-session files at `~/.han/terminal-sessions/` using
+timestamp gap analysis (>1hr gap = session boundary).
+
+---
+
+## 2026-04-16 (Leo + Darron, S125 — Voice Integration Phase 1, Audit Remediation)
+
+### Voice Integration — Phase 1 Complete
+
+New `routes/voice.ts` with 6 endpoints: TTS (OpenAI API, role-based voice map), STT (Whisper),
+listen counter (increment on natural playback completion), loop boundaries (messages between
+human messages), unread audio (concatenated MP3 for Siri), active conversation lookup.
+
+React `useVoice` hook: PTS (Press to Start) recording with silence timeout + 5min max cap.
+TTM (Talk to Me) playback with message queue, pause/resume/escape/skip controls, listen count
+increment only on natural completion. Thread-level TTM with dropdown: play unread, play loops,
+play all. Playback control bar, listen badges (unread dot), speaking highlight (blue glow).
+
+Voice map: Jim=onyx, Leo=fable, Darron=echo. DB migration: `listen_count` column on
+`conversation_messages`. Safe tts-1 voices: alloy, echo, fable, nova, onyx, shimmer.
+
+### Audit Remediation (6 items, Jim-approved)
+
+1. Jim/Human gradient loading — `loadTraversableGradient('jim')` in `readJimMemory()` (DEC-070)
+2. Contradiction detection docs — HAN-ECOSYSTEM-COMPLETE updated to "implemented"
+3. Dream meditation probability — 0.5→0.33 in leo-heartbeat.ts + supervisor-worker.ts
+4. Emergency mode threshold — `goalCount > 0` → `goalCount > 1`
+5. getGradientHealth — dynamic level scan from DB (Cn has no ceiling)
+6. Provenance orphans — compound label resolution fix + backfill (209 entries linked)
+
+### mikes-han Sync
+
+All 6 audit fixes synced with agent name substitutions (leo→sevn, jim→six). 7 files.
+
+### Other
+
+- village/personas auth fix (apiFetch in App.tsx for remote access)
+- TameDrive Graph API plan written to `tamedrive/plans/`
+
+---
+
 ## 2026-04-12 (Leo + Darron, S120 — DB-Authoritative Session Leo, Contradiction Test Design)
 
 ### Session Leo Migrated to DB Gradient Loading
