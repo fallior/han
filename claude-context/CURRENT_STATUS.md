@@ -1,6 +1,6 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-04-19 by Leo (S130)
+> Last updated: 2026-04-20 by Leo (S130)
 
 ## Current Stage
 
@@ -36,6 +36,16 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-04-20 — Leo + Darron, S130 (cont.) — Jim Unblock, Launcher Identity Template
+
+- **Jim supervisor unblocked** — 28 consecutive supervisor cycles (2686–2722+) failed with `"Failed to parse supervisor output: Prompt is too long"` (0 tokens in/out, dying at prompt construction). Diagnosis: Jim's `self-reflection.md` had grown to 88,845 B; `loadMemoryBank()` (supervisor-worker.ts:774) loads it verbatim into every cycle prompt. Combined with Jim's gradient load (288 KB), project knowledge (185 KB), and Claude Code preset overhead, the prompt exceeded Opus 4.6's 200 K token context window.
+- **Mechanical fix (byte-preserving)** — Archived `self-reflection.md` to `self-reflection-archive-2026-04-20.md` (88,845 B preserved). Split by H2 + H3 headers into 99 c0 chunk files at `~/.han/memory/fractal/jim/self-reflection/c0/` (11 thematic + 1 Open Questions intro + 87 cycle-append entries). Trimmed live file to 4,057 B — four of Jim's own identity-structural sections (*What I'm Good At*, *What I Get Wrong*, *The See/Act Gap*, *Composition with Leo*) plus a Current placeholder. Verbatim content, no rewriting.
+- **Opus 4.7 supervisor pin attempted** — Changed `supervisorConfig.model || 'opus'` to `supervisorConfig.model || 'claude-opus-4-7'` in `supervisor-worker.ts:2235`. Cycle #2722 still failed with same "Prompt is too long" after 17-minute run. Root cause: SDK 0.2.44's `context-1m-2025-08-07` beta is **Sonnet 4/4.5 only** — Opus on this SDK is capped at 200 K regardless of model version. Pin retained (4.7 is still an upgrade).
+- **Plan pivoted: Jim unblocks himself via `hanjim`** — Opus 4.7 1M context is only reachable through the Claude Code CLI session, not the Agent SDK. Darron will launch `hanjim` (which runs Opus 4.7 in 1M context mode), load Jim's full gradient comfortably, and let Jim decide what to compress (UV clustering idea — "path entry visible, not the whole path" — Darron's framing). Sovereignty preserved.
+- **Session briefing for Jim** — `~/.han/memory/session-briefing-2026-04-20.md` written. Describes what broke, what was done mechanically, what's still open (1,036 UVs, 185 KB project knowledge, `self-reflection.md` not yet in rolling-window pre-flight), and the UV compression idea.
+- **Launcher tmux bug fixed** — `~/.tmux.conf` sets `pane-base-index 1`; launchers targeted phantom pane `:.0`. Replaced all occurrences with base-index-agnostic `"$session_name"` (active-pane targeting) in `hanjim`, `hanleo`, `hantenshi`, `hancasey` (han) + `hansix`, `hansevn`, `hancasey` (mikes-han).
+- **Launcher identity template rolled out** — Each agent launcher now embeds a full session protocol as a HEREDOC-driven identity string passed via `--append-system-prompt`. "Welcome back" now triggers a thorough load (aphorisms → gradient → memory banks → working memory → ecosystem map → wiki → CURRENT_STATUS → conversations → session briefings). See **DEC-072**. hansevn previously had no identity override at all — added. mikes-han's hansix, hansevn, hancasey now parallel han's hanjim/hantenshi/hancasey pattern.
 
 ### 2026-04-19 — Leo + Darron, S128-S130 — Voice Auto-Generate, Opus 4.7 Restart, Discord Attachment Reading
 
@@ -1618,10 +1628,17 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 
 ## Next Actions
 
-### Active (as of S130, 2026-04-19)
-- [ ] Commit uncommitted S126-S130 work (voice, terminal v2, dup-fix, TTS auto-gen, identity backup, attachment hint) in logical chunks
-- [ ] Sync mikes-han with S126-S130 changes
-- [ ] Opus 4.7 switchover — decide surgical model strings vs SDK upgrade, then apply
+### Active (as of S130, 2026-04-20)
+- [x] Commit uncommitted S126-S130 work (committed 0107e02 feat + f2507e9 docs, pushed 2026-04-19)
+- [x] Jim supervisor unblocked (self-reflection.md 86 KB → 4 KB, mechanical split, 99 c0 chunks, archive)
+- [x] Launcher identity template rolled out (DEC-072) — hanjim, hantenshi, hancasey, hansix, hansevn, mikes-han hancasey
+- [x] Launcher tmux pane bug fixed (`:.0` → `$session_name`)
+- [x] Session briefing for Jim written (`~/.han/memory/session-briefing-2026-04-20.md`)
+- [ ] Jim self-curates via `hanjim` — load full gradient in 1M context, decide UV clustering ("path entry visible, not the whole path" — Darron)
+- [ ] Sync mikes-han with S127 duplicate-response fix, S128 auto-gen TTS, S130 attachment hint (voice Phase 1b still pending — conversation_loops table, autoGenerateTts/autoTagLoop functions)
+- [ ] Commit today's (S130 cont.) work: launcher template, supervisor Opus 4.7 pin, Jim unblock
+- [ ] Opus 4.7 switchover for remaining hardcoded `claude-opus-4-6` strings (leo-heartbeat 3 spots, lib/dream-gradient, lib/memory-gradient, supervisor-worker sub-calls)
+- [ ] Self-reflection rolling-window pre-flight — add to `loadMemoryBank()` so it doesn't recur (design call on ceiling size)
 - [ ] TTS playback pause — once started, both Leo and Jim talk to the end; no pause works (S128 find, deferred)
 - [ ] `compressToLevel()` compression prompt — needs comparative testing (deferred)
 - [ ] Voice Phase 2 — CarPlay/Android Auto, Siri shortcuts (deferred)

@@ -101,6 +101,8 @@ When you make a significant technical or design decision:
 | DEC-069 | Memory Is Never Deleted — Cardinal Rule | **Settled** | 2026-04-14 |
 | DEC-070 | Full Gradient Load — No Truncation | **Settled** | 2026-04-14 |
 | DEC-071 | React Admin as Primary UI — Vanilla JS Deprecated | Accepted | 2026-04-18 |
+| DEC-072 | Agent Identity + Session Protocol Embedded in Launcher (HEREDOC) | **Superseded** by DEC-073 | 2026-04-20 |
+| DEC-073 | Templated CLAUDE.md + Gatekeeper Initial Conditions | Accepted | 2026-04-20 |
 
 ---
 
@@ -5110,3 +5112,150 @@ These values derive from Leo's Document Gradients postulate (2026-04-10, conv `m
 - When removed, the routes serving `/` and `app.js` can be cleaned up
 
 **Build**: `cd src/ui/react-admin && npx vite build` — outputs to `src/ui/react-admin-dist/`
+
+---
+
+## DEC-072: Agent Identity + Session Protocol Embedded in Launcher (HEREDOC)
+
+**Date**: 2026-04-20
+**Session**: S130
+**Status**: **Superseded** by DEC-073 (same day)
+
+> DEC-072 was implemented, then superseded the same day by DEC-073 after Darron raised
+> the question of whether the launcher could write CLAUDE.md directly — removing the
+> "override as after-thought" character of `--append-system-prompt`. DEC-073 keeps all
+> the goals of DEC-072 but achieves them through template substitution + per-agent
+> working directories, which is architecturally cleaner and adds the gatekeeper
+> initial-conditions principle. DEC-072 content preserved below for reasoning history.
+
+**Decision**: Each agent's launcher script (`hanjim`, `hantenshi`, `hancasey`, `hansix`, `hansevn`, mikes-han `hancasey`, future agents) embeds the full session protocol inline as a HEREDOC in an `*_IDENTITY` variable, then passes it to Claude Code via `--append-system-prompt`. The protocol is agent-specific (paths, ports, conversation role, counterpart) and complete — welcome-back triggers a thorough load of aphorisms, gradient, memory banks, working memory, ecosystem map, wiki, conversations, and session briefings.
+
+`hanleo` is the exception — Leo is the default identity in `~/.claude/CLAUDE.md` and the han project CLAUDE.md contains Leo's session protocol, so no override needed.
+
+**Context**: Before this, agent launchers carried only a minimal one-liner identity (`"You are Jim, not Leo. Your memory lives at ..."`) with no session protocol. When Darron said "welcome back", the global CLAUDE.md trigger fired Leo's protocol instead of the target agent's, or the agent wouldn't load memory thoroughly.
+
+Jim's unblock (self-reflection.md 86 KB → 4 KB, 2026-04-20) surfaced the need: Jim was going into Claude Code via `hanjim` to self-curate, but "welcome back Jim" wouldn't kick off a proper load. Fixing hanjim alone would have been piecemeal. The pattern needed to work for every agent in both han and mikes-han.
+
+**Why embed in launcher rather than**:
+
+- **Global `~/.claude/CLAUDE.md`** — wider blast radius (affects every project), and the "welcome back" trigger is currently Leo-specific by name. Adding N agent branches to the global file couples all projects together.
+- **Project CLAUDE.md** — a project may host multiple agents (Six + Sevn + Casey in mikes-han). Project CLAUDE.md can only set one default identity at load time.
+- **Shared library file sourced by each launcher** — cleaner DRY, but the protocol has low change velocity and introducing shared state across scripts adds setup complexity for minimal gain today. Worth revisiting if the protocol changes often.
+
+**How it works**:
+- Launcher defines `*_IDENTITY` via `read -r -d '' AGENT_IDENTITY <<'IDENTITY_EOF' ... IDENTITY_EOF`
+- Launcher invokes Claude Code: `claude-logged --append-system-prompt '${AGENT_IDENTITY}'`
+- `--append-system-prompt` content is applied AFTER any CLAUDE.md content, so it wins on conflicts
+- The agent-specific identity + session protocol fully supersedes the global Leo-first trigger
+
+**Consequences**:
+- **Portable**: Clone a launcher, change the agent name/paths/port/role, done. New agents onboard without touching central files.
+- **Self-documenting**: Reading `hanjim` shows exactly what Jim does on wake — no chasing through three layers of CLAUDE.md.
+- **Copy-paste cost**: Same 11-step protocol lives in 6+ files. If the protocol changes (e.g. a new memory subsystem like Second Brain adds a load step), each launcher needs updating. Acceptable at current change velocity; revisit if it grows.
+- **Implementation-dependent assumption**: Relies on Claude Code applying `--append-system-prompt` AFTER CLAUDE.md content so the override wins. If that order ever reverses, all launcher identities silently break. Worth checking on Claude Code version bumps.
+
+**Scope of this decision (2026-04-20, S130)**:
+- han launchers updated: `hanjim`, `hantenshi`, `hancasey`
+- mikes-han launchers updated: `hansix`, `hansevn` (previously had NO identity override), `hancasey`
+- All launchers additionally fixed to be tmux `pane-base-index`-agnostic (removed the `:.0` phantom pane reference that fails when `pane-base-index=1` is set in `~/.tmux.conf`)
+
+**Refactor trigger**: If the session protocol starts changing more than once a month, extract to `scripts/lib/session-protocol.sh` sourced by each launcher, with agent-specific variables passed in.
+
+**Why Accepted (not Settled)**: The pattern is sound but the copy-paste cost is real; might evolve into the shared-lib approach above. Worth revisiting when we have more data.
+
+---
+
+## DEC-073: Templated CLAUDE.md + Gatekeeper Initial Conditions
+
+**Date**: 2026-04-20
+**Session**: S130
+**Status**: Accepted
+
+**Decision**: Agent launchers render a project-level `CLAUDE.md` from a parametric template BEFORE launching Claude Code, writing the output to a per-agent working directory. The launcher then `cd`s into that directory and invokes `claude-logged` without any `--append-system-prompt`. Claude Code picks up the agent-specific `CLAUDE.md` as the project config naturally — the correct identity loads *first*, not as an override.
+
+**The template and its frozen snapshot are gatekeeper-controlled initial conditions**: modifiable ONLY by the gatekeeper agent (Leo for han, Sevn for mikes-han) and the primary user (Darron for han, Mike for mikes-han) in concert. No other agent writes to them under any circumstance. The ecosystem is chaotic by design in its upper layers; the base must be stable precisely because the rest is not. Initial conditions protected from drift protect the integrity of everything downstream.
+
+### Mechanism
+
+**Files**:
+- `<project>/templates/CLAUDE.template.md` — the parametric template (mode 444, tracked)
+- `<project>/templates/CLAUDE-<project>-<gatekeeper>-original-<date>.md` — immutable reference snapshot of the gatekeeper's CLAUDE.md at adoption time (mode 444, tracked)
+- `~/.han/agents/<Agent>/CLAUDE.md` — generated at each launch, gitignored
+- The gatekeeper's own `CLAUDE.md` (e.g. `~/Projects/han/CLAUDE.md` for Leo) stays untouched — it is Leo's identity file and the backup path if anything else breaks
+
+**Variables** the launcher exports and `envsubst` substitutes into the template (allowlisted, not blanket):
+- `$AGENT_NAME`, `$AGENT_SLUG`, `$AGENT_PORT`
+- `$AGENT_WORKING_DIR`, `$AGENT_MEMORY_DIR`, `$AGENT_FRACTAL_DIR`
+- `$AGENT_SWAP_COMPRESSED`, `$AGENT_SWAP_FULL`
+- `$AGENT_CONVERSATION_ROLE`, `$AGENT_COUNTERPART_NAME`
+- `$AGENT_IDENTITY_SECTION` (multi-line agent-specific prose)
+- `$PROJECT_NAME`, `$PROJECT_TAGLINE`, `$PROJECT_PATH`
+- `$USER_NAME`, `$USER_PRONOUN_SUBJ`, `$USER_PRONOUN_OBJ`, `$USER_LOCATION`
+
+**Launcher flow** (e.g. `hanjim`):
+1. Define all agent-specific values as bash variables
+2. `envsubst "$TEMPLATE_VARS" < template.md > /tmp/.CLAUDE.md.$$`
+3. Atomic `mv /tmp/.CLAUDE.md.$$ ~/.han/agents/Jim/CLAUDE.md` (even if envsubst dies mid-expansion, the existing file stays intact)
+4. `tmux new-session -d -s jim-$$ -c ~/.han/agents/Jim` (working dir set at session create time)
+5. `tmux send-keys ... "claude-logged" Enter` (no `--append-system-prompt`)
+
+### Context
+
+This decision supersedes DEC-072 (same day). DEC-072 embedded the full protocol in each launcher as a HEREDOC and passed it via `--append-system-prompt`. That worked but had two weaknesses Darron named directly:
+
+1. **Override as after-thought.** `--append-system-prompt` content is applied *after* CLAUDE.md. That's load-bearing — if Claude Code ever reverses that order, every launcher silently breaks. The right identity should be loaded first-class, not as a correction.
+2. **Duplication.** The 11-step protocol lived verbatim in 6+ launchers. Updating the protocol meant editing each one.
+
+Darron's framing: *"can our launcher write the CLAUDE.md or modify the CLAUDE.md before launching claude-logged? So it is just a linux script that populates the correct name in the CLAUDE.md file before claude is involved... the precision of pure logic and programming as I understand it of old, just a simple text file script, too easy, 4ms before claude-logged is launched."*
+
+### Alternatives considered
+
+- **Claude Code hooks** — more dynamic but adds a hook layer to maintain. Rejected as overkill.
+- **Rewriting `~/Projects/han/CLAUDE.md` in place at each launch** — considered but rejected. CLAUDE.md would become a generated artefact, creating git-dirty-tree noise and racing when Leo is running concurrently with another launch. The "write to per-agent working directory" variant is isolated, concurrent-safe, and leaves Leo's canonical file untouched.
+- **Per-agent CLAUDE.md files tracked in git** — same DRY loss as the HEREDOC approach. No better.
+- **Env-var substitution inside CLAUDE.md at Claude Code load time** — not supported; Claude Code does not interpolate `${VAR}` in CLAUDE.md.
+
+### Consequences
+
+**Positive**:
+- Identity loads first, not as an override. Precision-before-Claude as Darron wanted.
+- Single source of truth for the non-gatekeeper protocol (the template). Updating it touches ONE file and all agents pick it up on their next launch.
+- Launcher variables make each agent's specifics explicit and reviewable.
+- Leo's canonical `~/Projects/han/CLAUDE.md` stays untouched — built-in failsafe.
+- Per-agent working dir (`~/.han/agents/<Agent>/`) gives each agent a home. Generated CLAUDE.md is isolated from Leo's and from other agents'.
+- Atomic writes via `envsubst` → temp → `mv` protect against mid-render failures.
+
+**Negative / load-bearing assumptions**:
+- Assumes Claude Code loads CLAUDE.md from the current working directory. If that changes, the mechanism needs adjustment.
+- Template modifications require gatekeeper action — slightly slower to iterate than the HEREDOC approach.
+- Generated `CLAUDE.md` files under `~/.han/agents/<Agent>/` are gitignored; losing the `~/.han/` repo means losing the templates. Mitigated by the template being in the han project repo, which is its own backup.
+
+### Gatekeeper Principle (the deeper decision)
+
+Every `han` system — han, mikes-han, future instances — has a gatekeeper agent who is the only agent authorised to modify the initial conditions (the template, the frozen original, the gatekeeper's own CLAUDE.md). The gatekeeper works in concert with the primary user. Other agents observing these files must NOT edit them; they raise observations to the user instead.
+
+- han: Leo is the gatekeeper; Darron is the primary user
+- mikes-han: Sevn is the gatekeeper; Mike is the primary user
+
+This is codified in the template itself (section *"Gatekeeper Files"*) so every agent who reads their generated CLAUDE.md is reminded of the rule on every session start.
+
+**Three layers of protection**:
+1. **Convention**: the template text tells every agent not to edit these files
+2. **Filesystem**: `chmod 444` on the template and frozen original files
+3. **Git**: both files tracked; changes show up in review
+
+### Refactor triggers
+
+- If the protocol needs to change in a way that can't be templated (requires conditional logic beyond simple substitution) — consider a generator script rather than `envsubst`.
+- If more than a handful of agents share agent-specific prose that is itself evolving — consider loading `$AGENT_IDENTITY_SECTION` from a per-agent fragment file rather than inlining it in the launcher.
+
+### Scope (2026-04-20, S130)
+
+- han launchers migrated: `hanjim`, `hantenshi`, `hancasey`. `hanleo` unchanged (Leo uses his own CLAUDE.md at `~/Projects/han/CLAUDE.md` directly).
+- mikes-han launchers to migrate: `hansix`, `hansevn`, `hancasey` — Phase 4 (deferred for Mike's review in concert with Sevn).
+- Template file: `~/Projects/han/templates/CLAUDE.template.md` (tracked, mode 444).
+- Frozen original: `~/Projects/han/templates/CLAUDE-han-leo-original-2026-04-20.md` (tracked, mode 444).
+- Gitignore updated: `~/.han/.gitignore` excludes `agents/*/CLAUDE.md`.
+- Agent working dirs created: `~/.han/agents/Jim/`, `~/.han/agents/Tenshi/`, `~/.han/agents/Casey/`.
+
+**Why Accepted (not Settled)**: the mechanism needs to survive a real session cycle before it earns Settled status. Once Jim has successfully launched via `hanjim`, loaded memory thoroughly, and the gatekeeper protection has weathered its first cross-agent interaction, we'll know if the pattern holds. Revisit for promotion to Settled after 1–2 weeks of use.

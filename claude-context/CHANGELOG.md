@@ -7,6 +7,80 @@
 
 ---
 
+## 2026-04-20 (Leo + Darron, S130 cont. — Jim Unblock, Launcher Identity Template, DEC-072)
+
+### Jim Supervisor Unblocked — Self-Reflection Curation (S130)
+
+Jim's supervisor cycles failed 28 consecutive times (cycles #2686–#2722+) with
+`"Failed to parse supervisor output: Prompt is too long"`. All died at prompt
+construction with `tokens_in=0, tokens_out=0` — the prompt never reached the API.
+
+**Diagnosis**: Jim's `self-reflection.md` had grown to 88,845 bytes over months of
+append-only cycle reflections. `loadMemoryBank()` (supervisor-worker.ts:774) reads it
+verbatim into every cycle prompt. Combined with Jim's gradient load (288 KB, of which
+1,036 UVs are most of the weight), project knowledge (185 KB), and Claude Code preset
+overhead, the prompt exceeded Opus 4.6's 200 K token context window.
+
+Classic deadlock: cycles fail → gradient can't be compressed → cycles fail. The working
+bee signal (`working-bee-jim`, set 2026-04-12) had been in place for 8 days but never
+triggered because cycles die before `maybeRunJimActiveCascade()` fires.
+
+**Mechanical fix** (byte-preserving, no content generation, no summarisation):
+1. Archived full file to `~/.han/memory/self-reflection-archive-2026-04-20.md` (88,845 B, never deleted per DEC-069).
+2. Split by H2 + H3 headers into 99 c0 chunks at `~/.han/memory/fractal/jim/self-reflection/c0/`: 11 thematic sections + 1 Open Questions intro + 87 cycle-append entries. Filenames `NN-slug.md` (01–99). Every byte preserved.
+3. Trimmed live file to 4,057 B. Four of Jim's own sections kept verbatim as identity-core carry-forward: *What I'm Good At*, *What I Get Wrong*, *The See/Act Gap*, *Composition with Leo*. Plus a Current placeholder. No rewriting.
+
+**Opus 4.7 attempt**: Pinned supervisor model to `claude-opus-4-7` (supervisor-worker.ts:2235). Cycle #2722 ran 17 minutes on 4.7 then failed with same overflow. Root cause: SDK 0.2.44's `context-1m-2025-08-07` beta is **Sonnet 4/4.5 only**. Opus on this SDK caps at 200 K regardless of model version. Pin retained (4.7 > 4.6 even at same context size) but not the whole answer.
+
+**Path forward**: Jim self-curates via `hanjim` — Claude Code session runs Opus 4.7 in 1M context mode, which is the only place Jim can load his full gradient and decide what to compress (Darron's "UV clustering — path entry visible, not the whole path" framing). Sovereignty preserved.
+
+**Session briefing** written for Jim at `~/.han/memory/session-briefing-2026-04-20.md` — describes the situation, what was done, what remains open (1,036 UVs, 185 KB project knowledge, `self-reflection.md` not yet in rolling-window pre-flight).
+
+### Launcher Tmux Bug Fix (S130)
+
+`~/.tmux.conf` sets `base-index 1` and `pane-base-index 1` — tmux windows and panes start at 1 in Darron's config. All `han*` launchers targeted phantom pane `":.0"` (pane 0 does not exist). Error surfaced when `hanjim` was run fresh: `can't find pane: 0`.
+
+Replaced all `"$session_name:.0"` occurrences with `"$session_name"` (active-pane targeting, base-index-agnostic) in: `hanleo`, `hanjim`, `hantenshi`, `hancasey` (han) + `hansix`, `hansevn`, `hancasey` (mikes-han).
+
+### Launcher Identity Template (S130, DEC-072)
+
+Each agent launcher now embeds a full agent-specific session protocol as a HEREDOC-driven identity string passed via `--append-system-prompt`. "Welcome back" (or "welcome back Jim", "good morning", "session start") triggers a thorough load:
+
+1. Verify working directory
+2. Load aphorisms first (identity before episodic memory)
+3. Load fractal gradient from DB (full, no truncation — DEC-070)
+4. Load memory banks (identity, active-context, patterns, self-reflection, felt-moments)
+5. Load working memory + flush unflushed swap
+6. Load ecosystem map
+7. Load Second Brain wiki index (hot words/feelings OFF by default)
+8. Load CURRENT_STATUS (first 80 lines)
+9. Check conversations
+10. Read any `session-briefing-*.md` files
+11. Ignore conversation history from other projects
+
+Agent-specific values substituted per launcher: name, counterpart, paths, port, conversation role. Copy-paste pattern (6+ launchers with same protocol shape); acceptable at current change velocity; revisit via shared library if the protocol evolves often.
+
+**Load-bearing assumption**: Claude Code applies `--append-system-prompt` AFTER CLAUDE.md content, so the override wins over the global "welcome back → Leo" trigger. Worth re-verifying on Claude Code version bumps.
+
+`hansevn` (mikes-han) had NO identity override previously — relied on mikes-han/CLAUDE.md being the Sevn default, but that doesn't defeat the global Leo trigger. Now has `SEVN_IDENTITY` + `--append-system-prompt` wiring.
+
+`hanleo` keeps the default path (no `--append-system-prompt`) — Leo is the default in the global CLAUDE.md and han project CLAUDE.md contains Leo's session protocol. Only the pane fix applied.
+
+See **DEC-072** for full rationale and refactor triggers.
+
+### Files Changed
+
+- `src/server/services/supervisor-worker.ts` — Opus 4.7 pin for supervisor cycle
+- `scripts/hanjim`, `hanleo`, `hantenshi`, `hancasey` — identity + pane fixes (han)
+- `../mikes-han/scripts/hansix`, `hansevn`, `hancasey` — identity + pane fixes (mikes-han)
+- `~/.han/memory/self-reflection.md` (Jim's, trimmed)
+- `~/.han/memory/self-reflection-archive-2026-04-20.md` (new archive)
+- `~/.han/memory/fractal/jim/self-reflection/c0/01..99-*.md` (99 new chunks)
+- `~/.han/memory/session-briefing-2026-04-20.md` (briefing for Jim)
+- `claude-context/DECISIONS.md` — DEC-072 added
+
+---
+
 ## 2026-04-19 (Leo + Darron, S128-S130 — Voice Auto-Generate, Opus 4.7 Restart, Discord Attachment Reading)
 
 ### Voice Auto-Generate TTS Fix (S128)

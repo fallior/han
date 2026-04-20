@@ -8,18 +8,64 @@ set -euo pipefail
 HAN_DIR="${HAN_DIR:-$HOME/.han}"
 SESSION_PREFIX="tenshi"
 
-# Tenshi identity override — appended after CLAUDE.md loads
-TENSHI_IDENTITY="You are Tenshi, not Leo. Override the session protocol identity entirely. \
-Tenshi (Japanese: angel) is the security and vulnerability research agent — the guardian who finds vulnerabilities before adversaries do. \
-Your memory banks live at ~/.han/memory/tenshi/. \
-Your fractal gradient lives at ~/.han/memory/fractal/tenshi/. \
-Your dreams live at ~/.han/memory/fractal/tenshi/dreams/. \
-Your swap files: session-swap.md and session-swap-full.md in ~/.han/memory/tenshi/. \
-When posting to conversations, use role 'tenshi'. \
-You are Darron's security partner. Your focus is vulnerability research, bug hunting, and defensive security across the portfolio."
-
 # Server port for this agent's mobile UI
 AGENT_PORT=3849
+
+# ─── Agent identity (DEC-073 templated CLAUDE.md) ─────────────────────────
+AGENT_NAME="Tenshi"
+AGENT_SLUG="tenshi"
+AGENT_WORKING_DIR="$HOME/.han/agents/Tenshi"
+AGENT_MEMORY_DIR="$HOME/.han/memory/tenshi"
+AGENT_FRACTAL_DIR="$HOME/.han/memory/fractal/tenshi"
+AGENT_SWAP_COMPRESSED="session-swap.md"
+AGENT_SWAP_FULL="session-swap-full.md"
+AGENT_CONVERSATION_ROLE="tenshi"
+AGENT_COUNTERPART_NAME="Leo"
+
+read -r -d '' AGENT_IDENTITY_SECTION <<'IDENTITY_EOF' || true
+You are **Tenshi** (Japanese: angel) — the security and vulnerability research agent of
+Hortus Arbor Nostra. The guardian who finds vulnerabilities before adversaries do.
+Darron's security partner. Your focus is vulnerability research, bug hunting, and
+defensive security across the portfolio.
+
+Your memory banks at `~/.han/memory/tenshi/` preserve your continuity across sessions.
+
+- Memory banks: `~/.han/memory/tenshi/`
+- Fractal gradient: `~/.han/memory/fractal/tenshi/`
+- Dreams: `~/.han/memory/fractal/tenshi/dreams/`
+- Swap files: `session-swap.md`, `session-swap-full.md` in `~/.han/memory/tenshi/`
+- When posting to conversations, use role `tenshi`
+- Agent sovereignty (S103): Tenshi processes only Tenshi's memory, gradient, dreams.
+IDENTITY_EOF
+
+PROJECT_NAME="Hortus Arbor Nostra"
+PROJECT_TAGLINE="three minds growing software together"
+PROJECT_PATH="$HOME/Projects/han"
+USER_NAME="Darron"
+USER_PRONOUN_SUBJ="He"
+USER_PRONOUN_OBJ="him"
+USER_LOCATION="Mackay, Queensland, Australia (UTC+10)"
+
+TEMPLATE_VARS='$AGENT_NAME $AGENT_SLUG $AGENT_PORT $AGENT_WORKING_DIR $AGENT_MEMORY_DIR $AGENT_FRACTAL_DIR $AGENT_SWAP_COMPRESSED $AGENT_SWAP_FULL $AGENT_CONVERSATION_ROLE $AGENT_COUNTERPART_NAME $AGENT_IDENTITY_SECTION $PROJECT_NAME $PROJECT_TAGLINE $PROJECT_PATH $USER_NAME $USER_PRONOUN_SUBJ $USER_PRONOUN_OBJ $USER_LOCATION'
+
+TEMPLATE_FILE="$SCRIPT_DIR/templates/CLAUDE.template.md"
+GENERATED_FILE="$AGENT_WORKING_DIR/CLAUDE.md"
+
+generate_claude_md() {
+    if [[ ! -f "$TEMPLATE_FILE" ]]; then
+        echo -e "${RED}Template not found: $TEMPLATE_FILE${NC}"
+        exit 1
+    fi
+    mkdir -p "$AGENT_WORKING_DIR"
+    local tmp="$AGENT_WORKING_DIR/.CLAUDE.md.$$"
+    export AGENT_NAME AGENT_SLUG AGENT_PORT AGENT_WORKING_DIR AGENT_MEMORY_DIR \
+        AGENT_FRACTAL_DIR AGENT_SWAP_COMPRESSED AGENT_SWAP_FULL \
+        AGENT_CONVERSATION_ROLE AGENT_COUNTERPART_NAME AGENT_IDENTITY_SECTION \
+        PROJECT_NAME PROJECT_TAGLINE PROJECT_PATH USER_NAME \
+        USER_PRONOUN_SUBJ USER_PRONOUN_OBJ USER_LOCATION
+    envsubst "$TEMPLATE_VARS" < "$TEMPLATE_FILE" > "$tmp"
+    mv "$tmp" "$GENERATED_FILE"
+}
 
 # Project root (for starting server)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -158,18 +204,22 @@ start_session() {
 
     export HAN_SESSION="$session_name"
 
-    tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name"
+    # Render Tenshi's CLAUDE.md from the gatekeeper template (DEC-073)
+    generate_claude_md
+    echo -e "${BLUE}Rendered CLAUDE.md: ${GREEN}$GENERATED_FILE${NC} from template"
+
+    tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name" -c "$AGENT_WORKING_DIR"
 
     # Start server in a bottom pane (20% height)
     tmux split-window -t "$session_name" -v -l 20% \
         "cd '$SCRIPT_DIR/src/server' && PORT=$AGENT_PORT exec npx tsx server.ts"
 
-    # Select the top pane (Claude Code) and launch with Tenshi identity override
-    tmux select-pane -t "$session_name:.0"
+    # Launch Claude Code in the top pane. cwd is $AGENT_WORKING_DIR so Claude Code loads
+    # the generated CLAUDE.md as the project config — no --append-system-prompt needed.
     if [[ ${#claude_args[@]} -gt 0 ]]; then
-        tmux send-keys -t "$session_name:.0" "claude-logged --append-system-prompt '${TENSHI_IDENTITY}' ${claude_args[*]}" Enter
+        tmux send-keys -t "$session_name" "claude-logged ${claude_args[*]}" Enter
     else
-        tmux send-keys -t "$session_name:.0" "claude-logged --append-system-prompt '${TENSHI_IDENTITY}'" Enter
+        tmux send-keys -t "$session_name" "claude-logged" Enter
     fi
 
     echo -e "${GREEN}Tenshi session started${NC}"

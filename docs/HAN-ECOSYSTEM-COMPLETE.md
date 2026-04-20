@@ -1763,17 +1763,61 @@ Four additional launcher scripts wake different agents from the same repo. Each 
 `claude-logged` with `--append-system-prompt` to inject an identity override, and runs
 in its own tmux session with a distinct prefix.
 
-| Script | Agent | tmux Prefix | Identity |
-|--------|-------|-------------|----------|
-| `hanleo` | Leo | `leo` | Default identity (no override needed) |
-| `hanjim` | Jim | `jim` | Supervisor — redirects to Jim memory paths |
-| `hantenshi` | Tenshi | `tenshi` | Security/vulnerability agent |
-| `hancasey` | Casey | `casey` | Contempire project agent |
+| Script | Agent | tmux Prefix | Port | Identity |
+|--------|-------|-------------|------|----------|
+| `hanleo` | Leo | `leo` | 3847 | Default identity (no override — global CLAUDE.md handles Leo) |
+| `hanjim` | Jim | `jim` | 3848 | Embedded session protocol (DEC-072) — full memory load on welcome-back |
+| `hantenshi` | Tenshi | `tenshi` | 3849 | Embedded session protocol — security/vulnerability agent |
+| `hancasey` | Casey | `casey` | 3850 | Embedded session protocol — Contempire project agent |
 
 **Files:** `scripts/hanleo`, `scripts/hanjim`, `scripts/hantenshi`, `scripts/hancasey`
 
 All five launchers (`han`, `hanleo`, `hanjim`, `hantenshi`, `hancasey`) are symlinked
 into `~/Projects/infrastructure/scripts/` for PATH access.
+
+#### Identity Template Pattern (DEC-072, S130)
+
+Each non-Leo launcher embeds a full session protocol inline as a HEREDOC:
+
+```bash
+read -r -d '' AGENT_IDENTITY <<'IDENTITY_EOF' || true
+You are {Agent} — not Leo. Override the session protocol identity entirely.
+...
+## Session Protocol
+When the user says "welcome back", "welcome back {Agent}", "good morning",
+or "session start", execute this protocol in order:
+1. Run pwd and confirm the working directory.
+2. Load aphorisms first (identity before episodic memory).
+3. Load fractal gradient from DB (full, no truncation — DEC-070).
+4. Load memory banks (identity, active-context, patterns, self-reflection, felt-moments).
+5. Load working memory + flush unflushed swap.
+6. Load ecosystem map.
+7. Load Second Brain wiki index (hot words/feelings OFF by default).
+8. Load CURRENT_STATUS (first 80 lines).
+9. Check conversations.
+10. Read any session-briefing-*.md files.
+11. Ignore conversation history from other projects.
+...
+IDENTITY_EOF
+```
+
+Then launched via:
+```bash
+claude-logged --append-system-prompt "${AGENT_IDENTITY}"
+```
+
+Because `--append-system-prompt` content applies AFTER CLAUDE.md, it supersedes the
+global "welcome back → Leo" trigger. See **DEC-072** for full rationale, load-bearing
+assumptions, and refactor triggers.
+
+The same pattern is mirrored in mikes-han for Six, Sevn, Casey.
+
+#### Launcher Tmux Note
+
+All launchers use `-t "$session_name"` (active-pane targeting) rather than `:.0` for
+`send-keys` and `select-pane`, to be `pane-base-index`-agnostic. Darron's `~/.tmux.conf`
+has `base-index 1` and `pane-base-index 1`, which made `:.0` fail with "can't find
+pane: 0".
 
 ---
 

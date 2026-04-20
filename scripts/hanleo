@@ -157,11 +157,11 @@ start_session() {
         "cd '$SCRIPT_DIR/src/server' && PORT=$AGENT_PORT exec npx tsx server.ts"
 
     # Select the top pane (Claude Code) and launch
-    tmux select-pane -t "$session_name:.0"
+    tmux select-pane -t "$session_name"
     if [[ ${#claude_args[@]} -gt 0 ]]; then
-        tmux send-keys -t "$session_name:.0" "claude-logged ${claude_args[*]}" Enter
+        tmux send-keys -t "$session_name" "claude-logged ${claude_args[*]}" Enter
     else
-        tmux send-keys -t "$session_name:.0" "claude-logged" Enter
+        tmux send-keys -t "$session_name" "claude-logged" Enter
     fi
 
     echo -e "${GREEN}Leo session started${NC}"

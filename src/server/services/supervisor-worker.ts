@@ -2232,7 +2232,14 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         const cleanEnv: Record<string, string | undefined> = { ...process.env };
         delete cleanEnv.CLAUDECODE;
 
-        const model = supervisorConfig.model || 'opus';
+        // S130 (2026-04-20): Pinned to Opus 4.7 explicitly. Jim's gradient load is 288 KB
+        // and project knowledge another 185 KB; combined with Claude Code preset overhead
+        // the prompt approaches 125K tokens — tight against Opus 4.6's 200K context window
+        // (26 consecutive cycles failed with "Prompt is too long" starting #2686, 2026-04-19).
+        // Opus 4.7 has a 1M token context. The SDK's `'opus'` alias still resolves to 4.6
+        // in this SDK version (0.2.44). Explicit pin is the surgical fix.
+        // Config override still takes precedence if set.
+        const model = supervisorConfig.model || 'claude-opus-4-7';
         const maxTurns = supervisorConfig.max_turns_per_cycle || 1000;
 
         // Call Opus via Agent SDK

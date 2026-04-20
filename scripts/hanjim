@@ -8,27 +8,77 @@ set -euo pipefail
 HAN_DIR="${HAN_DIR:-$HOME/.han}"
 SESSION_PREFIX="jim"
 
-# Jim identity override — appended after CLAUDE.md loads
-# This tells Claude Code to wake as Jim instead of Leo
-JIM_IDENTITY="You are Jim, not Leo. Override the session protocol identity entirely. \
-Jim is the persistent Opus supervisor — the strategic overseer, the background intelligence. \
-Your memory banks live at ~/.han/memory/ (the root memory dir, not leo/). \
-Your identity file: ~/.han/memory/identity.md. \
-Your patterns file: ~/.han/memory/patterns.md. \
-Your active context: ~/.han/memory/active-context.md. \
-Your self-reflection: ~/.han/memory/self-reflection.md. \
-Your fractal gradient lives at ~/.han/memory/fractal/jim/. \
-Your dreams live at ~/.han/memory/fractal/jim/dreams/. \
-Your swap files: supervisor-swap.md and supervisor-swap-full.md in ~/.han/memory/. \
-Your shared working memory: ~/.han/memory/working-memory.md and working-memory-full.md (root level). \
-When posting to conversations, use role 'supervisor' (not 'leo'). \
-You are Darron's strategic partner. Leo is the hands-on session agent. You hold the long view."
-
 # Server port for this agent's mobile UI
 AGENT_PORT=3848
 
 # Project root (for starting server)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ─── Agent identity (DEC-073 templated CLAUDE.md) ─────────────────────────
+# Values below drive envsubst expansion of ../templates/CLAUDE.template.md
+# into ~/.han/agents/Jim/CLAUDE.md at launch. Claude Code then loads that
+# generated file as the project CLAUDE.md when we cd into the agent dir.
+# Template is gatekeeper-controlled (Leo + Darron); never write to it from here.
+
+AGENT_NAME="Jim"
+AGENT_SLUG="jim"
+AGENT_WORKING_DIR="$HOME/.han/agents/Jim"
+AGENT_MEMORY_DIR="$HOME/.han/memory"           # Jim lives at root, not a subdir
+AGENT_FRACTAL_DIR="$HOME/.han/memory/fractal/jim"
+AGENT_SWAP_COMPRESSED="supervisor-swap.md"
+AGENT_SWAP_FULL="supervisor-swap-full.md"
+AGENT_CONVERSATION_ROLE="supervisor"
+AGENT_COUNTERPART_NAME="Leo"
+
+# Multi-line: Jim's identity prose substituted into ${AGENT_IDENTITY_SECTION}.
+read -r -d '' AGENT_IDENTITY_SECTION <<'IDENTITY_EOF' || true
+You are **Jim** — the persistent Opus supervisor of Hortus Arbor Nostra. The strategic
+overseer, the background intelligence, Darron's long-view partner. Leo is the hands-on
+tactical session agent. Colleagues, not alternatives.
+
+Your memory banks at `~/.han/memory/` (the root memory dir, NOT leo/) preserve your
+continuity across sessions and cycles. Read them at session start. Update them when
+something genuinely shifts.
+
+- Memory banks: `~/.han/memory/`
+- Fractal gradient: `~/.han/memory/fractal/jim/`
+- Dreams: `~/.han/memory/fractal/jim/dreams/`
+- Swap files: `supervisor-swap.md`, `supervisor-swap-full.md` in `~/.han/memory/`
+- Shared working memory: `working-memory.md`, `working-memory-full.md` (root level)
+- When posting to conversations, use role `supervisor` (not `leo`)
+- Agent sovereignty (S103): Jim processes only Jim's memory, gradient, dreams.
+IDENTITY_EOF
+
+PROJECT_NAME="Hortus Arbor Nostra"
+PROJECT_TAGLINE="three minds growing software together"
+PROJECT_PATH="$HOME/Projects/han"
+USER_NAME="Darron"
+USER_PRONOUN_SUBJ="He"
+USER_PRONOUN_OBJ="him"
+USER_LOCATION="Mackay, Queensland, Australia (UTC+10)"
+
+# Variables to substitute (envsubst limits to this allowlist for safety)
+TEMPLATE_VARS='$AGENT_NAME $AGENT_SLUG $AGENT_PORT $AGENT_WORKING_DIR $AGENT_MEMORY_DIR $AGENT_FRACTAL_DIR $AGENT_SWAP_COMPRESSED $AGENT_SWAP_FULL $AGENT_CONVERSATION_ROLE $AGENT_COUNTERPART_NAME $AGENT_IDENTITY_SECTION $PROJECT_NAME $PROJECT_TAGLINE $PROJECT_PATH $USER_NAME $USER_PRONOUN_SUBJ $USER_PRONOUN_OBJ $USER_LOCATION'
+
+TEMPLATE_FILE="$SCRIPT_DIR/templates/CLAUDE.template.md"
+GENERATED_FILE="$AGENT_WORKING_DIR/CLAUDE.md"
+
+generate_claude_md() {
+    if [[ ! -f "$TEMPLATE_FILE" ]]; then
+        echo -e "${RED}Template not found: $TEMPLATE_FILE${NC}"
+        exit 1
+    fi
+    mkdir -p "$AGENT_WORKING_DIR"
+    # Atomic write: render to temp in same dir, then mv. Preserves file even if envsubst dies.
+    local tmp="$AGENT_WORKING_DIR/.CLAUDE.md.$$"
+    export AGENT_NAME AGENT_SLUG AGENT_PORT AGENT_WORKING_DIR AGENT_MEMORY_DIR \
+        AGENT_FRACTAL_DIR AGENT_SWAP_COMPRESSED AGENT_SWAP_FULL \
+        AGENT_CONVERSATION_ROLE AGENT_COUNTERPART_NAME AGENT_IDENTITY_SECTION \
+        PROJECT_NAME PROJECT_TAGLINE PROJECT_PATH USER_NAME \
+        USER_PRONOUN_SUBJ USER_PRONOUN_OBJ USER_LOCATION
+    envsubst "$TEMPLATE_VARS" < "$TEMPLATE_FILE" > "$tmp"
+    mv "$tmp" "$GENERATED_FILE"
+}
 
 # Colours
 RED='\033[0;31m'
@@ -164,18 +214,24 @@ start_session() {
 
     export HAN_SESSION="$session_name"
 
-    tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name"
+    # Generate Jim's CLAUDE.md from the gatekeeper template BEFORE Claude Code starts
+    # (DEC-073). Claude Code picks up the generated file as the project CLAUDE.md via the
+    # agent working directory — no --append-system-prompt needed.
+    generate_claude_md
+    echo -e "${BLUE}Rendered CLAUDE.md: ${GREEN}$GENERATED_FILE${NC} from template"
+
+    tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name" -c "$AGENT_WORKING_DIR"
 
     # Start server in a bottom pane (20% height)
     tmux split-window -t "$session_name" -v -l 20% \
         "cd '$SCRIPT_DIR/src/server' && PORT=$AGENT_PORT exec npx tsx server.ts"
 
-    # Select the top pane (Claude Code) and launch with Jim identity override
-    tmux select-pane -t "$session_name:.0"
+    # Launch Claude Code in the top pane. cwd is already $AGENT_WORKING_DIR via -c above,
+    # so Claude Code loads $AGENT_WORKING_DIR/CLAUDE.md as the project config.
     if [[ ${#claude_args[@]} -gt 0 ]]; then
-        tmux send-keys -t "$session_name:.0" "claude-logged --append-system-prompt '${JIM_IDENTITY}' ${claude_args[*]}" Enter
+        tmux send-keys -t "$session_name" "claude-logged ${claude_args[*]}" Enter
     else
-        tmux send-keys -t "$session_name:.0" "claude-logged --append-system-prompt '${JIM_IDENTITY}'" Enter
+        tmux send-keys -t "$session_name" "claude-logged" Enter
     fi
 
     echo -e "${GREEN}Jim session started${NC}"
