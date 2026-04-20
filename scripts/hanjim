@@ -12,7 +12,7 @@ SESSION_PREFIX="jim"
 AGENT_PORT=3848
 
 # Project root (for starting server)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 
 # ─── Agent identity (DEC-073 templated CLAUDE.md) ─────────────────────────
 # Values below drive envsubst expansion of ../templates/CLAUDE.template.md

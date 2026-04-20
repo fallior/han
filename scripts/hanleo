@@ -14,7 +14,7 @@ SESSION_PREFIX="leo"
 AGENT_PORT=3847
 
 # Project root (for starting server)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 
 # Colours
 RED='\033[0;31m'
