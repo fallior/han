@@ -7,6 +7,89 @@
 
 ---
 
+## 2026-04-20 afternoon (Leo + Darron, S130 cont. — DEC-073, filter-repo, pid-guard, launcher hardening)
+
+### DEC-073 Templated CLAUDE.md + Gatekeeper Initial Conditions
+
+Evolved DEC-072's HEREDOC approach. DEC-073 moves the full session protocol into a
+parametric template at `~/Projects/han/templates/CLAUDE.template.md`. Each launcher
+(`hanjim`, `hantenshi`, `hancasey` in han; `hansix`, `hansevn`, `hancasey` in mikes-han)
+runs `envsubst` against the template with agent-specific values to produce
+`~/.han/agents/<Agent>/CLAUDE.md`, then `cd`s into that directory before invoking
+`claude-logged`. Claude Code loads the generated CLAUDE.md as the project config —
+the correct identity loads *first*, not as a `--append-system-prompt` override.
+
+Gatekeeper principle: the template and the frozen reference snapshot
+(`CLAUDE-han-leo-original-2026-04-20.md`) are modifiable ONLY by Leo + Darron in concert
+(Six + Mike for mikes-han). `chmod 444` filesystem guard, git tracking for audit,
+in-file convention telling every agent not to edit. Three layers of protection.
+
+`hanleo` keeps the default path — Leo's canonical `~/Projects/han/CLAUDE.md` stays as
+the gatekeeper's own file and is the failsafe if everything else breaks.
+
+DEC-072 marked Superseded (preserves the design journey).
+
+### `~/.han` git filter-repo — reclaim 14 GB → 5.4 MB
+
+`~/.han/.git` had grown to 14 GB. Diagnosis: `terminal-sessions/` (124 files, ~50 GB
+on disk, ~28 GB packed) had been committed inadvertently in S127, plus
+`terminal-log-v2.txt` (77 MB) and `terminal-log-deduped.txt` (545 MB). Root cause for
+three days of silent cron push failures — remote was stuck at the very first commit
+`1043e70` from 2026-04-17.
+
+Steps taken:
+1. `git rm -r --cached terminal-sessions/` + gitignore update
+2. `cp -r .git .git.backup-2026-04-20-1240` (14 GB safety backup)
+3. `git filter-repo --path terminal-sessions/ --path terminal-log-v2.txt --path terminal-log-deduped.txt --invert-paths --force`
+4. `git remote add origin https://github.com/fallior/hanmemory.git` (filter-repo removes origin by default)
+5. `git push --force origin main` — clean history landed in seconds
+6. `git gc --prune=now --aggressive` → 5.4 MB final
+7. `gitignore` broadened to `terminal-log*.txt` glob + `.git.backup-*/`
+
+16 historical auto-backup commits + all S130 work now on GitHub for the first time in
+3 days. On-disk files preserved (terminal-sessions/, logs/) for the on-ice dedup
+project.
+
+### Cron silent-failure alerting
+
+New `~/scripts/han-git-push.sh` replaces the inline cron command. Handles `git add`,
+commit, push with 120s timeout. On any failure, fires ntfy to
+`claude-remote-f78919b57957ea64` so silent push failures can't recur.
+
+Crontab line updated:
+```
+0 0,6,12,18 * * * /home/darron/scripts/han-git-push.sh
+```
+
+### Pid-guard port-scoping — `server.ts:71`
+
+Changed `replaceExistingInstance('han-server')` → `replaceExistingInstance(\`han-server-${PORT}\`)`.
+Per-agent servers (3847 Leo, 3848 Jim, 3849 Tenshi, 3850 Casey) now use separate pid
+files (`han-server-3847.pid`, `han-server-3848.pid`, etc.). Previously they all shared
+`han-server.pid` and SIGTERM'd each other — `hanjim` killed Leo's systemd-managed
+han-server on 3847 because both wanted the same pid file. systemd auto-restarted, but
+Jim's 3848 never came up. Mirrored to mikes-han.
+
+### Launcher symlink resolution — `readlink -f`
+
+All launchers are symlinked from `~/Projects/infrastructure/scripts/` for PATH access.
+`${BASH_SOURCE[0]}` returned the symlink path, so `dirname/..` computed
+`~/Projects/infrastructure/` rather than the real project dir, and the template at
+`~/Projects/han/templates/` wasn't found.
+
+Fixed: `SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"`
+in all 7 launchers (4 han + 3 mikes-han).
+
+### Files changed
+- MODIFIED: `src/server/server.ts` (pid-guard port-scoping)
+- MODIFIED: `scripts/{hanjim,hanleo,hantenshi,hancasey}` (readlink -f symlink resolution)
+- NEW: `~/scripts/han-git-push.sh` (cron wrapper with failure alerting)
+- MODIFIED: `~/.han/.gitignore` (broadened globs)
+- ADDED: `claude-context/DECISIONS.md` → DEC-073 full entry (also in mikes-han)
+- MIRRORED: `mikes-han/src/server/server.ts`, `mikes-han/scripts/{hansix,hansevn,hancasey}`
+
+---
+
 ## 2026-04-20 (Leo + Darron, S130 cont. — Jim Unblock, Launcher Identity Template, DEC-072)
 
 ### Jim Supervisor Unblocked — Self-Reflection Curation (S130)
