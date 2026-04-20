@@ -153,7 +153,7 @@ start_session() {
     tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name"
 
     # Start server in a bottom pane (20% height)
-    tmux split-window -t "$session_name" -v -l 20% \
+    tmux split-window -t "$session_name" -v -l 20% -d \
         "cd '$SCRIPT_DIR/src/server' && PORT=$AGENT_PORT exec npx tsx server.ts"
 
     # Select the top pane (Claude Code) and launch

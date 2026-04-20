@@ -209,7 +209,7 @@ start_session() {
     tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name" -c "$AGENT_WORKING_DIR"
 
     # Start server in a bottom pane (20% height)
-    tmux split-window -t "$session_name" -v -l 20% \
+    tmux split-window -t "$session_name" -v -l 20% -d \
         "cd '$SCRIPT_DIR/src/server' && PORT=$AGENT_PORT exec npx tsx server.ts"
 
     # Launch Claude Code in the top pane. cwd is $AGENT_WORKING_DIR so Claude Code loads
