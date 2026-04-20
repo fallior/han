@@ -66,9 +66,12 @@ const server = useHttps
 const PORT = process.env.PORT || 3847;
 const UI_DIR = path.join(__dirname, '..', 'ui');
 
-// PID guard: kill previous server gracefully (30s), then SIGKILL if needed
+// PID guard: kill previous server on THIS port gracefully (30s), then SIGKILL if needed.
+// Port-scoped so per-agent servers (3847 Leo, 3848 Jim, 3849 Tenshi, 3850 Casey) don't
+// SIGTERM each other. Previously the shared 'han-server' name caused hanjim to kill the
+// systemd-managed han-server on 3847 via replaceExistingInstance (2026-04-20, S130).
 import { replaceExistingInstance } from './lib/pid-guard';
-const serverPidGuard = replaceExistingInstance('han-server');
+const serverPidGuard = replaceExistingInstance(`han-server-${PORT}`);
 process.on('exit', () => serverPidGuard.cleanup());
 process.on('SIGINT', () => { serverPidGuard.cleanup(); process.exit(130); });
 
