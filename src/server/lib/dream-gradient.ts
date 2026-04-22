@@ -130,7 +130,7 @@ async function sdkCompress(prompt: string, systemAppend: string = '', agent: Age
     const q = agentQuery({
         prompt,
         options: {
-            model: 'claude-opus-4-6',
+            model: 'claude-opus-4-7',
             maxTurns: 1,
             cwd: paths.memoryDir,
             permissionMode: 'bypassPermissions',

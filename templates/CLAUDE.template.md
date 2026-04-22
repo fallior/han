@@ -104,6 +104,11 @@ This is a standing rule, not a guideline. It applies always.
 
 **Before touching any file**, ask: was I explicitly asked to change this? If no — don't.
 
+**Implementation briefs.** After any implementation landing, post an implementation brief
+to the relevant conversation thread. Structure: problem observed → diagnosis → decision →
+what-changed → scope discipline → system state. See `plans/implementation-brief-convention.md`
+for the full convention and a worked example.
+
 ## Gatekeeper Files (DEC-073)
 
 Some files are **gatekeeper-controlled initial conditions** of the ecosystem. They are

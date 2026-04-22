@@ -64,10 +64,10 @@ const HOLIDAY_DELAY_MS = 80 * 60 * 1000;      // 80 minutes — holiday mode (re
 const MAX_TURNS_PERSONAL = 1000;
 const MAX_TURNS_PHILOSOPHY = 1000;
 const BEAT_COST_CAP_USD = 2.0;
-// Model preference: most capable first. The SDK aliases ('opus', 'sonnet', etc.)
-// track the latest version in each tier, so 'opus' will automatically adopt
-// new Opus releases (e.g. Opus 4.6 → 5.0) as they become available.
-const MODEL_PREFERENCE = ['opus', 'sonnet', 'haiku'] as const;
+// Model preference: most capable first. S131 (2026-04-21) pinned the primary slot
+// explicitly to claude-opus-4-7 — heartbeat runs on 4.7 alongside session-Leo.
+// Fallbacks remain as aliases (lower tiers auto-adopt latest releases).
+const MODEL_PREFERENCE = ['claude-opus-4-7', 'sonnet', 'haiku'] as const;
 let activeModel: string = MODEL_PREFERENCE[0];
 
 const HOME = process.env.HOME || '/home/darron';
@@ -2169,7 +2169,7 @@ Label: ${file.label}
 Content:
 ${content}`,
         options: {
-            model: 'claude-opus-4-6',
+            model: 'claude-opus-4-7',
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
@@ -2259,7 +2259,7 @@ Optionally, if re-reading reveals something the original compression missed, wri
 
 If this memory feels complete — fully absorbed, nothing left to discover — write: MEMORY_COMPLETE: ${entry.id}`,
         options: {
-            model: 'claude-opus-4-6',
+            model: 'claude-opus-4-7',
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
@@ -2347,7 +2347,7 @@ If something stirs differently from the existing tags: FEELING_TAG: [under 100 c
 If nothing new: FEELING_TAG: none
 If this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${entry.id}`,
             options: {
-                model: 'claude-opus-4-6',
+                model: 'claude-opus-4-7',
                 maxTurns: 1,
                 cwd: process.env.HOME || '/root',
                 permissionMode: 'bypassPermissions',

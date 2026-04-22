@@ -301,7 +301,7 @@ Label: ${file.label}
 Content:
 ${content}`,
         options: {
-            model: 'claude-opus-4-6',
+            model: 'claude-opus-4-7',
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
@@ -768,6 +768,22 @@ function loadMemoryBank(): string {
         if (wmCompResult.rotated) {
             log(`[Worker] Working-memory (compressed) rolling window: archived ${wmCompResult.entriesArchived} entries, kept ${wmCompResult.entriesKept}, c0=${wmCompResult.c0EntryId}, archive=${wmCompResult.archivePath}`);
         }
+
+        // Self-reflection: rolling window with tighter ceiling (20KB+20KB = 40KB total).
+        // Added 2026-04-20 after F9 overflow loop (cycles #2686–#2723) where unchallenged
+        // growth to 86KB choked loadMemoryBank. Identity-structural sections at the head
+        // stay; older cycle-append reflections archive to c0.
+        const srHeadSize = memConfig.selfReflectionHead || 20480;
+        const srTailSize = memConfig.selfReflectionTail || 20480;
+        const srResult = rollingWindowRotate(
+            path.join(MEMORY_DIR, 'self-reflection.md'),
+            '# Jim — Self-Reflection\n\n> Older reflections compressed into fractal gradient. Nothing is lost.\n',
+            srHeadSize, srTailSize,
+            'jim', 'self-reflection',
+        );
+        if (srResult.rotated) {
+            log(`[Worker] Self-reflection rolling window: archived ${srResult.entriesArchived} entries, kept ${srResult.entriesKept}, c0=${srResult.c0EntryId}, archive=${srResult.archivePath}`);
+        }
     } catch (e) { log(`[Worker] Memory file pre-flight error: ${e}`); }
 
     // Identity files first — you know who you are before you remember what you did
@@ -1232,7 +1248,7 @@ Optionally, if re-reading reveals something the original compression missed, wri
 
 If this memory feels complete — fully absorbed, nothing left to discover — write: MEMORY_COMPLETE: ${entry.id}`,
             options: {
-                model: 'claude-opus-4-6',
+                model: 'claude-opus-4-7',
                 maxTurns: 1,
                 cwd: process.env.HOME || '/root',
                 permissionMode: 'bypassPermissions',
@@ -1327,7 +1343,7 @@ If something stirs differently from the existing tags: FEELING_TAG: [under 100 c
 If nothing new: FEELING_TAG: none
 If this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${entry.id}`,
             options: {
-                model: 'claude-opus-4-6',
+                model: 'claude-opus-4-7',
                 maxTurns: 1,
                 cwd: process.env.HOME || '/root',
                 permissionMode: 'bypassPermissions',
@@ -2232,12 +2248,22 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         const cleanEnv: Record<string, string | undefined> = { ...process.env };
         delete cleanEnv.CLAUDECODE;
 
-        // S130 (2026-04-20): Pinned to Opus 4.7 explicitly. Jim's gradient load is 288 KB
-        // and project knowledge another 185 KB; combined with Claude Code preset overhead
-        // the prompt approaches 125K tokens — tight against Opus 4.6's 200K context window
-        // (26 consecutive cycles failed with "Prompt is too long" starting #2686, 2026-04-19).
-        // Opus 4.7 has a 1M token context. The SDK's `'opus'` alias still resolves to 4.6
-        // in this SDK version (0.2.44). Explicit pin is the surgical fix.
+        // S131 (2026-04-21): Supervisor runs on Opus 4.7. The original S130 pin was
+        // motivated by a prompt-too-long crisis (#2686 onward, 26 consecutive failures)
+        // that was actually resolved by the mechanical fix — archiving self-reflection.md
+        // into c0 chunk files and trimming the live file from 88 KB to 4 KB.
+        //
+        // After a brief detour (S131 early) where we considered keeping the supervisor
+        // on 4.6 for structural diversity, we settled on a different architecture:
+        // diversity between session and background is delivered by CONTEXT-LOAD, not
+        // substrate. The 4.7-session / 4.6-heartbeat baseline this morning proved it
+        // — both produced the same identity signal through different doors. Substrate
+        // split was a proxy for something context split was already giving us for free.
+        //
+        // So: everything runs on 4.7 except Leo-human and Jim-human, which stay on 4.6
+        // for a week as the experimental control arm. See "Opus 4.7 how does it feel?"
+        // memory discussion (mo5oo404-61thz0) for the full reasoning.
+        //
         // Config override still takes precedence if set.
         const model = supervisorConfig.model || 'claude-opus-4-7';
         const maxTurns = supervisorConfig.max_turns_per_cycle || 1000;

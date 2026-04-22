@@ -139,7 +139,7 @@ async function sdkCompress(prompt: string): Promise<string> {
     const q = agentQuery({
         prompt,
         options: {
-            model: 'claude-opus-4-6',
+            model: 'claude-opus-4-7',
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
@@ -1361,7 +1361,7 @@ export function rollingWindowRotate(
     headSize: number = ROLLING_WINDOW_HEAD_DEFAULT,
     tailSize: number = ROLLING_WINDOW_TAIL_DEFAULT,
     agent?: 'leo' | 'jim',
-    contentType?: 'working-memory' | 'felt-moments',
+    contentType?: 'working-memory' | 'felt-moments' | 'self-reflection',
 ): { rotated: boolean; archivePath?: string; c0EntryId?: string; entriesArchived: number; entriesKept: number } {
     if (!fs.existsSync(filePath)) {
         return { rotated: false, entriesArchived: 0, entriesKept: 0 };

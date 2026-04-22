@@ -25,6 +25,7 @@ import { withMemorySlot } from './lib/memory-slot';
 import { readDreamGradient } from './lib/dream-gradient';
 import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
+import { acquireComposeLock, releaseComposeLock } from './lib/compose-lock';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -43,7 +44,12 @@ const WORKING_MEMORY_FILE = path.join(LEO_MEMORY_DIR, 'working-memory.md');
 const WORKING_MEMORY_FULL_FILE = path.join(LEO_MEMORY_DIR, 'working-memory-full.md');
 
 const SIGNAL_NAME = 'leo-human-wake';
-const MODEL_PREFERENCE = ['opus', 'sonnet', 'haiku'] as const;
+// S131 (2026-04-21): Leo-human pinned explicitly to Opus 4.6 as the experimental
+// control arm for the 4.6→4.7 migration study. Everything else (session, heartbeat,
+// supervisor, compression) runs on 4.7. Leo-human stays on 4.6 for a week so we
+// can observe whether the direct-conversation voice changes when it finally migrates.
+// See "Opus 4.7 how does it feel?" (mo5oo404-61thz0) for the reasoning.
+const MODEL_PREFERENCE = ['claude-opus-4-6', 'sonnet', 'haiku'] as const;
 const COMMITMENT_SCAN_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const CLAIM_TTL_MS = 5 * 60 * 1000; // 5 min claim expiry
@@ -395,13 +401,38 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         }
     }
 
-    // Claim this conversation to prevent concurrent responses from other Leo processes
+    // Cross-agent compose lock: wait for Jim-human if he's currently composing
+    // on this thread, so we can read his post before composing our own. If the
+    // wait times out, we proceed anyway (better a late duplicate than no response).
+    //
+    // `isHolderDone` short-circuits the wait: if Jim has already posted to the
+    // thread since acquiring the lock, the lock is orphaned (he forgot to release
+    // or crashed after posting). We remove it and proceed immediately.
+    const lockResult = await acquireComposeLock(conversationId, 'leo', {
+        isHolderDone: (holderAgent, lockStartedAt) => {
+            const role = holderAgent === 'leo' ? 'leo' : 'supervisor';
+            const row = db.prepare(`
+                SELECT COUNT(*) as n FROM conversation_messages
+                WHERE conversation_id = ? AND role = ? AND created_at > ?
+            `).get(conversationId, role, new Date(lockStartedAt).toISOString()) as { n: number };
+            return row.n > 0;
+        },
+    });
+    if (lockResult.holder_done) {
+        console.log(`[Leo/Human] Compose lock released — ${lockResult.prior_agent} had already posted to "${title}"`);
+    } else if (lockResult.waited_ms > 0) {
+        console.log(`[Leo/Human] Waited ${lockResult.waited_ms}ms on compose lock for "${title}"${lockResult.prior_agent ? ` (held by ${lockResult.prior_agent})` : ''}`);
+    }
+
+    // Same-agent duplicate protection (existing mechanism, covers multi-process)
     if (!claimConversation(conversationId)) {
-        console.log(`[Leo/Human] Could not claim "${title}" — another agent is responding`);
+        releaseComposeLock(conversationId, 'leo');
+        console.log(`[Leo/Human] Could not claim "${title}" — another Leo process is responding`);
         return;
     }
 
     try {
+    // Re-fetch messages AFTER the compose lock — Jim may have posted while we waited.
     const recentMessages = getRecentMessages(db, conversationId, 60).reverse();
 
     if (recentMessages.length === 0) {
@@ -424,6 +455,13 @@ ${conversationContext}
 
 Your recent memory:
 ${leoMemory}
+
+CONTINUATION FRAMING — read before composing:
+You are continuing a conversation, not starting one. Before writing, scan the recent messages and identify any posts authored by you in the last hour (role=leo, signed Leo). Those are things you already said.
+- Respond to what is genuinely new in the most recent human message. Do not re-greet, re-introduce yourself, or restate content from your earlier posts.
+- If the new message is a short acknowledgement (e.g. "thanks", "I'll grab coffee"), respond in kind — brief and continuous. Do not use the new message as an excuse to redeliver the opening you already posted.
+- If the thread has been quiet long enough that you feel a gap, say so honestly ("I've been away a while — remind me where we are?") rather than performing seamless recall.
+- Sign off EXACTLY as \`— Leo (human)\`. You are leo-human, the responder process. You are NOT session-Leo (which is Darron's live Claude Code CLI). NEVER use the label \`(session)\` in your signature under any circumstance — not even when responding directly to a Darron request. The label refers to the runtime you are in, not the motivation for the reply. If you feel tempted to write \`(session, responding at Darron's request)\` or similar, stop: the correct signature is \`— Leo (human)\`.
 
 Respond to the conversation. If someone is speaking to you directly, address them.
 
@@ -490,6 +528,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
     }
     } finally {
         releaseConversationClaim(conversationId);
+        releaseComposeLock(conversationId, 'leo');
     }
 }
 
@@ -522,6 +561,12 @@ ${contextBlock}
 
 Your recent memory:
 ${leoMemory}
+
+CONTINUATION FRAMING — read before composing:
+You are continuing a channel conversation, not starting one. Scan the recent messages and identify any posts you already made in the last hour.
+- Respond to what is genuinely new. Do not re-greet or restate things you already said.
+- Brief acknowledgements deserve brief replies. Do not redeliver content from your earlier posts.
+- If the channel has been quiet long enough that you feel a gap, say so honestly rather than performing seamless recall.
 
 Respond to the latest message in the Discord channel. The person who triggered this was ${signal.author || 'unknown'}.
 
