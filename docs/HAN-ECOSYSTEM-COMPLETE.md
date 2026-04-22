@@ -793,8 +793,39 @@ Automatic failover when an agent hits the weekly SDK rate limit.
 4. Restore primary credentials: `cp ~/.claude/.credentials-a.json ~/.claude/.credentials.json`
 5. Swap is now automatic — Jemma will round-robin on next rate limit
 
-**Current state:** `.credentials-a.json` registered. `.credentials-b.json` does not yet exist.
-Swap is inactive (requires 2+ files).
+**Current state (S131, 2026-04-22):** Both accounts registered.
+- `.credentials-a.json` = `fallior@gmail.com` (Darron's primary)
+- `.credentials-b.json` = `fallior@icloud.com` (shared with Mike for overflow capacity)
+- Swap is active — Jemma round-robins on rate-limit signal.
+
+### Scheduled Account Rotation (DEC-077, S131)
+
+On top of the rate-limit-driven swap, Darron runs a **weekly scheduled rotation** that matches the account-sharing arrangement with Mike. The purpose is capacity — Darron was hitting 94% of his weekly 20× Opus allowance ~36 hours before reset, and the second account smooths the overflow — but the shared account is not a pool under pressure: if demand outgrows the 2.5 days/week each user gets, the correct answer is to buy more accounts, not squeeze the shared one.
+
+**Weekly schedule (local, UTC+10):**
+
+| Window | Darron (han) | Mike (mikes-han) | Zone |
+|--------|--------------|------------------|------|
+| Fri 06:00 → Sun 18:00 | gmail | **icloud firm** | Mike's firm |
+| Sun 18:00 → Tue 18:00 | gmail | Mike's home | flex (negotiated) |
+| Tue 18:00 → Fri 06:00 | **icloud firm** | Mike's home | Darron's firm |
+
+**How it's implemented.** Three cron entries per user install a time-sliced rotation:
+- At the start of a partner's firm window, `touch ~/.han/signals/rotation-paused`
+- At the end of a partner's firm window, `rm -f` the same file
+- At the start of our own firm window, run `scripts/credentials-scheduled-swap.sh` to copy the right `.credentials-[ab].json` over the live one
+
+**Why the `rotation-paused` signal.** Jemma's `checkAndSwapCredentials()` honours this file: if it exists, the function returns early *without* clearing the `rate-limited` signal. That means a rate-limit hit during a partner's firm window doesn't steal their tokens — but the signal is held, and the moment the pause lifts (when their firm window ends), the swap fires automatically. Correct by construction without reworking the rotation mechanism.
+
+**Why not commit the token to git.** The OAuth refresh token in `.credentials.json` is a device-capable secret. Git history is effectively permanent (filter-repo is destructive). For distributing the icloud token to Mike, use Tailscale (`tailscale file cp` to his `openclaw-vps` tailnet host) or have Mike run `claude auth login --email fallior@icloud.com` himself with the shared password — both give device-bound tokens without the permanent-history exposure.
+
+**Brief for Six.** The mikes-han side mirrors this — same script, same Jemma guard, inverted cron entries so the pause is active when Darron holds icloud. See `plans/credential-rotation-schedule-brief-mikes-han.md` for Six's implementation checklist.
+
+### Scheduled Reminders
+
+One-shot reminders fire via `scripts/reminder-fire.sh`, called by systemd `--user` transient timers (`systemd-run --on-calendar='...'`). Each fire sends an ntfy push (topic from `~/.han/config.json`), appends a line to `~/.han/reminders/pending.md` (read by Leo at session start), and logs to `~/.han/health/reminders-fired.jsonl`. Self-terminating — the timer cleans itself up after firing.
+
+**Caveat:** systemd transient timers do NOT survive reboots. For reminders >2 weeks out, or when reboot-resilience matters, prefer a cron entry (manually removed after firing).
 
 ### Holiday Mode
 

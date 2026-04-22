@@ -43,12 +43,25 @@ Format: date, session reference, summary of changes.
 - `jim-human` swallows wake signals when `processSignal()` throws — signal is consumed, error is logged, but no retry. Caused 20-min silence after 11:47 AEST SDK crash. Fix designed (resilient compose wrapper with 3 escalating strategies + ack file → engineering distress) and folded into `plans/jemma-conversation-orchestration.md` as part of the orchestrator landing
 
 ### Scheduled Account Rotation (DEC-077)
-- Second Claude Max subscription created (`fallior@icloud.com`), shared with Mike as overflow capacity
-- New `scripts/credentials-scheduled-swap.sh` — idempotent swap script with audit logging
-- `jemma.ts:checkAndSwapCredentials()` honours `~/.han/signals/rotation-paused` signal (returns early without clearing the `rate-limited` signal, so rotation fires once pause lifts)
+
+**Why.** Darron hit 94% of the weekly 20× Opus allowance on his primary Max subscription ~36 hours before the Friday reset. The second account provides overflow capacity; sharing it with Mike at 2.5 days/week each covers both users' overflow at half the per-user cost. Framing: *capacity smoothing, not a shared pool under pressure* — if either needs more than 2.5 days, they buy their own second account rather than squeeze the shared one.
+
+**What.**
+- Second Claude Max subscription created (`fallior@icloud.com`), shared with Mike
+- New `scripts/credentials-scheduled-swap.sh` — idempotent swap script with audit logging to `~/.han/health/credential-swaps.jsonl` (source: scheduled)
+- `jemma.ts:checkAndSwapCredentials()` honours `~/.han/signals/rotation-paused` signal (returns early *without* clearing the `rate-limited` signal, so rotation fires automatically the moment the pause lifts — correct by construction without reworking the rotation mechanism)
 - Three cron entries per user (Darron + Mike's symmetric mirror), firing at Fri 06:00, Sun 18:00, Tue 18:00 local
 - Implementation brief for Six at `plans/credential-rotation-schedule-brief-mikes-han.md`
 - `.credentials-a.json` = gmail, `.credentials-b.json` = icloud (on han); inverse mapping on mikes-han
+- Old Mar 12 `.credentials-a.json` archived to `.credentials-a-2026-03-12-archive.json` before overwrite
+
+**Decided against.** Committing the OAuth token to the private git repo as a distribution mechanism for Mike — git history is effectively permanent, filter-repo is destructive, and OAuth refresh tokens are device-capable secrets. Use Tailscale `file cp` to Mike's `openclaw-vps` tailnet host for a one-shot transport, OR share the icloud password via password manager so Mike runs `claude auth login` himself for a device-bound token. Second option is cleaner long-term.
+
+### Scheduled Reminders Infrastructure
+- New `scripts/reminder-fire.sh` — three-channel reminder firing (ntfy push + pending-reminders file + audit log)
+- Used with `systemd-run --user --on-calendar=...` for one-shot transient timers that self-terminate after firing
+- First live instance: `remind-mike-creds-2026-04-25.timer` fires Sat 12:00 AEST to nudge in-person discussion with Mike about icloud credential distribution
+- Caveat: systemd transient timers do NOT survive reboots; for long-horizon or reboot-resilient reminders, use a manual cron entry
 
 ---
 
