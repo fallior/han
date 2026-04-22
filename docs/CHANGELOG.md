@@ -42,6 +42,14 @@ Format: date, session reference, summary of changes.
 ### Diagnosis (no fix this session)
 - `jim-human` swallows wake signals when `processSignal()` throws — signal is consumed, error is logged, but no retry. Caused 20-min silence after 11:47 AEST SDK crash. Fix designed (resilient compose wrapper with 3 escalating strategies + ack file → engineering distress) and folded into `plans/jemma-conversation-orchestration.md` as part of the orchestrator landing
 
+### Scheduled Account Rotation (DEC-077)
+- Second Claude Max subscription created (`fallior@icloud.com`), shared with Mike as overflow capacity
+- New `scripts/credentials-scheduled-swap.sh` — idempotent swap script with audit logging
+- `jemma.ts:checkAndSwapCredentials()` honours `~/.han/signals/rotation-paused` signal (returns early without clearing the `rate-limited` signal, so rotation fires once pause lifts)
+- Three cron entries per user (Darron + Mike's symmetric mirror), firing at Fri 06:00, Sun 18:00, Tue 18:00 local
+- Implementation brief for Six at `plans/credential-rotation-schedule-brief-mikes-han.md`
+- `.credentials-a.json` = gmail, `.credentials-b.json` = icloud (on han); inverse mapping on mikes-han
+
 ---
 
 ## 2026-04-03 — S108

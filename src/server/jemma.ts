@@ -1294,6 +1294,19 @@ function checkAndSwapCredentials(): void {
   const signalPath = path.join(SIGNALS_DIR, 'rate-limited');
   if (!fs.existsSync(signalPath)) return;
 
+  // S131 DEC-077 — scheduled rotation pause for shared-account windows.
+  // During a partner's firm window (e.g., Mike using the shared icloud
+  // account Fri 06:00 → Sun 18:00), this machine's rotation-paused signal
+  // is set by cron. While paused, rate-limit rotation is held off so we
+  // don't drain the partner's tokens. The rate-limited signal is left in
+  // place — the moment the pause lifts (partner's window ends), the next
+  // 30-second poll swaps as intended.
+  const pausePath = path.join(SIGNALS_DIR, 'rotation-paused');
+  if (fs.existsSync(pausePath)) {
+    console.log('[Jemma] Rate-limit signal received but rotation is paused — signal held until pause lifts');
+    return;
+  }
+
   const credDir = path.join(HOME, '.claude');
   const credPath = path.join(credDir, '.credentials.json');
 

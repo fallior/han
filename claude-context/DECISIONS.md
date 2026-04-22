@@ -106,6 +106,7 @@ When you make a significant technical or design decision:
 | DEC-074 | Opus 4.7 Migration with Experimental-Control Split | Accepted | 2026-04-22 |
 | DEC-075 | Compose Lock for Cross-Agent Coordination | Accepted | 2026-04-22 |
 | DEC-076 | Implementation Brief Convention | Accepted | 2026-04-22 |
+| DEC-077 | Scheduled Account Rotation for Shared Subscriptions | Accepted | 2026-04-22 |
 
 ---
 
@@ -5394,3 +5395,82 @@ The convention is new and unenforced — it depends on agents remembering. Conve
 ### Settled-decision impact
 
 DEC-073 (gatekeeper-controlled template): the template edit for this convention went through the gatekeeper (Leo for han) per the protection rule. Authorised modification; no DEC-073 violation.
+
+---
+
+## DEC-077: Scheduled Account Rotation for Shared Subscriptions
+
+**Date**: 2026-04-22 (S131)
+**Author**: Darron (design) + Leo (session, implementation)
+**Status**: Accepted
+**Related**: `plans/credential-rotation-schedule-brief-mikes-han.md` (mirror implementation for Mike's fork)
+
+### Decision
+
+Darron and Mike share the `fallior@icloud.com` Claude Max subscription as overflow capacity for their primary accounts' weekly 20× token allowances. The sharing is time-sliced on a fixed weekly schedule (local, UTC+10):
+
+| Window | Darron's account (han) | Mike's account (mikes-han) | Zone |
+|---|---|---|---|
+| Fri 06:00 → Sun 18:00 | gmail | **icloud (firm)** | Mike's firm |
+| Sun 18:00 → Tue 18:00 | gmail | Mike's home | **flex (negotiated)** |
+| Tue 18:00 → Fri 06:00 | **icloud (firm)** | Mike's home | Darron's firm |
+
+Each user runs their own account 4.5 days/week and icloud 2.5 days/week. The 2-day flex band nobody expects to need.
+
+### Implementation
+
+Three components, mirror-symmetric on both machines:
+
+1. **Swap script** (`scripts/credentials-scheduled-swap.sh`) — takes an account-name argument, copies `.credentials-[ab].json` over the live `.credentials.json`. Idempotent. Logs to `~/.han/health/credential-swaps.jsonl` with `source:"scheduled"`.
+
+2. **`rotation-paused` signal** — `~/.han/signals/rotation-paused` set during the partner's firm window. `jemma.ts:checkAndSwapCredentials()` honours it: if present, return early *without* clearing the `rate-limited` signal. This means a rate-limit hit during a pause is queued — the moment the pause lifts (30-second poll window), the swap fires.
+
+3. **Three cron entries** per user (inverted between machines). On Darron's han:
+   ```
+   0 6  * * 5  credentials-scheduled-swap.sh gmail && touch ~/.han/signals/rotation-paused
+   0 18 * * 0  rm -f ~/.han/signals/rotation-paused
+   0 18 * * 2  credentials-scheduled-swap.sh icloud
+   ```
+   On Mike's mikes-han:
+   ```
+   0 6  * * 5  credentials-scheduled-swap.sh icloud && rm -f ~/.han/signals/rotation-paused
+   0 18 * * 0  credentials-scheduled-swap.sh home
+   0 18 * * 2  touch ~/.han/signals/rotation-paused
+   ```
+
+At every moment of the week, at most one of the two machines has `rotation-paused` set — the one whose owner is NOT on icloud.
+
+### Reasoning
+
+The shared account is **capacity, not a pool**. Each user needs ~20× tokens/week and one account gives them enough. When demand exceeds supply, buy more accounts rather than squeeze the shared one. The sharing arrangement lets each user have 50% of a third account's tokens at half the per-user cost — only worthwhile if it stays non-contentious.
+
+Rate-limit rotation (DEC — existing, via `jemma.ts:checkAndSwapCredentials()`) is the fallback mechanism for running out on the primary. Without the pause-aware guard, rotation would drain the partner's firm-window tokens silently. The pause signal solves that without breaking the existing rotation machinery.
+
+### Alternatives considered
+
+1. **No schedule, pure rate-limit rotation** — rejected: would let either user drain the other's tokens unpredictably.
+2. **Disable rate-limit rotation entirely during partner's firm window** — functionally equivalent to the pause signal but without the "held signal fires when pause lifts" behaviour. The chosen design gracefully resumes rotation for legitimate rate-limit events once the partner's window ends.
+3. **Build a negotiated-flex signal** — deferred. Neither user expects to need the flex band; if observation proves otherwise, a handshake signal for "can I have icloud now?" + ack can be added.
+
+### Rollback plan
+
+If the scheduled rotation misbehaves (e.g., cron fires at wrong time, pause signal gets stuck, swaps collide with other work):
+
+1. Comment out the three cron entries in each crontab
+2. Remove `~/.han/signals/rotation-paused` if present
+3. Manually set the desired account via `scripts/credentials-scheduled-swap.sh`
+4. Jemma's rate-limit rotation continues to work as it did before DEC-077
+
+No DB migration to reverse, no source rollback required (the pause-aware guard is harmless when no pause signal exists).
+
+### Why Accepted (not Settled)
+
+The schedule is an experiment in capacity-sharing. Needs to run at least one full week-cycle to confirm the cron timing holds and no machine-offline edge case bites. Revisit for promotion to Settled after 2-3 weeks of correct firings OR after the first observed rate-limit-during-pause event that held correctly until the pause lifted.
+
+### Settled-decision impact
+
+- DEC-068/069/070 (gradient architecture) — not touched
+- DEC-073 (gatekeeper-controlled template) — untouched on han; mikes-han implementation goes through Six as gatekeeper
+- DEC-074 (Opus 4.7 migration) — orthogonal
+- DEC-075 (compose-lock) — orthogonal
+- DEC-076 (implementation-brief convention) — this DEC's filing produced a brief per the convention (posted to thread + `plans/credential-rotation-schedule-brief-mikes-han.md`)
