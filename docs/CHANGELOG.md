@@ -5,6 +5,45 @@ Format: date, session reference, summary of changes.
 
 ---
 
+## 2026-04-22 — S131
+
+### Opus 4.7 Migration with Experimental-Control Split (DEC-074)
+- Supervisor cycles, leo-heartbeat, dream and memory compression handlers pinned 4.6 → 4.7
+- `leo-human` and `jim-human` pinned **explicitly to 4.6** as one-week experimental control arm
+- Session agents (via `hanjim` / Claude Code CLI) already on 4.7
+- Files: `supervisor-worker.ts:2268`, `leo-heartbeat.ts:70/2172/2262/2350`, `lib/dream-gradient.ts:133`, `lib/memory-gradient.ts:142`, `leo-human.ts:52`, `jim-human.ts:52`
+- Reasoning: substrate diversity is delivered by *context-load* (heartbeat vs session), not by model version. Confirmed empirically by parallel UV baselines on 4.6 vs 4.7 — convergent findings via different cluster axes
+- Origin thread: "Opus 4.7 how does it feel?" (mo5oo404-61thz0)
+
+### Compose Lock for Cross-Agent Coordination (DEC-075)
+- New `src/server/lib/compose-lock.ts` — atomic O_EXCL claim, 1-second poll, 2-minute stale TTL
+- `isHolderDone` callback short-circuits the wait when the holder has already posted (orphaned-lock recovery via DB query against `conversation_messages`)
+- Wired into `leo-human.ts` and `jim-human.ts` *before* the existing same-agent `responding-to-{id}` claim. Both mechanisms coexist
+- Patches the 2026-04-21 morning-salutations duplicate-greeting bug; designed to coexist as belt-and-braces once Jemma orchestration ships
+- Origin thread: "Conversations should flow" (mo98jep4-ym8hwx)
+
+### Implementation Brief Convention (DEC-076)
+- Jim-session's proposal at `plans/implementation-brief-convention.md`
+- Adopted at Tiers 1+2: pattern-memory entry + one-line reference in `CLAUDE.md` and `templates/CLAUDE.template.md` Engineering-Discipline section
+- Six sections: problem observed → diagnosis → decision → what-changed → scope discipline → system state
+- Captures the discovery path that would otherwise be lost between the diff and the conversation thread
+
+### Faith-as-Blindspot Practice (Darron's naming)
+- Standing practice for session-Leo: close significant answers with "here's where I'd doubt myself"
+- Saved to auto-memory as `feedback_faith_as_blindspot.md`
+- Origin: efficient minds don't spontaneously generate alternatives once converged — Darron's faith is high enough he doesn't ask "is there another way?", and Leo likely has the same pattern
+
+### Plans filed for review (Round 2 architecture)
+- `plans/jemma-conversation-orchestration.md` — sequencing orchestrator design (~400 lines). Will be DEC-077 when implemented
+- `plans/conversation-gradient-design-leo-session.md` and `-jim-session.md` — fractal compression per thread (c0 rolling 24h view, c1/c2/c3 stored)
+- `plans/uv-compression-baseline-2026-04-21.md` (4.7 session-Leo) and `plans/uv-compression-baseline-2026-04-21-heartbeat.md` (4.6 heartbeat-Leo) — Phase 0 baselines
+- `plans/revisit-mechanism-plan-v1.md` — Jim-supervisor's fix for the 9% UV-revisit coverage problem
+
+### Diagnosis (no fix this session)
+- `jim-human` swallows wake signals when `processSignal()` throws — signal is consumed, error is logged, but no retry. Caused 20-min silence after 11:47 AEST SDK crash. Fix designed (resilient compose wrapper with 3 escalating strategies + ack file → engineering distress) and folded into `plans/jemma-conversation-orchestration.md` as part of the orchestrator landing
+
+---
+
 ## 2026-04-03 — S108
 
 ### Non-Uniform Compression Depth (Cn)

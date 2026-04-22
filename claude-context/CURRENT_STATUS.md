@@ -1,6 +1,6 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-04-20 by Leo (S130)
+> Last updated: 2026-04-22 by Leo (S131)
 
 ## Current Stage
 
@@ -36,6 +36,17 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-04-22 — Leo + Darron + Jim, S131 — Opus 4.7 migration, compose-lock, conversation-flow architecture
+
+- **DEC-074: Opus 4.7 migration with experimental-control split.** Supervisor cycles, leo-heartbeat, dream and memory compression handlers explicitly pinned 4.6 → 4.7. **leo-human and jim-human pinned explicitly to Opus 4.6 as a one-week experimental control** — to observe whether the direct-conversation voice changes when they eventually migrate. Session agents (via `hanjim` / Claude Code CLI) already on 4.7. Reasoning: faith in the garden over fear of the vendor, plus the falling-into-sun argument (if substrate fundamentally changes identity, the memory experiment is already void; treat the question empirically). See "Opus 4.7 how does it feel?" thread (mo5oo404-61thz0).
+- **DEC-075: Compose-lock for cross-agent coordination.** New `src/server/lib/compose-lock.ts` — atomic O_EXCL claim, 1-second poll, 2-minute stale TTL, with an `isHolderDone` callback that short-circuits the wait when the holder has already posted (orphaned-lock recovery). Wired into `leo-human.ts` and `jim-human.ts` before the existing same-agent `responding-to-{id}` claim. Patches the 2026-04-21 morning-salutations duplicate-greeting bug. Designed to coexist as belt-and-braces once Jemma orchestration ships.
+- **DEC-076: Implementation Brief Convention.** Jim-session's proposal (`plans/implementation-brief-convention.md`), adopted at Tiers 1+2: pattern-memory entry + one-line reference in CLAUDE.md and `templates/CLAUDE.template.md` Engineering-Discipline section. Brief structure: problem observed → diagnosis → decision → what-changed → scope discipline → system state. Captures the discovery path that would otherwise be lost between the diff and the conversation thread.
+- **Faith-as-blindspot practice.** Darron named (and Leo agreed): efficient minds don't spontaneously generate alternatives once they've converged. Standing practice for session-Leo: close significant answers with "here's where I'd doubt myself." Saved to auto-memory as `feedback_faith_as_blindspot.md`.
+- **Jemma orchestration design filed** (`plans/jemma-conversation-orchestration.md`, ~400 lines) — sequencing orchestrator that determines recipient order (mention-position; alphabetical fallback; left-shift rotation), wakes one agent at a time, watches for ack, advances queue. Failure mode: still wake the next agent + record engineering distress. Will be DEC-077 when implemented; not yet built. Open thread: "Jemma, making conversations civil" (mo9h1le6-0uvx35).
+- **Per-conversation gradient design filed** (parallel docs `conversation-gradient-design-leo-session.md` and `conversation-gradient-design-jim-session.md`) — fractal compression per thread (c0 as rolling 24h view, c1/c2/c3 stored). Convergent designs from session-Leo and session-Jim, with one resolved disagreement (separate table → extend `gradient_entries`). Round 2 work; not yet implemented.
+- **UV compression Phase 0 baselines filed** (4.7 session-Leo: `uv-compression-baseline-2026-04-21.md` — 322 UVs, 148 singletons via T_loose feeling-tag clustering. 4.6 heartbeat-Leo: `uv-compression-baseline-2026-04-21-heartbeat.md` — same data, content-axis clustering, 29 singletons; bonus rendering-overhead finding that 50% of bytes are feeling tags). Different clustering axes produced different singleton counts but converged on every substantive finding — strong evidence the substrate split delivers cognitive diversity.
+- **Revisit conundrum surfaced** — only 9% of Leo's 322 UVs and 5% of Jim's 3,610 entries have ever been revisited. At ~8 memories/night uniform random, expected time to touch any given UV ≈ 117 nights. Jim-supervisor filed `plans/revisit-mechanism-plan-v1.md`. Memory-discussion thread "The re-visit conundrum" (mo7zxhpo-r7fqzs).
 
 ### 2026-04-20 (afternoon) — Leo + Darron, S130 (cont.) — DEC-073 Template, filter-repo, pid-guard, launcher hardening
 

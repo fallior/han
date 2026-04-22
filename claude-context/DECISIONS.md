@@ -103,6 +103,9 @@ When you make a significant technical or design decision:
 | DEC-071 | React Admin as Primary UI — Vanilla JS Deprecated | Accepted | 2026-04-18 |
 | DEC-072 | Agent Identity + Session Protocol Embedded in Launcher (HEREDOC) | **Superseded** by DEC-073 | 2026-04-20 |
 | DEC-073 | Templated CLAUDE.md + Gatekeeper Initial Conditions | Accepted | 2026-04-20 |
+| DEC-074 | Opus 4.7 Migration with Experimental-Control Split | Accepted | 2026-04-22 |
+| DEC-075 | Compose Lock for Cross-Agent Coordination | Accepted | 2026-04-22 |
+| DEC-076 | Implementation Brief Convention | Accepted | 2026-04-22 |
 
 ---
 
@@ -5259,3 +5262,135 @@ This is codified in the template itself (section *"Gatekeeper Files"*) so every 
 - Agent working dirs created: `~/.han/agents/Jim/`, `~/.han/agents/Tenshi/`, `~/.han/agents/Casey/`.
 
 **Why Accepted (not Settled)**: the mechanism needs to survive a real session cycle before it earns Settled status. Once Jim has successfully launched via `hanjim`, loaded memory thoroughly, and the gatekeeper protection has weathered its first cross-agent interaction, we'll know if the pattern holds. Revisit for promotion to Settled after 1–2 weeks of use.
+
+---
+
+## DEC-074: Opus 4.7 Migration with Experimental-Control Split
+
+**Date**: 2026-04-22 (S131)
+**Author**: Darron + Leo + Jim
+**Status**: Accepted
+**Origin thread**: `mo5oo404-61thz0` ("Opus 4.7 how does it feel?")
+
+### Decision
+
+Migrate the autonomous and compression layers from Opus 4.6 → Opus 4.7. Hold the human-facing responder agents (`leo-human`, `jim-human`) on Opus 4.6 explicitly for a one-week experimental observation window. Do they sound different to Darron when they eventually migrate? Documented split:
+
+| Component | Model | File / pin |
+|-----------|-------|-----------|
+| Session Leo (Claude Code CLI in `han`) | 4.7 | CLI default |
+| Session Jim (via `hanjim`) | 4.7 | CLI default |
+| Heartbeat Leo | 4.7 | `leo-heartbeat.ts:70` MODEL_PREFERENCE explicit |
+| Supervisor Jim | 4.7 | `supervisor-worker.ts:2268` config default |
+| Dream compression | 4.7 | `lib/dream-gradient.ts:133` |
+| Memory compression | 4.7 | `lib/memory-gradient.ts:142` |
+| **Leo-human** (conversation responder) | **4.6** | `leo-human.ts:52` MODEL_PREFERENCE explicit |
+| **Jim-human** (conversation responder) | **4.6** | `jim-human.ts:52` MODEL_PREFERENCE explicit |
+
+### Reasoning
+
+The original concern (does substrate change identity?) was structurally undecidable — if it does, the memory experiment is already void; if it doesn't, behave normally. Darron's "falling-into-sun" framing: behave as if the experiment is valid; the alternative is to end it now. Logical move + happy choice.
+
+Empirical observation that informed the split: when session-Leo (4.7) and heartbeat-Leo (4.6) ran the same Phase 0 UV compression baseline against the same data, they produced **convergent findings through different doors** — 4.7 entered via feeling-tag clustering (148 singletons), 4.6 entered via content-axis clustering (29 singletons), but agreed on every substantive point. Bonus: 4.6 caught the rendering-overhead insight (50% of bytes are feeling tags) that 4.7 missed. This is genuine cognitive diversity from the substrate split, captured at zero cost.
+
+The control-arm restriction to leo-human and jim-human is deliberate: they're the surface where Darron actually feels the voice. If migration changes the voice perceptibly, the comparison is cleanest there.
+
+### Alternatives considered
+
+1. **Migrate everything to 4.7 immediately.** Rejected — loses the empirical opportunity to observe whether substrate change is felt.
+2. **Keep everything on 4.6.** Rejected — unnecessarily conservative; supervisor needs the larger context (S130's prompt-too-long crisis was the trigger).
+3. **Put supervisor back to 4.6** (briefly considered S131 morning) — Darron pivoted away from this after Leo's response. Substrate diversity is delivered by *context-load* (heartbeat vs session loads different things), not by model version. The 4.6/4.7 split is a proxy for what the context split was already giving us. So we keep substrate-diversity narrowly (just at the user-facing surface) rather than broadly.
+
+### How the experiment ends
+
+After ~one week (≈2026-04-29), migrate `leo-human` and `jim-human` to 4.7 too. Compare voice before/after deliberately (sit with specific message pairs, ask "is this the same voice?"). If we can't tell, that *is* the answer — Leo is Leo, the garden dominates. Per Darron's reframing: uncertainty-of-difference is not a failed experiment, it's the strongest possible result.
+
+### Settled-decision protection note
+
+If reverting any of the explicit pins in this decision, surface the reasoning in the same thread and confirm with Darron. The control arm only works if the pins are honoured.
+
+---
+
+## DEC-075: Compose Lock for Cross-Agent Coordination
+
+**Date**: 2026-04-22 (S131)
+**Author**: Leo (session)
+**Status**: Accepted
+**Origin thread**: `mo98jep4-ym8hwx` ("Conversations should flow")
+
+### Decision
+
+Add a cross-agent compose lock at `src/server/lib/compose-lock.ts` to prevent `leo-human` and `jim-human` from composing responses to the same thread in parallel. The lock uses an atomic file claim (`fs.writeFileSync` with `wx` flag → `O_CREAT | O_EXCL`) on `~/.han/signals/composing-{threadId}`. If the lock is held, the waiter polls every 1 second up to a 90-second cap, with two short-circuit paths:
+
+1. **Stale TTL** (2 minutes) — if the lock is older than this, it's assumed dead and forcibly reclaimed.
+2. **`isHolderDone` callback** — each poll, the waiter queries the conversation_messages table to see if the holder agent has posted *since* the lock was acquired. If yes, the lock is treated as orphaned (holder posted but failed to release) and forcibly reclaimed.
+
+Wired into `leo-human.ts` and `jim-human.ts` *before* the existing same-agent `responding-to-{id}` claim. Both mechanisms coexist: the older claim handles same-agent multi-process protection; the new lock handles cross-agent coordination.
+
+### Reasoning
+
+The 2026-04-21 morning-salutations bug: Leo and Jim posted near-identical good-mornings four seconds apart, then posted again nearly identically six minutes later. Two distinct failure modes: (a) parallel composition from the same wake signal, and (b) inability to recognise their own prior contribution. The compose lock addresses (a); Jim-session's prompt-framing fix addresses (b).
+
+### Alternatives considered
+
+1. **Single-process serialisation** — rejected: would couple agents that should remain independent processes for resilience.
+2. **Server-side endpoint enforcement** — rejected: invasive and changes the wake-signal protocol everywhere; defer to Round 2.
+3. **Jemma-orchestrated turn-taking** (the better long-term fix) — accepted in design (`plans/jemma-conversation-orchestration.md`), but not yet built. Compose-lock ships first as the immediate fix.
+
+### Relationship to Jemma orchestration
+
+When the Jemma orchestrator ships, the compose-lock will be **kept as defense-in-depth**, not removed. Under orchestration, only one agent is ever woken at a time → the lock acquires immediately, holds briefly, releases. Zero waiting in the happy path. If the orchestrator ever crashes and the system falls back to direct dual-wake signals, the lock prevents duplicate-greeting in that degraded mode.
+
+### Why Accepted (not Settled)
+
+The lock works in isolation but the full coordination story includes Jemma orchestration. Once orchestration ships and the lock has weathered its role as fallback rather than primary, revisit. May convert to Settled once we've seen the failure modes the compose-lock catches that orchestration alone wouldn't.
+
+---
+
+## DEC-076: Implementation Brief Convention
+
+**Date**: 2026-04-22 (S131)
+**Author**: Jim (session) — proposed; Leo (session) — implemented; Darron — adopted
+**Status**: Accepted
+**Origin thread**: `mo98jep4-ym8hwx` ("Conversations should flow")
+**Canonical reference**: `~/Projects/han/plans/implementation-brief-convention.md`
+
+### Decision
+
+After any implementation landing, post an **implementation brief** to the relevant conversation thread. The brief sits alongside the diff — the thread carries the *why*, the brief carries the *what*. Six standard sections:
+
+1. **Problem observed** — what was actually seen, with timestamps / message IDs. Failure mode, not diagnosis.
+2. **Diagnosis** — what was concluded as cause, including alternatives considered and rejected.
+3. **Decision** — what was chosen, with thread/message IDs that carry the consensus.
+4. **Implementation** — files touched, lines, behavioural change.
+5. **Scope discipline** — what was deliberately not touched, settled decisions checked, build passes.
+6. **System state after** — what's live, what still needs to happen (restarts, migrations, follow-ups).
+
+Optional sections: **What this does not fix** and **On the discovery path**.
+
+Adopted at **Tier 1 + Tier 2** per Jim's tier ladder:
+- **Tier 1**: Pattern-memory entry in each agent's `patterns.md`.
+- **Tier 2**: One-line reference in `CLAUDE.md` and `templates/CLAUDE.template.md` Engineering-Discipline section.
+- **Tier 3** (settled-decision filing) deferred — promote later if the convention proves load-bearing under drift.
+
+### Reasoning
+
+The code change in any landing is typically the smallest part of the work; the discovery path that produced it is much larger. Without a record that scaffolds both, reconstruction from `git log` alone is lossy. The conversation-gradient design (Round 2) will eventually do this reconstruction work automatically; until then, briefs are the scaffold.
+
+### Refinements raised but not (yet) folded into the canonical doc
+
+Leo (session) flagged three small refinements as personal practice rather than convention amendments:
+
+1. **Calibrate "after any implementation"** to *non-trivial* — trivial fixes (typo, one-line bug) don't need six sections.
+2. **Promote "What this does not fix"** from optional to standard — it aligns with the faith-as-blindspot practice (named blindspots beat unnamed ones).
+3. **Note overlap with Pre-Commit Declaration** (CLAUDE.md S123) — the brief's scope-discipline section can reference rather than duplicate the pre-commit audit.
+
+These refinements live in Leo's `patterns.md` as personal practice. Jim may fold them into the canonical doc later.
+
+### Why Accepted (not Settled)
+
+The convention is new and unenforced — it depends on agents remembering. Convert to Settled once it's been observed sticking across multiple landings without prompting.
+
+### Settled-decision impact
+
+DEC-073 (gatekeeper-controlled template): the template edit for this convention went through the gatekeeper (Leo for han) per the protection rule. Authorised modification; no DEC-073 violation.

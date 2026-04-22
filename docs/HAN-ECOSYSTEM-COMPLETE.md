@@ -581,15 +581,27 @@ supervisor cycles which take 10-30 minutes).
 
 ### Conversation Claim Mechanism
 
-Prevents duplicate responses within the same agent family (Jim agents check Jim claims, Leo agents check Leo claims):
+Two layered mechanisms prevent duplicate or racing responses:
+
+**Same-agent duplicate protection** (existing) — within the same agent family (Jim agents check Jim claims, Leo agents check Leo claims):
 - **Claim file:** `~/.han/signals/responding-to-{conversationId}` — written before SDK call
 - **Claim TTL:** 5 minutes (`CLAIM_TTL_MS`) — expired claims are overwritten
 - **Release:** `finally` block ensures claim is always released, even if the SDK call errors
 - **Duplicate check:** Before claiming, checks if Jim already responded since the last human/leo message — skips if so
 
+**Cross-agent compose lock** (added S131, DEC-075) — prevents Leo and Jim from composing in parallel on the same thread:
+- **Lock file:** `~/.han/signals/composing-{threadId}` — atomic O_EXCL claim via `lib/compose-lock.ts`
+- **Poll interval:** 1 second (waiter checks every second whether holder is done)
+- **Wait cap:** 90 seconds total; on timeout, proceed with a warning rather than block forever
+- **Stale TTL:** 2 minutes — locks older than this are forcibly reclaimed
+- **`isHolderDone` short-circuit:** each poll, the waiter queries `conversation_messages` to see if the holder has posted since acquiring the lock. If yes, the lock is treated as orphaned and reclaimed immediately — protects against crashed agents that posted but never released
+- **Acquire order:** compose-lock first (cross-agent), then `responding-to-{id}` claim (same-agent). Both released in `finally`
+
 **Previous bug (fixed S97):** `releaseConversationClaim()` was only called on the success
 path. SDK errors (exit code 1) left stale claims that blocked all subsequent responses to
 that conversation. Fixed by wrapping the response logic in `try/finally`.
+
+**Known issue (diagnosed S131, fix designed):** When `processSignal()` throws, the wake signal is consumed but no retry fires — the agent goes silent until the next signal. Fix is the resilient compose wrapper (3 escalating strategies + ack-file → engineering distress) folded into `plans/jemma-conversation-orchestration.md` for the Jemma orchestrator landing.
 
 ### WebSocket Broadcasting
 
@@ -822,13 +834,15 @@ All signals live at `~/.han/signals/`. They are plain files — existence is the
 | `jim-emergency` | Manual | supervisor-worker | Force emergency mode (all cycles = supervisor) | Empty file |
 | `maintenance-mode` | Manual | (not checked by any code — aspirational) | Belt-and-braces ecosystem stop guard | Empty file |
 | `responding-to-{id}` | jim-human, supervisor-worker, leo-human | All conversation-responding agents | Conversation claim token — prevents duplicate responses | `{ agent, timestamp }` |
+| `composing-{threadId}` | jim-human, leo-human (S131, DEC-075) | Cross-agent waiters | Cross-agent compose lock — prevents Leo and Jim composing in parallel | `{ agent, timestamp, pid }` |
 
 ### Conversation Claim Mechanism
 
-When an agent begins responding to a conversation, it writes a claim file
-`responding-to-{conversationId}` containing `{ agent, timestamp }`. Other agents check
-for an existing valid claim (< 5 min old) before responding. Claims are released with
-`try/finally` to prevent stale claims on SDK errors.
+Two layered mechanisms protect against different failure modes:
+
+**Same-agent duplicate protection (`responding-to-{id}`):** When an agent begins responding to a conversation, it writes a claim file containing `{ agent, timestamp }`. Other agents check for an existing valid claim (< 5 min old) before responding. Claims are released with `try/finally` to prevent stale claims on SDK errors.
+
+**Cross-agent compose lock (`composing-{threadId}`, S131, DEC-075):** Atomic O_EXCL claim via `lib/compose-lock.ts`. Acquired before the same-agent claim. If Leo holds the lock, Jim waits (1-second poll, 90-second cap, 2-minute stale TTL). The waiter also runs an `isHolderDone` callback each poll — if the holder has already posted to the thread since the lock was acquired, the lock is treated as orphaned (holder crashed or forgot to release) and reclaimed immediately. Patches the 2026-04-21 morning-salutations duplicate-greeting bug. Designed to coexist as belt-and-braces once the Jemma orchestrator (designed in `plans/jemma-conversation-orchestration.md`) ships.
 
 **Cross-agent claim scoping (S99):** Claims only block agents within the same family.
 Jim agents (jim-human, supervisor-worker) check for existing Jim claims before responding.
