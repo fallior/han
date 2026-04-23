@@ -322,6 +322,42 @@ interface SignalData {
     mentionedAt?: string;
     messagePreview?: string;
     reason?: string;
+    // Phase 1 orchestration (DEC-077 follow-on). Written by jemma-dispatch.ts
+    // when jemma-orchestrator invoked it. Format spec lives in
+    // services/jemma-orchestrator.ts header comment.
+    // - dispatchId present → we must write ~/.han/signals/jemma-ack-{id} at end
+    //   (success, stood_down, or failed) so the orchestrator can advance queue.
+    // - priorAgentFailed present → surface in prompt as default-on acknowledgment.
+    dispatchId?: string;
+    priorAgentFailed?: { agent: string; reason: string; exit_reason: string };
+}
+
+/**
+ * Write the orchestrator ack after we've finished processing (posted, stood down,
+ * or exhausted retries). No-op when dispatchId is absent (backward-compat with
+ * non-orchestrated wake paths).
+ */
+function writeJemmaAck(
+    dispatchId: string | undefined,
+    agent: string,
+    status: 'done' | 'failed' | 'stood_down',
+    opts: { reason?: string; compose_duration_ms?: number; final_attempt_count?: number } = {},
+): void {
+    if (!dispatchId) return;
+    try {
+        const ackFile = path.join(SIGNALS_DIR, `jemma-ack-${dispatchId}`);
+        fs.writeFileSync(ackFile, JSON.stringify({
+            dispatchId,
+            agent,
+            status,
+            reason: opts.reason,
+            final_attempt_count: opts.final_attempt_count ?? 1,
+            compose_duration_ms: opts.compose_duration_ms,
+            ack_written_at: new Date().toISOString(),
+        }));
+    } catch (err) {
+        console.error(`[Leo/Human] Failed to write jemma-ack for ${dispatchId}:`, (err as Error).message);
+    }
 }
 
 function readSignal(): SignalData | null {
@@ -384,8 +420,11 @@ function releaseConversationClaim(conversationId: string): void {
 
 // ── Response: Conversation ────────────────────────────────────
 
-async function respondToConversation(db: Database.Database, conversationId: string): Promise<void> {
+async function respondToConversation(db: Database.Database, conversationId: string, signal?: SignalData): Promise<void> {
     const title = getConversationTitle(db, conversationId);
+    const dispatchId = signal?.dispatchId;
+    const priorAgentFailed = signal?.priorAgentFailed;
+    const composeStartMs = Date.now();
 
     // Check if the last human message is explicitly addressed to Jim only.
     // If Darron says "Jim" or "Hey Jim" without mentioning Leo, this one's not for us.
@@ -397,6 +436,7 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         const mentionsLeo = /\bleo\b|\bleonhard\b/.test(text);
         if (mentionsJim && !mentionsLeo) {
             console.log(`[Leo/Human] Message addressed to Jim only in "${title}" — standing down`);
+            writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'addressed_to_other_agent', compose_duration_ms: Date.now() - composeStartMs });
             return;
         }
     }
@@ -428,6 +468,7 @@ async function respondToConversation(db: Database.Database, conversationId: stri
     if (!claimConversation(conversationId)) {
         releaseComposeLock(conversationId, 'leo');
         console.log(`[Leo/Human] Could not claim "${title}" — another Leo process is responding`);
+        writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'claim_held_by_other_leo_process', compose_duration_ms: Date.now() - composeStartMs });
         return;
     }
 
@@ -446,6 +487,16 @@ async function respondToConversation(db: Database.Database, conversationId: stri
 
     const leoMemory = readLeoMemory();
 
+    // Phase 1 orchestration: if the previous agent failed to respond (ground-truth
+    // reconciled, not stood-down, not posted-but-ack-missed), surface it as a
+    // default-on acknowledgment cue. Per thread consensus: Darron always wants to
+    // know, no judgement call. Natural mention, not a system line.
+    const priorFailedBlock = priorAgentFailed ? `
+
+PRIOR AGENT FAILED (acknowledge briefly in your own voice before responding):
+${priorAgentFailed.agent} tried to respond but couldn't (${priorAgentFailed.reason}). One natural sentence at the top of your response: "${priorAgentFailed.agent} seems to have had trouble on this one — let me take it." Then respond normally. Do NOT repeat the distress details; do NOT apologise for them; do NOT use a system-notice tone.
+` : '';
+
     const prompt = `Conversation: "${title}" (id: ${conversationId})
 
 Recent messages:
@@ -455,7 +506,7 @@ ${conversationContext}
 
 Your recent memory:
 ${leoMemory}
-
+${priorFailedBlock}
 CONTINUATION FRAMING — read before composing:
 You are continuing a conversation, not starting one. Before writing, scan the recent messages and identify any posts authored by you in the last hour (role=leo, signed Leo). Those are things you already said.
 - Respond to what is genuinely new in the most recent human message. Do not re-greet, re-introduce yourself, or restate content from your earlier posts.
@@ -509,6 +560,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
             );
             if (alreadyAnswered) {
                 console.log(`[Leo/Human] Leo already responded to "${title}" while I was thinking — discarding my response`);
+                writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'duplicate_detected_post_compose', compose_duration_ms: Date.now() - composeStartMs });
                 return;
             }
         }
@@ -523,9 +575,16 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
             `- ${timestamp}: Responded to "${title}" (${responseText.trim().length} chars)`,
             `### Response to "${title}" (${timestamp})\n${responseText.trim().slice(0, 500)}\n`
         );
+
+        writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
     } else {
         console.log(`[Leo/Human] No meaningful response for "${title}" — skipping`);
+        writeJemmaAck(dispatchId, 'leo', 'failed', { reason: 'empty_response', compose_duration_ms: Date.now() - composeStartMs });
     }
+    } catch (err) {
+        console.error(`[Leo/Human] Compose error for "${title}":`, (err as Error).message);
+        writeJemmaAck(dispatchId, 'leo', 'failed', { reason: (err as Error).message, compose_duration_ms: Date.now() - composeStartMs });
+        throw err;
     } finally {
         releaseConversationClaim(conversationId);
         releaseComposeLock(conversationId, 'leo');
@@ -684,7 +743,7 @@ async function processSignal(signal: SignalData): Promise<void> {
     } else if (signal.conversationId) {
         const db = getDb();
         try {
-            await respondToConversation(db, signal.conversationId);
+            await respondToConversation(db, signal.conversationId, signal);
         } finally {
             db.close();
         }

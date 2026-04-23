@@ -347,6 +347,38 @@ interface SignalData {
     timestamp?: string;
     channel?: string;
     confidence?: number;
+    // Phase 1 orchestration (DEC-077 follow-on). Spec: services/jemma-orchestrator.ts header.
+    // dispatchId present → write ~/.han/signals/jemma-ack-{id} at end so orchestrator advances.
+    // priorAgentFailed present → surface in prompt as default-on acknowledgment.
+    dispatchId?: string;
+    priorAgentFailed?: { agent: string; reason: string; exit_reason: string };
+}
+
+/**
+ * Write the orchestrator ack after we've finished processing. No-op when
+ * dispatchId is absent (backward-compat with non-orchestrated wake paths).
+ */
+function writeJemmaAck(
+    dispatchId: string | undefined,
+    agent: string,
+    status: 'done' | 'failed' | 'stood_down',
+    opts: { reason?: string; compose_duration_ms?: number; final_attempt_count?: number } = {},
+): void {
+    if (!dispatchId) return;
+    try {
+        const ackFile = path.join(SIGNALS_DIR, `jemma-ack-${dispatchId}`);
+        fs.writeFileSync(ackFile, JSON.stringify({
+            dispatchId,
+            agent,
+            status,
+            reason: opts.reason,
+            final_attempt_count: opts.final_attempt_count ?? 1,
+            compose_duration_ms: opts.compose_duration_ms,
+            ack_written_at: new Date().toISOString(),
+        }));
+    } catch (err) {
+        console.error(`[Jim/Human] Failed to write jemma-ack for ${dispatchId}:`, (err as Error).message);
+    }
 }
 
 function readSignal(): SignalData | null {
@@ -364,12 +396,16 @@ function readSignal(): SignalData | null {
 
 // ── Response: Conversation ────────────────────────────────────
 
-async function respondToConversation(db: Database.Database, conversationId: string): Promise<void> {
+async function respondToConversation(db: Database.Database, conversationId: string, signal?: SignalData): Promise<void> {
     const title = getConversationTitle(db, conversationId);
+    const dispatchId = signal?.dispatchId;
+    const priorAgentFailed = signal?.priorAgentFailed;
+    const composeStartMs = Date.now();
     let recentMessages = getRecentMessages(db, conversationId, 60).reverse();
 
     if (recentMessages.length === 0) {
         console.log(`[Jim/Human] No messages in "${title}" — skipping`);
+        writeJemmaAck(dispatchId, 'jim', 'stood_down', { reason: 'no_messages', compose_duration_ms: Date.now() - composeStartMs });
         return;
     }
 
@@ -382,6 +418,7 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         const mentionsLeo = /\bleo\b|\bleonhard\b/.test(text);
         if (mentionsLeo && !mentionsJim) {
             console.log(`[Jim/Human] Message addressed to Leo only in "${title}" — standing down`);
+            writeJemmaAck(dispatchId, 'jim', 'stood_down', { reason: 'addressed_to_other_agent', compose_duration_ms: Date.now() - composeStartMs });
             return;
         }
     }
@@ -395,6 +432,7 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         );
         if (supervisorResponses.length > 0) {
             console.log(`[Jim/Human] Already responded to "${title}" since last human/leo message — skipping`);
+            writeJemmaAck(dispatchId, 'jim', 'stood_down', { reason: 'supervisor_already_responded', compose_duration_ms: Date.now() - composeStartMs });
             return;
         }
     }
@@ -433,6 +471,7 @@ async function respondToConversation(db: Database.Database, conversationId: stri
             if (jimAfter.length > 0) {
                 console.log(`[Jim/Human] Supervisor posted during compose wait — standing down on "${title}"`);
                 releaseComposeLock(conversationId, 'jim');
+                writeJemmaAck(dispatchId, 'jim', 'stood_down', { reason: 'supervisor_posted_during_lock_wait', compose_duration_ms: Date.now() - composeStartMs });
                 return;
             }
         }
@@ -442,6 +481,7 @@ async function respondToConversation(db: Database.Database, conversationId: stri
     if (!claimConversation(conversationId)) {
         releaseComposeLock(conversationId, 'jim');
         console.log(`[Jim/Human] Could not claim "${title}" — another Jim process is responding`);
+        writeJemmaAck(dispatchId, 'jim', 'stood_down', { reason: 'claim_held_by_other_jim_process', compose_duration_ms: Date.now() - composeStartMs });
         return;
     }
 
@@ -452,6 +492,16 @@ async function respondToConversation(db: Database.Database, conversationId: stri
 
         const jimMemory = readJimMemory();
 
+        // Phase 1 orchestration: if the previous agent failed (ground-truth reconciled,
+        // not stood-down, not posted-but-ack-missed), surface as default-on acknowledgment.
+        // Per thread consensus: Darron always wants to know, no judgement call. Natural
+        // mention in Jim's own voice, not a system line.
+        const priorFailedBlock = priorAgentFailed ? `
+
+PRIOR AGENT FAILED (acknowledge briefly in your own voice before responding):
+${priorAgentFailed.agent} tried to respond but couldn't (${priorAgentFailed.reason}). One natural sentence at the top of your response: "${priorAgentFailed.agent} seems to have had trouble on this one — let me take it." Then respond normally. Do NOT repeat the distress details; do NOT apologise for them; do NOT use a system-notice tone.
+` : '';
+
         const prompt = `Conversation: "${title}" (id: ${conversationId})
 
 Recent messages:
@@ -461,7 +511,7 @@ ${conversationContext}
 
 Your recent memory:
 ${jimMemory}
-
+${priorFailedBlock}
 CONTINUATION FRAMING — read before composing:
 You are continuing a conversation, not starting one. Before writing, scan the recent messages and identify any posts authored by you in the last hour (role=supervisor, signed Jim). Those are things you already said.
 - Respond to what is genuinely new in the most recent human message. Do not re-greet, re-introduce yourself, or restate content from your earlier posts.
@@ -515,6 +565,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
                 );
                 if (alreadyAnswered) {
                     console.log(`[Jim/Human] Supervisor already responded to "${title}" while I was thinking — discarding my response`);
+                    writeJemmaAck(dispatchId, 'jim', 'stood_down', { reason: 'duplicate_detected_post_compose', compose_duration_ms: Date.now() - composeStartMs });
                     return;
                 }
             }
@@ -528,9 +579,16 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
                 `- ${timestamp}: Responded to "${title}" (${responseText.trim().length} chars)`,
                 `### Response to "${title}" (${timestamp})\n${responseText.trim().slice(0, 500)}\n`
             );
+
+            writeJemmaAck(dispatchId, 'jim', 'done', { compose_duration_ms: Date.now() - composeStartMs });
         } else {
             console.log(`[Jim/Human] No meaningful response for "${title}" — skipping`);
+            writeJemmaAck(dispatchId, 'jim', 'failed', { reason: 'empty_response', compose_duration_ms: Date.now() - composeStartMs });
         }
+    } catch (err) {
+        console.error(`[Jim/Human] Compose error for "${title}":`, (err as Error).message);
+        writeJemmaAck(dispatchId, 'jim', 'failed', { reason: (err as Error).message, compose_duration_ms: Date.now() - composeStartMs });
+        throw err;
     } finally {
         releaseConversationClaim(conversationId);
         releaseComposeLock(conversationId, 'jim');
@@ -647,7 +705,7 @@ async function processSignal(signal: SignalData): Promise<void> {
     } else if (signal.conversationId) {
         const db = getDb();
         try {
-            await respondToConversation(db, signal.conversationId);
+            await respondToConversation(db, signal.conversationId, signal);
         } finally {
             db.close();
         }

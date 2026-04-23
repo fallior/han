@@ -378,6 +378,30 @@ db.exec(`CREATE TABLE IF NOT EXISTS conversation_loops (
 )`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_loops_conversation ON conversation_loops(conversation_id)`);
 
+// Jemma orchestration — dispatch + rotation state (S132, DEC-077 follow-on: Phase 1)
+// See plans/jemma-conversation-orchestration-v2.md.
+db.exec(`CREATE TABLE IF NOT EXISTS jemma_dispatch (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    recipients_ordered TEXT NOT NULL,
+    current_index INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    total_duration_ms INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT
+)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_jemma_dispatch_status ON jemma_dispatch(status, updated_at)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_jemma_dispatch_conv ON jemma_dispatch(conversation_id, created_at DESC)`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS jemma_rotation (
+    scope_key TEXT PRIMARY KEY,
+    last_order_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)`);
+
 // FTS5 virtual table for conversation messages
 // Note: FTS5 tables can't be checked with pragma table_info, so we use a try-catch approach
 try {

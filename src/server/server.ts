@@ -46,6 +46,7 @@ import proposalsRouter from './routes/proposals';
 import supervisorRouter from './routes/supervisor';
 import conversationsRouter from './routes/conversations';
 import jemmaRouter from './routes/jemma';
+import { startAckWatcher as startJemmaOrchestratorWatcher } from './services/jemma-orchestrator';
 import gradientRouter from './routes/gradient';
 import tailscaleRouter from './routes/tailscale';
 import villageRouter from './routes/village';
@@ -349,6 +350,14 @@ server.listen(Number(PORT), '0.0.0.0', () => {
     const recovered = detectAndRecoverGhostTasks();
     if (recovered > 0) {
         console.log(`[Ghost Recovery] Startup recovered ${recovered} ghost task(s) from previous session`);
+    }
+
+    // Start Jemma orchestrator ack watcher (Phase 1, DEC-077 follow-on).
+    // No-op when config.orchestration.enabled === false.
+    try {
+        startJemmaOrchestratorWatcher();
+    } catch (err) {
+        console.error('[Server] Failed to start Jemma orchestrator watcher:', (err as Error).message);
     }
 });
 

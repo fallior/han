@@ -7,6 +7,7 @@ import { catalogueConversation, catalogueAllUncatalogued } from '../services/cat
 import { autoGenerateTts, autoTagLoop } from './voice';
 import { callLLM } from '../orchestrator';
 import { deliverMessage } from '../services/jemma-dispatch';
+import { orchestrate, isEnabled as orchestrationEnabled } from '../services/jemma-orchestrator';
 import { getPersonas, getAgentPersonas, getMentionPatterns } from '../services/village.js';
 const router = Router();
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
@@ -125,6 +126,42 @@ function classifyAndDispatch(
 ): void {
     console.log(`[Conversations] Classifying addressee for message in ${discussionType} thread`);
     classifyAddressee(content, discussionType).then(async ({ recipients, reasoning }) => {
+        // Phase 1 (DEC-077 follow-on, plans/jemma-conversation-orchestration-v2.md):
+        // When orchestration is enabled, hand the recipient list to the orchestrator for
+        // sequential wake + ack + rotation. When disabled, fall back to the parallel
+        // for-loop + compose-lock behaviour this replaced. The fallback is preserved
+        // verbatim so `git revert` of the Phase 1 commit restores prior behaviour cleanly.
+        if (orchestrationEnabled()) {
+            try {
+                await orchestrate({
+                    conversationId,
+                    messageId,
+                    recipients,
+                    messageText: content,
+                    author: 'darron',
+                    source: 'admin',
+                    discussionType,
+                    reasoning,
+                });
+            } catch (err: any) {
+                console.error(`[Conversations] Orchestration failed — falling back to parallel fanout: ${err.message}`);
+                for (const recipient of recipients) {
+                    try {
+                        await deliverMessage({
+                            source: 'admin',
+                            recipient, message: content,
+                            conversationId, discussionType,
+                            author: 'darron', classification_confidence: 1.0, reasoning,
+                        });
+                    } catch (e: any) {
+                        console.error(`[Conversations] Fallback delivery failed for ${recipient}: ${e.message}`);
+                    }
+                }
+            }
+            return;
+        }
+
+        // Legacy parallel fanout path — preserved for config-flag rollback
         for (const recipient of recipients) {
             try {
                 await deliverMessage({

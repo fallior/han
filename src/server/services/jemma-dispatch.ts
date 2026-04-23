@@ -114,6 +114,12 @@ export interface DeliveryRequest {
     discussionType?: string;
     reasoning?: string;
     conversation_id?: string;  // Alias for conversationId (backward compat)
+    // Orchestration (Phase 1, DEC-077 follow-on): when present, the agent
+    // writes ~/.han/signals/jemma-ack-{dispatchId} after posting/standing-down.
+    // Absent → backward-compat behaviour (agent runs, no ack written).
+    // Wake signal payload format documented in jemma-orchestrator.ts header.
+    dispatchId?: string;
+    priorAgentFailed?: { agent: string; reason: string; exit_reason: string };
 }
 
 export interface DeliveryResult {
@@ -143,6 +149,8 @@ export async function deliverMessage(req: DeliveryRequest): Promise<DeliveryResu
         discussionType,
         reasoning,
         conversation_id,
+        dispatchId,
+        priorAgentFailed,
     } = req;
 
     const effectiveSource = source === 'admin' ? 'admin' : 'discord';
@@ -206,6 +214,10 @@ export async function deliverMessage(req: DeliveryRequest): Promise<DeliveryResu
             // For conversation dispatch, only write the human-wake signal (not the heartbeat/supervisor wake)
             // to prevent duplicate responses. The human-wake agent handles conversations.
             const humanWakeSignal = wakeSignals.find(s => s.includes('human-wake')) || wakeSignals[0];
+            // Wake payload schema (read site: leo-human.ts / jim-human.ts SignalData interface).
+            // `dispatchId` + `priorAgentFailed` are the Phase 1 orchestration fields — when
+            // dispatchId is present, the agent must write ~/.han/signals/jemma-ack-{id}
+            // after posting/standing-down. See jemma-orchestrator.ts header comment.
             const signalData = {
                 source: effectiveSource,
                 ...(convId ? { conversationId: convId } : {}),
@@ -214,7 +226,9 @@ export async function deliverMessage(req: DeliveryRequest): Promise<DeliveryResu
                 author,
                 messagePreview: message.substring(0, 200),
                 confidence: classification_confidence,
-                mentionedAt: new Date().toISOString()
+                mentionedAt: new Date().toISOString(),
+                ...(dispatchId ? { dispatchId } : {}),
+                ...(priorAgentFailed ? { priorAgentFailed } : {}),
             };
             writeSignalFile(humanWakeSignal, signalData);
 
