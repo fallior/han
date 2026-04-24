@@ -1754,6 +1754,16 @@ function savePartialCycleWork(cycleNumber: number, cycleType: string, partialCon
     const combined = partialContent.join('\n\n').trim();
     if (combined.length < 10) return;
 
+    // F9 guard: prompt-too-long failures carry no resumable content (the
+    // failure IS that the prompt couldn't be processed). Persisting the
+    // error text to swap + working-memory compounded the bloat that caused
+    // the failure — self-reinforcing F9 loop. The failure is already
+    // recorded via failCycle + logCycleAudit; nothing valuable is lost.
+    if (reason.includes('Prompt is too long')) {
+        log(`[Worker] F9 guard: skipping partial save for cycle #${cycleNumber} (prompt-too-long failure, no resumable content)`);
+        return;
+    }
+
     try {
         if (cycleType === 'dream') {
             const explorationsPath = path.join(MEMORY_DIR, 'explorations.md');
@@ -2536,14 +2546,28 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         try {
             const cycleHeader = `\n\n### Cycle #${cycleNumber} — ${cycleType} (${new Date().toISOString()})`;
 
-            // Write compressed to swap
-            if (output.working_memory_compressed) {
-                fs.appendFileSync(SUPERVISOR_SWAP_FILE, `${cycleHeader}\n${output.working_memory_compressed}`);
-            }
+            // F9 prevention (Option A): for supervisor cycles with no state
+            // change — only no_action actions, no active-context update —
+            // skip the working-memory append. Quiet-hold cycles previously
+            // stacked up in working-memory.md faster than compression could
+            // reduce them. The cycle is still recorded in supervisor_cycles
+            // (via completeCycle below) so hold streaks remain countable
+            // from the DB. Personal/dream cycles unaffected.
+            const isUnchangedSupervisorCycle =
+                cycleType === 'supervisor' &&
+                !output.active_context_update &&
+                (output.actions || []).every(a => a.type === 'no_action');
 
-            // Write full to swap
-            if (output.working_memory_full) {
-                fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${cycleHeader}\n${output.working_memory_full}`);
+            if (!isUnchangedSupervisorCycle) {
+                // Write compressed to swap
+                if (output.working_memory_compressed) {
+                    fs.appendFileSync(SUPERVISOR_SWAP_FILE, `${cycleHeader}\n${output.working_memory_compressed}`);
+                }
+
+                // Write full to swap
+                if (output.working_memory_full) {
+                    fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${cycleHeader}\n${output.working_memory_full}`);
+                }
             }
 
             // Flush swap to shared working memory using memory slot (serialised with jim-human)
