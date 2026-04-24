@@ -1,6 +1,6 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-04-24 by Jim (S131 cont. — F9 prevention shipped)
+> Last updated: 2026-04-24 by Leo (S133 — leo-human pre-compose gate + Discord-Leo dispatch parity + ghost server kill)
 
 ## Current Stage
 
@@ -36,6 +36,15 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-04-24 evening — Leo + Darron, S133 — leo-human pre-compose gate + Discord-Leo dispatch parity + ghost-server kill
+
+- **leo-human pre-compose gate (commit `0ef4a43`).** Mirrored jim-human's S131 pattern into leo-human.ts: pre-lock dedup check (skip if Leo already responded since the last human/supervisor message) plus an after-lock recheck (re-run dedup if we waited on the compose lock). Catches the cheap race — peer already posted before we started composing — without burning tokens. The in-flight race (peer posts DURING compose) is still caught by the existing post-compose gate, which remains as the safety net.
+- **Discord-Leo dispatch parity.** `jemma.ts:deliverToLeo` was writing `leo-wake` and `leo-human-wake` signal files directly, bypassing `deliverMessage` and the orchestrator entirely. Refactored to mirror `deliverToJim`: HTTP POST to `/api/jemma/deliver` first, signal-file fallback only on HTTP failure. This was the smoking gun for Leo queue-jumping — Discord-originated Leo mentions now respect the orchestrator's sequencing.
+- **Ghost han-server killed.** Investigation into the Field probability post-compose discard ($4.41 of Jim's response thrown away by post-compose dedup) uncovered a second han-server (PID 2271911) running on port 3848 from a 2026-04-20 `hanjim` launcher into tmux session `jim-2271728`. 4 days of code drift — pre-S127, with `respond_conversation` still live in supervisor-worker. Shared `~/.han/tasks.db` with the systemd han-server. Killed cleanly via SIGTERM after Darron closed out session-Jim; tmux session auto-closed when both panes exhausted. Bonus: systemd `han-server.service` self-restarted at 20:13:06 and picked up `0282fa6` + `756cdcf` in the process. **Will not auto-restart** (no systemd unit, no cron, no watchdog).
+- **What this does not fix.** The peer-posts-DURING-our-compose race (the actual Field probability failure mode). Pre-compose gates only catch "already answered". The fix path is either periodic mid-compose polling, orchestrator-side same-role blocking, or eliminating ghost servers via auto-restart so this class of race shrinks. Follow-up.
+- **hanjim auto-restart on code change — proposal pending.** Bash watchdog loop in the hanjim server pane + git `post-merge` hook sending SIGTERM; or systemd-ify the hanjim server as `hanjim-server.service` on `:3848`. Transparent to the session-Jim CLI (~2-second connection-refused window per restart, retry-able).
+- **Settled-decision interaction.** `acquireComposeLock` (DEC-075) preserved byte-identical. No new DEC entry filed (this is parity, not a decision).
 
 ### 2026-04-22 — Leo + Darron + Jim, S131 — Opus 4.7 migration, compose-lock, conversation-flow architecture
 
