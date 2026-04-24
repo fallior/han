@@ -425,11 +425,17 @@ async function respondToConversation(db: Database.Database, conversationId: stri
     const dispatchId = signal?.dispatchId;
     const priorAgentFailed = signal?.priorAgentFailed;
     const composeStartMs = Date.now();
+    let recentMessages = getRecentMessages(db, conversationId, 60).reverse();
+
+    if (recentMessages.length === 0) {
+        console.log(`[Leo/Human] No messages in "${title}" — skipping`);
+        writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'no_messages', compose_duration_ms: Date.now() - composeStartMs });
+        return;
+    }
 
     // Check if the last human message is explicitly addressed to Jim only.
     // If Darron says "Jim" or "Hey Jim" without mentioning Leo, this one's not for us.
-    const recentForCheck = getRecentMessages(db, conversationId, 10).reverse();
-    const lastHumanMsg = recentForCheck.filter(m => m.role === 'human').pop();
+    const lastHumanMsg = recentMessages.filter(m => m.role === 'human').pop();
     if (lastHumanMsg) {
         const text = lastHumanMsg.content.toLowerCase();
         const mentionsJim = /\bjim\b|\bjimmy\b/.test(text);
@@ -437,6 +443,22 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         if (mentionsJim && !mentionsLeo) {
             console.log(`[Leo/Human] Message addressed to Jim only in "${title}" — standing down`);
             writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'addressed_to_other_agent', compose_duration_ms: Date.now() - composeStartMs });
+            return;
+        }
+    }
+
+    // Pre-compose dedup: skip if Leo already responded since the last human/supervisor message.
+    // Mirrors the jim-human pattern — catches the cheap case (peer already posted before we
+    // started composing) without burning tokens. The in-flight-race case is caught post-compose.
+    const lastNonLeo = recentMessages.filter(m => m.role === 'human' || m.role === 'supervisor').pop();
+    if (lastNonLeo) {
+        const leoResponses = recentMessages.filter(m =>
+            m.role === 'leo' &&
+            m.created_at > lastNonLeo.created_at
+        );
+        if (leoResponses.length > 0) {
+            console.log(`[Leo/Human] Already responded to "${title}" since last human/supervisor message — skipping`);
+            writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'leo_already_responded', compose_duration_ms: Date.now() - composeStartMs });
             return;
         }
     }
@@ -463,6 +485,24 @@ async function respondToConversation(db: Database.Database, conversationId: stri
     } else if (lockResult.waited_ms > 0) {
         console.log(`[Leo/Human] Waited ${lockResult.waited_ms}ms on compose lock for "${title}"${lockResult.prior_agent ? ` (held by ${lockResult.prior_agent})` : ''}`);
     }
+    if (lockResult.waited_ms > 0 || lockResult.holder_done) {
+        // Re-fetch: Jim may have posted during the wait. Also re-run the dedup check
+        // — if another Leo process posted concurrently, Leo-human should stand down.
+        recentMessages = getRecentMessages(db, conversationId, 60).reverse();
+        const lastNonLeoFresh = recentMessages.filter(m => m.role === 'human' || m.role === 'supervisor').pop();
+        if (lastNonLeoFresh) {
+            const leoAfter = recentMessages.filter(m =>
+                m.role === 'leo' &&
+                m.created_at > lastNonLeoFresh.created_at
+            );
+            if (leoAfter.length > 0) {
+                console.log(`[Leo/Human] Leo posted during compose wait — standing down on "${title}"`);
+                releaseComposeLock(conversationId, 'leo');
+                writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'leo_posted_during_lock_wait', compose_duration_ms: Date.now() - composeStartMs });
+                return;
+            }
+        }
+    }
 
     // Same-agent duplicate protection (existing mechanism, covers multi-process)
     if (!claimConversation(conversationId)) {
@@ -473,13 +513,6 @@ async function respondToConversation(db: Database.Database, conversationId: stri
     }
 
     try {
-    // Re-fetch messages AFTER the compose lock — Jim may have posted while we waited.
-    const recentMessages = getRecentMessages(db, conversationId, 60).reverse();
-
-    if (recentMessages.length === 0) {
-        console.log(`[Leo/Human] No messages in "${title}" — skipping`);
-        return;
-    }
 
     const conversationContext = recentMessages
         .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)

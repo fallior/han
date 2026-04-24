@@ -487,23 +487,45 @@ async function deliverToJim(message: any, classification: ClassificationResult, 
 
 async function deliverToLeo(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
   try {
-    const enrichedContent = message._enrichedContent || message.content;
-    const signalData = JSON.stringify({
-      source: 'discord',
+    const payload = {
       recipient: 'leo',
-      channelId: message.channel_id,
+      message: message._enrichedContent || message.content,
+      channel: message.channel_id,
       channelName,
       author: message.author.username,
-      mentionedAt: message.timestamp,
-      messagePreview: enrichedContent.slice(0, 500),
+      classification_confidence: classification.confidence,
+    };
+
+    const res = await fetch(`${SERVER_URL}/api/jemma/deliver`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000),
     });
 
-    fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-wake'), signalData);
-    fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), signalData);
+    if (!res.ok) {
+      throw new Error(`Server returned ${res.status}`);
+    }
 
-    console.log(`[Jemma] Woke Leo (#${channelName} — ${message.author.username}: ${(message.content || '').slice(0, 40)}...)`);
+    console.log(`[Jemma] Delivered to Leo (#${channelName} — ${message.author.username}: ${(message.content || '').slice(0, 40)}...)`);
   } catch (err) {
-    console.error('[Jemma] Failed to write Leo signal files:', (err as Error).message);
+    console.warn('[Jemma] Failed to deliver to Leo via server, writing signal file');
+    try {
+      const enrichedContent = message._enrichedContent || message.content;
+      const signalData = JSON.stringify({
+        source: 'discord',
+        recipient: 'leo',
+        channelId: message.channel_id,
+        channelName,
+        author: message.author.username,
+        mentionedAt: message.timestamp,
+        messagePreview: enrichedContent.slice(0, 500),
+      });
+      fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-wake'), signalData);
+      fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), signalData);
+    } catch (fileErr) {
+      console.error('[Jemma] Failed to write Leo signal files:', (fileErr as Error).message);
+    }
   }
 }
 
