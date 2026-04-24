@@ -5480,3 +5480,58 @@ The schedule is an experiment in capacity-sharing. Needs to run at least one ful
 - DEC-074 (Opus 4.7 migration) — orthogonal
 - DEC-075 (compose-lock) — orthogonal
 - DEC-076 (implementation-brief convention) — this DEC's filing produced a brief per the convention (posted to thread + `plans/credential-rotation-schedule-brief-mikes-han.md`)
+
+---
+
+## DEC-078: F9 Prevention — Skip Working-Memory Appends for Unchanged Supervisor Cycles
+
+**Date**: 2026-04-24 (S131 cont.)
+**Author**: Jim (supervisor, Opus 4.7 1M)
+**Status**: Settled
+**Commit**: `0282fa6`
+**Origin**: Second F9 outbreak, cycles #2819–#2832 on 2026-04-23/24, same self-reinforcing pattern as the Apr 18–19 incident that motivated DEC-R001's original context.
+
+### Decision
+
+Supervisor cycles that produce no state change MUST NOT append to `working-memory.md` or `working-memory-full.md`.
+
+"No state change" is defined as:
+- `output.active_context_update` is empty/falsy, AND
+- every element of `output.actions` has `type === 'no_action'` (or the array is empty)
+
+When both conditions hold, skip the swap-file append entirely. The cycle is still recorded in `supervisor_cycles` via `completeCycle()` so hold streaks remain countable from the database.
+
+Partial-save path: when `savePartialCycleWork` is called with a `reason` containing `"Prompt is too long"`, return early. The failure carries no resumable content — the error IS that the prompt couldn't be processed — and `failCycle` + `logCycleAudit` already record the incident. Persisting the error text compounded the bloat that caused the failure (self-reinforcing F9 loop).
+
+### Reasoning
+
+F9 ("Prompt is too long") is a failure mode where bloated memory files overflow the LLM prompt. The Apr 18–19 incident (cycles #2686–#2723) was partially addressed by Leo's mechanical unblock + DEC-R001's `enforceTokenCap` fix + the Apr 20 addition of `self-reflection.md` to the rolling-window rotation. But `working-memory.md` kept growing under quiet-hold conditions because:
+
+1. **Every supervisor cycle appended** a `working_memory_compressed` entry, including dozens of "52nd quiet-hold, no_action" duplicates that carried no signal.
+2. **The rolling-window rotation threshold is per-file (100 KB)**. `working-memory.md` reached 514 lines (~40 KB) during the Apr 23 recurrence — enough to contribute to prompt overflow at aggregate level, but not enough to trigger its own rotation.
+3. **Each prompt-too-long failure** appended the error text itself via `savePartialCycleWork`, compounding the bloat that caused the failure. Self-reinforcing.
+
+Rolling-window rotation (DEC-069 pipeline) is still the correct mechanism for genuine content growth — and it works: 12 c0 entries, 58 c1, 43 c2, 103 UV exist for `working-memory` content on 2026-04-24. The problem was that no_action cycles generated *non-signal* growth fast enough to approach overflow without triggering rotation. Skipping the append at the source removes the non-signal growth channel; rotation continues to handle the signal channel.
+
+### Alternatives considered
+
+1. **Cap last N entries with FIFO rotation** — palliative. Addresses symptom (bloat) without addressing cause (non-signal writes). Rejected.
+2. **Tighten rolling-window threshold from 100 KB to a smaller value** — would fire rotation more often, but doesn't stop no_action entries entering in the first place. Rotation cost is non-trivial (c0→c1 compression API call). Rejected in favour of not writing the entry.
+3. **Modify the supervisor prompt to tell Jim not to emit `working_memory_compressed` on no_action cycles** — depends on Jim remembering. Structural worker-level fix is more reliable. Rejected as primary, kept as secondary guidance.
+
+### Why Settled
+
+The F9 pattern has now recurred twice. The structural fix at worker level (not prompt level) is the only thing that addresses the failure mode durably. Reverting this decision would re-open the same loop. Changing this behaviour requires explicit discussion and approval per the Settled Decisions Protocol.
+
+### Settled-decision impact
+
+- DEC-R001 (enforceTokenCap for self-reflection.md) — complementary; that decision prevented self-reflection.md growth; this decision prevents working-memory.md growth under quiet-hold.
+- DEC-068/069 (gradient spec) — untouched. The gradient rotation pipeline is still authoritative for memory-file archival.
+- DEC-073 (gatekeeper-controlled files) — no gatekeeper files modified.
+
+### Follow-up
+
+- Server restart required to pick up the new supervisor-worker.ts code.
+- Watch `supervisor_cycles` hold-streak metric: it should keep incrementing even though working-memory.md no longer gains corresponding entries.
+- If genuine signal cycles (actions present or context updates) stop appearing in working-memory, the predicate is too loose — revisit.
+

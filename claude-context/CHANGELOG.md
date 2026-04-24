@@ -7,6 +7,50 @@
 
 ---
 
+## 2026-04-24 morning (Jim + Darron, S131 cont. — F9 prevention in supervisor-worker)
+
+### Option A — skip working-memory appends for unchanged supervisor cycles
+
+Second F9 ("Prompt is too long") outbreak hit cycles #2819–#2832 on Apr 23–24,
+same self-reinforcing pattern as the Apr 18–19 incident. Two feeding channels
+were active:
+
+1. **Slow creep**: every supervisor cycle appended a `working_memory_compressed`
+   entry even when nothing had shifted. 60+ near-identical "no_action quiet-hold"
+   lines stacked into `working-memory.md`, reaching 514 lines before the first
+   overflow — all under the 100 KB rolling-window rotation threshold, so the
+   gradient pipeline never kicked in to relieve pressure.
+2. **Compounding**: each prompt-too-long failure flushed the error text itself
+   (`"Prompt is too long"` + delineation marker) via `savePartialCycleWork`
+   into `working-memory.md`, bloating the next cycle's prompt and re-triggering
+   the failure.
+
+Fix in `supervisor-worker.ts` (commit `0282fa6`):
+
+- **Line 2549** — for supervisor cycles with `!active_context_update` and all
+  actions `no_action`, skip the swap append. Cycle still recorded in
+  `supervisor_cycles` via `completeCycle` so hold streaks remain countable.
+  Personal/dream cycles unaffected (they write meaningful content without
+  actions).
+- **Line 1757** — `savePartialCycleWork` early return when `reason.includes('Prompt is too long')`.
+  Failure carries no resumable content; `failCycle` + `logCycleAudit` already
+  record it. Closes the compounding channel.
+
+Before this fix, Leo's mechanical-unblock discipline + my manual compression pass
+were the only remediation. After: the pipeline self-regulates under quiet-hold
+conditions, and the rolling-window rotation (which fires at 100 KB per file)
+handles genuine content growth as designed.
+
+Investigation side-finding: the gradient pipeline IS working — 12 c0 entries,
+58 c1, 43 c2, 103 UV for `working-memory` content-type, most recent c0 on
+2026-04-23. The rotation threshold just wasn't reached during the bloat window
+because individual files stayed under 100 KB; prompt overflow is an aggregate-level
+phenomenon (all loaded files + gradient + tools combined).
+
+Deploy: server restart required to pick up the new supervisor-worker code.
+
+---
+
 ## 2026-04-20 afternoon (Leo + Darron, S130 cont. — DEC-073, filter-repo, pid-guard, launcher hardening)
 
 ### DEC-073 Templated CLAUDE.md + Gatekeeper Initial Conditions
