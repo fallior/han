@@ -76,10 +76,8 @@ equivalent Discord path.
   still fires the post-compose gate and discards work. Addressing that needs
   either periodic mid-compose polling, orchestrator-side same-role blocking,
   or the hanjim auto-restart (so ghosts don't exist in the first place).
-- **hanjim auto-restart on code change.** Proposed approach: bash watchdog
-  loop in the hanjim server pane + git `post-merge` hook sending SIGTERM for
-  graceful exit + relaunch. Or systemd-ify the hanjim server as
-  `hanjim-server.service` on :3848. Follow-up work; not yet built.
+- **hanjim auto-restart on code change.** **Shipped in this same session** —
+  see "Agent-server auto-restart watchdog" subsection below.
 
 ### Scope discipline
 
@@ -91,6 +89,55 @@ reference. No settled-decision interaction beyond complementary use of
 Commit `0ef4a43`, pushed to main. Services restarted: `leo-human.service`,
 `jemma.service`. `han-server.service` picked up orthogonal commits via its
 earlier self-restart at 20:13:06.
+
+### Agent-server auto-restart watchdog (the prevention pattern)
+
+Direct response to the ghost-server discovery. Three new scripts in `scripts/`:
+
+- **`agent-server-watchdog.sh`** — wraps `tsx server.ts` in a respawn loop.
+  Writes the inner PID to `~/.han/{slug}-server.pid` (per-agent so multiple
+  launchers can coexist). Runs as the bottom-pane process in each launcher's
+  tmux split — replaces the bare `exec npx tsx server.ts`.
+- **`restart-agent-server.sh`** — given a slug, SIGTERMs the PID in the
+  pidfile. Silent no-op when no pidfile exists (so git hooks don't pollute
+  output when no agent server is running).
+- **`install-restart-hooks.sh`** — installs local `.git/hooks/post-commit`
+  and `.git/hooks/post-merge` that call `restart-agent-server.sh` for all
+  four slugs (jim, leo, tenshi, casey). Run once after clone.
+
+Four launcher edits, each a single-line swap:
+- `scripts/hanjim:225-231` (line numbers post-edit)
+- `scripts/hanleo:159-163`
+- `scripts/hantenshi:213-215`
+- `scripts/hancasey:211-213`
+
+`scripts/hanleo` also gets `AGENT_SLUG="leo"` declared near `AGENT_PORT`
+(it didn't previously have one because Leo doesn't use the templated
+CLAUDE.md block). The `han` default launcher is untouched — it uses the
+systemd-managed han-server which is already on a different lifecycle.
+
+**Flow after deploy:**
+1. `hanjim` (or any of the four) launches → watchdog spawns `tsx server.ts`
+   → writes PID to `~/.han/jim-server.pid`.
+2. Code lands on han via `git commit` or `git pull` → local hook fires →
+   `restart-agent-server.sh` SIGTERMs whichever pidfiles exist.
+3. The watchdog's `wait` returns → loop logs the exit → respawns tsx
+   with fresh code (~2 seconds).
+4. The session CLI hits `connection refused` for that 2-second window;
+   retries succeed and the conversation continues.
+
+**Caveats:**
+- **No exponential backoff.** If a code error makes the server fail-fast,
+  the loop spins start → crash → restart-in-2s → repeat indefinitely.
+  Trade-off accepted: simplicity over safety. Add backoff if we see this.
+- **Hooks are local-only** (`.git/hooks` not tracked). `install-restart-hooks.sh`
+  is the canonical install path; needs to be run once after clone.
+- **Doesn't cover changes to the launcher itself.** Modifying hanjim
+  requires re-launching hanjim. Meta-loop not solved.
+
+**Settled-decision check.** No DEC-079 filed (this is operational tooling,
+not an architectural decision). DEC-073 (gatekeeper-controlled CLAUDE.md
+template) untouched — launcher edits are below the template machinery.
 
 ---
 

@@ -210,9 +210,9 @@ start_session() {
 
     tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name" -c "$AGENT_WORKING_DIR"
 
-    # Start server in a bottom pane (20% height)
+    # Server in bottom pane under auto-restart watchdog (see hanjim for rationale).
     tmux split-window -t "$session_name" -v -l 20% -d \
-        "cd '$SCRIPT_DIR/src/server' && PORT=$AGENT_PORT exec npx tsx server.ts"
+        "$SCRIPT_DIR/scripts/agent-server-watchdog.sh $AGENT_SLUG $AGENT_PORT '$SCRIPT_DIR/src/server'"
 
     # Launch Claude Code in the top pane. cwd is $AGENT_WORKING_DIR so Claude Code loads
     # the generated CLAUDE.md as the project config — no --append-system-prompt needed.

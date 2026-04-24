@@ -222,9 +222,13 @@ start_session() {
 
     tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name" -c "$AGENT_WORKING_DIR"
 
-    # Start server in a bottom pane (20% height)
+    # Start server in a bottom pane (20% height) under the auto-restart watchdog.
+    # The watchdog writes ~/.han/{slug}-server.pid; han's git hooks SIGTERM that PID
+    # on code change, the loop catches the exit and relaunches with fresh code.
+    # Replaces the bare `exec npx tsx server.ts` that caused the Apr 20 → Apr 24
+    # ghost-server drift (PID 2271911 ran 4 days of stale code).
     tmux split-window -t "$session_name" -v -l 20% -d \
-        "cd '$SCRIPT_DIR/src/server' && PORT=$AGENT_PORT exec npx tsx server.ts"
+        "$SCRIPT_DIR/scripts/agent-server-watchdog.sh $AGENT_SLUG $AGENT_PORT '$SCRIPT_DIR/src/server'"
 
     # Launch Claude Code in the top pane. cwd is already $AGENT_WORKING_DIR via -c above,
     # so Claude Code loads $AGENT_WORKING_DIR/CLAUDE.md as the project config.

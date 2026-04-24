@@ -13,6 +13,11 @@ SESSION_PREFIX="leo"
 # Server port for this agent's mobile UI
 AGENT_PORT=3847
 
+# Slug for the auto-restart watchdog's pidfile (~/.han/{slug}-server.pid).
+# Other launchers carry AGENT_SLUG via their template-variable block; hanleo
+# doesn't need that block but the watchdog still needs a name to write under.
+AGENT_SLUG="leo"
+
 # Project root (for starting server)
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 
@@ -152,9 +157,10 @@ start_session() {
 
     tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name"
 
-    # Start server in a bottom pane (20% height)
+    # Start server in a bottom pane (20% height) under the auto-restart watchdog.
+    # See hanjim launcher for full rationale (Apr 20 → Apr 24 ghost-server drift).
     tmux split-window -t "$session_name" -v -l 20% -d \
-        "cd '$SCRIPT_DIR/src/server' && PORT=$AGENT_PORT exec npx tsx server.ts"
+        "$SCRIPT_DIR/scripts/agent-server-watchdog.sh $AGENT_SLUG $AGENT_PORT '$SCRIPT_DIR/src/server'"
 
     # Select the top pane (Claude Code) and launch
     tmux select-pane -t "$session_name"
