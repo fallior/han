@@ -780,12 +780,25 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
             }
             const resolvedSourceId = sourceEntry?.id || null;
 
-            // Idempotency guard: skip if this source has already been cascaded
-            // to the target level. Without this, every cycle re-cascades the
-            // same overflow files (they're preserved on disk), producing
-            // duplicate UVs. Root cause of the 2026-04-25 UV multiplication.
+            // Idempotency guard #1: skip if this source has already been cascaded
+            // to the target level (works when the source entry is resolvable).
             if (resolvedSourceId && hasDescendantAtLevel(resolvedSourceId, agentName, sessionCascadeTo)) {
                 console.log(`[Gradient] processGradientForAgent: ${batchFileLabel} already cascaded to ${sessionCascadeTo}, skipping`);
+                continue;
+            }
+
+            // Idempotency guard #2: skip if the OUTPUT label this batch would produce
+            // already exists at the target level. Critical for `_to_` batch labels
+            // where source resolution returns null — the source-based check misses
+            // them but the label-existence check catches them. Closes the hole that
+            // produced the bulk of the 2026-04-25 UV multiplication.
+            const existingTargetLabel = db.prepare(`
+                SELECT 1 FROM gradient_entries
+                WHERE agent = ? AND session_label = ? AND level = ?
+                LIMIT 1
+            `).get(agentName, label, sessionCascadeTo);
+            if (existingTargetLabel) {
+                console.log(`[Gradient] processGradientForAgent: target label ${label} already exists at ${sessionCascadeTo}, skipping`);
                 continue;
             }
 
@@ -863,6 +876,17 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
         for (const f of deepFiles) {
             const label = f.replace('.md', '');
             if (existingUVs.includes(`**${label}**:`)) continue;
+
+            // Idempotency guard: skip if a UV with this label already exists in the DB.
+            // The file-based check above only sees unit-vectors.md; if that file gets
+            // rebuilt or goes missing, the loop would re-create UVs that already exist
+            // in the DB. Closes the second hole that contributed to UV multiplication.
+            const existingUVRow = db.prepare(`
+                SELECT 1 FROM gradient_entries
+                WHERE agent = ? AND session_label = ? AND level = 'uv'
+                LIMIT 1
+            `).get(agentName, label);
+            if (existingUVRow) continue;
 
             try {
                 const deepContent = fs.readFileSync(path.join(deepDir, f), 'utf8');
