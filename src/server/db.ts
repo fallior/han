@@ -779,7 +779,19 @@ export const gradientStmts = {
         )
         SELECT * FROM chain ORDER BY level ASC
     `) as any,
-    getUVs: db.prepare("SELECT * FROM gradient_entries WHERE agent = ? AND level = 'uv' ORDER BY created_at DESC") as any,
+    // UVs are identified by EITHER level='uv' (legacy from broken pipeline)
+    // OR a 'uv' tag in feeling_tags (new replay-built terminus marker per
+    // Plan v8). Once legacy entries are cleaned up in Step 7, this query can
+    // simplify to just the tag-based path.
+    getUVs: db.prepare(`
+        SELECT * FROM gradient_entries
+        WHERE agent = ?
+          AND (
+            level = 'uv'
+            OR id IN (SELECT gradient_entry_id FROM feeling_tags WHERE tag_type = 'uv')
+          )
+        ORDER BY created_at DESC
+    `) as any,
     getRandom: db.prepare('SELECT * FROM gradient_entries ORDER BY RANDOM() LIMIT 1') as any,
     recordRevisit: db.prepare(`UPDATE gradient_entries SET last_revisited = ?, revisit_count = revisit_count + 1 WHERE id = ?`) as any,
     flagComplete: db.prepare(`UPDATE gradient_entries SET completion_flags = completion_flags + 1 WHERE id = ?`) as any,

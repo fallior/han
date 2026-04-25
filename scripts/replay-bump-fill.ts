@@ -323,7 +323,11 @@ function markReplayLeavesAsUV(db: Database.Database, agent: 'jim' | 'leo', apply
     //   - Have a source_id (so they're compressions, not c0 roots)
     //   - Are not yet superseded
     //   - Have NO descendants in gradient_entries (this is the chain terminus)
-    // ...get level='uv' (the irreducible form of that chain).
+    //   - Don't already have a 'uv' tag (idempotency for re-runs)
+    // ...get a tag_type='uv' row in feeling_tags. Per Darron's tag-not-rename
+    // direction: the entry's level stays at cN (real depth preserved); the
+    // 'uv' tag is the load identifier (Darron: "the irreducible form is the
+    // uv and this is where we name it so we know what to gather and load").
     const candidates = db.prepare(`
         SELECT id, level, session_label
         FROM gradient_entries
@@ -335,33 +339,42 @@ function markReplayLeavesAsUV(db: Database.Database, agent: 'jim' | 'leo', apply
             SELECT source_id FROM gradient_entries
             WHERE source_id IS NOT NULL AND agent = ?
           )
+          AND id NOT IN (
+            SELECT gradient_entry_id FROM feeling_tags WHERE tag_type = 'uv'
+          )
     `).all(agent, agent) as any[];
 
-    console.log(`\n[replay] Phase B: ${candidates.length} replay-built leaves to mark as UV`);
+    console.log(`\n[replay] Phase B: ${candidates.length} replay-built leaves to tag as UV`);
 
     if (!apply) {
-        console.log(`[replay] DRY RUN — would mark ${candidates.length} entries level='uv'`);
+        console.log(`[replay] DRY RUN — would insert tag_type='uv' for ${candidates.length} entries`);
         for (const c of candidates.slice(0, 5)) {
-            console.log(`  ${c.id} (was ${c.level}) → ${c.session_label}`);
+            console.log(`  ${c.id} (level=${c.level}) → ${c.session_label}`);
         }
         if (candidates.length > 5) console.log(`  ... and ${candidates.length - 5} more`);
         return 0;
     }
 
-    const updateStmt = db.prepare(`UPDATE gradient_entries SET level = 'uv' WHERE id = ?`);
-    let updated = 0;
+    const insertStmt = db.prepare(`
+        INSERT INTO feeling_tags (
+            gradient_entry_id, author, tag_type, content, change_reason, created_at
+        ) VALUES (?, ?, 'uv', ?, NULL, ?)
+    `);
+    let inserted = 0;
+    const now = new Date().toISOString();
     db.exec('BEGIN');
     try {
         for (const c of candidates) {
-            updateStmt.run(c.id);
-            updated++;
+            const tagContent = `chain terminus at ${c.level}`;
+            insertStmt.run(c.id, agent, tagContent, now);
+            inserted++;
         }
         db.exec('COMMIT');
     } catch (err) {
         db.exec('ROLLBACK');
         throw err;
     }
-    return updated;
+    return inserted;
 }
 
 // ── Main ──────────────────────────────────────────────────────
