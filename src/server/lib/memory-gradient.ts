@@ -169,6 +169,59 @@ function ensureDir(dirPath: string): void {
     }
 }
 
+// ── Cascade pause + idempotency guards ─────────────────────────
+
+const SIGNALS_DIR = path.join(process.env.HOME || '', '.han', 'signals');
+const CASCADE_PAUSED_SIGNAL = path.join(SIGNALS_DIR, 'cascade-paused');
+
+/**
+ * Tourniquet: when ~/.han/signals/cascade-paused exists, all cascade functions
+ * return immediately. Touch the file to pause; rm it to resume. Used as the
+ * emergency stop for the UV-multiplication incident (2026-04-25) — every
+ * supervisor cycle and heartbeat was re-cascading the same sources, producing
+ * 5.4× UVs per c0 over months.
+ */
+function isCascadePaused(): boolean {
+    return fs.existsSync(CASCADE_PAUSED_SIGNAL);
+}
+
+/**
+ * Idempotency check: does this source already have a child at the target level?
+ * Used by processGradientForAgent before compressing a batch to its next level.
+ * Prevents re-cascading the same source repeatedly across cycles. Index used:
+ * idx_ge_source on gradient_entries(source_id).
+ */
+function hasDescendantAtLevel(sourceId: string, agent: string, level: string): boolean {
+    const row = db.prepare(`
+        SELECT 1 FROM gradient_entries
+        WHERE source_id = ? AND agent = ? AND level = ?
+        LIMIT 1
+    `).get(sourceId, agent, level);
+    return !!row;
+}
+
+/**
+ * Idempotency check: does this seed have ANY UV descendant in its lineage?
+ * Walks the source_id chain transitively. Used by activeCascade and bumpCascade
+ * to skip seeds whose chains have already terminated at UV — preventing
+ * duplicate UV creation when seeds get re-picked across cycles.
+ */
+function hasUVDescendant(seedId: string, agent: string): boolean {
+    const row = db.prepare(`
+        WITH RECURSIVE descendants(id) AS (
+            SELECT id FROM gradient_entries WHERE source_id = ? AND agent = ?
+            UNION
+            SELECT g.id FROM gradient_entries g
+            JOIN descendants d ON g.source_id = d.id
+            WHERE g.agent = ?
+        )
+        SELECT 1 FROM gradient_entries
+        WHERE id IN (SELECT id FROM descendants) AND level = 'uv'
+        LIMIT 1
+    `).get(seedId, agent, agent);
+    return !!row;
+}
+
 // ── Traversable Memory helpers ──────────────────────────────────
 
 function generateGradientId(): string {
@@ -540,6 +593,18 @@ ${content}${FEELING_TAG_INSTRUCTION}`);
 // ── Function 3: processGradientForAgent ────────────────────────
 
 export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise<GradientProcessingResult> {
+    if (isCascadePaused()) {
+        console.log(`[Gradient] processGradientForAgent: paused (cascade-paused signal present), skipping`);
+        return {
+            agentName,
+            sessionDate: new Date().toISOString().split('T')[0],
+            compressionsToDo: 0,
+            completions: [],
+            totalTokensUsed: 0,
+            errors: [],
+        };
+    }
+
     const homeDir = process.env.HOME || '/root';
     const memoryDir =
         agentName === 'jim'
@@ -715,6 +780,15 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
             }
             const resolvedSourceId = sourceEntry?.id || null;
 
+            // Idempotency guard: skip if this source has already been cascaded
+            // to the target level. Without this, every cycle re-cascades the
+            // same overflow files (they're preserved on disk), producing
+            // duplicate UVs. Root cause of the 2026-04-25 UV multiplication.
+            if (resolvedSourceId && hasDescendantAtLevel(resolvedSourceId, agentName, sessionCascadeTo)) {
+                console.log(`[Gradient] processGradientForAgent: ${batchFileLabel} already cascaded to ${sessionCascadeTo}, skipping`);
+                continue;
+            }
+
             try {
                 const raw = await sdkCompress(
                     `${prompt}\n\nSource: ${sessionCascadeFrom} → ${sessionCascadeTo}\nFiles: ${batch.join(', ')}\n\n${batchContent}${FEELING_TAG_INSTRUCTION}`
@@ -842,6 +916,11 @@ export async function activeCascade(
     percentage: number,
     context: string = 'active cascade',
 ): Promise<number> {
+    if (isCascadePaused()) {
+        console.log(`[Gradient] activeCascade (${context}): paused, skipping`);
+        return 0;
+    }
+
     // Get all c0 and c1 entries for this agent (both are seed levels for the cascade)
     const allC0s = (gradientStmts.getByAgentLevel.all(agent, 'c0') as any[]);
     const allC1s = (gradientStmts.getByAgentLevel.all(agent, 'c1') as any[]);
@@ -857,6 +936,13 @@ export async function activeCascade(
 
     for (const seedEntry of selected) {
         try {
+            // Idempotency guard: skip if this seed's chain already terminates at UV.
+            // Without this, random sampling re-picks already-cascaded seeds and
+            // produces duplicate UVs. Root cause of the 2026-04-25 UV multiplication.
+            if (hasUVDescendant(seedEntry.id, agent)) {
+                continue;
+            }
+
             // Check feeling tag stability — volatile entries are still metabolising
             const seedTags = feelingTagStmts.getByEntry.all(seedEntry.id) as any[];
             if (seedTags.some((t: any) => t.stability === 'volatile')) {
@@ -987,6 +1073,11 @@ export async function bumpCascade(
 ): Promise<{ compressions: number; uvs: number; errors: number; details: string[] }> {
     const result = { compressions: 0, uvs: 0, errors: 0, details: [] as string[] };
 
+    if (isCascadePaused()) {
+        console.log(`[Gradient] bumpCascade (${context}): paused, skipping`);
+        return result;
+    }
+
     // Scan each level from startLevel upward, finding leaves
     let currentLevel = startLevel;
     let totalLeaves = 0;
@@ -1007,6 +1098,15 @@ export async function bumpCascade(
         const batch = leaves.slice(0, count);
 
         for (const entry of batch) {
+            // Idempotency guard: skip if this leaf already has a descendant at the
+            // next level (its bump has already been done by a prior cycle). Without
+            // this, leaves get re-bumped repeatedly across cycles, creating duplicate
+            // chains. Root cause of the 2026-04-25 UV multiplication.
+            const nextForCheck = nextLevel(entry.level);
+            if (nextForCheck && hasDescendantAtLevel(entry.id, agent, nextForCheck)) {
+                continue;
+            }
+
             // Check feeling tag stability — volatile entries are still metabolising
             const entryTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
             if (entryTags.some((t: any) => t.stability === 'volatile')) {
