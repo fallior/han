@@ -1914,7 +1914,12 @@ export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
     // Exclude noise-tagged supersessions (cascade duplicates that are preserved in
     // DB but are not perception history worth loading). Was-true-when contradictions
     // and evolution markers continue to load — those represent real perception history.
-    const NOISE_QUALIFIERS = new Set(['noise-duplicate', 'auto-dedupe-needs-review']);
+    const NOISE_QUALIFIERS = new Set([
+        'noise-duplicate',
+        'auto-dedupe-needs-review',
+        'cascade-artefact-merge',
+        'not-own',
+    ]);
     const activeUVs = uvs.filter((uv: any) => !uv.superseded_by);
     const supersededUVs = uvs.filter((uv: any) =>
         uv.superseded_by && !NOISE_QUALIFIERS.has(uv.qualifier)

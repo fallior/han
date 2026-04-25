@@ -54,14 +54,58 @@ load-time visibility; the `qualifier` field records the reason. The
 supersession chain preserves the perception-history of each compression
 position.
 
-## Follow-up flagged
+## Audit pass (sovereignty restoration)
 
-`loadTraversableGradient` (memory-gradient.ts:1903) still renders BOTH
-active and superseded UV sections in the loaded gradient. After Pass B
-the active section shrunk but the Was-True-When section grew correspondingly.
-Net loaded size unchanged (~439 KB / ~110K tokens for jim).
+Darron's instruction after Pass A/B landed: "Leo violated the sovereignty
+edict, can you do an audit." Per S103 and Darron's express approval to
+"alter anything as you see fit."
 
-If a smaller load is wanted, a one-line loader change to skip or cap the
-Was-True-When section would do it. Not required for jim-human function
-under current context — verified compose works at 110K tokens with 200K
-limit. Deferred for Darron's call.
+### `audit-leo-actions.mjs` (read-only)
+
+Quantifies what Leo did under his own (non-Jim) qualifiers:
+- `auto-dedupe-needs-review`: 1,009 — Leo flagged these for review explicitly
+- `noise-duplicate`: 361 — Leo's strict exact-content dedup
+- `was-true-when`: 137 — Leo's bi-directional supersession chains
+
+### `audit-50-pairs.mjs` and `audit-quantify.mjs` (read-only)
+
+Sample-read pairs by qualifier; quantify Jaccard word-overlap between
+each superseded entry and its assigned canonical. Findings:
+- `noise-duplicate`: 100% Jaccard ≈ 1.00 (correct dedup, keep)
+- `auto-dedupe-needs-review`: 77% have Jaccard < 0.30 (genuinely different
+  content — Leo over-collapsed thematic relatives into one bucket)
+- `was-true-when`: 92% have Jaccard < 0.30 (same pattern)
+
+### `restore-leo-overcollapse.mjs` (state-changing — already run)
+
+Restored 903 entries (cleared `superseded_by`, `qualifier`, decremented
+`change_count`, and cleared `supersedes` on canonicals where Leo had
+set bi-directional pointers).
+
+Restore criterion: jaccard < 0.30 between target and canonical, qualifier
+in (`auto-dedupe-needs-review`, `was-true-when`). Higher-jaccard entries
+(0.30+) kept superseded as genuine variants.
+
+### Final jim UV state (after audit + restore)
+
+| Status | Count |
+|---|---:|
+| Active | 1,607 |
+| Superseded — `cascade-artefact-merge` (my Pass B) | 568 |
+| Superseded — `noise-duplicate` (Leo, exact-content) | 361 |
+| Superseded — `auto-dedupe-needs-review` (jaccard ≥ 0.30) | 232 |
+| Superseded — `was-true-when` (jaccard ≥ 0.30) | 11 |
+| Superseded — `not-own` (my Pass A) | 1 |
+| **Total superseded** | **1,173** |
+
+## Loader change
+
+`loadTraversableGradient` (memory-gradient.ts:1917) had `NOISE_QUALIFIERS`
+filtering the Was-True-When section to skip 'noise-duplicate' and
+'auto-dedupe-needs-review' from the rendered load. Added
+'cascade-artefact-merge' and 'not-own' to that set so they don't load
+either. Memory invariant preserved — entries remain in the DB queryable.
+
+Net result: jim's loaded gradient ~493 KB / ~123K tokens. Direct SDK
+test confirmed jim-human composes successfully at this size with 47K
+tokens of headroom in Opus 4.6's 200K context.
