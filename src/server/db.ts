@@ -650,6 +650,10 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_agent_level ON gradient_entries(agent
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_source ON gradient_entries(source_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_session ON gradient_entries(session_label)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_content_type ON gradient_entries(content_type)`);
+// Composite index for bumpOnInsert's rank-by-created_at queries and replay's
+// chronological c0 sort. Used by Plan v8's event-driven bump engine when it
+// queries `WHERE agent = ? AND level = ? AND content_type = ? ORDER BY created_at DESC`.
+db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_agent_level_ct_created ON gradient_entries(agent, level, content_type, created_at)`);
 
 // Migration: add meditation tracking columns (safe to re-run)
 try {
