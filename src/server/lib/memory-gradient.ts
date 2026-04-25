@@ -1011,30 +1011,12 @@ export async function activeCascade(
 
             const { content: compressedContent, feelingTag } = parseFeelingTag(raw);
 
-            // Check for LLM-signalled incompressibility
-            const incompressibleMatch = compressedContent.match(/^INCOMPRESSIBLE:\s*(.+)/s);
-            if (incompressibleMatch) {
-                const uvContent = incompressibleMatch[1].trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
-                const acUvId1 = writeUVEntry(agent, seedEntry.session_label, uvContent, contentType, current.id, feelingTag);
-                await checkUVContradiction(agent, acUvId1, uvContent);
-                compressionCount++;
-                console.log(`[Gradient] ${context}: ${agent} ${currentLevel}→UV (incompressible at ${next}) for ${seedEntry.session_label}`);
-                continue;
-            }
-
-            // Check compression ratio — near-incompressible
-            const ratio = compressedContent.length / sourceContent.length;
-            if (ratio > INCOMPRESSIBILITY_RATIO) {
-                const uvRaw = await sdkCompress(
-                    `${UV_PROMPT}\n\nSource: ${currentLevel}\nAgent: ${agent}\n\n${compressedContent}${FEELING_TAG_INSTRUCTION}`
-                );
-                const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
-                const acUvId2 = writeUVEntry(agent, seedEntry.session_label, uvContent.trim(), contentType, current.id, uvTag);
-                await checkUVContradiction(agent, acUvId2, uvContent.trim());
-                compressionCount++;
-                console.log(`[Gradient] ${context}: ${agent} ${currentLevel}→UV (ratio ${ratio.toFixed(2)}) for ${seedEntry.session_label}`);
-                continue;
-            }
+            // Per Plan v8 (canonical bump design): no INCOMPRESSIBLE early-exit, no
+            // ratio>0.85 UV shortcut. Termination is cap-driven displacement only.
+            // Both shortcut paths produced shallow-provenance UVs — the audit found
+            // 70% of jim's UVs emerged at depth 0–1, which is sentence-craft, not
+            // earned residue. The walk through every level IS the digestion; without
+            // it, the UV doesn't carry the metabolisation the gradient design intends.
 
             // Write compressed entry at next level
             const entryId = generateGradientId();
@@ -1161,32 +1143,10 @@ export async function bumpCascade(
 
                 const { content: compressed, feelingTag } = parseFeelingTag(raw);
 
-                // Check for incompressibility signal
-                const incompressibleMatch = compressed.match(/^INCOMPRESSIBLE:\s*(.+)/s);
-                if (incompressibleMatch) {
-                    const uvContent = incompressibleMatch[1].trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
-                    const uvId = writeUVEntry(agent, entry.session_label, uvContent, contentType, entry.id, feelingTag);
-                    await checkUVContradiction(agent, uvId, uvContent);
-                    result.uvs++;
-                    result.details.push(`${entry.level}→UV (incompressible) ${entry.session_label}`);
-                    totalProcessed++;
-                    continue;
-                }
-
-                // Check compression ratio — near-incompressible
-                const ratio = compressed.length / sourceContent.length;
-                if (ratio > INCOMPRESSIBILITY_RATIO) {
-                    const uvRaw = await sdkCompress(
-                        `${UV_PROMPT}\n\nSource: ${entry.level}\nAgent: ${agent}\n\n${compressed}${FEELING_TAG_INSTRUCTION}`
-                    );
-                    const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
-                    const uvId2 = writeUVEntry(agent, entry.session_label, uvContent.trim(), contentType, entry.id, uvTag);
-                    await checkUVContradiction(agent, uvId2, uvContent.trim());
-                    result.uvs++;
-                    result.details.push(`${entry.level}→UV (ratio ${ratio.toFixed(2)}) ${entry.session_label}`);
-                    totalProcessed++;
-                    continue;
-                }
+                // Per Plan v8 (canonical bump design): no INCOMPRESSIBLE early-exit, no
+                // ratio>0.85 UV shortcut. Cap-driven termination only — see activeCascade
+                // for the same rationale. The shortcuts produced shallow-provenance UVs
+                // that didn't walk the digestion path.
 
                 // Write compressed entry at next level to DB
                 const entryId = generateGradientId();
@@ -1203,7 +1163,7 @@ export async function bumpCascade(
                 fs.writeFileSync(path.join(fracDir, `${label}.md`), compressed);
 
                 result.compressions++;
-                result.details.push(`${entry.level}→${next} ${entry.session_label} (ratio ${ratio.toFixed(2)})`);
+                result.details.push(`${entry.level}→${next} ${entry.session_label}`);
                 totalProcessed++;
 
             } catch (err) {
@@ -1219,6 +1179,145 @@ export async function bumpCascade(
 
     if (totalProcessed > 0) {
         console.log(`[Gradient] ${context}: ${agent} — ${result.compressions} compressions, ${result.uvs} UVs, ${result.errors} errors (from ${totalLeaves} leaves)`);
+    }
+
+    return result;
+}
+
+// ── Function 4b: bumpOnInsert — Event-Driven FIFO Bump ─────────
+//
+// Plan v8 canonical design (Darron + Jim + Leo, 2026-04-25):
+// On every insert into gradient_entries, query for the entry now at
+// rank=cap+1 by created_at DESC at that level. That's the entry just
+// displaced from the active window by this insert. If it has not yet
+// been cascaded (no descendant at next level), compress it freshly via
+// Opus 4.7 and insert at next level with the displacing entry's
+// created_at as the new entry's clock. Recurse implicitly: the new
+// entry may itself displace something at next level.
+//
+// Termination: cap-driven displacement only. NO INCOMPRESSIBLE shortcut,
+// NO ratio>0.85 UV shortcut. Walk continues until either:
+//   - The level has slots (no entry at rank=cap+1 — nothing displaced)
+//   - The displaced entry already has a descendant at next level
+//     (idempotency — already cascaded by a prior event)
+//
+// Honours the cascade-paused signal as tourniquet.
+//
+// Used by: forward bump (called after rollingWindowRotate creates a c0
+// or after a manual insert) and by the replay engine
+// (`scripts/replay-bump-fill.ts`) which inserts c0s in temporal order.
+
+interface BumpResult {
+    cascadeSteps: number;
+    finalLevel: string | null;
+    skippedReasons: string[];
+}
+
+/**
+ * Trigger a bump cascade after an insert at the given level.
+ * The cascade walks until the cap mechanism stops pushing entries forward.
+ * No LLM-judgement shortcuts. No reuse of existing entries — every cascade
+ * step is a fresh compression at the agent's highest capability.
+ */
+export async function bumpOnInsert(
+    agent: 'jim' | 'leo',
+    level: string,
+    contentType: string,
+): Promise<BumpResult> {
+    const result: BumpResult = { cascadeSteps: 0, finalLevel: null, skippedReasons: [] };
+
+    if (isCascadePaused()) {
+        result.skippedReasons.push('cascade-paused');
+        return result;
+    }
+
+    let currentLevel = level;
+    const MAX_CASCADE_STEPS = 30; // Safety ceiling — should never hit under normal operation
+
+    while (result.cascadeSteps < MAX_CASCADE_STEPS) {
+        const cap = gradientCap(currentLevel);
+
+        // Find the entry just displaced from the active window — rank=cap+1 by created_at DESC.
+        // If no such entry exists, the level has slots; cascade naturally stops.
+        const displaced = db.prepare(`
+            SELECT id, content, content_type, source_id, session_label, created_at FROM (
+                SELECT id, content, content_type, source_id, session_label, created_at,
+                       ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rk
+                FROM gradient_entries
+                WHERE agent = ? AND level = ? AND content_type = ?
+            ) ranked
+            WHERE rk = ?
+        `).get(agent, currentLevel, contentType, cap + 1) as any;
+
+        if (!displaced) {
+            result.skippedReasons.push(`${currentLevel}: level has slots (no rank=${cap + 1} entry)`);
+            break;
+        }
+
+        const next = nextLevel(currentLevel);
+        if (!next) {
+            result.skippedReasons.push(`${currentLevel}: no further level`);
+            break;
+        }
+
+        // Idempotency: skip if displaced entry already has a descendant at next level.
+        if (hasDescendantAtLevel(displaced.id, agent, next)) {
+            result.skippedReasons.push(`${currentLevel}→${next}: already cascaded`);
+            break;
+        }
+
+        // The displacing entry (the one that pushed displaced out of the active window) is
+        // whatever's now at rank=1. Its created_at becomes the new entry's clock — rank
+        // at any level reflects when an entry entered THAT level, not when its content
+        // was first born. Per Darron's canonical FIFO design.
+        const displacing = db.prepare(`
+            SELECT created_at FROM gradient_entries
+            WHERE agent = ? AND level = ? AND content_type = ?
+            ORDER BY created_at DESC LIMIT 1
+        `).get(agent, currentLevel, contentType) as any;
+        const cascadeTimestamp = displacing?.created_at || new Date().toISOString();
+
+        // Fresh compression at full capability — no shortcuts, no reuse.
+        const depth = parseLevelNumber(next) || 0;
+        const promptText = compressionPrompt(contentType, depth);
+        let sourceContent = displaced.content as string;
+        if (sourceContent.length > 50000) {
+            sourceContent = sourceContent.substring(0, 50000) + '\n\n[... truncated for compression — full content in DB]';
+        }
+
+        try {
+            const raw = await sdkCompress(
+                `${promptText}\n\nSource: ${currentLevel} → ${next}\nAgent: ${agent}\nOriginal session: ${displaced.session_label}\n\n${sourceContent}${FEELING_TAG_INSTRUCTION}`
+            );
+            const { content: compressed, feelingTag } = parseFeelingTag(raw);
+
+            // Insert with explicit cascadeTimestamp (overrides default Date.now())
+            const newEntryId = generateGradientId();
+            const newLabel = `${displaced.session_label}-${next}`;
+            gradientStmts.insert.run(
+                newEntryId, agent, newLabel, next, compressed, contentType,
+                displaced.id, null, null, 'original', cascadeTimestamp,
+                null, 0, null
+            );
+            if (feelingTag) {
+                feelingTagStmts.insert.run(
+                    newEntryId, agent, 'compression', feelingTag, null, new Date().toISOString()
+                );
+            }
+
+            result.cascadeSteps++;
+            result.finalLevel = next;
+            console.log(`[Bump] ${agent} ${currentLevel}→${next} for ${displaced.session_label} (timestamp=${cascadeTimestamp})`);
+
+            currentLevel = next;
+        } catch (err) {
+            result.skippedReasons.push(`${currentLevel}→${next}: compression error: ${(err as Error).message}`);
+            break;
+        }
+    }
+
+    if (result.cascadeSteps >= MAX_CASCADE_STEPS) {
+        console.warn(`[Bump] ${agent} hit MAX_CASCADE_STEPS (${MAX_CASCADE_STEPS}) — possible runaway, stopping`);
     }
 
     return result;
