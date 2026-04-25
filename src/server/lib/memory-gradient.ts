@@ -2019,6 +2019,11 @@ export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
         'cascade-artefact-merge',
         'not-own',
         'lineage-collision',
+        // Plan v8 Step 7 supersessions: pre-rebuild entries whose replay-built
+        // canonicals now hold the truth. Preserved in DB for audit but excluded
+        // from prompt load.
+        'pre-replay',
+        'broken-lineage',
     ]);
     const activeUVs = uvs.filter((uv: any) => !uv.superseded_by);
     const supersededUVs = uvs.filter((uv: any) =>
