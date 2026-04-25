@@ -24,8 +24,12 @@ export const PID_FILE = path.join(HAN_DIR, 'server.pid');
 export const REGISTRY_PATH = path.join(process.env.HOME!, 'Projects', 'infrastructure', 'registry', 'services.toml');
 
 // ── Database setup ──────────────────────────────────────────
+//
+// HAN_DB_PATH override allows scripts (e.g. replay-bump-fill) to route
+// `db` at a non-default file without forking schema. Production paths
+// fall back to ~/.han/tasks.db when the env var is unset.
 
-const TASKS_DB_PATH = path.join(HAN_DIR, 'tasks.db');
+const TASKS_DB_PATH = process.env.HAN_DB_PATH || path.join(HAN_DIR, 'tasks.db');
 export const db = new Database(TASKS_DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');

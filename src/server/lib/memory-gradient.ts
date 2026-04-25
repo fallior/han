@@ -1222,7 +1222,6 @@ interface BumpResult {
 export async function bumpOnInsert(
     agent: 'jim' | 'leo',
     level: string,
-    contentType: string,
 ): Promise<BumpResult> {
     const result: BumpResult = { cascadeSteps: 0, finalLevel: null, skippedReasons: [] };
 
@@ -1238,16 +1237,16 @@ export async function bumpOnInsert(
         const cap = gradientCap(currentLevel);
 
         // Find the entry just displaced from the active window — rank=cap+1 by created_at DESC.
-        // If no such entry exists, the level has slots; cascade naturally stops.
+        // Cap is global per agent per level; content_type does NOT partition the queue. A
+        // working-memory c0 and a conversation c0 share the same c0 cap and compete for the
+        // same slot. The displaced entry's own content_type drives the prompt below.
         const displaced = db.prepare(`
-            SELECT id, content, content_type, source_id, session_label, created_at FROM (
-                SELECT id, content, content_type, source_id, session_label, created_at,
-                       ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rk
-                FROM gradient_entries
-                WHERE agent = ? AND level = ? AND content_type = ?
-            ) ranked
-            WHERE rk = ?
-        `).get(agent, currentLevel, contentType, cap + 1) as any;
+            SELECT id, content, content_type, source_id, session_label, created_at
+            FROM gradient_entries
+            WHERE agent = ? AND level = ?
+            ORDER BY created_at DESC
+            LIMIT 1 OFFSET ?
+        `).get(agent, currentLevel, cap) as any;
 
         if (!displaced) {
             result.skippedReasons.push(`${currentLevel}: level has slots (no rank=${cap + 1} entry)`);
@@ -1272,14 +1271,16 @@ export async function bumpOnInsert(
         // was first born. Per Darron's canonical FIFO design.
         const displacing = db.prepare(`
             SELECT created_at FROM gradient_entries
-            WHERE agent = ? AND level = ? AND content_type = ?
+            WHERE agent = ? AND level = ?
             ORDER BY created_at DESC LIMIT 1
-        `).get(agent, currentLevel, contentType) as any;
+        `).get(agent, currentLevel) as any;
         const cascadeTimestamp = displacing?.created_at || new Date().toISOString();
 
-        // Fresh compression at full capability — no shortcuts, no reuse.
+        // Prompt comes from the DISPLACED entry's content_type. The new row's content_type
+        // also inherits from the displaced entry — lineage carries the type up the chain.
+        const displacedContentType = displaced.content_type as string;
         const depth = parseLevelNumber(next) || 0;
-        const promptText = compressionPrompt(contentType, depth);
+        const promptText = compressionPrompt(displacedContentType, depth);
         let sourceContent = displaced.content as string;
         if (sourceContent.length > 50000) {
             sourceContent = sourceContent.substring(0, 50000) + '\n\n[... truncated for compression — full content in DB]';
@@ -1291,11 +1292,26 @@ export async function bumpOnInsert(
             );
             const { content: compressed, feelingTag } = parseFeelingTag(raw);
 
+            // UV signal — if the model reports irreducibility, the displaced entry IS the
+            // UV. Tag it with the kernel sentence and stop the cascade for this lineage.
+            // No new entry is inserted: the kernel lives on the source as its 'uv' tag.
+            // The work was done (we attempted compression at depth ${depth}) — by
+            // construction, every UV tagged this way has earned it.
+            if (compressed.startsWith('INCOMPRESSIBLE:')) {
+                const kernel = compressed.slice('INCOMPRESSIBLE:'.length).trim();
+                feelingTagStmts.insert.run(
+                    displaced.id, agent, 'uv', kernel, null, new Date().toISOString()
+                );
+                result.skippedReasons.push(`${currentLevel}→${next}: INCOMPRESSIBLE — tagged source ${displaced.id} as UV`);
+                console.log(`[Bump] ${agent} ${currentLevel} UV for ${displaced.session_label}: "${kernel}"`);
+                break;
+            }
+
             // Insert with explicit cascadeTimestamp (overrides default Date.now())
             const newEntryId = generateGradientId();
             const newLabel = `${displaced.session_label}-${next}`;
             gradientStmts.insert.run(
-                newEntryId, agent, newLabel, next, compressed, contentType,
+                newEntryId, agent, newLabel, next, compressed, displacedContentType,
                 displaced.id, null, null, 'original', cascadeTimestamp,
                 null, 0, null
             );
@@ -2024,8 +2040,16 @@ export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
         // from prompt load.
         'pre-replay',
         'broken-lineage',
+        // Deferred-pipeline content (dream, felt-moment) — preserved in DB,
+        // excluded from main-gradient load; will be picked up by their own
+        // gradient pipelines when designed.
+        'deferred-pipeline',
+        // Aborted partial replay run (2026-04-25) — entries from a replay
+        // attempt that used per-content-type loops instead of the canonical
+        // single-FIFO-per-agent design. Preserved for audit, excluded from load.
+        'replay-aborted-content-type-loop',
     ]);
-    const activeUVs = uvs.filter((uv: any) => !uv.superseded_by);
+    const activeUVs = uvs.filter((uv: any) => !uv.superseded_by && !NOISE_QUALIFIERS.has(uv.qualifier));
     const supersededUVs = uvs.filter((uv: any) =>
         uv.superseded_by && !NOISE_QUALIFIERS.has(uv.qualifier)
     );
@@ -2063,7 +2087,9 @@ export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
 
     for (const level of distinctLevels) {
         const cap = gradientCap(level);
-        const entries = allEntries.filter((e: any) => e.level === level).slice(0, cap);
+        const entries = allEntries
+            .filter((e: any) => e.level === level && !NOISE_QUALIFIERS.has(e.qualifier))
+            .slice(0, cap);
         if (entries.length === 0) continue;
 
         const levelParts = entries.map((e: any) => {
