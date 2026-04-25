@@ -58,6 +58,48 @@ function deriveDateFromFilename(filename: string): string | null {
     return `${match[1]}T00:00:00.000Z`;
 }
 
+function deriveDateFromContent(filepath: string): string | null {
+    // Read first ~12 lines and look for a YYYY-MM-DD pattern.
+    // Common patterns: "Session 60 (2026-03-04, morning)", "Session 127 — 2026-04-17 to 2026-04-18", etc.
+    try {
+        const content = fs.readFileSync(filepath, 'utf-8');
+        const head = content.split('\n').slice(0, 12).join('\n');
+        const match = head.match(/(\d{4}-\d{2}-\d{2})/);
+        if (!match) return null;
+        return `${match[1]}T00:00:00.000Z`;
+    } catch {
+        return null;
+    }
+}
+
+function deriveDateFromMtime(filepath: string): string | null {
+    // Last-resort fallback. mtime reflects when the file was last written —
+    // close enough for our purposes when no explicit date is available.
+    try {
+        const stat = fs.statSync(filepath);
+        return stat.mtime.toISOString();
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Composite date derivation: try filename, then file content, then mtime.
+ * Returns ISO timestamp or null if nothing works.
+ */
+function deriveDateChain(filename: string, filepath: string): { iso: string | null; source: string } {
+    const fromFilename = deriveDateFromFilename(filename);
+    if (fromFilename) return { iso: fromFilename, source: 'filename' };
+
+    const fromContent = deriveDateFromContent(filepath);
+    if (fromContent) return { iso: fromContent, source: 'content' };
+
+    const fromMtime = deriveDateFromMtime(filepath);
+    if (fromMtime) return { iso: fromMtime, source: 'mtime (fallback)' };
+
+    return { iso: null, source: 'none' };
+}
+
 const CONFIGS: Record<string, AgentConfig> = {
     jim: {
         agent: 'jim',
@@ -65,7 +107,7 @@ const CONFIGS: Record<string, AgentConfig> = {
         contentType: 'session',
         fileFilter: (f) => f.endsWith('.md') && !f.startsWith('.'),
         deriveLabel: (f) => f.replace(/\.md$/, ''),
-        deriveCreatedAt: (f) => deriveDateFromFilename(f),
+        deriveCreatedAt: (f, fp) => deriveDateChain(f, fp).iso,
     },
     leo: {
         agent: 'leo',
@@ -78,7 +120,7 @@ const CONFIGS: Record<string, AgentConfig> = {
             return true;
         },
         deriveLabel: (f) => f.replace(/\.md$/, ''),
-        deriveCreatedAt: (f) => deriveDateFromFilename(f),
+        deriveCreatedAt: (f, fp) => deriveDateChain(f, fp).iso,
         // session-NN-YYYY-MM-DD.md and session-NN-full-YYYY-MM-DD.md → same key
         dedupeKey: (f) => f.replace(/-full-/, '-').replace(/\.md$/, ''),
         preferenceScore: (f) => f.includes('-full-') ? 100 : 0,
