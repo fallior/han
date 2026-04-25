@@ -1910,9 +1910,15 @@ export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
 
     const sections: string[] = [];
 
-    // Unit vectors — split into active and superseded
+    // Unit vectors — split into active and meaningfully-superseded.
+    // Exclude noise-tagged supersessions (cascade duplicates that are preserved in
+    // DB but are not perception history worth loading). Was-true-when contradictions
+    // and evolution markers continue to load — those represent real perception history.
+    const NOISE_QUALIFIERS = new Set(['noise-duplicate', 'auto-dedupe-needs-review']);
     const activeUVs = uvs.filter((uv: any) => !uv.superseded_by);
-    const supersededUVs = uvs.filter((uv: any) => uv.superseded_by);
+    const supersededUVs = uvs.filter((uv: any) =>
+        uv.superseded_by && !NOISE_QUALIFIERS.has(uv.qualifier)
+    );
 
     if (activeUVs.length > 0) {
         const uvLines = activeUVs.map((uv: any) => {
