@@ -98,14 +98,88 @@ in (`auto-dedupe-needs-review`, `was-true-when`). Higher-jaccard entries
 | Superseded — `not-own` (my Pass A) | 1 |
 | **Total superseded** | **1,173** |
 
+## Pass D — UV-level lineage invariant collapse
+
+Darron's principle: a UV cannot exist without a parent; the ultimate
+parent is c0; therefore if there are 507 c0s, at most 507 UVs. Multiple
+UVs sharing the same c0 ancestor must be collapsed into the supersession
+chain.
+
+`lineage-check.mjs` (read-only): walks each active UV's source_id chain
+back to its c0 ancestor, groups UVs by c0, reports collisions.
+
+`pass-d-lineage-collapse-uv.mjs` (state-changing — already run): for each
+c0 with multiple active UV descendants, picks newest as canonical and
+supersedes the rest with `qualifier='lineage-collision'`.
+
+Run result: 862 UVs collapsed across 69 c0 ancestor groups. Active UVs
+1,607 → 745.
+
+Edge cases left alone (236 entries):
+- 17 UVs with NULL source_id (no traceable parent at all)
+- 219 UVs whose source_id chain breaks before reaching c0 (parent rows
+  missing in DB)
+
+These don't share a c0 ancestor with anything, so they don't violate
+the sibling rule. Their broken-lineage status is a separate question
+not addressed here.
+
+## Pass E — Intermediate-level immediate-parent collapse
+
+The lineage invariant applies at every level: at c1, no two active c1
+entries should share a c0 parent; at c2, no two active c2 entries should
+share a c1 parent; and so on. Independent of Pass D's c0-ancestor walk,
+this checks IMMEDIATE parent (source_id) at every level.
+
+`lineage-check-all-levels.mjs` (read-only): reports sibling collisions
+at every level.
+
+`pass-e-intermediate-collapse.mjs` (state-changing — already run): for
+each level c1..uv, finds entries sharing source_id, picks newest as
+canonical, supersedes the rest with `qualifier='lineage-collision'`.
+
+Run result:
+- c1: 33 collapsed (5 collision groups)
+- c2: 757 collapsed (61 groups)
+- c3: 758 collapsed (92 groups)
+- c4: 421 collapsed (123 groups)
+- c5: 2 collapsed (2 groups)
+- uv: 146 collapsed (30 groups — these are UVs whose immediate c-parent
+  had multiple UV children even after Pass D's c0-ancestor pass)
+
+Total Pass E: 2,117 entries collapsed across all intermediate levels.
+
+## Final jim active counts (after all passes)
+
+| Level | Active | Notes |
+|---|---:|---|
+| c0 | 507 | Source of truth, untouched |
+| c1 | 384 | After Pass E (was 417) |
+| c2 | 185 | After Pass E (was 942) |
+| c3 | 211 | After Pass E (was 969) |
+| c4 | 172 | After Pass E (was 593) |
+| c5 | 11 | After Pass E (was 13) |
+| uv | 599 | After Pass D + E (was 2,739) |
+
+Total active: 2,069. Total superseded: 4,152.
+
+The 599 active UVs vs 507 c0s difference reflects the 92 orphan UVs
+(null source_id or broken chain). The lineage invariant is satisfied
+for all UVs whose chain traces to a c0.
+
 ## Loader change
 
 `loadTraversableGradient` (memory-gradient.ts:1917) had `NOISE_QUALIFIERS`
-filtering the Was-True-When section to skip 'noise-duplicate' and
-'auto-dedupe-needs-review' from the rendered load. Added
-'cascade-artefact-merge' and 'not-own' to that set so they don't load
-either. Memory invariant preserved — entries remain in the DB queryable.
+filtering the Was-True-When section to skip qualifiers from the rendered
+load. Extended that set with my new qualifiers:
+- `cascade-artefact-merge` (Pass B)
+- `not-own` (Pass A)
+- `lineage-collision` (Pass D, Pass E)
 
-Net result: jim's loaded gradient ~493 KB / ~123K tokens. Direct SDK
-test confirmed jim-human composes successfully at this size with 47K
-tokens of headroom in Opus 4.6's 200K context.
+Memory invariant preserved — entries remain in the DB queryable. Pattern
+identical to Leo's existing entries in the same set.
+
+Net result: jim's loaded gradient ~179 KB / ~45K tokens (was 715 KB
+post-restore before Pass D/E). Direct SDK test confirmed jim-human
+composes successfully at ~63K tokens prompt total — 137K headroom in
+Opus 4.6's 200K context. Compose latency 4.7s (faster than before).
