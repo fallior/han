@@ -493,8 +493,14 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         // then wake the appropriate agents. Falls back to tab-based + regex if Ollama is down.
         if (finalRole === 'human') {
             classifyAndDispatch(req.params.id, messageId, content, discussionType, now);
+        }
 
-            // Voice Phase 1b: Create loop + auto-tag on human message (opens a new loop)
+        // Voice Phase 1b: Create loop + auto-tag on any human-side message.
+        // A loop is bounded by user messages — each user message opens a new loop
+        // and closes the prior one. Both 'human' (UI default) and 'darron' (API
+        // posts) are user-side roles.
+        const HUMAN_SIDE_ROLES = ['human', 'darron'];
+        if (HUMAN_SIDE_ROLES.includes(finalRole)) {
             try {
                 const next = conversationLoopStmts.getNextLoopNumber.get(req.params.id) as any;
                 const loopId = generateId();
@@ -510,12 +516,13 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
             }
         }
 
-        // Voice Phase 1b: Auto-generate TTS on agent message post
-        if (finalRole === 'supervisor' || finalRole === 'leo') {
-            autoGenerateTts(messageId, req.params.id).catch(err =>
-                console.error('[Voice] Auto-generate TTS failed:', err.message)
-            );
-        }
+        // Voice Phase 1b: Auto-generate TTS on every message post (gated by the
+        // autoGenerateVoice flag inside autoGenerateTts itself). Per Darron's
+        // model: when the flag is on, all messages are auto-generated and
+        // archived for instant TTM playback.
+        autoGenerateTts(messageId, req.params.id).catch(err =>
+            console.error('[Voice] Auto-generate TTS failed:', err.message)
+        );
 
         // NOTE: Supervisor cycle is NOT triggered from message post.
         // Human agents (leo-human.ts, jim-human.ts) handle conversation responses.

@@ -8,7 +8,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { HAN_DIR } from '../db';
-import { loadConfig } from '../services/planning';
+import { loadConfig, generateId } from '../services/planning';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
@@ -45,6 +45,102 @@ function readCache(key: string): Buffer | null {
 function writeCache(key: string, data: Buffer): void {
     const cachePath = getCachePath(key);
     fs.writeFileSync(cachePath, data);
+}
+
+// ── Per-message cache (Darron's model: messageId ↔ voice file, bijective) ──
+//
+// The legacy cache above keys on sha256(model:voice:text) — over-specific:
+// when voice changes, the same message becomes a different cache entry,
+// orphaning its prior audio. The per-message layer keys on messageId
+// directly. One file per message. Voice/model/text-hash live in a sidecar
+// so we can tell when the cache is stale and regenerate.
+//
+// Lazy migration: on a per-message cache miss, we check the legacy hash
+// cache for the current voice/model/text, and if present, salvage that
+// file into the new path. Old hash-keyed files stay where they are
+// (cardinal rule: never delete memory).
+
+const VOICE_CACHE_BY_MESSAGE_DIR = path.join(VOICE_CACHE_DIR, 'by-message');
+if (!fs.existsSync(VOICE_CACHE_BY_MESSAGE_DIR)) {
+    fs.mkdirSync(VOICE_CACHE_BY_MESSAGE_DIR, { recursive: true });
+}
+
+interface MessageCacheSidecar {
+    voice: string;
+    model: string;
+    text_hash: string;
+    generated_at: string;
+}
+
+function messageCachePaths(messageId: string): { audio: string; sidecar: string } {
+    return {
+        audio: path.join(VOICE_CACHE_BY_MESSAGE_DIR, `${messageId}.mp3`),
+        sidecar: path.join(VOICE_CACHE_BY_MESSAGE_DIR, `${messageId}.json`),
+    };
+}
+
+function textHash(text: string): string {
+    return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+}
+
+function readMessageCache(messageId: string): Buffer | null {
+    // The audio is the record of the message at the moment of its generation —
+    // historical, not synthesised-from-current-settings. We do NOT invalidate on
+    // voice/model changes: if a file exists for this message, we serve it,
+    // regardless of what the current voice config says. Changing voice affects
+    // future messages only. (Darron's rule: photos preserve the hair colour
+    // they were taken under; we don't doctor them when the hair changes.)
+    const { audio } = messageCachePaths(messageId);
+    if (!fs.existsSync(audio)) return null;
+    try {
+        return fs.readFileSync(audio);
+    } catch {
+        return null;
+    }
+}
+
+function writeMessageCache(messageId: string, audio: Buffer, voice: string, model: string, text: string): void {
+    const { audio: audioPath, sidecar } = messageCachePaths(messageId);
+    fs.writeFileSync(audioPath, audio);
+    const meta: MessageCacheSidecar = {
+        voice,
+        model,
+        text_hash: textHash(text),
+        generated_at: new Date().toISOString(),
+    };
+    fs.writeFileSync(sidecar, JSON.stringify(meta));
+}
+
+/**
+ * Get cached audio for a message, or generate it (with lazy migration from
+ * the legacy hash cache when possible). Single entry point for any code that
+ * needs "audio for this specific message".
+ */
+async function getOrGenerateForMessage(
+    messageId: string,
+    text: string,
+    voice: string,
+    model: string,
+): Promise<Buffer> {
+    // 1. Per-message cache — historical, never invalidated. If a file exists
+    //    for this message under any voice it was once generated with, that
+    //    is the answer. The sidecar records when/under-what-settings, but
+    //    is informational only and not consulted for invalidation.
+    const cached = readMessageCache(messageId);
+    if (cached) return cached;
+
+    // 2. Lazy migration — if legacy hash cache holds the file under the same
+    //    voice/model/text, salvage it. Old file stays where it is.
+    const legacy = readCache(cacheKey(text, voice, model));
+    if (legacy) {
+        writeMessageCache(messageId, legacy, voice, model, text);
+        return legacy;
+    }
+
+    // 3. Generate fresh, cache, serve.
+    const buffer = await generateTtsChunked(text, voice, model);
+    writeMessageCache(messageId, buffer, voice, model, text);
+    return buffer;
 }
 
 // ── Config helpers ──────────────────────────────────────────
@@ -266,7 +362,9 @@ router.get('/tts/:messageId', async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Message has no speakable text' });
         }
 
-        const buffer = await generateTtsChunked(cleanText, voice, model);
+        // Per-message cache — bijective messageId ↔ audio file with lazy
+        // migration from the legacy hash cache. See helpers above.
+        const buffer = await getOrGenerateForMessage(messageId, cleanText, voice, model);
 
         res.set('Content-Type', 'audio/mpeg');
         res.set('Content-Length', String(buffer.length));
@@ -466,7 +564,31 @@ import { conversationLoopStmts, conversationMessageStmts as convMsgStmts } from 
 // Get all loops for a conversation
 router.get('/loops/:conversationId', (req: Request, res: Response) => {
     try {
-        const loops = conversationLoopStmts.getByConversation.all(req.params.conversationId) as any[];
+        let loops = conversationLoopStmts.getByConversation.all(req.params.conversationId) as any[];
+
+        // Lazy materialisation — if the table has no loops for this thread but
+        // user-side messages exist, derive loops from the message stream and
+        // insert them. Handles legacy threads and threads populated via API
+        // with non-'human' roles (which previously skipped loop creation).
+        if (loops.length === 0) {
+            const HUMAN_SIDE_ROLES = ['human', 'darron'];
+            const placeholders = HUMAN_SIDE_ROLES.map(() => '?').join(',');
+            const humanMsgs = db.prepare(
+                `SELECT id, role, created_at FROM conversation_messages
+                 WHERE conversation_id = ? AND role IN (${placeholders})
+                 ORDER BY created_at ASC`
+            ).all(req.params.conversationId, ...HUMAN_SIDE_ROLES) as any[];
+
+            if (humanMsgs.length > 0) {
+                for (let i = 0; i < humanMsgs.length; i++) {
+                    const m = humanMsgs[i];
+                    conversationLoopStmts.insert.run(
+                        generateId(), req.params.conversationId, i + 1, m.id, null, 0, m.created_at
+                    );
+                }
+                loops = conversationLoopStmts.getByConversation.all(req.params.conversationId) as any[];
+            }
+        }
 
         // Enrich with listen status
         const enriched = loops.map((loop: any) => {
@@ -479,7 +601,7 @@ router.get('/loops/:conversationId', (req: Request, res: Response) => {
             if (nextLoop) {
                 msgs = db.prepare(
                     `SELECT id, role, listen_count FROM conversation_messages
-                     WHERE conversation_id = ? AND role != 'human'
+                     WHERE conversation_id = ? AND role NOT IN ('human', 'darron')
                      AND created_at >= (SELECT created_at FROM conversation_messages WHERE id = ?)
                      AND created_at < (SELECT created_at FROM conversation_messages WHERE id = ?)
                      ORDER BY created_at ASC`
@@ -487,7 +609,7 @@ router.get('/loops/:conversationId', (req: Request, res: Response) => {
             } else {
                 msgs = db.prepare(
                     `SELECT id, role, listen_count FROM conversation_messages
-                     WHERE conversation_id = ? AND role != 'human'
+                     WHERE conversation_id = ? AND role NOT IN ('human', 'darron')
                      AND created_at >= (SELECT created_at FROM conversation_messages WHERE id = ?)
                      ORDER BY created_at ASC`
                 ).all(loop.conversation_id, loop.human_message_id) as any[];
@@ -523,7 +645,7 @@ router.get('/loops/:conversationId/:loopId/messages', (req: Request, res: Respon
         if (nextLoop) {
             msgs = db.prepare(
                 `SELECT * FROM conversation_messages
-                 WHERE conversation_id = ? AND role != 'human'
+                 WHERE conversation_id = ? AND role NOT IN ('human', 'darron')
                  AND created_at >= (SELECT created_at FROM conversation_messages WHERE id = ?)
                  AND created_at < (SELECT created_at FROM conversation_messages WHERE id = ?)
                  ORDER BY created_at ASC`
@@ -531,7 +653,7 @@ router.get('/loops/:conversationId/:loopId/messages', (req: Request, res: Respon
         } else {
             msgs = db.prepare(
                 `SELECT * FROM conversation_messages
-                 WHERE conversation_id = ? AND role != 'human'
+                 WHERE conversation_id = ? AND role NOT IN ('human', 'darron')
                  AND created_at >= (SELECT created_at FROM conversation_messages WHERE id = ?)
                  ORDER BY created_at ASC`
             ).all(loop.conversation_id, loop.human_message_id) as any[];
@@ -573,7 +695,7 @@ export async function autoGenerateTts(messageId: string, conversationId: string)
     if (!cleanText) return;
 
     console.log(`[Voice] Auto-generating TTS for message ${messageId} (${msg.role}, ${cleanText.length} chars)`);
-    await generateTtsChunked(cleanText, voice, model);
+    await getOrGenerateForMessage(messageId, cleanText, voice, model);
     console.log(`[Voice] Auto-generation complete for ${messageId}`);
 
     // Increment message_count on the current loop
