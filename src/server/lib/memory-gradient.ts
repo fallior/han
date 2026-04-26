@@ -1281,7 +1281,15 @@ export async function bumpOnInsert(
         const displacedContentType = displaced.content_type as string;
         const depth = parseLevelNumber(next) || 0;
         const promptText = compressionPrompt(displacedContentType, depth);
-        let sourceContent = displaced.content as string;
+        // Coerce content to string at the boundary. better-sqlite3 returns BLOB
+        // columns as Buffer (which has .length but no .substring), and a handful
+        // of legacy c0 rows in tasks.db were stored as BLOB rather than TEXT.
+        let sourceContent: string;
+        if (Buffer.isBuffer(displaced.content)) {
+            sourceContent = (displaced.content as Buffer).toString('utf8');
+        } else {
+            sourceContent = String(displaced.content || '');
+        }
         if (sourceContent.length > 50000) {
             sourceContent = sourceContent.substring(0, 50000) + '\n\n[... truncated for compression — full content in DB]';
         }

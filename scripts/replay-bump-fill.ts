@@ -29,11 +29,16 @@
  *   --agent={jim|leo}              Required.
  *   --source-db=<path>             Default ~/.han/tasks.db (read-only).
  *   --target-db=<path>             Default ~/.han/gradient.db (writes here).
+ *   --limit=N                      Process at most N c0s this invocation.
+ *                                   Omit for "all remaining".
  *   --apply                        Without this, dry-run (counts only).
  *
- * Idempotency: if the target DB already contains entries for this agent,
- * the script aborts. Re-running against a fresh DB is safe; partial reruns
- * require manual intervention.
+ * Resumable: each invocation reads MAX(created_at) for this agent's c0s
+ * in the target, and processes only source c0s strictly newer than that.
+ * Re-runs naturally pick up from where the last one stopped. Per-row
+ * inserts are wrapped to tolerate PRIMARY KEY violations as idempotent
+ * skips (defensive belt-and-braces — the resume cursor should already
+ * exclude in-target rows).
  *
  * The target DB is auto-created with full schema on first import of
  * src/server/db.ts (CREATE TABLE IF NOT EXISTS runs at module load).
@@ -57,6 +62,12 @@ const agent = arg('agent') as 'jim' | 'leo' | null;
 const apply = arg('apply') === 'true';
 const sourceDbPath = arg('source-db', path.join(os.homedir(), '.han', 'tasks.db'))!;
 const targetDbPath = arg('target-db', process.env.HAN_DB_PATH || path.join(os.homedir(), '.han', 'gradient.db'))!;
+const limitArg = arg('limit');
+const limit = limitArg ? parseInt(limitArg, 10) : null;
+if (limitArg && (!Number.isFinite(limit!) || limit! <= 0)) {
+    console.error(`[replay] --limit must be a positive integer, got: ${limitArg}`);
+    process.exit(1);
+}
 
 if (!agent || (agent !== 'jim' && agent !== 'leo')) {
     console.error('Usage: tsx scripts/replay-bump-fill.ts --agent={jim|leo} [--source-db=...] [--target-db=...] [--apply]');
@@ -74,37 +85,51 @@ process.env.HAN_DB_PATH = targetDbPath;
 // ── Main ────────────────────────────────────────────────────────
 
 async function main() {
-    console.log(`[replay] Agent: ${agent}`);
+    console.log(`[replay] Agent:  ${agent}`);
     console.log(`[replay] Source: ${sourceDbPath} (read-only)`);
     console.log(`[replay] Target: ${targetDbPath}`);
+    console.log(`[replay] Limit:  ${limit ?? 'unlimited'}`);
     console.log(`[replay] Mode:   ${apply ? 'APPLY' : 'DRY-RUN'}`);
 
     // Dynamic imports so HAN_DB_PATH is honoured by the target db.ts module.
     const { db: targetDb, gradientStmts, feelingTagStmts } = await import('../src/server/db');
     const { bumpOnInsert } = await import('../src/server/lib/memory-gradient');
 
-    // Idempotency guard — refuse to write into a target that already has rows
-    // for this agent. Per-agent so jim and leo replays can share a target DB.
-    const existing = (targetDb.prepare(
-        'SELECT COUNT(*) AS n FROM gradient_entries WHERE agent = ?'
-    ).get(agent) as any).n as number;
-    if (existing > 0 && apply) {
-        console.error(`[replay] FATAL: target DB already has ${existing} rows for agent='${agent}'. Aborting.`);
-        process.exit(3);
+    // Resume cursor — pick up from the c0 immediately after the latest in-target
+    // c0 for this agent (in cross-content-type chronological order). On a fresh
+    // run this is null and we start from the beginning.
+    const resumeRow = targetDb.prepare(`
+        SELECT MAX(created_at) AS max_created_at
+        FROM gradient_entries
+        WHERE agent = ? AND level = 'c0'
+          AND content_type NOT IN ('dream', 'felt-moment')
+    `).get(agent) as any;
+    const resumeFrom: string | null = resumeRow?.max_created_at || null;
+    if (resumeFrom) {
+        console.log(`[replay] Resuming from c0s with created_at > ${resumeFrom}`);
+    } else {
+        console.log(`[replay] Starting fresh — no prior c0s in target for ${agent}`);
     }
 
     // Read c0s from source DB — chronological, cross-content-type, excludes
-    // dream / felt-moment (those have their own pipelines).
+    // dream / felt-moment (those have their own pipelines). Bounded by the
+    // resume cursor and an optional --limit.
     const sourceDb = new Database(sourceDbPath, { readonly: true });
-    const c0Rows = sourceDb.prepare(`
+    const baseSql = `
         SELECT id, agent, session_label, level, content, content_type,
                source_id, source_conversation_id, source_message_id,
                provenance_type, created_at, supersedes, change_count, qualifier
         FROM gradient_entries
         WHERE agent = ? AND level = 'c0'
           AND content_type NOT IN ('dream', 'felt-moment')
+          ${resumeFrom ? "AND created_at > ?" : ""}
         ORDER BY created_at ASC, id ASC
-    `).all(agent) as any[];
+        ${limit ? "LIMIT ?" : ""}
+    `;
+    const params: any[] = [agent];
+    if (resumeFrom) params.push(resumeFrom);
+    if (limit) params.push(limit);
+    const c0Rows = sourceDb.prepare(baseSql).all(...params) as any[];
 
     console.log(`[replay] ${c0Rows.length} c0 entries to process for ${agent}`);
 
@@ -131,12 +156,20 @@ async function main() {
         const c0 = c0Rows[i];
 
         // Insert c0 into target — preserve original id, source_id, created_at.
-        gradientStmts.insert.run(
-            c0.id, c0.agent, c0.session_label, 'c0', c0.content, c0.content_type,
-            c0.source_id, c0.source_conversation_id, c0.source_message_id,
-            c0.provenance_type || 'original', c0.created_at,
-            c0.supersedes, c0.change_count || 0, c0.qualifier
-        );
+        // Tolerate PRIMARY KEY violations as idempotent skips (the resume cursor
+        // should already exclude in-target rows, but defence in depth).
+        try {
+            gradientStmts.insert.run(
+                c0.id, c0.agent, c0.session_label, 'c0', c0.content, c0.content_type,
+                c0.source_id, c0.source_conversation_id, c0.source_message_id,
+                c0.provenance_type || 'original', c0.created_at,
+                c0.supersedes, c0.change_count || 0, c0.qualifier
+            );
+        } catch (e: any) {
+            if (!String(e?.message || '').includes('UNIQUE constraint')) throw e;
+            console.log(`[replay] skip — c0 ${c0.id} already in target (UNIQUE constraint)`);
+            continue;
+        }
 
         // Copy feeling_tags for this c0 (compression-feel etc.)
         const tags = sourceTagsStmt.all(c0.id) as any[];
