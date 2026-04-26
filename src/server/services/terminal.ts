@@ -4,7 +4,7 @@ import path from 'path';
 import { HAN_DIR, PENDING_DIR } from '../db';
 
 /**
- * List all active han tmux sessions
+ * List all active tmux sessions on the host.
  */
 export function listActiveSessions(): string[] {
     try {
@@ -12,19 +12,27 @@ export function listActiveSessions(): string[] {
             encoding: 'utf8',
             stdio: ['pipe', 'pipe', 'ignore']
         });
-        return output.trim().split('\n')
-            .filter(s => s.startsWith('han'))
-            .filter(Boolean);
+        return output.trim().split('\n').filter(Boolean);
     } catch {
         return [];
     }
 }
 
 /**
- * Get the first active han session (or null)
+ * Pick the tmux session this server mirrors.
+ *
+ * HAN_SESSION is our construct — set by agent-server-watchdog when an
+ * agent-server (hanjim, hanleo, etc.) is launched, so each agent-server
+ * is pinned to its own tmux. We honour it directly instead of guessing
+ * by name prefix. If HAN_SESSION isn't set (e.g. systemd-managed
+ * han-server), fall back to the first session tmux returns.
  */
 export function getActiveSession(): string | null {
     const sessions = listActiveSessions();
+    const pinned = process.env.HAN_SESSION;
+    if (pinned && sessions.includes(pinned)) {
+        return pinned;
+    }
     return sessions.length > 0 ? sessions[0] : null;
 }
 
