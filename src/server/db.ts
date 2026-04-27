@@ -369,6 +369,20 @@ if (!msgCols.includes('listen_count')) {
     console.log('[DB] Migration complete: listen_count column added');
 }
 
+// Compression-tag column on conversation_messages — referenced by the
+// `getUnprocessedTaggedMessages` prepared statement below (~line 803). The
+// column was added to live tasks.db / gradient.db via an out-of-tree migration
+// long ago, but never made it into either the CREATE TABLE statement (above)
+// or an in-tree migration block. Result: any freshly-created gradient.db
+// (e.g., after a wipe + recreate) lacked the column, and the prepared-stmt
+// compile failed at db.ts module load. Surfaced during cutover step-4
+// dry-run testing of the new dynamic-chunk slicer.
+if (!msgCols.includes('compression_tag')) {
+    console.log('[DB] Adding compression_tag column to conversation_messages...');
+    db.exec(`ALTER TABLE conversation_messages ADD COLUMN compression_tag TEXT DEFAULT NULL`);
+    console.log('[DB] Migration complete: compression_tag column added');
+}
+
 // Voice integration — conversation_loops table (S127, Phase 1b)
 db.exec(`CREATE TABLE IF NOT EXISTS conversation_loops (
     id TEXT PRIMARY KEY,
