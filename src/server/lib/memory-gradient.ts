@@ -1298,7 +1298,7 @@ export async function bumpOnInsert(
         // functional compression and would naturally drop a short closing line.
         // Deeper levels (c1→c2 onward) are shape distillation and don't need this.
         const angelDirective = currentLevel === 'c0'
-            ? `\n\nNOTE: This c0 may end with a one-line closing signed "— D" (Darron). If present, preserve its tone in your compressed output even if the literal phrase is dropped — the closing carries warmth that should fold into the kernel rather than be discarded as noise.`
+            ? `\n\nNOTE: This c0 may end with a one-line closing signed "— D" (Darron). The closing is from D speaking to the agent — never reattribute it to Leo, Jim, or any voice present in the surrounding c0 narrative. Preserve its TONE in your compressed output but let the literal phrase drop; the warmth folds into the kernel as feeling, not as quoted text.`
             : '';
 
         try {
