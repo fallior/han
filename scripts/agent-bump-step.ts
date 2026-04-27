@@ -121,8 +121,20 @@ function hasDescendantAt(sourceId: string, atLevel: string): boolean {
     return !!row;
 }
 
-// Find the next pending compression — walk c0..maxLevel for a cap-violation
-// where the displaced entry hasn't yet been cascaded. Returns lowest-level first.
+// Find the next pending compression — walk c0..maxLevel for ANY uncascaded
+// entry beyond the active window (rank > cap by created_at DESC, id DESC).
+// Returns the OLDEST uncascaded entry (lowest rank below the active window
+// fires first — that's the FIFO order for cascade).
+//
+// Why "any uncascaded" rather than "rank=cap+1 only" (as bumpOnInsert does):
+// bumpOnInsert is called RIGHT AFTER an insert when there's exactly one new
+// displaced entry to handle. This script runs as a state machine that may
+// observe partially-cascaded state from prior tied-timestamp tiebreaking
+// (where SQL placed the older entry at rank 1 instead of rank 2). Walking
+// all candidates beyond cap ensures no entry gets stuck.
+//
+// Composite ordering (created_at, id) DESC makes rank deterministic across
+// queries — same fix as the replay-bump-fill.ts cursor.
 function findPendingCompression(): {
     level: string;
     nextLevel: string;
@@ -131,21 +143,29 @@ function findPendingCompression(): {
     for (let n = 0; n <= maxLevel; n++) {
         const level = `c${n}`;
         const cap = gradientCap(level);
-        // Displaced entry = rank=cap+1 by created_at DESC. Same query bumpOnInsert uses.
-        const displaced = targetDb.prepare(`
+        const nextL = nextLevelName(level);
+        if (!nextL) continue;
+
+        // All entries at this level beyond the active-window cap, oldest first
+        // (so cascade goes FIFO). Composite (created_at, id) DESC for active
+        // window means OFFSET cap returns entries from rank cap+1 onward in
+        // ascending-rank order when iterated.
+        const candidates = targetDb.prepare(`
             SELECT id, content, content_type, source_id, session_label, created_at
             FROM gradient_entries
             WHERE agent = ? AND level = ?
-            ORDER BY created_at DESC
-            LIMIT 1 OFFSET ?
-        `).get(agent, level, cap) as any;
+            ORDER BY created_at DESC, id DESC
+            LIMIT -1 OFFSET ?
+        `).all(agent, level, cap) as any[];
 
-        if (!displaced) continue;
-        const nextL = nextLevelName(level);
-        if (!nextL) continue;
-        if (hasDescendantAt(displaced.id, nextL)) continue;
-
-        return { level, nextLevel: nextL, displaced };
+        // candidates ordered rank cap+1, cap+2, ... by composite DESC.
+        // Iterate from oldest (last in the array) to newest.
+        for (let i = candidates.length - 1; i >= 0; i--) {
+            const c = candidates[i];
+            if (!hasDescendantAt(c.id, nextL)) {
+                return { level, nextLevel: nextL, displaced: c };
+            }
+        }
     }
     return null;
 }
