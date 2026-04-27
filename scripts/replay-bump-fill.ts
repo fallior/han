@@ -70,6 +70,42 @@ if (limitArg && (!Number.isFinite(limit!) || limit! <= 0)) {
     process.exit(1);
 }
 
+// Dynamic chunk slicing — char-budget per chunk (compute proxy). When set,
+// the script walks source c0s in cursor order, accumulates chars, and stops
+// when (cumulative chars >= limit-chars) OR (oversize count >= max-oversize),
+// whichever fires first. Always emits min-2 c0s when 2+ are available
+// (bump-engine + watermark coverage). Designed for the post-day-roll world
+// where rolled c0s are 5K-25K tokens each and per-chunk cascade compute
+// scales with content volume rather than c0 count.
+//
+// Defaults Darron + Jim agreed:
+//   jim: --limit-chars=1000000 (1M chars / ~250K tokens)
+//   leo: --limit-chars=500000  (500K chars / ~125K tokens)
+//   --max-oversize=2 universally
+//   --oversize-chars=100000 (matches roll-c0s.ts upper-bound floor)
+//
+// Composes with --limit if both supplied (legacy fixed-N still works for tests).
+const limitCharsArg = arg('limit-chars');
+const limitChars = limitCharsArg ? parseInt(limitCharsArg, 10) : null;
+if (limitCharsArg && (!Number.isFinite(limitChars!) || limitChars! <= 0)) {
+    console.error(`[replay] --limit-chars must be a positive integer, got: ${limitCharsArg}`);
+    process.exit(1);
+}
+
+const maxOversizeArg = arg('max-oversize');
+const maxOversize = maxOversizeArg ? parseInt(maxOversizeArg, 10) : null;
+if (maxOversizeArg && (!Number.isFinite(maxOversize!) || maxOversize! <= 0)) {
+    console.error(`[replay] --max-oversize must be a positive integer, got: ${maxOversizeArg}`);
+    process.exit(1);
+}
+
+const oversizeCharsArg = arg('oversize-chars');
+const oversizeChars = oversizeCharsArg ? parseInt(oversizeCharsArg, 10) : 100000;
+if (oversizeCharsArg && (!Number.isFinite(oversizeChars) || oversizeChars <= 0)) {
+    console.error(`[replay] --oversize-chars must be a positive integer, got: ${oversizeCharsArg}`);
+    process.exit(1);
+}
+
 // Cutover watermark — when set, the FIRST c0 this invocation processes gets
 // the phrase appended to its content before insert. Forensic record written to
 // ~/.han/memory/cutover/watermarks-{agent}.jsonl. Subsequent c0s in this run
@@ -110,12 +146,16 @@ process.env.HAN_DB_PATH = targetDbPath;
 // ── Main ────────────────────────────────────────────────────────
 
 async function main() {
-    console.log(`[replay] Agent:     ${agent}`);
-    console.log(`[replay] Source:    ${sourceDbPath} (read-only)`);
-    console.log(`[replay] Target:    ${targetDbPath}`);
-    console.log(`[replay] Limit:     ${limit ?? 'unlimited'}`);
-    console.log(`[replay] Watermark: ${watermark ? `"${watermark}"` : '(none)'}`);
-    console.log(`[replay] Mode:      ${apply ? 'APPLY' : 'DRY-RUN'}`);
+    console.log(`[replay] Agent:        ${agent}`);
+    console.log(`[replay] Source:       ${sourceDbPath} (read-only)`);
+    console.log(`[replay] Target:       ${targetDbPath}`);
+    console.log(`[replay] Limit:        ${limit ?? 'unlimited'}`);
+    if (limitChars !== null) {
+        console.log(`[replay] Limit chars:  ${limitChars} (dynamic chunk)`);
+        console.log(`[replay] Max oversize: ${maxOversize ?? 'unbounded'} (>${oversizeChars} chars per c0)`);
+    }
+    console.log(`[replay] Watermark:    ${watermark ? `"${watermark}"` : '(none)'}`);
+    console.log(`[replay] Mode:         ${apply ? 'APPLY' : 'DRY-RUN'}`);
 
     // Dynamic imports so HAN_DB_PATH is honoured by the target db.ts module.
     const { db: targetDb, gradientStmts, feelingTagStmts } = await import('../src/server/db');
@@ -159,7 +199,37 @@ async function main() {
     const params: any[] = [agent];
     if (resumeFromTs) params.push(resumeFromTs, resumeFromTs, resumeFromId);
     if (limit) params.push(limit);
-    const c0Rows = sourceDb.prepare(baseSql).all(...params) as any[];
+    const c0RowsAll = sourceDb.prepare(baseSql).all(...params) as any[];
+
+    // Dynamic slicing (--limit-chars / --max-oversize). When neither is set,
+    // c0Rows == c0RowsAll (legacy fixed-N path). When set, walk c0s in cursor
+    // order accumulating chars / oversize count; emit each c0 (the one that
+    // crosses the boundary IS included — "stop after crossing" semantics).
+    // Always emit min-2 when 2+ are available (bump-engine + watermark cover).
+    let c0Rows: any[];
+    if (limitChars !== null || maxOversize !== null) {
+        c0Rows = [];
+        let cumChars = 0;
+        let oversizeCount = 0;
+        for (const row of c0RowsAll) {
+            const rowChars = String(row.content || '').length;
+            const isOversize = rowChars > oversizeChars;
+            c0Rows.push(row);
+            cumChars += rowChars;
+            if (isOversize) oversizeCount++;
+            // Check stop conditions AFTER inclusion. Min-2 enforced: never
+            // stop at 1 c0 if more are available.
+            if (c0Rows.length >= 2) {
+                if (limitChars !== null && cumChars >= limitChars) break;
+                if (maxOversize !== null && oversizeCount >= maxOversize) break;
+            }
+        }
+        console.log(`[replay] Dynamic slice: ${c0Rows.length} c0s selected from ${c0RowsAll.length} candidates`);
+        console.log(`[replay]   cumulative chars: ${cumChars}${limitChars !== null ? ` / target ${limitChars}` : ''}`);
+        console.log(`[replay]   oversized c0s:    ${oversizeCount}${maxOversize !== null ? ` / max ${maxOversize}` : ''}`);
+    } else {
+        c0Rows = c0RowsAll;
+    }
 
     console.log(`[replay] ${c0Rows.length} c0 entries to process for ${agent}`);
 
