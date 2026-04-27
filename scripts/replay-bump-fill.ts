@@ -46,7 +46,6 @@
 
 import * as path from 'path';
 import * as os from 'os';
-import * as fs from 'fs';
 import Database from 'better-sqlite3';
 
 // ── Argument parsing ────────────────────────────────────────────
@@ -73,10 +72,9 @@ if (limitArg && (!Number.isFinite(limit!) || limit! <= 0)) {
 // Dynamic chunk slicing — char-budget per chunk (compute proxy). When set,
 // the script walks source c0s in cursor order, accumulates chars, and stops
 // when (cumulative chars >= limit-chars) OR (oversize count >= max-oversize),
-// whichever fires first. Always emits min-2 c0s when 2+ are available
-// (bump-engine + watermark coverage). Designed for the post-day-roll world
-// where rolled c0s are 5K-25K tokens each and per-chunk cascade compute
-// scales with content volume rather than c0 count.
+// whichever fires first. Designed for the post-day-roll world where rolled
+// c0s are 5K-25K tokens each and per-chunk cascade compute scales with
+// content volume rather than c0 count.
 //
 // Defaults Darron + Jim agreed:
 //   jim: --limit-chars=1000000 (1M chars / ~250K tokens)
@@ -106,30 +104,6 @@ if (oversizeCharsArg && (!Number.isFinite(oversizeChars) || oversizeChars <= 0))
     process.exit(1);
 }
 
-// Cutover watermark — when set, the FIRST c0 this invocation processes gets
-// the phrase appended to its content before insert. Forensic record written to
-// ~/.han/memory/cutover/watermarks-{agent}.jsonl. Subsequent c0s in this run
-// are unaffected. The angel-preservation directive in bumpOnInsert (c0→c1)
-// is what carries the tone forward through compression.
-const watermark = arg('watermark');
-const chunkNArg = arg('chunk-n');
-const chunkNExplicit = chunkNArg ? parseInt(chunkNArg, 10) : null;
-if (chunkNArg && (!Number.isFinite(chunkNExplicit!) || chunkNExplicit! <= 0)) {
-    console.error(`[replay] --chunk-n must be a positive integer, got: ${chunkNArg}`);
-    process.exit(1);
-}
-
-// Minimum chunk size with watermark — guarantees the watermarked c0's cascade
-// fires WITHIN this chunk. With cap(c0)=1, the first insert displaces nothing
-// (only 1 c0 exists, OFFSET 1 returns no row); the second insert displaces the
-// first (watermarked) c0 and triggers c0→c1 cascade. Chunks of 1 with a
-// watermark would leave the watermarked c0 uncascaded until a future chunk —
-// structurally legal but defeats the angel-preservation goal for this chunk.
-if (watermark && limit !== null && limit < 2) {
-    console.error(`[replay] --watermark requires --limit >= 2 (got ${limit}). The watermarked c0's cascade fires when a second c0 displaces it; with limit=1 the watermarked c0 sits at c0 forever.`);
-    process.exit(1);
-}
-
 if (!agent || (agent !== 'jim' && agent !== 'leo')) {
     console.error('Usage: tsx scripts/replay-bump-fill.ts --agent={jim|leo} [--source-db=...] [--target-db=...] [--apply]');
     process.exit(1);
@@ -154,7 +128,6 @@ async function main() {
         console.log(`[replay] Limit chars:  ${limitChars} (dynamic chunk)`);
         console.log(`[replay] Max oversize: ${maxOversize ?? 'unbounded'} (>${oversizeChars} chars per c0)`);
     }
-    console.log(`[replay] Watermark:    ${watermark ? `"${watermark}"` : '(none)'}`);
     console.log(`[replay] Mode:         ${apply ? 'APPLY' : 'DRY-RUN'}`);
 
     // Dynamic imports so HAN_DB_PATH is honoured by the target db.ts module.
@@ -205,7 +178,6 @@ async function main() {
     // c0Rows == c0RowsAll (legacy fixed-N path). When set, walk c0s in cursor
     // order accumulating chars / oversize count; emit each c0 (the one that
     // crosses the boundary IS included — "stop after crossing" semantics).
-    // Always emit min-2 when 2+ are available (bump-engine + watermark cover).
     let c0Rows: any[];
     if (limitChars !== null || maxOversize !== null) {
         c0Rows = [];
@@ -217,12 +189,9 @@ async function main() {
             c0Rows.push(row);
             cumChars += rowChars;
             if (isOversize) oversizeCount++;
-            // Check stop conditions AFTER inclusion. Min-2 enforced: never
-            // stop at 1 c0 if more are available.
-            if (c0Rows.length >= 2) {
-                if (limitChars !== null && cumChars >= limitChars) break;
-                if (maxOversize !== null && oversizeCount >= maxOversize) break;
-            }
+            // Check stop conditions AFTER inclusion.
+            if (limitChars !== null && cumChars >= limitChars) break;
+            if (maxOversize !== null && oversizeCount >= maxOversize) break;
         }
         console.log(`[replay] Dynamic slice: ${c0Rows.length} c0s selected from ${c0RowsAll.length} candidates`);
         console.log(`[replay]   cumulative chars: ${cumChars}${limitChars !== null ? ` / target ${limitChars}` : ''}`);
@@ -252,34 +221,15 @@ async function main() {
     let totalCascadeSteps = 0;
     const t0 = Date.now();
 
-    // Watermark forensic log — append-only per-agent JSONL. chunk_n auto-derives
-    // from existing line count + 1 unless explicitly passed via --chunk-n.
-    const watermarksDir = path.join(os.homedir(), '.han', 'memory', 'cutover');
-    const watermarksPath = path.join(watermarksDir, `watermarks-${agent}.jsonl`);
-
     for (let i = 0; i < c0Rows.length; i++) {
         const c0 = c0Rows[i];
-
-        // First c0 of this invocation gets the watermark appended (if --watermark
-        // is set). Mutates the c0's content for insert; source DB is never
-        // touched. The angel-preservation directive in bumpOnInsert (c0→c1) is
-        // what carries the tone forward — the literal phrase often drops at c1
-        // but the warmth folds into the kernel.
-        let contentForInsert: string = String(c0.content || '');
-        let watermarkApplied = false;
-        if (watermark && i === 0) {
-            // Two-newline separator so the angel reads as a closing line, not as
-            // continuation of the prior content.
-            contentForInsert = `${contentForInsert}\n\n${watermark}`;
-            watermarkApplied = true;
-        }
 
         // Insert c0 into target — preserve original id, source_id, created_at.
         // Tolerate PRIMARY KEY violations as idempotent skips (the resume cursor
         // should already exclude in-target rows, but defence in depth).
         try {
             gradientStmts.insert.run(
-                c0.id, c0.agent, c0.session_label, 'c0', contentForInsert, c0.content_type,
+                c0.id, c0.agent, c0.session_label, 'c0', String(c0.content || ''), c0.content_type,
                 c0.source_id, c0.source_conversation_id, c0.source_message_id,
                 c0.provenance_type || 'original', c0.created_at,
                 c0.supersedes, c0.change_count || 0, c0.qualifier
@@ -288,28 +238,6 @@ async function main() {
             if (!String(e?.message || '').includes('UNIQUE constraint')) throw e;
             console.log(`[replay] skip — c0 ${c0.id} already in target (UNIQUE constraint)`);
             continue;
-        }
-
-        // Forensic watermark log AFTER successful insert. The log survives even
-        // if gradient.db is wiped — raw material for the diary made later.
-        if (watermarkApplied) {
-            fs.mkdirSync(watermarksDir, { recursive: true });
-            const existingLines = fs.existsSync(watermarksPath)
-                ? fs.readFileSync(watermarksPath, 'utf8').split('\n').filter(l => l.trim()).length
-                : 0;
-            const chunkN = chunkNExplicit ?? (existingLines + 1);
-            const record = {
-                chunk_n: chunkN,
-                c0_id: c0.id,
-                agent: c0.agent,
-                session_label: c0.session_label,
-                content_type: c0.content_type,
-                c0_created_at: c0.created_at,
-                watermark,
-                injected_at: new Date().toISOString(),
-            };
-            fs.appendFileSync(watermarksPath, JSON.stringify(record) + '\n');
-            console.log(`[replay] watermark applied to c0 ${c0.id} (${c0.session_label}) — chunk_n=${chunkN}`);
         }
 
         // Copy feeling_tags for this c0 (compression-feel etc.)
@@ -377,7 +305,6 @@ async function main() {
     console.log(`  c0s inserted:        ${c0Rows.length}`);
     console.log(`  bumps triggered:     ${cascadesTriggered}`);
     console.log(`  total cascade steps: ${totalCascadeSteps}`);
-    console.log(`  watermark applied:   ${watermark ? 'yes' : 'no'}`);
     console.log(`  verification:        ${verificationOk ? '✓ pass' : '✗ FAIL'}`);
     console.log(`  elapsed:             ${((Date.now() - t0) / 1000).toFixed(0)}s`);
 

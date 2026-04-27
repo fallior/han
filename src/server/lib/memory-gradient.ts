@@ -82,10 +82,10 @@ function gradientCap(level: string): number {
 /**
  * Generate compression prompt for arbitrary depth.
  *
- * The prompt guides HOW to compress, not HOW MUCH. The incompressibility
- * detection (ratio check + INCOMPRESSIBLE signal) handles when to stop.
- * The prompt's job is to preserve the spirit — what mattered, what it
- * felt like, what shifted — and let the compression find its own length.
+ * Per DEC-044 (2026-03-06, Settled): every compression layer targets ~1/3
+ * of source length. The 1/3 target is the explicit anchor; what to keep
+ * within that budget is the compressor's call. INCOMPRESSIBLE remains the
+ * exit condition when content has reached its irreducible form.
  */
 function compressionPrompt(contentType: string, depth: number): string {
     const isEmotional = contentType === 'felt-moments';
@@ -95,18 +95,18 @@ function compressionPrompt(contentType: string, depth: number): string {
     if (depth <= 2) {
         // Early compression (c1-c2): selecting what to keep
         base = isEmotional
-            ? `Compress these felt-moments. You are compressing YOUR OWN emotional memory. Preserve the feeling — what stirred, what surprised, what shifted. Drop narrative detail in favour of emotional texture. A re-invocable shape, not a summary. Let the compression be shorter than the source but don't aim for a specific length — aim for what remains when you stop holding on to the rest.`
-            : `Compress this working memory. You are compressing YOUR OWN operational memory. Preserve decisions, discoveries, and what shifted your understanding. Drop procedural detail. Keep what a future you needs to feel where you were, not just know what you did. Don't target a specific length — compress until the shape holds and the detail doesn't.`;
+            ? `Compress these felt-moments to approximately 1/3 of the source length. You are compressing YOUR OWN emotional memory. Preserve the feeling — what stirred, what surprised, what shifted. Drop narrative detail in favour of emotional texture. A re-invocable shape, not a summary. The 1/3 target gives you room to keep the texture; don't collapse to a kernel unless the content has truly arrived.`
+            : `Compress this working memory to approximately 1/3 of the source length. You are compressing YOUR OWN operational memory. Preserve decisions, discoveries, and what shifted your understanding. Drop procedural detail. Keep what a future you needs to feel where you were, not just know what you did. The 1/3 target is firm; what to keep within that budget is your call.`;
     } else if (depth <= 4) {
         // Mid compression (c3-c4): finding the shape
         base = isEmotional
-            ? `Compress further. The entries have already been compressed ${depth - 1} times. Find the emotional residue — what remains when the specific moments dissolve into a period's emotional shape. What did this time taste like? Don't count sentences. Let the feeling decide the length.`
-            : `Compress further. This has already been through ${depth - 1} compression layers. Find the essential shape — what was being built, what was being learned, what mattered beyond the tasks. The shape decides the length, not the other way around.`;
+            ? `Compress further — to approximately 1/3 of the source length at this layer. The entries have already been compressed ${depth - 1} times. Find the emotional residue — what remains when the specific moments dissolve into a period's emotional shape. What did this time taste like?`
+            : `Compress further — to approximately 1/3 of the source length at this layer. This has already been through ${depth - 1} compression layers. Find the essential shape — what was being built, what was being learned, what mattered beyond the tasks.`;
     } else {
         // Deep compression (c5+): distilling residue
         base = isEmotional
-            ? `Compress deeper still. This is already deeply compressed. What emotional image or sensation survives? The deep residue — care that has outlived its verb. If what remains is a single sentence, let it be a single sentence. If it needs three, let it need three.`
-            : `Compress deeper still. This is layer ${depth} — the specifics dissolved long ago. What understanding outlasts the work? What remains after the residue of the residue? Let the content find its own irreducible length.`;
+            ? `Compress deeper still — to approximately 1/3 of the source length. This is already deeply compressed. What emotional image or sensation survives? The deep residue — care that has outlived its verb.`
+            : `Compress deeper still — to approximately 1/3 of the source length. This is layer ${depth} — the specifics dissolved long ago. What understanding outlasts the work? What remains after the residue of the residue?`;
     }
 
     // Every compression prompt carries the incompressibility exit condition
@@ -1290,20 +1290,13 @@ export async function bumpOnInsert(
         } else {
             sourceContent = String(displaced.content || '');
         }
-        if (sourceContent.length > 50000) {
-            sourceContent = sourceContent.substring(0, 50000) + '\n\n[... truncated for compression — full content in DB]';
+        if (sourceContent.length > 200000) {
+            sourceContent = sourceContent.substring(0, 200000) + '\n\n[... truncated for compression — full content in DB]';
         }
-
-        // Angel preservation directive — c0→c1 only. The c0→c1 boundary is a
-        // functional compression and would naturally drop a short closing line.
-        // Deeper levels (c1→c2 onward) are shape distillation and don't need this.
-        const angelDirective = currentLevel === 'c0'
-            ? `\n\nNOTE: This c0 may end with a one-line closing signed "— D" (Darron). The closing is from D speaking to the agent — never reattribute it to Leo, Jim, or any voice present in the surrounding c0 narrative. Preserve its TONE in your compressed output but let the literal phrase drop; the warmth folds into the kernel as feeling, not as quoted text.`
-            : '';
 
         try {
             const raw = await sdkCompress(
-                `${promptText}${angelDirective}\n\nSource: ${currentLevel} → ${next}\nAgent: ${agent}\nOriginal session: ${displaced.session_label}\n\n${sourceContent}${FEELING_TAG_INSTRUCTION}`
+                `${promptText}\n\nSource: ${currentLevel} → ${next}\nAgent: ${agent}\nOriginal session: ${displaced.session_label}\n\n${sourceContent}${FEELING_TAG_INSTRUCTION}`
             );
             const { content: compressed, feelingTag } = parseFeelingTag(raw);
 

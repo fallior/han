@@ -2,8 +2,18 @@
 /**
  * scripts/inject-watermark.ts
  *
- * Cutover helper — inject a Darron watermark on the FIRST c0 of a chunk
- * before the replay processes the rest of that chunk.
+ * **DEPRECATED 2026-04-27.** The angel-watermark mechanism was removed when
+ * DEC-044's 1/3 length anchor was restored to the cascade prompt. The angel
+ * directive at c0→c1 was found to bias compression toward closing-line-as-
+ * essence (collapsing 65K of working memory to a 358-char pseudo-kernel).
+ * Both the directive and the watermark machinery were removed in favour of
+ * relational warmth living in the welcome-back greeting (where it belongs)
+ * rather than the gradient (where it warped compression).
+ *
+ * This file is retained for git/audit history only. Do not invoke.
+ *
+ * Original purpose — Cutover helper — inject a Darron watermark on the FIRST
+ * c0 of a chunk before the replay processes the rest of that chunk.
  *
  * Atomic three-step:
  *   1. Read the next unprocessed c0 for the agent from the source DB

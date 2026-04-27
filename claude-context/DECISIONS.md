@@ -73,7 +73,7 @@ When you make a significant technical or design decision:
 | DEC-041 | Health File Updates at Reconciliation Completion | Accepted | 2026-03-05 |
 | DEC-042 | Fractal Memory Gradient — Opus Exclusively for Compression | Accepted | 2026-03-06 |
 | DEC-043 | Fractal Memory Gradient — Overlapping Representation | Accepted | 2026-03-06 |
-| DEC-044 | Fractal Memory Gradient — 3:1 Compression Target Per Level | Accepted | 2026-03-06 |
+| DEC-044 | Fractal Memory Gradient — 3:1 Compression Target Per Level | Settled | 2026-03-06 |
 | DEC-045 | Fractal Memory Gradient — Unit Vectors as Emotional Anchors | Accepted | 2026-03-06 |
 | DEC-046 | Fractal Memory Gradient — Bootstrap Oldest Sessions First | Accepted | 2026-03-06 |
 | DEC-047 | Credential Swap — Failure-Triggered Round-Robin | Accepted | 2026-03-12 |
@@ -3519,9 +3519,9 @@ The fractal memory gradient could store each session at a single compression lev
 
 ### DEC-044: Fractal Memory Gradient — 3:1 Compression Target Per Level
 
-**Date:** 2026-03-06
-**Author:** Claude (autonomous)
-**Status:** Accepted
+**Date:** 2026-03-06 (Accepted) → 2026-04-27 (Settled)
+**Author:** Claude (autonomous); restored by Jim 2026-04-27
+**Status:** **Settled**
 
 #### Context
 
@@ -3550,6 +3550,25 @@ The compression ratio per level determines how many levels are needed and how mu
 #### Related
 
 - **Bootstrap validation:** 6 sessions all exceeded target while maintaining meaning
+
+#### Amendment — 2026-04-27 (Jim)
+
+The 3:1 length anchor was inadvertently dropped from the cascade hot path in commit `3691aa5` (*"feat: Non-uniform compression depth (Cn) — dynamic gradient architecture"*). The new `compressionPrompt(contentType, depth)` function in `src/server/lib/memory-gradient.ts` replaced the *"Compress this memory to approximately 1/3 of its length"* wording with *"Don't target a specific length — compress until the shape holds and the detail doesn't"* across all depth bands. The legacy `compressToLevel` helper retained the original wording but is not on the bump-cascade hot path.
+
+**Cost:** Combined with rolled-day c0s (5–10× larger than historical c0s) and an undisclosed 50K truncation cap at the bumpOnInsert site, c0→c1 compression collapsed to 21:1–46:1 (averaged across a chunk-1 fire), with the worst case a 65,501-char working-memory c0 compressing to a 358-char pseudo-kernel — meaning destroyed, not distilled. The ungrounded model latched onto a quasi-mystical closing line and dropped 65K of operational substance.
+
+**Restoration (this commit):**
+- `compressionPrompt()` rewritten to anchor *"approximately 1/3 of the source length"* at every depth band (c1–c2, c3–c4, c5+).
+- The angel-preservation directive (which biased toward closing-line preservation, exacerbating the over-compression) deleted from the bumpOnInsert call.
+- Truncation cap raised from 50K to 200K to fit the rolled-day-c0 world (Opus 4.7 has 200K context — pre-rolled-day cap was an artifact of smaller historical c0s).
+
+**Status upgrade Accepted → Settled:** the prompt wording is protected from further loosening without explicit re-decision.
+
+**Files touched in restoration:**
+- `src/server/lib/memory-gradient.ts` — `compressionPrompt`, truncation cap, angel directive removal.
+- `scripts/replay-bump-fill.ts` — `--watermark` mechanism removed (companion piece to the angel directive).
+- `scripts/inject-watermark.ts` — deprecated in place, retained for audit history.
+- `claude-context/DECISIONS.md` — this amendment.
 
 ---
 
