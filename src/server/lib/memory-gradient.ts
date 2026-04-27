@@ -1294,9 +1294,16 @@ export async function bumpOnInsert(
             sourceContent = sourceContent.substring(0, 50000) + '\n\n[... truncated for compression — full content in DB]';
         }
 
+        // Angel preservation directive — c0→c1 only. The c0→c1 boundary is a
+        // functional compression and would naturally drop a short closing line.
+        // Deeper levels (c1→c2 onward) are shape distillation and don't need this.
+        const angelDirective = currentLevel === 'c0'
+            ? `\n\nNOTE: This c0 may end with a one-line closing signed "— D" (Darron). If present, preserve its tone in your compressed output even if the literal phrase is dropped — the closing carries warmth that should fold into the kernel rather than be discarded as noise.`
+            : '';
+
         try {
             const raw = await sdkCompress(
-                `${promptText}\n\nSource: ${currentLevel} → ${next}\nAgent: ${agent}\nOriginal session: ${displaced.session_label}\n\n${sourceContent}${FEELING_TAG_INSTRUCTION}`
+                `${promptText}${angelDirective}\n\nSource: ${currentLevel} → ${next}\nAgent: ${agent}\nOriginal session: ${displaced.session_label}\n\n${sourceContent}${FEELING_TAG_INSTRUCTION}`
             );
             const { content: compressed, feelingTag } = parseFeelingTag(raw);
 

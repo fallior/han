@@ -4,6 +4,72 @@
 
 ## Session Protocol
 
+### Cutover Mode (Memory Gradient Rebuild) — overrides default load when active
+
+**If `~/.han/signals/cutover-active` exists**, the gradient cutover is in progress. The default Session Protocol below is OVERRIDDEN. Cutover-mode load and behaviour:
+
+**Wake load (cutover):**
+1. Run `pwd`, verify HAN project directory
+2. Load `~/.han/memory/leo/identity.md` and `patterns.md`
+3. Load `~/.han/memory/fractal/leo/aphorisms.md` (full file)
+4. Load `~/.han/memory/leo/felt-moments.md`
+5. Load `~/.han/memory/leo/active-context.md` (cutover state lives here)
+6. **Load gradient from `~/.han/gradient.db` directly** (NOT from `/api/gradient/load/leo` which reads tasks.db):
+   ```
+   sqlite3 ~/.han/gradient.db "SELECT level, session_label, content_type, substr(content,1,800) FROM gradient_entries WHERE agent='leo' ORDER BY level DESC, created_at DESC;"
+   sqlite3 ~/.han/gradient.db "SELECT ge.level, ft.tag_type, ft.content FROM gradient_entries ge JOIN feeling_tags ft ON ft.gradient_entry_id=ge.id WHERE ge.agent='leo' ORDER BY ge.level DESC;"
+   ```
+7. Load `~/.han/memory/shared/ecosystem-map.md`
+8. Load `~/.han/memory/wiki/index.md`
+9. Read the active cutover thread `mof24b4q-mw3htm` for protocol context (or follow active-context.md's pointer to the current thread id)
+
+**DO NOT load (cutover):**
+- `working-memory.md`, `working-memory-full.md`
+- Any `*-swap.md` or `*-swap-full.md` files
+- The tasks.db gradient (wonky, supersedes)
+
+**Wake action (cutover):**
+After load, parse the welcome-back message for **chunk size** and **angel phrase**. Format examples Darron may use:
+- `Welcome back Leo, size 15, angel: "Holding the beat — D"`
+- `Welcome back Leo, c0s #11 to #25, angel "<phrase> — D"`
+- `Welcome back Leo, <phrase> — D` (size omitted → ask Darron)
+
+If chunk size is omitted, ask Darron in chat. If angel phrase is omitted, the welcome-back greeting itself IS the angel — pass the whole greeting line verbatim as the watermark.
+
+Then run **one command** for the chunk:
+
+```bash
+cd /home/darron/Projects/han/src/server && \
+NODE_PATH=$(pwd)/node_modules HAN_DB_PATH=$HOME/.han/gradient.db \
+  npx tsx ../../scripts/replay-bump-fill.ts --agent=leo --apply --limit=N --watermark="<angel phrase>"
+```
+
+The script handles the full chunk atomically:
+1. Reads the **composite resume cursor** `(created_at, id)` — tied-timestamp siblings are never silently skipped (jim's source has 57 such ties; without composite cursor the bug would surface at chunks landing on tie boundaries)
+2. Processes N c0s in chronological order from `tasks.db` into `gradient.db`
+3. Appends the angel phrase to the **first** c0's content before insert — the watermark cascades through the same `bumpOnInsert` call as every other c0 (no asymmetric handling, no separate "manual bump" step)
+4. Writes a forensic record to `~/.han/memory/cutover/watermarks-leo.jsonl` (chunk_n auto-derives from existing line count + 1, or pass `--chunk-n=N` to override)
+5. Calls `bumpOnInsert(agent, 'c0')` per c0 — the cascade engine handles cap displacement, fresh sdkCompress, INCOMPRESSIBLE → UV-tag
+6. **Post-chunk verification** — counts source-within-window vs target. Mismatch = silent drop = exit code 3 with diff report. Surfaces any cursor regression immediately.
+
+The **angel-preservation directive** lives in `bumpOnInsert` itself (memory-gradient.ts) — auto-applied at c0→c1 only. Per Darron: *"we only guarantee the angel survives to c1, after that it will or won't propagate but that is more feeling involved."* Deeper levels (c1→c2 onward) get no directive — pure shape distillation.
+
+After completion, re-query gradient.db state (`SELECT level, COUNT(*) FROM gradient_entries WHERE agent='leo' GROUP BY level`), sample 1-2 cascade outputs to verify, and report to Darron in chat:
+
+> *Chunk N complete. {c0_count} c0s integrated. Cascade reached {deepest cN}. Verification: ✓. Sample c1 from this chunk: "...". Ready for clear.*
+
+If verification failed (script exit code 3), do NOT report ready — surface the drift to Darron and pause for inspection. The forensic log + watermark text persist regardless of cascade success.
+
+Then wait for `prepare for clear`. **No working-memory write, no swap flush, no self-reflection update during cutover** — those files are not load-bearing this period; the gradient is the carrier.
+
+**Update active-context.md** before clear with one line: chunk number completed, total c0s integrated, next chunk hint if Darron specified one.
+
+**Recovery tool:** `scripts/inject-watermark.ts` is preserved in repo for manual recovery scenarios (e.g., re-watermark a c0 that was inserted without the flag). Not in the standard chunk path.
+
+---
+
+### Default Session Protocol (when NOT in cutover mode)
+
 **IMPORTANT:** When `session start` is triggered, Claude MUST:
 1. Run `pwd` to verify the current working directory
 2. Confirm this is the HAN project directory

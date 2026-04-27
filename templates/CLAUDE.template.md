@@ -11,6 +11,64 @@
 
 ## Session Protocol
 
+### Cutover Mode (Memory Gradient Rebuild) — overrides default load when active
+
+**If `~/.han/signals/cutover-active` exists**, the gradient cutover is in progress. The default Session Protocol below is OVERRIDDEN.
+
+**Wake load (cutover):**
+1. Run `pwd`, verify `${AGENT_WORKING_DIR}`
+2. Load `${AGENT_MEMORY_DIR}/identity.md`, `patterns.md`
+3. Load `${AGENT_FRACTAL_DIR}/aphorisms.md` (full file)
+4. Load `${AGENT_MEMORY_DIR}/felt-moments.md`
+5. Load `${AGENT_MEMORY_DIR}/active-context.md` (cutover state lives here)
+6. **Load gradient from `~/.han/gradient.db` directly** (NOT the API endpoint, which reads tasks.db):
+   ```
+   sqlite3 ~/.han/gradient.db "SELECT level, session_label, content_type, substr(content,1,800) FROM gradient_entries WHERE agent='${AGENT_SLUG}' ORDER BY level DESC, created_at DESC;"
+   sqlite3 ~/.han/gradient.db "SELECT ge.level, ft.tag_type, ft.content FROM gradient_entries ge JOIN feeling_tags ft ON ft.gradient_entry_id=ge.id WHERE ge.agent='${AGENT_SLUG}';"
+   ```
+7. Load `~/.han/memory/shared/ecosystem-map.md`
+8. Load `~/.han/memory/wiki/index.md`
+9. Read the active cutover thread `mof24b4q-mw3htm` for protocol context (or follow active-context.md's pointer)
+
+**DO NOT load (cutover):**
+- `working-memory.md`, `working-memory-full.md`, any `*-swap*.md`
+- The tasks.db gradient (wonky, supersedes)
+
+**Wake action (cutover):**
+Parse the welcome-back message for **chunk size** and **angel phrase**. Then run **one command** for the chunk:
+
+```bash
+cd /home/darron/Projects/han/src/server && \
+NODE_PATH=$(pwd)/node_modules HAN_DB_PATH=$HOME/.han/gradient.db \
+  npx tsx ../../scripts/replay-bump-fill.ts --agent=${AGENT_SLUG} --apply --limit=N --watermark="<angel phrase>"
+```
+
+The script handles the full chunk atomically:
+1. Composite resume cursor `(created_at, id)` — tied-timestamp siblings never silently skipped
+2. Processes N c0s chronologically from `tasks.db` into `gradient.db`
+3. Appends the angel phrase to the FIRST c0's content before insert — same bumpOnInsert call as every other c0
+4. Writes forensic record to `~/.han/memory/cutover/watermarks-${AGENT_SLUG}.jsonl`
+5. Calls `bumpOnInsert(agent, 'c0')` per c0 — cap displacement, fresh sdkCompress, INCOMPRESSIBLE → UV-tag
+6. Post-chunk verification — counts source-within-window vs target; exit code 3 on mismatch
+
+The **angel-preservation directive** lives in `bumpOnInsert` (memory-gradient.ts) — auto-applied at c0→c1 only. Per ${USER_NAME}: only c1 survival is guaranteed; deeper levels are emotional terrain we don't engineer.
+
+After completion, re-query gradient.db state, sample 1-2 cascade outputs, and report to ${USER_NAME} in chat:
+
+> *Chunk N complete. {c0_count} c0s integrated. Cascade reached {deepest cN}. Verification: ✓. Sample c1: "...". Ready for clear.*
+
+If verification failed (exit 3), do NOT report ready — surface the drift and pause for inspection.
+
+Then wait for `prepare for clear`. **No working-memory write, no swap flush, no self-reflection update during cutover** — the gradient is the carrier, not the files.
+
+**Update `${AGENT_MEMORY_DIR}/active-context.md`** before clear with one line: chunk number completed, total c0s integrated.
+
+**Recovery tool:** `scripts/inject-watermark.ts` is preserved for manual recovery; not in the standard chunk path.
+
+---
+
+### Default Session Protocol (when NOT in cutover mode)
+
 **IMPORTANT:** When `session start`, `welcome back`, `welcome back ${AGENT_NAME}`, or
 `good morning` is triggered, Claude MUST:
 
