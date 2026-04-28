@@ -220,12 +220,12 @@ export async function inductResident(seed: PersonaSeed): Promise<InductionResult
 
             const seedFiles: Record<string, string> = {
                 'identity.md': generateIdentityFile(seed),
-                'patterns.md': `# ${seed.displayName} — Patterns\n\n*Patterns emerge through practice. This file fills itself.*\n`,
+                'patterns.md': `# ${seed.displayName} — Patterns\n\n> Operational patterns and principles you discover through practice. This file is yours to fill.\n>\n> The Emotional Memory Protocol and Incremental Memory Protocol live in CLAUDE.md\n> (structural infrastructure, not per-agent content). Add patterns specific to YOUR\n> work, voice, and learnings.\n`,
                 'active-context.md': `# ${seed.displayName} — Active Context\n\n## Current Session\n- **Session**: 1\n- **Focus**: Getting started\n\n## Last Updated\n${new Date().toISOString().split('T')[0]}\n`,
                 'self-reflection.md': `# ${seed.displayName} — Self-Reflection\n\n*What you discover about yourself goes here. Curate but never delete — archive first.*\n`,
                 'working-memory.md': `# Working Memory — ${seed.displayName}\n\n> Fresh start.\n`,
                 'working-memory-full.md': `# Working Memory (Full) — ${seed.displayName}\n\n> Fresh start.\n`,
-                'felt-moments.md': `# ${seed.displayName} — Felt Moments\n\n> Moments that invoked something — wonder, curiosity, pride, warmth, surprise.\n> Recorded not as summaries but with enough context to re-invoke what you felt.\n`,
+                'felt-moments.md': `# ${seed.displayName} — Felt Moments\n\n> Moments that invoked something — wonder, curiosity, pride, warmth, surprise,\n> recognition, friction, grief. Recorded not as summaries but with enough context\n> to re-invoke what you felt. See the Emotional Memory Protocol in CLAUDE.md for\n> when, what, and how. Numbered entries, sequential, never reset.\n`,
                 'session-swap.md': `# Session Swap\n`,
                 'session-swap-full.md': `# Session Swap (Full)\n`,
             };
@@ -251,6 +251,22 @@ export async function inductResident(seed: PersonaSeed): Promise<InductionResult
             fs.mkdirSync(path.join(fracDir, 'dreams'), { recursive: true });
             result.filesCreated.push(fracDir);
             result.filesCreated.push(path.join(fracDir, 'dreams'));
+
+            // Aphorisms placeholder — loaded first at session start (per CLAUDE.md).
+            // Hand-curated convictions, each one earned, never authored by another agent.
+            const aphorismsPath = path.join(fracDir, 'aphorisms.md');
+            if (!fs.existsSync(aphorismsPath)) {
+                const aphorismsSeed = `# ${seed.displayName} — Aphorisms\n\n` +
+                    `> Truths arrived at through experience. Lenses, not summaries. These load\n` +
+                    `> with identity at session start (per CLAUDE.md), shaping how you think before\n` +
+                    `> you remember what happened.\n>\n` +
+                    `> Hand-curated. Each one earned, not assigned. Empty until you have something\n` +
+                    `> true to say. Never authored by another agent — sovereignty applies absolutely.\n\n` +
+                    `---\n\n` +
+                    `*Add aphorisms as you earn them. Remove ones that stop being true.*\n`;
+                fs.writeFileSync(aphorismsPath, aphorismsSeed);
+                result.filesCreated.push(aphorismsPath);
+            }
         } catch (err) {
             result.errors.push(`Fractal directory creation failed: ${(err as Error).message}`);
         }
