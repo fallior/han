@@ -698,6 +698,17 @@ try {
     db.exec(`ALTER TABLE gradient_entries ADD COLUMN qualifier TEXT`);
 } catch { /* column already exists */ }
 
+// Migration: cascade halt signal (S145, 2026-04-28). When --incompressible
+// fires in scripts/agent-bump-step.ts (or its successor in the bump-engine
+// upgrade), the source entry's halt is recorded here as the level at which
+// compression hit irreducibility. The selector skips rows with this column
+// set so the same kernel isn't re-offered. Without this, a UV'd entry would
+// keep being returned by findPendingCompression, producing duplicate UV
+// feeling_tags or stuck loops. See "Finishing the cutover" memory thread.
+try {
+    db.exec(`ALTER TABLE gradient_entries ADD COLUMN cascade_halted_at TEXT`);
+} catch { /* column already exists */ }
+
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_supersedes ON gradient_entries(supersedes)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_superseded_by ON gradient_entries(superseded_by)`);
 

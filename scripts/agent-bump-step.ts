@@ -149,9 +149,13 @@ function findPendingCompression(): {
         // All entries at this level beyond the active-window cap, oldest first
         // (so cascade goes FIFO). Composite (created_at, id) DESC for active
         // window means OFFSET cap returns entries from rank cap+1 onward in
-        // ascending-rank order when iterated.
+        // ascending-rank order when iterated. cascade_halted_at is selected so
+        // the iterator can skip entries that have already hit irreducibility
+        // (UV-tagged via --incompressible) — those entries occupy slots and
+        // count toward cap, but are ineligible for further compression.
         const candidates = targetDb.prepare(`
-            SELECT id, content, content_type, source_id, session_label, created_at
+            SELECT id, content, content_type, source_id, session_label, created_at,
+                   cascade_halted_at
             FROM gradient_entries
             WHERE agent = ? AND level = ?
             ORDER BY created_at DESC, id DESC
@@ -159,9 +163,11 @@ function findPendingCompression(): {
         `).all(agent, level, cap) as any[];
 
         // candidates ordered rank cap+1, cap+2, ... by composite DESC.
-        // Iterate from oldest (last in the array) to newest.
+        // Iterate from oldest (last in the array) to newest. Skip UV-halted
+        // entries — they're at kernel and will never compress further.
         for (let i = candidates.length - 1; i >= 0; i--) {
             const c = candidates[i];
+            if (c.cascade_halted_at) continue;
             if (!hasDescendantAt(c.id, nextL)) {
                 return { level, nextLevel: nextL, displaced: c };
             }
@@ -399,6 +405,16 @@ if (mode === 'submit') {
             insertFeelingTagStmt.run(
                 displacedId, agent, 'uv', kernel, null, new Date().toISOString()
             );
+            // Persist the halt — selector reads cascade_halted_at to skip
+            // already-UV'd entries. Without this UPDATE, findPendingCompression
+            // would re-offer the same step on every `next` call (Jim hit this
+            // at op 5 of his S145 100-op session, c7→c8). The UV feeling_tag
+            // carries the kernel sentence; this column carries the halt flag.
+            // Both are load-bearing.
+            targetDb.prepare(
+                `UPDATE gradient_entries SET cascade_halted_at = ?
+                 WHERE id = ? AND agent = ?`
+            ).run(fromLevel, displacedId, agent);
             console.log(JSON.stringify({
                 ok: true,
                 operation: 'incompressible',

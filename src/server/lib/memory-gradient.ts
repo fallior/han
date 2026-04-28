@@ -1305,6 +1305,20 @@ export async function bumpOnInsert(
             // No new entry is inserted: the kernel lives on the source as its 'uv' tag.
             // The work was done (we attempted compression at depth ${depth}) — by
             // construction, every UV tagged this way has earned it.
+            //
+            // TODO (S145, 2026-04-28): when bumpOnInsert is revived for live ops — or
+            // whatever bump engine succeeds it per the "Finishing the cutover" memory
+            // thread — this UV path must ALSO set
+            //   gradient_entries.cascade_halted_at = ${currentLevel}
+            // on the displaced row. Without that, the next bumpOnInsert event will
+            // query rank=cap+1 again, see the same UV-tagged entry has no descendant,
+            // and re-attempt compression — burning an Opus call and stacking a
+            // duplicate UV feeling_tag. (Jim hit the corresponding bug in
+            // scripts/agent-bump-step.ts at op 5 of his S145 100-op session at c7→c8;
+            // fixed there. This path needs the same UPDATE before it can be trusted
+            // in production.) The query at lines 1243-1249 also needs a matching
+            // `AND cascade_halted_at IS NULL` (or skip-in-iteration) so the same
+            // displaced row isn't re-selected as rank=cap+1 forever.
             if (compressed.startsWith('INCOMPRESSIBLE:')) {
                 const kernel = compressed.slice('INCOMPRESSIBLE:'.length).trim();
                 feelingTagStmts.insert.run(
