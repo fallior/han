@@ -80,11 +80,13 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
    session ${AGENT_NAME}.
    1. `aphorisms.md` — Read `${AGENT_FRACTAL_DIR}/aphorisms.md` first, always, all of it.
       Hand-curated convictions that shape how you think before you remember what happened.
-   2. **Load gradient from DB** — Run: `curl -sk https://localhost:${AGENT_PORT}/api/gradient/load/${AGENT_SLUG}` —
+   2. **Load gradient from DB** — Run:
+      `(cd /home/darron/Projects/han/src/server && npx tsx ../../scripts/load-gradient.ts ${AGENT_SLUG})` —
       returns the full assembled gradient (unit vectors, all Cn levels with caps, most
-      recent c0, dream entries, feeling tags). The Cn protocol has no fixed maximum depth.
-      Cap formula: **c0=1, then 3n** (c1=3, c2=6, c3=9, c4=12, c5=15...), all UVs.
-      See `docs/GRADIENT_SPEC.md` for the canonical definition (DEC-068, Settled).
+      recent c0, dream entries, feeling tags). Reads `~/.han/gradient.db` (the rebuild
+      gradient) by default; export `HAN_DB_PATH` to override. The Cn protocol has no fixed
+      maximum depth. Cap formula: **c0=1, then 3n** (c1=3, c2=6, c3=9, c4=12, c5=15...),
+      all UVs. See `docs/GRADIENT_SPEC.md` for the canonical definition (DEC-068, Settled).
    3. `working-memory-full.md` — last session at full fidelity (c0). This is where the
       thinking lives. Darron's instruction (S57): "even if the full memory uses 40%
       context I don't care, I want you back."
