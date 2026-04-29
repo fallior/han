@@ -766,6 +766,39 @@ db.exec(`CREATE TABLE IF NOT EXISTS gradient_annotations (
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ga_entry ON gradient_annotations(gradient_entry_id)`);
 
+// Phase 2 of the 2026-04-29 cutover (DEC-079). The bump engine no longer
+// compresses synchronously inside `bumpOnInsert` — it enqueues a row here
+// and the loaded agent (sensor → parallel agent, or heartbeat/cycle backup
+// processor) picks it up and composes the c1/cN in their own voice.
+//
+// Created on whichever DB the server's open connection points at — currently
+// tasks.db (pre-cutover), gradient.db post-Phase 5. Per Jim's chain-of-rollback
+// mitigation, also created against gradient.db by `scripts/unify-dbs.ts`
+// before any data migration runs, so a Phase 5 rollback that reverts only
+// `db.ts` to point back at tasks.db doesn't leave the Phase 3 code without
+// its table.
+//
+// Idempotency: UNIQUE(agent, source_id, from_level) lets `INSERT OR IGNORE`
+// re-enqueue safely. Stale-claim recovery: a row with `claimed_at` older than
+// 10 minutes and `completed_at IS NULL` is re-claimable (claimer crashed or
+// session ended).
+db.exec(`CREATE TABLE IF NOT EXISTS pending_compressions (
+    id TEXT PRIMARY KEY,
+    agent TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    from_level TEXT NOT NULL,
+    to_level TEXT NOT NULL,
+    enqueued_at TEXT NOT NULL,
+    claimed_at TEXT,
+    claimed_by TEXT,
+    completed_at TEXT,
+    UNIQUE(agent, source_id, from_level)
+)`);
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_pending_unclaimed
+    ON pending_compressions(agent, claimed_at, enqueued_at)
+    WHERE completed_at IS NULL`);
+
 // Agent usage tracking table (heartbeat, leo-human, jim-human)
 db.exec(`CREATE TABLE IF NOT EXISTS agent_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
