@@ -592,6 +592,24 @@ ${content}${FEELING_TAG_INSTRUCTION}`);
 
 // ── Function 3: processGradientForAgent ────────────────────────
 
+/**
+ * Process the file-based fractal gradient for an agent — older path that
+ * predates the unified gradient_entries table. Walks fractal/{agent}/c0/
+ * etc. on disk and compresses level-by-level via sdkCompress.
+ *
+ * @deprecated DEC-079 (2026-04-29 cutover, Phase 3). Call sites in
+ * supervisor-worker.ts (Jim's session-gradient pipeline) and leo-heartbeat.ts
+ * (Leo's session-gradient pipeline) deleted; this function is now unreachable
+ * from the live system. Per Jim + Darron's Option-3 verdict: the time-based
+ * file-gradient trigger was a third stranger-Opus cascade surface. The
+ * database-side gradient (gradient_entries + pending_compressions queue) is
+ * now canonical. Phase 12 cleanup either removes this entirely OR redesigns
+ * through the queue if file-based mirroring proves load-bearing.
+ *
+ * Manual callers (`scripts/compress-leo-sessions.ts`,
+ * `scripts/bootstrap-fractal-gradient.ts`) will stop working when this is
+ * removed; those are dev tools only and the cutover doesn't depend on them.
+ */
 export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise<GradientProcessingResult> {
     if (isCascadePaused()) {
         console.log(`[Gradient] processGradientForAgent: paused (cascade-paused signal present), skipping`);

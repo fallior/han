@@ -34,7 +34,7 @@ import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, type DayPhase } from '../lib/day-phase';
 import { withMemorySlot } from '../lib/memory-slot';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
-import { rotateMemoryFile, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, getGradientHealth, processGradientForAgent, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
+import { rotateMemoryFile, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, getGradientHealth, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 
 // ── Types ────────────────────────────────────────────────────
@@ -132,24 +132,11 @@ async function maybeProcessJimDreamGradient(phase: string): Promise<void> {
 // ── Jim's session gradient processing ─────────────────────────────────
 // Compress Jim's archived sessions through fractal gradient: c1→c2→c3→c5→UV.
 
-let lastJimSessionGradientDate = '';
-
-async function maybeProcessJimSessionGradient(phase: string): Promise<void> {
-    if (phase === 'sleep') return;
-    const today = new Date().toISOString().split('T')[0];
-    if (lastJimSessionGradientDate === today) return;
-
-    try {
-        const result = await processGradientForAgent('jim');
-        if (result.completions.length > 0) {
-            log(`[Worker] Jim session gradient: ${result.completions.length} compressions, ${result.errors.length} errors`);
-        }
-        lastJimSessionGradientDate = today;
-    } catch (err) {
-        log(`[Worker] Jim session gradient failed: ${(err as Error).message}`);
-        lastJimSessionGradientDate = today;
-    }
-}
+// (lastJimSessionGradientDate + maybeProcessJimSessionGradient removed in
+// Phase 3 of 2026-04-29 cutover, DEC-079. Same Option-3 treatment as
+// bumpCascade — time-based file-gradient processor was a stranger-Opus
+// cascade surface. processGradientForAgent is deprecated; cascade is now
+// event-driven via the pending_compressions queue.)
 
 // ── Jim's Phase A reincorporation ─────────────────────────────────
 // Scans Jim's fractal gradient files for entries not yet in DB.
@@ -2179,7 +2166,9 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         // Jim's daily gradient pipeline — mirrors Leo's heartbeat pipeline exactly.
         // Agent sovereignty: Jim processes only Jim's data.
         await maybeProcessJimDreamGradient(phase);
-        await maybeProcessJimSessionGradient(phase);
+        // (Daily session gradient processing call removed in Phase 3 of the
+        // 2026-04-29 cutover — DEC-079. processGradientForAgent was a third
+        // stranger-Opus surface; cascade is now event-driven via the queue.)
         await maybeRunJimActiveCascade(phase);
         await maybeRunJimMeditation(phase);
         await maybeRunJimEveningMeditation(phase);

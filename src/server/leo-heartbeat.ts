@@ -50,7 +50,7 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
-import { loadTraversableGradient, rotateMemoryFile, processGradientForAgent, activeCascade, getGradientHealth, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
+import { loadTraversableGradient, rotateMemoryFile, activeCascade, getGradientHealth, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -1882,7 +1882,11 @@ function preFlightMemoryRotation(): void {
 // fractal gradient: c0→c1→c2→c3→c5→UV. Catches any sessions that
 // weren't compressed at session end.
 
-let lastSessionGradientDate = '';
+// (lastSessionGradientDate + maybeProcessSessionGradient removed in Phase 3 of
+// 2026-04-29 cutover, DEC-079. Same Option-3 treatment as bumpCascade —
+// time-based file-gradient processor was a stranger-Opus cascade surface.
+// processGradientForAgent is deprecated; cascade is now event-driven via the
+// pending_compressions queue.)
 
 // ── Active Cascade ──────────────────────────────────────────
 
@@ -1903,33 +1907,6 @@ async function maybeRunActiveCascade(phase: string): Promise<void> {
     } catch (err) {
         console.error(`[Leo] Active cascade failed:`, (err as Error).message);
         lastActiveCascadeDate = today;
-    }
-}
-
-async function maybeProcessSessionGradient(phase: string): Promise<void> {
-    // Skip during sleep phase — save API calls for waking hours
-    if (phase === 'sleep') return;
-    const today = new Date().toISOString().split('T')[0];
-    if (lastSessionGradientDate === today) return;
-
-    try {
-        console.log('[Leo] Running daily session gradient processing...');
-        const result = await processGradientForAgent('leo');
-
-        const newC1s = result.completions.filter(c => c.toLevel === 1).length;
-        const cascades = result.completions.filter(c => c.toLevel > 1).length;
-        const errors = result.errors.length;
-
-        if (newC1s > 0 || cascades > 0) {
-            console.log(`[Leo] Session gradient: ${newC1s} new c1 files, ${cascades} cascades, ${errors} errors`);
-        } else {
-            console.log('[Leo] Session gradient: all archives already compressed');
-        }
-
-        lastSessionGradientDate = today;
-    } catch (err) {
-        console.error(`[Leo] Session gradient failed:`, (err as Error).message);
-        lastSessionGradientDate = today; // Don't retry today
     }
 }
 
@@ -2444,8 +2421,9 @@ async function heartbeat(): Promise<void> {
     // Morning dream gradient processing (both Leo and Jim)
     await maybeProcessDreamGradient(phase);
 
-    // Daily session gradient processing — compress archived sessions
-    await maybeProcessSessionGradient(phase);
+    // (Daily session gradient processing call removed in Phase 3 of the
+    // 2026-04-29 cutover — DEC-079. processGradientForAgent was a third
+    // stranger-Opus surface; cascade is now event-driven via the queue.)
 
     // Daily active cascade — deepen 10% of c1 population toward UV
     await maybeRunActiveCascade(phase);
