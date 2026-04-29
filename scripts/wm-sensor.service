@@ -1,0 +1,20 @@
+[Unit]
+Description=WM Sensor — event-driven rolling-window rotation + parallel-agent dispatch (DEC-079, Phase 4)
+After=network.target han-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/darron/Projects/han/src/server
+ExecStart=/home/darron/Projects/han/src/server/node_modules/.bin/tsx services/wm-sensor.ts
+Restart=always
+RestartSec=5
+Environment=HOME=/home/darron
+Environment=PATH=/home/darron/.nvm/versions/node/v23.9.0/bin:/usr/local/bin:/usr/bin:/bin
+Environment=NODE_TLS_REJECT_UNAUTHORIZED=0
+EnvironmentFile=/home/darron/Projects/han/.env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wm-sensor
+
+[Install]
+WantedBy=default.target

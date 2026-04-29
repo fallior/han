@@ -1750,8 +1750,15 @@ export function rollingWindowRotate(
     const archiveContent = toArchive.map(e => e.content).join('\n\n---\n\n');
 
     // Atomic c0 insertion: trimmed block enters the gradient DB immediately.
-    // No limbo — what gets trimmed IS what gets represented. bumpCascade
-    // will compress c0 → c1 → ... → UV over subsequent beats.
+    // No limbo — what gets trimmed IS what gets represented.
+    //
+    // Phase 4 of 2026-04-29 cutover (DEC-079): after the atomic insert, call
+    // bumpOnInsert to enqueue a pending_compressions row. Single source of
+    // truth — every c0 produced by rolling-window rotation triggers the
+    // bump engine, regardless of which caller (sensor, timed pre-flight,
+    // direct invocation) drove the rotation. Fire-and-forget: bumpOnInsert
+    // is async but only does DB work; the rotation's result is observable
+    // synchronously via the returned struct.
     let c0EntryId: string | undefined;
     if (agent && contentType) {
         const entryId = generateGradientId();
@@ -1760,6 +1767,11 @@ export function rollingWindowRotate(
         const sessionLabel = `rolling-${sessionDate}`;
         insertGradientEntry(entryId, agent, sessionLabel, 'c0', archiveContent, contentType, null, null);
         c0EntryId = entryId;
+
+        // Trigger the bump engine to enqueue the cascade.
+        void bumpOnInsert(agent, 'c0').catch((err: Error) => {
+            console.error(`[rollingWindowRotate] bumpOnInsert failed for ${agent} c0=${entryId}:`, err.message);
+        });
     }
 
     // Write archive file (kept for backward compat / manual inspection)
