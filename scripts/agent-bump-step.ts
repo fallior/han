@@ -176,36 +176,68 @@ function findPendingCompression(): {
     return null;
 }
 
-// Composite-cursor on (created_at, id) DESC against target's c0 high-water,
-// returns the next source c0 (chronologically) not yet in target. Excludes
+// Returns the next source c0 (chronologically) not yet in target. Excludes
 // dream/felt-moment per the same convention as replay-bump-fill.ts.
+//
+// S145 fix (cursor-skip on tied timestamps): the previous composite-cursor
+// `(created_at = resumeTs AND id > resumeId)` walked forward correctly under
+// monotonic insertion but silently skipped tied-timestamp siblings whose id
+// sorted BETWEEN already-inserted ties. (Surfaced S144 — Mar 6 part 2 was
+// skipped because target had Mar 6 part 1 and Mar 6 part 3 sharing the same
+// timestamp; the cursor anchored on the higher-id of the two and never
+// returned for the lower-id one.)
+//
+// Fixed approach: walk ALL uncascaded ties at the resume timestamp before
+// advancing. We compute the set of target ids at the maximum c0 timestamp,
+// then either (a) return a source row at that same timestamp whose id is NOT
+// in the target set, or (b) advance to a source row strictly past that
+// timestamp. Once all ties are processed, (a) returns nothing and we fall
+// through to (b).
 function findNextSourceC0(): any | null {
-    const resumeRow = targetDb.prepare(`
-        SELECT created_at, id FROM gradient_entries
+    const maxTsRow = targetDb.prepare(`
+        SELECT MAX(created_at) AS max_ts FROM gradient_entries
         WHERE agent = ? AND level = 'c0'
           AND content_type NOT IN ('dream', 'felt-moment')
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
     `).get(agent) as any;
 
-    const resumeTs = resumeRow?.created_at;
-    const resumeId = resumeRow?.id;
+    const maxTs = maxTsRow?.max_ts;
 
-    const sql = resumeTs
-        ? `SELECT * FROM gradient_entries
-           WHERE agent = ? AND level = 'c0'
-             AND content_type NOT IN ('dream', 'felt-moment')
-             AND (created_at > ? OR (created_at = ? AND id > ?))
-           ORDER BY created_at ASC, id ASC
-           LIMIT 1`
-        : `SELECT * FROM gradient_entries
-           WHERE agent = ? AND level = 'c0'
-             AND content_type NOT IN ('dream', 'felt-moment')
-           ORDER BY created_at ASC, id ASC
-           LIMIT 1`;
+    if (!maxTs) {
+        // No c0s in target yet — return first source row.
+        return sourceDb.prepare(`
+            SELECT * FROM gradient_entries
+            WHERE agent = ? AND level = 'c0'
+              AND content_type NOT IN ('dream', 'felt-moment')
+            ORDER BY created_at ASC, id ASC
+            LIMIT 1
+        `).get(agent) as any || null;
+    }
+
+    const idsAtMaxTs = (targetDb.prepare(`
+        SELECT id FROM gradient_entries
+        WHERE agent = ? AND level = 'c0'
+          AND content_type NOT IN ('dream', 'felt-moment')
+          AND created_at = ?
+    `).all(agent, maxTs) as any[]).map(r => r.id as string);
+
+    const placeholders = idsAtMaxTs.map(() => '?').join(',');
+    const tieClause = idsAtMaxTs.length > 0
+        ? `(created_at = ? AND id NOT IN (${placeholders})) OR created_at > ?`
+        : `created_at > ?`;
+
+    const sql = `SELECT * FROM gradient_entries
+                 WHERE agent = ? AND level = 'c0'
+                   AND content_type NOT IN ('dream', 'felt-moment')
+                   AND (${tieClause})
+                 ORDER BY created_at ASC, id ASC
+                 LIMIT 1`;
 
     const params: any[] = [agent];
-    if (resumeTs) params.push(resumeTs, resumeTs, resumeId);
+    if (idsAtMaxTs.length > 0) {
+        params.push(maxTs, ...idsAtMaxTs, maxTs);
+    } else {
+        params.push(maxTs);
+    }
 
     return sourceDb.prepare(sql).get(...params) as any || null;
 }
