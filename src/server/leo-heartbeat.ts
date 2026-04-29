@@ -1894,7 +1894,10 @@ import { acquireWmSensorLock, releaseWmSensorLock } from './lib/sensor-lock.js';
 import BetterSqlite3 from 'better-sqlite3';
 
 const PROCESS_PENDING_SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'process-pending-compression.ts');
-const GRADIENT_DB_PATH = path.join(HAN_DIR, 'gradient.db');
+// Mirror db.ts:32 pattern — honour HAN_DB_PATH override so dev/test scenarios
+// that route the system to alternate DBs see consistent behaviour. Phase 5
+// audit (S145) caught this hardcoded path as a silent-divergence footgun.
+const GRADIENT_DB_PATH = process.env.HAN_DB_PATH || path.join(HAN_DIR, 'gradient.db');
 
 async function maybeBackupQueueDrain(): Promise<void> {
     let pendingCount = 0;

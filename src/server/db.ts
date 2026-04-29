@@ -29,7 +29,12 @@ export const REGISTRY_PATH = path.join(process.env.HOME!, 'Projects', 'infrastru
 // `db` at a non-default file without forking schema. Production paths
 // fall back to ~/.han/tasks.db when the env var is unset.
 
-const TASKS_DB_PATH = process.env.HAN_DB_PATH || path.join(HAN_DIR, 'tasks.db');
+// Phase 5 of 2026-04-29 cutover (DEC-080): default flipped from tasks.db to
+// gradient.db. tasks.db is retired as the canonical store; the rebuild gradient
+// is the home now. The HAN_DB_PATH env override remains so diagnostic scripts
+// (replay-bump-fill, agent-bump-step in alt-DB mode) can route elsewhere.
+// Variable name kept as TASKS_DB_PATH for now — Phase 12 cleanup will rename.
+const TASKS_DB_PATH = process.env.HAN_DB_PATH || path.join(HAN_DIR, 'gradient.db');
 export const db = new Database(TASKS_DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');

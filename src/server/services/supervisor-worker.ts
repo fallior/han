@@ -143,13 +143,18 @@ async function maybeProcessJimDreamGradient(phase: string): Promise<void> {
 //      stale-claim recovery handles "sensor died mid-process."
 //   3. Spawn process-pending-compression.ts; await exit; release lock.
 
-const GRADIENT_DB_PATH_4C = path.join(HAN_DIR, 'gradient.db');
-const PROCESS_PENDING_SCRIPT_4C = path.resolve(__dirname, '..', '..', '..', 'scripts', 'process-pending-compression.ts');
+// Mirror db.ts:32 pattern — honour HAN_DB_PATH override so dev/test scenarios
+// that route the system to alternate DBs see consistent behaviour. Phase 5
+// audit (S145) caught the previous hardcoded path as a silent-divergence
+// footgun; renamed from GRADIENT_DB_PATH_4C (no longer needs the suffix —
+// no name collision in this file).
+const GRADIENT_DB_PATH = process.env.HAN_DB_PATH || path.join(HAN_DIR, 'gradient.db');
+const PROCESS_PENDING_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'process-pending-compression.ts');
 
 async function maybeBackupQueueDrainJim(): Promise<void> {
     let pendingCount = 0;
     try {
-        const peekDb = new Database(GRADIENT_DB_PATH_4C, { readonly: true });
+        const peekDb = new Database(GRADIENT_DB_PATH, { readonly: true });
         try {
             const row = peekDb.prepare(`
                 SELECT COUNT(*) as n FROM pending_compressions
@@ -170,7 +175,7 @@ async function maybeBackupQueueDrainJim(): Promise<void> {
         const SERVER_DIR = path.resolve(__dirname, '..');
         const tsxBin = path.join(SERVER_DIR, 'node_modules', '.bin', 'tsx');
         await new Promise<void>((resolve) => {
-            const child = spawnChild(tsxBin, [PROCESS_PENDING_SCRIPT_4C, '--agent=jim'], {
+            const child = spawnChild(tsxBin, [PROCESS_PENDING_SCRIPT, '--agent=jim'], {
                 cwd: SERVER_DIR,
                 env: { ...process.env, NODE_PATH: path.join(SERVER_DIR, 'node_modules') },
                 stdio: ['ignore', 'pipe', 'pipe'],
