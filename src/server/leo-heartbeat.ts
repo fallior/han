@@ -1872,6 +1872,72 @@ function preFlightMemoryRotation(): void {
     }
 }
 
+// ── Backup queue-drain (Phase 4c, DEC-079) ─────────────────────────────
+//
+// Belt-and-braces fallback: if wm-sensor isn't running OR has crashed mid-
+// process, the heartbeat sweeps up unclaimed pending_compressions rows for
+// Leo at the end of each beat. The sensor is the primary path; this is the
+// safety net.
+//
+// Concurrency-safe by composition:
+//   1. Cheap peek on pending_compressions count — exit early if queue empty
+//      (avoids spawning a child every beat for nothing).
+//   2. acquireWmSensorLock — if sensor holds the lock, this returns false and
+//      we skip silently. Stale-claim recovery in claimNextPendingCompression
+//      (10-min) handles the "sensor died mid-process" case naturally.
+//   3. Spawn process-pending-compression.ts as child; await its exit;
+//      release the lock.
+//
+// Per-agent ownership preserved: heartbeat-Leo only drains Leo's queue.
+import { spawn as spawnChild } from 'child_process';
+import { acquireWmSensorLock, releaseWmSensorLock } from './lib/sensor-lock.js';
+import BetterSqlite3 from 'better-sqlite3';
+
+const PROCESS_PENDING_SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'process-pending-compression.ts');
+const GRADIENT_DB_PATH = path.join(HAN_DIR, 'gradient.db');
+
+async function maybeBackupQueueDrain(): Promise<void> {
+    let pendingCount = 0;
+    try {
+        const peekDb = new BetterSqlite3(GRADIENT_DB_PATH, { readonly: true });
+        try {
+            const row = peekDb.prepare(`
+                SELECT COUNT(*) as n FROM pending_compressions
+                WHERE agent = 'leo' AND completed_at IS NULL
+            `).get() as any;
+            pendingCount = row?.n || 0;
+        } finally { peekDb.close(); }
+    } catch {
+        return; // gradient.db may not yet have pending_compressions; pre-Phase-2 boot
+    }
+    if (pendingCount === 0) return;
+
+    if (!acquireWmSensorLock('leo')) {
+        return; // sensor is doing the work — skip silently
+    }
+    try {
+        console.log(`[Leo] Backup queue-drain: ${pendingCount} pending — spawning parallel agent`);
+        const tsxBin = path.join(__dirname, 'node_modules', '.bin', 'tsx');
+        await new Promise<void>((resolve) => {
+            const child = spawnChild(tsxBin, [PROCESS_PENDING_SCRIPT, '--agent=leo'], {
+                cwd: __dirname,
+                env: { ...process.env, NODE_PATH: path.join(__dirname, 'node_modules') },
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            let stderr = '';
+            child.stderr.on('data', (d) => { stderr += d.toString(); });
+            child.on('exit', (code) => {
+                if (code !== 0) {
+                    console.warn(`[Leo] Backup parallel agent exited ${code}: ${stderr.split('\n').slice(0, 3).join(' | ')}`);
+                }
+                resolve();
+            });
+        });
+    } finally {
+        releaseWmSensorLock('leo');
+    }
+}
+
 // ── Nightly dream compression — REMOVED (S112, 2026-04-07) ───────────
 // The 6am clock-based wipe has been replaced by the rolling window design
 // in preFlightMemoryRotation(). Memory files are now compressed by size
@@ -2408,6 +2474,12 @@ async function heartbeat(): Promise<void> {
 
     // Pre-flight: rolling window rotation for memory files (fast, no API)
     preFlightMemoryRotation();
+
+    // Phase 4c (DEC-079): backup queue-drain — sweep up pending_compressions
+    // if wm-sensor isn't running. No-op when sensor is doing its job (lock
+    // acquisition fails silently). Agent-scoped: heartbeat-Leo drains Leo's
+    // queue only.
+    await maybeBackupQueueDrain();
 
     // Robin Hood: check all service health FIRST — before anything else
     checkJimHealth();

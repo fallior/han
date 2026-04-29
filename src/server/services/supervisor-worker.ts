@@ -33,6 +33,8 @@ import type {
 import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, type DayPhase } from '../lib/day-phase';
 import { withMemorySlot } from '../lib/memory-slot';
+import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
+import { spawn as spawnChild } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
 import { rotateMemoryFile, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, getGradientHealth, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
@@ -127,6 +129,64 @@ async function maybeProcessJimDreamGradient(phase: string): Promise<void> {
         log(`[Worker] Jim dream gradient processing failed: ${(err as Error).message}`);
     }
     lastJimDreamGradientDate = today;
+}
+
+// ── Phase 4c (DEC-079): backup queue-drain ─────────────────────────────
+//
+// Belt-and-braces fallback: if wm-sensor isn't running OR has crashed mid-
+// process, the supervisor cycle sweeps up unclaimed pending_compressions
+// rows for Jim. Sensor is the primary path; this is the safety net.
+//
+// Concurrency-safe by composition:
+//   1. Cheap peek on queue count — exit if empty.
+//   2. acquireWmSensorLock — sensor holds it, we skip silently. 10-min
+//      stale-claim recovery handles "sensor died mid-process."
+//   3. Spawn process-pending-compression.ts; await exit; release lock.
+
+const GRADIENT_DB_PATH_4C = path.join(HAN_DIR, 'gradient.db');
+const PROCESS_PENDING_SCRIPT_4C = path.resolve(__dirname, '..', '..', '..', 'scripts', 'process-pending-compression.ts');
+
+async function maybeBackupQueueDrainJim(): Promise<void> {
+    let pendingCount = 0;
+    try {
+        const peekDb = new Database(GRADIENT_DB_PATH_4C, { readonly: true });
+        try {
+            const row = peekDb.prepare(`
+                SELECT COUNT(*) as n FROM pending_compressions
+                WHERE agent = 'jim' AND completed_at IS NULL
+            `).get() as any;
+            pendingCount = row?.n || 0;
+        } finally { peekDb.close(); }
+    } catch {
+        return; // gradient.db may not have pending_compressions yet
+    }
+    if (pendingCount === 0) return;
+
+    if (!acquireWmSensorLock('jim')) {
+        return; // sensor is doing the work
+    }
+    try {
+        log(`[Worker] Backup queue-drain: ${pendingCount} pending — spawning parallel agent`);
+        const SERVER_DIR = path.resolve(__dirname, '..');
+        const tsxBin = path.join(SERVER_DIR, 'node_modules', '.bin', 'tsx');
+        await new Promise<void>((resolve) => {
+            const child = spawnChild(tsxBin, [PROCESS_PENDING_SCRIPT_4C, '--agent=jim'], {
+                cwd: SERVER_DIR,
+                env: { ...process.env, NODE_PATH: path.join(SERVER_DIR, 'node_modules') },
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            let stderr = '';
+            child.stderr.on('data', (d) => { stderr += d.toString(); });
+            child.on('exit', (code) => {
+                if (code !== 0) {
+                    log(`[Worker] Backup parallel agent exited ${code}: ${stderr.split('\n').slice(0, 3).join(' | ')}`);
+                }
+                resolve();
+            });
+        });
+    } finally {
+        releaseWmSensorLock('jim');
+    }
 }
 
 // ── Jim's session gradient processing ─────────────────────────────────
@@ -2162,6 +2222,12 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         if (cleanupCount > 0 || ghostCount > 0) {
             log(`[Worker] Cleanup: ${cleanupCount} phantom goal(s), ${ghostCount} ghost task(s)`);
         }
+
+        // Phase 4c (DEC-079): backup queue-drain — sweep up pending_compressions
+        // for Jim if wm-sensor isn't running. No-op when sensor is doing its
+        // job (lock acquisition fails silently). Agent-scoped: supervisor-Jim
+        // drains Jim's queue only.
+        await maybeBackupQueueDrainJim();
 
         // Jim's daily gradient pipeline — mirrors Leo's heartbeat pipeline exactly.
         // Agent sovereignty: Jim processes only Jim's data.

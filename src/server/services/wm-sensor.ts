@@ -37,6 +37,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { spawn } from 'child_process';
 import { rollingWindowRotate } from '../lib/memory-gradient';
+import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 
 // ── Config + paths ────────────────────────────────────────────────
 
@@ -131,35 +132,9 @@ function buildTargets(agent: 'jim' | 'leo'): WatchTarget[] {
     return targets;
 }
 
-// ── Concurrency lock per agent ────────────────────────────────────
-
-function acquireLock(agent: 'jim' | 'leo'): boolean {
-    const lockPath = path.join(SIGNALS_DIR, `wm-sensor-${agent}-active`);
-    try {
-        const fd = fs.openSync(lockPath, 'wx');
-        fs.writeSync(fd, `pid=${process.pid} ts=${new Date().toISOString()}`);
-        fs.closeSync(fd);
-        return true;
-    } catch {
-        // Already locked. Check staleness — if older than 5 min, the holder
-        // probably died. Force-release and retry.
-        try {
-            const stat = fs.statSync(lockPath);
-            const ageMs = Date.now() - stat.mtimeMs;
-            if (ageMs > 5 * 60 * 1000) {
-                log(`stale lock for ${agent} (age ${Math.round(ageMs / 1000)}s) — forcing release`);
-                fs.unlinkSync(lockPath);
-                return acquireLock(agent);
-            }
-        } catch { /* lock vanished mid-stat */ }
-        return false;
-    }
-}
-
-function releaseLock(agent: 'jim' | 'leo'): void {
-    const lockPath = path.join(SIGNALS_DIR, `wm-sensor-${agent}-active`);
-    try { fs.unlinkSync(lockPath); } catch { /* already gone */ }
-}
+// (Lock helpers extracted to ../lib/sensor-lock.ts in Phase 4c so the backup
+// queue-drain in leo-heartbeat and supervisor-worker can share the same
+// primitive — whoever holds the lock owns rotation/drain for that agent.)
 
 // ── Spawn the parallel memory-aware agent ────────────────────────
 
@@ -244,7 +219,7 @@ function setupWatcher(target: WatchTarget, config: Config): void {
     const onChange = () => {
         if (state.debounceTimer) clearTimeout(state.debounceTimer);
         state.debounceTimer = setTimeout(async () => {
-            if (!acquireLock(target.agent)) {
+            if (!acquireWmSensorLock(target.agent)) {
                 // Another invocation is in flight for this agent; it'll observe
                 // the new size when it finishes its current pass.
                 return;
@@ -254,7 +229,7 @@ function setupWatcher(target: WatchTarget, config: Config): void {
             } catch (err) {
                 log(`processTarget error for ${target.agent}/${path.basename(target.filePath)}: ${(err as Error).message}`);
             } finally {
-                releaseLock(target.agent);
+                releaseWmSensorLock(target.agent);
             }
         }, config.sensorDebounceMs);
     };
@@ -287,8 +262,11 @@ function setupWatcher(target: WatchTarget, config: Config): void {
     if (fs.existsSync(target.filePath)) {
         watch();
         log(`watching ${target.agent}/${path.basename(target.filePath)}`);
-        // Also process once at startup in case the file is already over ceiling.
-        onChange();
+        // Note: NO initial-scan onChange() at boot. Per Jim+Darron's S145 audit,
+        // boot-time-oversize cases are covered by (a) the heartbeat/cycle's
+        // existing rollingWindowRotate calls, and (b) the next session-end
+        // write naturally triggering a watch event. Skipping saves needless
+        // surface area at startup.
     } else {
         log(`${target.agent}/${path.basename(target.filePath)} doesn't exist yet — will set up watch when it appears`);
         // Poll for the file every 30s; once it exists, switch to watch mode.
@@ -338,8 +316,8 @@ async function main() {
     // Stay alive
     process.on('SIGTERM', () => {
         log('SIGTERM received; releasing locks and exiting');
-        releaseLock('leo');
-        releaseLock('jim');
+        releaseWmSensorLock('leo');
+        releaseWmSensorLock('jim');
         process.exit(0);
     });
 }
