@@ -79,7 +79,11 @@ const HAN_DIR = process.env.HAN_DIR || path.join(process.env.HOME!, '.han');
 const MEMORY_DIR = path.join(HAN_DIR, 'memory');
 const PROJECTS_DIR = path.join(MEMORY_DIR, 'projects');
 const SESSIONS_DIR = path.join(MEMORY_DIR, 'sessions');
-const TASKS_DB_PATH = path.join(HAN_DIR, 'tasks.db');
+// Phase 5 followup: honour HAN_DB_PATH override; default flipped from
+// tasks.db to gradient.db per DEC-080. Mirrors db.ts:32 pattern. Variable
+// name kept TASKS_DB_PATH for now — Phase 12 cleanup will rename consistently
+// across the codebase.
+const TASKS_DB_PATH = process.env.HAN_DB_PATH || path.join(HAN_DIR, 'gradient.db');
 const JIM_AGENT_DIR = path.join(HAN_DIR, 'agents', 'Jim');
 const SUPERVISOR_SWAP_FILE = path.join(MEMORY_DIR, 'supervisor-swap.md');
 const SUPERVISOR_SWAP_FULL_FILE = path.join(MEMORY_DIR, 'supervisor-swap-full.md');

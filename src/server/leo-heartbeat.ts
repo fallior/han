@@ -73,7 +73,9 @@ let activeModel: string = MODEL_PREFERENCE[0];
 const HOME = process.env.HOME || '/home/darron';
 const HAN_DIR = path.join(HOME, '.han');
 const CONFIG_PATH = path.join(HAN_DIR, 'config.json');
-const DB_PATH = path.join(HAN_DIR, 'tasks.db');
+// Phase 5 followup: honour HAN_DB_PATH override; default flipped from
+// tasks.db to gradient.db per DEC-080. Mirrors db.ts:32 pattern.
+const DB_PATH = process.env.HAN_DB_PATH || path.join(HAN_DIR, 'gradient.db');
 const JIM_MEMORY_DIR = path.join(HAN_DIR, 'memory');
 const LEO_MEMORY_DIR = path.join(HAN_DIR, 'memory', 'leo');
 const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
