@@ -269,6 +269,74 @@ async function main() {
 // ── Mode: next ──────────────────────────────────────────────────
 
 if (mode === 'next') {
+    // Phase 3 (DEC-079): consult the pending_compressions queue first. The
+    // bump engine enqueues here when a c0 (or cN) insert produces a
+    // displacement. findPendingCompression below remains as fallback for
+    // direct rebuild use that runs outside the queue (e.g., re-feeding
+    // migrated rolling-c0s before the sensor wires up Phase 4).
+    //
+    // Stale-claim recovery: rows whose claimed_at > 10 min old and
+    // completed_at IS NULL are re-claimable — claimer crashed or session
+    // ended. Atomic via a transaction so two `next` invocations don't
+    // double-claim the same row.
+    const STALE_CLAIM_MINUTES = 10;
+    const claimer = `${agent}-direct`;
+    const claimQueueTxn = targetDb.transaction(() => {
+        const row = targetDb.prepare(`
+            SELECT pc.id, pc.agent, pc.source_id, pc.from_level, pc.to_level,
+                   pc.enqueued_at,
+                   ge.content as source_content,
+                   ge.session_label as source_session_label,
+                   ge.content_type as source_content_type
+            FROM pending_compressions pc
+            LEFT JOIN gradient_entries ge ON ge.id = pc.source_id
+            WHERE pc.agent = ?
+              AND pc.completed_at IS NULL
+              AND (pc.claimed_at IS NULL
+                   OR pc.claimed_at < datetime('now', '-${STALE_CLAIM_MINUTES} minutes'))
+            ORDER BY pc.enqueued_at ASC
+            LIMIT 1
+        `).get(agent) as any;
+        if (!row) return null;
+        targetDb.prepare(`
+            UPDATE pending_compressions
+            SET claimed_at = datetime('now'), claimed_by = ?
+            WHERE id = ?
+        `).run(claimer, row.id);
+        return row;
+    });
+    const queued = claimQueueTxn();
+    if (queued) {
+        const sourceContent = String(queued.source_content || '');
+        const targetChars = Math.max(1, Math.round(sourceContent.length / 3));
+        const out = {
+            operation: 'compress',
+            agent,
+            step_id: `compress:${queued.source_id}:${queued.from_level}->${queued.to_level}`,
+            from_level: queued.from_level,
+            to_level: queued.to_level,
+            source_id: queued.source_id,
+            session_label: queued.source_session_label,
+            content_type: queued.source_content_type,
+            source_chars: sourceContent.length,
+            target_chars: targetChars,
+            source_content: sourceContent,
+            from_queue: true,
+            pending_id: queued.id,
+            instructions: [
+                `Compose the compression in your own voice (${agent}).`,
+                `Target ~${targetChars} chars (1/3 of source ${sourceContent.length}).`,
+                `Save to /tmp/${agent}-comp-${queued.source_id.slice(0, 8)}-${queued.to_level}.md`,
+                `Emit a feeling tag (single short line capturing the day's tone).`,
+                `If compressing further would destroy meaning, use --incompressible with content-file containing the irreducible kernel sentence (max 50 chars).`,
+                `Submit: agent-bump-step.ts submit --agent=${agent} --step-id=<step_id> --content-file=<path> --feeling-tag="..."`,
+                `(Step came from queue; submission auto-completes pending row ${queued.id}.)`,
+            ],
+        };
+        console.log(JSON.stringify(out, null, 2));
+        process.exit(0);
+    }
+
     const pending = findPendingCompression();
     if (pending) {
         const sourceContent = String(pending.displaced.content || '');
@@ -447,12 +515,23 @@ if (mode === 'submit') {
                 `UPDATE gradient_entries SET cascade_halted_at = ?
                  WHERE id = ? AND agent = ?`
             ).run(fromLevel, displacedId, agent);
+            // Phase 3 (DEC-079): if this step came from the queue, mark the
+            // pending row complete. UV is a valid completion — the cascade
+            // halts at the kernel and the queue should reflect that. No-op
+            // for direct rebuild use that didn't go through the queue.
+            const uvCompleteResult = targetDb.prepare(`
+                UPDATE pending_compressions
+                SET completed_at = datetime('now')
+                WHERE agent = ? AND source_id = ? AND from_level = ?
+                  AND completed_at IS NULL
+            `).run(agent, displacedId, fromLevel);
             console.log(JSON.stringify({
                 ok: true,
                 operation: 'incompressible',
                 uv_tagged: displacedId,
                 kernel,
                 cascade_halted_at: fromLevel,
+                pending_completed: uvCompleteResult.changes > 0,
             }, null, 2));
             process.exit(0);
         }
@@ -496,6 +575,16 @@ if (mode === 'submit') {
             );
         }
 
+        // Phase 3 (DEC-079): if this step came from the queue, mark the pending
+        // row complete. No-op for direct rebuild use that didn't go through the
+        // queue (the UPDATE matches zero rows and exits cleanly).
+        const compressCompleteResult = targetDb.prepare(`
+            UPDATE pending_compressions
+            SET completed_at = datetime('now')
+            WHERE agent = ? AND source_id = ? AND from_level = ?
+              AND completed_at IS NULL
+        `).run(agent, displaced.id, fromLevel);
+
         const sourceChars = String(displaced.content || '').length;
         const ratio = sourceChars > 0 ? sourceChars / Math.max(1, compressed.length) : 0;
 
@@ -512,6 +601,7 @@ if (mode === 'submit') {
             ratio_actual: Math.round(ratio * 100) / 100,
             ratio_target: 3,
             feeling_tag: feelingTag || null,
+            pending_completed: compressCompleteResult.changes > 0,
             cascade_timestamp: cascadeTimestamp,
         }, null, 2));
         process.exit(0);

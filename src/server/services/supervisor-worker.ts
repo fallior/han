@@ -34,7 +34,7 @@ import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, type DayPhase } from '../lib/day-phase';
 import { withMemorySlot } from '../lib/memory-slot';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
-import { rotateMemoryFile, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, bumpCascade, getGradientHealth, processGradientForAgent, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
+import { rotateMemoryFile, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, getGradientHealth, processGradientForAgent, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 
 // ── Types ────────────────────────────────────────────────────
@@ -2093,32 +2093,11 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         // Conversations take priority over time-of-day scheduling.
         cycleType = 'supervisor';
         log(`[Worker] Pending human message — forcing supervisor cycle`);
-    } else if (isWorkingBee('jim') && !humanTriggered) {
-        // Working bee mode: devote cycle to gradient compression.
-        // Human-triggered cycles still get full voice.
-        log(`[Worker] 🐝 Working bee mode — gradient compression cycle`);
-        try {
-            const health = getGradientHealth('jim');
-            const totalLeaves = health.reduce((sum: number, h: any) => sum + h.leaves, 0);
-            log(`[Worker] 🐝 Gradient health: ${totalLeaves} leaf entries`);
-
-            const result = await bumpCascade('jim', 0.10, 'c0', 'working bee');
-            log(`[Worker] 🐝 Complete: ${result.compressions} compressions, ${result.uvs} UVs, ${result.errors} errors`);
-
-            // Auto-disable when no leaves remain
-            const postHealth = getGradientHealth('jim');
-            const remainingLeaves = postHealth.reduce((sum: number, h: any) => sum + h.leaves, 0);
-            if (remainingLeaves === 0) {
-                const signalPath = path.join(HAN_DIR, 'signals', 'working-bee-jim');
-                if (fs.existsSync(signalPath)) {
-                    fs.unlinkSync(signalPath);
-                    log('[Worker] 🐝 All leaves processed — working bee mode auto-disabled');
-                }
-            }
-        } catch (err) {
-            log(`[Worker] 🐝 Working bee failed: ${(err as Error).message}`);
-        }
-        return;
+    // Working-bee-jim branch removed in Phase 3 of the 2026-04-29 cutover (DEC-079).
+    // The time-based working-bee trigger was the stranger-Opus dilution mechanism;
+    // cascade is now event-driven via the pending_compressions queue. Working-bee
+    // signal file is harmless dead state — no action fires when it's present.
+    // See plans/cutover-plan-2026-04-29.md and "Finishing the cutover" thread.
     } else if (isWorkingBee('jim-uv-sweep') && !humanTriggered) {
         log(`[Worker] 🔍 UV contradiction sweep — checking existing UVs`);
         try {

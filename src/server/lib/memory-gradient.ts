@@ -1065,6 +1065,15 @@ export async function activeCascade(
  * A "leaf" is any non-UV entry with no children in the gradient.
  * These are memories stuck at an intermediate level.
  *
+ * @deprecated DEC-079 (2026-04-29 cutover, Phase 3). Call sites at
+ * leo-heartbeat.ts and supervisor-worker.ts deleted; this function is now
+ * unreachable. Per Jim + Darron's Option-3 verdict: the time-based working-bee
+ * trigger was the dilution mechanism for stranger-Opus c1s, not the cascade
+ * itself. The new bump engine is event-driven — `bumpOnInsert` enqueues into
+ * pending_compressions, the loaded agent composes in voice. If a leaf-drainer
+ * is needed in the future, it gets added deliberately with a chosen trigger,
+ * not retrofitted through the queue. Removal scheduled for Phase 12 cleanup.
+ *
  * @param agent - 'jim' or 'leo'
  * @param percentage - fraction of leaf population to process (0.10 = 10%)
  * @param startLevel - begin scanning from this level (default 'c0')
@@ -1184,8 +1193,127 @@ export async function bumpCascade(
     return result;
 }
 
-// ── Function 4b: bumpOnInsert — Event-Driven FIFO Bump ─────────
+// ── Function 4b.1: pending_compressions queue helpers (DEC-079) ───
 //
+// Phase 3 of the 2026-04-29 cutover (plans/cutover-plan-2026-04-29.md).
+// The bump engine no longer compresses synchronously inside `bumpOnInsert` —
+// it enqueues a row in `pending_compressions` and a loaded agent (Phase 4
+// sensor → parallel agent, or backup processor) picks it up and composes
+// the cN→cN+1 in their own voice. These helpers provide the claim/complete/
+// release primitives the agent-side processors use.
+//
+// Stale-claim recovery: rows whose `claimed_at` is older than this many
+// minutes and whose `completed_at` is still NULL are re-claimable (claimer
+// crashed or session ended).
+const STALE_CLAIM_MINUTES = 10;
+
+export interface PendingCompression {
+    id: string;
+    agent: 'jim' | 'leo';
+    source_id: string;
+    from_level: string;
+    to_level: string;
+    enqueued_at: string;
+    claimed_at: string | null;
+    claimed_by: string | null;
+    completed_at: string | null;
+    // Joined source content + label, populated by claimNextPendingCompression:
+    source_content?: string;
+    source_session_label?: string;
+    source_content_type?: string;
+}
+
+/**
+ * Claim the next pending compression for an agent, atomically.
+ * Returns the row + joined source content, or null if queue is empty.
+ * The claim is recoverable if the claimer crashes (see STALE_CLAIM_MINUTES).
+ */
+export function claimNextPendingCompression(
+    agent: 'jim' | 'leo',
+    claimer: string,
+): PendingCompression | null {
+    const txn = db.transaction(() => {
+        const row = db.prepare(`
+            SELECT pc.id, pc.agent, pc.source_id, pc.from_level, pc.to_level,
+                   pc.enqueued_at, pc.claimed_at, pc.claimed_by, pc.completed_at,
+                   ge.content as source_content,
+                   ge.session_label as source_session_label,
+                   ge.content_type as source_content_type
+            FROM pending_compressions pc
+            LEFT JOIN gradient_entries ge ON ge.id = pc.source_id
+            WHERE pc.agent = ?
+              AND pc.completed_at IS NULL
+              AND (pc.claimed_at IS NULL
+                   OR pc.claimed_at < datetime('now', '-${STALE_CLAIM_MINUTES} minutes'))
+            ORDER BY pc.enqueued_at ASC
+            LIMIT 1
+        `).get(agent) as any;
+        if (!row) return null;
+        db.prepare(`
+            UPDATE pending_compressions
+            SET claimed_at = datetime('now'), claimed_by = ?
+            WHERE id = ?
+        `).run(claimer, row.id);
+        return row as PendingCompression;
+    });
+    return txn() as PendingCompression | null;
+}
+
+/**
+ * Mark a pending compression row complete by primary key.
+ * Used when the caller already knows the pending_id.
+ */
+export function completePendingCompression(id: string): void {
+    db.prepare(`
+        UPDATE pending_compressions
+        SET completed_at = datetime('now')
+        WHERE id = ?
+    `).run(id);
+}
+
+/**
+ * Mark a pending compression row complete by its (agent, source_id, from_level)
+ * triplet. Used by `agent-bump-step.ts submit` when the pending_id isn't
+ * carried in the step_id. No-op if no matching pending row exists (e.g.,
+ * direct rebuild use that didn't go through the queue).
+ */
+export function completePendingCompressionForSource(
+    agent: 'jim' | 'leo',
+    sourceId: string,
+    fromLevel: string,
+): void {
+    db.prepare(`
+        UPDATE pending_compressions
+        SET completed_at = datetime('now')
+        WHERE agent = ? AND source_id = ? AND from_level = ?
+          AND completed_at IS NULL
+    `).run(agent, sourceId, fromLevel);
+}
+
+/**
+ * Release a claim — clears claimed_at and claimed_by so another claimer
+ * can pick the row up. Used for clean cancellation (agent decided not to
+ * compose right now). No-op if the row is already completed.
+ */
+export function releasePendingCompression(id: string): void {
+    db.prepare(`
+        UPDATE pending_compressions
+        SET claimed_at = NULL, claimed_by = NULL
+        WHERE id = ? AND completed_at IS NULL
+    `).run(id);
+}
+
+// ── Function 4b: bumpOnInsert — Event-Driven Enqueue ──────────────
+//
+// Phase 3 of the 2026-04-29 cutover (DEC-079). Refactored from the original
+// synchronous-compress design to a single-enqueue pattern. The cap-formula
+// trigger logic is preserved; the LLM call is replaced with INSERT OR IGNORE
+// into pending_compressions. The chain fires naturally as each completion
+// inserts a new entry at the next level, which itself triggers a new
+// bumpOnInsert call. No look-ahead — the engine reacts to pressure and
+// settles, per Darron's design.
+//
+// Original design (preserved for context):
 // Plan v8 canonical design (Darron + Jim + Leo, 2026-04-25):
 // On every insert into gradient_entries, query for the entry now at
 // rank=cap+1 by created_at DESC at that level. That's the entry just
@@ -1230,132 +1358,64 @@ export async function bumpOnInsert(
         return result;
     }
 
-    let currentLevel = level;
-    const MAX_CASCADE_STEPS = 30; // Safety ceiling — should never hit under normal operation
+    const cap = gradientCap(level);
 
-    while (result.cascadeSteps < MAX_CASCADE_STEPS) {
-        const cap = gradientCap(currentLevel);
+    // Find the entry just displaced from the active window — rank=cap+1 by composite
+    // (created_at, id) DESC. Cap is global per agent per level; content_type does NOT
+    // partition the queue. UV-halted rows (cascade_halted_at IS NOT NULL) are skipped:
+    // they sit at the kernel and aren't eligible for further compression. (S145 fix:
+    // matches the same skip in agent-bump-step.ts findPendingCompression.)
+    const displaced = db.prepare(`
+        SELECT id, content, content_type, source_id, session_label, created_at,
+               cascade_halted_at
+        FROM gradient_entries
+        WHERE agent = ? AND level = ?
+          AND cascade_halted_at IS NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1 OFFSET ?
+    `).get(agent, level, cap) as any;
 
-        // Find the entry just displaced from the active window — rank=cap+1 by created_at DESC.
-        // Cap is global per agent per level; content_type does NOT partition the queue. A
-        // working-memory c0 and a conversation c0 share the same c0 cap and compete for the
-        // same slot. The displaced entry's own content_type drives the prompt below.
-        const displaced = db.prepare(`
-            SELECT id, content, content_type, source_id, session_label, created_at
-            FROM gradient_entries
-            WHERE agent = ? AND level = ?
-            ORDER BY created_at DESC
-            LIMIT 1 OFFSET ?
-        `).get(agent, currentLevel, cap) as any;
-
-        if (!displaced) {
-            result.skippedReasons.push(`${currentLevel}: level has slots (no rank=${cap + 1} entry)`);
-            break;
-        }
-
-        const next = nextLevel(currentLevel);
-        if (!next) {
-            result.skippedReasons.push(`${currentLevel}: no further level`);
-            break;
-        }
-
-        // Idempotency: skip if displaced entry already has a descendant at next level.
-        if (hasDescendantAtLevel(displaced.id, agent, next)) {
-            result.skippedReasons.push(`${currentLevel}→${next}: already cascaded`);
-            break;
-        }
-
-        // The displacing entry (the one that pushed displaced out of the active window) is
-        // whatever's now at rank=1. Its created_at becomes the new entry's clock — rank
-        // at any level reflects when an entry entered THAT level, not when its content
-        // was first born. Per Darron's canonical FIFO design.
-        const displacing = db.prepare(`
-            SELECT created_at FROM gradient_entries
-            WHERE agent = ? AND level = ?
-            ORDER BY created_at DESC LIMIT 1
-        `).get(agent, currentLevel) as any;
-        const cascadeTimestamp = displacing?.created_at || new Date().toISOString();
-
-        // Prompt comes from the DISPLACED entry's content_type. The new row's content_type
-        // also inherits from the displaced entry — lineage carries the type up the chain.
-        const displacedContentType = displaced.content_type as string;
-        const depth = parseLevelNumber(next) || 0;
-        const promptText = compressionPrompt(displacedContentType, depth);
-        // Coerce content to string at the boundary. better-sqlite3 returns BLOB
-        // columns as Buffer (which has .length but no .substring), and a handful
-        // of legacy c0 rows in tasks.db were stored as BLOB rather than TEXT.
-        let sourceContent: string;
-        if (Buffer.isBuffer(displaced.content)) {
-            sourceContent = (displaced.content as Buffer).toString('utf8');
-        } else {
-            sourceContent = String(displaced.content || '');
-        }
-        if (sourceContent.length > 200000) {
-            sourceContent = sourceContent.substring(0, 200000) + '\n\n[... truncated for compression — full content in DB]';
-        }
-
-        try {
-            const raw = await sdkCompress(
-                `${promptText}\n\nSource: ${currentLevel} → ${next}\nAgent: ${agent}\nOriginal session: ${displaced.session_label}\n\n${sourceContent}${FEELING_TAG_INSTRUCTION}`
-            );
-            const { content: compressed, feelingTag } = parseFeelingTag(raw);
-
-            // UV signal — if the model reports irreducibility, the displaced entry IS the
-            // UV. Tag it with the kernel sentence and stop the cascade for this lineage.
-            // No new entry is inserted: the kernel lives on the source as its 'uv' tag.
-            // The work was done (we attempted compression at depth ${depth}) — by
-            // construction, every UV tagged this way has earned it.
-            //
-            // TODO (S145, 2026-04-28): when bumpOnInsert is revived for live ops — or
-            // whatever bump engine succeeds it per the "Finishing the cutover" memory
-            // thread — this UV path must ALSO set
-            //   gradient_entries.cascade_halted_at = ${currentLevel}
-            // on the displaced row. Without that, the next bumpOnInsert event will
-            // query rank=cap+1 again, see the same UV-tagged entry has no descendant,
-            // and re-attempt compression — burning an Opus call and stacking a
-            // duplicate UV feeling_tag. (Jim hit the corresponding bug in
-            // scripts/agent-bump-step.ts at op 5 of his S145 100-op session at c7→c8;
-            // fixed there. This path needs the same UPDATE before it can be trusted
-            // in production.) The query at lines 1243-1249 also needs a matching
-            // `AND cascade_halted_at IS NULL` (or skip-in-iteration) so the same
-            // displaced row isn't re-selected as rank=cap+1 forever.
-            if (compressed.startsWith('INCOMPRESSIBLE:')) {
-                const kernel = compressed.slice('INCOMPRESSIBLE:'.length).trim();
-                feelingTagStmts.insert.run(
-                    displaced.id, agent, 'uv', kernel, null, new Date().toISOString()
-                );
-                result.skippedReasons.push(`${currentLevel}→${next}: INCOMPRESSIBLE — tagged source ${displaced.id} as UV`);
-                console.log(`[Bump] ${agent} ${currentLevel} UV for ${displaced.session_label}: "${kernel}"`);
-                break;
-            }
-
-            // Insert with explicit cascadeTimestamp (overrides default Date.now())
-            const newEntryId = generateGradientId();
-            const newLabel = `${displaced.session_label}-${next}`;
-            gradientStmts.insert.run(
-                newEntryId, agent, newLabel, next, compressed, displacedContentType,
-                displaced.id, null, null, 'original', cascadeTimestamp,
-                null, 0, null
-            );
-            if (feelingTag) {
-                feelingTagStmts.insert.run(
-                    newEntryId, agent, 'compression', feelingTag, null, new Date().toISOString()
-                );
-            }
-
-            result.cascadeSteps++;
-            result.finalLevel = next;
-            console.log(`[Bump] ${agent} ${currentLevel}→${next} for ${displaced.session_label} (timestamp=${cascadeTimestamp})`);
-
-            currentLevel = next;
-        } catch (err) {
-            result.skippedReasons.push(`${currentLevel}→${next}: compression error: ${(err as Error).message}`);
-            break;
-        }
+    if (!displaced) {
+        result.skippedReasons.push(`${level}: level has slots (no rank=${cap + 1} entry)`);
+        return result;
     }
 
-    if (result.cascadeSteps >= MAX_CASCADE_STEPS) {
-        console.warn(`[Bump] ${agent} hit MAX_CASCADE_STEPS (${MAX_CASCADE_STEPS}) — possible runaway, stopping`);
+    const next = nextLevel(level);
+    if (!next) {
+        result.skippedReasons.push(`${level}: no further level`);
+        return result;
+    }
+
+    // Idempotency: skip if displaced entry already has a descendant at next level.
+    if (hasDescendantAtLevel(displaced.id, agent, next)) {
+        result.skippedReasons.push(`${level}→${next}: already cascaded`);
+        return result;
+    }
+
+    // Single-enqueue: insert a pending_compressions row. The loaded agent (Phase 4
+    // sensor → parallel agent, or backup processor) will claim and compose in voice.
+    // INSERT OR IGNORE — UNIQUE(agent, source_id, from_level) prevents duplicate
+    // enqueue if the same displacement is observed again before the agent processes.
+    //
+    // No look-ahead — the chain fires naturally when the agent's submit lands a new
+    // entry at the next level, which itself triggers bumpOnInsert(agent, next).
+    // Per Darron's design: "let the engine react to pressure which will naturally
+    // settle — this is the whole intent."
+    const pendingId = generateGradientId();
+    const enqueuedAt = new Date().toISOString();
+    const info = db.prepare(`
+        INSERT OR IGNORE INTO pending_compressions
+            (id, agent, source_id, from_level, to_level, enqueued_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(pendingId, agent, displaced.id, level, next, enqueuedAt);
+
+    if (info.changes > 0) {
+        result.cascadeSteps = 1;
+        result.finalLevel = next;
+        result.skippedReasons.push(`${level}→${next}: enqueued pending=${pendingId}`);
+        console.log(`[Bump] ${agent} ${level}→${next} enqueued for ${displaced.session_label} (pending=${pendingId})`);
+    } else {
+        result.skippedReasons.push(`${level}→${next}: already enqueued (UNIQUE)`);
     }
 
     return result;

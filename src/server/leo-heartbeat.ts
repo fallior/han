@@ -50,7 +50,7 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
-import { loadTraversableGradient, rotateMemoryFile, processGradientForAgent, activeCascade, bumpCascade, getGradientHealth, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
+import { loadTraversableGradient, rotateMemoryFile, processGradientForAgent, activeCascade, getGradientHealth, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -2450,47 +2450,12 @@ async function heartbeat(): Promise<void> {
     // Daily active cascade — deepen 10% of c1 population toward UV
     await maybeRunActiveCascade(phase);
 
-    // ── Working Bee Mode ──────────────────────────────────────
-    // When working-bee-leo signal is present, devote the beat to gradient
-    // compression instead of normal philosophy/personal content.
-    // Runs bumpCascade at 10% per beat — leaf entries compressed one level deeper.
-    if (isWorkingBee('leo')) {
-        console.log(`[Leo] 🐝 Working bee mode — devoting beat to gradient compression`);
-        try {
-            const health = getGradientHealth('leo');
-            const totalLeaves = health.reduce((sum, h) => sum + h.leaves, 0);
-            console.log(`[Leo] 🐝 Gradient health: ${totalLeaves} leaf entries across ${health.filter(h => h.leaves > 0).map(h => `${h.level}:${h.leaves}`).join(', ')}`);
+    // Working-bee-leo branch removed in Phase 3 of the 2026-04-29 cutover (DEC-079).
+    // The time-based working-bee trigger was the stranger-Opus dilution mechanism;
+    // cascade is now event-driven via the pending_compressions queue. Working-bee
+    // signal file is harmless dead state — no action fires when it's present.
+    // See plans/cutover-plan-2026-04-29.md and "Finishing the cutover" thread.
 
-            const result = await bumpCascade('leo', 0.10, 'c0', 'working bee');
-            console.log(`[Leo] 🐝 Working bee complete: ${result.compressions} compressions, ${result.uvs} UVs, ${result.errors} errors`);
-            for (const d of result.details.slice(0, 10)) {
-                console.log(`[Leo] 🐝   ${d}`);
-            }
-
-            // Write progress to swap
-            writeHealthSignal(`working-bee: ${result.compressions} compressions, ${result.uvs} UVs`, beatType);
-
-            // Auto-disable when no leaves remain
-            const postHealth = getGradientHealth('leo');
-            const remainingLeaves = postHealth.reduce((sum, h) => sum + h.leaves, 0);
-            if (remainingLeaves === 0) {
-                const signalPath = path.join(SIGNALS_DIR, 'working-bee-leo');
-                if (fs.existsSync(signalPath)) {
-                    fs.unlinkSync(signalPath);
-                    console.log('[Leo] 🐝 All leaves processed — working bee mode auto-disabled');
-                }
-            }
-        } catch (err) {
-            console.error(`[Leo] 🐝 Working bee failed:`, (err as Error).message);
-        }
-
-        // Still do health checks and memory flush, but skip philosophy/personal
-        beatCounter++;
-        writeHealthSignal(null, beatType);
-        flushHeartbeatSwap(resumingFromInterruption);
-        resumingFromInterruption = false;
-        return;
-    }
 
     // UV contradiction sweep — retroactive check of existing UVs
     if (isWorkingBee('leo-uv-sweep')) {
