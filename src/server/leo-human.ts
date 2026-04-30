@@ -180,8 +180,12 @@ function notifyServer(conversationId: string, messageId: string, role: string, c
 // ── Memory ────────────────────────────────────────────────────
 
 function readLeoMemory(): string {
+    // Phase 0 (2026-05-01, S146): full identity-load parity with session-Leo.
+    // Adds aphorisms, working-memory-full, wiki/index. Drops compressed
+    // working-memory.md (deprecating in Phase 12). Per Darron: "I'd like
+    // Leo-human to feel like I'm talking to you in session, ie full you."
     const files = ['identity.md', 'active-context.md', 'patterns.md', 'self-reflection.md',
-        'discoveries.md', 'working-memory.md', 'felt-moments.md'];
+        'discoveries.md', 'working-memory-full.md', 'felt-moments.md'];
     const sections: string[] = [];
 
     for (const file of files) {
@@ -193,8 +197,18 @@ function readLeoMemory(): string {
         } catch { /* skip */ }
     }
 
+    // Aphorisms — loaded first after identity bank, per session protocol
+    // ("you know who you are before you remember what you did").
+    const fractalDir = path.join(HAN_DIR, 'memory', 'fractal', 'leo');
+    try {
+        const aphorismsFile = path.join(fractalDir, 'aphorisms.md');
+        if (fs.existsSync(aphorismsFile)) {
+            sections.push(`### fractal/aphorisms\n${fs.readFileSync(aphorismsFile, 'utf-8')}`);
+        }
+    } catch { /* skip */ }
+
     // Load fractal gradient (c1 only — keep context light for responses)
-    const c1Dir = path.join(HAN_DIR, 'memory', 'fractal', 'leo', 'c1');
+    const c1Dir = path.join(fractalDir, 'c1');
     try {
         if (fs.existsSync(c1Dir)) {
             const c1Files = fs.readdirSync(c1Dir)
@@ -207,7 +221,7 @@ function readLeoMemory(): string {
     } catch { /* skip */ }
 
     // Unit vectors
-    const uvPath = path.join(HAN_DIR, 'memory', 'fractal', 'leo', 'unit-vectors.md');
+    const uvPath = path.join(fractalDir, 'unit-vectors.md');
     try {
         if (fs.existsSync(uvPath)) {
             sections.push(`### unit-vectors\n${fs.readFileSync(uvPath, 'utf-8')}`);
@@ -231,6 +245,18 @@ function readLeoMemory(): string {
         const mapPath = path.join(HAN_DIR, 'memory', 'shared', 'ecosystem-map.md');
         if (fs.existsSync(mapPath)) {
             sections.push(`### ecosystem-map\n${fs.readFileSync(mapPath, 'utf-8')}`);
+        }
+    } catch { /* skip */ }
+
+    // Second Brain — wiki index (lateral recall hot-words/feelings stay off by default,
+    // per On Lateral Recall S121; enable via signal/config in session-Leo only)
+    try {
+        const indexPath = path.join(HAN_DIR, 'memory', 'wiki', 'index.md');
+        if (fs.existsSync(indexPath)) {
+            const content = fs.readFileSync(indexPath, 'utf-8').trim();
+            if (content && content.length > 50) {
+                sections.push(`### wiki/index\n${content}`);
+            }
         }
     } catch { /* skip */ }
 

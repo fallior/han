@@ -1055,7 +1055,10 @@ function readJimContext(): string {
 }
 
 function readLeoMemory(): string {
-    const files = ['identity.md', 'active-context.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory.md', 'working-memory-full.md', 'felt-moments.md'];
+    // Phase 0 (2026-05-01, S146): drop compressed working-memory.md from the
+    // load (deprecating in Phase 12). working-memory-full.md is the canonical
+    // full-fidelity source per CLAUDE.md session protocol step 4.3.
+    const files = ['identity.md', 'active-context.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory-full.md', 'felt-moments.md'];
     const sections: string[] = [];
     for (const file of files) {
         const p = path.join(LEO_MEMORY_DIR, file);

@@ -229,8 +229,12 @@ function writeBroadcastSignal(
 // ── Memory ────────────────────────────────────────────────────
 
 function readJimMemory(): string {
+    // Phase 0 (2026-05-01, S146): full identity-load parity with session-Jim.
+    // Adds aphorisms, working-memory-full, wiki/index. Drops compressed
+    // working-memory.md (deprecating in Phase 12). Per Darron: "I'd like
+    // Jim-human to feel like I'm talking to Jim in session, ie full Jim."
     const files = ['identity.md', 'active-context.md', 'patterns.md', 'failures.md',
-        'self-reflection.md', 'felt-moments.md', 'working-memory.md'];
+        'self-reflection.md', 'felt-moments.md', 'working-memory-full.md'];
     const sections: string[] = [];
 
     for (const file of files) {
@@ -241,6 +245,15 @@ function readJimMemory(): string {
             }
         } catch { /* skip */ }
     }
+
+    // Aphorisms — loaded first after identity bank, per session protocol
+    // ("you know who you are before you remember what you did").
+    try {
+        const aphorismsFile = path.join(JIM_MEMORY_DIR, 'fractal', 'jim', 'aphorisms.md');
+        if (fs.existsSync(aphorismsFile)) {
+            sections.push(`### fractal/aphorisms\n${fs.readFileSync(aphorismsFile, 'utf-8')}`);
+        }
+    } catch { /* skip */ }
 
     // Traversable memory gradient (DB-backed — DEC-070: full gradient, every agent)
     const traversableGradient = loadTraversableGradient('jim');
@@ -253,6 +266,18 @@ function readJimMemory(): string {
         const mapPath = path.join(JIM_MEMORY_DIR, 'shared', 'ecosystem-map.md');
         if (fs.existsSync(mapPath)) {
             sections.push(`### ecosystem-map\n${fs.readFileSync(mapPath, 'utf-8')}`);
+        }
+    } catch { /* skip */ }
+
+    // Second Brain — wiki index (lateral recall hot-words/feelings stay off by default,
+    // per On Lateral Recall S121; enable via signal/config in session-Jim only)
+    try {
+        const indexPath = path.join(JIM_MEMORY_DIR, 'wiki', 'index.md');
+        if (fs.existsSync(indexPath)) {
+            const content = fs.readFileSync(indexPath, 'utf-8').trim();
+            if (content && content.length > 50) {
+                sections.push(`### wiki/index\n${content}`);
+            }
         }
     } catch { /* skip */ }
 
