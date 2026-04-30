@@ -122,10 +122,14 @@ function generateId(): string {
 
 // "Already cascaded" check — does any entry at `atLevel` have source_id = id?
 // Mirrors hasDescendantAtLevel from src/server/lib/memory-gradient.ts.
+// Phase A.1 (S145, 2026-04-30): filter superseded descendants so a source
+// whose only c1 is superseded is treated as "no live descendant" — eligible
+// for re-cascade. Matches the semantics in memory-gradient.ts's hasDescendantAtLevel.
 function hasDescendantAt(sourceId: string, atLevel: string): boolean {
     const row = targetDb.prepare(`
         SELECT 1 FROM gradient_entries
         WHERE agent = ? AND level = ? AND source_id = ?
+          AND superseded_by IS NULL
         LIMIT 1
     `).get(agent, atLevel, sourceId);
     return !!row;
@@ -163,11 +167,14 @@ function findPendingCompression(): {
         // the iterator can skip entries that have already hit irreducibility
         // (UV-tagged via --incompressible) — those entries occupy slots and
         // count toward cap, but are ineligible for further compression.
+        // Phase A.1 (S145, 2026-04-30): superseded rows are invisible to bump
+        // mechanics — vacated for occupation per Darron's valence-shell framing.
         const candidates = targetDb.prepare(`
             SELECT id, content, content_type, source_id, session_label, created_at,
                    cascade_halted_at
             FROM gradient_entries
             WHERE agent = ? AND level = ?
+              AND superseded_by IS NULL
             ORDER BY created_at DESC, id DESC
             LIMIT -1 OFFSET ?
         `).all(agent, level, cap) as any[];
@@ -596,6 +603,39 @@ if (mode === 'submit') {
             WHERE agent = ? AND source_id = ? AND from_level = ?
               AND completed_at IS NULL
         `).run(agent, displaced.id, fromLevel);
+
+        // Phase A.1 (S145, 2026-04-30) — cascade propagation. After the new
+        // entry at toLevel lands, enqueue the next-level compression if rank-
+        // cap+1 at toLevel needs it. This is what makes c0→c1→c2→...→UV
+        // propagate automatically per Darron's design. Skips if cascade-paused
+        // or no further level. Mirrors the enqueueCascadeIfNeeded logic in
+        // process-pending-compression.ts for symmetric behaviour across
+        // submission paths (manual rebuild via agent-bump-step submit; auto
+        // via parallel agent).
+        const CASCADE_PAUSED_FILE = path.join(os.homedir(), '.han', 'signals', 'cascade-paused');
+        const cascadePaused = fs.existsSync(CASCADE_PAUSED_FILE);
+        if (!cascadePaused) {
+            const cap = gradientCap(toLevel);
+            const nextL = nextLevelName(toLevel);
+            if (nextL) {
+                const nextDisplaced = targetDb.prepare(`
+                    SELECT id FROM gradient_entries
+                    WHERE agent = ? AND level = ?
+                      AND cascade_halted_at IS NULL
+                      AND superseded_by IS NULL
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1 OFFSET ?
+                `).get(agent, toLevel, cap) as { id: string } | undefined;
+                if (nextDisplaced && !hasDescendantAt(nextDisplaced.id, nextL)) {
+                    const newPendingId = generateId();
+                    targetDb.prepare(`
+                        INSERT OR IGNORE INTO pending_compressions
+                            (id, agent, source_id, from_level, to_level, enqueued_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    `).run(newPendingId, agent, nextDisplaced.id, toLevel, nextL, new Date().toISOString());
+                }
+            }
+        }
 
         const sourceTokens = countTokens(String(displaced.content || ''));
         const compressedTokens = countTokens(compressed);

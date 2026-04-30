@@ -193,9 +193,14 @@ function isCascadePaused(): boolean {
  * idx_ge_source on gradient_entries(source_id).
  */
 function hasDescendantAtLevel(sourceId: string, agent: string, level: string): boolean {
+    // Phase A.1 (S145, 2026-04-30): superseded descendants don't count. If a c1
+    // is superseded (e.g., its source c0 was restored to working memory and
+    // marked superseded), the source effectively has no live descendant at c1
+    // and should be eligible for re-cascade once unmuzzled.
     const row = db.prepare(`
         SELECT 1 FROM gradient_entries
         WHERE source_id = ? AND agent = ? AND level = ?
+          AND superseded_by IS NULL
         LIMIT 1
     `).get(sourceId, agent, level);
     return !!row;
@@ -1252,6 +1257,10 @@ export function claimNextPendingCompression(
     claimer: string,
 ): PendingCompression | null {
     const txn = db.transaction(() => {
+        // Phase A.1 (S145, 2026-04-30): exclude pending rows whose source is
+        // superseded. Compressing a superseded source produces stranger output
+        // for content that's been replaced — pure work for nothing. The
+        // superseded entry stays in DB (DEC-069); the queue just skips it.
         const row = db.prepare(`
             SELECT pc.id, pc.agent, pc.source_id, pc.from_level, pc.to_level,
                    pc.enqueued_at, pc.claimed_at, pc.claimed_by, pc.completed_at,
@@ -1262,6 +1271,7 @@ export function claimNextPendingCompression(
             LEFT JOIN gradient_entries ge ON ge.id = pc.source_id
             WHERE pc.agent = ?
               AND pc.completed_at IS NULL
+              AND (ge.superseded_by IS NULL OR ge.id IS NULL)
               AND (pc.claimed_at IS NULL
                    OR pc.claimed_at < datetime('now', '-${STALE_CLAIM_MINUTES} minutes'))
             ORDER BY pc.enqueued_at ASC
@@ -1381,15 +1391,20 @@ export async function bumpOnInsert(
 
     // Find the entry just displaced from the active window — rank=cap+1 by composite
     // (created_at, id) DESC. Cap is global per agent per level; content_type does NOT
-    // partition the queue. UV-halted rows (cascade_halted_at IS NOT NULL) are skipped:
-    // they sit at the kernel and aren't eligible for further compression. (S145 fix:
-    // matches the same skip in agent-bump-step.ts findPendingCompression.)
+    // partition the queue. Two filters:
+    // 1. UV-halted rows (cascade_halted_at IS NOT NULL) — at kernel, not eligible.
+    // 2. Superseded rows (superseded_by IS NOT NULL) — Phase A.1 (S145, 2026-04-30):
+    //    rows marked superseded behave as ABSENT to the bump engine. Per Darron's
+    //    "valence shell" framing — superseding vacates the slot for occupation
+    //    purposes; the row stays in the table for forensic / DEC-069 honour but
+    //    is invisible to mechanics.
     const displaced = db.prepare(`
         SELECT id, content, content_type, source_id, session_label, created_at,
                cascade_halted_at
         FROM gradient_entries
         WHERE agent = ? AND level = ?
           AND cascade_halted_at IS NULL
+          AND superseded_by IS NULL
         ORDER BY created_at DESC, id DESC
         LIMIT 1 OFFSET ?
     `).get(agent, level, cap) as any;

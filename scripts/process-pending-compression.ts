@@ -58,6 +58,79 @@ function countTokens(text: string | null | undefined): number {
     return Math.ceil(text.length / 4);
 }
 
+// Cap formula per DEC-068: c0=1, c{n>=1}=3n.
+function gradientCap(level: string): number {
+    const m = level.match(/^c(\d+)$/);
+    if (!m) return 1;
+    const n = parseInt(m[1], 10);
+    if (n < 1) return 1;
+    return 3 * n;
+}
+
+function nextLevelName(level: string): string | null {
+    const m = level.match(/^c(\d+)$/);
+    if (!m) return null;
+    return `c${parseInt(m[1], 10) + 1}`;
+}
+
+const CASCADE_PAUSED_SIGNAL = path.join(os.homedir(), '.han', 'signals', 'cascade-paused');
+function isCascadePausedHere(): boolean {
+    return fs.existsSync(CASCADE_PAUSED_SIGNAL);
+}
+
+/**
+ * Phase A.1 (S145, 2026-04-30): cascade propagation. After writing a new entry
+ * at level X, enqueue the rank=cap+1 entry at level X for cascade to level X+1
+ * if it has no live descendant. This is what makes the chain c0→c1→c2→...→UV
+ * propagate per Darron's design — every insert at any level triggers the next
+ * level's bump, not just c0 inserts via rolling-window-rotate.
+ *
+ * Mirrors src/server/lib/memory-gradient.ts bumpOnInsert. INSERT OR IGNORE
+ * deduplicates on (agent, source_id, from_level). Returns the pending row id
+ * if enqueued, null if no work needed (level has slots, already cascaded,
+ * cascade paused, or no further level).
+ */
+function enqueueCascadeIfNeeded(
+    db: Database.Database,
+    agent: 'jim' | 'leo',
+    fromLevel: string,
+): string | null {
+    if (isCascadePausedHere()) return null;
+
+    const cap = gradientCap(fromLevel);
+    const nextL = nextLevelName(fromLevel);
+    if (!nextL) return null;
+
+    // Find rank=cap+1 displaced entry (skip UV-halted + superseded — Phase A.1).
+    const displaced = db.prepare(`
+        SELECT id FROM gradient_entries
+        WHERE agent = ? AND level = ?
+          AND cascade_halted_at IS NULL
+          AND superseded_by IS NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1 OFFSET ?
+    `).get(agent, fromLevel, cap) as { id: string } | undefined;
+    if (!displaced) return null; // level has slots
+
+    // Idempotency: skip if already has live descendant at next level.
+    const hasDesc = db.prepare(`
+        SELECT 1 FROM gradient_entries
+        WHERE source_id = ? AND agent = ? AND level = ?
+          AND superseded_by IS NULL
+        LIMIT 1
+    `).get(displaced.id, agent, nextL);
+    if (hasDesc) return null;
+
+    // Enqueue. UNIQUE(agent, source_id, from_level) idempotent — re-call safe.
+    const pendingId = crypto.randomUUID();
+    db.prepare(`
+        INSERT OR IGNORE INTO pending_compressions
+            (id, agent, source_id, from_level, to_level, enqueued_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(pendingId, agent, displaced.id, fromLevel, nextL, new Date().toISOString());
+    return pendingId;
+}
+
 // ── Argument parsing ────────────────────────────────────────────
 
 function arg(name: string, defaultValue: string | null = null): string | null {
@@ -404,6 +477,16 @@ async function main() {
         }
 
         completeClaim(db, claimed.id);
+
+        // Phase A.1 (S145, 2026-04-30) — cascade propagation. After writing the
+        // new entry at to_level, check if its insertion displaced anything at
+        // to_level (rank=cap+1) that needs c{N+1} compression. Enqueue if so.
+        // This is what makes the chain c0→c1→c2→...→UV propagate per Darron's
+        // design — without it, cascade stops at one step.
+        const cascadeEnqueued = enqueueCascadeIfNeeded(db, agent!, claimed.to_level);
+        if (cascadeEnqueued) {
+            log(`cascade propagation: enqueued ${claimed.to_level}→${nextLevelName(claimed.to_level)} pending=${cascadeEnqueued}`);
+        }
 
         const sourceTokens = countTokens(claimed.source_content || '');
         const composedTokens = countTokens(composed);
