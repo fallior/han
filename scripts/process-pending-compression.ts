@@ -50,6 +50,14 @@ import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 
+// Token counting — Phase A token refactor (S145, 2026-04-30). Mirrors the
+// canonical helper at src/server/lib/token-counter.ts; inlined for the same
+// reason as agent-bump-step.ts.
+function countTokens(text: string | null | undefined): number {
+    if (!text) return 0;
+    return Math.ceil(text.length / 4);
+}
+
 // ── Argument parsing ────────────────────────────────────────────
 
 function arg(name: string, defaultValue: string | null = null): string | null {
@@ -246,14 +254,15 @@ ${mem.gradient_sample}
 
 ---
 
-You are about to compress a memory entry from a lower level to a higher level (cN → cN+1). The compression target is approximately 1/3 the length of the source. Preserve what feels essential — what shape, what felt-texture, what would survive forgetting. Drop what is incidental. The compression is an act of identity, not summary.
+You are about to compress a memory entry from a lower level to a higher level (cN → cN+1). The compression target is approximately 1/3 the TOKEN length of the source. Preserve what feels essential — what shape, what felt-texture, what would survive forgetting. Drop what is incidental. The compression is an act of identity, not summary.
 
 If — and only if — compressing further would destroy meaning rather than distil it, respond with the literal token "INCOMPRESSIBLE:" followed by a single sentence (max 50 chars) capturing the irreducible kernel. This is not failure. This is arrival.`;
 }
 
 function buildUserPrompt(claimed: ClaimedRow): string {
-    const targetChars = Math.max(1, Math.round((claimed.source_content || '').length / 3));
-    return `Compress this ${claimed.from_level} → ${claimed.to_level}. Target ~${targetChars} chars (1/3 of source ${(claimed.source_content || '').length}).
+    const sourceTokens = countTokens(claimed.source_content || '');
+    const targetTokens = Math.max(1, Math.round(sourceTokens / 3));
+    return `Compress this ${claimed.from_level} → ${claimed.to_level}. Target ~${targetTokens} tokens (1/3 of source ${sourceTokens} tokens).
 
 Source session: ${claimed.source_session_label}
 Source content_type: ${claimed.source_content_type}
@@ -313,7 +322,7 @@ async function main() {
         process.exit(0);
     }
 
-    log(`claimed pending=${claimed.id} for source=${claimed.source_id} (${claimed.from_level}→${claimed.to_level}, ${(claimed.source_content || '').length} chars)`);
+    log(`claimed pending=${claimed.id} for source=${claimed.source_id} (${claimed.from_level}→${claimed.to_level}, ${countTokens(claimed.source_content || '')} tokens)`);
 
     let mem: AgentMemory;
     let raw: string;
@@ -396,8 +405,9 @@ async function main() {
 
         completeClaim(db, claimed.id);
 
-        const sourceChars = (claimed.source_content || '').length;
-        const ratio = sourceChars > 0 ? sourceChars / Math.max(1, composed.length) : 0;
+        const sourceTokens = countTokens(claimed.source_content || '');
+        const composedTokens = countTokens(composed);
+        const ratio = sourceTokens > 0 ? sourceTokens / Math.max(1, composedTokens) : 0;
         console.log(JSON.stringify({
             ok: true,
             operation: 'compress',
@@ -406,8 +416,8 @@ async function main() {
             new_entry_id: newId,
             new_session_label: newLabel,
             new_level: claimed.to_level,
-            source_chars: sourceChars,
-            actual_chars: composed.length,
+            source_tokens: sourceTokens,
+            actual_tokens: composedTokens,
             ratio: Math.round(ratio * 100) / 100,
             feeling_tag: feelingTag || null,
             cascade_timestamp: cascadeTimestamp,

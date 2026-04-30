@@ -15,6 +15,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { db, gradientStmts, feelingTagStmts, feelingTagHistoryStmts } from '../db';
+import { countTokens } from './token-counter';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -1548,8 +1549,15 @@ export function listAvailableSessions(agentName: 'jim' | 'leo'): string[] {
 // Replaces the old floating/crossfade design and the 6am clock-based wipe.
 // No clock triggers. No empty files. Continuous rolling window.
 
-const ROLLING_WINDOW_HEAD_DEFAULT = 50 * 1024; // 50KB — retained (newest)
-const ROLLING_WINDOW_TAIL_DEFAULT = 50 * 1024; // 50KB — archived for compression (oldest)
+// Head/tail are BYTE counts that approximate TOKEN counts via the ~4 chars/token
+// heuristic for English markdown. Design intent: each tail becomes a c0 carrying
+// ~25K tokens of content; total ceiling is ~50K tokens of working memory before
+// rotation fires. Phase A of token-only refactor (S145, 2026-04-30): values are
+// now token counts directly via lib/token-counter.ts countTokens (chars÷4
+// approximation). Earlier defaults conflated bytes with tokens — Darron's S145
+// ruling: tokens throughout, never chars or bytes, no silent unit-switching.
+const ROLLING_WINDOW_HEAD_DEFAULT = 25_000; // tokens — retained (newest)
+const ROLLING_WINDOW_TAIL_DEFAULT = 25_000; // tokens — archived for compression (oldest)
 
 // Legacy threshold — used by rotateMemoryFile (kept for backward compat)
 const MEMORY_FILE_SIZE_THRESHOLD = 50 * 1024; // 50KB
@@ -1677,28 +1685,39 @@ export function rotateMemoryFile(
 /**
  * Rolling window memory rotation.
  *
- * When a memory file exceeds (headSize + tailSize):
- *   1. Split entries: keep newest ~headSize bytes, archive oldest as a discrete block
- *   2. Write archived entries to a temp file for c0 archival + c1 compression
+ * When a memory file exceeds (headTokens + tailTokens):
+ *   1. Split entries: keep newest ~headTokens of recent content, archive oldest
+ *      as a discrete block summing to ~tailTokens
+ *   2. Insert archived block as a c0 in the gradient DB (atomic)
  *   3. Rewrite living file with only the kept entries (+ header)
- *   4. Return archive path for gradient compression
+ *   4. Trigger bumpOnInsert (fire-and-forget) so the cascade engine enqueues
+ *      the displaced c0 for compression in voice
  *
- * The living file always retains at least headSize bytes of recent memory.
- * No clock-based wipes. No empty files. Continuous rolling window.
- * 50KB archive blocks are discrete compression units for isotropic gradient input.
+ * The living file always retains at least ~headTokens of recent memory. No
+ * clock-based wipes. No empty files. Continuous rolling window.
+ *
+ * **Self-leveling** (Darron's S145 mechanic): if a single write produces a
+ * file vastly larger than the ceiling, the SENSOR'S inner loop calls this
+ * function repeatedly — each call slices one ~tailTokens block — until the
+ * file is back under (headTokens + tailTokens). This function does ONE slice;
+ * the caller is responsible for re-checking and re-calling.
+ *
+ * **Phase A token refactor (S145, 2026-04-30)**: all size math is in tokens
+ * via lib/token-counter.ts countTokens. Earlier versions used bytes — that
+ * was the unit confusion Darron caught. Tokens throughout now.
  *
  * @param filePath - Path to the living memory file
  * @param fileHeader - Header text for the rewritten living file
- * @param headSize - Bytes to retain (newest entries). Default 50KB.
- * @param tailSize - Bytes that trigger archival (oldest entries). Default 50KB.
- * @param agent - If provided, insert trimmed block as c0 in gradient DB (atomic, synchronous).
+ * @param headTokens - Tokens to retain (newest entries). Default ~25K.
+ * @param tailTokens - Tokens that trigger archival (oldest entries). Default ~25K.
+ * @param agent - If provided, insert trimmed block as c0 in gradient DB.
  * @param contentType - Content type for the c0 entry (required if agent is provided).
  */
 export function rollingWindowRotate(
     filePath: string,
     fileHeader: string = '',
-    headSize: number = ROLLING_WINDOW_HEAD_DEFAULT,
-    tailSize: number = ROLLING_WINDOW_TAIL_DEFAULT,
+    headTokens: number = ROLLING_WINDOW_HEAD_DEFAULT,
+    tailTokens: number = ROLLING_WINDOW_TAIL_DEFAULT,
     agent?: 'leo' | 'jim',
     contentType?: 'working-memory' | 'felt-moments' | 'self-reflection',
 ): { rotated: boolean; archivePath?: string; c0EntryId?: string; entriesArchived: number; entriesKept: number } {
@@ -1706,14 +1725,14 @@ export function rollingWindowRotate(
         return { rotated: false, entriesArchived: 0, entriesKept: 0 };
     }
 
-    const stat = fs.statSync(filePath);
-    const ceiling = headSize + tailSize;
+    const content = fs.readFileSync(filePath, 'utf8');
+    const ceilingTokens = headTokens + tailTokens;
+    const fileTokens = countTokens(content);
 
-    if (stat.size <= ceiling) {
+    if (fileTokens <= ceilingTokens) {
         return { rotated: false, entriesArchived: 0, entriesKept: 0 };
     }
 
-    const content = fs.readFileSync(filePath, 'utf8');
     const entries = splitMemoryFileEntries(content);
 
     if (entries.length < 2) {
@@ -1721,21 +1740,20 @@ export function rollingWindowRotate(
         return { rotated: false, entriesArchived: 0, entriesKept: 0 };
     }
 
-    // Walk from the start (oldest), accumulating ~tailSize bytes to archive.
+    // Walk from the start (oldest), accumulating ~tailTokens to archive.
     // Always archive at least one entry. Split at entry boundaries — never mid-entry.
-    // This produces consistent ~tailSize archive blocks (discrete compression units)
-    // for isotropic gradient input. If the file is much larger than the ceiling,
-    // the next heartbeat pass will trim another block.
-    let archivedBytes = 0;
+    // This produces consistent ~tailTokens archive blocks (discrete compression units)
+    // for isotropic gradient input.
+    let archivedTokens = 0;
     let splitIndex = 0;
 
     for (let i = 0; i < entries.length; i++) {
-        const entryBytes = Buffer.byteLength(entries[i].content, 'utf8');
-        // Always include at least the first (oldest) entry; then keep adding while under tailSize
-        if (archivedBytes > 0 && archivedBytes + entryBytes > tailSize) {
+        const entryTokens = countTokens(entries[i].content);
+        // Always include at least the first (oldest) entry; then keep adding while under tailTokens
+        if (archivedTokens > 0 && archivedTokens + entryTokens > tailTokens) {
             break;
         }
-        archivedBytes += entryBytes;
+        archivedTokens += entryTokens;
         splitIndex = i + 1;
     }
 

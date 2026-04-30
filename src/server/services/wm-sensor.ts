@@ -38,6 +38,7 @@ import * as os from 'os';
 import { spawn } from 'child_process';
 import { rollingWindowRotate } from '../lib/memory-gradient';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
+import { countTokens } from '../lib/token-counter';
 
 // ── Config + paths ────────────────────────────────────────────────
 
@@ -55,9 +56,14 @@ interface Config {
 }
 
 function loadConfig(): Config {
+    // Phase A token refactor (S145, 2026-04-30): head/tail are TOKEN counts
+    // via lib/token-counter.ts countTokens (chars÷4 approximation). Per
+    // Darron's S145 ruling: tokens throughout, never bytes or chars, no
+    // silent unit-switching. 25,000 tokens per tail → ~25K-token c0 per
+    // rotation. Total ceiling 50,000 tokens before slicer fires.
     const defaults: Config = {
-        rollingWindowHead: 25600,
-        rollingWindowTail: 25600,
+        rollingWindowHead: 25_000,
+        rollingWindowTail: 25_000,
         sensorEnabled: true,
         parallelAgentMaxConcurrency: 1,
         sensorDebounceMs: 500,
@@ -97,7 +103,14 @@ function buildTargets(agent: 'jim' | 'leo'): WatchTarget[] {
         : path.join(HAN_DIR, 'memory');
     const agentTitle = agent === 'leo' ? 'Leo' : 'Jim';
 
-    const targets: WatchTarget[] = [
+    // Phase A token refactor (S145, 2026-04-30): per Darron's mechanics
+    // restatement and Jim's review — the slicer's domain is working memory
+    // ONLY. felt-moments.md and self-reflection.md are loaded WHOLE at
+    // session/cycle start, hand-curated, not chunked. Removed from the
+    // watcher target list. The historical felt-moments rolling-c0s in the
+    // gradient remain as superseded entries (DEC-069 honoured); going
+    // forward, felt-moments.md doesn't slice.
+    return [
         {
             agent,
             filePath: path.join(memDir, 'working-memory.md'),
@@ -110,26 +123,7 @@ function buildTargets(agent: 'jim' | 'leo'): WatchTarget[] {
             header: `# Working Memory (Full) — ${agentTitle}\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n`,
             contentType: 'working-memory',
         },
-        {
-            agent,
-            filePath: path.join(memDir, 'felt-moments.md'),
-            header: `# ${agentTitle} — Felt Moments\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n`,
-            contentType: 'felt-moments',
-        },
     ];
-
-    // Jim has self-reflection.md in the rolling-window pipeline (added Apr 20
-    // S130 — the unblock day). Leo's self-reflection is hand-curated.
-    if (agent === 'jim') {
-        targets.push({
-            agent,
-            filePath: path.join(memDir, 'self-reflection.md'),
-            header: `# Jim — Self-Reflection\n\n> Older reflections compressed into fractal gradient. Nothing is lost.\n`,
-            contentType: 'self-reflection',
-        });
-    }
-
-    return targets;
 }
 
 // (Lock helpers extracted to ../lib/sensor-lock.ts in Phase 4c so the backup
@@ -162,16 +156,20 @@ function spawnParallelAgent(agent: 'jim' | 'leo'): Promise<{ exitCode: number; s
 async function processTarget(target: WatchTarget, config: Config): Promise<void> {
     if (!fs.existsSync(target.filePath)) return;
 
-    const ceiling = config.rollingWindowHead + config.rollingWindowTail;
+    const ceilingTokens = config.rollingWindowHead + config.rollingWindowTail;
     let safety = 10; // Hard ceiling on inner loop iterations — should never hit
 
     while (safety-- > 0) {
-        const stat = fs.statSync(target.filePath);
-        if (stat.size <= ceiling) {
+        // Phase A token refactor (S145, 2026-04-30): read content + countTokens
+        // instead of stat.size. Slightly heavier per check (read vs stat) but for
+        // these file sizes it's microseconds. Tokens are the single canonical
+        // unit per Darron's S145 ruling.
+        const fileTokens = countTokens(fs.readFileSync(target.filePath, 'utf8'));
+        if (fileTokens <= ceilingTokens) {
             return;
         }
 
-        log(`${target.agent}/${path.basename(target.filePath)} ${stat.size}B > ceiling ${ceiling}B — rotating`);
+        log(`${target.agent}/${path.basename(target.filePath)} ${fileTokens} tokens > ceiling ${ceilingTokens} tokens — rotating`);
 
         const rot = rollingWindowRotate(
             target.filePath,
@@ -291,7 +289,8 @@ async function main() {
         process.exit(0);
     }
 
-    log(`sensor starting; ceiling=${config.rollingWindowHead + config.rollingWindowTail}B (head=${config.rollingWindowHead}, tail=${config.rollingWindowTail}), debounce=${config.sensorDebounceMs}ms`);
+    const ceilingTokens = config.rollingWindowHead + config.rollingWindowTail;
+    log(`sensor starting; ceiling=${ceilingTokens} tokens (head=${config.rollingWindowHead}, tail=${config.rollingWindowTail}), debounce=${config.sensorDebounceMs}ms`);
 
     fs.mkdirSync(SIGNALS_DIR, { recursive: true });
 

@@ -46,6 +46,16 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
 
+// Token counting — Phase A token refactor (S145, 2026-04-30). Mirrors the
+// canonical helper at src/server/lib/token-counter.ts; inlined here to avoid
+// cross-tree import path concerns when this script runs from scripts/ with
+// NODE_PATH=src/server/node_modules. Update both places if the heuristic
+// changes (e.g., real tokenizer swap-in).
+function countTokens(text: string | null | undefined): number {
+    if (!text) return 0;
+    return Math.ceil(text.length / 4);
+}
+
 // ── Argument parsing ────────────────────────────────────────────
 
 function arg(name: string, defaultValue: string | null = null): string | null {
@@ -308,7 +318,8 @@ if (mode === 'next') {
     const queued = claimQueueTxn();
     if (queued) {
         const sourceContent = String(queued.source_content || '');
-        const targetChars = Math.max(1, Math.round(sourceContent.length / 3));
+        const sourceTokens = countTokens(sourceContent);
+        const targetTokens = Math.max(1, Math.round(sourceTokens / 3));
         const out = {
             operation: 'compress',
             agent,
@@ -318,14 +329,14 @@ if (mode === 'next') {
             source_id: queued.source_id,
             session_label: queued.source_session_label,
             content_type: queued.source_content_type,
-            source_chars: sourceContent.length,
-            target_chars: targetChars,
+            source_tokens: sourceTokens,
+            target_tokens: targetTokens,
             source_content: sourceContent,
             from_queue: true,
             pending_id: queued.id,
             instructions: [
                 `Compose the compression in your own voice (${agent}).`,
-                `Target ~${targetChars} chars (1/3 of source ${sourceContent.length}).`,
+                `Target ~${targetTokens} tokens (1/3 of source ${sourceTokens} tokens).`,
                 `Save to /tmp/${agent}-comp-${queued.source_id.slice(0, 8)}-${queued.to_level}.md`,
                 `Emit a feeling tag (single short line capturing the day's tone).`,
                 `If compressing further would destroy meaning, use --incompressible with content-file containing the irreducible kernel sentence (max 50 chars).`,
@@ -340,7 +351,8 @@ if (mode === 'next') {
     const pending = findPendingCompression();
     if (pending) {
         const sourceContent = String(pending.displaced.content || '');
-        const targetChars = Math.max(1, Math.round(sourceContent.length / 3));
+        const sourceTokens = countTokens(sourceContent);
+        const targetTokens = Math.max(1, Math.round(sourceTokens / 3));
         const out = {
             operation: 'compress',
             agent,
@@ -350,13 +362,13 @@ if (mode === 'next') {
             source_id: pending.displaced.id,
             session_label: pending.displaced.session_label,
             content_type: pending.displaced.content_type,
-            source_chars: sourceContent.length,
-            target_chars: targetChars,
+            source_tokens: sourceTokens,
+            target_tokens: targetTokens,
             // Truncate display only — submit reads from DB
             source_content: sourceContent,
             instructions: [
                 `Compose the compression in your own voice (${agent}).`,
-                `Target ~${targetChars} chars (1/3 of source ${sourceContent.length}).`,
+                `Target ~${targetTokens} tokens (1/3 of source ${sourceTokens} tokens).`,
                 `Save to /tmp/${agent}-comp-${pending.displaced.id.slice(0, 8)}-${pending.nextLevel}.md`,
                 `Emit a feeling tag (single short line capturing the day's tone).`,
                 `If compressing further would destroy meaning, use --incompressible with content-file containing the irreducible kernel sentence (max 50 chars).`,
@@ -585,8 +597,9 @@ if (mode === 'submit') {
               AND completed_at IS NULL
         `).run(agent, displaced.id, fromLevel);
 
-        const sourceChars = String(displaced.content || '').length;
-        const ratio = sourceChars > 0 ? sourceChars / Math.max(1, compressed.length) : 0;
+        const sourceTokens = countTokens(String(displaced.content || ''));
+        const compressedTokens = countTokens(compressed);
+        const ratio = sourceTokens > 0 ? sourceTokens / Math.max(1, compressedTokens) : 0;
 
         console.log(JSON.stringify({
             ok: true,
@@ -595,9 +608,9 @@ if (mode === 'submit') {
             new_session_label: newLabel,
             new_level: toLevel,
             source_id: displaced.id,
-            source_chars: sourceChars,
-            target_chars_requested: Math.round(sourceChars / 3),
-            actual_chars: compressed.length,
+            source_tokens: sourceTokens,
+            target_tokens_requested: Math.round(sourceTokens / 3),
+            actual_tokens: compressedTokens,
             ratio_actual: Math.round(ratio * 100) / 100,
             ratio_target: 3,
             feeling_tag: feelingTag || null,

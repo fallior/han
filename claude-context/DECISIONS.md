@@ -3535,7 +3535,9 @@ The compression ratio per level determines how many levels are needed and how mu
 - c=3 is 1/3 of c=2 (1/27 of c=0)
 - c=4 is 1/3 of c=3 (1/81 of c=0)
 
-**Prompt enforces ratio:** "Compress this memory to approximately 1/3 of its length. Preserve what feels essential. Drop the specific in favour of the shape."
+**Prompt enforces ratio:** "Compress this memory to approximately 1/3 of its TOKEN length. Preserve what feels essential. Drop the specific in favour of the shape."
+
+**Token clarification (Phase A token refactor, S145, 2026-04-30):** "1/3 of length" means **1/3 of TOKEN length**, counted via `src/server/lib/token-counter.ts` `countTokens` (chars÷4 approximation). Earlier wording said "1/3 of length" without specifying the unit — the implementation operated on character counts which approximated tokens for English markdown. Now made explicit per Darron's S145 ruling: tokens throughout the engine, never chars or bytes, no silent unit-switching.
 
 #### Consequences
 
