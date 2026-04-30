@@ -199,19 +199,54 @@ async function processTarget(target: WatchTarget, config: Config): Promise<void>
         log(`${target.agent}/${path.basename(target.filePath)} rotated → c0=${rot.c0EntryId}, archived=${rot.entriesArchived}, kept=${rot.entriesKept}`);
 
         // rollingWindowRotate fires bumpOnInsert internally (Phase 4 modification);
-        // a pending_compressions row is now in flight. Spawn the parallel agent
-        // to process it.
-        const spawnResult = await spawnParallelAgent(target.agent);
-        if (spawnResult.exitCode !== 0) {
-            log(`${target.agent} parallel agent exited ${spawnResult.exitCode}`);
-            if (spawnResult.stderr) {
-                log(`${target.agent} parallel agent stderr: ${spawnResult.stderr.split('\n').slice(0, 5).join(' | ')}`);
+        // a pending_compressions row is in flight. Drain the FULL cascade chain
+        // for this agent (c0→c1→c2→...→UV or cap-not-exceeded) BEFORE re-checking
+        // file size for the next slice.
+        //
+        // Per Darron's S145 ruling (2026-04-30 evening): "the slicer doesn't
+        // wait for the cascade — change it, make it wait." Earlier reading
+        // had the slicer firing fast and cascade running in parallel; the
+        // updated rule is each slice fully digests through the gradient
+        // (c0→c1→c2→...) before the next slice considers. Keeps cascade
+        // serial per agent; prevents memory pressure from concurrent chains;
+        // makes "size check after bump complete" mean "after the chain
+        // settles," not just "after one compression lands."
+        //
+        // Implementation: keep spawning the parallel agent. Each invocation
+        // claims one pending row, processes it, exits. If the compression
+        // succeeds, Phase A.1's enqueueCascadeIfNeeded enqueues the next
+        // level if cap is exceeded. So the queue may have new rows after each
+        // spawn. Loop until a spawn finds the queue empty (no JSON output
+        // indicating compression).
+        let drainCount = 0;
+        let drainGuard = 50; // safety: should never need that many per slice
+        while (drainGuard-- > 0) {
+            const spawnResult = await spawnParallelAgent(target.agent);
+            if (spawnResult.exitCode !== 0) {
+                log(`${target.agent} parallel agent exited ${spawnResult.exitCode}; halting drain for this slice`);
+                if (spawnResult.stderr) {
+                    log(`${target.agent} parallel agent stderr: ${spawnResult.stderr.split('\n').slice(0, 5).join(' | ')}`);
+                }
+                return;
             }
-            // Don't loop — let the next sensor fire (or backup processor) try again.
+            // Did it process something? Compression results emit JSON to stdout
+            // ({"ok":true, "operation":"compress"|"incompressible", ...}).
+            // Queue-empty exits cleanly with no JSON output.
+            if (spawnResult.stdout.includes('"ok":true')) {
+                drainCount++;
+                // Loop — cascade propagation may have enqueued the next level.
+            } else {
+                // Queue empty for this agent — chain has settled. Stop draining.
+                break;
+            }
+        }
+        if (drainGuard <= 0) {
+            log(`${target.agent} drain hit safety cap (50 compressions) — possible runaway, halting this slice`);
             return;
         }
-        log(`${target.agent} parallel agent processed pending row`);
-        // Loop: re-check size. If still over ceiling, rotate again.
+        log(`${target.agent} cascade chain settled: ${drainCount} compressions processed; re-checking file size`);
+        // Loop: re-check size. If still over ceiling, rotate again — but only
+        // now, after the previous slice's full cascade has drained.
     }
     log(`${target.agent}/${path.basename(target.filePath)} hit safety limit (10 iterations) — pausing further processing this fire`);
 }
