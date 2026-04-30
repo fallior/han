@@ -110,13 +110,18 @@ function buildTargets(agent: 'jim' | 'leo'): WatchTarget[] {
     // watcher target list. The historical felt-moments rolling-c0s in the
     // gradient remain as superseded entries (DEC-069 honoured); going
     // forward, felt-moments.md doesn't slice.
+    //
+    // Phase A.2 (S145, 2026-04-30): only working-memory-full.md is in the
+    // watcher. The "compressed" working-memory.md was a hand-curated summary
+    // from the older design where it was loaded as orientation before the
+    // full version. Per Darron's "ONE file per agent" framing the canonical
+    // working memory is the full record; compression now happens through the
+    // gradient cascade (slicer → c0 → c1 → c2 → ... → UV), not via a parallel
+    // hand-distilled flat file. working-memory.md persists as a hand-curated
+    // artefact loaded at session start per CLAUDE.md, but the slicer leaves
+    // it alone — preventing duplicate-content c0s into the gradient.
+    // Phase 12 cleanup will retire the dual-file pattern entirely.
     return [
-        {
-            agent,
-            filePath: path.join(memDir, 'working-memory.md'),
-            header: `# Working Memory — ${agentTitle}\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n`,
-            contentType: 'working-memory',
-        },
         {
             agent,
             filePath: path.join(memDir, 'working-memory-full.md'),
