@@ -138,7 +138,13 @@ function buildTargets(agent: 'jim' | 'leo'): WatchTarget[] {
 // ── Spawn the parallel memory-aware agent ────────────────────────
 
 const PROCESS_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'process-pending-compression.ts');
-const SERVER_DIR = path.resolve(__dirname, '..', '..');
+// Bug fix S145 cont. (2026-04-30): SERVER_DIR was previously '..', '..' — that
+// resolved to src/ instead of src/server/. The tsx binary lives in src/server/
+// node_modules so spawning failed with ENOENT, crashing wm-sensor mid-rotation
+// after the slicer had successfully produced a c0. Caught when the cascade
+// chain didn't propagate through the parallel agent path. Path is now '..' —
+// matches the supervisor-worker.ts pattern in maybeBackupQueueDrainJim.
+const SERVER_DIR = path.resolve(__dirname, '..');
 
 function spawnParallelAgent(agent: 'jim' | 'leo'): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
