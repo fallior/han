@@ -234,7 +234,7 @@ function readJimMemory(): string {
     // working-memory.md (deprecating in Phase 12). Per Darron: "I'd like
     // Jim-human to feel like I'm talking to Jim in session, ie full Jim."
     const files = ['identity.md', 'active-context.md', 'patterns.md', 'failures.md',
-        'self-reflection.md', 'felt-moments.md', 'working-memory-full.md'];
+        'self-reflection.md', 'discoveries.md', 'felt-moments.md', 'working-memory-full.md'];
     const sections: string[] = [];
 
     for (const file of files) {

@@ -846,7 +846,7 @@ function loadMemoryBank(): string {
     // Phase 0 (2026-05-01, S146): drop compressed working-memory.md from the load
     // (deprecating in Phase 12). working-memory-full.md is the canonical
     // full-fidelity source per CLAUDE.md session protocol step 4.3.
-    for (const file of ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'felt-moments.md', 'working-memory-full.md']) {
+    for (const file of ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'discoveries.md', 'felt-moments.md', 'working-memory-full.md']) {
         const filepath = path.join(MEMORY_DIR, file);
         try {
             if (fs.existsSync(filepath)) {
