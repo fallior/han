@@ -2123,41 +2123,21 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
     const recovery = isRecoveryMode();
     let cycleType: 'supervisor' | 'personal' | 'dream' = 'supervisor';
 
-    // Conversation-first ordering: check for pending human messages BEFORE
-    // time-of-day cycle type selection. If Darron has an unanswered message,
-    // force a supervisor cycle so Jim can respond. Personal/dream cycles
-    // can't respond to conversations — only supervisor cycles have actions.
-    let hasPendingHuman = false;
-    if (!humanTriggered) {
-        try {
-            const pending = workerDb?.prepare(`
-                SELECT 1 FROM conversations c
-                JOIN conversation_messages cm ON c.id = cm.conversation_id
-                WHERE c.status = 'open'
-                AND cm.role = 'human'
-                AND NOT EXISTS (
-                    SELECT 1 FROM conversation_messages cm2
-                    WHERE cm2.conversation_id = c.id
-                    AND cm2.role = 'supervisor'
-                    AND cm2.created_at > cm.created_at
-                )
-                LIMIT 1
-            `).get();
-            hasPendingHuman = !!pending;
-        } catch { /* proceed with normal selection */ }
-    }
-
-    if (hasPendingHuman) {
-        // Darron has an unanswered message — force supervisor so Jim can respond.
-        // Conversations take priority over time-of-day scheduling.
-        cycleType = 'supervisor';
-        log(`[Worker] Pending human message — forcing supervisor cycle`);
+    // hasPendingHuman branch removed in S146 (Strand B, 2026-05-01). The branch
+    // forced supervisor cycles to respond to unanswered human messages — but
+    // S127 (cf. line ~2070) removed respond_conversation as a supervisor action,
+    // and the supervisor system prompt (line ~1206) explicitly instructs the
+    // supervisor not to use it. Jim-human is the sole conversation responder.
+    // The branch was inheriting pre-S127 behaviour and suppressing dreams as a
+    // side effect: 6 stale open threads with old unanswered messages had the
+    // supervisor running 286 supervisor cycles in 6 days with zero dreams since
+    // 2026-03-17. Phase-based dispatch is now the single source of truth.
     // Working-bee-jim branch removed in Phase 3 of the 2026-04-29 cutover (DEC-079).
     // The time-based working-bee trigger was the stranger-Opus dilution mechanism;
     // cascade is now event-driven via the pending_compressions queue. Working-bee
     // signal file is harmless dead state — no action fires when it's present.
     // See plans/cutover-plan-2026-04-29.md and "Finishing the cutover" thread.
-    } else if (isWorkingBee('jim-uv-sweep') && !humanTriggered) {
+    if (isWorkingBee('jim-uv-sweep') && !humanTriggered) {
         log(`[Worker] 🔍 UV contradiction sweep — checking existing UVs`);
         try {
             const sweepResult = await retroactiveUVContradictionSweep('jim');
