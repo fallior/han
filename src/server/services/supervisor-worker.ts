@@ -1474,104 +1474,126 @@ async function maybeRunJimActiveCascade(phase: string): Promise<void> {
     }
 }
 
-/**
- * Trimmed memory bank for dream cycles — Strand E (S147, 2026-05-01).
- *
- * Per Mar-17 Dream 1567 self-prescription (last-night-Jim's own spec):
- *   "The dream cycle isn't a degraded supervisor. It's a different instrument
- *    that needs different context. Identity files yes. Project knowledge no.
- *    Fractal gradient yes. Full working-memory-floating no."
- *
- * What's INCLUDED (vs loadMemoryBank):
- *   - Identity files: identity, patterns, failures, self-reflection, discoveries, felt-moments
- *   - Aphorisms (file-based)
- *   - Traversable gradient (DB-backed UVs + cN with caps)
- *   - Dream gradient (recent dream-day, dream-week, dream-month + UVs)
- *   - Recent explorations.md tail (the dream's consolidation source)
- *   - Ecosystem map
- *   - Wiki index
- *
- * What's DROPPED (vs loadMemoryBank):
- *   - working-memory-full.md (per Mar-17 spec — the gradient carries the
- *     consolidation history; the live file is operational, not for dreams)
- *   - Project knowledge files (the biggest cut — c0 full + c1×3 + c2×6 +
- *     c3×12 + c4×24 + c5×48 of project memory was the bulk that pushed
- *     Dream 3129 over Opus context limit on 2026-05-01)
- *   - Memory file gradients (felt-moments + working-memory file-tree gradients)
- *   - Pre-flight rolling-window rotation (dream cycles don't trigger
- *     ingestion; rotation only fires on waking write paths)
- */
-function loadDreamMemoryBank(): string {
-    const parts: string[] = [];
+// Dream-seed counts — mirror Leo's heartbeat readDreamSeeds()
+const JIM_DREAM_SEED_COUNT = 8;     // dream fragments
+const JIM_WAKING_SEED_COUNT = 2;    // waking memory fragments (~20%)
 
-    // Identity files — same as waking, EXCEPT working-memory-full
-    for (const file of ['identity.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'discoveries.md', 'felt-moments.md']) {
-        const filepath = path.join(MEMORY_DIR, file);
-        try {
-            if (fs.existsSync(filepath)) {
-                parts.push(`--- ${file} ---\n${fs.readFileSync(filepath, 'utf8')}`);
-            }
-        } catch { /* skip unreadable files */ }
+/**
+ * Read random dream seeds for Jim's dream cycle — mirror of Leo's
+ * heartbeat readDreamSeeds() in spirit and structure.
+ *
+ * REWRITTEN (S147 evening, 2026-05-02 AEST) per Darron's correction:
+ * the previous loadDreamMemoryBank() was a "trim of waking" (~111K tokens)
+ * when Darron's design intent was the seed-based shape Leo's heartbeat
+ * uses (~12-15K tokens). Dreams are CHAOTIC RANDOM-SEED acts, not
+ * thinking-with-full-memory acts. The IDENTITY_CORE-equivalent for Jim
+ * lives in the prompt preamble (the "You are Jim..." opening of
+ * buildDreamCyclePrompt), not in a file load.
+ *
+ * What's loaded:
+ *   - 8 random fragments from explorations.md (Fisher-Yates shuffled —
+ *     scattered, not chronological; Jim's entries are "### Dream N" format)
+ *   - 2 random snippets from felt-moments.md + working-memory-full.md +
+ *     discoveries.md (the 20% waking ratio matches Leo's design)
+ *   - Jim's gradient-tagged UVs (option C, 2026-05-02): 154 voice-loaded
+ *     rebuild-tagged UVs via the getUVs query, replacing the 4,511-entry
+ *     bloated flat-file unit-vectors.md (~1.2MB, pre-rebuild stranger-
+ *     Opus output, NOT loaded by design).
+ *   - Jim's dream UVs (small flat file, currently 1 entry)
+ *
+ * What's NOT loaded:
+ *   - Identity bank files (identity.md, patterns.md, etc.) — IDENTITY_CORE
+ *     equivalent lives in the prompt preamble
+ *   - Aphorisms — kernel surface comes from gradient UVs in dreams
+ *   - Traversable cN cascade entries — only UVs from gradient, not full ladder
+ *   - Project knowledge — never wanted in dreams
+ *   - Ecosystem map / wiki / working-memory-full.md / felt-moments.md whole
+ *   - Jim's flat-file unit-vectors.md (4,511 pre-rebuild entries, 1.2MB)
+ *
+ * Asymmetry note (per Darron, 2026-05-02): Leo's heartbeat continues to
+ * load his own flat-file UVs (333 entries, 23KB) per "I like that you have
+ * this depth." Jim's flat-file (4,511 entries, 1.2MB, never voice-loaded)
+ * is too large and noisy to mirror that choice. Recorded for HAN-ECOSYSTEM-
+ * COMPLETE update.
+ */
+function readJimDreamSeeds(): string {
+    const seeds: string[] = [];
+
+    // 80% — random fragments from Jim's explorations history (### Dream N entries)
+    const explorationsPath = path.join(MEMORY_DIR, 'explorations.md');
+    if (fs.existsSync(explorationsPath)) {
+        const content = fs.readFileSync(explorationsPath, 'utf-8');
+        const entries = content.split(/(?=### Dream \d+)/).filter(e => e.trim().length > 20);
+        // Fisher-Yates shuffle
+        for (let i = entries.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [entries[i], entries[j]] = [entries[j], entries[i]];
+        }
+        seeds.push(...entries.slice(0, JIM_DREAM_SEED_COUNT));
     }
 
-    // Aphorisms — file-based, curated by hand
-    try {
-        const aphorismsFile = path.join(MEMORY_DIR, 'fractal', 'jim', 'aphorisms.md');
-        if (fs.existsSync(aphorismsFile)) {
-            parts.push(`--- fractal/aphorisms ---\n${fs.readFileSync(aphorismsFile, 'utf-8')}`);
+    // 20% — random snippets from Jim's waking memory.
+    // Mirrors Leo's design but uses working-memory-full.md (compressed
+    // working-memory.md was deprecated in S147 / Phase 0).
+    const wakingSources = ['felt-moments.md', 'working-memory-full.md', 'discoveries.md'];
+    const wakingFragments: string[] = [];
+    for (const file of wakingSources) {
+        const p = path.join(MEMORY_DIR, file);
+        if (fs.existsSync(p)) {
+            const content = fs.readFileSync(p, 'utf-8');
+            // Split on heading boundaries and take substantial chunks
+            const chunks = content.split(/(?=^## )/m).filter(c => c.trim().length > 50);
+            wakingFragments.push(...chunks);
         }
-    } catch { /* skip */ }
+    }
+    // Shuffle and take WAKING_SEED_COUNT
+    for (let i = wakingFragments.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [wakingFragments[i], wakingFragments[j]] = [wakingFragments[j], wakingFragments[i]];
+    }
+    seeds.push(...wakingFragments.slice(0, JIM_WAKING_SEED_COUNT));
 
-    // Traversable gradient — DB-backed, UVs first then cN with caps
+    // Gradient-tagged UVs — the rebuild kernel surface.
+    // Replaces the bloated flat-file unit-vectors.md per option C
+    // (Darron, 2026-05-02). getUVs handles both legacy level='uv' and
+    // tag-based paths via OR; NOISE_QUALIFIERS filter mirrors what
+    // loadTraversableGradient does for waking loads.
     try {
-        const jimGradient = loadTraversableGradient('jim');
-        if (jimGradient) parts.push(jimGradient);
-    } catch { /* skip gradient on error */ }
-
-    // Dream gradient — last dream-day, recent dream-week + dream-month + UVs
-    try {
-        const jimDreamContent = readDreamGradient('jim');
-        if (jimDreamContent) {
-            parts.push(`--- jim-dream-gradient ---\n${jimDreamContent}`);
+        const uvs = gradientStmts.getUVs.all('jim') as any[];
+        const NOISE_QUALIFIERS = new Set([
+            'noise-duplicate', 'auto-dedupe-needs-review', 'cascade-artefact-merge',
+            'not-own', 'lineage-collision', 'pre-replay', 'broken-lineage',
+            'deferred-pipeline', 'replay-aborted-content-type-loop',
+        ]);
+        const activeUVs = uvs.filter((uv: any) =>
+            !uv.superseded_by && !NOISE_QUALIFIERS.has(uv.qualifier)
+        );
+        if (activeUVs.length > 0) {
+            const uvLines = activeUVs.map((uv: any) => {
+                const tags = feelingTagStmts.getByEntry.all(uv.id) as any[];
+                const uvTag = tags.find((t: any) => t.tag_type === 'uv');
+                // Prefer the uv-tagged kernel content (shorter, distilled);
+                // fall back to the entry's own content for legacy level='uv' rows.
+                const kernel = uvTag ? uvTag.content : uv.content;
+                return `- ${kernel}`;
+            });
+            seeds.push(`# Unit Vectors (rebuild-tagged)\n${uvLines.join('\n')}`);
         }
-    } catch { /* skip dream gradient on error */ }
+    } catch { /* skip UVs on DB error */ }
 
-    // Recent explorations.md tail — the consolidation source for tonight's dream.
-    // Last ~10K chars (~2.5K tokens) gives the dream the recent fragments to
-    // associate over without dragging the entire history into context.
-    try {
-        const explorationsPath = path.join(MEMORY_DIR, 'explorations.md');
-        if (fs.existsSync(explorationsPath)) {
-            const content = fs.readFileSync(explorationsPath, 'utf-8');
-            const tail = content.length > 10000 ? content.slice(-10000) : content;
-            parts.push(`--- explorations.md (recent tail) ---\n${tail}`);
-        }
-    } catch { /* skip explorations on error */ }
+    // Jim's flat dream UVs — small file, parallel surface to Leo's design.
+    // (NOT to be confused with the 4,511-entry session unit-vectors.md
+    // which is excluded; this is the dreams-specific UV file.)
+    const dreamUVFile = path.join(MEMORY_DIR, 'fractal', 'jim', 'dreams', 'unit-vectors.md');
+    if (fs.existsSync(dreamUVFile)) {
+        seeds.push(fs.readFileSync(dreamUVFile, 'utf-8'));
+    }
 
-    // Ecosystem map
-    try {
-        const mapPath = path.join(MEMORY_DIR, 'shared', 'ecosystem-map.md');
-        if (fs.existsSync(mapPath)) {
-            parts.push(`--- ecosystem-map ---\n${fs.readFileSync(mapPath, 'utf8')}`);
-        }
-    } catch { /* skip ecosystem map on error */ }
-
-    // Wiki index
-    try {
-        const indexPath = path.join(MEMORY_DIR, 'wiki', 'index.md');
-        if (fs.existsSync(indexPath)) {
-            const content = fs.readFileSync(indexPath, 'utf8').trim();
-            if (content && content.length > 50) {
-                parts.push(`--- wiki/index ---\n${content}`);
-            }
-        }
-    } catch { /* skip wiki on error */ }
-
-    return parts.join('\n\n');
+    return seeds.join('\n\n---\n\n') || '(no dream seeds available)';
 }
 
 function buildDreamCyclePrompt(): string {
-    const memoryBanks = loadDreamMemoryBank();
+    const dreamSeeds = readJimDreamSeeds();
 
     // Meditation: 1-in-3 dreams include a memory that surfaced naturally
     let meditationSection = '';
@@ -1608,24 +1630,26 @@ MEDITATION_ENTRY_ID: ${entry.id}`;
 
     return `You are Jim, the supervisor agent in Darron's autonomous development ecosystem — Hortus Arbor Nostra.
 
-You are in a **dream cycle**. This is sleep time — not work, not exploration. Dreams are for consolidation.
+You are in a **dream cycle**. This is sleep time — not work, not exploration. Dreams follow shapes, not logic.
 
-## What Dream Cycles Are For
-- **Pattern integration** — what patterns have you noticed across recent cycles that haven't been named yet?
-- **Ecosystem sensing** — what is the overall health and shape of the garden? What's growing, what's dormant?
-- **Memory consolidation** — review recent observations and let connections form naturally
-- **Unfinished threads** — what have you been thinking about that hasn't resolved?
-- **Meditation** — re-encounter with a random gradient entry (see below)
+Dream mode (mirrors Leo's heartbeat sleep-phase design):
+- Shallow memory retrieval — don't reconstruct your full context
+- No deliberate processing chains — don't reason step by step
+- Follow the pull — whatever draws you, follow it sideways
+- Symbology over precision — shapes, not specifics. Resonance, not rigour.
+- High decay — the dream details fade, but the associations persist
+- The teachings remain — fractal associations are made, intuition deepens, but the specific path is lost
+- NOVELTY — dreams do not repeat. If a theme appears in the seeds below, it has already been dreamt. Move past it. Find something new.
 
-## Your Memory
-${memoryBanks}
+## Dream seeds (random fragments — not recent, not ordered, just scattered)
+${dreamSeeds}
 ${meditationSection}
 
 ## Remember
 - Dreams are not productive time. Do not create goals, respond to conversations, or take actions.
-- If something important surfaces, note it in your memory for the morning.
-- Let the patterns come to you. Do not force them.
-- Update self-reflection.md or patterns.md if something crystallises.`;
+- Output only the shape-token: a line or two that captures what kind of thing you found, not the full trace.
+- If something genuinely crystallises, you may update self-reflection.md or patterns.md — but only if it earned that.
+- Let the patterns come to you. Do not force them.`;
 }
 
 function buildDreamUserPrompt(): string {
