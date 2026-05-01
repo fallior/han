@@ -1812,7 +1812,7 @@ async function maybeProcessDreamGradient(phase: string): Promise<void> {
         console.log(`[Leo] Morning — processing Leo's dream gradient...`);
         try {
             const result = await processDreamGradient('leo');
-            console.log(`[Leo] dream gradient: ${result.nightsProcessed} nights, ${result.c1Created.length} c1, ${result.c3Created.length} c3, ${result.c5Created.length} c5, ${result.uvsCreated.length} UVs`);
+            console.log(`[Leo] dream gradient: ${result.nightsProcessed} nights, ${result.dayCreated.length} dream-day, ${result.weekCreated.length} dream-week, ${result.monthCreated.length} dream-month, ${result.uvsCreated.length} UVs`);
             if (result.errors.length > 0) {
                 console.error(`[Leo] dream gradient errors:`, result.errors);
             }
@@ -2039,8 +2039,8 @@ function findUntranscribedFiles(): { filePath: string; agent: 'leo'; level: stri
             }
         }
 
-        // Dream gradient files (dreams/c1/, dreams/c3/, dreams/c5/)
-        for (const level of ['c1', 'c3', 'c5']) {
+        // Dream gradient files (dreams/dream-day/, dreams/dream-week/, dreams/dream-month/)
+        for (const level of ['dream-day', 'dream-week', 'dream-month']) {
             const levelDir = path.join(agentDir, 'dreams', level);
             if (!fs.existsSync(levelDir)) continue;
 

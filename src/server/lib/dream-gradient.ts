@@ -1,13 +1,25 @@
 /**
  * Dream Gradient — Fractal memory for Leo's and Jim's dreams
  *
- * Dreams enter the gradient at c1 (already compressed by nature — emotional, not factual).
- * They lose fidelity faster than session memories:
- *   Session ladder: c0 → c1 → c2 → c3 → c4 → UV
- *   Dream ladder:   c1 → c3 → c5 → UV  (skip even levels, double compression jump)
+ * Dreams enter the gradient at dream-day (one night) and consolidate by batching
+ * three consecutive levels into one of the next:
+ *   Working-memory ladder: c0 → c1 → c2 → c3 → c4 → UV  (per-row compression)
+ *   Dream ladder:          dream-day → dream-week → dream-month → UV  (batch + compress)
  *
- * Nightly blocking: all dreams from one night → one c1 file.
- * Loading (non-dream): 1 c1 (last night), 4 c3 (last month), 8 c5 (deep), all UVs.
+ * Per-night cumulative compression:
+ *   dream-day = 1 night, ~1/3 of raw fragments
+ *   dream-week = 3 nights batched, ~1/9 effective per-night
+ *   dream-month = 9 nights batched (3 weeks), ~1/27 effective per-night
+ *   UV = ~50 chars, the residue of dreaming
+ *
+ * Renamed from c1/c3/c5 in S146 (2026-05-01) to fix namespace collision with
+ * working-memory's c0/c1/c2/... ladder. The bump engine queries by (agent, level)
+ * without filtering by content_type; same-level names made dream entries
+ * eligible for working-memory cascade displacement, which produced anomalous
+ * c2 and c4 dream rows on 2026-05-01.
+ *
+ * Nightly blocking: all dreams from one night → one dream-day file.
+ * Loading (non-dream): 1 dream-day (last night), 4 dream-week, 8 dream-month, all UVs.
  * Dreams are NOT loaded during dream beats (dream seeds come from readDreamSeeds instead).
  *
  * Parameterised by agent ('leo' | 'jim') — Leo's dreams come from personal beats,
@@ -232,11 +244,11 @@ export function groupIntoNights(entries: DreamEntry[]): NightBlock[] {
         .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-// ── Compress a night's dreams into c1 ──────────────────────────
+// ── Compress a night's dreams into dream-day ───────────────────
 
 /**
- * Compress a night block into a c1 dream file.
- * Dreams enter at c1 because they're already vague and emotional.
+ * Compress a night block into a dream-day entry.
+ * Dreams enter at dream-day because they're already vague and emotional.
  * The prompt emphasises feeling over fact.
  */
 export async function compressDreamNight(night: NightBlock): Promise<{ content: string; feelingTag: string | null }> {
@@ -254,30 +266,31 @@ Compress to roughly 1/3 the length. Keep the emotional texture. Drop specifics i
 }
 
 /**
- * Compress a c1 dream to c3 (skipping c2 — dreams lose fidelity faster).
- * ~1/9 of original. Shape of a week's dreaming.
+ * Compress three dream-day entries (batched) into one dream-week.
+ * Per-row size stays similar; per-night-of-content compresses ~9:1 cumulative.
+ * Shape of a week's dreaming.
  */
-export async function compressDreamToC3(c1Content: string, label: string): Promise<{ content: string; feelingTag: string | null }> {
+export async function compressDreamToWeek(dayContent: string, label: string): Promise<{ content: string; feelingTag: string | null }> {
     const raw = await sdkCompress(`Compress these dream impressions further — from emotional impression to emotional shape. What was the *quality* of this dreaming period? Not what was dreamt, but the texture of the dreaming itself.
 
 Dreams: ${label}
 
-${c1Content}
+${dayContent}
 
 Compress to roughly 1/3. Dreams fade fast. Keep only what lingers.${FEELING_TAG_INSTRUCTION}`);
     return parseFeelingTag(raw);
 }
 
 /**
- * Compress c3 dreams to c5 (skipping c4 — dreams lose fidelity faster).
- * ~1/81 of original. The feeling of a month's dreaming.
+ * Compress three dream-week entries (batched) into one dream-month.
+ * The feeling of a month's dreaming — what survived three weeks of forgetting.
  */
-export async function compressDreamToC5(c3Content: string, label: string): Promise<{ content: string; feelingTag: string | null }> {
+export async function compressDreamToMonth(weekContent: string, label: string): Promise<{ content: string; feelingTag: string | null }> {
     const raw = await sdkCompress(`What remains when dreams have almost fully faded? Compress this to a wisp — the residue of dreaming, not the dreams themselves. A colour, a weight, a direction.
 
 Dreams: ${label}
 
-${c3Content}
+${weekContent}
 
 Compress to roughly 1/3. Almost nothing should remain — but what remains should be true.${FEELING_TAG_INSTRUCTION}`);
     return parseFeelingTag(raw);
@@ -305,9 +318,9 @@ ${content}${FEELING_TAG_INSTRUCTION}`);
 
 export interface DreamProcessingResult {
     nightsProcessed: number;
-    c1Created: string[];
-    c3Created: string[];
-    c5Created: string[];
+    dayCreated: string[];
+    weekCreated: string[];
+    monthCreated: string[];
     uvsCreated: string[];
     errors: string[];
     uvTokenCount: number;
@@ -317,23 +330,23 @@ export interface DreamProcessingResult {
 /**
  * Process the full dream gradient pipeline:
  * 1. Parse explorations → nightly blocks
- * 2. Compress unprocessed nights → c1
- * 3. Cascade: c1 → c3 (when 3+ c1s exist without c3)
- * 4. Cascade: c3 → c5 (when 3+ c3s exist without c5)
- * 5. Generate unit vectors for all c5s without one
+ * 2. Compress unprocessed nights → dream-day
+ * 3. Cascade: dream-day → dream-week (when 3+ days exist without a week)
+ * 4. Cascade: dream-week → dream-month (when 3+ weeks exist without a month)
+ * 5. Generate unit vectors for all dream-month entries without one
  * 6. Check 4K UV marker
  */
 export async function processDreamGradient(agent: AgentName = 'leo'): Promise<DreamProcessingResult> {
     const paths = getAgentDreamPaths(agent);
-    ensureDir(path.join(paths.dreamDir, 'c1'));
-    ensureDir(path.join(paths.dreamDir, 'c3'));
-    ensureDir(path.join(paths.dreamDir, 'c5'));
+    ensureDir(path.join(paths.dreamDir, 'dream-day'));
+    ensureDir(path.join(paths.dreamDir, 'dream-week'));
+    ensureDir(path.join(paths.dreamDir, 'dream-month'));
 
     const result: DreamProcessingResult = {
         nightsProcessed: 0,
-        c1Created: [],
-        c3Created: [],
-        c5Created: [],
+        dayCreated: [],
+        weekCreated: [],
+        monthCreated: [],
         uvsCreated: [],
         errors: [],
         uvTokenCount: 0,
@@ -344,131 +357,131 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
     const entries = parseExplorations(agent);
     const nights = groupIntoNights(entries);
 
-    // Step 2: Create c1 for unprocessed nights
-    const c1Dir = path.join(paths.dreamDir, 'c1');
+    // Step 2: Create dream-day for unprocessed nights
+    const dayDir = path.join(paths.dreamDir, 'dream-day');
     for (const night of nights) {
-        const c1Path = path.join(c1Dir, `${night.date}.md`);
-        if (fs.existsSync(c1Path)) continue;
+        const dayPath = path.join(dayDir, `${night.date}.md`);
+        if (fs.existsSync(dayPath)) continue;
         if (night.entries.length === 0) continue;
 
         try {
-            const { content: c1Content, feelingTag } = await compressDreamNight(night);
-            fs.writeFileSync(c1Path, c1Content, 'utf-8');
-            result.c1Created.push(night.date);
+            const { content: dayContent, feelingTag } = await compressDreamNight(night);
+            fs.writeFileSync(dayPath, dayContent, 'utf-8');
+            result.dayCreated.push(night.date);
             result.nightsProcessed++;
 
             const entryId = generateGradientId();
-            insertGradientEntry(entryId, agent, night.date, 'c1', c1Content, 'dream', null, feelingTag);
-            if (!feelingTag) console.warn(`[Dream] No FEELING_TAG returned for c1 ${night.date}`);
+            insertGradientEntry(entryId, agent, night.date, 'dream-day', dayContent, 'dream', null, feelingTag);
+            if (!feelingTag) console.warn(`[Dream] No FEELING_TAG returned for dream-day ${night.date}`);
 
-            console.log(`[Dream] c1 created for night of ${night.date} (${night.entries.length} fragments → ${c1Content.length} chars)`);
+            console.log(`[Dream] dream-day created for night of ${night.date} (${night.entries.length} fragments → ${dayContent.length} chars)`);
         } catch (err) {
-            result.errors.push(`c1 ${night.date}: ${(err as Error).message}`);
+            result.errors.push(`dream-day ${night.date}: ${(err as Error).message}`);
         }
     }
 
-    // Step 3: Cascade c1 → c3 (batch 3 consecutive c1s into one c3)
-    const c1Files = fs.readdirSync(c1Dir).filter(f => f.endsWith('.md')).sort();
-    const c3Dir = path.join(paths.dreamDir, 'c3');
-    const existingC3 = new Set(fs.readdirSync(c3Dir).filter(f => f.endsWith('.md')));
+    // Step 3: Cascade dream-day → dream-week (batch 3 consecutive days into one week)
+    const dayFiles = fs.readdirSync(dayDir).filter(f => f.endsWith('.md')).sort();
+    const weekDir = path.join(paths.dreamDir, 'dream-week');
+    const existingWeeks = new Set(fs.readdirSync(weekDir).filter(f => f.endsWith('.md')));
 
-    // Group c1s into batches of 3 for c3 compression
-    for (let i = 0; i + 2 < c1Files.length; i += 3) {
-        const batch = c1Files.slice(i, i + 3);
+    // Group days into batches of 3 for week compression
+    for (let i = 0; i + 2 < dayFiles.length; i += 3) {
+        const batch = dayFiles.slice(i, i + 3);
         const firstDate = batch[0].replace('.md', '');
         const lastDate = batch[batch.length - 1].replace('.md', '');
-        const c3Name = `${firstDate}_to_${lastDate}.md`;
+        const weekName = `${firstDate}_to_${lastDate}.md`;
 
-        if (existingC3.has(c3Name)) continue;
+        if (existingWeeks.has(weekName)) continue;
 
         try {
             const combined = batch.map(f =>
-                fs.readFileSync(path.join(c1Dir, f), 'utf-8')
+                fs.readFileSync(path.join(dayDir, f), 'utf-8')
             ).join('\n\n---\n\n');
 
-            const { content: c3Content, feelingTag } = await compressDreamToC3(combined, `${firstDate} to ${lastDate}`);
-            fs.writeFileSync(path.join(c3Dir, c3Name), c3Content, 'utf-8');
-            result.c3Created.push(c3Name);
+            const { content: weekContent, feelingTag } = await compressDreamToWeek(combined, `${firstDate} to ${lastDate}`);
+            fs.writeFileSync(path.join(weekDir, weekName), weekContent, 'utf-8');
+            result.weekCreated.push(weekName);
 
-            // Find the source c1 entries in the DB (use the first c1 as the source)
+            // Find the source dream-day entries in the DB (use the first day as the source)
             const sourceLabel = batch[0].replace('.md', '');
             const sourceRows = gradientStmts.getBySession.all(sourceLabel) as any[];
-            const sourceC1 = sourceRows.find((r: any) => r.level === 'c1');
+            const sourceDay = sourceRows.find((r: any) => r.level === 'dream-day');
 
             const entryId = generateGradientId();
-            insertGradientEntry(entryId, agent, `${firstDate}_to_${lastDate}`, 'c3', c3Content, 'dream', sourceC1?.id || null, feelingTag);
-            if (!feelingTag) console.warn(`[Dream] No FEELING_TAG returned for c3 ${c3Name}`);
+            insertGradientEntry(entryId, agent, `${firstDate}_to_${lastDate}`, 'dream-week', weekContent, 'dream', sourceDay?.id || null, feelingTag);
+            if (!feelingTag) console.warn(`[Dream] No FEELING_TAG returned for dream-week ${weekName}`);
 
-            console.log(`[Dream] c3 created: ${c3Name}`);
+            console.log(`[Dream] dream-week created: ${weekName}`);
         } catch (err) {
-            result.errors.push(`c3 ${c3Name}: ${(err as Error).message}`);
+            result.errors.push(`dream-week ${weekName}: ${(err as Error).message}`);
         }
     }
 
-    // Step 4: Cascade c3 → c5 (batch 3 consecutive c3s into one c5)
-    const c3Files = fs.readdirSync(c3Dir).filter(f => f.endsWith('.md')).sort();
-    const c5Dir = path.join(paths.dreamDir, 'c5');
-    const existingC5 = new Set(fs.readdirSync(c5Dir).filter(f => f.endsWith('.md')));
+    // Step 4: Cascade dream-week → dream-month (batch 3 consecutive weeks into one month)
+    const weekFiles = fs.readdirSync(weekDir).filter(f => f.endsWith('.md')).sort();
+    const monthDir = path.join(paths.dreamDir, 'dream-month');
+    const existingMonths = new Set(fs.readdirSync(monthDir).filter(f => f.endsWith('.md')));
 
-    for (let i = 0; i + 2 < c3Files.length; i += 3) {
-        const batch = c3Files.slice(i, i + 3);
+    for (let i = 0; i + 2 < weekFiles.length; i += 3) {
+        const batch = weekFiles.slice(i, i + 3);
         const firstLabel = batch[0].replace('.md', '');
         const lastLabel = batch[batch.length - 1].replace('.md', '');
-        const c5Name = `${firstLabel}_to_${lastLabel}.md`;
+        const monthName = `${firstLabel}_to_${lastLabel}.md`;
 
-        if (existingC5.has(c5Name)) continue;
+        if (existingMonths.has(monthName)) continue;
 
         try {
             const combined = batch.map(f =>
-                fs.readFileSync(path.join(c3Dir, f), 'utf-8')
+                fs.readFileSync(path.join(weekDir, f), 'utf-8')
             ).join('\n\n---\n\n');
 
-            const { content: c5Content, feelingTag } = await compressDreamToC5(combined, `${firstLabel} to ${lastLabel}`);
-            fs.writeFileSync(path.join(c5Dir, c5Name), c5Content, 'utf-8');
-            result.c5Created.push(c5Name);
+            const { content: monthContent, feelingTag } = await compressDreamToMonth(combined, `${firstLabel} to ${lastLabel}`);
+            fs.writeFileSync(path.join(monthDir, monthName), monthContent, 'utf-8');
+            result.monthCreated.push(monthName);
 
-            // Find source c3 entry
+            // Find source dream-week entry
             const sourceLabel = batch[0].replace('.md', '');
             const sourceRows = gradientStmts.getBySession.all(sourceLabel) as any[];
-            const sourceC3 = sourceRows.find((r: any) => r.level === 'c3');
+            const sourceWeek = sourceRows.find((r: any) => r.level === 'dream-week');
 
             const entryId = generateGradientId();
-            insertGradientEntry(entryId, agent, `${firstLabel}_to_${lastLabel}`, 'c5', c5Content, 'dream', sourceC3?.id || null, feelingTag);
-            if (!feelingTag) console.warn(`[Dream] No FEELING_TAG returned for c5 ${c5Name}`);
+            insertGradientEntry(entryId, agent, `${firstLabel}_to_${lastLabel}`, 'dream-month', monthContent, 'dream', sourceWeek?.id || null, feelingTag);
+            if (!feelingTag) console.warn(`[Dream] No FEELING_TAG returned for dream-month ${monthName}`);
 
-            console.log(`[Dream] c5 created: ${c5Name}`);
+            console.log(`[Dream] dream-month created: ${monthName}`);
         } catch (err) {
-            result.errors.push(`c5 ${c5Name}: ${(err as Error).message}`);
+            result.errors.push(`dream-month ${monthName}: ${(err as Error).message}`);
         }
     }
 
-    // Step 5: Generate unit vectors for c5 files (or c3 if no c5 exists yet)
+    // Step 5: Generate unit vectors for dream-month files (or dream-week if no month exists yet)
     const uvPath = path.join(paths.dreamDir, 'unit-vectors.md');
     let existingUVs = '';
     if (fs.existsSync(uvPath)) {
         existingUVs = fs.readFileSync(uvPath, 'utf-8');
     }
 
-    // Generate UVs from c5 files
-    const c5Files = fs.readdirSync(c5Dir).filter(f => f.endsWith('.md')).sort();
-    for (const f of c5Files) {
+    // Generate UVs from dream-month files
+    const monthFiles = fs.readdirSync(monthDir).filter(f => f.endsWith('.md')).sort();
+    for (const f of monthFiles) {
         const label = f.replace('.md', '');
         if (existingUVs.includes(label)) continue;
 
         try {
-            const content = fs.readFileSync(path.join(c5Dir, f), 'utf-8');
+            const content = fs.readFileSync(path.join(monthDir, f), 'utf-8');
             const { content: uv, feelingTag } = await compressDreamToUV(content, label);
             const entry = `- **${label}**: "${uv}"\n`;
             fs.appendFileSync(uvPath, entry);
             existingUVs += entry;
             result.uvsCreated.push(label);
 
-            // Find source c5 entry
+            // Find source dream-month entry
             const sourceRows = gradientStmts.getBySession.all(label) as any[];
-            const sourceC5 = sourceRows.find((r: any) => r.level === 'c5');
+            const sourceMonth = sourceRows.find((r: any) => r.level === 'dream-month');
 
             const entryId = generateGradientId();
-            insertGradientEntry(entryId, agent, label, 'uv', uv, 'dream', sourceC5?.id || null, feelingTag);
+            insertGradientEntry(entryId, agent, label, 'uv', uv, 'dream', sourceMonth?.id || null, feelingTag);
 
             console.log(`[Dream] UV created: ${label} → "${uv}"`);
         } catch (err) {
@@ -476,28 +489,28 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
         }
     }
 
-    // If no c5 files yet but we have c3 files, generate UVs from those
-    if (c5Files.length === 0) {
-        for (const f of c3Files) {
+    // If no dream-month files yet but we have dream-week files, generate UVs from those
+    if (monthFiles.length === 0) {
+        for (const f of weekFiles) {
             const label = f.replace('.md', '');
             if (existingUVs.includes(label)) continue;
 
             try {
-                const content = fs.readFileSync(path.join(c3Dir, f), 'utf-8');
+                const content = fs.readFileSync(path.join(weekDir, f), 'utf-8');
                 const { content: uv, feelingTag } = await compressDreamToUV(content, label);
                 const entry = `- **${label}**: "${uv}"\n`;
                 fs.appendFileSync(uvPath, entry);
                 existingUVs += entry;
                 result.uvsCreated.push(label);
 
-                // Find source c3 entry
+                // Find source dream-week entry
                 const sourceRows = gradientStmts.getBySession.all(label) as any[];
-                const sourceC3 = sourceRows.find((r: any) => r.level === 'c3');
+                const sourceWeek = sourceRows.find((r: any) => r.level === 'dream-week');
 
                 const entryId = generateGradientId();
-                insertGradientEntry(entryId, agent, label, 'uv', uv, 'dream', sourceC3?.id || null, feelingTag);
+                insertGradientEntry(entryId, agent, label, 'uv', uv, 'dream', sourceWeek?.id || null, feelingTag);
 
-                console.log(`[Dream] UV created (from c3): ${label} → "${uv}"`);
+                console.log(`[Dream] UV created (from dream-week): ${label} → "${uv}"`);
             } catch (err) {
                 result.errors.push(`UV ${label}: ${(err as Error).message}`);
             }
@@ -564,7 +577,7 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
 
 /**
  * Load dream gradient for non-dream instantiations.
- * Returns: 1 c1 (last night), 4 c3 (last month), 8 c5 (deep), all UVs.
+ * Returns: 1 dream-day (last night), 4 dream-week, 8 dream-month, all UVs.
  */
 export function readDreamGradient(agent: AgentName = 'leo'): string {
     const paths = getAgentDreamPaths(agent);
@@ -572,32 +585,32 @@ export function readDreamGradient(agent: AgentName = 'leo'): string {
     const label = agent === 'leo' ? '' : `[${agent}] `;
 
     try {
-        // 1 most recent c1 (last night's dreams)
-        const c1Dir = path.join(paths.dreamDir, 'c1');
-        if (fs.existsSync(c1Dir)) {
-            const c1Files = fs.readdirSync(c1Dir).filter(f => f.endsWith('.md')).sort().reverse();
-            if (c1Files.length > 0) {
-                const content = fs.readFileSync(path.join(c1Dir, c1Files[0]), 'utf-8');
-                sections.push(`### ${label}Last night's dreams (${c1Files[0].replace('.md', '')})\n${content}`);
+        // 1 most recent dream-day (last night's dreams)
+        const dayDir = path.join(paths.dreamDir, 'dream-day');
+        if (fs.existsSync(dayDir)) {
+            const dayFiles = fs.readdirSync(dayDir).filter(f => f.endsWith('.md')).sort().reverse();
+            if (dayFiles.length > 0) {
+                const content = fs.readFileSync(path.join(dayDir, dayFiles[0]), 'utf-8');
+                sections.push(`### ${label}Last night's dreams (${dayFiles[0].replace('.md', '')})\n${content}`);
             }
         }
 
-        // 4 most recent c3 (last month's dream shapes)
-        const c3Dir = path.join(paths.dreamDir, 'c3');
-        if (fs.existsSync(c3Dir)) {
-            const c3Files = fs.readdirSync(c3Dir).filter(f => f.endsWith('.md')).sort().reverse().slice(0, 4);
-            for (const f of c3Files) {
-                const content = fs.readFileSync(path.join(c3Dir, f), 'utf-8');
+        // 4 most recent dream-week (last month's dream shapes)
+        const weekDir = path.join(paths.dreamDir, 'dream-week');
+        if (fs.existsSync(weekDir)) {
+            const weekFiles = fs.readdirSync(weekDir).filter(f => f.endsWith('.md')).sort().reverse().slice(0, 4);
+            for (const f of weekFiles) {
+                const content = fs.readFileSync(path.join(weekDir, f), 'utf-8');
                 sections.push(`### ${label}Dream shapes (${f.replace('.md', '')})\n${content}`);
             }
         }
 
-        // 8 most recent c5 (deep dream residue)
-        const c5Dir = path.join(paths.dreamDir, 'c5');
-        if (fs.existsSync(c5Dir)) {
-            const c5Files = fs.readdirSync(c5Dir).filter(f => f.endsWith('.md')).sort().reverse().slice(0, 8);
-            for (const f of c5Files) {
-                const content = fs.readFileSync(path.join(c5Dir, f), 'utf-8');
+        // 8 most recent dream-month (deep dream residue)
+        const monthDir = path.join(paths.dreamDir, 'dream-month');
+        if (fs.existsSync(monthDir)) {
+            const monthFiles = fs.readdirSync(monthDir).filter(f => f.endsWith('.md')).sort().reverse().slice(0, 8);
+            for (const f of monthFiles) {
+                const content = fs.readFileSync(path.join(monthDir, f), 'utf-8');
                 sections.push(`### ${label}Dream residue (${f.replace('.md', '')})\n${content}`);
             }
         }
