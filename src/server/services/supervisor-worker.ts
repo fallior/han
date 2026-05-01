@@ -1474,8 +1474,104 @@ async function maybeRunJimActiveCascade(phase: string): Promise<void> {
     }
 }
 
+/**
+ * Trimmed memory bank for dream cycles — Strand E (S147, 2026-05-01).
+ *
+ * Per Mar-17 Dream 1567 self-prescription (last-night-Jim's own spec):
+ *   "The dream cycle isn't a degraded supervisor. It's a different instrument
+ *    that needs different context. Identity files yes. Project knowledge no.
+ *    Fractal gradient yes. Full working-memory-floating no."
+ *
+ * What's INCLUDED (vs loadMemoryBank):
+ *   - Identity files: identity, patterns, failures, self-reflection, discoveries, felt-moments
+ *   - Aphorisms (file-based)
+ *   - Traversable gradient (DB-backed UVs + cN with caps)
+ *   - Dream gradient (recent dream-day, dream-week, dream-month + UVs)
+ *   - Recent explorations.md tail (the dream's consolidation source)
+ *   - Ecosystem map
+ *   - Wiki index
+ *
+ * What's DROPPED (vs loadMemoryBank):
+ *   - working-memory-full.md (per Mar-17 spec — the gradient carries the
+ *     consolidation history; the live file is operational, not for dreams)
+ *   - Project knowledge files (the biggest cut — c0 full + c1×3 + c2×6 +
+ *     c3×12 + c4×24 + c5×48 of project memory was the bulk that pushed
+ *     Dream 3129 over Opus context limit on 2026-05-01)
+ *   - Memory file gradients (felt-moments + working-memory file-tree gradients)
+ *   - Pre-flight rolling-window rotation (dream cycles don't trigger
+ *     ingestion; rotation only fires on waking write paths)
+ */
+function loadDreamMemoryBank(): string {
+    const parts: string[] = [];
+
+    // Identity files — same as waking, EXCEPT working-memory-full
+    for (const file of ['identity.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'discoveries.md', 'felt-moments.md']) {
+        const filepath = path.join(MEMORY_DIR, file);
+        try {
+            if (fs.existsSync(filepath)) {
+                parts.push(`--- ${file} ---\n${fs.readFileSync(filepath, 'utf8')}`);
+            }
+        } catch { /* skip unreadable files */ }
+    }
+
+    // Aphorisms — file-based, curated by hand
+    try {
+        const aphorismsFile = path.join(MEMORY_DIR, 'fractal', 'jim', 'aphorisms.md');
+        if (fs.existsSync(aphorismsFile)) {
+            parts.push(`--- fractal/aphorisms ---\n${fs.readFileSync(aphorismsFile, 'utf-8')}`);
+        }
+    } catch { /* skip */ }
+
+    // Traversable gradient — DB-backed, UVs first then cN with caps
+    try {
+        const jimGradient = loadTraversableGradient('jim');
+        if (jimGradient) parts.push(jimGradient);
+    } catch { /* skip gradient on error */ }
+
+    // Dream gradient — last dream-day, recent dream-week + dream-month + UVs
+    try {
+        const jimDreamContent = readDreamGradient('jim');
+        if (jimDreamContent) {
+            parts.push(`--- jim-dream-gradient ---\n${jimDreamContent}`);
+        }
+    } catch { /* skip dream gradient on error */ }
+
+    // Recent explorations.md tail — the consolidation source for tonight's dream.
+    // Last ~10K chars (~2.5K tokens) gives the dream the recent fragments to
+    // associate over without dragging the entire history into context.
+    try {
+        const explorationsPath = path.join(MEMORY_DIR, 'explorations.md');
+        if (fs.existsSync(explorationsPath)) {
+            const content = fs.readFileSync(explorationsPath, 'utf-8');
+            const tail = content.length > 10000 ? content.slice(-10000) : content;
+            parts.push(`--- explorations.md (recent tail) ---\n${tail}`);
+        }
+    } catch { /* skip explorations on error */ }
+
+    // Ecosystem map
+    try {
+        const mapPath = path.join(MEMORY_DIR, 'shared', 'ecosystem-map.md');
+        if (fs.existsSync(mapPath)) {
+            parts.push(`--- ecosystem-map ---\n${fs.readFileSync(mapPath, 'utf8')}`);
+        }
+    } catch { /* skip ecosystem map on error */ }
+
+    // Wiki index
+    try {
+        const indexPath = path.join(MEMORY_DIR, 'wiki', 'index.md');
+        if (fs.existsSync(indexPath)) {
+            const content = fs.readFileSync(indexPath, 'utf8').trim();
+            if (content && content.length > 50) {
+                parts.push(`--- wiki/index ---\n${content}`);
+            }
+        }
+    } catch { /* skip wiki on error */ }
+
+    return parts.join('\n\n');
+}
+
 function buildDreamCyclePrompt(): string {
-    const memoryBanks = loadMemoryBank();
+    const memoryBanks = loadDreamMemoryBank();
 
     // Meditation: 1-in-3 dreams include a memory that surfaced naturally
     let meditationSection = '';
@@ -2300,6 +2396,25 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         // Config override still takes precedence if set.
         const model = supervisorConfig.model || 'claude-opus-4-7';
         const maxTurns = supervisorConfig.max_turns_per_cycle || 1000;
+
+        // Prompt-size guard — Strand E (S147, 2026-05-01).
+        // Per Jim's specification: if combined system+user prompt exceeds the
+        // threshold, abort cleanly with a structured failure rather than letting
+        // Opus error out with "Prompt is too long". Avoids the F9 self-reinforcing
+        // append-on-failure pattern. 150K tokens leaves headroom under Opus 4.7's
+        // 200K context window for tool turns and response. Estimation via
+        // chars÷4 (canonical token-counter heuristic).
+        const PROMPT_SIZE_LIMIT_TOKENS = 150_000;
+        const estimatedTokens = Math.ceil((systemPrompt.length + prompt.length) / 4);
+        if (estimatedTokens > PROMPT_SIZE_LIMIT_TOKENS) {
+            log(`[Worker] Prompt-size guard tripped: ${cycleType} cycle #${cycleNumber} estimated ${estimatedTokens} tokens (system=${Math.ceil(systemPrompt.length/4)}, user=${Math.ceil(prompt.length/4)}) exceeds ${PROMPT_SIZE_LIMIT_TOKENS} threshold — aborting before LLM call`);
+            logCycleAudit(cycleNumber, cycleType, 'error', 0, Date.now() - cycleStartMs);
+            // Do NOT call savePartialCycleWork — we have no partial work and
+            // appending a "skipped" entry to working-memory-full would feed the
+            // exact same overflow loop on the next cycle. Just record the audit
+            // and return cleanly.
+            return;
+        }
 
         // Call Opus via Agent SDK
         const q = agentQuery({
