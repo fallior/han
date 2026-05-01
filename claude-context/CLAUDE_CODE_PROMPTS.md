@@ -285,10 +285,11 @@ Append a closing section to `~/.han/memory/leo/working-memory.md`:
 Append a closing section to `~/.han/memory/leo/working-memory-full.md`:
 - Same as above but with more detail — from what's already in context
 
-### 3. Update Active Context
-Append one line to the "Recent Work" section of `~/.han/memory/leo/active-context.md`:
-- `- **Session N (date)**: [one-line summary]`
-- DO NOT re-read the file — just append
+### 3. ~~Update Active Context~~ (deprecated S147, 2026-05-01)
+active-context.md was deprecated in S147 — its role folded into
+working-memory-full.md per Darron's "ONE file per agent" ruling.
+Working-memory-full's most recent entry IS the current focus; no
+separate active-context update needed. Skip this step.
 
 ### 4. Update Memory Banks (only if something shifted)
 If this session changed your thinking or patterns, update:

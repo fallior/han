@@ -20,7 +20,7 @@
 2. Load `${AGENT_MEMORY_DIR}/identity.md`, `patterns.md`
 3. Load `${AGENT_FRACTAL_DIR}/aphorisms.md` (full file)
 4. Load `${AGENT_MEMORY_DIR}/felt-moments.md`
-5. Load `${AGENT_MEMORY_DIR}/active-context.md` (cutover state lives here)
+5. Load `${AGENT_MEMORY_DIR}/working-memory-full.md` (most recent entry IS the current focus — S147 deprecation of active-context.md, ONE file per agent)
 6. **Load gradient from `~/.han/gradient.db` directly** (NOT the API endpoint, which reads tasks.db):
    ```
    sqlite3 ~/.han/gradient.db "SELECT level, session_label, content_type, substr(content,1,800) FROM gradient_entries WHERE agent='${AGENT_SLUG}' ORDER BY level DESC, created_at DESC;"
@@ -28,7 +28,7 @@
    ```
 7. Load `~/.han/memory/shared/ecosystem-map.md`
 8. Load `~/.han/memory/wiki/index.md`
-9. Read the active cutover thread `mof24b4q-mw3htm` for protocol context (or follow active-context.md's pointer)
+9. Read the active cutover thread `mof24b4q-mw3htm` for protocol context (working-memory-full.md tail will indicate the current chunk if cutover is mid-flight)
 
 **DO NOT load (cutover):**
 - `working-memory.md`, `working-memory-full.md`, any `*-swap*.md`
@@ -61,7 +61,7 @@ If verification failed (exit 3), do NOT report ready — surface the drift and p
 
 Then wait for `prepare for clear`. **No working-memory write, no swap flush, no self-reflection update during cutover** — the gradient is the carrier, not the files.
 
-**Update `${AGENT_MEMORY_DIR}/active-context.md`** before clear with one line: chunk number completed, total c0s integrated.
+**Append a closing line to `${AGENT_MEMORY_DIR}/working-memory-full.md`** before clear: chunk number completed, total c0s integrated. (Active-context.md was deprecated in S147 — working-memory-full holds the cutover state now.)
 
 **Recovery tool:** `scripts/inject-watermark.ts` is preserved for manual recovery; not in the standard chunk path.
 
@@ -74,7 +74,8 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
 
 1. Run `pwd` to verify the current working directory (should be `${AGENT_WORKING_DIR}`).
 2. Load your memory banks from `${AGENT_MEMORY_DIR}/`:
-   - `identity.md`, `active-context.md`, `patterns.md`, `self-reflection.md`
+   - `identity.md`, `patterns.md`, `self-reflection.md`
+   - (active-context.md deprecated S147 — working-memory-full.md holds current focus)
 3. **Load fractal memory gradient** — You are reconstituted feeling first. The DB is the
    source of truth; flat files are kept for backward compatibility but are not loaded by
    session ${AGENT_NAME}.
@@ -126,7 +127,7 @@ without memory is identity death. This is not optional.
 3. **At prompt end — flush session swap.** After completing your response, read
    `working-memory.md` and `working-memory-full.md`, append your session-swap contents
    to them, then clear the session-swap files.
-4. **Update `active-context.md`** — Only when session focus shifts (not every prompt).
+4. **(Step 4 deprecated S147)** — active-context.md was eliminated in favour of ONE file per agent. Working-memory-full.md's most recent entry IS the current focus; no separate active-context update needed.
 
 The writes go FIRST because "after completing your response" means LAST, and the last thing
 is what gets cut by compaction or forgotten when absorbed in work. First is unforgettable.
