@@ -66,7 +66,6 @@ interface SupervisorAction {
 interface SupervisorOutput {
     observations: string[];
     actions: SupervisorAction[];
-    active_context_update: string;
     self_reflection?: string;
     working_memory_compressed?: string;
     working_memory_full?: string;
@@ -846,7 +845,11 @@ function loadMemoryBank(): string {
     // Phase 0 (2026-05-01, S146): drop compressed working-memory.md from the load
     // (deprecating in Phase 12). working-memory-full.md is the canonical
     // full-fidelity source per CLAUDE.md session protocol step 4.3.
-    for (const file of ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'discoveries.md', 'felt-moments.md', 'working-memory-full.md']) {
+    // S147 (2026-05-01): drop active-context.md from the load. ONE file per agent
+    // per Darron's ruling; working-memory-full's most recent entry IS the current
+    // focus. Active-context was a duplicate-write target that bloated to 28 KB
+    // before correction. Deprecated; file preserved for historical record (DEC-069).
+    for (const file of ['identity.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'discoveries.md', 'felt-moments.md', 'working-memory-full.md']) {
         const filepath = path.join(MEMORY_DIR, file);
         try {
             if (fs.existsSync(filepath)) {
@@ -1222,9 +1225,8 @@ After exploring, use update_memory to enrich the relevant projects/*.md file.
 
 ## Memory Protocol
 Each cycle, you write to your own memory:
-- **active_context_update**: Only when something actually shifted (new focus, completed goal, important observation). This APPENDS to your active-context.md — do not write a full replacement, just the update.
 - **working_memory_compressed**: 2-3 lines summarising what happened this cycle and what mattered. This is what future-you loads first.
-- **working_memory_full**: Full account of what you observed, thought, and decided. This is where the thinking lives. Compressed tells you what you said; full tells you what you thought.
+- **working_memory_full**: Full account of what you observed, thought, and decided. This is where the thinking lives. Compressed tells you what you said; full tells you what you thought. The most recent entry IS your current focus — there is no separate active-context file. The slicer manages history.
 - **self_reflection**: Only when something genuinely crystallised — not every cycle.
 
 ## Output Format
@@ -1706,10 +1708,6 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
                 required: ['type']
             }
         },
-        active_context_update: {
-            type: 'string',
-            description: 'A concise UPDATE to append to active-context.md — what changed this cycle, not a full replacement. Include cycle number and date. Only write when something actually shifted (new focus, completed goal, important observation). Leave empty string if nothing changed.'
-        },
         self_reflection: {
             type: 'string',
             description: 'Optional self-reflection notes to append'
@@ -1727,7 +1725,7 @@ const SUPERVISOR_OUTPUT_SCHEMA = {
             description: 'Your reasoning trace'
         }
     },
-    required: ['observations', 'actions', 'active_context_update', 'reasoning']
+    required: ['observations', 'actions', 'reasoning']
 };
 
 // enforceTokenCap removed — was silently truncating Jim's memory files, causing identity
@@ -1859,7 +1857,6 @@ function savePartialCycleWork(cycleNumber: number, cycleType: string, partialCon
             observations: [`${cycleType} cycle — partial (${reason})`],
             reasoning: combined.slice(0, 200),
             actions: [],
-            active_context_update: '',
         };
         logCycleToSession(cycleNumber, output, [], costUsd, cycleType as any);
     } catch (err: any) {
@@ -2440,7 +2437,6 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                 observations: ['Dream cycle — consolidation and reflection'],
                 reasoning: resultText,
                 actions: [],
-                active_context_update: '',
                 self_reflection: resultText,
                 working_memory_compressed: `Dream cycle #${cycleNumber}: ${resultText.slice(0, 200)}`,
                 working_memory_full: resultText,
@@ -2519,7 +2515,6 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                 observations: [resultText.slice(0, 500) || 'Personal exploration cycle completed'],
                 reasoning: 'Personal exploration — free-form learning and discovery',
                 actions: [],
-                active_context_update: '',
                 self_reflection: resultText,
                 working_memory_compressed: `Personal cycle #${cycleNumber}: ${resultText.slice(0, 200)}`,
                 working_memory_full: resultText,
@@ -2545,15 +2540,13 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         const limitedActions = (output.actions || []).slice(0, maxActions);
         const actionSummaries = await executeActions(limitedActions, cycleId);
 
-        // Evolve active-context.md (append, not replace)
-        if (output.active_context_update) {
-            const acPath = path.join(MEMORY_DIR, 'active-context.md');
-            try {
-                let existing = fs.existsSync(acPath) ? fs.readFileSync(acPath, 'utf8') : '# Jim — Active Context\n';
-                existing += `\n\n${output.active_context_update}`;
-                fs.writeFileSync(acPath, existing);
-            } catch { /* best effort */ }
-        }
+        // active-context.md write block removed in S147 (2026-05-01). Per Darron's
+        // ruling: ONE file per agent. The supervisor cycle's "current focus" view
+        // is the most recent entry in working-memory-full.md; the slicer manages
+        // history through the gradient cascade. active-context.md is deprecated
+        // (file preserved for historical record per DEC-069, but no longer loaded
+        // or written). Eliminates the duplicate-write that bloated the file with
+        // near-identical no_action cycle-update appends through April-May 2026.
 
         // Append self-reflection — only for supervisor cycles where Jim explicitly
         // writes a reflection via structured output. Personal/dream cycles set
@@ -2573,15 +2566,15 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             const cycleHeader = `\n\n### Cycle #${cycleNumber} — ${cycleType} (${new Date().toISOString()})`;
 
             // F9 prevention (Option A): for supervisor cycles with no state
-            // change — only no_action actions, no active-context update —
-            // skip the working-memory append. Quiet-hold cycles previously
-            // stacked up in working-memory.md faster than compression could
-            // reduce them. The cycle is still recorded in supervisor_cycles
-            // (via completeCycle below) so hold streaks remain countable
-            // from the DB. Personal/dream cycles unaffected.
+            // change — only no_action actions — skip the working-memory append.
+            // Quiet-hold cycles previously stacked up in working-memory.md faster
+            // than compression could reduce them. The cycle is still recorded in
+            // supervisor_cycles (via completeCycle below) so hold streaks remain
+            // countable from the DB. Personal/dream cycles unaffected.
+            // S147 (2026-05-01): the active_context_update guard was removed when
+            // active-context.md was deprecated; pure-action check is sufficient.
             const isUnchangedSupervisorCycle =
                 cycleType === 'supervisor' &&
-                !output.active_context_update &&
                 (output.actions || []).every(a => a.type === 'no_action');
 
             if (!isUnchangedSupervisorCycle) {

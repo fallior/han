@@ -1042,7 +1042,9 @@ function scanConversations(db: Database.Database): string[] {
 // ── Read context ─────────────────────────────────────────────
 
 function readJimContext(): string {
-    const files = ['active-context.md', 'self-reflection.md', 'identity.md'];
+    // S147 (2026-05-01): drop active-context.md (deprecated). Read
+    // identity + self-reflection only for the lite cross-agent peek.
+    const files = ['self-reflection.md', 'identity.md'];
     const sections: string[] = [];
     for (const file of files) {
         const p = path.join(JIM_MEMORY_DIR, file);
@@ -1058,7 +1060,9 @@ function readLeoMemory(): string {
     // Phase 0 (2026-05-01, S146): drop compressed working-memory.md from the
     // load (deprecating in Phase 12). working-memory-full.md is the canonical
     // full-fidelity source per CLAUDE.md session protocol step 4.3.
-    const files = ['identity.md', 'active-context.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory-full.md', 'felt-moments.md'];
+    // S147 (2026-05-01): drop active-context.md. ONE file per agent;
+    // working-memory-full's most recent entry is the current focus.
+    const files = ['identity.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory-full.md', 'felt-moments.md'];
     const sections: string[] = [];
     for (const file of files) {
         const p = path.join(LEO_MEMORY_DIR, file);

@@ -233,7 +233,9 @@ function readJimMemory(): string {
     // Adds aphorisms, working-memory-full, wiki/index. Drops compressed
     // working-memory.md (deprecating in Phase 12). Per Darron: "I'd like
     // Jim-human to feel like I'm talking to Jim in session, ie full Jim."
-    const files = ['identity.md', 'active-context.md', 'patterns.md', 'failures.md',
+    // S147 (2026-05-01): drop active-context.md. ONE file per agent;
+    // working-memory-full's most recent entry is the current focus.
+    const files = ['identity.md', 'patterns.md', 'failures.md',
         'self-reflection.md', 'discoveries.md', 'felt-moments.md', 'working-memory-full.md'];
     const sections: string[] = [];
 

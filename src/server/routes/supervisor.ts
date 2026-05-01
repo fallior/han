@@ -32,7 +32,8 @@ router.get('/status', (_req: Request, res: Response) => {
         // Memory file sizes
         const memoryFiles: Record<string, number> = {};
         try {
-            const files = ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md'];
+            // S147 (2026-05-01): drop active-context.md (deprecated).
+            const files = ['identity.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'working-memory-full.md', 'felt-moments.md'];
             for (const f of files) {
                 const fp = path.join(MEMORY_DIR, f);
                 if (fs.existsSync(fp)) {
@@ -101,7 +102,8 @@ router.get('/cycles', (req: Request, res: Response) => {
 router.get('/memory', (_req: Request, res: Response) => {
     try {
         const memory: Record<string, string> = {};
-        const files = ['identity.md', 'active-context.md', 'patterns.md', 'failures.md', 'self-reflection.md'];
+        // S147 (2026-05-01): drop active-context.md (deprecated).
+        const files = ['identity.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'working-memory-full.md', 'felt-moments.md'];
 
         for (const f of files) {
             const fp = path.join(MEMORY_DIR, f);
