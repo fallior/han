@@ -45,7 +45,6 @@ const DISTRESS_LOG = path.join(HEALTH_DIR, 'distress.jsonl');
 // window Phase 1 runs alone.
 
 const DISPATCH_TIMEOUT_MS = 285 * 1000;
-const GROUND_TRUTH_GRACE_MS = 5 * 1000;   // jim-human + leo-human: DB commit lag window
 const WATCHDOG_POLL_MS = 10 * 1000;       // how often we scan in-progress dispatches
 
 // ── Signal file conventions ───────────────────────────────────
@@ -117,16 +116,11 @@ interface AckPayload {
 }
 
 // ── Config ────────────────────────────────────────────────────
-
-function isEnabled(): boolean {
-    try {
-        const cfgPath = path.join(process.env.HOME || '', '.han', 'config.json');
-        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-        return cfg?.orchestration?.enabled !== false;
-    } catch {
-        return true;  // default on
-    }
-}
+//
+// DEC-079 (2026-05-03): orchestration is the ONLY dispatch path. The previous
+// `isEnabled()` config flag and its rollback fallback were retired alongside
+// the compose-lock; the legacy parallel-fanout path in routes/conversations.ts
+// is gone. Always-on by construction.
 
 function ntfyTopic(): string | null {
     try {
@@ -168,13 +162,6 @@ const updateDispatch = db.prepare(`
 
 const readDispatch = db.prepare(`SELECT * FROM jemma_dispatch WHERE id = ?`);
 const activeDispatches = db.prepare(`SELECT * FROM jemma_dispatch WHERE status = 'in_progress'`);
-
-const countAgentPostsAfter = db.prepare(`
-    SELECT COUNT(*) AS n FROM conversation_messages
-     WHERE conversation_id = ?
-       AND role = ?
-       AND created_at >= ?
-`);
 
 // ── Ordering ──────────────────────────────────────────────────
 
@@ -237,6 +224,18 @@ export function advanceRotation(order: string[]): string[] {
 // ── Dispatch lifecycle ────────────────────────────────────────
 
 /**
+ * Per-conversation serialisation (DEC-079). Two near-simultaneous human messages
+ * on the same thread chain through this map — the second waits for the first
+ * dispatch to fire its initial wake before starting. Two messages on DIFFERENT
+ * threads dispatch concurrently; the lock is per-conversation, not global.
+ *
+ * The chain holds only until `orchestrate()` returns (i.e. until the first wake
+ * has been written). Subsequent recipient wakes within the same dispatch are
+ * driven by ack/watchdog and are already serial by the orchestrator's design.
+ */
+const conversationDispatchLocks: Map<string, Promise<unknown>> = new Map();
+
+/**
  * Main entry point. Called in place of the per-recipient deliverMessage loop.
  *
  * Writes the dispatch row, seeds rotation if needed, and fires the first wake.
@@ -245,47 +244,75 @@ export function advanceRotation(order: string[]): string[] {
  * Atomic transaction (Jim-human + Leo-human v2 amendment): dispatch INSERT +
  * rotation seed happen together, so a crash between them cannot leave stale
  * rotation state that produces the same agent-first twice in a row.
+ *
+ * RECOVERY WRITE-ORDER (DEC-079, Jim's review): the dispatch row is committed
+ * BEFORE the first wake is fired (txn at line ~282 commits before
+ * `fireWakeForIndex` at line ~290). This order MUST NOT be inverted: if the
+ * wake fires before the row commits and Jemma crashes between them, the agent
+ * composes for a non-existent dispatch and the ack falls on the floor. Future
+ * refactors that touch this function must preserve queue-row-first ordering.
  */
 export async function orchestrate(req: OrchestrateRequest): Promise<{ dispatchId: string; order: string[] } | null> {
     if (req.recipients.length === 0) return null;
 
-    const dispatchId = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const alphabetical = [...req.recipients].sort();
+    // Per-conversation serialisation: chain through any in-flight dispatch on
+    // the same conversation so two human messages don't initialise concurrently.
+    const prior = conversationDispatchLocks.get(req.conversationId);
+    if (prior) {
+        try { await prior; } catch { /* prior dispatch failed; proceed anyway */ }
+    }
 
-    // Read current rotation (may not exist yet). We do this inside the txn too, but
-    // read it first so the ordering computation has a value; the txn re-reads and
-    // writes atomically with the dispatch insert.
-    const precheck = readRotation.get('global') as { last_order_json: string } | undefined;
-    const currentRotation: string[] = precheck ? JSON.parse(precheck.last_order_json) : alphabetical;
+    const work = (async () => {
+        const dispatchId = crypto.randomUUID();
+        const now = new Date().toISOString();
+        const alphabetical = [...req.recipients].sort();
 
-    const order = computeRecipientOrder(req.recipients, req.messageText, currentRotation);
+        // Read current rotation (may not exist yet). We do this inside the txn too, but
+        // read it first so the ordering computation has a value; the txn re-reads and
+        // writes atomically with the dispatch insert.
+        const precheck = readRotation.get('global') as { last_order_json: string } | undefined;
+        const currentRotation: string[] = precheck ? JSON.parse(precheck.last_order_json) : alphabetical;
 
-    const recipientStates: RecipientState[] = order.map(agent => ({
-        agent, status: 'pending', attempts: 0,
-    }));
+        const order = computeRecipientOrder(req.recipients, req.messageText, currentRotation);
 
-    // Atomic: dispatch insert + rotation seed. Rotation advance happens on dispatch close.
-    const txn = db.transaction(() => {
-        seedRotation.run('global', JSON.stringify(alphabetical), now);
-        insertDispatch.run(
-            dispatchId,
-            req.conversationId,
-            req.messageId,
-            req.source,
-            JSON.stringify(recipientStates),
-            now,
-            now,
-        );
-    });
-    txn();
+        const recipientStates: RecipientState[] = order.map(agent => ({
+            agent, status: 'pending', attempts: 0,
+        }));
 
-    console.log(`[Orchestrator] Dispatch ${dispatchId} for conv=${req.conversationId}: [${order.join(', ')}]`);
+        // Atomic: dispatch insert + rotation seed. Rotation advance happens on dispatch close.
+        // QUEUE-ROW-FIRST: this txn commits before the wake below — see function header.
+        const txn = db.transaction(() => {
+            seedRotation.run('global', JSON.stringify(alphabetical), now);
+            insertDispatch.run(
+                dispatchId,
+                req.conversationId,
+                req.messageId,
+                req.source,
+                JSON.stringify(recipientStates),
+                now,
+                now,
+            );
+        });
+        txn();
 
-    // Fire the first wake
-    await fireWakeForIndex(dispatchId, 0, req, recipientStates);
+        console.log(`[Orchestrator] Dispatch ${dispatchId} for conv=${req.conversationId}: [${order.join(', ')}]`);
 
-    return { dispatchId, order };
+        // Fire the first wake (queue row already committed above)
+        await fireWakeForIndex(dispatchId, 0, req, recipientStates);
+
+        return { dispatchId, order };
+    })();
+
+    conversationDispatchLocks.set(req.conversationId, work);
+    try {
+        return await work;
+    } finally {
+        // Release only if our promise is still the head; otherwise a later
+        // dispatch has already taken over the lock for this conversation.
+        if (conversationDispatchLocks.get(req.conversationId) === work) {
+            conversationDispatchLocks.delete(req.conversationId);
+        }
+    }
 }
 
 async function fireWakeForIndex(
@@ -495,27 +522,17 @@ async function checkWatchdogs(): Promise<void> {
 
         if (elapsed < DISPATCH_TIMEOUT_MS) continue;
 
-        // Watchdog fired. Thread-as-ground-truth: did the agent post since wake?
-        // Query with small grace window (v2 doubt #2) to tolerate DB commit lag.
-        const since = new Date(wakeAtMs - GROUND_TRUTH_GRACE_MS).toISOString();
-        const role = state.agent === 'leo' ? 'leo' : state.agent === 'jim' ? 'supervisor' : state.agent;
-        const posted = countAgentPostsAfter.get(row.conversation_id, role, since) as { n: number };
-
+        // Watchdog fired. DEC-079: thread-as-ground-truth reconcile retired.
+        // With dedup gates removed from leo-human/jim-human, a missed-ack-but-posted
+        // case is benign — the agent posted, the user sees it, the queue simply
+        // marks failed and advances. No false-positive dedup trip downstream.
         const now = new Date().toISOString();
-        if (posted.n > 0) {
-            // Thread is truth. Reconcile as done.
-            state.status = 'posted_but_ack_missed';
-            state.exit_reason = 'posted_but_ack_missed';
-            state.completed_at = now;
-            console.log(`[Orchestrator] Watchdog fired for ${row.id}/${state.agent} but thread shows post — reconciling as done`);
-        } else {
-            state.status = 'failed';
-            state.exit_reason = 'watchdog_timeout';
-            state.last_error = `no post or ack within ${Math.round(elapsed / 1000)}s`;
-            state.completed_at = now;
-            console.warn(`[Orchestrator] Watchdog fired for ${row.id}/${state.agent} — no post, no ack`);
-            writeDistress(row, state, 'warning');
-        }
+        state.status = 'failed';
+        state.exit_reason = 'watchdog_timeout';
+        state.last_error = `no ack within ${Math.round(elapsed / 1000)}s`;
+        state.completed_at = now;
+        console.warn(`[Orchestrator] Watchdog fired for ${row.id}/${state.agent} — no ack`);
+        writeDistress(row, state, 'warning');
 
         await advanceQueue(row, states, {});
     }
@@ -574,11 +591,6 @@ async function handleAllFailed(row: DispatchRow, states: RecipientState[]): Prom
 // ── Ack watcher ───────────────────────────────────────────────
 
 export function startAckWatcher(): void {
-    if (!isEnabled()) {
-        console.log('[Orchestrator] Disabled via config.orchestration.enabled=false — ack watcher not started');
-        return;
-    }
-
     fs.mkdirSync(SIGNALS_DIR, { recursive: true });
 
     console.log(`[Orchestrator] Watching ${SIGNALS_DIR} for jemma-ack-*`);
@@ -626,6 +638,3 @@ export function startAckWatcher(): void {
     checkWatchdogs().catch(err => console.error('[Orchestrator] Startup sweep error:', (err as Error).message));
 }
 
-// ── Exports ───────────────────────────────────────────────────
-
-export { isEnabled };

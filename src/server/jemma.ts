@@ -443,16 +443,21 @@ async function callLLMForClassification(message: any): Promise<ClassificationRes
 }
 
 async function deliverToJim(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
-  try {
-    const payload = {
-      recipient: 'jim',
-      message: message._enrichedContent || message.content,
-      channel: message.channel_id,
-      channelName,
-      author: message.author.username,
-      classification_confidence: classification.confidence,
-    };
+  // DEC-079 + DEC-080: HTTP is the only delivery path; the legacy signal-file
+  // fallback in this function's catch was a second wake-write site that violated
+  // one-write-site discipline (the parity bug to deliverToLeo's catch removed
+  // alongside). Failures now surface — the message stays in the thread, visible
+  // to Darron, per *"failures are visible by design"*.
+  const payload = {
+    recipient: 'jim',
+    message: message._enrichedContent || message.content,
+    channel: message.channel_id,
+    channelName,
+    author: message.author.username,
+    classification_confidence: classification.confidence,
+  };
 
+  try {
     const res = await fetch(`${SERVER_URL}/api/jemma/deliver`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -466,36 +471,30 @@ async function deliverToJim(message: any, classification: ClassificationResult, 
 
     console.log(`[Jemma] Delivered to Jim (#${channelName} — ${message.author.username}: ${(message.content || '').slice(0, 40)}...)`);
   } catch (err) {
-    console.warn('[Jemma] Failed to deliver to Jim via server, writing signal file');
-    try {
-      const signalData = JSON.stringify({
-        source: 'discord',
-        recipient: 'jim',
-        channelId: message.channel_id,
-        channelName,
-        author: message.author.username,
-        content: message._enrichedContent || message.content,
-        timestamp: message.timestamp,
-      });
-      fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-wake'), signalData);
-      fs.writeFileSync(path.join(SIGNALS_DIR, 'jim-human-wake'), signalData);
-    } catch (fileErr) {
-      console.error('[Jemma] Failed to write Jim signal files:', (fileErr as Error).message);
-    }
+    console.error(`[Jemma] Failed to deliver to Jim via server: ${(err as Error).message}`);
+    // No signal-file fallback — per DEC-080 the canonical writer lives in
+    // services/jemma-dispatch.writeSignalFile, reached via the HTTP path above.
   }
 }
 
 async function deliverToLeo(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
-  try {
-    const payload = {
-      recipient: 'leo',
-      message: message._enrichedContent || message.content,
-      channel: message.channel_id,
-      channelName,
-      author: message.author.username,
-      classification_confidence: classification.confidence,
-    };
+  // DEC-079 + DEC-080: HTTP is the only delivery path; the legacy signal-file
+  // fallback in this function's catch was the source of Bug A in #33 (it wrote
+  // both `leo-wake` and `leo-human-wake` directly, bypassing the persona
+  // registry's `delivery_config.wake_signals` resolution and creating a second
+  // wake-write site that violated one-write-site discipline). Failures now
+  // surface — the message stays in the thread, visible to Darron, per
+  // *"failures are visible by design"*.
+  const payload = {
+    recipient: 'leo',
+    message: message._enrichedContent || message.content,
+    channel: message.channel_id,
+    channelName,
+    author: message.author.username,
+    classification_confidence: classification.confidence,
+  };
 
+  try {
     const res = await fetch(`${SERVER_URL}/api/jemma/deliver`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -509,23 +508,9 @@ async function deliverToLeo(message: any, classification: ClassificationResult, 
 
     console.log(`[Jemma] Delivered to Leo (#${channelName} — ${message.author.username}: ${(message.content || '').slice(0, 40)}...)`);
   } catch (err) {
-    console.warn('[Jemma] Failed to deliver to Leo via server, writing signal file');
-    try {
-      const enrichedContent = message._enrichedContent || message.content;
-      const signalData = JSON.stringify({
-        source: 'discord',
-        recipient: 'leo',
-        channelId: message.channel_id,
-        channelName,
-        author: message.author.username,
-        mentionedAt: message.timestamp,
-        messagePreview: enrichedContent.slice(0, 500),
-      });
-      fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-wake'), signalData);
-      fs.writeFileSync(path.join(SIGNALS_DIR, 'leo-human-wake'), signalData);
-    } catch (fileErr) {
-      console.error('[Jemma] Failed to write Leo signal files:', (fileErr as Error).message);
-    }
+    console.error(`[Jemma] Failed to deliver to Leo via server: ${(err as Error).message}`);
+    // No signal-file fallback — per DEC-080 the canonical writer lives in
+    // services/jemma-dispatch.writeSignalFile, reached via the HTTP path above.
   }
 }
 

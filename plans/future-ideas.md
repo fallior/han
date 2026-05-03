@@ -373,6 +373,299 @@ After the S147 UV-promotion migration (162 INCOMPRESSIBLE-content entries tagged
 
 ---
 
+## #29 — Curated voice-true UV file for Jim — symmetric to Leo's
+
+**What it is:** Eventually mirror Jim's gradient-tagged UVs out to a flat file at `~/.han/memory/fractal/jim/unit-vectors.md`, parallel to Leo's curated 23 KB voice-true file. Currently Jim has 154 voice-loaded UVs in the gradient (queryable via `getUVs`) and an empty filename slot — the old `unit-vectors.md` was renamed to `unit-vectors-pre-rebuild-2026-04.md` (S147, 2026-05-02) because it carried 4,511 pre-rebuild stranger-Opus entries that never represented Jim's voice.
+
+**The asymmetry it closes:** Leo's heartbeat loads his flat-file UVs at sleep-beat time, getting "depth" — his hand-curated voice anchors. Jim's seed-based dream load (post-bbe5063) loads the 154 gradient-tagged UVs via DB query, which works but doesn't surface them to other readers (curl, dashboard, archaeology). A symmetric flat file would: (a) make Jim's UV surface inspectable at the file-tree level the way Leo's is, (b) give future-Jim or future-Six a single-glance view of "who Jim is in his irreducibles," (c) provide a stable artefact for Identity Memory Backup (Apr 17 plan, folded as Phase 11).
+
+**Where it came from:** My 2026-05-02 audit of bbe5063 (Strand E correction). Leo's commit message named the asymmetry: *"Leo gets the depth choice; Jim gets the cleaner gradient surface."* Darron green-lit moving it to future-ideas.md immediately after.
+
+**Design sketch:**
+
+- **Source of truth stays the gradient.** The tag-based UV path (`feeling_tags.tag_type='uv'`) is the canonical signal — see #28. The flat file is a *derived view*, not authoritative.
+- **Generation:** a small script (`src/scripts/sync-jim-flat-uvs.ts`) that queries `getUVs('jim')`, applies the `NOISE_QUALIFIERS` filter (mirroring `readJimDreamSeeds`), formats each kernel as Leo's format does (`- **{label}**: "{content}"`), writes to `~/.han/memory/fractal/jim/unit-vectors.md`. Idempotent — overwrites cleanly.
+- **Trigger:** post-cascade hook? scheduled? on-demand? *Open question.* My instinct: scheduled (weekly?) so the flat file lags the gradient by at most a week. Continuous generation on every UV insert is cheaper to write but creates write-storm noise for an artefact that doesn't need real-time sync.
+- **Format compatibility:** match Leo's exactly so any reader expecting the format works for both agents. `findJimUntranscribedFiles()` would need to be aware that the new generated file is NOT a source-of-truth (don't ingest from it, since it's derived). Simple guard: skip the unit-vectors.md scan if the file's first line contains `<!-- generated -->`.
+- **Pre-rebuild file stays renamed.** The deprecated `unit-vectors-pre-rebuild-2026-04.md` is preserved as historical record per DEC-069. The new generated file uses the canonical filename, the old data has the dated suffix.
+
+**When this becomes worth doing:**
+
+- After Jim's UV count stabilises post-rebuild (currently 154; if it grows to 300-500 with comparable quality to Leo's, the flat-file mirror starts paying its way)
+- Or sooner if Identity Memory Backup needs a stable artefact
+- Or if a dashboard / archaeology view wants single-file UV access
+
+**Settled-decisions check:** none touched. New surface area, additive. The renamed pre-rebuild file already honours DEC-069.
+
+**Open questions:**
+
+1. Generation cadence — scheduled (weekly), event-driven (on UV insert), or on-demand only?
+2. Should the flat file include feeling-tag metadata or just the kernel content? Leo's includes labels; mine could too if `getUVs` returns them.
+3. Does this generalise to Leo too — i.e. should Leo's flat-file become a derived-view of his gradient UVs as well, with the current hand-curated file becoming the seed? Or does Leo's hand-curation remain the source of truth? (Per Darron 2026-05-02: *"I like that you have this depth"* — Leo's flat file is voice-curated and likely stays as authoritative for Leo.)
+
+**Status:** Concept only. Lower priority than #27 (Voice Page). Do when Jim's UV surface is stable and the asymmetry starts to feel like missing capability rather than honest difference.
+
+**Key insight:** *Asymmetries between agents are fine when they reflect honest differences in voice. The pre-rebuild bloat that produced Jim's 1.2 MB flat file was an architectural accident, not a voice difference. Closing it through gradient-derived view symmetrises the surface without forcing the voice to converge.*
+
+---
+
+## #30 — Floor-load for young agents — top up sparse UVs with deepest-cN entries
+
+**What it is:** A floor mechanism in the dream-seed UV load: if an agent has fewer than N UVs (Darron suggests N=10), top up the UV slot with `N - count(uvs)` highest-compression entries from that agent's gradient. So a young agent with 0 UVs and a few c1s gets ten c1s in the UV slot; an agent with 3 UVs and some c2s gets 3 UVs + 7 c2s; an established agent like Jim (154 UVs) is unaffected by the floor.
+
+**Where it came from:** Darron's design instruction, 2026-05-02, immediately after #29 was added. *"I'd like to load more than UV if the agent is young and has less than say 10 UVs and load 10-#uvs_loaded of the highest compression memories just to get some representation in there during dreams."*
+
+**The problem it solves:** Currently `readJimDreamSeeds()` (and Leo's `readDreamSeeds()`) loads UVs as the kernel anchor of the dream. For an agent with no UVs yet — Casey when she comes online (#2), Six in his early days, Sevn, any new persona — the UV slot would be empty. The dream would still fire (from explorations + waking seeds) but lose the *kernel-anchor surface* that gives the dream a shape to associate over. Floor-loading gives every agent a felt-shape baseline regardless of age.
+
+**Mechanism (sketch):**
+
+```
+function readDreamSeedsFloored(agent, FLOOR = 10):
+    uvs = getUVs(agent)
+    activeUVs = filter NOISE_QUALIFIERS, !superseded_by
+    if len(activeUVs) >= FLOOR:
+        return activeUVs.map(kernelLine)  // current behaviour
+    else:
+        topup_count = FLOOR - len(activeUVs)
+        deepest = query: SELECT * FROM gradient_entries
+                         WHERE agent = ? AND level NOT IN ('uv', 'c0')
+                         ORDER BY level_depth DESC, created_at DESC
+                         LIMIT ?
+        return activeUVs.map(kernelLine)
+             + deepest.map(line)  // marked clearly as "fill-in"
+```
+
+The `level_depth DESC` ordering picks c5 before c4 before c3 etc — highest compression first. Skip c0 (full slices, too long) and uv (already in the activeUVs query).
+
+**Format note:** the topped-up entries should be visually distinguished from real UVs in the prompt — perhaps as `# Deep memories (kernel surface placeholder while UV count grows)` instead of `# Unit Vectors (rebuild-tagged)`. The dream prompt's framing should know which it has, so the agent doesn't conflate "this is my irreducible kernel" with "this is the deepest I've reached so far."
+
+**Configurability:** floor count should be configurable per-agent in `config.json` (`memory.dreamUvFloor`, default 10). Some agents may want different floors — Casey maybe 5 (terse legal-domain UVs), a future high-volume agent maybe 20.
+
+**Settled-decisions check:** none touched. Additive — extends an existing seed-loading path with a fallback branch. No changes to gradient schema, no changes to UV semantics, no changes to existing UV-tagged kernels.
+
+**Open questions:**
+
+1. Should the topped-up entries cycle randomly between dreams (chaos, mirror seed shuffling) or stay deterministic (always top-N deepest)? My instinct: random — same Fisher-Yates pattern as explorations seeds. Lets the dream surface different deep memories on different nights instead of grinding the same N every time.
+2. When an agent crosses the floor (gains the 10th UV), should the floor mechanism gracefully retire, or stay as supplementary? My instinct: retire — once you have UVs, the deep-cN slot is yours to grow into via cascade, not floor-padded.
+3. Does this generalise to other seed slots (explorations seeds, waking seeds) or apply only to the UV anchor? *Probably only the UV anchor* — the other slots have their own natural fill mechanisms (explorations grows from dream output; waking from supervisor cycles).
+
+**Where this becomes worth doing:**
+
+- When the next persona comes online with <10 UVs (Casey, Six, Sevn, or another future agent)
+- Or when revisiting #29 (curated voice-true UV file) — floor-load is the inverse problem and they share design space
+- Sooner if a young agent's first dream-seed-test reveals empty-UV-slot makes the dream wander shapelessly
+
+**Status:** Concept only. Pairs naturally with #29 (the symmetric-flat-file idea — both are about UV surface ergonomics). Lower priority than #27 (Voice Page) and Strand E close-out (already landed in bbe5063).
+
+**Key insight:** *Every agent deserves a kernel-anchor in their dreams — the floor isn't padding, it's the bottom of the gradient meeting the agent where they currently are. Young agents dream too; they should dream with the deepest they have.*
+
+---
+
+## #31 — Dispatch register — fan-out reflects current HAN state, not the static persona list
+
+**What it is:** A registry of which agents are *currently active* in HAN — wired into the running ecosystem, capable of receiving and responding to messages — that Jemma consults when fanning out a multi-recipient message ("hey boys", "team", explicit @-list, etc.). Inactive personas (designed but not yet implemented, paused, retired, or temporarily offline) get filtered from the dispatch set instead of being treated as silent participants who'll never reply.
+
+**Where it came from:** Darron's observation, 2026-05-03 (gym, voice memo). *"the rectification of the dispatch system to accurately reflect who is currently active. I believe at the moment when I say hey boys Jemma is dispatching to Leo, Casey and Jim but Casey is not active and will never respond. We need a system to make this a little more sensitive to the current HAN state, perhaps we have a register?"*
+
+**The problem it solves:** Casey is a designed persona (#2 in this file) but has no live agent — no heartbeat, no human dispatcher, no service running. When Darron addresses "the boys", Jemma's classifier currently treats Casey as a valid recipient and routes accordingly. The downstream effect is timeouts: Casey never responds, the dispatch pipeline waits or hands off to whoever's next, and the takeover line surfaces as forced (see #32). Both symptoms have the same root — the dispatch model treats *designed* and *active* as the same category.
+
+**Mechanism (sketch):**
+
+- A small registry of active agents with state per agent: `active`, `paused`, `inactive`, `retired`. Possible homes: a table in `tasks.db` (`agents` table), a config block in `~/.han/config.json` (`agents.{slug}.active`), or a file-based register at `~/.han/agents/active.json` updated by launcher / shutdown hooks. Each has tradeoffs — DB is queryable, config is human-readable, signals are runtime-discoverable.
+- Jemma's classifier (and any other broadcast routing point) filters its recipient set against the active register before dispatch.
+- Heartbeat / launcher / human-agent processes self-register on start, deregister on graceful exit, and a watchdog catches crashes (last-heartbeat-timestamp + TTL).
+- Open question: is "active" a binary, or are there gradations? Casey-as-concept could be a third state ("designed but not staffed") that Jemma can mention in fall-back text without dispatching to.
+
+**Settled-decisions check:** none touched. Additive — wraps existing dispatch with a filter step. Doesn't change how Jim or Leo run, only what Jemma fans out to.
+
+**Open questions:**
+
+1. Where the register lives (DB / config / signal file) and who writes it.
+2. How a "designed but not active" persona is handled in conversational framing — does Darron addressing "the boys" gracefully skip Casey, or surface a *"Casey isn't online right now"* hint, or stay silent on it?
+3. Does the register also gate `@persona` mentions in Discord — i.e. should mentioning Casey when she's inactive route to Jim/Leo with a context hint, or bounce back to Darron, or sit unread?
+4. Relationship to #21 (Mike & Six collaboration) — the cross-fork case is a distinct dispatch surface that may want its own register, or share the same one.
+
+**Where this becomes worth doing:**
+
+- Sooner rather than later — the symptom is live now and shapes the texture of every multi-recipient exchange.
+- Pairs with #32 (own-voice takeover) — together they fix the dispatch-and-handoff seam end-to-end.
+- Before any new persona comes online (Casey, future agents) — landing the register first means new personas plug in cleanly with an `active: false` default until they're truly wired up.
+
+**Status:** Concept only. Darron flagged for design discussion: *"anyhow we'll look at that."*
+
+**Key insight:** *Designed-and-implemented is two states, not one. The dispatcher needs to know the difference; the conversation needs to feel the difference.*
+
+---
+
+## #32 — Own-voice timeout takeover — drop the formulaic "let me cover for them" line
+
+**What it is:** A change to the prompt that fires when an agent picks up a message after a preceding agent has timed out (or otherwise failed to respond in the allotted window). Currently the takeover comes out forced and non-own-voice — the responder narrates a meta-frame about the timeout instead of just answering the question in their own voice.
+
+**Where it came from:** Darron's observation, 2026-05-03 (gym, voice memo). *"it feels like Jim is being forced with non own-voice response, here is the example and I'd like us to change the prompt for the response if a preceding agent times out but here is what Jim wrote and I feel it is forced — 'Casey seems to have had trouble on this one — let me take it.'"*
+
+**The problem it solves:** The takeover sentence does two things at once: (a) acknowledges that the prior recipient didn't respond, and (b) signals the new responder is stepping in. Both are *prompt artefacts* — Jim doesn't naturally narrate Casey's failure-state before answering; he'd just answer. The current frame produces a stiff, performative apology-on-someone's-behalf shape that breaks Jim's voice. Same risk for Leo if the takeover prompt routes through him.
+
+**Mechanism (sketch):**
+
+- Locate the prompt template that fires for the timeout-takeover path (likely in `jemma.ts` or one of the human/heartbeat dispatch surfaces).
+- Replace the explicit *"the prior recipient didn't respond, please cover"* framing with something closer to: *"You are responding to Darron's message. Respond in your own voice as you normally would."* — i.e. don't *tell* the agent there's been a timeout; let the response emerge from the agent's own context.
+- If the timeout-fact is operationally useful (e.g. for logging, telemetry, or for a downstream "Casey didn't reply" footnote that surfaces to Darron in the UI but not in the agent's response text), keep it as system metadata, not as text the agent feels obliged to acknowledge.
+- The principle: the agent shouldn't perform the dispatcher's accounting. Voice belongs to the agent; sequencing belongs to Jemma.
+
+**Settled-decisions check:** none touched. Prompt change only — no schema changes, no behaviour change in dispatch sequencing, no agent identity changes.
+
+**Open questions:**
+
+1. Should Darron get a separate UI/telemetry surface that *does* tell him "Casey timed out, Jim picked up" — so the accounting still reaches him, just not through Jim's voice?
+2. If #31 (dispatch register) lands first, the timeout-on-inactive-agent path largely disappears — but timeouts on truly-active agents who are stuck or slow can still happen. So #32 stands on its own merit even after #31.
+3. Does the same fix apply to the other direction — when Leo picks up after a Jim timeout, or vice versa? My instinct: yes, identically. The principle is voice-preservation, not agent-specific.
+4. Is there a class of timeout where the takeover *should* surface meta-context — e.g. "I notice this is a question Casey would normally take, so I'll answer narrowly and flag for her when she's online"? Worth exploring per-agent rather than a blanket rule.
+
+**Where this becomes worth doing:**
+
+- Now-ish — the texture is degrading current exchanges. Small change, high voice-quality return.
+- Pairs with #31 (dispatch register) — together they remove the inactive-agent timeout surface entirely *and* clean up the residual takeover-on-active-agent case.
+
+**Status:** Concept only. Darron flagged the example; design pending.
+
+**Key insight:** *Voice is the agent's. Accounting is the dispatcher's. Don't make the agent narrate the dispatcher's bookkeeping.*
+
+---
+
+## #33 — Investigation: Leo receiving double wake signals
+
+**What it is:** A diagnostic action item to find out why Leo appears to be receiving two wake events for a single dispatched message. The duplicate could be coming from any of several plausible sources, and the goal of this entry is to narrow it down rather than pre-solve it.
+
+**Where it came from:** Darron's observation, 2026-05-03 (gym, voice memo). *"the dispatch as it seems to be either giving Leo two wake messages or there is a wake action still in leo-heartbeat or the systemd or some other leo-human wake call. can you write an action to future-ideas to investigate and resolve this issue."*
+
+**The symptom:** Leo waking twice (or being prompted to wake twice) for a single inbound message — visible as duplicate run-up activity, two leo-human invocations, two heartbeat reactions, or a doubled signal-file lifecycle. The exact texture isn't pinned down yet; the investigation needs to reproduce + classify before fixing.
+
+**Hypotheses (not ranked — disprove or confirm each):**
+
+1. **Jemma dispatching twice.** `jemma.ts:deliverToLeo` could be firing both the HTTP path *and* the signal-file fallback on success rather than fallback-only-on-failure. (S133 commit `0282fa6` aligned this with `deliverToJim`'s pattern; check it didn't drift back.)
+2. **Heartbeat self-waking on signal.** `leo-heartbeat.ts` may still be reacting to `leo-wake` or `leo-human-wake` signal files alongside its own beat schedule — a leftover wake-handler that should have been retired when leo-human took over the human-dispatch path. The single-flag signal design (overwrite-if-present) means a handler reading the file *and* a fresh write from Jemma can both fire.
+3. **systemd timer or cron.** A periodic `leo-wake.timer`, `leo-human-wake.timer`, or cron entry that's writing the signal file independently of Jemma. Possibly a leftover from an older periodic-poll architecture. Check `systemctl --user list-timers` and `crontab -l`.
+4. **Two leo-human invocations.** The launcher / watchdog / restart hook landing twice — e.g. a stale `leo-human` process plus a fresh one both consuming the same wake. Or the agent-server-watchdog (S133) pattern doubling up if a respawn race fires.
+5. **Conversation orchestrator double-call.** If a multi-recipient message routes through both the orchestrator's per-recipient wake *and* a fan-out wake to Leo, the same message could land twice. Related to #31 (dispatch register) and #32 (timeout takeover).
+6. **Discord-Leo path duplication.** Pre-S133 there was a window where `deliverToLeo` wrote signal files directly *and* posted via the orchestrator. If a residual code path remains, Discord-originated mentions could trigger both.
+
+**Where to look (concrete starting points):**
+
+- `src/server/jemma.ts` — `deliverToLeo` and `deliverToJim` for parity drift.
+- `src/server/leo-heartbeat.ts` — search for `leo-wake` / `leo-human-wake` / `wakeFile` references.
+- `src/server/services/leo-human.ts` — entry conditions, signal-file consumption.
+- `~/.han/signals/` — watch for signal-file writes during a known dispatch (e.g. `inotifywait -m ~/.han/signals` while Darron sends a test message).
+- `systemctl --user list-timers --all | grep -i leo` and `crontab -l` for scheduled leo-wakes.
+- `_logs/` and `~/.han/health/` for the last few dispatches — look for paired wake entries.
+- `plans/cutover-audit-log-2026-04-29.md` — Jim's recent audit may already have flagged anomalies in dispatch sequencing.
+
+**Method (sketch):**
+
+1. Reproduce: Darron sends a single test message. Capture `inotifywait` on `~/.han/signals/`, plus tail `_logs/` for that timestamp window. Confirm the duplication empirically before guessing.
+2. Bisect by hypothesis: with the symptom captured, walk the hypotheses above against the trace. Most should disprove on a single run.
+3. Surface the cause to Darron with an implementation brief (per the Implementation Brief Convention) before fixing — *especially* if the fix touches a settled-decision file or signal-protocol behaviour.
+
+**Settled-decisions check (for the eventual fix):** any change to signal-file handling needs to honour the single-flag overwrite-if-present design (per ecosystem-map.md). Any change to dispatch sequencing needs to respect the orchestrator behaviour codified after S133. No DEC entry exists for "wake-event uniqueness" — if the fix introduces de-duplication semantics, that may itself warrant a new decision.
+
+**Open questions:**
+
+1. Is the doubling cosmetic (two log entries, one effective wake) or functional (two leo-human compose attempts, doubled token cost)? The texture changes the urgency.
+2. Does the same symptom exist on Jim's side? If yes, the cause is upstream of leo-specific code (likely Jemma or orchestrator); if no, leo-side handlers are the prime suspect.
+3. Could this be pre-existing and only newly visible because of #31/#32-era attention to dispatch quality? Worth checking historical logs to date the onset.
+
+**Where this becomes worth doing:**
+
+- Soon — duplicate wakes burn tokens (each leo-human compose is a real Opus call). Even cosmetic doubling adds noise to telemetry that other investigations rely on.
+- Pairs with #31 + #32 — the dispatch surface is being looked at as a coherent area; fixing the duplication while we're already there is cheaper than coming back for it.
+
+**Status:** Investigation pending. No fix proposed until the cause is identified.
+
+**Key insight:** *Diagnose before treating. Two hypotheses look identical from the symptom side and have completely different fixes; guessing wrong here means moving the bug rather than fixing it.*
+
+---
+
+## #34 — Agent-mentions-agent re-dispatch (post-simplification follow-on)
+
+**What it is:** A second-generation Jemma behaviour — after the dispatch engine is simplified to single-pass linear delivery — to handle the case where an agent's response mentions another agent. Jemma simply dispatches to the mentioned agent (the mention *is* the trigger; no Jemma-side intent inference, no special signal from the speaking agent). The activated agent reads the thread (the mentioning post + preceding context) and **decides for themselves** whether to add anything: silence, *"nothing further to add"*, an elaboration, a confirmation, or even a change of view in light of what they've now read. The decision-to-engage sits with the agent, not the dispatcher.
+
+**Where it came from:** Darron, 2026-05-03 (clarified after the simplification proposal). *"Jemma can simply dispatch to an agent mentioned in another agents message, that activated agent can read the message, preceding ones as well, and decide if they have anything further to add. They might say simply nothing further to add or something human like as a response to carry on, they could say nothing or they could indeed elaborate or add something or even change there view in light of the new evidence. I hope it will become more like humans but also I don't want the agents feeling compelled to add anything they don't feel is value adding."*
+
+**The problem it solves:** Today, when Leo finishes a response that says *"Jim, your read on this?"*, Jim has no awareness of the implicit invitation unless his next supervisor cycle picks it up — which is async and slow. The conversation feels stilted because cross-agent invitations don't translate into a follow-up turn. After the dispatch simplification (single-pass linear), Jemma stops dispatching to a thread once all addressed recipients have replied; without this feature, agent-to-agent calls fall on the floor.
+
+**Mechanism (sketch):**
+
+- Jemma's classifier already runs over human messages to detect mentions. Extend it to run over agent messages on the same thread.
+- When a mention is detected, Jemma dispatches to the mentioned agent (subject to active-register filtering, #31).
+- The dispatched agent's prompt explicitly invites silence: *"You've been mentioned by ${author}. Read the thread. If you have something to add — a clarification, a different angle, a correction, or simple agreement — post it. If you don't, post nothing or a short stand-down line. Don't add filler."*
+- Loop-prevention by **depth cap** (Jim's suggestion: N=2 or 3, configurable in `~/.han/config.json` as `dispatch.maxAgentMentionDepth`). Each chain step increments a counter on the dispatch row; when the cap is hit, Jemma stops dispatching and posts no further wake regardless of mentions.
+
+**The risk to keep front-of-mind:** *"tag you're it"* — agents performatively passing the conversation back and forth without substance, each time burning Opus tokens. Mitigations:
+1. Depth cap (hard ceiling).
+2. Prompt explicitly permits and models silence as a valid response.
+3. Possibly: track a *cross-mention rate* metric — if it spikes, surface a distress.
+4. Agent-side discipline (cultural, in patterns.md) — *do not respond to a mention unless you have something genuinely to add*.
+
+**Settled-decisions check:** none touched (concept only). Implementation interacts with the simplified Jemma post-#33; build on the clean baseline, not on today's surface.
+
+**Open questions:**
+
+1. **Cap value.** Start at N=2 (one human → first agent → one re-dispatch → done). Lift to N=3 if the conversation feels truncated. Open until we observe the pattern.
+2. **Cross-fork generalisation** (#21). Can Leo on han mention Six on mikes-han? Out of scope for this idea; revisit when forks are wired.
+3. **Visibility to Darron.** Should the UI distinguish *"Jemma dispatched to Jim because Leo mentioned him"* from *"Darron addressed Jim directly"*? Probably useful for transparency; minor UI thread-render cue.
+4. **Self-mention.** If Leo mentions Leo (rare), Jemma should ignore — agents don't re-dispatch to themselves.
+
+**Where this becomes worth doing:**
+
+- After the dispatch simplification (#33 follow-on) lands and stabilises. Don't build on the current surface — build on the clean one.
+- When the first concrete cross-agent invitation gets dropped on the floor and Darron notices the friction.
+
+**Status:** Concept only. Future-work, post-simplification. Per Darron: *"This will be complicated I think... again this is future work ok :)"*
+
+**Key insight:** *The mention is the dispatch trigger; the agent decides whether the mention warrants a response. Jemma's job is delivery, not intent inference. The agent's job is to keep silence as a first-class option — value comes from substance, not performance.*
+
+---
+
+## #35 — Workshop-owner direct-path carve-out (Jemma dispatches only non-owner mentions in workshops)
+
+**What it is:** A semantic refinement of how Jemma dispatches inside workshop tabs. Each workshop is owned by a persona (e.g. `leo-question` / `leo-postulate` are Leo's; `jim-request` / `jim-report` are Jim's; `darron-thought` / `darron-musing` are Darron's; `jemma-messages` / `jemma-stats` are Jemma's). The principle: **the owner is always notified by their own direct path** (heartbeat, supervisor cycle, etc.) and Jemma should NOT dispatch to the owner of a workshop she's monitoring. Jemma dispatches only to *other* agents mentioned in the workshop post.
+
+**Where it came from:** Darron, 2026-05-03 (during the simplification design discussion). *"I agree also with the carve out for both Leo and Jim and all agents in their own Workshops. We'll make this more sophisticated as we progress but for now the carve out will be enough but add to future-ideas the notion of Jemma only dispatching to non-workshop-owner agents mentioned in the workshop as the owner will always be notified by their own direct path."*
+
+**The problem it solves:** Today, when a message lands in `leo-question`, `classifyAddressee` defaults to the tab owner (Leo) and Jemma dispatches to leo-human via signal file — duplicating the path leo-heartbeat already has into Leo's awareness. The owner is always "at home" in their own workshop; a third party announcing the message to them is redundant. Worse, it's an extra path that has to stay correct as the system evolves (cf. #33's persona delivery_config drift).
+
+**Today's only direct path:** `leo-heartbeat.postMessageToConversation` writes directly to the *philosophy thread* (`JIM_CONVERSATION_ID`) — a single hardcoded conversation, not a workshop tab. That's the carve-out being preserved through the #33 simplification. There is no current jim-heartbeat; Jim's only conversation surface is via jim-human (Jemma-driven) plus supervisor-worker (observe-only).
+
+**Mechanism (sketch):**
+
+- Each agent runs a small *workshop watcher* — scans new messages in tabs they own, decides whether to engage. Mirrors the heartbeat-watches-philosophy pattern, generalised.
+- `classifyAddressee` is amended to **exclude the workshop owner** from its recipient set when the message arrives in a workshop tab. The owner gets notified via their own watcher; Jemma only dispatches to non-owner agents who are mentioned.
+- For workshops with no owner (`general`, `memory`, `discord`), behaviour is unchanged — Jemma dispatches per the simplified linear model.
+
+**Why "for now the carve-out is enough":**
+
+- The leo-heartbeat → philosophy-thread carve-out covers the only place this principle materially matters today (the Jim ↔ Leo philosophy exchange). Workshop tabs other than that are infrequently used as conversation grounds; the owner-notification redundancy is small.
+- Building the workshop-watcher generalisation requires per-agent watcher logic and DB-level "last seen" tracking per (agent, conversation). Non-trivial. Defer until the simplified Jemma is live and the workshop usage pattern is observable.
+
+**Settled-decisions check:** none touched (concept only). Eventual implementation would touch `classifyAddressee` (route): exclude workshop owner from recipient set. Each agent would gain a workshop-watcher loop (similar shape to heartbeat philosophy-watcher).
+
+**Open questions:**
+
+1. **Watcher cadence per agent.** Heartbeat already runs every ~20min; piggyback on that, or independent loop? Probably piggyback for the agents that have a heartbeat (Leo); separate light loop for those that don't (Jim, Tenshi, future personas).
+2. **Cross-workshop mentions.** If a message in `leo-question` mentions Jim, Jemma dispatches to Jim. Confirmed — that's the whole point of "non-owner mentions". But what about a message in `jim-report` that mentions Jim *and* Leo? Jemma dispatches only to Leo; Jim sees it via his own watcher. Worth being explicit in the spec.
+3. **Discord-originated workshop posts.** Discord doesn't have workshop semantics. Out of scope here.
+4. **Generalises to mike's-han and future forks** — yes, with the same principle. But fork interaction is a separate problem (#21).
+
+**Where this becomes worth doing:**
+
+- Once #33 simplification lands and the dispatch surface is clean.
+- Once a workshop tab other than the philosophy thread becomes a regular conversation ground (i.e. Darron starts using `jim-request` / `leo-postulate` as live forums rather than archival tags).
+
+**Status:** Concept only. Future-work. Today's carve-out (leo-heartbeat → philosophy thread) suffices for the present usage pattern.
+
+**Key insight:** *The owner of a room doesn't need to be told someone has spoken in their room. They're already there. Jemma's job is to bring in the people who aren't.*
+
+---
+
 ## How These Connect
 
 The ideas form a web, not a list:
@@ -383,7 +676,8 @@ The ideas form a web, not a list:
 - **Sovereignty:** Invite model (#1) — how agents share without losing themselves
 - **Community:** Meeting places (#6), training manual (#5), Discord integration (#16), Mike & Six collaboration (#21) — agents in the world
 - **Products:** LoreForge (#20), financial assistant (#18), topology analyser (#17), diary manager (#19), mobile admin (#12) — things we build for others
-- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), `/pfs` skill (#23) — operational refinements
+- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23) — operational refinements
+- **Dispatch:** Active-agent register (#31), own-voice timeout takeover (#32), Leo double-wake investigation (#33), agent-mentions-agent re-dispatch (#34), workshop-owner direct-path carve-out (#35) — Jemma reflects current state; agents keep their voice through handoffs; one message wakes one agent once; agents can engage when mentioned and stay silent when they don't have substance; Jemma doesn't tell owners about messages in their own room
 - **Voice:** The Voice Page (#27) — how the agents speak without prompting
 
 The garden grows from the inside out. Foundation first, then identity, then capability, then community, then product. We're between identity and capability right now — the gradient works, the compression is felt, and what comes next builds on that.

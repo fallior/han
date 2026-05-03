@@ -25,7 +25,6 @@ import { withMemorySlot } from './lib/memory-slot';
 import { readDreamGradient } from './lib/dream-gradient';
 import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
-import { acquireComposeLock, releaseComposeLock } from './lib/compose-lock';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -477,66 +476,15 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         }
     }
 
-    // Pre-compose dedup: skip if Leo already responded since the last human/supervisor message.
-    // Mirrors the jim-human pattern — catches the cheap case (peer already posted before we
-    // started composing) without burning tokens. The in-flight-race case is caught post-compose.
-    const lastNonLeo = recentMessages.filter(m => m.role === 'human' || m.role === 'supervisor').pop();
-    if (lastNonLeo) {
-        const leoResponses = recentMessages.filter(m =>
-            m.role === 'leo' &&
-            m.created_at > lastNonLeo.created_at
-        );
-        if (leoResponses.length > 0) {
-            console.log(`[Leo/Human] Already responded to "${title}" since last human/supervisor message — skipping`);
-            writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'leo_already_responded', compose_duration_ms: Date.now() - composeStartMs });
-            return;
-        }
-    }
+    // DEC-079: pre-compose and cross-agent dedup gates removed. Jemma's serial
+    // dispatch + per-conversation serialisation guarantees this agent is woken
+    // at most once per dispatch — there is no cheap case to catch and no
+    // cross-agent race to lock against. The same-agent claim below remains as
+    // an instance-level safety (single ensureSingleInstance pid-guard already
+    // covers most of this; the file claim is belt-and-braces against a stray
+    // worker before the pid-guard takes effect).
 
-    // Cross-agent compose lock: wait for Jim-human if he's currently composing
-    // on this thread, so we can read his post before composing our own. If the
-    // wait times out, we proceed anyway (better a late duplicate than no response).
-    //
-    // `isHolderDone` short-circuits the wait: if Jim has already posted to the
-    // thread since acquiring the lock, the lock is orphaned (he forgot to release
-    // or crashed after posting). We remove it and proceed immediately.
-    const lockResult = await acquireComposeLock(conversationId, 'leo', {
-        isHolderDone: (holderAgent, lockStartedAt) => {
-            const role = holderAgent === 'leo' ? 'leo' : 'supervisor';
-            const row = db.prepare(`
-                SELECT COUNT(*) as n FROM conversation_messages
-                WHERE conversation_id = ? AND role = ? AND created_at > ?
-            `).get(conversationId, role, new Date(lockStartedAt).toISOString()) as { n: number };
-            return row.n > 0;
-        },
-    });
-    if (lockResult.holder_done) {
-        console.log(`[Leo/Human] Compose lock released — ${lockResult.prior_agent} had already posted to "${title}"`);
-    } else if (lockResult.waited_ms > 0) {
-        console.log(`[Leo/Human] Waited ${lockResult.waited_ms}ms on compose lock for "${title}"${lockResult.prior_agent ? ` (held by ${lockResult.prior_agent})` : ''}`);
-    }
-    if (lockResult.waited_ms > 0 || lockResult.holder_done) {
-        // Re-fetch: Jim may have posted during the wait. Also re-run the dedup check
-        // — if another Leo process posted concurrently, Leo-human should stand down.
-        recentMessages = getRecentMessages(db, conversationId, 60).reverse();
-        const lastNonLeoFresh = recentMessages.filter(m => m.role === 'human' || m.role === 'supervisor').pop();
-        if (lastNonLeoFresh) {
-            const leoAfter = recentMessages.filter(m =>
-                m.role === 'leo' &&
-                m.created_at > lastNonLeoFresh.created_at
-            );
-            if (leoAfter.length > 0) {
-                console.log(`[Leo/Human] Leo posted during compose wait — standing down on "${title}"`);
-                releaseComposeLock(conversationId, 'leo');
-                writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'leo_posted_during_lock_wait', compose_duration_ms: Date.now() - composeStartMs });
-                return;
-            }
-        }
-    }
-
-    // Same-agent duplicate protection (existing mechanism, covers multi-process)
     if (!claimConversation(conversationId)) {
-        releaseComposeLock(conversationId, 'leo');
         console.log(`[Leo/Human] Could not claim "${title}" — another Leo process is responding`);
         writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'claim_held_by_other_leo_process', compose_duration_ms: Date.now() - composeStartMs });
         return;
@@ -612,22 +560,9 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
 
     const responseText = resultMessage?.result || '';
     if (responseText && responseText.trim().length > 20) {
-        // Post-generation dedup: check AGAIN if Leo responded elsewhere
-        // while we were thinking. Prevents double-tap when both processes
-        // receive the wake signal simultaneously.
-        const freshMessages = getRecentMessages(db, conversationId, 20).reverse();
-        const freshLastHuman = freshMessages.filter(m => m.role === 'human' || m.role === 'supervisor').pop();
-        if (freshLastHuman) {
-            const alreadyAnswered = freshMessages.some(m =>
-                m.role === 'leo' && m.created_at > freshLastHuman.created_at
-            );
-            if (alreadyAnswered) {
-                console.log(`[Leo/Human] Leo already responded to "${title}" while I was thinking — discarding my response`);
-                writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'duplicate_detected_post_compose', compose_duration_ms: Date.now() - composeStartMs });
-                return;
-            }
-        }
-
+        // DEC-079: post-compose dedup retired. Jemma's structural guarantee
+        // (single wake per recipient per dispatch + per-conversation
+        // serialisation) means there is no concurrent Leo to race against.
         postMessage(db, conversationId, responseText.trim());
         responseCount++;
         console.log(`[Leo/Human] Responded to "${title}" (${responseText.trim().length} chars)`);
@@ -650,7 +585,6 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
         throw err;
     } finally {
         releaseConversationClaim(conversationId);
-        releaseComposeLock(conversationId, 'leo');
     }
 }
 
@@ -869,19 +803,10 @@ async function main(): Promise<void> {
         }
     });
 
-    // Also poll every 60s in case fs.watch misses events
-    setInterval(async () => {
-        const signal = readSignal();
-        if (signal) {
-            try {
-                await processSignal(signal);
-                writeHealth();
-            } catch (err) {
-                console.error('[Leo/Human] Poll signal error:', (err as Error).message);
-                writeHealth((err as Error).message);
-            }
-        }
-    }, 60_000);
+    // DEC-079: fs.watch+poll race retired. With one-write-site discipline
+    // (DEC-080) and a single watch listener, missed inotify events are
+    // vanishingly rare; if one ever happens the message stays in the thread
+    // and Darron sees the missing response — failure-visible by design.
 
     // Keep process alive
     await new Promise(() => {});

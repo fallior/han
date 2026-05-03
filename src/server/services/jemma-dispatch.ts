@@ -25,6 +25,18 @@ const HEALTH_DIR = path.join(HAN_DIR, 'health');
 
 // ── Helpers ──────────────────────────────────────────────────
 
+/**
+ * Write a wake-signal file. Per DEC-080 (One-Write-Site Discipline) this is the
+ * SOLE writer of `~/.han/signals/{agent}-human-wake` files anywhere in the
+ * codebase. Any other call to `fs.writeFileSync(...wake...)` under `src/server/`
+ * is a bug — file an issue. Audit:
+ *
+ *     grep -nE 'writeFileSync.*wake' src/server/
+ *
+ * Should return exactly one match (this function). Note: `ws-broadcast` and
+ * `jemma-ack-*` signals are NOT wake signals — they're WebSocket broadcasts and
+ * orchestrator acks respectively; those have their own writers and audit paths.
+ */
 function writeSignalFile(signalName: string, data?: Record<string, unknown>): void {
     const filepath = path.join(SIGNALS_DIR, signalName);
     if (data) {

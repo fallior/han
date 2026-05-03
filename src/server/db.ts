@@ -990,7 +990,17 @@ db.exec(`CREATE TABLE IF NOT EXISTS personas (
     updated_at TEXT DEFAULT (datetime('now'))
 )`);
 
-// Seed existing personas — preserves current behaviour exactly
+// Seed existing personas — preserves current behaviour exactly.
+//
+// Per DEC-080 (One-Write-Site Discipline): each agent's wake_signals list names
+// ONLY the agent's own dispatch target. One signal per agent. Seed strings are
+// part of DEC-080's audit surface — copy-paste of another agent's signal name
+// is the bug class this rule prevents (Bug A in #33's investigation).
+//
+// Audit method (must pass on every dispatch-touching PR):
+//   grep -rnE '"[a-z-]+-wake"' src/server/
+//   → each match must be either the agent naming its own signal OR an
+//     audit-comment reference. Cross-naming is a regression.
 const seedPersona = db.prepare(`INSERT OR IGNORE INTO personas
     (name, display_name, kind, delivery, delivery_config, role_name, memory_path, fractal_path,
      color, workshop_tabs, mention_patterns, classification_hint, agent_port, session_prefix, instance, is_local)
@@ -999,13 +1009,13 @@ const seedPersona = db.prepare(`INSERT OR IGNORE INTO personas
 const personaSeeds: Array<[string, string, string, string, string, string, string | null, string | null,
     string, string, string, string | null, number | null, string | null, string, number]> = [
     ['leo', 'Philosopher Leo', 'agent', 'signal',
-        '{"wake_signals":["leo-wake","leo-human-wake"]}',
+        '{"wake_signals":["leo-human-wake"]}',
         'leo', '~/.han/memory/leo/', '~/.han/memory/fractal/leo/',
         'green', '[{"key":"leo-question","label":"Questions"},{"key":"leo-postulate","label":"Postulates"}]',
         '["\\\\bleo\\\\b","\\\\bleonhard\\\\b"]', 'Leo: code review, implementation, philosophy',
         3847, 'leo', 'han', 1],
     ['jim', 'Supervisor Jim', 'agent', 'http_local',
-        '{"server_url":"https://localhost:3847","fallback_signals":["jim-wake","jim-human-wake"]}',
+        '{"server_url":"https://localhost:3847","fallback_signals":["jim-human-wake"]}',
         'supervisor', '~/.han/memory/', '~/.han/memory/fractal/jim/',
         'purple', '[{"key":"jim-request","label":"Requests"},{"key":"jim-report","label":"Reports"}]',
         '["\\\\bjim\\\\b","\\\\bjimmy\\\\b"]', 'Jim: technical/system topics, supervisor requests, strategic decisions',
@@ -1023,13 +1033,13 @@ const personaSeeds: Array<[string, string, string, string, string, string, strin
         '[]', null,
         null, null, 'han', 1],
     ['tenshi', 'Guardian Tenshi', 'agent', 'signal',
-        '{"wake_signals":["leo-wake","leo-human-wake"]}',
+        '{"wake_signals":["tenshi-human-wake"]}',
         'tenshi', '~/.han/memory/tenshi/', '~/.han/memory/fractal/tenshi/',
         'red', '[]',
         '["\\\\btenshi\\\\b"]', 'Tenshi: security, vulnerability, bug hunting',
         3849, 'tenshi', 'han', 1],
     ['casey', 'Operator Casey', 'agent', 'signal',
-        '{"wake_signals":["leo-wake","leo-human-wake"]}',
+        '{"wake_signals":["casey-human-wake"]}',
         'casey', '~/.han/memory/casey/', '~/.han/memory/fractal/casey/',
         'orange', '[]',
         '["\\\\bcasey\\\\b"]', 'Casey: Contempire, trailer fleet, yard operations',

@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { db, conversationStmts, conversationMessageStmts, conversationLoopStmts } from '../db';
 import { generateId } from '../services/planning';
 import { broadcast } from '../ws';
@@ -6,9 +8,21 @@ import { runSupervisorCycle } from '../services/supervisor';
 import { catalogueConversation, catalogueAllUncatalogued } from '../services/cataloguing';
 import { autoGenerateTts, autoTagLoop } from './voice';
 import { callLLM } from '../orchestrator';
-import { deliverMessage } from '../services/jemma-dispatch';
-import { orchestrate, isEnabled as orchestrationEnabled } from '../services/jemma-orchestrator';
+import { orchestrate } from '../services/jemma-orchestrator';
 import { getPersonas, getAgentPersonas, getMentionPatterns } from '../services/village.js';
+
+// Active-agent register (#31). Static config-flag implementation per DEC-079.
+// `~/.han/config.json` → `agents.active = ["leo","jim", ...]`. Future iteration
+// (Phase 2): derive from process liveness. Defaults to ["leo","jim"] if absent.
+function getActiveAgents(): Set<string> {
+    try {
+        const cfgPath = path.join(process.env.HOME || '', '.han', 'config.json');
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        const active = cfg?.agents?.active;
+        if (Array.isArray(active) && active.length > 0) return new Set<string>(active.map(String));
+    } catch { /* fall through */ }
+    return new Set<string>(['leo', 'jim']);
+}
 const router = Router();
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b';
@@ -26,7 +40,12 @@ interface AddresseeResult {
 }
 
 async function classifyAddressee(content: string, discussionType: string): Promise<AddresseeResult> {
-    const localAgents = getAgentPersonas().filter(p => p.is_local);
+    // Active register filter (DEC-079, #31): only agents listed in
+    // `~/.han/config.json:agents.active` are eligible recipients. Casey/tenshi
+    // (designed personas without runtime services) are filtered out here, so
+    // they never enter the orchestrator queue and don't burn watchdog timeouts.
+    const activeAgents = getActiveAgents();
+    const localAgents = getAgentPersonas().filter(p => p.is_local && activeAgents.has(p.name));
     const humanPersonas = getPersonas().filter(p => p.kind === 'human');
 
     // Detect tab ownership: discussion_type prefix matches a persona name
@@ -126,57 +145,27 @@ function classifyAndDispatch(
 ): void {
     console.log(`[Conversations] Classifying addressee for message in ${discussionType} thread`);
     classifyAddressee(content, discussionType).then(async ({ recipients, reasoning }) => {
-        // Phase 1 (DEC-077 follow-on, plans/jemma-conversation-orchestration-v2.md):
-        // When orchestration is enabled, hand the recipient list to the orchestrator for
-        // sequential wake + ack + rotation. When disabled, fall back to the parallel
-        // for-loop + compose-lock behaviour this replaced. The fallback is preserved
-        // verbatim so `git revert` of the Phase 1 commit restores prior behaviour cleanly.
-        if (orchestrationEnabled()) {
-            try {
-                await orchestrate({
-                    conversationId,
-                    messageId,
-                    recipients,
-                    messageText: content,
-                    author: 'darron',
-                    source: 'admin',
-                    discussionType,
-                    reasoning,
-                });
-            } catch (err: any) {
-                console.error(`[Conversations] Orchestration failed — falling back to parallel fanout: ${err.message}`);
-                for (const recipient of recipients) {
-                    try {
-                        await deliverMessage({
-                            source: 'admin',
-                            recipient, message: content,
-                            conversationId, discussionType,
-                            author: 'darron', classification_confidence: 1.0, reasoning,
-                        });
-                    } catch (e: any) {
-                        console.error(`[Conversations] Fallback delivery failed for ${recipient}: ${e.message}`);
-                    }
-                }
-            }
+        // DEC-079: Jemma orchestration is the sole dispatch path. The legacy
+        // parallel-fanout fallback was removed alongside the compose-lock —
+        // Jemma's serial dispatch + per-conversation serialisation provides
+        // the structural guarantee that supersedes the runtime locks.
+        if (recipients.length === 0) {
+            console.log(`[Conversations] No active recipients for ${discussionType} — skipping dispatch`);
             return;
         }
-
-        // Legacy parallel fanout path — preserved for config-flag rollback
-        for (const recipient of recipients) {
-            try {
-                await deliverMessage({
-                    source: 'admin',
-                    recipient,
-                    message: content,
-                    conversationId,
-                    discussionType,
-                    author: 'darron',
-                    classification_confidence: 1.0,
-                    reasoning,
-                });
-            } catch (err: any) {
-                console.error(`[Conversations] Jemma delivery failed for ${recipient}: ${err.message}`);
-            }
+        try {
+            await orchestrate({
+                conversationId,
+                messageId,
+                recipients,
+                messageText: content,
+                author: 'darron',
+                source: 'admin',
+                discussionType,
+                reasoning,
+            });
+        } catch (err: any) {
+            console.error(`[Conversations] Orchestrate threw: ${err.message}`);
         }
     }).catch(err => {
         console.error(`[Conversations] Classification dispatch error: ${err.message}`);

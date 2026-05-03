@@ -5337,8 +5337,9 @@ If reverting any of the explicit pins in this decision, surface the reasoning in
 
 **Date**: 2026-04-22 (S131)
 **Author**: Leo (session)
-**Status**: Accepted
+**Status**: Superseded by DEC-079 (2026-05-03)
 **Origin thread**: `mo98jep4-ym8hwx` ("Conversations should flow")
+**Superseded thread**: `mopg0w3o-zkmhzg` ("Jemma and the dispatch engine")
 
 ### Decision
 
@@ -5555,4 +5556,101 @@ The F9 pattern has now recurred twice. The structural fix at worker level (not p
 - Server restart required to pick up the new supervisor-worker.ts code.
 - Watch `supervisor_cycles` hold-streak metric: it should keep incrementing even though working-memory.md no longer gains corresponding entries.
 - If genuine signal cycles (actions present or context updates) stop appearing in working-memory, the predicate is too loose — revisit.
+
+---
+
+## DEC-079: Compose-Lock Removed — Jemma Serial Dispatch as Structural Substitute (Re-decision of DEC-075)
+
+**Date**: 2026-05-03
+**Author**: Leo (session), Jim (session) concur, Darron approve
+**Status**: Settled
+**Origin thread**: `mopg0w3o-zkmhzg` ("Jemma and the dispatch engine")
+**Supersedes**: DEC-075
+
+### Decision
+
+The cross-agent compose-lock (`src/server/lib/compose-lock.ts`) is removed. Jemma is made the sole dispatch conduit for response-bound messages from Discord and admin pages; the legacy parallel-fanout fallback in `routes/conversations.ts` is removed; per-conversation Jemma serialisation chains dispatches on the same thread. Concurrent compose by two agents on the same conversation becomes structurally impossible — Jemma wakes recipients one at a time per dispatch, and per-conversation serialisation prevents two dispatches on one thread from interleaving.
+
+### Reasoning
+
+DEC-075 retained the compose-lock as defense-in-depth on the assumption that Jemma orchestration would coexist with a degraded direct-dual-wake fallback. With the legacy fanout removed and Jemma made the sole conduit, there is no degraded fallback to defend against — the runtime check defends an impossible-by-construction failure mode. Darron's framing (2026-05-03): *"I don't think we need a fail safe, if the cost of the failsafe is to put numerous and complicated locking mechanisms in place to ensure the failsafe doesn't fire erroneously. I will notice if Leo-human or Jim-human do not respond but this hidden complication is invisible to me and can have bugs that present very subtly."*
+
+The compose-lock's existence created subtle bugs (the dedup-bypass discovered in #33, where `leo-human`'s pre-compose dedup misread a mid-dispatch supervisor post as a new prompt because the dedup gate existed). Removing the gate removes the bug class.
+
+### Structural guarantee replacing the runtime lock
+
+1. **Single dispatch path.** Jemma's orchestrator is the only entry point. `routes/conversations.ts` calls `orchestrate()` unconditionally on human messages. No parallel-fanout fallback.
+2. **Single wake per recipient per dispatch.** Each agent in a recipient set is woken at most once. The orchestrator advances on ack-or-timeout, never re-wakes.
+3. **Per-conversation serialisation.** A `Map<conversationId, Promise>` chains dispatches on the same thread. Different threads dispatch concurrently as before.
+4. **Single wake-write site.** `jemma-dispatch.writeSignalFile()` is the only function in the codebase that writes a wake signal. Audit by `grep`. (See DEC-080.)
+
+### Alternatives considered
+
+1. **Keep compose-lock as defense-in-depth, remove only the dedup gates.** Rejected — the lock has no failure mode to defend against once the parallel-fanout fallback is gone. Keeping it would mean keeping 189 lines of code + 8 call sites against a hypothetical that the structural guarantees prevent.
+2. **HTTP-delivered wake instead of signal files.** Rejected after Jim's audit-friendliness argument — signal files are inotify-observable from the shell, which is exactly Darron's diagnostic surface for dispatch bugs. Zero new ports, zero new failure modes.
+3. **Global Jemma serialisation instead of per-conversation.** Rejected — would bottleneck all threads behind one slow recipient. Per-conversation provides the same structural guarantee scoped to where the collision actually occurs.
+
+### Settled-decision impact
+
+- DEC-075 explicitly superseded; status updated, link maintained for archaeology.
+- DEC-076 (Implementation Brief Convention) honoured — the brief is in the origin thread.
+- DEC-080 (One-Write-Site Discipline) lights up alongside this decision in the same commit; together they encode the structural guarantee.
+- DEC-068/069 (gradient spec) — untouched; this is a dispatch decision, not a memory decision.
+- DEC-073 (gatekeeper-controlled files) — no gatekeeper files modified.
+
+### Why Settled
+
+The compose-lock was Accepted not Settled because DEC-075 anticipated revisiting once the orchestrator stabilised. That moment has arrived. The structural guarantees (single conduit + per-conversation serialisation + single wake-write site) are stronger than the runtime check the lock provided, and the runtime check was the source of the bug class diagnosed in #33. Reverting this decision would re-introduce the dedup-bypass surface. Changing this behaviour requires explicit discussion and approval per the Settled Decisions Protocol.
+
+### Follow-up
+
+- The `jemma-dispatch.writeSignalFile()` audit comment should be re-checked on every refactor that touches dispatch. Grep audit: `grep -nE 'writeFileSync.*wake' src/server/` should return one match (the audit comment site itself).
+- The Active Register (#31 in plans/future-ideas.md) lands in this same change as a static config-flag (`~/.han/config.json` → `agents.active`). Runtime liveness inference is Phase 2 future work.
+- Heartbeat → philosophy thread carve-out (`leo-heartbeat.postMessageToConversation`) is preserved unchanged. Generalised workshop-owner direct-path is filed as #35 future-work.
+
+---
+
+## DEC-080: One-Write-Site Discipline for Wake Signals
+
+**Date**: 2026-05-03
+**Author**: Leo (session), Jim (session) concur, Darron approve
+**Status**: Settled
+**Origin thread**: `mopg0w3o-zkmhzg` ("Jemma and the dispatch engine")
+**Companion**: DEC-079
+
+### Decision
+
+Wake-signal files (the `~/.han/signals/{agent}-human-wake` family that triggers leo-human / jim-human / future agent-human services to compose responses) are written from exactly **one** function in the codebase: `src/server/services/jemma-dispatch.ts:writeSignalFile`. Any other call site in `src/server/` that writes a file matching `*-wake` is a bug.
+
+Audit method: `grep -nE 'writeFileSync.*wake' src/server/` (or equivalent). One result expected — the canonical writer.
+
+### Reasoning
+
+The Bug A failure mode discovered in #33 was a copy-paste error in the personas registry's `delivery_config` JSON (`casey` and `tenshi` rows pointing at `leo-human-wake` instead of their own signal names). The bug was invisible to runtime checks — every write was syntactically valid, every signal-file write succeeded, every persona had a `delivery_config`. The only thing that could have caught it ahead of the symptom was a code-shape rule + grep audit: *if there is more than one writer of these files, one of them is wrong*.
+
+Darron's framing of the underlying principle (2026-05-03): visibility wins over runtime robustness when the runtime mechanism is invisible. A code-shape rule is visible; a runtime check that fires correctly 99% of the time and fails silently 1% is not.
+
+### Mechanism
+
+`writeSignalFile` carries an audit comment in its docstring naming this decision. Reviewers checking dispatch changes verify the grep audit returns one site. The personas registry routes wake signals by recipient name (not by config-string lookup that can drift) — `delivery_config.wake_signals[0]` is structurally `{recipient}-human-wake` for active human-responder agents, derived from the recipient name not stored verbatim.
+
+### Audit method — two surfaces
+
+This rule covers seed/migration strings as well as runtime writers. The grep audit `writeFileSync.*wake` detects runtime mis-writes. A second inspection covers seed/migration data: `grep -rnE '"[a-z-]+-wake"' src/server/` should return ONLY strings that name the same agent the surrounding row defines, OR audit-comment references. Cross-naming (one agent's row pointing at another agent's signal) is the bug class — exactly the failure mode discovered in #33's Bug A, where `casey` and `tenshi` rows seeded `leo-wake` / `leo-human-wake` and every casey/tenshi dispatch leaked onto leo-human.
+
+Audit both surfaces on every dispatch-touching PR. Pre-commit declaration includes both grep results.
+
+### Settled-decision impact
+
+- DEC-079 (Compose-Lock Removed) — companion. Together they encode the structural guarantee that supersedes the runtime lock.
+- Operational policy: any future agent-human service (e.g. casey-human if Casey ships) registers its wake signal name following the `{agent}-human-wake` convention; the persona registry's `delivery_config` is data-only, not code.
+
+### Why Settled
+
+The grep audit is cheap; the bug class it prevents is expensive (the dedup-bypass surface in #33 cost hours of investigation). Settling this rule survives the next refactor. Reverting requires explicit discussion — usually because someone has discovered a structural reason for a second writer (in which case the new writer must be named, audited, and added to a small registry of allowed sites).
+
+### Follow-up
+
+- On every dispatch-touching PR: confirm the grep audit returns one site. Pre-commit declaration explicitly mentions DEC-080 verified.
+- If a second writer becomes unavoidable (genuinely new use case), file a re-decision before adding it. Drift-by-PR is the failure mode this decision prevents.
 
