@@ -17,12 +17,17 @@
  * until the living file is under the headSize bound. This is what closes
  * Darron's loop: *"the cascade is never delayed."*
  *
- * Files watched per agent:
- *   - working-memory.md
+ * Files watched per agent (post Phase A.2, S145):
  *   - working-memory-full.md
- *   - felt-moments.md
- *   - self-reflection.md  (jim only — leo's self-reflection is
- *     hand-curated, not append-driven, so size doesn't naturally grow)
+ *
+ * NB. An earlier docstring listed working-memory.md, felt-moments.md, and
+ * self-reflection.md (jim) as also watched — that was the original design and
+ * is no longer the code. Phase A.2 narrowed the slicer's domain to working
+ * memory only; felt-moments and self-reflection are loaded WHOLE at session
+ * start (hand-curated, not chunked), and the compressed working-memory.md is
+ * a hand-curated artefact left untouched by the slicer to prevent duplicate-
+ * content c0s. See `buildTargets` (lines 100-132) for the inline rationale,
+ * and `wm-sensor.SHAPE.md` adjacent to this file for the canonical flow.
  *
  * Concurrency: per-agent file lock at ~/.han/signals/wm-sensor-{agent}-active.
  * Two writes within the debounce window collapse to one rotation pass.
@@ -30,6 +35,10 @@
  * Backup processors in heartbeat/cycle (Phase 4c) are defensive — the sensor
  * is the primary path. They sweep up only if the sensor was down or crashed
  * mid-process.
+ *
+ * For the canonical end-to-end flow (rotation → bumpOnInsert → pending_compressions
+ * → process-pending-compression.ts → identity-loaded compose), see the
+ * `wm-sensor.SHAPE.md` document adjacent to this file (S149, 2026-05-04).
  */
 
 import * as fs from 'fs';

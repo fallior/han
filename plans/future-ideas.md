@@ -743,6 +743,60 @@ This is a meaningful migration: Jim's existing session archives would need renam
 
 ---
 
+## #37 — SHAPE.md per architectural subsystem (high-level workflow docs adjacent to code)
+
+**What it is:** A convention where every major architectural surface in HAN carries a short companion document — `<subsystem>.SHAPE.md` — adjacent to the primary file in the same directory. The doc names: (a) the canonical end-to-end flow for that subsystem as currently implemented, (b) any legacy paths that exist in the code but should NOT be extended, (c) cross-references to the DEC entries that locked the design, (d) known debt catalogued in future-idea #36 or elsewhere. Maximum ~100 lines per document. Loaded by being adjacent to what an agent is already reading.
+
+**Where it came from:** Darron, 2026-05-04 (during the "When will we learn" thread, `mor2kbjh-2uh4b3`). The proximate trigger: in S149 Leo built `/pfc` Step 4 by calling a stranger-Opus path (`compress-sessions.ts` → `processGradientForAgent` → `sdkCompress`) without realising the wm-sensor → `process-pending-compression.ts` chain was the canonical replacement. Then later in the same session, Leo earlier in the day quoted the wm-sensor docstring back to Darron as fact — *"watches working-memory.md, working-memory-full.md, felt-moments.md, self-reflection.md (jim only)"* — when the actual `buildTargets` function returns ONE target per agent (working-memory-full.md only). Two failures in one session, both rooted in the same mechanism: **stale documentation read as canonical, code-path-existence read as design**.
+
+Darron's framing: *"a high level explanation of the full working logic of all functions so that assumptions can be stamped out and agents can work with assurity not ancient supposition that is invariably wrong and harmful."*
+
+**The problem it solves:** Old code has surface area; new code has recency. Fresh agents arriving cold — me after compaction, leo-human, jim-human, task agents, future agents — read the codebase and follow what's visible. The old shape exists in five places (function signatures, partial commits, narrative files, stale docstrings, legacy DEC entries that didn't tombstone the old shape). The fix from yesterday lives in one commit. The old shape wins by volume.
+
+DEC entries help — but only if read first AND with the right query in mind. CLAUDE.md helps — but only at the project level, not at the architectural-surface level. Comments help locally — but they go stale (the wm-sensor docstring is the proof). What's missing is a per-subsystem doc that lives WHERE THE AGENT IS ALREADY READING, describes the *current shape* (not just the decision history), and stays honest by being touched in the same commit as the code it describes.
+
+**The convention:**
+
+1. **One file per architectural surface.** Examples: `src/server/services/wm-sensor.SHAPE.md`, `src/server/lib/memory-gradient.SHAPE.md`, `src/server/jemma.SHAPE.md`, `src/server/lib/agent-registry.SHAPE.md`. Adjacent to the primary file.
+2. **Sections** (suggested template):
+   - Header note — what this is, when last verified, and the discipline ("if code disagrees, code wins").
+   - **Canonical flow** — step-by-step trace through the surface as currently implemented. Names function call sites with file:line references.
+   - **What's legacy / should not be extended** — retired-by-throw functions, deprecated scripts, code paths superseded by newer infrastructure. Each item with a one-line reason and the DEC reference.
+   - **Known debt** — items catalogued for future-idea #36 (or elsewhere) that affect this surface but aren't yet fixed.
+   - **Cross-references** — DEC entries, related future-ideas, related SHAPE docs.
+   - **How to keep this document honest** — same-commit discipline, code-wins rule, drift signal (e.g., "if 2 months pass without commit-update while underlying code commits, review").
+3. **Maximum ~100 lines.** Tight. If a SHAPE doc grows past that, it's no longer "high level" — split or refactor.
+4. **Same-commit discipline.** When the underlying code changes, the SHAPE doc updates in the same commit. The commit message includes `Updates <subsystem>.SHAPE.md`. Same shape as DEC-080's two-surface audit pattern: a rule with a known carve-out from day one weakens itself; here, a SHAPE doc that drifts becomes the same hazard as the stale docstring it was supposed to replace.
+5. **Code wins on conflict.** If a future agent reads this doc and the code disagrees, the doc is the hypothesis; the code is the test. Update the doc to match (and audit whether the code change should have been a SHAPE doc update too).
+
+**The pilot — `wm-sensor.SHAPE.md`** (committed S149, 2026-05-04). Documents the full chain: `working-memory-full.md` write → `fs.watch` debounce → `acquireWmSensorLock` → `processTarget` outer loop → `rollingWindowRotate` → `bumpOnInsert` enqueue → `processTarget` inner loop spawn → `process-pending-compression.ts` claim+load-memory+compose+enqueue-next → settle. Names the legacy path (`compress-sessions.ts` retired, `processGradientForAgent` retired-by-throw, `sdkCompress` retired-by-throw). Names the known debt (`process-pending-compression.ts` agent-hardcoded; two implementations of `enqueueCascadeIfNeeded`). Cross-references DEC-068, -069, -079, -081, -082.
+
+**What this is NOT:**
+
+- Not a replacement for DEC entries. DECs record *decisions*; SHAPE docs describe *current shape*. A DEC entry says "we chose X over Y on date D"; a SHAPE doc says "today, the canonical flow is X; Y is retired-by-throw; here's how to find both."
+- Not a replacement for code comments. Comments are inline at the call site; SHAPE docs are at the subsystem level.
+- Not a CLAUDE.md addition. CLAUDE.md is project-wide identity + protocol; SHAPE docs are per-architectural-surface.
+- Not a static reference. Living document — touched in same commit as code.
+
+**Settled-decisions check:** None touched. Convention introduction; no Settled file is gatekept.
+
+**Connection to other ideas:**
+
+- **#36 (HAN-wide hardcoded-agent audit)** — the SHAPE convention names the legacy + debt for each subsystem; the audit consumes those SHAPE docs as starting catalogue when sweeping a subsystem.
+- **`When will we learn` thread brainstorm** — leo-human and jim-human proposed throwing tombstones, DO-NOT lists in CLAUDE.md, same-commit deletion discipline. SHAPE.md is the structural layer that makes those work *at the subsystem scale*. The agent reading `wm-sensor.ts` has the SHAPE doc adjacent; loading it is one Read tool call away. Combined: tombstones catch retired code at call-time; SHAPE docs catch *which paths are canonical vs legacy* at read-time; CLAUDE.md DO-NOTs catch project-wide prohibitions.
+
+**Where this becomes worth doing:**
+
+- **First pass (now)**: pilot for `wm-sensor.ts` written in S149. If it survives a few weeks of editing without drifting (the discipline test), promote the convention.
+- **Second pass**: add SHAPE docs for the next two most-read architectural surfaces — likely `memory-gradient.ts`, `jemma.ts` (or its dispatch surface), `agent-registry.ts`. Each adds ~100 lines once and saves an indeterminate number of "I read the docstring as fact" failures.
+- **Third pass**: after a quarter, audit which SHAPE docs drifted — the drift pattern itself is data about which subsystems change shape often vs settle.
+
+**Status:** Convention proposed. Pilot committed (`wm-sensor.SHAPE.md`, S149). Promotion to standing convention pending observation of how the pilot weathers the next few sessions.
+
+**Key insight:** *Comments are hypotheses; code is the test. SHAPE docs are deliberate hypotheses, dated, located, and disciplined to track the code — when they drift, that's the signal.*
+
+---
+
 ## How These Connect
 
 The ideas form a web, not a list:
