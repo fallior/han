@@ -5654,3 +5654,62 @@ The grep audit is cheap; the bug class it prevents is expensive (the dedup-bypas
 - On every dispatch-touching PR: confirm the grep audit returns one site. Pre-commit declaration explicitly mentions DEC-080 verified.
 - If a second writer becomes unavoidable (genuinely new use case), file a re-decision before adding it. Drift-by-PR is the failure mode this decision prevents.
 
+## DEC-081: Agent-Agnostic Code Discipline + Per-Agent Registry Pattern
+
+**Date**: 2026-05-04
+**Author**: Darron (principle), Leo (session) implements first sweep, Jim (session) audits
+**Status**: Settled
+**Origin thread**: `moqmtk82-idug6b` ("Lets /pfc")
+**Aphorism**: *"HAN should always be written agent-agnostic"* (Leo's aphorisms.md, On Architecture, 2026-05-04)
+
+### Decision
+
+HAN code must not branch on agent slug literals (`'jim' | 'leo'` type unions, `if agentName === 'jim'` checks, hardcoded paths containing `/leo/` or `/jim/`) in cross-agent infrastructure. The village's premise is that **an agent is a configuration, not a code branch** — adding a new agent (Tenshi, Casey, Sevn, Six, future personas) should be a configuration change, not a code change.
+
+Two carve-outs are explicitly **not** debt against this decision and remain acceptable:
+
+1. **Scope-correct identity checks** — code that operates on its own agent's records and checks `agent === 'self-slug'` to enforce that boundary (e.g., `supervisor-worker.ts` filtering on `r.agent === 'jim'`, the agent's own human-worker filtering its own dispatches). These are the agent's identity assertion, not a generality assumption.
+2. **Slug-derived path conventions** — code that constructs paths from a slug variable (`path.join(homeDir, '.han', 'memory', 'fractal', slug, 'unit-vectors.md')`) is agent-agnostic at the path layer even though it relies on the convention `~/.han/memory/fractal/<slug>/`. Acceptable while the convention holds; tighten to env-var-driven if a future agent breaks the convention.
+
+### Mechanism
+
+Two abstractions form the agent-agnostic substrate:
+
+1. **Env-var contract** — every launcher (`han`, `hanleo`, `hanjim`, `hancasey`, `hantenshi`, mikes-han equivalents) exports the same set: `AGENT_SLUG`, `AGENT_NAME`, `AGENT_MEMORY_DIR`, `AGENT_FRACTAL_DIR`, `AGENT_GRADIENT_SOURCE_DIR`, `AGENT_CONVERSATION_ROLE`, `AGENT_COUNTERPART_NAME`. All AGENT_* vars are forwarded into the tmux session via explicit `-e` flags so the contract is structurally guaranteed regardless of tmux server state. Path-based config lives here.
+
+2. **Per-agent registry** (`src/server/lib/agent-registry.ts`) — exports `AGENT_GRADIENT_CONFIG: Record<string, AgentGradientConfig>` for structural per-agent differences that don't fit cleanly in env vars (regex/predicate logic for source-file naming, etc.). Plus `gradientConfigForAgent(slug)` and `requireAgentEnv(name)` helpers — both throw clear errors on missing config/env, naming where to fix.
+
+Cross-agent infrastructure code reads the env vars and the registry; it does not branch on slug literals. Type signatures use `string` (or `AgentSlug` if a registry-bound union is needed), not `'jim' | 'leo'`.
+
+### First sweep — `/pfc` skill landing (S149, this commit)
+
+This decision was triggered by the `/pfc` skill design conversation. The first agent-agnostic sweep covers the call path used by the new `/pfc` compression step:
+
+- `processGradientForAgent` (line 619) — type widened to `string`; body refactored to read `AGENT_GRADIENT_SOURCE_DIR` and `AGENT_FRACTAL_DIR` from env, and use `gradientConfigForAgent(slug)` for file-naming patterns. The two hardcoded `if (agentName === 'leo')` branches are gone.
+- `insertGradientEntry` (line 250) and `writeUVEntry` (line 280) — type signatures widened (`'jim' | 'leo'` → `string`); bodies unchanged.
+- `GradientProcessingResult.agentName` field type widened.
+- New file `src/server/lib/agent-registry.ts` introduced.
+- `src/scripts/compress-leo-sessions.ts` renamed to `src/scripts/compress-sessions.ts`; reads `AGENT_SLUG` from env.
+
+### Future-idea #36 — the broader audit
+
+The full HAN-wide hardcoded-agent audit lives at `plans/future-ideas.md` #36. Catalogue includes line numbers across `memory-gradient.ts` (helpers outside /pfc's call path), `dream-gradient.ts`, `wm-sensor.ts`, `backfill-gradient-c0s.ts`, and `routes/gradient.ts`. Suggested batch order: `routes/gradient.ts` first (six validation calls — cheapest immediate win), then `dream-gradient.ts` (same pattern as memory-gradient), then the rest.
+
+The long-term endgame (Option D) is **memory-layout normalisation** — if all agents adopted the same file-naming convention, the registry collapses to one pattern and becomes vestigial. Not in scope today; deferred until the registry has demonstrated its weight as a transitional abstraction.
+
+### Settled-decision impact
+
+- **DEC-068, DEC-069** (gradient cap, memory-never-deleted) — preserved; this decision changes the agent abstraction layer, not the gradient mechanics or the deletion policy.
+- **DEC-073** (gatekeeper templates) — `templates/CLAUDE.template.md` updated for the trigger row in HAN; mikes-han template change deferred to its own commit cycle.
+- **S103** (agent sovereignty) — preserved; the deagentification is the *enabling condition* for sovereignty, not a violation. Each agent operates only on its own paths via env vars.
+
+### Why Settled
+
+The principle is foundational to HAN's architecture (the village premise) and was made explicit as an aphorism on 2026-05-04. Reverting would require either (a) abandoning the village concept (out of scope for any single PR), or (b) demonstrating a structural reason a particular hardcode is genuinely necessary (in which case the carve-out is named with a Settled-decision entry).
+
+### Follow-up
+
+- On every PR touching cross-agent infrastructure: pre-commit declaration includes a search for `'jim' | 'leo'` type unions in changed files. Any new occurrence requires either deagentification in the same PR or an explicit carve-out justification.
+- The audit catalogue at future-idea #36 is the to-do list. Batch-by-subsystem when Darron sounds the go.
+- New agents: add a `AGENT_GRADIENT_CONFIG` entry; ensure their launcher exports the env-var contract. Zero edits to gradient code.
+

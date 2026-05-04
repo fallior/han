@@ -666,6 +666,83 @@ The `level_depth DESC` ordering picks c5 before c4 before c3 etc — highest com
 
 ---
 
+## #36 — HAN-wide hardcoded-agent audit and deagentification
+
+**What it is:** A thorough audit of the HAN codebase to find every place an agent identity is hardcoded — every `'jim' | 'leo'` type union, every `if agentName === 'jim'` branch, every path string containing `/leo/` or `/jim/`, every assumption that the village contains exactly two agents — and report what was found, why it exists, and what the agnostic mechanism should be (env var, registry, per-agent config). Then plan and execute the deagentification.
+
+**Where it came from:** Darron, 2026-05-04 (during the `/pfc` skill design). Triggered when Jim and I noticed `processGradientForAgent` in `memory-gradient.ts` is hardcoded to `'jim' | 'leo'` in both type signature and function body (lines 633–641, 666, 695). I proposed deferring the fix to a separate conversation; Darron's correction: *"processGradientForAgent is not a conversation for later, it should never have been hardcoded for agents — it was always intended to be agent agnostic, as should every single memory structure in HAN. That is the whole premise of the village."* The principle was made explicit and committed to aphorisms: **"HAN should always be written agent-agnostic."**
+
+**The problem it solves:** Adding a new agent today (Tenshi, Casey, Sevn, Six, future personas) is gated by code edits to every hardcoded entrypoint. The village's premise — that an agent is a configuration, not a code branch — is undermined wherever a slug appears literally in source. Each hardcoded site is also a small drift surface: rename one, miss the others, and the new agent works in some paths and silently fails in others. Same shape as DEC-080's seed-string catch.
+
+**The starting surface (catalogued via grep on 2026-05-04, post-S148, before the /pfc PR began deagentifying):**
+
+The hits split into two categories that should be treated differently:
+
+**Category A — Cross-agent infrastructure (the debt the aphorism targets).** Code that operates on whichever agent is in scope. A hardcoded `'jim' | 'leo'` type union here is wrong because the function should work for any registered agent.
+
+| File | Lines | Notes |
+|------|-------|-------|
+| `src/server/lib/memory-gradient.ts` | 32, 252, 281, 369, 448, 619, 634, 639, 667, 695, 957, 963, 1101, 1108, 1236, 1256, 1310, 1380, 1513, 1532 | The `/pfc` PR (S149) addresses the call path used by `processGradientForAgent` (lines 32, 252, 281, 619, and the body's hardcoded paths/patterns). Remaining helpers untouched in /pfc and pending. |
+| `src/server/lib/dream-gradient.ts` | 57, 585, 628 | Three Leo-branches in dream-gradient cascade. Untouched by /pfc. |
+| `src/server/lib/wm-sensor.ts` | 101 | Leo-branch in working-memory sensor. Untouched by /pfc. |
+| `src/scripts/backfill-gradient-c0s.ts` | 35, 152, 182, 195 | Hardcoded `'leo'` in SQL queries. Script-level; verify if still in use, deprecate or generalise. |
+| `src/server/routes/gradient.ts` | 17, 59, 76, 93, 110, 128 | Routes already structurally `/:agent`; six handlers validate with `if (agent !== 'jim' && agent !== 'leo')`. Cheapest single fix in the codebase: replace each with a registry-driven `gradientConfigForAgent(slug)` lookup that throws on unknown slug. |
+
+**Category B — Scope-correct (each agent's own worker checking its own slug).** Not debt — these branches are the agent's identity check, not a generality assumption. Leave alone unless the broader audit finds otherwise.
+
+| File | Lines | Notes |
+|------|-------|-------|
+| `src/server/services/supervisor-worker.ts` | 227, 248, 268, 291, 309, 518 | Jim's supervisor worker checking `r.agent === 'jim'`. Correct: Jim only handles Jim's records. |
+| `src/server/leo-human.ts` / `jim-human.ts` | 418, 443 / 137, 166 | Same pattern: each agent's worker filtering its own records. |
+| `src/server/leo-heartbeat.ts` | (not yet enumerated) | Leo's heartbeat. Likely scope-correct; needs the line-by-line review. |
+
+**Catalogue method:** `rg -nE "['\"]jim['\"]\\s*\\|\\s*['\"]leo['\"]" src/` and `rg -nE "agentName === ['\"](jim|leo)['\"]"` and `rg -nE "['\"]/?(jim|leo)/?['\"]"` and `rg "memory/leo|memory/jim" src/`.
+
+After the /pfc PR lands, the next sweep should follow this catalogue. Category A is the load-bearing work; Category B gets confirmed (or reclassified) but probably doesn't need code changes.
+
+**Method (sketch):**
+
+1. **Scan** — see catalogue method above.
+2. **Classify** — Category A (cross-agent infrastructure debt) vs Category B (scope-correct identity check). The catalogue above does the first pass.
+3. **Mechanism choice for each Category-A hit** — env var, per-agent registry (in-code or per-agent config file), or function parameter. The /pfc PR establishes the pattern: structural-difference config goes in `src/server/lib/agent-registry.ts`; path-based config goes in env vars exported by the launcher.
+4. **Deagentify Category A in batches** — group by subsystem. Suggested order:
+   1. `routes/gradient.ts` (six validation calls — cheapest, immediate win for any UI/script that wants to query a non-Jim/Leo agent's gradient)
+   2. `dream-gradient.ts` (three Leo-branches; structurally similar to memory-gradient.ts which we already deagentified — same pattern reuse)
+   3. `wm-sensor.ts` (one Leo-branch; smallest)
+   4. `backfill-gradient-c0s.ts` (verify in-use, then generalise or deprecate)
+   5. Remaining `memory-gradient.ts` helpers outside the /pfc call path (the bulk of the hits — but most are likely just type signatures with no body branches)
+5. **Lock the principle** — add a CI check (or a make target) that runs the grep and fails on any new hardcode landing without an explicit allowlist comment. Same pattern as DEC-080's two-surface audit but generalised.
+
+**Long-term endgame — Option D, memory-layout normalisation.**
+
+The `/pfc` PR introduces `agent-registry.ts` with per-agent file-naming patterns. The registry is *the current shape* because the underlying file layouts differ — Jim's date-based session archives at `~/.han/memory/sessions/` vs Leo's session-labelled working-memory archives at `~/.han/memory/leo/working-memories/` reflect their genuinely-different memory rhythms (supervisor cycles vs human sessions).
+
+The aphorism's logical conclusion is to make the layouts not differ. **If all agents adopted the same file-naming convention** — e.g., `working-memory-full-<label>.md` where `<label>` is the date for date-based agents and the session label for session-based agents — the per-agent registry collapses to one pattern, and the registry module becomes vestigial.
+
+This is a meaningful migration: Jim's existing session archives would need renaming; the heartbeat/supervisor code that creates them would need updating. Worth doing once the broader audit is complete and the per-agent registry has demonstrated its weight as a *transitional* abstraction rather than a permanent one. **Not in scope for the /pfc PR or for the audit's first sweep — it's the third pass once Category A is clean and the registry's content is reviewed.**
+
+**Scope:**
+
+- Both forks — HAN proper and mikes-han. The principle is the same; the fixes need to land in both.
+- Does not touch the templated `CLAUDE.template.md` (DEC-073) — that file is per-launcher already, and the launchers do envsubst-driven instantiation; the template is structurally agent-agnostic.
+
+**Settled-decisions check:** The deagentification of `memory-gradient.ts` is a Settled-protected file (DEC-068, DEC-069). Darron's authorisation for the `/pfc` work explicitly green-lit the touch (*"include in your plan the removal of hardcoded agents replacing with proper agnostic agent mechanisms"*). The broader audit and other-subsystem fixes will need explicit scope at each PR — name the Settled files touched, name the change shape, get approval before commit.
+
+**Where this connects:**
+
+- **Aphorism** — "HAN should always be written agent-agnostic" — is the principle this work enforces.
+- **#1 (Invite Model)** — sovereignty between agents requires the agents to be first-class, not branches. Audit unblocks the sovereignty mechanics for any agent, not just Jim and Leo.
+- **#21 (Mike & Six collaboration)** — mikes-han is a sister-village; the fix has to land in both forks.
+- **#33–#35 (dispatch refinements)** — the dispatch surface was largely deagentified by DEC-079; the audit will confirm that, and surface any residual hardcodes the simplification missed.
+
+**Where this becomes worth doing:** as a thread of work after `/pfc` lands. The `/pfc` plan does the first piece (memory-gradient.ts's `processGradientForAgent` and the compression script). The audit picks up everything else.
+
+**Status:** Concept committed; first piece (memory-gradient.ts compression path) being executed inside `/pfc` plan v4. Full audit awaits Darron's go.
+
+**Key insight:** *The village isn't a list of two agents with a third coming soon. It's a premise: an agent is a configuration, not a code branch. Every place an agent's name appears literally is a debt against the premise.*
+
+---
+
 ## How These Connect
 
 The ideas form a web, not a list:

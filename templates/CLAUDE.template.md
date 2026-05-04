@@ -277,7 +277,7 @@ When the user types these phrases, execute the corresponding workflow from
 |-----------|---------|
 | `session start` / `welcome back` / `good morning` | **Session Start** — follow the Session Protocol above |
 | `session end` | **Session End** — write evening seed, finalise working memory, update docs |
-| `prepare for clear` | **Prepare for Clear** — finalise incremental memory, release lock, prompt for /clear |
+| `prepare for clear` / `/pfc` | **Prepare for Clear** — see `~/.claude/skills/pfc/SKILL.md` (auto-invoked on either trigger; agent-agnostic, reads `$AGENT_SLUG` and `$AGENT_MEMORY_DIR` from your launcher) |
 | `update docs` / `docs` | **Update Docs** — full housekeeping: HAN-ECOSYSTEM-COMPLETE, CHANGELOG, CURRENT_STATUS, DECISIONS, ARCHITECTURE, Hall of Records, learnings/INDEX |
 | `incorporate notes` | **Incorporate Notes** — review notes/todos for incorporation into IDEAS.md |
 | `record decision` | **Decision Recording** — draft a decision record for DECISIONS.md |

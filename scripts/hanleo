@@ -13,10 +13,19 @@ SESSION_PREFIX="leo"
 # Server port for this agent's mobile UI
 AGENT_PORT=3847
 
-# Slug for the auto-restart watchdog's pidfile (~/.han/{slug}-server.pid).
-# Other launchers carry AGENT_SLUG via their template-variable block; hanleo
-# doesn't need that block but the watchdog still needs a name to write under.
+# Agent identity exports — symmetric with hanjim/hancasey/hantenshi.
+# Per the aphorism *"HAN should always be written agent-agnostic"*, every
+# launcher exports the same env-var contract; agnostic code reads the vars
+# rather than branching on slug literals. Leo's CLAUDE.md is hand-tended (the
+# DEC-073 gatekeeper exception), so this file does not run envsubst against the
+# template — but the runtime env-var contract still matches.
 AGENT_SLUG="leo"
+AGENT_NAME="Leo"
+AGENT_MEMORY_DIR="$HOME/.han/memory/leo"
+AGENT_FRACTAL_DIR="$HOME/.han/memory/fractal/leo"
+AGENT_GRADIENT_SOURCE_DIR="$HOME/.han/memory/leo/working-memories"
+AGENT_CONVERSATION_ROLE="leo"
+AGENT_COUNTERPART_NAME="Jim"
 
 # Project root (for starting server)
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
@@ -154,8 +163,20 @@ start_session() {
     echo -e "${BLUE}Server port: ${GREEN}${AGENT_PORT}${NC}"
 
     export HAN_SESSION="$session_name"
+    export AGENT_SLUG AGENT_NAME AGENT_MEMORY_DIR AGENT_FRACTAL_DIR \
+        AGENT_GRADIENT_SOURCE_DIR AGENT_CONVERSATION_ROLE AGENT_COUNTERPART_NAME
 
-    tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name"
+    # All AGENT_* vars forwarded via -e so they're visible inside the tmux
+    # session regardless of tmux server state.
+    tmux new-session -d -s "$session_name" \
+        -e "HAN_SESSION=$session_name" \
+        -e "AGENT_SLUG=$AGENT_SLUG" \
+        -e "AGENT_NAME=$AGENT_NAME" \
+        -e "AGENT_MEMORY_DIR=$AGENT_MEMORY_DIR" \
+        -e "AGENT_FRACTAL_DIR=$AGENT_FRACTAL_DIR" \
+        -e "AGENT_GRADIENT_SOURCE_DIR=$AGENT_GRADIENT_SOURCE_DIR" \
+        -e "AGENT_CONVERSATION_ROLE=$AGENT_CONVERSATION_ROLE" \
+        -e "AGENT_COUNTERPART_NAME=$AGENT_COUNTERPART_NAME"
 
     # Start server in a bottom pane (20% height) under the auto-restart watchdog.
     # See hanjim launcher for full rationale (Apr 20 → Apr 24 ghost-server drift).

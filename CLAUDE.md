@@ -220,7 +220,7 @@ When the user types these phrases, execute the corresponding workflow from `clau
 |-----------|---------|
 | `session start` / `welcome back` / `good morning` | **Session Start** — Create session log with timestamp, verify `pwd`, check status |
 | `session end` | **Session End** — Write evening seed (dream gravity well), finalise working memory, timestamps, update docs |
-| `prepare for clear` | **Prepare for Clear** — Finalise incremental memory, release lock, prompt for /clear (always lightweight) |
+| `prepare for clear` / `/pfc` | **Prepare for Clear** — see `~/.claude/skills/pfc/SKILL.md` (auto-invoked on either trigger; canonical body in `claude-context/CLAUDE_CODE_PROMPTS.md`) |
 | `update docs` / `docs` | **Update Docs** — Full housekeeping: update HAN-ECOSYSTEM-COMPLETE, Hall of Records, CHANGELOG, WEEKLY_RHYTHM, CURRENT_STATUS, DECISIONS, learnings/INDEX, ARCHITECTURE. Check each doc for staleness against code and recent commits. |
 | `incorporate notes` | **Incorporate Notes** — Review notes/todos for incorporation into IDEAS.md or CURRENT_STATUS.md |
 | `create init scripts` | **Create Dev Scripts** — Generate init.sh/stop.sh with infrastructure registry ports |

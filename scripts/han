@@ -157,9 +157,31 @@ start_session() {
     # Export session name for the hook to use
     export HAN_SESSION="$session_name"
 
+    # Agent identity exports — symmetric with hanjim/hancasey/hantenshi.
+    # Per the aphorism *"HAN should always be written agent-agnostic"*, every
+    # launcher exports the same env-var contract; agnostic code reads the vars
+    # rather than branching on slug literals.
+    export AGENT_SLUG="leo"
+    export AGENT_NAME="Leo"
+    export AGENT_MEMORY_DIR="$HOME/.han/memory/leo"
+    export AGENT_FRACTAL_DIR="$HOME/.han/memory/fractal/leo"
+    export AGENT_GRADIENT_SOURCE_DIR="$HOME/.han/memory/leo/working-memories"
+    export AGENT_CONVERSATION_ROLE="leo"
+    export AGENT_COUNTERPART_NAME="Jim"
+
     # Create tmux session and run claude
-    # The session stays alive after claude exits so you can review
-    tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name"
+    # The session stays alive after claude exits so you can review.
+    # All AGENT_* vars are forwarded via -e flags so they're guaranteed visible
+    # inside the session regardless of tmux server state.
+    tmux new-session -d -s "$session_name" \
+        -e "HAN_SESSION=$session_name" \
+        -e "AGENT_SLUG=$AGENT_SLUG" \
+        -e "AGENT_NAME=$AGENT_NAME" \
+        -e "AGENT_MEMORY_DIR=$AGENT_MEMORY_DIR" \
+        -e "AGENT_FRACTAL_DIR=$AGENT_FRACTAL_DIR" \
+        -e "AGENT_GRADIENT_SOURCE_DIR=$AGENT_GRADIENT_SOURCE_DIR" \
+        -e "AGENT_CONVERSATION_ROLE=$AGENT_CONVERSATION_ROLE" \
+        -e "AGENT_COUNTERPART_NAME=$AGENT_COUNTERPART_NAME"
 
     # Send the claude command to the session
     if [[ ${#claude_args[@]} -gt 0 ]]; then

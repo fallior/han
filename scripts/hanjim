@@ -25,6 +25,7 @@ AGENT_SLUG="jim"
 AGENT_WORKING_DIR="$HOME/.han/agents/Jim"
 AGENT_MEMORY_DIR="$HOME/.han/memory"           # Jim lives at root, not a subdir
 AGENT_FRACTAL_DIR="$HOME/.han/memory/fractal/jim"
+AGENT_GRADIENT_SOURCE_DIR="$HOME/.han/memory/sessions"  # Jim's session-archive dir
 AGENT_SWAP_COMPRESSED="supervisor-swap.md"
 AGENT_SWAP_FULL="supervisor-swap-full.md"
 AGENT_CONVERSATION_ROLE="supervisor"
@@ -72,7 +73,7 @@ generate_claude_md() {
     # Atomic write: render to temp in same dir, then mv. Preserves file even if envsubst dies.
     local tmp="$AGENT_WORKING_DIR/.CLAUDE.md.$$"
     export AGENT_NAME AGENT_SLUG AGENT_PORT AGENT_WORKING_DIR AGENT_MEMORY_DIR \
-        AGENT_FRACTAL_DIR AGENT_SWAP_COMPRESSED AGENT_SWAP_FULL \
+        AGENT_FRACTAL_DIR AGENT_GRADIENT_SOURCE_DIR AGENT_SWAP_COMPRESSED AGENT_SWAP_FULL \
         AGENT_CONVERSATION_ROLE AGENT_COUNTERPART_NAME AGENT_IDENTITY_SECTION \
         PROJECT_NAME PROJECT_TAGLINE PROJECT_PATH USER_NAME \
         USER_PRONOUN_SUBJ USER_PRONOUN_OBJ USER_LOCATION
@@ -220,7 +221,19 @@ start_session() {
     generate_claude_md
     echo -e "${BLUE}Rendered CLAUDE.md: ${GREEN}$GENERATED_FILE${NC} from template"
 
-    tmux new-session -d -s "$session_name" -e "HAN_SESSION=$session_name" -c "$AGENT_WORKING_DIR"
+    # All AGENT_* vars forwarded via -e so they're visible inside the tmux
+    # session regardless of tmux server state. Required for /pfc and any future
+    # agent-agnostic skill that reads the env-var contract.
+    tmux new-session -d -s "$session_name" \
+        -e "HAN_SESSION=$session_name" \
+        -e "AGENT_SLUG=$AGENT_SLUG" \
+        -e "AGENT_NAME=$AGENT_NAME" \
+        -e "AGENT_MEMORY_DIR=$AGENT_MEMORY_DIR" \
+        -e "AGENT_FRACTAL_DIR=$AGENT_FRACTAL_DIR" \
+        -e "AGENT_GRADIENT_SOURCE_DIR=$AGENT_GRADIENT_SOURCE_DIR" \
+        -e "AGENT_CONVERSATION_ROLE=$AGENT_CONVERSATION_ROLE" \
+        -e "AGENT_COUNTERPART_NAME=$AGENT_COUNTERPART_NAME" \
+        -c "$AGENT_WORKING_DIR"
 
     # Start server in a bottom pane (20% height) under the auto-restart watchdog.
     # The watchdog writes ~/.han/{slug}-server.pid; han's git hooks SIGTERM that PID

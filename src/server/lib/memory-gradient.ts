@@ -16,6 +16,7 @@ import * as crypto from 'crypto';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { db, gradientStmts, feelingTagStmts, feelingTagHistoryStmts } from '../db';
 import { countTokens } from './token-counter';
+import { gradientConfigForAgent, requireAgentEnv } from './agent-registry';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -29,7 +30,7 @@ interface CompressionResult {
 }
 
 interface GradientProcessingResult {
-    agentName: 'jim' | 'leo';
+    agentName: string;
     sessionDate: string;
     compressionsToDo: number;
     completions: Array<{
@@ -249,7 +250,7 @@ function parseFeelingTag(raw: string): { content: string; feelingTag: string | n
 
 function insertGradientEntry(
     id: string,
-    agent: 'jim' | 'leo',
+    agent: string,
     sessionLabel: string,
     level: string,
     content: string,
@@ -278,7 +279,7 @@ function insertGradientEntry(
 
 /** Write a unit vector entry to both DB and filesystem. Returns the entry ID. */
 function writeUVEntry(
-    agent: 'jim' | 'leo',
+    agent: string,
     sessionLabel: string,
     uvContent: string,
     contentType: string,
@@ -616,7 +617,7 @@ ${content}${FEELING_TAG_INSTRUCTION}`);
  * `scripts/bootstrap-fractal-gradient.ts`) will stop working when this is
  * removed; those are dev tools only and the cutover doesn't depend on them.
  */
-export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise<GradientProcessingResult> {
+export async function processGradientForAgent(agentName: string): Promise<GradientProcessingResult> {
     if (isCascadePaused()) {
         console.log(`[Gradient] processGradientForAgent: paused (cascade-paused signal present), skipping`);
         return {
@@ -629,16 +630,12 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
         };
     }
 
-    const homeDir = process.env.HOME || '/root';
-    const memoryDir =
-        agentName === 'jim'
-            ? path.join(homeDir, '.han', 'memory', 'sessions')
-            : path.join(homeDir, '.han', 'memory', 'leo', 'working-memories');
-
-    const fractionalDir =
-        agentName === 'jim'
-            ? path.join(homeDir, '.han', 'memory', 'fractal', 'jim')
-            : path.join(homeDir, '.han', 'memory', 'fractal', 'leo');
+    // Resolve per-agent paths from the launcher's env vars (fail-loud if unset)
+    // and per-agent file-naming patterns from the registry. Per the aphorism
+    // *"HAN should always be written agent-agnostic"* — no `if agent === 'jim'`.
+    const memoryDir = requireAgentEnv('AGENT_GRADIENT_SOURCE_DIR');
+    const fractionalDir = requireAgentEnv('AGENT_FRACTAL_DIR');
+    const gradientCfg = gradientConfigForAgent(agentName);
 
     ensureDir(fractionalDir);
 
@@ -660,17 +657,12 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
         };
     }
 
-    // Scan for session files (c=0 files in source directory)
-    // Jim: files named like 2026-02-18.md or 2026-02-18-c0.md
-    // Leo: files named like working-memory-full-s98-2026-03-21.md
-    const sourceFiles = fs.readdirSync(memoryDir).filter((f) => {
-        if (agentName === 'leo') {
-            // Match working-memory-full-{label}.md (the full versions have richest content)
-            return f.startsWith('working-memory-full-') && f.endsWith('.md');
-        }
-        const parsed = f.match(/(\d{4}-\d{2}-\d{2})(-c0)?\.md$/);
-        return parsed && (!parsed[2] || parsed[2] === '-c0');
-    });
+    // Scan for source files using the agent's registered filter. Each agent's
+    // file-naming convention reflects its memory rhythm (Jim: date-based
+    // supervisor archives; Leo: session-labelled working-memory archives) — see
+    // `agent-registry.ts`. Adding a new agent = adding an entry there, not
+    // editing this function.
+    const sourceFiles = fs.readdirSync(memoryDir).filter(gradientCfg.sourceFileFilter);
 
     result.compressionsToDo = sourceFiles.length;
 
@@ -690,14 +682,8 @@ export async function processGradientForAgent(agentName: 'jim' | 'leo'): Promise
 
     // Process each session file
     for (const sourceFile of sourceFiles) {
-        // Extract session label for the c1 filename
-        let baseName: string;
-        if (agentName === 'leo') {
-            // working-memory-full-s98-2026-03-21.md → s98-2026-03-21
-            baseName = sourceFile.replace(/^working-memory-full-/, '').replace(/\.md$/, '');
-        } else {
-            baseName = sourceFile.replace(/(-c0)?\.md$/, '');
-        }
+        // Extract the session label using the agent's registered baseName extractor
+        const baseName = gradientCfg.sourceFileBaseName(sourceFile);
         const sourceFilePath = path.join(memoryDir, sourceFile);
 
         try {

@@ -1,6 +1,6 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-04-24 by Leo (S133 — leo-human pre-compose gate + Discord-Leo dispatch parity + ghost server kill)
+> Last updated: 2026-05-04 by Leo (S149 — `/pfc` skill + agent-agnostic deagentification of `processGradientForAgent` call path + DEC-081)
 
 ## Current Stage
 
@@ -36,6 +36,19 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-05-04 — Leo + Jim + Darron, S149 — `/pfc` skill + agent-agnostic deagentification (DEC-081)
+
+- **`/pfc` skill landed** at `~/.claude/skills/pfc/SKILL.md` (user-scope, auto-discovered). Triggered by `/pfc` slash command OR natural-language *"prepare for clear"*. Body is env-driven (`AGENT_SLUG`, `AGENT_MEMORY_DIR`) with fail-loud semantics — no fallback. Steps 1–3 are memory-write; Step 4 invokes the renamed `compress-sessions.ts` for gradient compression. Works for any agent whose launcher exports the env-var contract (Leo, Jim, Tenshi, Casey, Sevn, Six). Outside-repo file; the in-repo CLAUDE.md trigger row points at it.
+- **DEC-081 — Agent-Agnostic Code Discipline + Per-Agent Registry Pattern** (Settled). Codifies the aphorism *"HAN should always be written agent-agnostic"* (Leo's aphorisms.md, On Architecture). Cross-agent infrastructure must not branch on slug literals; type signatures use `string` (not `'jim' | 'leo'`); per-agent structural differences live in `src/server/lib/agent-registry.ts`; path-based config lives in env vars exported by each launcher. Two carve-outs explicitly preserved (scope-correct identity checks, slug-derived path conventions).
+- **First sweep — `processGradientForAgent` call path deagentified.** `memory-gradient.ts` lines 32, 250, 280, 619 widened from `'jim' | 'leo'` to `string`. The function body's hardcoded `if agentName === 'jim'` branches at lines 633–641, 666–673, 695–700 replaced with env-var lookups (`AGENT_GRADIENT_SOURCE_DIR`, `AGENT_FRACTAL_DIR`) plus registry-driven file-naming (`gradientConfigForAgent(slug)`).
+- **New file** — `src/server/lib/agent-registry.ts`. Exports `AGENT_GRADIENT_CONFIG: Record<string, AgentGradientConfig>` with entries for Jim and Leo capturing today's behaviour exactly. `gradientConfigForAgent(slug)` and `requireAgentEnv(name)` helpers throw clear errors on missing config/env.
+- **Renamed** `src/scripts/compress-leo-sessions.ts` → `src/scripts/compress-sessions.ts` via `git mv` (history preserved). Reads `AGENT_SLUG` from env (fail-loud); pre-validates `AGENT_GRADIENT_SOURCE_DIR` and `AGENT_FRACTAL_DIR` before printing the operation banner (Jim's audit catch — banner-before-error confused the failure path).
+- **Launcher symmetry across both forks** — every launcher now exports the same env-var contract AND forwards via explicit `tmux new-session -e` flags so the contract is structurally guaranteed inside the session regardless of tmux server state. HAN: `scripts/{han,hanleo,hanjim,hancasey,hantenshi}` updated. Mikes-han: `scripts/{hancasey,hansevn,hansix}` updated. Leo's `han` and `hanleo` launchers gain the full AGENT_* set (was bare/partial).
+- **Template trigger row updated** — `templates/CLAUDE.template.md` (HAN) gains the `/pfc` pointer so non-Leo agents (Jim/Tenshi/Casey) inherit it on next CLAUDE.md re-render. Mikes-han template change parked behind the pre-existing S141 Emotional Memory Protocol commit.
+- **Future-idea #36 expanded** — `plans/future-ideas.md` now carries Jim's full hardcoded-agent catalogue with line numbers, split into Category A (cross-agent infrastructure debt — `routes/gradient.ts` × 6 validation calls; `dream-gradient.ts` × 3 branches; `wm-sensor.ts` × 1; `backfill-gradient-c0s.ts` × 4 SQL queries; remaining `memory-gradient.ts` helpers) and Category B (scope-correct identity checks, leave alone). Suggested batch order: `routes/gradient.ts` → `dream-gradient.ts` → `wm-sensor.ts` → `backfill` → memory-gradient remainder. Option D (memory-layout normalisation) named as the long-term endgame.
+- **Aphorism added** — `~/.han/memory/fractal/leo/aphorisms.md`: *"HAN should always be written agent-agnostic." (Darron, 2026-05-04. The village is the premise — every memory structure, every dispatch path, every helper. Hardcoding `'jim' | 'leo'` is a violation; abstract through env vars or a registry. When you find a hardcode, name it and fix it.)*
+- **What this does NOT do.** The full agent-agnostic sweep is deferred to future-idea #36 — only `processGradientForAgent` and its immediate helpers in /pfc's call path were touched. Other entrypoints in `memory-gradient.ts` (`getGradientHealth`, `readFractalMemory`, etc.) and the catalogued hits in other files remain typed `'jim' | 'leo'` for now. PR shape: in-place rename, no shim, no fallback, no Settled-touch outside the explicitly-authorised `memory-gradient.ts` call path. Compile-clean across all changes.
 
 ### 2026-04-24 evening — Leo + Darron, S133 — leo-human pre-compose gate + Discord-Leo dispatch parity + ghost-server kill
 
