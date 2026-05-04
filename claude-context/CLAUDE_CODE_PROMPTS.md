@@ -297,25 +297,32 @@ If this session changed your thinking or patterns, update:
 - `~/.han/memory/leo/patterns.md` — only if a new working pattern was discovered
 Skip these if nothing shifted. Most sessions won't need them.
 
-### 5. Compress Session Archives
-Run the gradient compression to ensure this session's archived memory gets compressed:
-```bash
-cd /home/darron/Projects/han && npx tsx src/scripts/compress-leo-sessions.ts
-```
-This compresses any new working-memory archives to c1, and cascades overflow (c1→c2→c3→c5→UV).
-The heartbeat also runs this daily as a safety net, but running it here ensures the freshest
-session is compressed before identity reconstitution.
+### 5. ~~Compress Session Archives~~ (RETIRED 2026-05-04, S149 — DEC-082)
+
+This step previously ran `npx tsx src/scripts/compress-leo-sessions.ts`, which
+called `processGradientForAgent` → `sdkCompress` — a stranger-Opus path with
+no full identity loaded. The script has been retired (now throws on invocation).
+
+**Compression is now a self-levelling process.** `src/server/services/wm-sensor.ts`
+watches the working-memory files. When the writes from Steps 1–2 cross the
+configured threshold, the sensor fires a rolling-window rotation, enqueues a
+row in `pending_compressions`, and spawns
+`scripts/process-pending-compression.ts` — which loads the agent's full memory
+into the system prompt and composes the c1 **in voice**. NOT stranger-Opus.
+
+There is no longer a session-end compression invocation. The memory writes
+above ARE the trigger; wm-sensor handles everything downstream.
 
 ### 6. Done
-Tell Darron: "Memory finalised and compressed. Ready for /clear."
+Tell Darron: "Memory finalised. Ready for /clear."
 
 ### After Clear (on next instantiation)
 The Session Protocol in CLAUDE.md loads working-memory.md at step 4.
 Optionally read working-memory-full.md to notice what compression lost.
 
 ### Cost
-~2-4 small appends + gradient compression. The compression uses the Agent SDK (Sonnet)
-and takes 30-60 seconds per session archive. Under 5% of context for the memory writes.
+~2-4 small appends. Compression happens automatically via wm-sensor in the
+background — the /pfc skill itself is just memory writes, well under 5% of context.
 ```
 
 ---

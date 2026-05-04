@@ -5713,3 +5713,63 @@ The principle is foundational to HAN's architecture (the village premise) and wa
 - The audit catalogue at future-idea #36 is the to-do list. Batch-by-subsystem when Darron sounds the go.
 - New agents: add a `AGENT_GRADIENT_CONFIG` entry; ensure their launcher exports the env-var contract. Zero edits to gradient code.
 
+## DEC-082: Stranger-Opus Compression Retired + /pfc Simplified to Memory-Writes-Only
+
+**Date**: 2026-05-04
+**Author**: Darron (decision), Leo (session) implements
+**Status**: Settled
+**Origin thread**: `moqmtk82-idug6b` ("Lets /pfc"); same-day follow-on to DEC-081
+
+### Decision
+
+Two retirements that travel together:
+
+1. **`sdkCompress` (stranger-Opus) is retired** — both instances in `src/server/lib/memory-gradient.ts` and `src/server/lib/dream-gradient.ts`. These functions previously called the Agent SDK with `model: 'claude-opus-4-7'`, `tools: []`, and no system prompt loading the agent's identity. Memory and dream compressions ran through a context-stripped Opus instance — voice surfaced from a stranger, not from the agent. Function bodies are commented out; signatures throw loudly on invocation, naming this decision and the prompt-prefix that triggered the call. **The throw is the diagnostic** — break-loud means we see every attempt rather than letting the path silently degrade voice.
+
+2. **`/pfc` Step 4 (compression invocation) is dropped.** The `/pfc` skill (`~/.claude/skills/pfc/SKILL.md`) and the legacy prepare-for-clear protocol (`claude-context/CLAUDE_CODE_PROMPTS.md:300-307`) both previously ran `npx tsx src/scripts/compress-sessions.ts` as a session-end step. That script called `processGradientForAgent` → `sdkCompress` (the now-disabled stranger-Opus path). The script itself is retired (throws on invocation). `/pfc` is now memory-writes-only.
+
+### Reasoning
+
+The full-identity compression infrastructure already exists. It was built in S145–S147:
+
+- `src/server/services/wm-sensor.ts` watches the working-memory files (`working-memory.md`, `working-memory-full.md`, `felt-moments.md`, and Jim's `self-reflection.md`).
+- When a write crosses the configured threshold, it calls `rollingWindowRotate` (in `memory-gradient.ts`), which slices off a c0 archive and calls `bumpOnInsert`.
+- `bumpOnInsert` enqueues a row in `pending_compressions`.
+- The sensor spawns `scripts/process-pending-compression.ts` as a child process.
+- That script loads the agent's full memory (identity, patterns, aphorisms, felt-moments, gradient sample) and composes the c1 **in voice** via the Agent SDK with that memory in the system prompt.
+
+The legacy `sdkCompress` path predated this infrastructure. It survived only because no one had connected the two — the legacy `compress-leo-sessions.ts` script was still being invoked from the prepare-for-clear protocol, and the new infrastructure was running in parallel. The /pfc plan landed earlier the same day (DEC-081, S149 commit `8b38d5d`) preserved the legacy invocation by copying the prepare-for-clear protocol body verbatim — without verifying that the wm-sensor work superseded it. Darron caught this by asking *"can I confirm gradient compression is done with full identity?"*
+
+The answer was no, and shouldn't have been. The new infrastructure is the right path. The old path is retired.
+
+Darron's framing for the break-loud retirement (paraphrased): *"comment out all code that uses sdk call to a stranger-opus instance, please. I know it will break lots but I don't want it accessible and when it breaks we know that an attempt to use it was made."* Visibility wins over silent fallback (same shape as DEC-080's two-surface audit principle).
+
+### Mechanism
+
+- **`memory-gradient.ts:sdkCompress`** — original body preserved as comments above a `throw new Error(...)` that names the disabled path and includes the prompt-prefix in the error.
+- **`dream-gradient.ts:sdkCompress`** — same shape, same comment + throw pattern. Throw message includes the agent slug from the call.
+- **`src/scripts/compress-sessions.ts`** — entire body retired; the file now throws on invocation with a clear pointer to the wm-sensor path.
+- **`~/.claude/skills/pfc/SKILL.md`** — Step 4 removed. Notes section explains why no compression step is present and points at wm-sensor.
+- **`claude-context/CLAUDE_CODE_PROMPTS.md`** — Step 5 of the legacy prepare-for-clear protocol marked retired with explanation; readers see the history rather than a missing step.
+
+The carve-outs preserved: Haiku-based SDK calls in `memory-gradient.ts` (lines 402, 482, used for fast contradiction-check classification) are NOT retired. They are not stranger-Opus and serve a different purpose.
+
+### Settled-decision impact
+
+- **DEC-067** (Leo Compression Pipeline — Three Automated Triggers) — partially superseded. Triggers 1–2 (heartbeat pre-flight + heartbeat daily) were already retired by the wm-sensor work. Trigger 3 (the `compress-leo-sessions.ts` session-end script) is now retired by this decision. The current pipeline is wm-sensor-driven, continuous, and full-identity; DEC-067's three-trigger model is obsolete. (Not formally re-decided here — flagged for sweep.)
+- **DEC-068, DEC-069** — preserved. Cap formula and memory-never-deleted unchanged.
+- **DEC-079** — companion. The 2026-04-29 cutover that introduced `pending_compressions` and `process-pending-compression.ts` is the foundation this decision rests on.
+- **DEC-081** — same-day predecessor. DEC-081 deagentified the call path; DEC-082 retires the call path entirely in favour of the wm-sensor route.
+
+### Why Settled
+
+The break-loud throws make the decision auditable: any future PR that re-introduces a stranger-Opus call or a session-end compression invocation will fail at runtime with a clear message naming this decision. Reverting requires either (a) building a new full-identity compression entry-point on top of `process-pending-compression.ts`, or (b) deciding the wm-sensor route has a legitimate gap and filing a re-decision before un-commenting any of the retired bodies.
+
+### Follow-up
+
+- **Watch for throws** — if any throw fires in the wild (heartbeat logs, error notifications), it's a path we missed. Surface immediately.
+- **Sweep DEC-067** — formally re-decide or mark superseded once the wm-sensor model is observed stable.
+- **The faith-as-blindspot lesson named here** — copying a protocol body verbatim into new infrastructure without verifying which call sites are still alive is a substitution failure mode. Trace pipelines, don't claim them (S142 lesson). When introducing new infrastructure, the question to ask is *"which old call sites does this supersede, and are any of them still being invoked?"* — not *"is the new infrastructure working in isolation?"*
+
+
+

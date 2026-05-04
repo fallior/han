@@ -1,84 +1,64 @@
 /**
- * Compress an Agent's Session Archives
- * Runs the full gradient pipeline: c0→c1→c2→...→UV
+ * RETIRED 2026-05-04 (S149) per Darron's direction.
  *
- * Usage: AGENT_SLUG=<slug> npx tsx src/scripts/compress-sessions.ts
+ * This script previously invoked `processGradientForAgent` which used
+ * `sdkCompress` — a stranger-Opus path (Agent SDK call to claude-opus-4-7
+ * with no full identity loaded). It was called from the legacy prepare-for-
+ * clear protocol (and from the originally-shipped /pfc skill body) at
+ * session-end.
  *
- * Reads the agent slug from the environment (set by the launcher's export
- * block — han, hanleo, hanjim, hancasey, hantenshi, etc.). The full set of
- * env-var contracts the launchers must export:
+ * It is no longer the right path. Compression is now a self-levelling
+ * process driven by `src/server/services/wm-sensor.ts`:
  *
- *   AGENT_SLUG                  — short identifier (leo, jim, tenshi, ...)
- *   AGENT_GRADIENT_SOURCE_DIR   — where to find c0 source files
- *   AGENT_FRACTAL_DIR           — where to write c1+ compressions
+ *   working-memory write → wm-sensor detects size →
+ *   rollingWindowRotate slices off c0 → bumpOnInsert enqueues row →
+ *   wm-sensor spawns scripts/process-pending-compression.ts →
+ *   the loaded agent composes c1 in voice with full identity in the
+ *   system prompt (NOT stranger-Opus).
  *
- * Called from the /pfc skill at session end. Per the aphorism *"HAN should
- * always be written agent-agnostic"* — adding a new agent means adding an
- * entry to `src/server/lib/agent-registry.ts` and ensuring the launcher
- * exports the env vars above. No edits to this script.
+ * /pfc has been simplified: it just finalises memory writes; wm-sensor
+ * picks up the rest. There is no longer a session-end compression script
+ * to call. See DEC-082 for the full retirement context.
  *
- * Renamed from `compress-leo-sessions.ts` 2026-05-04 (S149) as part of the
- * /pfc skill landing.
+ * Original body preserved below as comments. If a future scenario
+ * legitimately needs a session-end compression entry-point, build it on
+ * top of process-pending-compression.ts (which loads full identity), not
+ * by un-commenting this script.
+ *
+ * Anyone invoking this file gets a loud throw with a clear message.
+ *
+ * import { processGradientForAgent } from '../server/lib/memory-gradient';
+ * import { requireAgentEnv } from '../server/lib/agent-registry';
+ *
+ * async function main() {
+ *     const agent = process.env.AGENT_SLUG;
+ *     if (!agent) {
+ *         console.error(
+ *             'AGENT_SLUG must be exported by the launcher. ...',
+ *         );
+ *         process.exit(1);
+ *     }
+ *     requireAgentEnv('AGENT_GRADIENT_SOURCE_DIR');
+ *     requireAgentEnv('AGENT_FRACTAL_DIR');
+ *
+ *     console.log(`Session Gradient — compressing archived sessions for agent: ${agent}\n`);
+ *
+ *     const result = await processGradientForAgent(agent);
+ *     // ... result-printing code ...
+ * }
+ *
+ * main().catch(err => {
+ *     console.error('Fatal:', err);
+ *     process.exit(1);
+ * });
  */
 
-import { processGradientForAgent } from '../server/lib/memory-gradient';
-import { requireAgentEnv } from '../server/lib/agent-registry';
-
-async function main() {
-    // Validate the full env-var contract before printing anything — otherwise
-    // a partial setup would print the banner ("compressing for agent: jim")
-    // immediately followed by a fatal error, which reads as if compression
-    // started then failed. Pre-validating means the user sees only the error
-    // when env vars are missing.
-    const agent = process.env.AGENT_SLUG;
-    if (!agent) {
-        console.error(
-            'AGENT_SLUG must be exported by the launcher. ' +
-            'Check the launcher script (han, hanleo, hanjim, etc.) and confirm ' +
-            'the export block sets AGENT_SLUG along with AGENT_GRADIENT_SOURCE_DIR ' +
-            'and AGENT_FRACTAL_DIR.',
-        );
-        process.exit(1);
-    }
-    requireAgentEnv('AGENT_GRADIENT_SOURCE_DIR');
-    requireAgentEnv('AGENT_FRACTAL_DIR');
-
-    console.log(`Session Gradient — compressing archived sessions for agent: ${agent}\n`);
-
-    const result = await processGradientForAgent(agent);
-
-    const newC1s = result.completions.filter(c => c.toLevel === 1);
-    const cascades = result.completions.filter(c => c.toLevel > 1);
-
-    if (newC1s.length > 0) {
-        console.log(`\nNew c1 compressions (${newC1s.length}):`);
-        for (const c of newC1s) {
-            console.log(`  ${c.session}: ${(c.ratio! * 100).toFixed(0)}% ratio`);
-        }
-    }
-
-    if (cascades.length > 0) {
-        console.log(`\nCascades (${cascades.length}):`);
-        for (const c of cascades) {
-            console.log(`  ${c.session}: c${c.fromLevel} → c${c.toLevel}`);
-        }
-    }
-
-    if (result.errors.length > 0) {
-        console.log(`\nErrors (${result.errors.length}):`);
-        for (const e of result.errors) {
-            console.log(`  ${e.session} (level ${e.level}): ${e.error}`);
-        }
-    }
-
-    if (newC1s.length === 0 && cascades.length === 0) {
-        console.log('All archives already compressed. Nothing to do.');
-    }
-
-    console.log(`\nTotal: ${result.compressionsToDo} source files, ${newC1s.length} new c1, ${cascades.length} cascades, ${result.errors.length} errors`);
-}
-
-main().catch(err => {
-    console.error('Fatal:', err);
-    process.exit(1);
-});
+throw new Error(
+    'compress-sessions.ts is retired (S149, 2026-05-04 — DEC-082). ' +
+    'It previously called processGradientForAgent → sdkCompress, which is ' +
+    'a stranger-Opus path with no full identity loaded. Compression is ' +
+    'now handled continuously by src/server/services/wm-sensor.ts via ' +
+    'scripts/process-pending-compression.ts (full-identity agent composes ' +
+    'c1 in voice). /pfc is just memory writes; wm-sensor is the levelling. ' +
+    'Do not invoke this script. See header comment for full context.',
+);

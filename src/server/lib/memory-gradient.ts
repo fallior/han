@@ -135,32 +135,54 @@ function estimateTokenCount(text: string): number {
 // ── Helper: SDK query for text generation ──────────────────────
 
 async function sdkCompress(prompt: string): Promise<string> {
-    const cleanEnv: Record<string, string | undefined> = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
+    // ── DISABLED 2026-05-04 (S149) per Darron's direction ─────────────
+    // This function spawned a stranger-Opus instance — Agent SDK call to
+    // claude-opus-4-7 with no full identity loaded (tools: [], no system
+    // prompt establishing Leo or Jim). The rebuild work in S140-S148 used
+    // a different mechanism (full-identity Leo composing in-session via
+    // agent-bump-step.ts). Darron's read 2026-05-04: stranger-Opus calls
+    // should not be silently used for memory compression. Comment-out +
+    // throw-loud rather than silent removal — when something tries to
+    // compress via this path, we want to know it was attempted.
+    //
+    // Original body preserved below; restore only after the design
+    // conversation lands a Settled decision on which compression
+    // mechanism /pfc and the rolling-window cascade should use.
+    //
+    // const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    // delete cleanEnv.CLAUDECODE;
+    //
+    // const q = agentQuery({
+    //     prompt,
+    //     options: {
+    //         model: 'claude-opus-4-7',
+    //         maxTurns: 1,
+    //         cwd: process.env.HOME || '/root',
+    //         permissionMode: 'bypassPermissions',
+    //         allowDangerouslySkipPermissions: true,
+    //         env: cleanEnv,
+    //         persistSession: false,
+    //         tools: [],
+    //     },
+    // });
+    //
+    // let result = '';
+    // for await (const message of q) {
+    //     if (message.type === 'result' && message.subtype === 'success') {
+    //         result = message.result || '';
+    //     }
+    // }
+    //
+    // if (!result) throw new Error('No result from SDK query');
+    // return result;
 
-    const q = agentQuery({
-        prompt,
-        options: {
-            model: 'claude-opus-4-7',
-            maxTurns: 1,
-            cwd: process.env.HOME || '/root',
-            permissionMode: 'bypassPermissions',
-            allowDangerouslySkipPermissions: true,
-            env: cleanEnv,
-            persistSession: false,
-            tools: [],
-        },
-    });
-
-    let result = '';
-    for await (const message of q) {
-        if (message.type === 'result' && message.subtype === 'success') {
-            result = message.result || '';
-        }
-    }
-
-    if (!result) throw new Error('No result from SDK query');
-    return result;
+    throw new Error(
+        'sdkCompress disabled — stranger-Opus calls retired pending design ' +
+        'conversation (S149, 2026-05-04). The caller attempted a memory ' +
+        'compression via Agent SDK with no full-identity context. See ' +
+        'memory-gradient.ts:sdkCompress comment for context. ' +
+        `Prompt prefix (first 100 chars): ${prompt.slice(0, 100).replace(/\n/g, ' ')}`,
+    );
 }
 
 // ── Helper: Ensure directory exists ────────────────────────────

@@ -135,40 +135,62 @@ function estimateTokens(text: string): number {
  * Used for all compression calls — single-turn, no tools.
  */
 async function sdkCompress(prompt: string, systemAppend: string = '', agent: AgentName = 'leo'): Promise<string> {
-    const cleanEnv: Record<string, string | undefined> = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
+    // ── DISABLED 2026-05-04 (S149) per Darron's direction ─────────────
+    // This function spawned a stranger-Opus instance — Agent SDK call to
+    // claude-opus-4-7 with no full identity loaded (tools: [], optional
+    // systemAppend text only, not the full memory load Leo or Jim get at
+    // session/cycle start). Used for dream-day → dream-week → dream-month
+    // → UV compressions. Same retirement rationale as memory-gradient.ts:
+    // stranger-Opus calls should not be silently used for memory
+    // compression. Comment-out + throw-loud rather than silent removal.
+    //
+    // Original body preserved below; restore only after the design
+    // conversation lands a Settled decision on which compression
+    // mechanism the dream cascade should use.
+    //
+    // const cleanEnv: Record<string, string | undefined> = { ...process.env };
+    // delete cleanEnv.CLAUDECODE;
+    //
+    // const paths = getAgentDreamPaths(agent);
+    // const q = agentQuery({
+    //     prompt,
+    //     options: {
+    //         model: 'claude-opus-4-7',
+    //         maxTurns: 1,
+    //         cwd: paths.memoryDir,
+    //         permissionMode: 'bypassPermissions',
+    //         allowDangerouslySkipPermissions: true,
+    //         env: cleanEnv,
+    //         persistSession: false,
+    //         tools: [],
+    //         ...(systemAppend ? {
+    //             systemPrompt: {
+    //                 type: 'preset' as const,
+    //                 preset: 'claude_code' as const,
+    //                 append: systemAppend,
+    //             },
+    //         } : {}),
+    //     },
+    // });
+    //
+    // let result = '';
+    // for await (const message of q) {
+    //     if (message.type === 'result' && message.subtype === 'success') {
+    //         result = message.result || '';
+    //     }
+    // }
+    //
+    // if (!result) throw new Error('No result from SDK query');
+    // return result;
 
-    const paths = getAgentDreamPaths(agent);
-    const q = agentQuery({
-        prompt,
-        options: {
-            model: 'claude-opus-4-7',
-            maxTurns: 1,
-            cwd: paths.memoryDir,
-            permissionMode: 'bypassPermissions',
-            allowDangerouslySkipPermissions: true,
-            env: cleanEnv,
-            persistSession: false,
-            tools: [],
-            ...(systemAppend ? {
-                systemPrompt: {
-                    type: 'preset' as const,
-                    preset: 'claude_code' as const,
-                    append: systemAppend,
-                },
-            } : {}),
-        },
-    });
-
-    let result = '';
-    for await (const message of q) {
-        if (message.type === 'result' && message.subtype === 'success') {
-            result = message.result || '';
-        }
-    }
-
-    if (!result) throw new Error('No result from SDK query');
-    return result;
+    throw new Error(
+        'sdkCompress (dream-gradient) disabled — stranger-Opus calls ' +
+        'retired pending design conversation (S149, 2026-05-04). The ' +
+        `caller attempted a dream compression for agent='${agent}' via ` +
+        'Agent SDK with no full-identity context. See dream-gradient.ts:' +
+        'sdkCompress comment for context. ' +
+        `Prompt prefix (first 100 chars): ${prompt.slice(0, 100).replace(/\n/g, ' ')}`,
+    );
 }
 
 // ── Parse explorations into nightly blocks ─────────────────────
