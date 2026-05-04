@@ -23,7 +23,7 @@ import * as os from 'os';
 const SIGNALS_DIR = path.join(os.homedir(), '.han', 'signals');
 const STALE_LOCK_AGE_MS = 5 * 60 * 1000; // 5 minutes
 
-function lockPathFor(agent: 'jim' | 'leo'): string {
+function lockPathFor(agent: string): string {
     return path.join(SIGNALS_DIR, `wm-sensor-${agent}-active`);
 }
 
@@ -35,7 +35,7 @@ function lockPathFor(agent: 'jim' | 'leo'): string {
  * Stale-lock recovery: if the lock file is older than STALE_LOCK_AGE_MS, the
  * holder is presumed dead and the lock is force-released.
  */
-export function acquireWmSensorLock(agent: 'jim' | 'leo'): boolean {
+export function acquireWmSensorLock(agent: string): boolean {
     fs.mkdirSync(SIGNALS_DIR, { recursive: true });
     const lockPath = lockPathFor(agent);
     try {
@@ -60,7 +60,7 @@ export function acquireWmSensorLock(agent: 'jim' | 'leo'): boolean {
  * Release the per-agent lock. Idempotent — safe to call even if the lock
  * isn't held (no-op if the file doesn't exist).
  */
-export function releaseWmSensorLock(agent: 'jim' | 'leo'): void {
+export function releaseWmSensorLock(agent: string): void {
     try { fs.unlinkSync(lockPathFor(agent)); } catch { /* already gone */ }
 }
 
@@ -68,7 +68,7 @@ export function releaseWmSensorLock(agent: 'jim' | 'leo'): void {
  * Peek without modifying — returns true if the lock is currently held by
  * any (alive, non-stale) process.
  */
-export function isWmSensorLocked(agent: 'jim' | 'leo'): boolean {
+export function isWmSensorLocked(agent: string): boolean {
     const lockPath = lockPathFor(agent);
     if (!fs.existsSync(lockPath)) return false;
     try {

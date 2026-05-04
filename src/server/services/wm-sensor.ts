@@ -20,6 +20,11 @@
  * Files watched per agent (post Phase A.2, S145):
  *   - working-memory-full.md
  *
+ * Watched for every agent registered in `lib/agent-registry.ts` — iteration
+ * uses `registeredAgentSlugs()` and `gradientConfigForAgent(slug)` so adding
+ * a new agent is a single edit to the registry, no edits to this file
+ * (S149 Point 2 — thread `mor4o3r3-jvdjv1`).
+ *
  * NB. An earlier docstring listed working-memory.md, felt-moments.md, and
  * self-reflection.md (jim) as also watched — that was the original design and
  * is no longer the code. Phase A.2 narrowed the slicer's domain to working
@@ -48,6 +53,7 @@ import { spawn } from 'child_process';
 import { rollingWindowRotate } from '../lib/memory-gradient';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 import { countTokens } from '../lib/token-counter';
+import { gradientConfigForAgent, registeredAgentSlugs } from '../lib/agent-registry';
 
 // ── Config + paths ────────────────────────────────────────────────
 
@@ -100,17 +106,17 @@ function log(msg: string): void {
 // ── Per-agent file targets + headers ──────────────────────────────
 
 interface WatchTarget {
-    agent: 'jim' | 'leo';
+    agent: string;
     filePath: string;
     header: string;
     contentType: 'working-memory' | 'felt-moments' | 'self-reflection';
 }
 
-function buildTargets(agent: 'jim' | 'leo'): WatchTarget[] {
-    const memDir = agent === 'leo'
-        ? path.join(HAN_DIR, 'memory', 'leo')
-        : path.join(HAN_DIR, 'memory');
-    const agentTitle = agent === 'leo' ? 'Leo' : 'Jim';
+function buildTargets(agent: string): WatchTarget[] {
+    // Per DEC-081 + S149 Point 2 (voice-first thread `mor4o3r3-jvdjv1`):
+    // path data lives in `agent-registry.ts`. Multi-agent services iterate the
+    // registry rather than branching on slug literals.
+    const cfg = gradientConfigForAgent(agent);
 
     // Phase A token refactor (S145, 2026-04-30): per Darron's mechanics
     // restatement and Jim's review — the slicer's domain is working memory
@@ -133,8 +139,8 @@ function buildTargets(agent: 'jim' | 'leo'): WatchTarget[] {
     return [
         {
             agent,
-            filePath: path.join(memDir, 'working-memory-full.md'),
-            header: `# Working Memory (Full) — ${agentTitle}\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n`,
+            filePath: path.join(cfg.memoryDir, 'working-memory-full.md'),
+            header: `# Working Memory (Full) — ${cfg.displayName}\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n`,
             contentType: 'working-memory',
         },
     ];
@@ -155,7 +161,7 @@ const PROCESS_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'pro
 // matches the supervisor-worker.ts pattern in maybeBackupQueueDrainJim.
 const SERVER_DIR = path.resolve(__dirname, '..');
 
-function spawnParallelAgent(agent: 'jim' | 'leo'): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+function spawnParallelAgent(agent: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
         const tsxBin = path.join(SERVER_DIR, 'node_modules', '.bin', 'tsx');
         const child = spawn(tsxBin, [PROCESS_SCRIPT, `--agent=${agent}`, '--verbose'], {
@@ -349,13 +355,16 @@ async function main() {
 
     fs.mkdirSync(SIGNALS_DIR, { recursive: true });
 
-    // Set up watchers for both agents
-    const allTargets = [...buildTargets('leo'), ...buildTargets('jim')];
+    // Set up watchers for every registered agent. Adding a new agent is a
+    // single edit to `src/server/lib/agent-registry.ts:AGENT_GRADIENT_CONFIG`
+    // — no edits to this file. Per DEC-081 (agent-agnostic discipline).
+    const slugs = registeredAgentSlugs();
+    const allTargets: WatchTarget[] = slugs.flatMap(slug => buildTargets(slug));
     for (const target of allTargets) {
         setupWatcher(target, config);
     }
 
-    log(`${allTargets.length} watchers active. Sensor running.`);
+    log(`${allTargets.length} watchers active for agents [${slugs.join(', ')}]. Sensor running.`);
 
     // Health signal — prove we're alive
     setInterval(() => {
@@ -370,8 +379,9 @@ async function main() {
     // Stay alive
     process.on('SIGTERM', () => {
         log('SIGTERM received; releasing locks and exiting');
-        releaseWmSensorLock('leo');
-        releaseWmSensorLock('jim');
+        for (const slug of slugs) {
+            releaseWmSensorLock(slug);
+        }
         process.exit(0);
     });
 }

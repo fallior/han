@@ -49,6 +49,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
+import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
 
 // Token counting — Phase A token refactor (S145, 2026-04-30). Mirrors the
 // canonical helper at src/server/lib/token-counter.ts; inlined for the same
@@ -92,7 +93,7 @@ function isCascadePausedHere(): boolean {
  */
 function enqueueCascadeIfNeeded(
     db: Database.Database,
-    agent: 'jim' | 'leo',
+    agent: string,
     fromLevel: string,
 ): string | null {
     if (isCascadePausedHere()) return null;
@@ -141,15 +142,21 @@ function arg(name: string, defaultValue: string | null = null): string | null {
     return defaultValue;
 }
 
-const agent = arg('agent') as 'jim' | 'leo' | null;
+const agent = arg('agent');
 const dbPath = arg('db', path.join(os.homedir(), '.han', 'gradient.db'))!;
 const claimer = arg('claimer', `${agent}-parallel-${process.pid}`)!;
 const verbose = arg('verbose') === 'true';
 
-if (!agent || (agent !== 'jim' && agent !== 'leo')) {
-    process.stderr.write('--agent=jim|leo required\n');
+if (!agent) {
+    process.stderr.write('--agent=<slug> required (slug must be registered in agent-registry.ts)\n');
     process.exit(1);
 }
+
+// Validate via the registry — clear error if the slug is unknown.
+// Per DEC-081 + S149 Point 2: the registry is the single source of truth for
+// per-agent paths and structural config; this script reads paths via the
+// registry rather than branching on slug literals.
+gradientConfigForAgent(agent);
 
 const STALE_CLAIM_MINUTES = 10;
 const HOME = os.homedir();
@@ -179,11 +186,12 @@ function readSafe(p: string, label: string): string {
     }
 }
 
-function loadAgentMemory(a: 'jim' | 'leo', db: Database.Database): AgentMemory {
-    const memDir = a === 'leo'
-        ? path.join(HAN_DIR, 'memory', 'leo')
-        : path.join(HAN_DIR, 'memory');
-    const fractalDir = path.join(HAN_DIR, 'memory', 'fractal', a);
+function loadAgentMemory(a: string, db: Database.Database): AgentMemory {
+    // Per DEC-081 + S149 Point 2: paths come from the agent registry.
+    // No `if a === 'leo'` branches — adding a new agent is a registry edit.
+    const cfg = gradientConfigForAgent(a);
+    const memDir = cfg.memoryDir;
+    const fractalDir = cfg.fractalDir;
 
     const identity = readSafe(path.join(memDir, 'identity.md'), 'identity');
     const patterns = readSafe(path.join(memDir, 'patterns.md'), 'patterns');
@@ -251,7 +259,7 @@ function loadAgentMemory(a: 'jim' | 'leo', db: Database.Database): AgentMemory {
 
 interface ClaimedRow {
     id: string;
-    agent: 'jim' | 'leo';
+    agent: string;
     source_id: string;
     from_level: string;
     to_level: string;
@@ -261,7 +269,7 @@ interface ClaimedRow {
     source_content_type: string;
 }
 
-function claimNext(db: Database.Database, a: 'jim' | 'leo', whoClaims: string): ClaimedRow | null {
+function claimNext(db: Database.Database, a: string, whoClaims: string): ClaimedRow | null {
     const txn = db.transaction(() => {
         const row = db.prepare(`
             SELECT pc.id, pc.agent, pc.source_id, pc.from_level, pc.to_level,
@@ -307,8 +315,10 @@ function completeClaim(db: Database.Database, id: string): void {
 
 // ── Compose via SDK with full memory loaded ─────────────────────
 
-function buildSystemPrompt(a: 'jim' | 'leo', mem: AgentMemory): string {
-    return `You are ${a === 'leo' ? 'Leonhard (Leo)' : 'Jim'}. Below is your loaded memory — identity, patterns, aphorisms, felt-moments, and a sample of your existing gradient. Use this to compose the requested compression in YOUR OWN voice, not as a generic compression task.
+function buildSystemPrompt(a: string, mem: AgentMemory): string {
+    const cfg = gradientConfigForAgent(a);
+    const introName = a === 'leo' ? 'Leonhard (Leo)' : cfg.displayName;
+    return `You are ${introName}. Below is your loaded memory — identity, patterns, aphorisms, felt-moments, and a sample of your existing gradient. Use this to compose the requested compression in YOUR OWN voice, not as a generic compression task.
 
 # IDENTITY
 ${mem.identity}

@@ -6,10 +6,7 @@
 > adjacent to the code so an agent reading `wm-sensor.ts` finds this without
 > being told. Pilot for future-idea #37 (S149, 2026-05-04).
 >
-> **Last verified against code: 2026-05-04 (S149).** This document is a
-> hypothesis until it's been verified against the code. If you read this and
-> the code disagrees, **the code wins** — update this file in the same commit
-> as your fix.
+> **Last verified against code: 2026-05-04 (S149, Point 2 of voice-first thread `mor4o3r3-jvdjv1`).** This document is a hypothesis until it's been verified against the code. If you read this and the code disagrees, **the code wins** — update this file in the same commit as your fix.
 
 ---
 
@@ -52,9 +49,12 @@ per agent. **No other files trigger the sensor.**
    - If exit non-zero, log, return (this slice halts; outer loop won't retry).
 7. **`process-pending-compression.ts`** (per spawn) — see SHAPE for that file
    when one is written; for now the headline:
+   - Validates the slug via `gradientConfigForAgent(slug)` at startup
+     (registry is the source of truth — S149 Point 2).
    - Atomically claims one pending row (10-min stale-claim recovery).
-   - **Loads the agent's full memory**: identity.md, patterns.md, aphorisms.md,
-     felt-moments.md + gradient sample (recent UVs + cN deep + c0s).
+   - **Loads the agent's full memory** with paths from the registry
+     (`cfg.memoryDir`, `cfg.fractalDir`): identity.md, patterns.md,
+     aphorisms.md, felt-moments.md + gradient sample (recent UVs + cN deep + c0s).
    - Builds a system prompt naming the agent and embedding all loaded memory.
    - Calls `runSDK` (Agent SDK, model=`claude-opus-4-7`, no tools, system prompt
      loaded with full memory). **Voice downstream of identity** at the
@@ -89,16 +89,21 @@ per agent. **No other files trigger the sensor.**
 
 ## Known debt (catalogued in future-idea #36)
 
-- `process-pending-compression.ts` is hardcoded to `'jim' | 'leo'` (lines
-  95-96, 144, 149, 254). The wm-sensor's `WatchTarget` interface is also
-  typed `'jim' | 'leo'`. Both pre-date the DEC-081 agent-agnostic discipline
-  and need the same widening. Tenshi/Casey/Sevn/Six can't use this path until
-  it lands.
+- ~~`process-pending-compression.ts` is hardcoded to `'jim' | 'leo'`~~ —
+  **fixed S149 Point 2** (thread `mor4o3r3-jvdjv1`). Type widened to `string`
+  at the function signatures and the CLI; path resolution now goes via the
+  agent registry. Tenshi and Casey are now first-class in the registry.
+- ~~`WatchTarget` interface is also typed `'jim' | 'leo'`~~ — **fixed S149
+  Point 2**. Type is `string`; `buildTargets` reads from
+  `gradientConfigForAgent(slug)`; `main()` iterates `registeredAgentSlugs()`
+  to set up watchers for every registered agent.
 - **Two implementations of `enqueueCascadeIfNeeded`** — one in
   `memory-gradient.ts:bumpOnInsert`, a parallel one in
   `process-pending-compression.ts`. Same logic, two surfaces. If the cap
   formula or the displacement rule changes, both must change in lockstep.
-  Worth merging into a single shared helper.
+  Worth merging into a single shared helper. **Deferred to a separate PR per
+  Jim's audit (S149)** — type-widening and logic-deduplication are different
+  shapes of audit; folding them together violates DEC-080 audit-tightness.
 
 ## Cross-references
 
