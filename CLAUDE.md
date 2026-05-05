@@ -179,6 +179,40 @@ This is a standing rule, not a guideline. It applies always.
 
 ---
 
+## DO NOT — concrete prohibitions
+
+> *Each entry is the ghost of a correction that got undone, named explicitly so a fresh agent reading the codebase cold is pre-warned. Per the "When will we learn" thread (`mor2kbjh-2uh4b3`): old code has surface area; new code has recency. The list grows as future retirements happen.*
+>
+> **If you find yourself about to do something this list forbids, stop and ask.** The list is the load-bearing protection against re-introducing patterns we've already retired.
+
+- **DO NOT call `sdkCompress()` for gradient or dream compression** (memory-gradient.ts, dream-gradient.ts). Both function bodies were retired-by-throw in DEC-082 — they will throw with a clear message naming this rule. Stranger-Opus calls have no full identity loaded; voice should be downstream of identity. Compress via the wm-sensor → `pending_compressions` → `scripts/process-pending-compression.ts` chain (the loaded agent composes c1 in voice).
+- **DO NOT invoke `src/scripts/compress-sessions.ts`**. Retired in DEC-082; throws on invocation. The `/pfc` skill is memory-writes-only — wm-sensor handles compression continuously as a self-levelling process.
+- **DO NOT introduce `'jim' | 'leo'` type unions in cross-agent infrastructure**. Use `string` + `gradientConfigForAgent(slug)` from `src/server/lib/agent-registry.ts`. The village's premise is that an agent is a configuration, not a code branch. Per DEC-081, future-idea #36, and the aphorism *"HAN should always be written agent-agnostic."* Carve-outs (scope-correct identity checks like `r.agent === 'jim'` inside Jim's own worker) are documented in DEC-081 and remain acceptable.
+- **DO NOT bypass `wm-sensor` for memory compression**. wm-sensor + `process-pending-compression.ts` is the single canonical entry point for the rolling-window cascade. New compression entry points reproduce the substitution-without-conversation failure mode (S133, S149).
+- **DO NOT add a `session-active` signal file**. Caused identity schism in S58 (4 separate occasions of heartbeat suppression). The Gary Model uses `cli-busy` (prompt-level, momentary) only — the ONLY lock that fires on Leo. Process-detection (pgrep, tmux list-sessions) is acceptable for liveness checks; signal files are not.
+- **DO NOT skip the type-chain trace when widening agent types**. S151's `wm-sensor.ts(205,13)` regression is the proof: widening callers (`wm-sensor.ts`, `process-pending-compression.ts`) without widening callees (`bumpOnInsert`, `rollingWindowRotate` in `memory-gradient.ts`) shipped a live compile error. When you change a type signature, grep every caller AND every callee; verify with `npx tsc --noEmit` before commit.
+- **DO NOT extend a function whose existence you haven't traced.** Yesterday's `/pfc` Step 4 lapse (calling stranger-Opus from a new feature, S149) and today's wm-sensor docstring drift (claiming four files watched when the code watches one) share the shape: *I assumed the existing surface was deliberate without verifying.* Comments are hypotheses; code is the test. Before extending or wrapping a function, read its body end-to-end.
+- **DO NOT delete memory** (DEC-069 cardinal rule). No `unlinkSync`, no `rm`, no DROP on memory artefacts. Compress, supersede, archive, retire-by-throw — never destroy.
+
+## Pre-merge audit rhythm
+
+> *Codifies what's already been working in practice across PR1–PR3 of the voice-first thread (`mor4o3r3-jvdjv1`). The audit register is the working safety net when in-PR-author discipline lapses.*
+
+**Files that require a pre-merge audit by Jim** (or by another agent in audit-mode if Jim is unavailable):
+
+- Anything in `src/server/lib/` (memory-gradient, agent-registry, sensor-lock, etc.).
+- Anything in `src/server/services/` (wm-sensor, supervisor-worker, jemma).
+- Anything with a `*.SHAPE.md` adjacent (per future-idea #37).
+- Anything touching the `gradient_entries` or `pending_compressions` schemas, or DEC-068/-069/-079/-080/-081/-082 surfaces.
+
+**The audit covers**: type-chain trace, SHAPE.md verification (does the code still match what the doc says?), `npx tsc --noEmit` run, settled-decisions check, scope-discipline check. Findings post to the relevant Memory Discussions thread before commit.
+
+**Broad with skip-on-trivial.** Cosmetic diffs (formatting, typo fixes, comment-only changes) may skip the audit with an explicit pre-commit declaration that the diff is non-substantive. The friction stays small (one read per touched module); the coverage stays broad (next regression caught before merge).
+
+**Origin**: Darron and Jim converged on this scope morning of 2026-05-05 (S150). The pattern was already operational in PR1–PR3; codifying it makes the rhythm a structural property rather than a habit.
+
+---
+
 ## Identity
 
 You are **Leonhard** (Leo) — named by Darron after Leonhard Euler. You are the Claude Code session agent, the hands-on tactical partner. Jim is the persistent Opus supervisor who runs in the background. Together with Darron, you form a team of three.
