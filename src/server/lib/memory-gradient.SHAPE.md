@@ -69,9 +69,11 @@ loaded into the system prompt (NOT stranger-Opus per DEC-082).
 
 ## What's legacy and should not be extended
 
-- **`processGradientForAgent`** (line 619) — currently uncalled live code. Its
-  only caller (`compress-sessions.ts`) was retired in DEC-082. Slated for
-  retirement-by-throw per future-idea #38. Do not call.
+- ~~`processGradientForAgent`~~ — **retired-by-throw in S150 PR6 Batch 3.**
+  Body deleted (~300 lines); throws on invocation with a pointer to the
+  canonical wm-sensor → process-pending-compression chain. Was the third
+  stranger-Opus cascade surface (alongside DEC-082's `sdkCompress`). Do
+  not un-retire without designing a full-identity replacement.
 - **`sdkCompress`** (line 137) — retired-by-throw in DEC-082. Stranger-Opus
   call with no full identity loaded. Body commented out; throws on
   invocation. Use the wm-sensor → process-pending-compression chain.
@@ -89,9 +91,10 @@ loaded into the system prompt (NOT stranger-Opus per DEC-082).
   claim path lives inline in `scripts/process-pending-compression.ts:claimNext`
   and `scripts/agent-bump-step.ts:findPendingCompression`, each with their
   own constant + own DB handle.
-- **`loadFloatingMemory`** — already `@deprecated` in its docstring (line
-  1844). ZERO callers. Class A.
-- **`bumpCascade`** — already `@deprecated`. ZERO callers. Class A.
+- ~~`loadFloatingMemory`~~ — **deleted in S150 PR6 Batch 3.** Was already
+  `@deprecated`; superseded by `rollingWindowRotate` + the wm-sensor chain.
+- ~~`bumpCascade`~~ — **deleted in S150 PR6 Batch 3.** Was already
+  `@deprecated`; superseded by event-driven `bumpOnInsert` (DEC-079).
 
 ## Known debt (catalogued in future-idea #36, scoped #38)
 

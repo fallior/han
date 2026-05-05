@@ -36,7 +36,7 @@ import { withMemorySlot } from '../lib/memory-slot';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 import { spawn as spawnChild } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
-import { rotateMemoryFile, loadMemoryFileGradient, loadFloatingMemory, loadTraversableGradient, activeCascade, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
+import { rotateMemoryFile, loadMemoryFileGradient, loadTraversableGradient, activeCascade, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 
 // ── Types ────────────────────────────────────────────────────

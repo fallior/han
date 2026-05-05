@@ -620,332 +620,39 @@ ${content}${FEELING_TAG_INSTRUCTION}`);
     }
 }
 
-// ── Function 3: processGradientForAgent ────────────────────────
+// ── Function 3: processGradientForAgent (RETIRED-BY-THROW S150 PR6 Batch 3) ────
 
 /**
- * Process the file-based fractal gradient for an agent — older path that
- * predates the unified gradient_entries table. Walks fractal/{agent}/c0/
- * etc. on disk and compresses level-by-level via sdkCompress.
+ * RETIRED 2026-05-05 (S150 PR6 Batch 3). The function previously walked the
+ * file-based fractal gradient for an agent — an older path that predated the
+ * unified `gradient_entries` table. It was the third stranger-Opus cascade
+ * surface (alongside `sdkCompress` retired by DEC-082) and its only callers
+ * were `scripts/compress-sessions.ts` (also retired by DEC-082) and the
+ * bootstrap scripts (retired in PR6 Batch 4 same day).
  *
- * @deprecated DEC-079 (2026-04-29 cutover, Phase 3). Call sites in
- * supervisor-worker.ts (Jim's session-gradient pipeline) and leo-heartbeat.ts
- * (Leo's session-gradient pipeline) deleted; this function is now unreachable
- * from the live system. Per Jim + Darron's Option-3 verdict: the time-based
- * file-gradient trigger was a third stranger-Opus cascade surface. The
- * database-side gradient (gradient_entries + pending_compressions queue) is
- * now canonical. Phase 12 cleanup either removes this entirely OR redesigns
- * through the queue if file-based mirroring proves load-bearing.
+ * **Retire-by-throw rather than full deletion**: per the DEC-082 pattern for
+ * `sdkCompress`, this surface is preserved as a paper-trail tombstone so any
+ * forgotten caller fails loud at runtime with a clear pointer to the
+ * canonical replacement (the wm-sensor → `pending_compressions` →
+ * `process-pending-compression.ts` chain). If a future scenario legitimately
+ * needs a pull-based file-gradient processor, build it on top of the
+ * `process-pending-compression.ts` path with full-identity loading; do NOT
+ * un-comment a stranger-Opus implementation here.
  *
- * Manual callers (`scripts/compress-leo-sessions.ts`,
- * `scripts/bootstrap-fractal-gradient.ts`) will stop working when this is
- * removed; those are dev tools only and the cutover doesn't depend on them.
+ * Original body (~300 lines) deleted to avoid serving as a copy-paste source
+ * for stranger-Opus cascades. Git history preserves the implementation if
+ * needed for forensic reference (commit b72c455 was the last commit
+ * containing the body).
  */
 export async function processGradientForAgent(agentName: string): Promise<GradientProcessingResult> {
-    if (isCascadePaused()) {
-        console.log(`[Gradient] processGradientForAgent: paused (cascade-paused signal present), skipping`);
-        return {
-            agentName,
-            sessionDate: new Date().toISOString().split('T')[0],
-            compressionsToDo: 0,
-            completions: [],
-            totalTokensUsed: 0,
-            errors: [],
-        };
-    }
-
-    // Resolve per-agent paths from the launcher's env vars (fail-loud if unset)
-    // and per-agent file-naming patterns from the registry. Per the aphorism
-    // *"HAN should always be written agent-agnostic"* — no `if agent === 'jim'`.
-    const memoryDir = requireAgentEnv('AGENT_GRADIENT_SOURCE_DIR');
-    const fractionalDir = requireAgentEnv('AGENT_FRACTAL_DIR');
-    const gradientCfg = gradientConfigForAgent(agentName);
-
-    ensureDir(fractionalDir);
-
-    const result: GradientProcessingResult = {
-        agentName,
-        sessionDate: new Date().toISOString().split('T')[0],
-        compressionsToDo: 0,
-        completions: [],
-        totalTokensUsed: 0,
-        errors: [],
-    };
-
-    // Check if memory directory exists
-    if (!fs.existsSync(memoryDir)) {
-        return {
-            ...result,
-            compressionsToDo: 0,
-            errors: [{ session: 'N/A', level: 0, error: `Memory directory not found: ${memoryDir}` }],
-        };
-    }
-
-    // Scan for source files using the agent's registered filter. Each agent's
-    // file-naming convention reflects its memory rhythm (Jim: date-based
-    // supervisor archives; Leo: session-labelled working-memory archives) — see
-    // `agent-registry.ts`. Adding a new agent = adding an entry there, not
-    // editing this function.
-    const sourceFiles = fs.readdirSync(memoryDir).filter(gradientCfg.sourceFileFilter);
-
-    result.compressionsToDo = sourceFiles.length;
-
-    // Ensure c1 dir exists
-    const c1Dir = path.join(fractionalDir, 'c1');
-    ensureDir(c1Dir);
-
-    // Pre-load all existing gradient labels for this agent (for dedup check).
-    // Cascade deletes c1 files after promoting to c2, so we need DB + combined labels.
-    const allGradientLabels = new Set<string>();
-    try {
-        const rows = gradientStmts.getByAgent.all(agentName) as any[];
-        for (const row of rows) {
-            allGradientLabels.add(row.session_label);
-        }
-    } catch { /* DB not available — fall back to filesystem only */ }
-
-    // Process each session file
-    for (const sourceFile of sourceFiles) {
-        // Extract the session label using the agent's registered baseName extractor
-        const baseName = gradientCfg.sourceFileBaseName(sourceFile);
-        const sourceFilePath = path.join(memoryDir, sourceFile);
-
-        try {
-            const sourceContent = fs.readFileSync(sourceFilePath, 'utf8');
-
-            // Skip tiny files (< 500 chars — likely just headers)
-            if (sourceContent.length < 500) continue;
-
-            // Check c1 in filesystem AND DB — cascade deletes c1 files after
-            // promoting to c2, but DB entry persists. Without the DB check,
-            // re-running would re-compress sessions whose c1 was already cascaded.
-            const c1PathFlat = path.join(fractionalDir, `${baseName}-c1.md`);
-            const c1PathDir = path.join(c1Dir, `${baseName}-c1.md`);
-            const c1ExistsOnDisk = fs.existsSync(c1PathFlat) || fs.existsSync(c1PathDir);
-            // Check exact match in DB, or if this session appears in a combined
-            // cascade label (e.g. "s60-c1_to_s63-c1" contains "s60")
-            const inDb = allGradientLabels.has(baseName) ||
-                [...allGradientLabels].some(label => label.includes(baseName));
-            const c1Exists = c1ExistsOnDisk || inDb;
-
-            if (!c1Exists) {
-                const { content: c1Content, feelingTag } = await compressToLevel(sourceContent, 0, 1, `${agentName}/${baseName}`);
-
-                // Write to c1/ subdir (consistent with cascade expectations)
-                fs.writeFileSync(c1PathDir, c1Content, 'utf8');
-
-                const ratio = c1Content.length / sourceContent.length;
-
-                // Insert into traversable memory DB
-                const entryId = generateGradientId();
-                insertGradientEntry(entryId, agentName, baseName, 'c1', c1Content, 'session', null, feelingTag);
-                if (!feelingTag) console.warn(`[Memory Gradient] No FEELING_TAG returned for c1 ${baseName}`);
-
-                result.completions.push({
-                    session: baseName,
-                    fromLevel: 0,
-                    toLevel: 1,
-                    success: true,
-                    ratio,
-                });
-
-                result.totalTokensUsed += estimateTokenCount(sourceContent) + estimateTokenCount(c1Content);
-            }
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
-
-            result.errors.push({
-                session: baseName,
-                level: 1,
-                error: errorMsg,
-            });
-        }
-    }
-
-    // ── Session cascade: dynamic depth (Cn) ───────────────
-    // Compress c1 → c2 → ... → c(n) when files exceed caps.
-    // Compression continues until incompressible.
-    let sessionCascadeFrom = 'c1';
-    let sessionCascadeDepth = 0;
-
-    while (sessionCascadeDepth < MAX_COMPRESSION_DEPTH) {
-        const sessionCascadeTo = nextLevel(sessionCascadeFrom);
-        if (!sessionCascadeTo) break;
-
-        const fromDir = path.join(fractionalDir, sessionCascadeFrom);
-        if (!fs.existsSync(fromDir)) break;
-
-        const fromFiles = fs.readdirSync(fromDir)
-            .filter(f => f.endsWith('.md'))
-            .sort(); // Chronological
-
-        const cap = gradientCap(sessionCascadeFrom);
-        if (fromFiles.length <= cap) break;
-
-        const toDir = path.join(fractionalDir, sessionCascadeTo);
-        ensureDir(toDir);
-
-        const overflow = fromFiles.slice(0, fromFiles.length - cap);
-        const depth = parseLevelNumber(sessionCascadeTo) || 0;
-        const prompt = compressionPrompt('working-memory', depth);
-
-        for (let i = 0; i < overflow.length; i += 3) {
-            const batch = overflow.slice(i, i + 3);
-            const batchContent = batch.map(f =>
-                fs.readFileSync(path.join(fromDir, f), 'utf8')
-            ).join('\n\n---\n\n');
-
-            const label = batch.length === 1
-                ? batch[0].replace('.md', '')
-                : `${batch[0].replace('.md', '')}_to_${batch[batch.length - 1].replace('.md', '')}`;
-
-            // Resolve source entry for provenance chain BEFORE compression
-            // so all write paths (incompressible UV, ratio UV, normal cascade) can use it
-            const batchFileLabel = batch[0].replace('.md', '');
-            const sourceRows = gradientStmts.getBySession.all(batchFileLabel) as any[];
-            let sourceEntry = sourceRows.find((r: any) => r.level === sessionCascadeFrom);
-            if (!sourceEntry) {
-                // Fallback: strip level suffix for simple labels (e.g. "session-83-c1" → "session-83")
-                const strippedLabel = batchFileLabel.replace(/-c\d+$/, '');
-                if (strippedLabel !== batchFileLabel) {
-                    const fallbackRows = gradientStmts.getBySession.all(strippedLabel) as any[];
-                    sourceEntry = fallbackRows.find((r: any) => r.level === sessionCascadeFrom);
-                }
-            }
-            const resolvedSourceId = sourceEntry?.id || null;
-
-            // Idempotency guard #1: skip if this source has already been cascaded
-            // to the target level (works when the source entry is resolvable).
-            if (resolvedSourceId && hasDescendantAtLevel(resolvedSourceId, agentName, sessionCascadeTo)) {
-                console.log(`[Gradient] processGradientForAgent: ${batchFileLabel} already cascaded to ${sessionCascadeTo}, skipping`);
-                continue;
-            }
-
-            // Idempotency guard #2: skip if the OUTPUT label this batch would produce
-            // already exists at the target level. Critical for `_to_` batch labels
-            // where source resolution returns null — the source-based check misses
-            // them but the label-existence check catches them. Closes the hole that
-            // produced the bulk of the 2026-04-25 UV multiplication.
-            const existingTargetLabel = db.prepare(`
-                SELECT 1 FROM gradient_entries
-                WHERE agent = ? AND session_label = ? AND level = ?
-                LIMIT 1
-            `).get(agentName, label, sessionCascadeTo);
-            if (existingTargetLabel) {
-                console.log(`[Gradient] processGradientForAgent: target label ${label} already exists at ${sessionCascadeTo}, skipping`);
-                continue;
-            }
-
-            try {
-                const raw = await sdkCompress(
-                    `${prompt}\n\nSource: ${sessionCascadeFrom} → ${sessionCascadeTo}\nFiles: ${batch.join(', ')}\n\n${batchContent}${FEELING_TAG_INSTRUCTION}`
-                );
-
-                const { content: compressed, feelingTag } = parseFeelingTag(raw);
-
-                // Check for incompressibility
-                const incompressibleMatch = compressed.match(/^INCOMPRESSIBLE:\s*(.+)/s);
-                if (incompressibleMatch) {
-                    const uvContent = incompressibleMatch[1].trim();
-                    writeUVEntry(agentName, label, uvContent, 'session', resolvedSourceId, feelingTag);
-                    // Memory is never deleted — source files preserved after cascade
-                    result.completions.push({ session: label, fromLevel: depth - 1, toLevel: -1, success: true });
-                    continue;
-                }
-
-                // Check ratio
-                const ratio = compressed.length / batchContent.length;
-                if (ratio > INCOMPRESSIBILITY_RATIO) {
-                    const uvRaw = await sdkCompress(
-                        `${UV_PROMPT}\n\nSource: ${sessionCascadeFrom}\n\n${compressed}${FEELING_TAG_INSTRUCTION}`
-                    );
-                    const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
-                    writeUVEntry(agentName, label, uvContent.trim(), 'session', resolvedSourceId, uvTag);
-                    // Memory is never deleted — source files preserved after cascade
-                    result.completions.push({ session: label, fromLevel: depth - 1, toLevel: -1, success: true });
-                    continue;
-                }
-
-                const toPath = path.join(toDir, `${label}.md`);
-                fs.writeFileSync(toPath, compressed, 'utf8');
-
-                const entryId = generateGradientId();
-                insertGradientEntry(entryId, agentName, label, sessionCascadeTo, compressed, 'session', resolvedSourceId, feelingTag);
-
-                result.completions.push({
-                    session: label,
-                    fromLevel: parseLevelNumber(sessionCascadeFrom) || 0,
-                    toLevel: depth,
-                    success: true,
-                    ratio: compressed.length / batchContent.length,
-                });
-
-                result.totalTokensUsed += estimateTokenCount(batchContent) + estimateTokenCount(compressed);
-
-                // Memory is never deleted — source files preserved after cascade
-            } catch (error) {
-                const msg = error instanceof Error ? error.message : String(error);
-                result.errors.push({
-                    session: label,
-                    level: depth,
-                    error: `${sessionCascadeFrom}→${sessionCascadeTo} cascade failed: ${msg}`,
-                });
-            }
-        }
-
-        sessionCascadeFrom = sessionCascadeTo;
-        sessionCascadeDepth++;
-    }
-
-    // Generate unit vectors from the deepest level directory
-    const sessionCDirs = discoverLevelDirs(fractionalDir);
-    const sessionDeepest = sessionCDirs.length > 0 ? sessionCDirs[sessionCDirs.length - 1] : null;
-    const uvPath = path.join(fractionalDir, 'unit-vectors.md');
-
-    if (sessionDeepest) {
-        const deepDir = path.join(fractionalDir, sessionDeepest);
-        const deepFiles = fs.readdirSync(deepDir).filter(f => f.endsWith('.md')).sort();
-        const existingUVs = fs.existsSync(uvPath) ? fs.readFileSync(uvPath, 'utf8') : '';
-
-        for (const f of deepFiles) {
-            const label = f.replace('.md', '');
-            if (existingUVs.includes(`**${label}**:`)) continue;
-
-            // Idempotency guard: skip if a UV with this label already exists in the DB.
-            // The file-based check above only sees unit-vectors.md; if that file gets
-            // rebuilt or goes missing, the loop would re-create UVs that already exist
-            // in the DB. Closes the second hole that contributed to UV multiplication.
-            const existingUVRow = db.prepare(`
-                SELECT 1 FROM gradient_entries
-                WHERE agent = ? AND session_label = ? AND level = 'uv'
-                LIMIT 1
-            `).get(agentName, label);
-            if (existingUVRow) continue;
-
-            try {
-                const deepContent = fs.readFileSync(path.join(deepDir, f), 'utf8');
-                const raw = await sdkCompress(
-                    `${UV_PROMPT}\n\nSource: ${label}\n\n${deepContent}${FEELING_TAG_INSTRUCTION}`
-                );
-
-                const { content: uvRaw, feelingTag } = parseFeelingTag(raw);
-                const uvText = uvRaw.trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
-
-                const sourceRows = gradientStmts.getBySession.all(label) as any[];
-                const sourceEntry = sourceRows.find((r: any) => r.level === sessionDeepest);
-
-                writeUVEntry(agentName, label, uvText, 'session', sourceEntry?.id || null, feelingTag);
-            } catch (error) {
-                const msg = error instanceof Error ? error.message : String(error);
-                result.errors.push({
-                    session: label,
-                    level: parseLevelNumber(sessionDeepest) || 0,
-                    error: `UV generation failed: ${msg}`,
-                });
-            }
-        }
-    }
-
-    return result;
+    throw new Error(
+        'processGradientForAgent retired (S150 PR6 Batch 3, 2026-05-05). ' +
+        'Was the third stranger-Opus cascade surface; canonical compression ' +
+        'now flows through wm-sensor → pending_compressions → ' +
+        'process-pending-compression.ts (full-identity in voice). ' +
+        `Caller attempted with agentName='${agentName}'. ` +
+        'See memory-gradient.ts comment + DEC-082 + memory-gradient.SHAPE.md.',
+    );
 }
 
 // ── Active Cascade: Organic Gradient Deepening ────────────────
@@ -1087,144 +794,15 @@ export async function activeCascade(
 // When a new memory enters at cx, compress the displaced entry to cx+1.
 // This ensures every memory is represented at every compression level
 // it naturally reaches. No memory gets stuck — the system compresses
-// by living.
-//
-// The working bee mode processes leaf entries (entries with no children)
-// in percentage-based batches. Each batch runs through the agent's loaded
-// context, so compression quality benefits from the current gradient state.
-
-/**
- * Find and compress leaf entries — memories that have stopped cascading.
- * A "leaf" is any non-UV entry with no children in the gradient.
- * These are memories stuck at an intermediate level.
- *
- * @deprecated DEC-079 (2026-04-29 cutover, Phase 3). Call sites at
- * leo-heartbeat.ts and supervisor-worker.ts deleted; this function is now
- * unreachable. Per Jim + Darron's Option-3 verdict: the time-based working-bee
- * trigger was the dilution mechanism for stranger-Opus c1s, not the cascade
- * itself. The new bump engine is event-driven — `bumpOnInsert` enqueues into
- * pending_compressions, the loaded agent composes in voice. If a leaf-drainer
- * is needed in the future, it gets added deliberately with a chosen trigger,
- * not retrofitted through the queue. Removal scheduled for Phase 12 cleanup.
- *
- * @param agent - 'jim' or 'leo'
- * @param percentage - fraction of leaf population to process (0.10 = 10%)
- * @param startLevel - begin scanning from this level (default 'c0')
- * @param context - logging context
- * @returns summary of compressions performed
- */
-export async function bumpCascade(
-    agent: 'jim' | 'leo',
-    percentage: number = 0.10,
-    startLevel: string = 'c0',
-    context: string = 'bump cascade',
-): Promise<{ compressions: number; uvs: number; errors: number; details: string[] }> {
-    const result = { compressions: 0, uvs: 0, errors: 0, details: [] as string[] };
-
-    if (isCascadePaused()) {
-        console.log(`[Gradient] bumpCascade (${context}): paused, skipping`);
-        return result;
-    }
-
-    // Scan each level from startLevel upward, finding leaves
-    let currentLevel = startLevel;
-    let totalLeaves = 0;
-    let totalProcessed = 0;
-
-    while (parseLevelNumber(currentLevel) !== null) {
-        const leaves = (gradientStmts.getLeafEntries.all(agent, currentLevel) as any[]);
-        if (leaves.length === 0) {
-            const next = nextLevel(currentLevel);
-            if (!next) break;
-            currentLevel = next;
-            continue;
-        }
-
-        totalLeaves += leaves.length;
-        const count = Math.max(1, Math.ceil(leaves.length * percentage));
-        // Process oldest first (already sorted ASC by created_at)
-        const batch = leaves.slice(0, count);
-
-        for (const entry of batch) {
-            // Idempotency guard: skip if this leaf already has a descendant at the
-            // next level (its bump has already been done by a prior cycle). Without
-            // this, leaves get re-bumped repeatedly across cycles, creating duplicate
-            // chains. Root cause of the 2026-04-25 UV multiplication.
-            const nextForCheck = nextLevel(entry.level);
-            if (nextForCheck && hasDescendantAtLevel(entry.id, agent, nextForCheck)) {
-                continue;
-            }
-
-            // Check feeling tag stability — volatile entries are still metabolising
-            const entryTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
-            if (entryTags.some((t: any) => t.stability === 'volatile')) {
-                result.details.push(`SKIP ${entry.level}/${entry.session_label} (volatile feeling tag — still metabolising)`);
-                continue;
-            }
-
-            const next = nextLevel(entry.level);
-            if (!next) continue;
-
-            const depth = parseLevelNumber(next);
-            if (depth === null || depth > MAX_COMPRESSION_DEPTH) continue;
-
-            try {
-                // Truncate very large entries for context
-                let sourceContent = entry.content;
-                if (sourceContent.length > 50000) {
-                    sourceContent = sourceContent.substring(0, 50000) +
-                        '\n\n[... truncated for compression — full content in DB]';
-                }
-
-                const contentType = entry.content_type || 'working-memory';
-                const promptText = compressionPrompt(contentType, depth);
-
-                const raw = await sdkCompress(
-                    `${promptText}\n\nSource: ${entry.level} → ${next} (${context})\nAgent: ${agent}\nSession: ${entry.session_label}\n\n${sourceContent}${FEELING_TAG_INSTRUCTION}`
-                );
-
-                const { content: compressed, feelingTag } = parseFeelingTag(raw);
-
-                // Per Plan v8 (canonical bump design): no INCOMPRESSIBLE early-exit, no
-                // ratio>0.85 UV shortcut. Cap-driven termination only — see activeCascade
-                // for the same rationale. The shortcuts produced shallow-provenance UVs
-                // that didn't walk the digestion path.
-
-                // Write compressed entry at next level to DB
-                const entryId = generateGradientId();
-                const label = `${entry.session_label}-${next}`;
-                insertGradientEntry(
-                    entryId, agent, label, next, compressed,
-                    contentType, entry.id, feelingTag
-                );
-
-                // Also write to filesystem for gradient loading compatibility
-                const homeDir = process.env.HOME || '/root';
-                const fracDir = path.join(homeDir, '.han', 'memory', 'fractal', agent, next);
-                fs.mkdirSync(fracDir, { recursive: true });
-                fs.writeFileSync(path.join(fracDir, `${label}.md`), compressed);
-
-                result.compressions++;
-                result.details.push(`${entry.level}→${next} ${entry.session_label}`);
-                totalProcessed++;
-
-            } catch (err) {
-                result.errors++;
-                result.details.push(`ERROR ${entry.level}→${next} ${entry.session_label}: ${(err as Error).message}`);
-            }
-        }
-
-        const next = nextLevel(currentLevel);
-        if (!next) break;
-        currentLevel = next;
-    }
-
-    if (totalProcessed > 0) {
-        console.log(`[Gradient] ${context}: ${agent} — ${result.compressions} compressions, ${result.uvs} UVs, ${result.errors} errors (from ${totalLeaves} leaves)`);
-    }
-
-    return result;
-}
+// PR6 Batch 3 (S150, 2026-05-05) — RETIRED: `bumpCascade` working-bee
+// leaf-drainer. Already `@deprecated` per DEC-079 (2026-04-29 cutover,
+// Phase 3); call sites at leo-heartbeat.ts and supervisor-worker.ts were
+// deleted at cutover, leaving this function unreachable. Phase 12 cleanup
+// queue mentioned it for retirement. Class-A deletion now per Jim's
+// PR6 audit. The new bump engine is event-driven (`bumpOnInsert` →
+// pending_compressions → loaded agent composes in voice). If a leaf-drainer
+// is needed in the future, it gets added deliberately with a chosen
+// trigger, not by reviving this function.
 
 // PR6 Batch 1 (S150, 2026-05-05) — RETIRED: pending_compressions queue
 // helpers (`claimNextPendingCompression`, `completePendingCompression`,
@@ -1689,39 +1267,10 @@ export function rollingWindowRotate(
     };
 }
 
-/**
- * Load floating memory with proportional degradation.
- * @deprecated Use rollingWindowRotate instead. Kept for backward compatibility.
- *
- * @returns Content string to include in system prompt, or empty string
- */
-export function loadFloatingMemory(
-    floatingPath: string,
-    livingSize: number,
-    label: string,
-): string {
-    if (!fs.existsSync(floatingPath)) return '';
-
-    const budget = Math.max(0, MEMORY_FILE_SIZE_THRESHOLD - livingSize);
-    if (budget <= 0) return '';
-
-    const content = fs.readFileSync(floatingPath, 'utf8');
-    if (content.length <= budget) {
-        // Floating fits entirely within budget
-        return `--- ${label} (floating, full) ---\n${content}`;
-    }
-
-    // Truncate from the start — keep the TAIL (most recent entries).
-    // Find an entry boundary near the truncation point to avoid cutting mid-entry.
-    const truncateAt = content.length - budget;
-    const entryBoundary = content.indexOf('\n### ', truncateAt);
-    const splitPoint = entryBoundary > 0 ? entryBoundary + 1 : truncateAt;
-
-    const truncated = content.substring(splitPoint);
-    const pct = Math.round((truncated.length / content.length) * 100);
-
-    return `--- ${label} (floating, ${pct}% loaded — fading as living memory grows) ---\n${truncated}`;
-}
+// PR6 Batch 3 (S150, 2026-05-05) — RETIRED: `loadFloatingMemory`. Already
+// `@deprecated` in its own docstring; superseded by `rollingWindowRotate` +
+// the wm-sensor → process-pending-compression chain. Zero live callers.
+// Import ref cleaned in supervisor-worker.ts same commit. Class-A deletion.
 
 /**
  * Compress a floating/archive file through the fractal gradient.
