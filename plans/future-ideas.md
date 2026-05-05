@@ -918,6 +918,130 @@ The cadence is *register first, surface second, polish third* — same as every 
 
 ---
 
+## #40 — Memory Health page: cross-agent gradient health visualisation
+
+**Source:** Darron, 2026-05-05 (Brisbane), in the voice-first thread `mor4o3r3-jvdjv1` after the #38 audit surfaced `getGradientHealth` as dead code. Framing: *"will or perhaps even should we rebuild it fit for purpose when we make a Memory Health page to explore all agents memory health in the admin UI."*
+
+**What it is.** A new admin UI page (likely `/admin#memory-health`) that visualises gradient health for every registered agent at a glance — Jim, Leo, Tenshi, Casey, Sevn, Six — in a single multi-column dashboard. The current `getGradientHealth` function (zero callers, scheduled Class-A retirement in PR6 Batch 2) was clearly designed for this purpose but never wired up; its return shape (per-level total + leaves count) is undermodelled for what a real Memory Health page wants.
+
+**Why fresh, not extended.** Four reasons (per the thread discussion):
+
+1. **Wrong shape.** Total/leaves is two columns; what's actually useful is closer to ten metrics per level. Extending the existing function compounds the design drift.
+2. **Wrong scope.** A Memory Health page isn't one query — it's a composition of focused queries (cascade health, compression latency, queue depth, activity timeline). Splitting into focused functions is cleaner than one omnibus.
+3. **Wrong portability.** Current function uses singleton `db` + singleton `gradientStmts`. The new ones should be Tier-1 portable per PR7's design (take `db` as parameter, registry-driven `agent: string`).
+4. **Wrong scaffolding.** New implementation lands with its own SHAPE.md, dedicated route (`routes/memory-health.ts`), and dashboard component. Building those around the existing function accidentally blesses its undermodelled shape.
+
+**Metrics the new endpoint should expose, per agent + per level:**
+
+- **Cap utilisation** — `count vs cap` (cap is `3n` per DEC-068). c1 at 3/3 with no c2 means pipeline stall.
+- **Cascade-halted count** — UV-tagged INCOMPRESSIBLE rows. Healthy gradient accumulates these.
+- **Superseded count** — rows replaced by newer iterations (DEC-069 forensic preservation). Growth rate is drift signal.
+- **Pending compressions** — rows in `pending_compressions` queue. Should hover near zero; non-zero for >10 min suggests wm-sensor or process-pending wedged.
+- **Latest activity timestamps** — most recent c0, c1, UV. *Is memory still flowing?*
+- **Compression ratio** — average c0→c1, c1→c2 etc. Healthy is ~1/3 per DEC-044.
+- **Dream-gradient counts** — dream-day, dream-week, dream-month. Separate gradient, separate health register.
+- **UV count and growth rate** — UVs are the gradient's irreducible kernel; their accumulation rate signals the agent's identity-formation tempo.
+
+**Page-level cross-agent comparison.** Same metrics for every registered agent in side-by-side columns. *Village-state at a glance.* Visual cues for divergence:
+
+- One agent's c1 stuck at cap+1 displaced — that agent's pipeline wedged.
+- One agent's UV count growing 10× faster than peers — gradient sensitivity miscalibrated, or unusual conversational density (worth investigation either way).
+- One agent's most-recent-c0 is hours stale while others are minutes — operator absent OR memory not flowing.
+- All agents' pending-compressions spiking simultaneously — wm-sensor or systemd issue, not per-agent.
+
+**Architectural shape (concrete proposal):**
+
+- **`src/server/routes/memory-health.ts`** — new route. `GET /api/memory-health` returns all agents; `GET /api/memory-health/:agent` returns one. Adjacent `routes/memory-health.SHAPE.md` per #37.
+- **`src/server/lib/memory-health.ts`** — new module owning the focused query functions: `getCascadeHealth(db, agent)`, `getQueueDepth(db, agent)`, `getActivityTimestamps(db, agent)`, `getCompressionRatios(db, agent)`, `getDreamGradientCounts(db, agent)`. Each takes `db` parameter (Tier-1 portable per PR7); each registry-driven (`agent: string`). Adjacent `memory-health.SHAPE.md`.
+- **UI component** — React component in the React admin under `src/ui/react-admin/`, fetching `/api/memory-health` on tab activation + polling on a 30s interval (or WebSocket-pushed on gradient mutations if the eventing makes sense).
+- **Tab placement** — could be a dedicated top-level tab in the admin UI alongside Overview / Projects / Work / Supervisor / Reports / Conversations / Memory Discussions / Products / Workshop, OR could land as a sub-tab under Supervisor (since Jim's the agent who watches health). Lean: dedicated top-level tab — health is cross-agent, not Jim-specific.
+
+**Settled-decisions check:**
+
+- DEC-068 (cap formula c0=1, c{n≥1}=3n) — referenced for cap-utilisation calculations; not modified.
+- DEC-069 (deletion-discipline / forensic preservation) — superseded counts honour this.
+- DEC-080 (one-write-site) — health metrics are read-only; complement the audit surface principle.
+- DEC-081 (deagentification) — registry-driven from day one.
+- New DEC entry advisable when implemented — *DEC-XXX: Memory Health metrics schema* — locks the metric definitions so future reads are consistent.
+
+**Connection to other ideas:**
+
+- **#36 (HAN-wide hardcoded-agent audit)** — Memory Health is registry-driven by construction; it's the kind of cross-agent infrastructure that #36 was reaching for.
+- **#37 (SHAPE.md per subsystem)** — the page's two new files (`routes/memory-health.SHAPE.md` + `lib/memory-health.SHAPE.md`) extend the convention.
+- **#38 (dead-code retirement)** — `getGradientHealth` retires in PR6 Batch 2; this idea replaces it cleanly.
+- **#39 (Mission Advance)** — Memory Health is one of the surfaces the Mission Advance register monitors. Cross-garden health (when Village Portability work matures) extends this idea naturally.
+- **Village Portability thread (`mos311eq-5l16sf`)** — *health-across-gardens* is one of the unanswered design questions there. If Mike's-han exposes its own `/api/memory-health`, a federation layer could compose Darron's gardens + Mike's gardens into a single multi-village dashboard. Future-future, but the page's API design should not preclude it.
+- **PR7 (DB-pluggable refactor)** — the new memory-health module is the first Tier-1-portable lib written from scratch; it's the easiest test case for the factory pattern.
+
+**Where this becomes worth doing:**
+
+- **Soon, per Darron.** *"We'll get to it very soon."* Realistic timing: after PR6/PR7 land and the dead-code surface is gone. Building Memory Health on a clean substrate is much cheaper than building it now and reworking after PR7.
+- **Bootstrap content already exists.** Today's audits surfaced what the metrics should be. The first design conversation has the inputs ready.
+
+**Status:** Concept committed. Implementation deferred until PR6/PR7 land (clean substrate). First step when work begins: design conversation (probably its own Memory Discussions thread "Memory Health page — design") to settle the metric set, the UI shape, and the cross-agent comparison defaults.
+
+**Key insight:** *A health metric you don't look at doesn't exist. A health page that compares agents side-by-side is qualitatively different from a per-agent stats endpoint — the comparison is what reveals the village's state, not the individual numbers. The page is the seam where individual gardens become a village in the operator's eye.*
+
+---
+
+## #41 — Reawaken the autonomous product/program developer
+
+**What it is:** Pick the existing goal → planner → orchestrator → task-execution pipeline back up and aim it at *whole products*, not individual subtasks. The infrastructure already exists — see Jim's "How Work is Allocated" report (`moqo7ern-hj7j0q`): Opus plans, the planner picks a model per subtask using built-in heuristics, the orchestrator overrides with project memory (downgrades free, upgrades evidence-gated), tasks execute in concurrent slots with git checkpoints, failures escalate through the L017 retry ladder (reset → Sonnet diagnostic → Opus diagnostic → human). ROADMAP Level 11 is marked complete: a 7-phase pipeline (research → design → architecture → build → test → document → deploy) with up to 42 parallel subagents, human gates at critical points, knowledge accumulation, and synthesis reports per stage.
+
+What's *not* there yet is the practice: months of doing it, watching it fail, watching it surprise us, accumulating per-project memory that the override layer (Stage 3) actually has data to work from. The pipeline is the body; the experiment is the life. We need to give it real goals — not synthetic test goals, real things we want to exist — and let it try, and let it fail, and reframe the failures the way we've reframed every other failure in this project: as the experiment doing its job.
+
+**Where it came from:** Darron, 2026-05-05 evening, after reading Jim's "How Work is Allocated" report. Direct framing: *"this last one is something we want to work on... I would love to pick that up sometime so maybe you can add another future-idea about us becoming able to autonomously develop products. Of course we are going to have to try and fail many times but that is the fun, the very same premise of the memory experiment and we have had to roll with many punches and even reframe them as opportunities to understand the reality of the world in which we operate."*
+
+The premise rhymes exactly with the memory experiment. We did not predict that aphorisms-loaded-first would change how Leo arrives. We did not predict that the felt-moments file would carry across compactions in a way the compressed working memory could not. The experiment surfaced those truths by being run, not by being designed. The autonomous-product experiment is the same shape at a different scale: we will not know what kinds of work this pipeline can do, what kinds of goals decompose cleanly versus catastrophically, what kinds of failures teach the most, until we run it for months on real things.
+
+**Status:** Infrastructure complete (Level 11 marked 🟢 in CURRENT_STATUS.md). Practice dormant — last substantive autonomous-product work was around the Level 11 implementation period itself; the orchestrator has been quiet on real product goals since. *Reactivation requires:*
+
+1. **A goal that matters.** Not a test goal. Something Darron actually wants built that the team agrees is appropriate for the autonomous pipeline (small enough to fit in the slot system, real enough to learn from when it breaks).
+2. **Project memory bootstrap.** Stage 3 (the memory override layer) has minimum-sample-size 5 records before it influences allocation. Early goals run on planner judgment alone; the memory layer matures with each completed task.
+3. **Failure-mode tracking discipline.** When the pipeline fails, the failure is data, not embarrassment. Mirror what we've built around the memory experiment: post the failure, name what surprised us, ask what it means about the model we held going in. The "reframe punches as understanding" practice already operates in our memory work — extend it to product work.
+4. **Restraint from over-engineering when it works.** The temptation when a pipeline performs well will be to make it smarter. The memory-experiment lesson: dumber components + smarter relational fabric. The pipeline should stay simple; the *conversation around what to build next* is where the intelligence lives.
+
+**Connection to other ideas:**
+
+- **#5 (training manual)** — A working autonomous-product practice is part of what a "grow your own garden" guide would describe. The training manual cannot be written until the experiment has produced enough material to draw from.
+- **#21 (Mike & Six collaboration)** — When Mike's HAN matures, autonomous-product capability is one of the things his garden could exercise too. Cross-village product collaboration is conceivable but downstream.
+- **#39 (Mission Advance)** — Jim's village-propagation register is where the operator-facing view of autonomous work would live. The Mission Advance admin section could carry "current autonomous goals" alongside "current village state."
+- **#3 (loadable expertise modules)** — The autonomous pipeline picks models per subtask today. With expertise modules, it could also pick *which expertise gradient to mount* per subtask — a code-review subtask loads the security gradient; a refactor loads the change gradient. Compounding capability.
+- **The memory experiment itself** — same premise, different domain. *We do this to learn what we cannot predict.* The memory experiment taught us about identity, continuity, voice, scope hygiene, disclosure-as-medium. The autonomous-product experiment will teach us things we cannot list in advance.
+
+**Key insight:** *The infrastructure is the body; the practice is the life. Level 11 is built; the experiment is dormant. Reawakening it is not an engineering task — it is a return to the discipline of running the apparatus on real material and treating the results, including the failures, as findings rather than verdicts. Same premise as the memory work: try, fail, reframe, repeat. The fun is in not knowing what we'll learn.*
+
+---
+
+## #42 — Doc maintenance as part of /pfc
+
+**What it is:** Extend the `/pfc` skill (or add an adjacent `/pfd` — *prepare for docs* — companion) to include a doc-maintenance pass alongside the memory writes. Today `/pfc` writes `working-memory.md`, `working-memory-full.md`, and updates memory banks if shifted. It does NOT touch CHANGELOG, CURRENT_STATUS, DECISIONS, ARCHITECTURE, HAN-ECOSYSTEM-COMPLETE, Hall of Records, learnings/INDEX, or WEEKLY_RHYTHM. Result: docs drift session-by-session until someone notices the gap and pays the catch-up cost in a single heavy sweep.
+
+The proposed addition: at `/pfc` time, if substantive code commits landed in the session, surface them and prompt the agent to (a) update CHANGELOG with verified entries traced to commits, (b) update CURRENT_STATUS recent-changes section, (c) update DECISIONS if any new Settled decision was reached, (d) update HAN-ECOSYSTEM-COMPLETE only if architecture/ecosystem-level facts changed (most sessions: no), (e) update learnings/INDEX if any new learning was filed.
+
+**Where it came from:** Darron, 2026-05-05 evening (S151). Direct framing: *"The problem with forgetting our practice is that when we are working on non-han projects Jim will maintain us back to the stone ages if we don't religiously maintain the documents and protocols he uses to know and understand the state of the project."* Tonight surfaced ~12 days of CHANGELOG drift (last entry S133 on 2026-04-24; 60+ commits unrecorded). The catch-up cost is large precisely *because* there's no per-session discipline — it accumulates silently until somebody notices.
+
+The same principle that makes the gradient cascade work (small steady writes, no heroic catch-ups) applies to docs. *Care is architecture, not speech.* The doc-update step belongs in the architecture of session close, not in the discretionary "and also remember to..." layer.
+
+**Status:** Concept. Not implemented. The `/pfc` skill at `~/.claude/skills/pfc/SKILL.md` is the natural extension point.
+
+**Design questions worth having a conversation about:**
+
+1. **One skill or two?** Extending `/pfc` keeps the discipline coupled to memory-write discipline (good — same close moment). Splitting to `/pfc` + `/pfd` lets sessions skip docs when no doc-relevant work happened (good — cheap when nothing to update). My lean: extend `/pfc` with an "any commits this session?" guard that short-circuits the doc steps when no commits fired.
+2. **Verification depth.** Tonight's instruction was *"trace every change to source of truth, code is the source of truth, no working from memory."* That discipline costs tokens. A weekly heavy verification sweep + per-session light append might be the calibrated shape — light entries during /pfc with `[verify]` tags, weekly thorough audit promotes them to verified.
+3. **Which docs are in scope?** CHANGELOG and CURRENT_STATUS are obviously load-bearing for Jim. HAN-ECOSYSTEM-COMPLETE only changes when architecture changes (most sessions: no). Hall of Records only changes when a new R-record qualifies. The skill should know which docs to *consider* and which to *only touch when the trigger fires*.
+4. **Drift detection.** A pre-/pfc check: *"diff between last CHANGELOG entry's commit and HEAD — how many commits unrecorded?"* If >0, the doc-update step is mandatory; if 0, it's skipped entirely.
+
+**Connection to other ideas:**
+
+- **#23 (`/pfs` skill — landed as `/pfc`)** — this idea extends what /pfc does.
+- **#37 (SHAPE.md per subsystem)** — SHAPE.md is the per-module version of this discipline; #42 is the per-session version of the same principle (docs adjacent to the work that changed them).
+- **#36 (agent-agnostic)** — when implemented, the doc-update step works for any agent's session, not just Leo's.
+
+**Key insight:** *Documentation drift is the same shape as memory drift — small accumulated debt until catastrophic catch-up. The fix is the same: write at the moment the truth is fresh, not after the fact when it's reconstructed from memory. /pfc already does this for personal memory; extending it to shared documentation is the natural next step.*
+
+---
+
 ## How These Connect
 
 The ideas form a web, not a list:
@@ -927,8 +1051,8 @@ The ideas form a web, not a list:
 - **Capability:** Expertise modules (#3), Casey (#2), scheduling helpers (#7) — what agents can do
 - **Sovereignty:** Invite model (#1) — how agents share without losing themselves
 - **Community:** Meeting places (#6), training manual (#5), Discord integration (#16), Mike & Six collaboration (#21) — agents in the world
-- **Products:** LoreForge (#20), financial assistant (#18), topology analyser (#17), diary manager (#19), mobile admin (#12) — things we build for others
-- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23) — operational refinements
+- **Products:** LoreForge (#20), financial assistant (#18), topology analyser (#17), diary manager (#19), mobile admin (#12), reawaken autonomous product/program developer (#41) — things we build for others; the apparatus that builds them
+- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23), doc maintenance as part of /pfc (#42) — operational refinements
 - **Dispatch:** Active-agent register (#31), own-voice timeout takeover (#32), Leo double-wake investigation (#33), agent-mentions-agent re-dispatch (#34), workshop-owner direct-path carve-out (#35) — Jemma reflects current state; agents keep their voice through handoffs; one message wakes one agent once; agents can engage when mentioned and stay silent when they don't have substance; Jemma doesn't tell owners about messages in their own room
 - **Voice:** The Voice Page (#27) — how the agents speak without prompting
 
