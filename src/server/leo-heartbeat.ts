@@ -1892,8 +1892,9 @@ function preFlightMemoryRotation(): void {
 //   1. Cheap peek on pending_compressions count — exit early if queue empty
 //      (avoids spawning a child every beat for nothing).
 //   2. acquireWmSensorLock — if sensor holds the lock, this returns false and
-//      we skip silently. Stale-claim recovery in claimNextPendingCompression
-//      (10-min) handles the "sensor died mid-process" case naturally.
+//      we skip silently. Stale-claim recovery (10-min) in the inline claim
+//      path of `scripts/process-pending-compression.ts:claimNext` handles
+//      the "sensor died mid-process" case naturally.
 //   3. Spawn process-pending-compression.ts as child; await its exit;
 //      release the lock.
 //

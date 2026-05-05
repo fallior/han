@@ -6,9 +6,10 @@
  * `leo-heartbeat.ts` and `services/supervisor-worker.ts`.
  *
  * Whichever caller holds the lock owns rotation/drain for that agent. The
- * other caller skips silently — the existing concurrency guards
- * (claimNextPendingCompression's 10-min stale recovery) handle "lock holder
- * died mid-process" without any explicit liveness signalling at this layer.
+ * other caller skips silently — the existing concurrency guards (the
+ * inline 10-min stale-claim recovery in `scripts/process-pending-compression.ts`
+ * and `scripts/agent-bump-step.ts`) handle "lock holder died mid-process"
+ * without any explicit liveness signalling at this layer.
  *
  * Design note: file-based lock is cooperative, not OS-enforced. Two
  * processes on the same machine race on `fs.openSync(..., 'wx')` which is

@@ -82,12 +82,12 @@ loaded into the system prompt (NOT stranger-Opus per DEC-082).
 - **`getGradientHealth`, `getFractalMemoryFiles`, `readFractalMemory`,
   `listAvailableSessions`** — exported but ZERO live callers. Class A
   candidates per future-idea #38.
-- **`claimNextPendingCompression`, `completePendingCompression`,
-  `completePendingCompressionForSource`, `releasePendingCompression`** — the
-  `pending_compressions` claim primitives are RE-IMPLEMENTED inline in
-  `scripts/process-pending-compression.ts:claimNext` (which is the only path
-  that actually uses them). The exports here have ZERO live callers. Class A
-  per future-idea #38.
+- ~~`claimNextPendingCompression`, `completePendingCompression`,
+  `completePendingCompressionForSource`, `releasePendingCompression`~~ —
+  **deleted in S150 PR6 Batch 1.** Zero live callers; the actual queue
+  claim path lives inline in `scripts/process-pending-compression.ts:claimNext`
+  and `scripts/agent-bump-step.ts:findPendingCompression`, each with their
+  own constant + own DB handle.
 - **`loadFloatingMemory`** — already `@deprecated` in its docstring (line
   1844). ZERO callers. Class A.
 - **`bumpCascade`** — already `@deprecated`. ZERO callers. Class A.

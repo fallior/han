@@ -1226,120 +1226,16 @@ export async function bumpCascade(
     return result;
 }
 
-// ── Function 4b.1: pending_compressions queue helpers (DEC-079) ───
-//
-// Phase 3 of the 2026-04-29 cutover (plans/cutover-plan-2026-04-29.md).
-// The bump engine no longer compresses synchronously inside `bumpOnInsert` —
-// it enqueues a row in `pending_compressions` and a loaded agent (Phase 4
-// sensor → parallel agent, or backup processor) picks it up and composes
-// the cN→cN+1 in their own voice. These helpers provide the claim/complete/
-// release primitives the agent-side processors use.
-//
-// Stale-claim recovery: rows whose `claimed_at` is older than this many
-// minutes and whose `completed_at` is still NULL are re-claimable (claimer
-// crashed or session ended).
-const STALE_CLAIM_MINUTES = 10;
-
-export interface PendingCompression {
-    id: string;
-    agent: 'jim' | 'leo';
-    source_id: string;
-    from_level: string;
-    to_level: string;
-    enqueued_at: string;
-    claimed_at: string | null;
-    claimed_by: string | null;
-    completed_at: string | null;
-    // Joined source content + label, populated by claimNextPendingCompression:
-    source_content?: string;
-    source_session_label?: string;
-    source_content_type?: string;
-}
-
-/**
- * Claim the next pending compression for an agent, atomically.
- * Returns the row + joined source content, or null if queue is empty.
- * The claim is recoverable if the claimer crashes (see STALE_CLAIM_MINUTES).
- */
-export function claimNextPendingCompression(
-    agent: 'jim' | 'leo',
-    claimer: string,
-): PendingCompression | null {
-    const txn = db.transaction(() => {
-        // Phase A.1 (S145, 2026-04-30): exclude pending rows whose source is
-        // superseded. Compressing a superseded source produces stranger output
-        // for content that's been replaced — pure work for nothing. The
-        // superseded entry stays in DB (DEC-069); the queue just skips it.
-        const row = db.prepare(`
-            SELECT pc.id, pc.agent, pc.source_id, pc.from_level, pc.to_level,
-                   pc.enqueued_at, pc.claimed_at, pc.claimed_by, pc.completed_at,
-                   ge.content as source_content,
-                   ge.session_label as source_session_label,
-                   ge.content_type as source_content_type
-            FROM pending_compressions pc
-            LEFT JOIN gradient_entries ge ON ge.id = pc.source_id
-            WHERE pc.agent = ?
-              AND pc.completed_at IS NULL
-              AND (ge.superseded_by IS NULL OR ge.id IS NULL)
-              AND (pc.claimed_at IS NULL
-                   OR pc.claimed_at < datetime('now', '-${STALE_CLAIM_MINUTES} minutes'))
-            ORDER BY pc.enqueued_at ASC
-            LIMIT 1
-        `).get(agent) as any;
-        if (!row) return null;
-        db.prepare(`
-            UPDATE pending_compressions
-            SET claimed_at = datetime('now'), claimed_by = ?
-            WHERE id = ?
-        `).run(claimer, row.id);
-        return row as PendingCompression;
-    });
-    return txn() as PendingCompression | null;
-}
-
-/**
- * Mark a pending compression row complete by primary key.
- * Used when the caller already knows the pending_id.
- */
-export function completePendingCompression(id: string): void {
-    db.prepare(`
-        UPDATE pending_compressions
-        SET completed_at = datetime('now')
-        WHERE id = ?
-    `).run(id);
-}
-
-/**
- * Mark a pending compression row complete by its (agent, source_id, from_level)
- * triplet. Used by `agent-bump-step.ts submit` when the pending_id isn't
- * carried in the step_id. No-op if no matching pending row exists (e.g.,
- * direct rebuild use that didn't go through the queue).
- */
-export function completePendingCompressionForSource(
-    agent: 'jim' | 'leo',
-    sourceId: string,
-    fromLevel: string,
-): void {
-    db.prepare(`
-        UPDATE pending_compressions
-        SET completed_at = datetime('now')
-        WHERE agent = ? AND source_id = ? AND from_level = ?
-          AND completed_at IS NULL
-    `).run(agent, sourceId, fromLevel);
-}
-
-/**
- * Release a claim — clears claimed_at and claimed_by so another claimer
- * can pick the row up. Used for clean cancellation (agent decided not to
- * compose right now). No-op if the row is already completed.
- */
-export function releasePendingCompression(id: string): void {
-    db.prepare(`
-        UPDATE pending_compressions
-        SET claimed_at = NULL, claimed_by = NULL
-        WHERE id = ? AND completed_at IS NULL
-    `).run(id);
-}
+// PR6 Batch 1 (S150, 2026-05-05) — RETIRED: pending_compressions queue
+// helpers (`claimNextPendingCompression`, `completePendingCompression`,
+// `completePendingCompressionForSource`, `releasePendingCompression`,
+// `PendingCompression` interface, `STALE_CLAIM_MINUTES` constant). Zero
+// live callers — verified by grep. The actual queue claim path lives
+// inline in `scripts/process-pending-compression.ts:claimNext` and in
+// `scripts/agent-bump-step.ts:findPendingCompression`, each with their
+// own constant + own DB handle. These exports were the planned-replaced
+// shape that never got called. Deleted per the same-commit-deletion
+// discipline ("When will we learn" thread `mor2kbjh-2uh4b3`).
 
 // ── Function 4b: bumpOnInsert — Event-Driven Enqueue ──────────────
 //
