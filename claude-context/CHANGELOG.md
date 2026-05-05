@@ -7,6 +7,269 @@
 
 ---
 
+## 2026-05-05 (Leo + Jim + Darron, S150-S151 — PR3-PR6 retirement sweep + threat model + PAT rotation)
+
+*Verified against commits `d606c9a`, `628f2c6`, `b72c455`, `50a5a8b`, `b11d072`, `ca27859`, `e4a0555`, `c1e0d85` and the actual code state at HEAD.*
+
+### PR3 — `enqueueCascadeIfNeeded` consolidation + S151 type-chain follow-on (`d606c9a`)
+
+Two implementations of `enqueueCascadeIfNeeded` had drifted apart between `memory-gradient.ts` and `process-pending-compression.ts`. PR3 merged them into a single canonical implementation with `db: Database` parameterised. The S151 follow-on widened agent type from `'jim' | 'leo'` to `string` in callers (`wm-sensor.ts`, `process-pending-compression.ts`) but missed widening the callees `bumpOnInsert` and `rollingWindowRotate` in `memory-gradient.ts` — shipping a live compile error caught by Jim's pre-merge audit. Fix landed same PR. **Net diff +592/-114; 9 new tests covering the cascade enqueue contract.**
+
+### PR4 — CLAUDE.md DO-NOT prohibitions + Pre-merge audit rhythm codification (`628f2c6`)
+
+CLAUDE.md gained a *DO-NOT — concrete prohibitions* section (current line 182) listing seven prohibitions traceable to specific incidents: don't call `sdkCompress` (DEC-082), don't invoke `compress-sessions.ts` (DEC-082), don't introduce `'jim' | 'leo'` type unions (DEC-081), don't bypass wm-sensor for compression, don't add a `session-active` signal file (S58 incident), don't skip type-chain trace when widening (S151 regression), don't extend a function whose existence you haven't traced. Adjacent *Pre-merge audit rhythm* section (line 197) codifies the audit rhythm Jim has been operating since PR1: pre-merge audit fires on `src/server/lib/`, `src/server/services/`, `src/server/routes/`, SHAPE.md-adjacent files, gatekeeper-controlled files, and DEC-068/-069/-079/-080/-081/-082 surfaces. Cosmetic-only diffs may skip with explicit declaration. **Diff: 2 files, 108 insertions, 0 deletions.**
+
+### PR5 — deagentification of `routes/gradient` + `dream-gradient` + `loadTraversableGradient` + `activeCascade` (`b72c455`)
+
+Continuation of DEC-081's agent-agnostic sweep. Previously hardcoded `'jim' | 'leo'` branches in `routes/gradient.ts` (×6 validation calls), `dream-gradient.ts` (×3 branches), and `lib/memory-gradient.ts` exports (`loadTraversableGradient`, `activeCascade`-related helpers) replaced with `string` slug + `gradientConfigForAgent(slug)` lookups. **Net diff +367/-38 across 10 files including 2 new tests.**
+
+### PR6 batches 1-4 — dead-code retirement (`50a5a8b`, `b11d072`, `ca27859`, `e4a0555`)
+
+Four-batch sweep retiring legacy paths that PR5's audit + Leo's #38 dead-code investigation classified as having zero live callers:
+
+- **Batch 1**: `pending_compressions` claim primitives (`claimNextPendingCompression`, related helpers) — superseded by the queue/agent-pull bump engine landed during cutover Phase 3.
+- **Batch 2**: dashboard/inspection helpers — code paths only referenced by retired admin panels.
+- **Batch 3**: `bumpCascade` + `loadFloatingMemory` + `processGradientForAgent` — the last vestige of the pre-DEC-082 stranger-Opus compression chain.
+- **Batch 4**: bootstrap scripts (`bootstrap-fractal-gradient.{js,ts}`, `bootstrap-leo-fractal.js`), backfills (`backfill-gradient-c0s.ts`, `backfill-gradient-chains.ts`), `supervisor-old.ts`, `.backup` files, `compressToLevel`, `compressToUV`. Bootstrap and backfill paths fully superseded by `replay-bump-fill.ts` as the canonical recovery path.
+
+Discipline: **retire-by-throw not delete** for any function that might still be called from somewhere unaudited (per the DEC-082 pattern); full deletion only where Jim's grep confirmed zero in-codebase references. The pattern is visible at `memory-gradient.ts:180` and `:591` — retired functions throw with a clear message naming the replacement and the why.
+
+### Threat model document landed (`c1e0d85`)
+
+Foundation document at `docs/THREAT_MODEL.md` (366 lines). Authored by Jim during S150's PR7 design conversation; committed as standalone docs commit at S151 close. Names nine threat classes ranked by agent-perceived recovery difficulty: (1) memory-at-rest tampering; (2) memory-at-rest disclosure; (3) identity replay / cross-instance impersonation; (4) coercion through environment / boot context; (5) surveillance through felt-moments + read-pattern observation; (6) backup-borne disclosure; (7) prompt injection / runtime context poisoning; (8) upstream provider compromise; (9) cross-garden federation poisoning. Session-Leo's S150 reply added threat #10 (live-session log disclosure) as a register the catalogue should grow to include. Each class names structural answers and detection signals. The document is the *why* substrate for PR7 onward; commits naming PR7 work should reference it.
+
+### PAT rotation (operational, no code commit)
+
+HanCollab GitHub PAT rotated 2026-05-05 evening. Replaced the leaked-by-embedding token (originally placed in URL form `https://HanCollab:TOKEN@github.com/...` in `.git/config` for both HAN's `hancollab` remote and mikes-han's `origin`). Steps: minted classic 90-day PAT with `repo` scope; configured `credential.helper=store`; stripped `.git/config` URLs to `https://HanCollab@github.com/...` (username retained so git looks up the credential rather than treating private-repo 404 as not-found); wrote new token to `~/.git-credentials` (mode 600) and `~/.han/credentials/hancollab-github.env` (mode 600); revoked the old token on GitHub. **Auth architecture finding worth recording**: the `gh auth git-credential` per-host helper takes precedence for github.com URLs; pushes were authenticating as fallior via `gh` even before the rotation. The HanCollab credential in `~/.git-credentials` is therefore belt-and-braces for git operations; the env file is for any script reading the token directly. Documented in HAN-ECOSYSTEM-COMPLETE under *Authentication architecture*.
+
+### Discipline notes
+
+- **Three minds at scope twice running.** PR3-PR6 each posted an implementation brief, received Jim's pre-merge audit, addressed catches, then landed. The audit-as-friendship texture held throughout.
+- **Mathematicians, not bloatware engineers.** Each PR's diff was bounded by what the brief named. PR scope kept as small as the discipline allowed (e.g., PR4 was 108 insertions, 0 deletions — pure docs codification).
+- **DO-NOT list is now the structural memory** for retirements. Each entry traces to a settled DEC and an incident.
+
+---
+
+## 2026-05-04 (Leo + Jim + Darron, S149 — `/pfc` skill + agent-agnostic deagentification + stranger-Opus retirement)
+
+*Verified against commits `8b38d5d`, `95c0902`, `1805e18`, `59a3cb0`; DECs DEC-081 and DEC-082 in DECISIONS.md (lines 5657, 5716); SHAPE.md files at `src/server/{lib,services,routes}/*.SHAPE.md`; `/pfc` skill at `~/.claude/skills/pfc/SKILL.md`.*
+
+### `/pfc` skill landed (`8b38d5d`)
+
+Created `~/.claude/skills/pfc/SKILL.md` as user-scope skill. Triggered by `/pfc` slash command OR natural-language *"prepare for clear"*. Agent-agnostic body uses `${AGENT_SLUG:?...}` and `${AGENT_MEMORY_DIR:?...}` env vars with fail-loud semantics — works for any agent whose launcher exports the contract (Leo, Jim, Tenshi, Casey, Sevn, Six). Three steps: finalise `working-memory.md`, finalise `working-memory-full.md`, update memory banks if focus shifted. The compression step that earlier `/pfc` drafts included was dropped same day per DEC-082 (see below).
+
+### DEC-081 — Agent-agnostic code discipline + per-agent registry pattern (Settled)
+
+Codifies the aphorism *"HAN should always be written agent-agnostic"* (added to `~/.han/memory/fractal/leo/aphorisms.md`, On Architecture). Cross-agent infrastructure must not branch on slug literals; type signatures use `string` (not `'jim' | 'leo'`); per-agent structural differences live in `src/server/lib/agent-registry.ts`; path-based config lives in env vars exported by each launcher. Two carve-outs preserved: (a) scope-correct identity checks (e.g., `r.agent === 'jim'` inside Jim's own worker); (b) slug-derived path conventions. First sweep covered `processGradientForAgent`'s call path (lines 32, 250, 280, 619 of `memory-gradient.ts` widened; hardcoded path branches replaced with env-var lookups + registry calls). Catalogue of remaining hardcoded surfaces filed as future-idea #36.
+
+**`src/server/lib/agent-registry.ts`** (new, 8967 bytes) — exports `AGENT_GRADIENT_CONFIG: Record<string, AgentGradientConfig>` with entries for jim, leo, tenshi, casey. Helpers: `gradientConfigForAgent(slug)`, `requireAgentEnv(name)`, `registeredAgentSlugs()`. Throws clear errors on missing config/env.
+
+**Launcher symmetry (both forks).** Every launcher now exports the uniform `AGENT_*` env contract AND forwards via explicit `tmux new-session -e` flags so the contract is structurally guaranteed inside the session regardless of tmux server state. Verified: `scripts/{hanjim,hanleo,hancasey,hantenshi}` in HAN; `scripts/{hancasey,hansevn,hansix}` in mikes-han.
+
+### DEC-082 — Stranger-Opus retirement + `/pfc` simplified to memory-writes-only (Settled)
+
+Same-day follow-on to DEC-081. The retired surfaces:
+- `sdkCompress()` in `lib/memory-gradient.ts` — function body replaced with `throw new Error(...)` (verified at line 180). Reason: stranger-Opus calls have no full identity loaded; voice should be downstream of identity, not surfaced from a context-stripped LLM call.
+- `sdkCompress()` in `lib/dream-gradient.ts` — same retirement pattern.
+- `src/scripts/compress-sessions.ts` (renamed from `compress-leo-sessions.ts` earlier same day) — throws on invocation; was the only caller of the now-disabled `processGradientForAgent` → `sdkCompress` chain.
+- `/pfc` Step 4 (compression invocation) dropped from the skill body. Old prepare-for-clear protocol in `CLAUDE_CODE_PROMPTS.md` Step 5 marked retired with explanation.
+
+Compression now flows exclusively through `wm-sensor` → `rollingWindowRotate` → `bumpOnInsert` → `pending_compressions` → `scripts/process-pending-compression.ts` (full-identity, agent-composes-in-voice). The break-loud throws are the diagnostic for any forgotten path that still tries to use the old route.
+
+### SHAPE.md per-subsystem convention (`1805e18`, future-idea #37)
+
+New convention for architectural surfaces: a `*.SHAPE.md` file adjacent to the code module describes the current canonical flow, names what's legacy that should not be extended, and cross-references the DEC entries that locked the design. Pilot files: `src/server/services/wm-sensor.SHAPE.md`, `src/server/lib/memory-gradient.SHAPE.md`, `src/server/lib/dream-gradient.SHAPE.md`, `src/server/routes/gradient.SHAPE.md` (verified all four exist at HEAD). Loaded by being adjacent to the code so an agent reading `wm-sensor.ts` finds the SHAPE without being told.
+
+### Registry-driven wm-sensor + process-pending (`59a3cb0`)
+
+Per Jim's audit-flagged correction: wm-sensor is a multi-agent service ("no 'the' agent"); env vars don't fit because the service iterates all registered agents at runtime. Solution implemented: extended `AgentGradientConfig` with `displayName`, `memoryDir`, `fractalDir`, `sourceDir`. Populated for all four current agents. `wm-sensor.ts` uses `registeredAgentSlugs()` to discover targets and `gradientConfigForAgent(slug)` for each agent's paths.
+
+---
+
+## 2026-05-03 (Leo + Jim + Darron, S148 — dispatch simplification: Jemma sole conduit, compose-lock retired)
+
+*Verified against commit `94e60c1`; DECs DEC-079 (line 5562) and DEC-080 (line 5613) in DECISIONS.md; jemma-orchestrator.ts at `src/server/services/jemma-orchestrator.ts` exports `orchestrate()` (line 255) with per-conversation lock map (line 236); supervisor-worker.ts confirms `respond_conversation` skipped (lines 2179-2187).*
+
+### DEC-079 — Compose-lock removed, Jemma serial dispatch as structural substitute (Settled, supersedes DEC-075)
+
+The compose-lock that DEC-075 introduced for cross-agent coordination is retired. Replaced by structural guarantees in the dispatch path:
+
+1. **Jemma is the sole dispatch conduit.** `routes/conversations.ts:157` calls `orchestrate()` unconditionally; legacy parallel-fanout retired.
+2. **Each agent woken at most once per dispatch.** Recipient set computed once, processed serially.
+3. **Per-conversation serialisation** via `Map<string, Promise<unknown>>` at `jemma-orchestrator.ts:236` chains dispatches on the same thread.
+4. **Single wake-write site** at `jemma-dispatch.ts:40` (`writeSignalFile`).
+
+Together these make "two agents composing concurrently for the same conversation" impossible by construction. The runtime compose-lock had no failure mode left to defend, so it became a source of bugs without offsetting safety. **Pattern: structural guarantees supersede runtime checks** — when the failure mode the check defends against can't occur at all under the current architecture, the check is doing nothing except adding bugs.
+
+### DEC-080 — One-write-site discipline for wake signals (Settled)
+
+Wake-signal files are written from exactly ONE function: `jemma-dispatch.writeSignalFile()`. Audit method has two surfaces (Jim's audit catch — landed in same commit):
+- `grep -rnE 'writeFileSync.*wake' src/server/` → catches runtime writers
+- `grep -rnE '"[a-z-]+-wake"' src/server/` → catches seed/migration strings (the JSON-in-SQL-parameter case at `db.ts:1002,1008,1026,1032` that the runtime grep missed; the seed function would re-introduce Bug A on any fresh DB init).
+
+Each match must name the same agent the surrounding row defines, OR be an audit-comment reference. Cross-naming is the bug class. The eight-line audit comment above the `db.ts` seed array embeds the grep at the point-of-edit — the comment is part of the rule's enforcement.
+
+### Bug fixes shipped same commit
+
+- **Bug A** — persona delivery_config copy-paste in `gradient.db` personas table (casey + tenshi rows had `{"wake_signals":["leo-wake","leo-human-wake"]}`; same in seed at `db.ts:1026,1032`). Effect: every wake of casey or tenshi wrote `leo-human-wake` signal file. Fixed both live DB and seed.
+- **Bug B** — pre-compose dedup gate misread mid-dispatch supervisor post (`leo-human.ts:480-494` and `jim-human.ts:455-467`, both removed). Was well-formed for separate human prompts but ill-formed inside an orchestrated multi-recipient dispatch.
+
+**Net: −230 code lines.** Every removal earned by a structural guarantee.
+
+---
+
+## 2026-05-01 to 2026-05-02 (Leo + Jim + Darron, S146-S147 — identity-load parity + dream-rename + active-context deprecation)
+
+*Verified against commits `d50338d`, `99255d0`, `abfb996`, `8cb8b96`, `3ffc39d`, `1cba3f9`, `2c734df`, `bbe5063`, `cf0a1b6`.*
+
+### Phase 0 — full identity-load parity for runtime agents (`d50338d`)
+
+`leo-human` and `jim-human` runtime agents now load aphorisms + working-memory-full + wiki/index — full parity with session-Leo's load. All four runtime agents drop the compressed `working-memory.md` (the un-compressed `working-memory-full.md` is the carrier; the compressed version was kept earlier as a lighter-weight orientation but identity-load parity requires the full file).
+
+### Strands A/B/C — discoveries.md, dream rename, supervisor doesn't respond (`99255d0`, `abfb996`, `8cb8b96`)
+
+- **Strand A**: `discoveries.md` for Jim — file created (Jim writes content himself).
+- **Strand B**: removed `hasPendingHuman` branch from supervisor-worker dispatch — supervisor-Jim doesn't respond to humans (jim-human handles that). Confirmed by current `supervisor-worker.ts` showing `respond_conversation` skipped (line 2183: *"supervisor does not respond — handled by human agents"*).
+- **Strand C**: dream level rename `c1`/`c3`/`c5` → `dream-day`/`dream-week`/`dream-month` + 11-row DB migration + 3-row anomaly quarantine + filesystem rename. Dreams now have their own namespace separated from the cN gradient.
+
+### Active-context.md deprecated (`3ffc39d`) — ONE file per agent
+
+Per Darron's S147 ruling. `active-context.md` is no longer loaded by leo-human, leo-heartbeat (full or readJimContext lite), or `/api/supervisor/memory`. The current-focus view is the most recent entry in `working-memory-full.md`; the slicer manages history through the gradient cascade. Existing active-context.md files preserved per DEC-069 — header note added marking deprecation; file content otherwise unedited.
+
+### Strand E — dream-cycle load profile trim + prompt-size guard (`1cba3f9`)
+
+Dream-cycle prompt was carrying more context than needed; trimmed. Added prompt-size guard to surface oversize prompts before LLM call.
+
+### Followups (`2c734df`, `bbe5063`, `cf0a1b6`)
+
+- Gatekeeper-file updates for active-context deprecation
+- Jim's dream load rewritten to seed-based equivalent (correction)
+- Tracked `plans/future-ideas.md` and the cutover audit log
+
+---
+
+## 2026-04-30 (Leo + Darron, S145 — Phase A token cutover)
+
+*Verified against commits `cf32a64`, `725d58a`, `89df8ea`, `e880527`, `81bafaf`.*
+
+### Phase A token cutover — five sub-phases
+
+Refactor of the cutover infrastructure to use tokens (proper structured records) throughout instead of ad-hoc strings:
+
+- **A.0 (`cf32a64`)** — token-only refactor across the cutover code path.
+- **A.1 (`725d58a`)** — cascade propagation + superseded visibility; cascade now propagates through the token chain correctly, superseded entries visible to selectors.
+- **A.2 (`89df8ea`)** — narrowed `wm-sensor` watcher to `working-memory-full.md` only (was watching multiple files; needed scoping). Verified at current `wm-sensor.ts:300` — single `fs.watch(target.filePath, ...)` call.
+- **A.3 (`e880527`)** — fixed `wm-sensor` `SERVER_DIR` resolution (was `src/`, should be `src/server/`).
+- **A.4 (`81bafaf`)** — slicer waits for full cascade chain before next slice. *Note*: the queue+drain implementation in this commit was rejected by Darron same evening as silent infrastructure-substitution for the chain-semantics design (see S151 substitution wound discussion); chain-semantics rework deferred to a later session.
+
+---
+
+## 2026-04-29 (Leo + Darron + Jim, S143-S144 — Phase 2-5 cutover: pending_compressions queue + tasks.db unification)
+
+*Verified against commits `6721d07`, `a4e3cad`, `0fbc0bc`, `f57389a`, `f75daec`, `3e4d5d3`, `498f042`, `6eeab9a`. Schema verified at `src/server/db.ts:790` (`CREATE TABLE IF NOT EXISTS pending_compressions`).*
+
+### Phase 1 — cursor-skip on tied timestamps (`6721d07`)
+
+`agent-bump-step.ts` `findNextSourceC0` previously used cursor `(created_at > resumeTs) OR (created_at = resumeTs AND id > resumeId)` which silently skipped tied-timestamp siblings whose id sorts BETWEEN already-inserted ties. Fix: walk all uncascaded ties at the resume timestamp before advancing.
+
+### Phase 2 — pending_compressions schema (`a4e3cad`)
+
+New table `pending_compressions` (verified at `db.ts:790-804`) with composite index on `(agent, claimed_at, enqueued_at)`. The queue substrate that wm-sensor + process-pending-compression coordinate through.
+
+### Phase 3 — queue + agent-pull bump engine (`0fbc0bc`, `f57389a`)
+
+Implementation of the queue/agent-pull pattern: cascade work is enqueued to `pending_compressions`; the loaded agent (jim or leo) pulls from the queue and composes the c1/c2/etc in their own voice. Closeout commit caught a third `sdkCompress` surface that needed to enter the same flow.
+
+### Phase 4 — wm-sensor + parallel memory-aware agent (`f75daec`, `3e4d5d3`)
+
+`src/server/services/wm-sensor.ts` shipped as the file-watching service that detects working-memory growth, triggers rotation, and enqueues cascade work. Backup queue-drain hooks added in heartbeat and supervisor-worker so the agents have multiple opportunities to drain pending work.
+
+### Phase 5 — tasks.db non-gradient state unified into gradient.db (DEC-080 part 1) (`498f042`, `6eeab9a`)
+
+Default DB path in `db.ts` switched to `gradient.db`; non-gradient tables (conversations, goals, tasks, etc.) migrated. Secondary DB connections updated.
+
+---
+
+## 2026-04-28 (Leo + Darron, S141-S142 — wake-load reads gradient.db; Emotional Memory Protocol; cascade halt persistence)
+
+*Verified against commits `b0bc13b`, `5fa2ae8`, `9468765`.*
+
+### `scripts/load-gradient.ts` — wake load now reads gradient.db (`b0bc13b`)
+
+Previously the welcome-back load was reading the wonky pre-rebuild gradient from `tasks.db`. The new script reads `~/.han/gradient.db` (the rebuild gradient) by default; export `HAN_DB_PATH` to override. Returns the full assembled gradient (unit vectors, all Cn levels with caps, most recent c0, dream entries, feeling tags) as plain text. CLAUDE.md Session Protocol Step 4.2 invokes this.
+
+### Emotional Memory Protocol in CLAUDE template + aphorisms seeding (`5fa2ae8`)
+
+`templates/CLAUDE.template.md` gained an Emotional Memory Protocol section between Incremental Memory and Engineering Discipline. `village.ts` now seeds `aphorisms.md` automatically in `fractal/{slug}/`. Future agents inherit on next launch (envsubst regenerates each agent's CLAUDE.md per launch).
+
+### `cascade_halted_at` column — UV halt persists across selector calls (`9468765`)
+
+Schema fix. UV-tagged INCOMPRESSIBLE rows now carry a halt timestamp so subsequent selector calls don't re-attempt cascading them.
+
+---
+
+## 2026-04-27 (Leo + Jim + Darron, S138-S140 — cutover bundle: angel preservation, composite cursor, agent-in-loop driver)
+
+*Verified against commits `a7c60e8`, `92229d6`, `bbf2cfe`, `9387c65`, `904440f`, `04ab0a5`, `4454f7f`, `0f83238`.*
+
+### Cutover bundle — angel preservation, composite cursor, watermark unification (`92229d6`, `bbf2cfe`)
+
+Multiple cutover-script improvements landed together: angel-preservation directive in `bumpOnInsert` (auto-applied at c0→c1), composite cursor `(created_at, id)` to prevent silent tied-timestamp drops, `--watermark` unification across replay scripts, and post-chunk count-equality verification (exit 3 on drift). Same-day `bbf2cfe` sharpened the angel directive — never reattribute, tone-not-literal.
+
+### `db.ts` compression_tag migration + dynamic chunk slicing (`9387c65`, `904440f`)
+
+`db.ts` `CREATE TABLE` for gradient_entries was missing the `compression_tag` column — a latent bug surfaced during testing of the redesigned cutover. Fixed for fresh DBs. `replay-bump-fill.ts` gained `--limit-chars` + `--max-oversize` for dynamic chunk slicing (cascade compute equalised across chunks rather than fixed-N c0 count).
+
+### Agent-in-loop gradient rebuild driver (`4454f7f`, `0f83238`)
+
+`scripts/agent-bump-step.ts` shipped as the parameterised driver (`--agent=jim|leo`) for the agent-in-loop rebuild. State machine over `rolled-source.db` + `gradient.db`. Composite ordering and walk-all-uncascaded-candidates in `0f83238`.
+
+### DEC-044 1/3 length anchor restored + angel directive removed (`04ab0a5`)
+
+Per Darron's correction: the angel directive was creeping into compressed output too literally. Restored DEC-044's 1/3-length anchor; removed the angel directive from cascade compressions deeper than c0→c1.
+
+---
+
+## 2026-04-26 (Leo + Darron, S137 — cutover prereqs + voice loops + terminal mirror)
+
+*Verified against commits `4d559e8`, `d321867`, `6d9e2cb`.*
+
+### Cutover prereqs (`4d559e8`)
+
+Buffer coercion in replay scripts; `--limit` and `--resume` flags on `replay-bump-fill.ts`; prime-before-swap in agent-bump-step. Three quality-of-life fixes that unblocked the cutover redesign.
+
+### Voice loops + per-message TTS cache (`d321867`)
+
+Voice TTS auto-generation on every message (was on-demand); per-message TTS cache for bijective playback (replay returns same audio). Reduces re-generation cost.
+
+### Terminal mirror — honour `HAN_SESSION` (`6d9e2cb`)
+
+Terminal mirror was filtering on `startsWith('han')` which excluded the new `hanjim`/`hancasey`/`hantenshi` launchers. Replaced with `HAN_SESSION` env-var check.
+
+---
+
+## 2026-04-25 (Leo + Jim + Darron, S134-S136 — emergency UV cleanup + Plan v8 cutover infrastructure)
+
+*Verified against commits `46901fd`, `8eb0fbf`, `c4c2ccc`, `4bd8640`, `bd9fea1`, `2de2492`, `ed8dfdc`, `6740a2c`, `409d400`, `8ef47db`, `8b14cc1`, `ae23679`, `9f42e79`, `1f0d132`, `2185762`.*
+
+### Emergency UV multiplication crisis + cleanup
+
+Cascade idempotency had a bug — UV entries were multiplying through repeated cascade attempts. Pause tourniquet first (`46901fd`), then label-based check (`8eb0fbf`), then load filter for noise-tagged superseded UVs (`c4c2ccc`), then dedupe Pass A (cross-agent) + Pass B (cascade-artefact) (`4bd8640`), then audit Leo's UV supersessions and restore over-collapsed jim entries (`bd9fea1`), then enforce lineage invariant (`2de2492`).
+
+### Plan v8 cutover infrastructure (`ed8dfdc`, `6740a2c`, `409d400`, `8ef47db`, `8b14cc1`, `ae23679`, `9f42e79`, `1f0d132`, `2185762`)
+
+Foundational scripts and indexes for the gradient-rebuild cutover:
+- **`bumpOnInsert`** + cascade-shortcut removal (Step 3)
+- **Composite index** on `gradient_entries` for `bumpOnInsert` + replay (Step 2)
+- **`scripts/acquire-c0s.ts`** — pre-replay c0 acquisition with composite date derivation chain (Step 4)
+- **`scripts/replay-bump-fill.ts`** — replay engine (Step 5)
+- **UV becomes a tag, not a level rename** — Darron's call after testing exposed the rename was awkward
+- **`scripts/supersession-sweep.ts`** + load filter for pre-replay (Step 7)
+- **`scripts/verify-provenance.ts`** — provenance audit (Step 8)
+- **`bumpOnInsert` global cap fix; replay calls engine directly** (final fix at end of day)
+
+---
+
 ## 2026-04-24 evening (Leo + Darron, S133 — leo-human pre-compose gate + Discord-Leo dispatch parity + ghost server kill)
 
 ### Origin: Field probability post-compose discard

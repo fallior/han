@@ -2400,6 +2400,55 @@ const server = useHttps
 - Token stored in `localStorage` (key: `han-auth-token`)
 - Injected into all `fetch()` headers and WebSocket connection URL
 
+### Git Authentication (HanCollab GitHub remote)
+
+> **Discovered and documented 2026-05-05 (S151) during HanCollab PAT rotation. The auth picture is layered; the layering is non-obvious until you trace it.**
+
+**The remotes that need authenticated GitHub access:**
+
+| Repo | Remote name | URL form |
+|------|-------------|----------|
+| `~/Projects/han` | `origin` | `https://github.com/fallior/han.git` (no embedded credential) |
+| `~/Projects/han` | `hancollab` | `https://HanCollab@github.com/HanCollab/mikes.git` (username only — no token; see "GitHub 404 quirk" below for why username is in the URL) |
+| `~/Projects/mikes-han` | `origin` | `https://HanCollab@github.com/mikes-han/mikes-han.git` (same shape) |
+
+**Embedded-credential URLs (form `https://USER:TOKEN@github.com/...`) MUST NOT be used.** Every `git remote -v` prints the URL verbatim and any leak vector (transcripts, log files, archived `.git/config` files) carries a working token. Convention enforced: username in URL, no token; the credential helper supplies the password.
+
+**Two credential helpers, in priority order:**
+
+1. **Per-host (`credential.https://github.com.helper`)** — set in `~/.gitconfig`:
+   ```
+   [credential "https://github.com"]
+       helper =
+       helper = !/usr/bin/gh auth git-credential
+   ```
+   The empty first entry resets the helper list for the github.com URL pattern; the second entry adds GitHub CLI's credential bridge. **For github.com URLs, only this helper is consulted.**
+
+2. **Global (`credential.helper=store`)** — set in `~/.gitconfig`. Reads `~/.git-credentials` (mode 600). Used for non-github.com hosts AND as belt-and-braces (gh failure fallback wouldn't actually work for github.com because the per-host config replaces the helper list — but the file is kept current as documentation of who has what access).
+
+**What's actually authenticating today:**
+
+`gh auth status` shows the only logged-in account is **fallior** (Darron's primary GitHub identity, file: `~/.config/gh/hosts.yml`). The gh helper returns fallior's token for any github.com URL request, regardless of the URL's claimed user. GitHub authenticates by token (the token IS the identity); the URL's username is a hint for credential lookup, not an authentication claim. Push to `HanCollab@github.com/HanCollab/mikes.git` succeeds because fallior is a collaborator on the HanCollab repos.
+
+**The GitHub 404 quirk (worth knowing for any private-repo work):**
+
+GitHub returns HTTP 404 (not 401) for unauthenticated requests to private repos, to avoid leaking repo existence. Git interprets 404 as "repository doesn't exist" and **does not prompt for credentials**. Workaround that we use: include a username in the URL (e.g. `https://HanCollab@github.com/...`), which makes git look up the credential explicitly via the configured helper. Without the username, a fresh-environment git request to a private repo fails silently.
+
+**Credential file inventory:**
+
+| File | Mode | Contents | Used by |
+|------|------|----------|---------|
+| `~/.config/gh/hosts.yml` | 600 | gh CLI token (fallior) — current primary auth for all github.com operations | `gh` CLI; via `gh auth git-credential` for git |
+| `~/.git-credentials` | 600 | One line: `https://HanCollab:TOKEN@github.com` — belt-and-braces / documentation of who has access | `git` credential.helper=store (rarely consulted for github.com; consulted for other hosts) |
+| `~/.han/credentials/hancollab-github.env` | 600 | `HANCOLLAB_GITHUB_USER=HanCollab` + `HANCOLLAB_GITHUB_TOKEN=...` — for any script that needs the token directly (currently no live consumers; preserved for future scripts) | scripts (none currently — verified 2026-05-05) |
+
+**Rotation rhythm:**
+
+- HanCollab PAT: 90-day expiry. Rotation steps: mint new classic PAT with `repo` scope on github.com/settings/tokens (HanCollab account); update `~/.git-credentials` (replace token in the existing line); update `~/.han/credentials/hancollab-github.env` (replace `HANCOLLAB_GITHUB_TOKEN` value); revoke old PAT on GitHub. Most recent rotation: 2026-05-05 (next due ~2026-08-03; reminder window ~one week prior).
+- fallior gh CLI token: lifecycle managed via `gh auth refresh` / `gh auth login`. Currently no fixed expiry visible to operator; check periodically via `gh auth status`. **This is the actual security-critical token for HAN's git operations** — the HanCollab token is operationally redundant given the gh layering.
+
+**Open improvement seed (2026-05-05, Darron):** *"we should have something better for mike to migrate to."* Direction: per-user PATs against the same repos so each user rotates independently without coordination, OR Tailscale-distributed credential sync. Filed for the village-portability conversation when it next picks up.
+
 ---
 
 ## 26. WebSocket Protocol

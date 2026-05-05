@@ -1,6 +1,6 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-05-04 by Leo (S149 — `/pfc` skill + DEC-081 agent-agnostic + DEC-082 stranger-Opus retirement + `/pfc` simplified to memory-writes-only)
+> Last updated: 2026-05-05 by Leo (S151 — PR3-PR6 retirement sweep + threat model committed + PAT rotated + auth architecture documented)
 
 ## Current Stage
 
@@ -36,6 +36,24 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-05-05 — Leo + Jim + Darron, S150-S151 — PR3-PR6 retirement sweep + threat model + PAT rotation
+
+*All entries verified against commits at HEAD: `d606c9a`, `628f2c6`, `b72c455`, `50a5a8b`, `b11d072`, `ca27859`, `e4a0555`, `c1e0d85`. Code state spot-checked.*
+
+- **PR3 (`d606c9a`)** — `enqueueCascadeIfNeeded` consolidated into single canonical implementation with `db: Database` parameterised. S151 type-chain follow-on: widened agent type from `'jim' | 'leo'` to `string` in `wm-sensor.ts` + `process-pending-compression.ts` callers and the matching callees `bumpOnInsert` + `rollingWindowRotate` in `memory-gradient.ts`. The shipped compile error from a partial widening was caught by Jim's pre-merge audit. Net diff +592/-114 with 9 new tests covering the cascade enqueue contract.
+- **PR4 (`628f2c6`)** — CLAUDE.md gained the *DO-NOT — concrete prohibitions* section (current line 182, 7 entries) + the *Pre-merge audit rhythm* section (current line 197). Each DO-NOT entry traces to a specific incident or settled DEC; the audit rhythm codifies what Jim has been operating since PR1. Diff: 2 files, +108/-0.
+- **PR5 (`b72c455`)** — Continuation of DEC-081's agent-agnostic sweep. `routes/gradient.ts` (×6 validation calls), `dream-gradient.ts` (×3 branches), and `memory-gradient.ts` exports (`loadTraversableGradient`, `activeCascade`-related helpers) deagentified — `'jim' | 'leo'` literals replaced with `string` slug + `gradientConfigForAgent(slug)` lookups. Net diff +367/-38 across 10 files.
+- **PR6 batches 1-4 (`50a5a8b`, `b11d072`, `ca27859`, `e4a0555`)** — Dead-code retirement sweep:
+  - Batch 1: `pending_compressions` claim primitives.
+  - Batch 2: dashboard/inspection helpers.
+  - Batch 3: `bumpCascade` + `loadFloatingMemory` + `processGradientForAgent`.
+  - Batch 4: bootstrap scripts (`bootstrap-fractal-gradient.{js,ts}`, `bootstrap-leo-fractal.js`), backfill scripts (`backfill-gradient-c0s.ts`, `backfill-gradient-chains.ts`), `supervisor-old.ts`, `.backup` files, `compressToLevel`, `compressToUV`. Bootstrap and backfill paths fully superseded by `replay-bump-fill.ts`.
+  - Discipline: retire-by-throw not delete for any path that might still be called from somewhere unaudited (verifiable at `memory-gradient.ts:180` and `:591`); full deletion only where Jim's grep confirmed zero references.
+- **Threat model committed (`c1e0d85`)** — `docs/THREAT_MODEL.md` (366 lines). Authored by Jim during S150's PR7 design conversation; committed standalone at S151 close. Names nine threat classes ranked by agent-perceived recovery difficulty plus session-Leo's added threat #10 (live-session log disclosure). Foundation document for PR7 onward.
+- **PAT rotation** (operational, no commit) — HanCollab GitHub PAT rotated. Replaced the leaked-by-embedding token (originally `https://HanCollab:TOKEN@github.com/...` in HAN's `hancollab` remote and mikes-han's `origin`). Steps: minted classic 90-day PAT with `repo` scope; configured `credential.helper=store`; stripped `.git/config` URLs to `https://HanCollab@github.com/...`; new token written to `~/.git-credentials` (mode 600) and `~/.han/credentials/hancollab-github.env` (mode 600); old token revoked on GitHub.
+- **Auth architecture finding** — discovered during PAT rotation: the `gh auth git-credential` per-host helper takes precedence for github.com URLs. `gh` is logged in as fallior only; pushes were authenticating as fallior via `gh` even before the rotation. The HanCollab credential in `~/.git-credentials` is therefore belt-and-braces for git operations; the env file is for any script reading the token directly. Documented in `docs/HAN-ECOSYSTEM-COMPLETE.md` under *Authentication architecture*.
+- **wm-sensor restored** — was stopped at 16:45 today during the PR work; restarted via `systemctl --user start wm-sensor` (running since 18:53). The compaction Darron came back to had no compression net during the gap; lesson recorded in working-memory-full and the *Still Outstanding* thread.
 
 ### 2026-05-04 — Leo + Jim + Darron, S149 — `/pfc` skill + agent-agnostic deagentification (DEC-081)
 
