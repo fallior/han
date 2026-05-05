@@ -1400,98 +1400,15 @@ export async function bumpOnInsert(
     return result;
 }
 
-/**
- * Get a summary of the gradient state for an agent — leaf counts by level.
- * Useful for dashboards and working bee progress tracking.
- */
-export function getGradientHealth(agent: 'jim' | 'leo'): { level: string; total: number; leaves: number }[] {
-    // Dynamic level discovery — Cn protocol has no ceiling (DEC-068)
-    const rows = db.prepare(
-        "SELECT DISTINCT level FROM gradient_entries WHERE agent = ? AND level != 'uv' ORDER BY level"
-    ).all(agent) as { level: string }[];
-    const levels = rows.map(r => r.level);
-
-    const health: { level: string; total: number; leaves: number }[] = [];
-
-    for (const level of levels) {
-        const total = (gradientStmts.getByAgentLevel.all(agent, level) as any[]).length;
-        const leaves = (gradientStmts.getLeafEntries.all(agent, level) as any[]).length;
-        if (total > 0) {
-            health.push({ level, total, leaves });
-        }
-    }
-
-    // Add UV count
-    const uvs = (gradientStmts.getUVs.all(agent) as any[]).length;
-    health.push({ level: 'uv', total: uvs, leaves: 0 });
-
-    return health;
-}
+// PR6 Batch 2 (S150, 2026-05-05) — RETIRED: dashboard/inspection helpers
+// (`getGradientHealth`, `getFractalMemoryFiles`, `readFractalMemory`,
+// `listAvailableSessions`). Each had ZERO live callers. All four were
+// likely planned-but-never-wired-up dashboard endpoints. If demand emerges
+// later, the implementations are short and can be rewritten cleanly
+// against the registry-driven path resolution from S150 PR2/PR5.
+// Same-commit-deletion discipline per "When will we learn".
 
 // ── Function 5: Helper utilities ───────────────────────────────
-
-/**
- * Get all fractal memory files for a given agent
- */
-export function getFractalMemoryFiles(agentName: 'jim' | 'leo'): string[] {
-    const homeDir = process.env.HOME || '/root';
-    const fractionalDir = path.join(homeDir, '.han', 'memory', 'fractal', agentName);
-
-    if (!fs.existsSync(fractionalDir)) {
-        return [];
-    }
-
-    return fs
-        .readdirSync(fractionalDir)
-        .filter((f) => f.endsWith('.md'))
-        .sort()
-        .reverse(); // Most recent first
-}
-
-/**
- * Read a fractal memory file at a specific level
- */
-export function readFractalMemory(agentName: 'jim' | 'leo', date: string, level: 0 | 1 | 2 | 3 | 4): string | null {
-    const homeDir = process.env.HOME || '/root';
-    const fractionalDir =
-        level === 0
-            ? path.join(homeDir, '.han', 'memory', agentName === 'jim' ? 'sessions' : 'leo', 'working-memories')
-            : path.join(homeDir, '.han', 'memory', 'fractal', agentName);
-
-    const fileName = level === 0 ? `${date}.md` : `${date}-c${level}.md`;
-    const filePath = path.join(fractionalDir, fileName);
-
-    if (!fs.existsSync(filePath)) {
-        return null;
-    }
-
-    return fs.readFileSync(filePath, 'utf8');
-}
-
-/**
- * List available session dates for gradient processing
- */
-export function listAvailableSessions(agentName: 'jim' | 'leo'): string[] {
-    const homeDir = process.env.HOME || '/root';
-    const memoryDir =
-        agentName === 'jim'
-            ? path.join(homeDir, '.han', 'memory', 'sessions')
-            : path.join(homeDir, '.han', 'memory', 'leo', 'working-memories');
-
-    if (!fs.existsSync(memoryDir)) {
-        return [];
-    }
-
-    const dates = fs
-        .readdirSync(memoryDir)
-        .map((f) => {
-            const match = f.match(/^(\d{4}-\d{2}-\d{2})/);
-            return match ? match[1] : null;
-        })
-        .filter((d): d is string => d !== null);
-
-    return Array.from(new Set(dates)).sort().reverse();
-}
 
 // ── Memory File Gradient Compression ────────────────────────────
 //

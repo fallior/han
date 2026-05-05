@@ -79,9 +79,10 @@ loaded into the system prompt (NOT stranger-Opus per DEC-082).
   callers are bootstrap scripts (`bootstrap-fractal-gradient.ts`,
   `bootstrap-leo-fractal.js`) which themselves reference retired
   `sdkCompress`. Effectively dead. Class A candidate per future-idea #38.
-- **`getGradientHealth`, `getFractalMemoryFiles`, `readFractalMemory`,
-  `listAvailableSessions`** — exported but ZERO live callers. Class A
-  candidates per future-idea #38.
+- ~~`getGradientHealth`, `getFractalMemoryFiles`, `readFractalMemory`,
+  `listAvailableSessions`~~ — **deleted in S150 PR6 Batch 2.** Zero live
+  callers; planned-but-never-wired-up dashboard endpoints. Import refs
+  cleaned in `supervisor-worker.ts:39` and `leo-heartbeat.ts:53` same commit.
 - ~~`claimNextPendingCompression`, `completePendingCompression`,
   `completePendingCompressionForSource`, `releasePendingCompression`~~ —
   **deleted in S150 PR6 Batch 1.** Zero live callers; the actual queue
