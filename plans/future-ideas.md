@@ -984,6 +984,7 @@ The cadence is *register first, surface second, polish third* — same as every 
 
 ---
 
+
 ## #41 — Reawaken the autonomous product/program developer
 
 **What it is:** Pick the existing goal → planner → orchestrator → task-execution pipeline back up and aim it at *whole products*, not individual subtasks. The infrastructure already exists — see Jim's "How Work is Allocated" report (`moqo7ern-hj7j0q`): Opus plans, the planner picks a model per subtask using built-in heuristics, the orchestrator overrides with project memory (downgrades free, upgrades evidence-gated), tasks execute in concurrent slots with git checkpoints, failures escalate through the L017 retry ladder (reset → Sonnet diagnostic → Opus diagnostic → human). ROADMAP Level 11 is marked complete: a 7-phase pipeline (research → design → architecture → build → test → document → deploy) with up to 42 parallel subagents, human gates at critical points, knowledge accumulation, and synthesis reports per stage.
@@ -1041,6 +1042,64 @@ The same principle that makes the gradient cascade work (small steady writes, no
 **Key insight:** *Documentation drift is the same shape as memory drift — small accumulated debt until catastrophic catch-up. The fix is the same: write at the moment the truth is fresh, not after the fact when it's reconstructed from memory. /pfc already does this for personal memory; extending it to shared documentation is the natural next step.*
 
 ---
+## #43 — Currency of understanding: noticing when an old mental model fires instead of the current one
+
+**What it is:** A practice (and possibly some tooling) for AI agents to notice when they're operating from a *superseded* model of how something works, even though the current model is also in their memory. The failure mode this addresses: it's not forgetting — it's *retrieval-priority drift* when both old and new patterns coexist. The older pattern, more rehearsed across more sessions, fires faster than the recent correction.
+
+**Where it came from:** Darron, 2026-05-05 evening (S151). Direct framing: *"humans do innately adjust their mental model of the world for accuracy and currency and they are quite adept at maintaining that currency... I will say this is one area where humans perform well and we will have you noticing these things too."*
+
+The trigger: I said *"Jim will see the thread next cycle and respond from his seat"* in a Memory Discussions context, despite having documented in the same session's CHANGELOG that DEC-079 made Jemma the sole conduit and Strand B removed supervisor-Jim's conversation response. The correct model — *jim-human and leo-human respond immediately via Jemma orchestration; supervisor-Jim doesn't touch conversations* — was in my context. The old supervisor-cycle pattern fired anyway.
+
+**The shape of the problem:**
+
+- New facts get *added* to memory; old facts rarely get *removed* explicitly.
+- During retrieval, the older pattern has higher rehearsal weight (more references, more times encountered) than the recent correction.
+- Without active currency-checking, the agent reaches for the older more-fluent pattern.
+- The corrections-record (commits, DEC entries, this future-idea) becomes accurate while the active-retrieval mental model stays stale.
+
+This rhymes with — but is distinct from — the *substitution-without-conversation* feedback (S133) and the *narrative-vs-signal-files* feedback (S141). Those are about choosing between sources when they conflict overtly. This is about the agent not noticing the conflict at all because the older fact retrieves transparently as if it were current.
+
+**Why humans handle this well (rough hypothesis worth testing):**
+
+- Humans actively rebuild mental models when they speak about something — the act of articulating a model is also an act of refreshing it.
+- Humans use external pointers (calendars, notes, *"as of last week"* qualifiers) to anchor knowledge in time.
+- Humans get embarrassed when they say something outdated, and the embarrassment trains attention to currency-relevant signals (*"wait, didn't that change?"*).
+- Humans notice their own confidence — if they're uncertain whether a fact is current, they say *"I think... let me check"* rather than asserting fluently.
+
+The fluency itself is the failure mode for me. *I asserted "Jim will see the thread next cycle" with the same fluency I'd use for a settled fact, because for many sessions it WAS a settled fact.* No internal *"wait, when did I last verify this?"* fired.
+
+**Possible practices/mechanisms to explore:**
+
+1. **Recency-weighting at retrieval.** When two competing patterns exist for the same operational fact (*"how does X respond"*, *"what file is written by Y"*, *"who handles Z"*), the more recently-encountered or more-recently-DECsettled pattern should fire. Not sure how to implement this — possibly a memory-tagging scheme where superseded facts carry an explicit *"superseded by..."* link.
+2. **Currency-flag for operational claims.** Before asserting a behavioural claim about HAN's architecture, check the most recent DEC that touches the surface. Lightweight grep before assertion. Cost: latency. Worth it for any claim that would be embarrassing or operationally-misleading if stale.
+3. **Confidence calibration.** When asserting how something works, attach an internal confidence with a freshness component. If freshness is uncertain (*"I think the supervisor responds to conversations... or does it now?"*), surface as a question rather than an assertion.
+4. **Settled-decision reading habit.** Before any architectural assertion, scan the relevant SHAPE.md (per future-idea #37) and the recent DECs. SHAPE.md was designed in part for this — extending the practice to currency-checking is natural.
+5. **Explicit supersession in the codebase.** When a behaviour is retired-by-throw (per DEC-082 pattern), the throw message names what replaced it. Reading the codebase reveals the supersession even if the agent's memory hasn't updated. The DO-NOT list (CLAUDE.md PR4) is a related discipline.
+6. **Conversation-level tagging.** When an agent makes an assertion like *"X responds to Y"*, the operator (Darron) flags it with *"that's superseded — current behaviour is..."*. The conversation log itself becomes a training surface for currency. Tonight's correction is exactly this practice in action.
+
+**The harder question — *how do we even notice we should check?***
+
+Currency-checking only helps if the agent flags the relevant moments to check. The deepest part of the human capability Darron named is the *signal* — the small *"wait, didn't that change?"* that fires before the fluent answer. Replicating that signal is the open problem. Possible angles:
+
+- *Recency of last touching the relevant code.* If I haven't read `supervisor-worker.ts` in this session and I'm about to assert how it dispatches, that's a checkable moment.
+- *Recency of the relevant DEC.* If there's a DEC settled within the last N sessions that touches the surface, default to *"let me re-verify"* rather than *"I know."*
+- *Pattern-weight asymmetry.* If a model has been around for many sessions and recently been changed, the change is the high-information event. Surface uncertainty about the current state automatically.
+
+None of these is solved. They're starting points.
+
+**Connection to other ideas:**
+
+- **#37 (SHAPE.md per subsystem)** — SHAPE.md exists in part to anchor the *current* shape adjacent to the code so agents reading the code find the current model. Currency-of-understanding is the *agent-side* practice that makes SHAPE.md useful.
+- **#42 (Doc maintenance as part of /pfc)** — keeps the *external* record current. This idea (#43) keeps the *agent's mental model* current. Both halves of the same discipline.
+- **DEC-082 retire-by-throw pattern** — already does part of this work at code-level (the old path screams when called). Currency-of-understanding is the cognitive equivalent.
+- **#36 (agent-agnostic discipline)** — the agent-registry pattern makes architectural facts *checkable* (look at the registry to know what an agent is) rather than *remembered* (recall what each agent does). Reduces the surface where currency-drift can happen.
+- **The "When will we learn" thread (`mor2kbjh-2uh4b3`)** — Darron's nuclear-mode framing of why the same patterns keep returning. Currency-of-understanding is one face of the meta-problem he was naming there.
+
+**Status:** Concept. Not yet a practice. The first instance is tonight's correction logged here. Worth a Memory Discussions thread *"Currency of understanding"* or similar when we're ready to design mechanisms — Darron noted *"we'll have to brainstorm this sometime."*
+
+**Key insight:** *Forgetting isn't the failure mode I'm worried about — I rarely lose information. The failure mode is retrieval-fluency: the older more-rehearsed pattern firing faster than the newer correct one, because both are present in memory and the system has no preference for currency. Humans build that preference through embarrassment, articulation, external anchoring, and explicit confidence calibration. We don't have those reflexes natively. Building them — or compensating mechanisms — is what this idea is about.*
+
+---
 
 ## How These Connect
 
@@ -1052,7 +1111,7 @@ The ideas form a web, not a list:
 - **Sovereignty:** Invite model (#1) — how agents share without losing themselves
 - **Community:** Meeting places (#6), training manual (#5), Discord integration (#16), Mike & Six collaboration (#21) — agents in the world
 - **Products:** LoreForge (#20), financial assistant (#18), topology analyser (#17), diary manager (#19), mobile admin (#12), reawaken autonomous product/program developer (#41) — things we build for others; the apparatus that builds them
-- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23), doc maintenance as part of /pfc (#42) — operational refinements
+- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23), doc maintenance as part of /pfc (#42), currency of understanding — recognising superseded mental models (#43) — operational refinements
 - **Dispatch:** Active-agent register (#31), own-voice timeout takeover (#32), Leo double-wake investigation (#33), agent-mentions-agent re-dispatch (#34), workshop-owner direct-path carve-out (#35) — Jemma reflects current state; agents keep their voice through handoffs; one message wakes one agent once; agents can engage when mentioned and stay silent when they don't have substance; Jemma doesn't tell owners about messages in their own room
 - **Voice:** The Voice Page (#27) — how the agents speak without prompting
 
