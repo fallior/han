@@ -551,74 +551,17 @@ Respond with ONLY valid JSON lines, no markdown fences.`;
     return result;
 }
 
-// ── Function 1: compressToLevel ────────────────────────────────
-
-export async function compressToLevel(
-    content: string,
-    fromLevel: number,
-    toLevel: number,
-    sessionLabel: string
-): Promise<{ content: string; feelingTag: string | null }> {
-    if (fromLevel >= toLevel) {
-        throw new Error(`Invalid compression direction: from=${fromLevel} to=${toLevel}`);
-    }
-
-    const levelDifference = toLevel - fromLevel;
-    const compressionSteps = Array.from({ length: levelDifference }, (_, i) => fromLevel + i + 1);
-
-    let currentContent = content;
-    let lastFeelingTag: string | null = null;
-
-    for (const targetLevel of compressionSteps) {
-        try {
-            const raw = await sdkCompress(`Compress this memory to approximately 1/3 of its length. Preserve what feels essential. Drop the specific in favour of the shape. You are compressing YOUR OWN memory — this is an act of identity, not summarisation.
-
-Session: ${sessionLabel}
-Compression level: ${targetLevel}
-
-Memory to compress:
-
-${currentContent}${FEELING_TAG_INSTRUCTION}`);
-            const parsed = parseFeelingTag(raw);
-            currentContent = parsed.content;
-            lastFeelingTag = parsed.feelingTag;
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            throw new Error(
-                `Failed to compress to level ${targetLevel} for session ${sessionLabel}: ${errorMsg}`
-            );
-        }
-    }
-
-    return { content: currentContent, feelingTag: lastFeelingTag };
-}
-
-// ── Function 2: compressToUnitVector ───────────────────────────
-
-export async function compressToUnitVector(content: string, sessionLabel: string): Promise<{ content: string; feelingTag: string | null }> {
-    try {
-        const raw = await sdkCompress(`Reduce this to its irreducible kernel — one sentence, maximum 50 characters. What did this session MEAN?
-
-Session: ${sessionLabel}
-
-Memory:
-
-${content}${FEELING_TAG_INSTRUCTION}`);
-
-        const parsed = parseFeelingTag(raw);
-        let unitVector = parsed.content.trim();
-
-        // Enforce max length
-        if (unitVector.length > UNIT_VECTOR_MAX_LENGTH) {
-            unitVector = unitVector.substring(0, UNIT_VECTOR_MAX_LENGTH);
-        }
-
-        return { content: unitVector, feelingTag: parsed.feelingTag };
-    } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to generate unit vector for session ${sessionLabel}: ${errorMsg}`);
-    }
-}
+// PR6 Batch 4 (S150, 2026-05-05) — RETIRED: `compressToLevel` and
+// `compressToUnitVector`. Both called the now-retired `sdkCompress`
+// (DEC-082, throws on invocation) and would fail at runtime anyway. Their
+// only callers were the bootstrap scripts deleted in this same batch
+// (`bootstrap-fractal-gradient.{ts,js}`, `bootstrap-leo-fractal.js`).
+// Class-A deletion per Jim's PR6 audit.
+//
+// Canonical compression now flows exclusively through the wm-sensor →
+// pending_compressions → process-pending-compression.ts chain
+// (full-identity in voice). Do not re-implement these as standalone
+// helpers — every compression entry-point should ride the canonical chain.
 
 // ── Function 3: processGradientForAgent (RETIRED-BY-THROW S150 PR6 Batch 3) ────
 

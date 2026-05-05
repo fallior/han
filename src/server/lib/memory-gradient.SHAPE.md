@@ -77,10 +77,9 @@ loaded into the system prompt (NOT stranger-Opus per DEC-082).
 - **`sdkCompress`** (line 137) — retired-by-throw in DEC-082. Stranger-Opus
   call with no full identity loaded. Body commented out; throws on
   invocation. Use the wm-sensor → process-pending-compression chain.
-- **`compressToLevel`, `compressToUnitVector`** (lines 555, 597) — only
-  callers are bootstrap scripts (`bootstrap-fractal-gradient.ts`,
-  `bootstrap-leo-fractal.js`) which themselves reference retired
-  `sdkCompress`. Effectively dead. Class A candidate per future-idea #38.
+- ~~`compressToLevel`, `compressToUnitVector`~~ — **deleted in S150 PR6
+  Batch 4** alongside their bootstrap-script callers. Both called the
+  retired `sdkCompress` and would have thrown at runtime anyway.
 - ~~`getGradientHealth`, `getFractalMemoryFiles`, `readFractalMemory`,
   `listAvailableSessions`~~ — **deleted in S150 PR6 Batch 2.** Zero live
   callers; planned-but-never-wired-up dashboard endpoints. Import refs
