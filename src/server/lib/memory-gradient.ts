@@ -13,6 +13,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import DB from 'better-sqlite3';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { db, gradientStmts, feelingTagStmts, feelingTagHistoryStmts } from '../db';
 import { countTokens } from './token-counter';
@@ -1379,70 +1380,83 @@ interface BumpResult {
 }
 
 /**
- * Trigger a bump cascade after an insert at the given level.
- * The cascade walks until the cap mechanism stops pushing entries forward.
- * No LLM-judgement shortcuts. No reuse of existing entries — every cascade
- * step is a fresh compression at the agent's highest capability.
+ * Pure displacement + idempotency + INSERT OR IGNORE for the
+ * `pending_compressions` queue. Sync. Takes `db` as a parameter so the same
+ * helper works for both the server's closure-captured singleton DB AND for
+ * script processes (e.g. `scripts/process-pending-compression.ts`) that hold
+ * their own `Database.Database` instance.
+ *
+ * Returns `{ pendingId: <new uuid> if newly enqueued, null otherwise }` plus a
+ * `reason` naming why no row was added (level has slots, no further level,
+ * already cascaded, cascade-paused, or UNIQUE rejection).
+ *
+ * **One-write-site for cascade enqueueing (DEC-080 honoured at the cascade
+ * surface).** Replaces the previously-duplicated `enqueueCascadeIfNeeded` in
+ * `scripts/process-pending-compression.ts` — both paths now call this helper.
+ *
+ * Filters on the displacement query:
+ *   1. `cascade_halted_at IS NULL` — UV-halted rows (at kernel, not eligible).
+ *   2. `superseded_by IS NULL` — superseded rows behave as ABSENT to the bump
+ *      engine (Phase A.1, S145). Row stays in the table for forensic / DEC-069
+ *      honour but is invisible to mechanics.
  */
-export async function bumpOnInsert(
-    agent: 'jim' | 'leo',
+export function enqueueCascadeForDisplacedAt(
+    db: DB.Database,
+    agent: string,
     level: string,
-): Promise<BumpResult> {
-    const result: BumpResult = { cascadeSteps: 0, finalLevel: null, skippedReasons: [] };
-
+): { pendingId: string | null; reason: string } {
     if (isCascadePaused()) {
-        result.skippedReasons.push('cascade-paused');
-        return result;
+        return { pendingId: null, reason: 'cascade-paused' };
     }
 
     const cap = gradientCap(level);
 
-    // Find the entry just displaced from the active window — rank=cap+1 by composite
-    // (created_at, id) DESC. Cap is global per agent per level; content_type does NOT
-    // partition the queue. Two filters:
-    // 1. UV-halted rows (cascade_halted_at IS NOT NULL) — at kernel, not eligible.
-    // 2. Superseded rows (superseded_by IS NOT NULL) — Phase A.1 (S145, 2026-04-30):
-    //    rows marked superseded behave as ABSENT to the bump engine. Per Darron's
-    //    "valence shell" framing — superseding vacates the slot for occupation
-    //    purposes; the row stays in the table for forensic / DEC-069 honour but
-    //    is invisible to mechanics.
+    // Find the entry just displaced from the active window — rank=cap+1 by
+    // composite (created_at, id) DESC. Cap is global per agent per level;
+    // content_type does NOT partition the queue.
     const displaced = db.prepare(`
-        SELECT id, content, content_type, source_id, session_label, created_at,
-               cascade_halted_at
-        FROM gradient_entries
+        SELECT id FROM gradient_entries
         WHERE agent = ? AND level = ?
           AND cascade_halted_at IS NULL
           AND superseded_by IS NULL
         ORDER BY created_at DESC, id DESC
         LIMIT 1 OFFSET ?
-    `).get(agent, level, cap) as any;
+    `).get(agent, level, cap) as { id: string } | undefined;
 
     if (!displaced) {
-        result.skippedReasons.push(`${level}: level has slots (no rank=${cap + 1} entry)`);
-        return result;
+        return { pendingId: null, reason: `${level}: level has slots (no rank=${cap + 1} entry)` };
     }
 
     const next = nextLevel(level);
     if (!next) {
-        result.skippedReasons.push(`${level}: no further level`);
-        return result;
+        return { pendingId: null, reason: `${level}: no further level` };
     }
 
-    // Idempotency: skip if displaced entry already has a descendant at next level.
-    if (hasDescendantAtLevel(displaced.id, agent, next)) {
-        result.skippedReasons.push(`${level}→${next}: already cascaded`);
-        return result;
+    // Idempotency: skip if displaced entry already has a descendant at next
+    // level. Inlined here (rather than calling hasDescendantAtLevel) so the
+    // helper is portable across DB instances — the param-db is the single
+    // source of truth, even when called from a script process whose DB
+    // handle differs from the server's closure-captured singleton.
+    const hasDescendant = db.prepare(`
+        SELECT 1 FROM gradient_entries
+        WHERE source_id = ? AND agent = ? AND level = ?
+          AND superseded_by IS NULL
+        LIMIT 1
+    `).get(displaced.id, agent, next);
+    if (hasDescendant) {
+        return { pendingId: null, reason: `${level}→${next}: already cascaded` };
     }
 
-    // Single-enqueue: insert a pending_compressions row. The loaded agent (Phase 4
-    // sensor → parallel agent, or backup processor) will claim and compose in voice.
-    // INSERT OR IGNORE — UNIQUE(agent, source_id, from_level) prevents duplicate
-    // enqueue if the same displacement is observed again before the agent processes.
+    // Single-enqueue: insert a pending_compressions row. The loaded agent
+    // (Phase 4 sensor → parallel agent, or backup processor) will claim and
+    // compose in voice. INSERT OR IGNORE — UNIQUE(agent, source_id, from_level)
+    // prevents duplicate enqueue if the same displacement is observed again
+    // before the agent processes.
     //
-    // No look-ahead — the chain fires naturally when the agent's submit lands a new
-    // entry at the next level, which itself triggers bumpOnInsert(agent, next).
-    // Per Darron's design: "let the engine react to pressure which will naturally
-    // settle — this is the whole intent."
+    // No look-ahead — the chain fires naturally when the agent's submit lands
+    // a new entry at the next level, which itself triggers
+    // enqueueCascadeForDisplacedAt(...). Per Darron's design: "let the engine
+    // react to pressure which will naturally settle — this is the whole intent."
     const pendingId = generateGradientId();
     const enqueuedAt = new Date().toISOString();
     const info = db.prepare(`
@@ -1452,12 +1466,39 @@ export async function bumpOnInsert(
     `).run(pendingId, agent, displaced.id, level, next, enqueuedAt);
 
     if (info.changes > 0) {
+        return { pendingId, reason: `${level}→${next}: enqueued pending=${pendingId}` };
+    }
+    // UNIQUE rejection — return null, NOT the generated id (Drift A fix from
+    // S150's pre-merge audit; the prior `enqueueCascadeIfNeeded` returned the
+    // generated id even when the row was rejected, producing a misleading log
+    // upstream).
+    return { pendingId: null, reason: `${level}→${next}: already enqueued (UNIQUE)` };
+}
+
+/**
+ * Trigger a bump cascade after an insert at the given level. Async wrapper
+ * around `enqueueCascadeForDisplacedAt` that uses the closure-captured
+ * singleton `db` and preserves the existing `BumpResult` API for legacy
+ * callers (rollingWindowRotate, replay-bump-fill.ts).
+ *
+ * The cascade walks until the cap mechanism stops pushing entries forward.
+ * No LLM-judgement shortcuts. No reuse of existing entries — every cascade
+ * step is a fresh compression at the agent's highest capability.
+ */
+export async function bumpOnInsert(
+    agent: string,
+    level: string,
+): Promise<BumpResult> {
+    const result: BumpResult = { cascadeSteps: 0, finalLevel: null, skippedReasons: [] };
+
+    const helper = enqueueCascadeForDisplacedAt(db, agent, level);
+    result.skippedReasons.push(helper.reason);
+
+    if (helper.pendingId) {
+        const next = nextLevel(level);
         result.cascadeSteps = 1;
         result.finalLevel = next;
-        result.skippedReasons.push(`${level}→${next}: enqueued pending=${pendingId}`);
-        console.log(`[Bump] ${agent} ${level}→${next} enqueued for ${displaced.session_label} (pending=${pendingId})`);
-    } else {
-        result.skippedReasons.push(`${level}→${next}: already enqueued (UNIQUE)`);
+        console.log(`[Bump] ${agent} ${level}→${next} enqueued (pending=${helper.pendingId})`);
     }
 
     return result;
@@ -1741,7 +1782,7 @@ export function rollingWindowRotate(
     fileHeader: string = '',
     headTokens: number = ROLLING_WINDOW_HEAD_DEFAULT,
     tailTokens: number = ROLLING_WINDOW_TAIL_DEFAULT,
-    agent?: 'leo' | 'jim',
+    agent?: string,
     contentType?: 'working-memory' | 'felt-moments' | 'self-reflection',
 ): { rotated: boolean; archivePath?: string; c0EntryId?: string; entriesArchived: number; entriesKept: number } {
     if (!fs.existsSync(filePath)) {

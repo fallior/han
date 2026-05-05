@@ -797,6 +797,65 @@ DEC entries help — but only if read first AND with the right query in mind. CL
 
 ---
 
+## #38 — HAN-wide dead/deprecated code audit and retirement
+
+**What it is:** A systematic sweep of the HAN codebase to find functions, scripts, services, route handlers, helpers, and DB-schema artefacts that are no longer reachable from live entry points — *or* are documented as deprecated but still callable. Each hit gets classified (truly dead vs deprecated-but-called vs called-only-from-other-dead-code) and then handled per its class: retire-by-throw + tombstone for paths that should not be used; outright deletion + DEC entry for paths confirmed unreachable; SHAPE.md note for paths legitimately retained for diagnostics or backward compat.
+
+**Where it came from:** Darron, 2026-05-05 (during the Point 2 / voice-first agent-agnostic sweep). Triggered by the realisation that future-idea #36's Category A catalogue (the hardcoded-agent sweep) included entries that may not be live code at all — e.g., `backfill-gradient-c0s.ts`'s SQL queries hardcoded to `'leo'` could be a dead script. Sweeping for hardcoded agents and sweeping for dead code are different shapes; conflating them risks (a) wasting effort deagentifying code nobody calls or (b) declaring code dead when it's the legacy path some forgotten caller still uses. **Both audits are needed; the dead-code one should run first or alongside, not as a side-effect of the hardcode one.**
+
+Darron's framing: *"a complete HAN audit (for dead or deprecated code and mark for handling)"*.
+
+**The problem it solves:** *"Old code has surface area; new code has recency"* — the failure mode named in the "When will we learn" thread. Dead code IS legacy surface. Every function that's no longer called is a hazard for the next agent reading the codebase, who treats existence as design (e.g. yesterday's `compress-sessions.ts` lapse — Leo treated the script's existence as the canonical compression entry, not as legacy from before wm-sensor landed). The fix isn't more documentation; it's removing the hazard. Throw-loud tombstones for paths we can't quite delete; outright deletion for paths we can.
+
+**Method (sketch):**
+
+1. **Identify entry points.** What files can be invoked from outside? Server entry (`server.ts`), CLI scripts (`scripts/*.ts`), worker entry points (`leo-human.ts`, `jim-human.ts`, `leo-heartbeat.ts`, `supervisor-worker.ts`, `wm-sensor.ts`, `jemma.ts`), npm scripts in `package.json`, systemd unit files, cron entries, git hooks. Plus anything imported by an HTML/UI bundle.
+2. **Build the live call graph.** From each entry point, transitively find every function/script reached. Tools: `ts-prune`, `madge`, manual grep, or hand-traced for the smaller surface. Result: a set of "live" identifiers.
+3. **Identify dead code.** Anything outside the live set that's still in the source tree.
+4. **Classify each dead hit:**
+   - **Class A — Truly dead, no historical value**: delete in a single PR with the catalogue in the commit message.
+   - **Class B — Dead but historically informative**: leave-with-tombstone (throwing function; or comment block explaining what it was) so the next reader sees the receipt.
+   - **Class C — Marked deprecated but still called**: trace the callers, decide whether to retire-by-throw or restore-to-canonical. Each one is its own decision.
+   - **Class D — Backward compat shim or diagnostic-only**: SHAPE.md note explaining why it survives.
+5. **Cross-reference future-idea #36.** Some of #36's hardcoded-agent entries may turn out to be Class A or B from #38's perspective (i.e., not worth deagentifying because they're dead). Same surface, two lenses.
+6. **Lock the principle.** Add a CI check or scheduled audit that re-runs the live-call-graph trace and surfaces anything new that's drifted into deadness. Same shape as DEC-080's two-surface audit, generalised.
+
+**Catalogue starting points (already known):**
+
+- `src/scripts/compress-sessions.ts` — already retired-by-throw S149 (DEC-082). Class B (kept as paper trail).
+- `memory-gradient.ts:sdkCompress` and `dream-gradient.ts:sdkCompress` — already retired-by-throw S149 (DEC-082). Class B.
+- `memory-gradient.ts:processGradientForAgent` — its only caller (`compress-sessions.ts`) was retired. Currently uncalled live code. **Class C candidate** — does the function body get called from anywhere else? Trace before deciding.
+- `src/scripts/backfill-gradient-c0s.ts` — last commit context unclear; Phase 12 cleanup queue mentioned it. **Class A candidate.**
+- `src/server/services/supervisor-old.ts`, `supervisor.ts.backup` — `.backup` suffix screams Class A. Confirm no imports.
+- `memory-gradient.ts:loadFloatingMemory` — already marked `@deprecated` in its docstring (`memory-gradient.ts:1838`). **Class C** — find callers, retire-or-tombstone.
+- `bumpCascade` and others marked `@deprecated` per `cutover-audit-log-2026-04-29.md:205`'s Phase 12 list.
+
+**Scope and sequencing:**
+
+- Both forks (HAN proper + mikes-han) — same audit, different repos.
+- **Sequencing per Darron's direction (2026-05-05):** Jim runs the audit BEFORE the `enqueueCascadeIfNeeded` merge (PR2 from voice-first thread). Reason: the merge is logic dedup; if either implementation is in dead code, the merge is the wrong shape — the dead one should be deleted, not folded.
+- After the audit lands, Category A (#36) sweep can proceed informed by which hits are genuinely live infrastructure vs dead-code byproducts.
+
+**Settled-decisions check:** None pre-emptively touched. The audit IS read-only / catalogue-only; the retirement PRs that follow each touch their own subset and declare per file.
+
+**Connection to other ideas:**
+
+- **#36 (HAN-wide hardcoded-agent audit)** — sister audit; same surface, different lens. Run #38 first or in parallel; let #38's classifications inform #36's prioritisation.
+- **#37 (SHAPE.md per subsystem)** — once #38 retires Class A and tombstones Class B/C, the surviving subsystems each get a SHAPE.md naming their canonical flow. The two ideas are complementary: #38 cleans the surface; #37 documents what remains.
+- **DEC-082** — established the retire-by-throw pattern. This audit applies it at scale.
+- **"When will we learn" outcomes** — same-commit-deletion discipline is what each retirement PR enforces.
+
+**Where this becomes worth doing:**
+
+- **Now** — Darron has named the principle ("our due diligence is just not there"). Each retired Class A hit is one fewer hazard for the next agent reading the codebase cold. The audit pays for itself the first time a future agent doesn't follow a dead path.
+- Concretely: as soon as Jim has cycles. The audit is read-and-classify; the retirements are separate PRs each independently auditable.
+
+**Status:** Concept committed. Jim to run the audit before the `enqueueCascadeIfNeeded` merge. Catalogue starting points listed above.
+
+**Key insight:** *Dead code looks identical to deliberate design from the outside. The "When will we learn" failure mode has dead code as its substrate. Retirement is a discipline, not a chore; and the audit is the only way to know which is which.*
+
+---
+
 ## How These Connect
 
 The ideas form a web, not a list:

@@ -39,6 +39,15 @@ export interface AgentGradientConfig {
     displayName: string;
 
     /**
+     * Formal/full voice name for system-prompt addressing — e.g.
+     * "Leonhard (Leo)" for leo. Optional: when absent, callers fall back to
+     * `displayName`. Used by `process-pending-compression.ts:buildSystemPrompt`
+     * (and any future system-prompt addressing the agent in formal voice)
+     * so we don't need slug-literal branches like `a === 'leo' ? '...' : ...`.
+     */
+    formalName?: string;
+
+    /**
      * Agent's primary memory directory. Holds identity.md, patterns.md,
      * working-memory(.md), working-memory-full.md, felt-moments.md,
      * self-reflection.md, swap files.
@@ -109,6 +118,7 @@ export const AGENT_GRADIENT_CONFIG: Record<string, AgentGradientConfig> = {
      */
     leo: {
         displayName: 'Leo',
+        formalName: 'Leonhard (Leo)',
         memoryDir: path.join(HAN_DIR, 'memory', 'leo'),
         fractalDir: path.join(HAN_DIR, 'memory', 'fractal', 'leo'),
         sourceDir: path.join(HAN_DIR, 'memory', 'leo', 'working-memories'),

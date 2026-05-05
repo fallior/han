@@ -50,6 +50,7 @@ import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
+import { enqueueCascadeForDisplacedAt } from '../src/server/lib/memory-gradient';
 
 // Token counting — Phase A token refactor (S145, 2026-04-30). Mirrors the
 // canonical helper at src/server/lib/token-counter.ts; inlined for the same
@@ -59,14 +60,10 @@ function countTokens(text: string | null | undefined): number {
     return Math.ceil(text.length / 4);
 }
 
-// Cap formula per DEC-068: c0=1, c{n>=1}=3n.
-function gradientCap(level: string): number {
-    const m = level.match(/^c(\d+)$/);
-    if (!m) return 1;
-    const n = parseInt(m[1], 10);
-    if (n < 1) return 1;
-    return 3 * n;
-}
+// `gradientCap` was previously defined here for the now-deleted local
+// `enqueueCascadeIfNeeded`. It has been removed in S150 PR3 (the shared
+// helper in memory-gradient.ts owns the cap formula now). Same-commit-
+// deletion discipline per "When will we learn".
 
 function nextLevelName(level: string): string | null {
     const m = level.match(/^c(\d+)$/);
@@ -74,63 +71,21 @@ function nextLevelName(level: string): string | null {
     return `c${parseInt(m[1], 10) + 1}`;
 }
 
-const CASCADE_PAUSED_SIGNAL = path.join(os.homedir(), '.han', 'signals', 'cascade-paused');
-function isCascadePausedHere(): boolean {
-    return fs.existsSync(CASCADE_PAUSED_SIGNAL);
-}
-
-/**
- * Phase A.1 (S145, 2026-04-30): cascade propagation. After writing a new entry
- * at level X, enqueue the rank=cap+1 entry at level X for cascade to level X+1
- * if it has no live descendant. This is what makes the chain c0→c1→c2→...→UV
- * propagate per Darron's design — every insert at any level triggers the next
- * level's bump, not just c0 inserts via rolling-window-rotate.
- *
- * Mirrors src/server/lib/memory-gradient.ts bumpOnInsert. INSERT OR IGNORE
- * deduplicates on (agent, source_id, from_level). Returns the pending row id
- * if enqueued, null if no work needed (level has slots, already cascaded,
- * cascade paused, or no further level).
- */
-function enqueueCascadeIfNeeded(
-    db: Database.Database,
-    agent: string,
-    fromLevel: string,
-): string | null {
-    if (isCascadePausedHere()) return null;
-
-    const cap = gradientCap(fromLevel);
-    const nextL = nextLevelName(fromLevel);
-    if (!nextL) return null;
-
-    // Find rank=cap+1 displaced entry (skip UV-halted + superseded — Phase A.1).
-    const displaced = db.prepare(`
-        SELECT id FROM gradient_entries
-        WHERE agent = ? AND level = ?
-          AND cascade_halted_at IS NULL
-          AND superseded_by IS NULL
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1 OFFSET ?
-    `).get(agent, fromLevel, cap) as { id: string } | undefined;
-    if (!displaced) return null; // level has slots
-
-    // Idempotency: skip if already has live descendant at next level.
-    const hasDesc = db.prepare(`
-        SELECT 1 FROM gradient_entries
-        WHERE source_id = ? AND agent = ? AND level = ?
-          AND superseded_by IS NULL
-        LIMIT 1
-    `).get(displaced.id, agent, nextL);
-    if (hasDesc) return null;
-
-    // Enqueue. UNIQUE(agent, source_id, from_level) idempotent — re-call safe.
-    const pendingId = crypto.randomUUID();
-    db.prepare(`
-        INSERT OR IGNORE INTO pending_compressions
-            (id, agent, source_id, from_level, to_level, enqueued_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    `).run(pendingId, agent, displaced.id, fromLevel, nextL, new Date().toISOString());
-    return pendingId;
-}
+// Cascade enqueueing was previously duplicated here as `enqueueCascadeIfNeeded`
+// (S145 Phase A.1). It mirrored src/server/lib/memory-gradient.ts:bumpOnInsert
+// and could drift out of sync with it. S150 (2026-05-05, voice-first thread
+// `mor4o3r3-jvdjv1`, PR3) consolidated both surfaces into the single shared
+// helper `enqueueCascadeForDisplacedAt` in memory-gradient.ts. Per DEC-080's
+// one-write-site principle applied at the cascade-enqueue surface.
+//
+// The duplicate fixed Drift A in the same change: this script previously
+// returned the generated UUID even when INSERT OR IGNORE rejected on UNIQUE,
+// producing a misleading log upstream ("enqueued pending=<id>" when no row
+// was actually added). The shared helper checks `info.changes > 0` and
+// returns null on rejection.
+//
+// `isCascadePausedHere()` is no longer needed here — the shared helper checks
+// the cascade-paused signal itself.
 
 // ── Argument parsing ────────────────────────────────────────────
 
@@ -317,7 +272,10 @@ function completeClaim(db: Database.Database, id: string): void {
 
 function buildSystemPrompt(a: string, mem: AgentMemory): string {
     const cfg = gradientConfigForAgent(a);
-    const introName = a === 'leo' ? 'Leonhard (Leo)' : cfg.displayName;
+    // Per DEC-081 + S150 PR3: formal voice name lives on the registry as
+    // `formalName` (e.g. "Leonhard (Leo)" for leo). Falls back to displayName
+    // for agents whose registry entry doesn't override.
+    const introName = cfg.formalName ?? cfg.displayName;
     return `You are ${introName}. Below is your loaded memory — identity, patterns, aphorisms, felt-moments, and a sample of your existing gradient. Use this to compose the requested compression in YOUR OWN voice, not as a generic compression task.
 
 # IDENTITY
@@ -493,9 +451,13 @@ async function main() {
         // to_level (rank=cap+1) that needs c{N+1} compression. Enqueue if so.
         // This is what makes the chain c0→c1→c2→...→UV propagate per Darron's
         // design — without it, cascade stops at one step.
-        const cascadeEnqueued = enqueueCascadeIfNeeded(db, agent!, claimed.to_level);
-        if (cascadeEnqueued) {
-            log(`cascade propagation: enqueued ${claimed.to_level}→${nextLevelName(claimed.to_level)} pending=${cascadeEnqueued}`);
+        //
+        // Calls the shared helper from memory-gradient.ts (S150, voice-first
+        // PR3) — same code path as bumpOnInsert. One-write-site for cascade
+        // enqueueing per DEC-080.
+        const cascadeResult = enqueueCascadeForDisplacedAt(db, agent!, claimed.to_level);
+        if (cascadeResult.pendingId) {
+            log(`cascade propagation: enqueued ${claimed.to_level}→${nextLevelName(claimed.to_level)} pending=${cascadeResult.pendingId}`);
         }
 
         const sourceTokens = countTokens(claimed.source_content || '');
