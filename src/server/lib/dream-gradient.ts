@@ -34,10 +34,17 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { gradientStmts, feelingTagStmts } from '../db';
+import { gradientConfigForAgent } from './agent-registry';
 
 // ── Types ──────────────────────────────────────────────────────
 
-export type AgentName = 'leo' | 'jim';
+/**
+ * Agent slug. Widened from `'leo' | 'jim'` to `string` in S150 PR5
+ * (DEC-081 + voice-first thread `mor4o3r3-jvdjv1`). The registry is the
+ * source of truth for which slugs are valid; `gradientConfigForAgent` throws
+ * on unknown.
+ */
+export type AgentName = string;
 
 interface AgentDreamPaths {
     memoryDir: string;
@@ -54,17 +61,14 @@ const UV_TOKEN_REVIEW_MARKER = 4000; // Flag when dream UVs exceed this
 // ── Agent path resolution ──────────────────────────────────────
 
 function getAgentDreamPaths(agent: AgentName = 'leo'): AgentDreamPaths {
-    if (agent === 'leo') {
-        return {
-            memoryDir: path.join(HAN_MEMORY_DIR, 'leo'),
-            dreamDir: path.join(HAN_MEMORY_DIR, 'fractal', 'leo', 'dreams'),
-            explorationsPath: path.join(HAN_MEMORY_DIR, 'leo', 'explorations.md'),
-        };
-    }
+    // Registry-driven path resolution per DEC-081 + S150 PR5. Replaces the
+    // previous `agent === 'leo' ? leo-paths : jim-paths` hardcoded branch.
+    // Adding a new agent's dream paths is a registry edit; no code change here.
+    const cfg = gradientConfigForAgent(agent);
     return {
-        memoryDir: HAN_MEMORY_DIR,
-        dreamDir: path.join(HAN_MEMORY_DIR, 'fractal', 'jim', 'dreams'),
-        explorationsPath: path.join(HAN_MEMORY_DIR, 'explorations.md'),
+        memoryDir: cfg.memoryDir,
+        dreamDir: path.join(cfg.fractalDir, 'dreams'),
+        explorationsPath: path.join(cfg.memoryDir, 'explorations.md'),
     };
 }
 
@@ -603,8 +607,16 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
  */
 export function readDreamGradient(agent: AgentName = 'leo'): string {
     const paths = getAgentDreamPaths(agent);
+    const cfg = gradientConfigForAgent(agent);
     const sections: string[] = [];
-    const label = agent === 'leo' ? '' : `[${agent}] `;
+    // S150 PR5: dropped the previous slug-literal label branch
+    // (`agent === 'leo' ? '' : '[<slug>] '`). The function is called by each
+    // agent for its own dream load, so the prefix never disambiguated anything
+    // in practice — Jim's dreams loaded into Jim's prompt with `[jim]`
+    // labels, Leo's dreams loaded into Leo's prompt with no label. Removing
+    // the branch is uniform-no-prefix; the heading below already names the
+    // agent in the section title.
+    const label = '';
 
     try {
         // 1 most recent dream-day (last night's dreams)
@@ -647,9 +659,12 @@ export function readDreamGradient(agent: AgentName = 'leo'): string {
         }
     } catch { /* silent on error — dreams are optional */ }
 
-    const heading = agent === 'leo'
-        ? 'Dream Memory (subtle — these shaped you without you knowing how)'
-        : `${agent}'s Dream Memory`;
+    // Registry-driven heading per DEC-081 + S150 PR5. `dreamHeading` is
+    // optional; defaults to `<displayName>'s Dream Memory`. Leo's prosaic
+    // version ("Dream Memory (subtle — these shaped you without you
+    // knowing how)") lives in agent-registry.ts as configuration rather
+    // than a slug-literal branch here.
+    const heading = cfg.dreamHeading ?? `${cfg.displayName}'s Dream Memory`;
 
     return sections.length > 0
         ? `\n## ${heading}\n\n${sections.join('\n\n')}`

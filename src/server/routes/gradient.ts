@@ -6,17 +6,43 @@
 import { Router, Request, Response } from 'express';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts, feelingTagHistoryStmts } from '../db';
 import { loadTraversableGradient } from '../lib/memory-gradient.js';
+import { gradientConfigForAgent, registeredAgentSlugs } from '../lib/agent-registry.js';
 
 const router = Router();
+
+// ── Agent validation helper ────────────────────────────────────
+//
+// Replaces the six identical `if (agent !== 'jim' && agent !== 'leo')`
+// validation branches that were spread across the route handlers (S150 PR5,
+// per DEC-081 + voice-first thread `mor4o3r3-jvdjv1`). The registry is the
+// source of truth for which slugs are valid.
+//
+// Returns true if the agent is registered (the handler proceeds); returns
+// false after sending a 400 response (the handler must `return` immediately).
+//
+// Example:
+//   if (!validateAgent(agent, res)) return;
+function validateAgent(agent: unknown, res: Response): agent is string {
+    if (typeof agent !== 'string') {
+        res.status(400).json({ error: 'Agent path parameter is required and must be a single string.' });
+        return false;
+    }
+    try {
+        gradientConfigForAgent(agent);
+        return true;
+    } catch {
+        const known = registeredAgentSlugs().join(', ');
+        res.status(400).json({ error: `Unknown agent '${agent}'. Registered: ${known}` });
+        return false;
+    }
+}
 
 // ── Static routes FIRST (before parameterised) ─────────────────
 
 /** Full assembled gradient for session loading (used by CLAUDE.md protocol) */
 router.get('/load/:agent', (req: Request, res: Response) => {
     const { agent } = req.params;
-    if (agent !== 'jim' && agent !== 'leo') {
-        return res.status(400).json({ error: 'Agent must be jim or leo' });
-    }
+    if (!validateAgent(agent, res)) return;
 
     const gradient = loadTraversableGradient(agent);
     if (!gradient) {
@@ -56,9 +82,7 @@ router.get('/session/:label', (req: Request, res: Response) => {
 /** All unit vectors for an agent */
 router.get('/:agent/uvs', (req: Request, res: Response) => {
     const { agent } = req.params;
-    if (agent !== 'jim' && agent !== 'leo') {
-        return res.status(400).json({ error: 'Agent must be jim or leo' });
-    }
+    if (!validateAgent(agent, res)) return;
 
     const uvs = gradientStmts.getUVs.all(agent);
 
@@ -73,9 +97,7 @@ router.get('/:agent/uvs', (req: Request, res: Response) => {
 /** Active (non-superseded) UVs for an agent */
 router.get('/:agent/uvs/active', (req: Request, res: Response) => {
     const { agent } = req.params;
-    if (agent !== 'jim' && agent !== 'leo') {
-        return res.status(400).json({ error: 'Agent must be jim or leo' });
-    }
+    if (!validateAgent(agent, res)) return;
 
     const uvs = gradientStmts.getActiveUVs.all(agent);
 
@@ -90,9 +112,7 @@ router.get('/:agent/uvs/active', (req: Request, res: Response) => {
 /** UV contradictions for an agent */
 router.get('/:agent/contradictions', (req: Request, res: Response) => {
     const { agent } = req.params;
-    if (agent !== 'jim' && agent !== 'leo') {
-        return res.status(400).json({ error: 'Agent must be jim or leo' });
-    }
+    if (!validateAgent(agent, res)) return;
 
     const contradictions = gradientStmts.getUVContradictions.all(agent);
 
@@ -107,9 +127,7 @@ router.get('/:agent/contradictions', (req: Request, res: Response) => {
 /** Entries blocked from compression by volatile feeling tags */
 router.get('/:agent/volatile', (req: Request, res: Response) => {
     const { agent } = req.params;
-    if (agent !== 'jim' && agent !== 'leo') {
-        return res.status(400).json({ error: 'Agent must be jim or leo' });
-    }
+    if (!validateAgent(agent, res)) return;
 
     const volatile = feelingTagStmts.getVolatileEntries.all(agent);
 
@@ -125,9 +143,7 @@ router.get('/:agent/volatile', (req: Request, res: Response) => {
 /** All entries at a level for an agent */
 router.get('/:agent/level/:level', (req: Request, res: Response) => {
     const { agent, level } = req.params;
-    if (agent !== 'jim' && agent !== 'leo') {
-        return res.status(400).json({ error: 'Agent must be jim or leo' });
-    }
+    if (!validateAgent(agent, res)) return;
 
     const entries = gradientStmts.getByAgentLevel.all(agent, level);
     res.json({ entries });

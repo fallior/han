@@ -202,7 +202,9 @@ This is a standing rule, not a guideline. It applies always.
 
 - Anything in `src/server/lib/` (memory-gradient, agent-registry, sensor-lock, etc.).
 - Anything in `src/server/services/` (wm-sensor, supervisor-worker, jemma).
+- Anything in `src/server/routes/` (HTTP API; agent-validation surfaces; cross-agent infrastructure).
 - Anything with a `*.SHAPE.md` adjacent (per future-idea #37).
+- Anything gatekeeper-controlled per DEC-073 (`templates/CLAUDE.template.md`, `CLAUDE.md`, `templates/CLAUDE-*-original-*.md`). PR4 itself was technically uncovered by the rhythm-as-originally-written; S150 PR5 closed that gap (Jim's audit catch).
 - Anything touching the `gradient_entries` or `pending_compressions` schemas, or DEC-068/-069/-079/-080/-081/-082 surfaces.
 
 **The audit covers**: type-chain trace, SHAPE.md verification (does the code still match what the doc says?), `npx tsc --noEmit` run, settled-decisions check, scope-discipline check. Findings post to the relevant Memory Discussions thread before commit.

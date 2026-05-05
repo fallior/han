@@ -969,7 +969,7 @@ export async function processGradientForAgent(agentName: string): Promise<Gradie
  * @returns number of compressions performed
  */
 export async function activeCascade(
-    agent: 'jim' | 'leo',
+    agent: string,
     percentage: number,
     context: string = 'active cascade',
 ): Promise<number> {
@@ -2209,7 +2209,7 @@ export function loadMemoryFileGradient(gradientDir: string, label: string): stri
  *
  * Returns formatted text for system prompt inclusion.
  */
-export function loadTraversableGradient(agent: 'jim' | 'leo'): string {
+export function loadTraversableGradient(agent: string): string {
     // Check if DB has any entries for this agent (any level — UVs aren't a
     // precondition for loading; during the rebuild we have c0/c1/c2/c3/c4
     // long before INCOMPRESSIBLE landings produce UVs).

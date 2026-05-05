@@ -48,6 +48,15 @@ export interface AgentGradientConfig {
     formalName?: string;
 
     /**
+     * Heading text used by `lib/dream-gradient.ts:readDreamGradient` when
+     * loading the agent's dream memory into a prompt. Optional; when absent,
+     * the default `"<displayName>'s Dream Memory"` is used. Carries
+     * agent-specific UI flavour text as configuration rather than a
+     * slug-literal branch (DEC-081 carve-out for prose configuration).
+     */
+    dreamHeading?: string;
+
+    /**
      * Agent's primary memory directory. Holds identity.md, patterns.md,
      * working-memory(.md), working-memory-full.md, felt-moments.md,
      * self-reflection.md, swap files.
@@ -119,6 +128,7 @@ export const AGENT_GRADIENT_CONFIG: Record<string, AgentGradientConfig> = {
     leo: {
         displayName: 'Leo',
         formalName: 'Leonhard (Leo)',
+        dreamHeading: 'Dream Memory (subtle — these shaped you without you knowing how)',
         memoryDir: path.join(HAN_DIR, 'memory', 'leo'),
         fractalDir: path.join(HAN_DIR, 'memory', 'fractal', 'leo'),
         sourceDir: path.join(HAN_DIR, 'memory', 'leo', 'working-memories'),

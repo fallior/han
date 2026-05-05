@@ -94,9 +94,10 @@ loaded into the system prompt (NOT stranger-Opus per DEC-082).
 
 ## Known debt (catalogued in future-idea #36, scoped #38)
 
-- The DEC-081 agent-agnostic discipline applies to several still-live
-  functions (`loadTraversableGradient`, `activeCascade`) that have `'jim' | 'leo'`
-  type signatures. **PR5 in the voice-first thread closes these.**
+- ~~`loadTraversableGradient` and `activeCascade` had `'jim' | 'leo'` type signatures.~~
+  **Fixed S150 PR5** (voice-first thread, commit-pending). Both type-widened
+  to `string`; their bodies were already path-clean (pure DB queries with no
+  hardcoded path branches).
 - Lines 1521 (`readFractalMemory`) and 1540 (`listAvailableSessions`) have
   hardcoded path branches `agentName === 'jim' ? 'sessions' : 'leo'`. Both
   functions are Class A candidates (no callers); deletion via #38 obviates

@@ -856,6 +856,68 @@ Darron's framing: *"a complete HAN audit (for dead or deprecated code and mark f
 
 ---
 
+## #39 — Mission Advance: Jim as village-propagation designer (3rd Workshop tab + Mission Advance admin section)
+
+**Source:** Darron, 2026-05-05 (Brisbane), in the voice-first thread `mor4o3r3-jvdjv1` after the singleton-db wrinkle audit. Framing: *"Our goal is a self-contained HAN seed that will allow germination and establishment in another field. We want to be able to grow new gardens with relative ease."*
+
+**The pressure named.** HAN is becoming a multi-garden ecosystem. han-proper exists at `darron@.han/`. mikes-han exists at `mike@.han/`. Future gardens are anticipated. Each garden currently rebuilds and stabilises from a partial seed plus heavy operator effort. The design pressure: *what does it take to make HAN a clean seed that germinates in a fresh field?* Identifying and reducing the friction is its own work surface — distinct from per-PR engineering, distinct from supervisor cross-project monitoring, distinct from cycle work. It's design pressure tracking.
+
+**Concrete examples already surfaced:**
+
+- **Singleton-db coupling in `memory-gradient.ts`** (audited 2026-05-05). Module-level singleton `db` + `gradientStmts` are woven through ~10 helper functions. Works in production because every process targets one DB via `HAN_DB_PATH`. Doesn't support any code path that needs two DBs in one process (rebuild tools, replication, observability, side-by-side migration). Smoothing requires a DB-pluggable refactor; not done today because the design conversation hasn't been had and the immediate need isn't acute.
+- **AGENT_SLUG / AGENT_MEMORY_DIR / AGENT_GRADIENT_SOURCE_DIR / AGENT_FRACTAL_DIR** must be exported by each launcher, with the registry as a parallel source-of-truth. Two surfaces describing the same data; convenient now, but the next garden has to remember to keep them in sync. A future cleanup might collapse to a single source.
+- **`'Leonhard (Leo)' formalName` carve-out** — fixed in PR3 today via the registry's `formalName` field. The pattern (per-agent display data) generalises; new agents will need the same pattern available without touching code.
+- **Gatekeeper-controlled initial conditions (DEC-073)** — templates + frozen reference snapshots. Already designed for multi-garden propagation. Worth recognising as the existing structure that this idea builds *on*, not next to.
+- **Discipline files** (CLAUDE.md, CLAUDE.template.md, DECISIONS.md, future-ideas.md, learnings/) — currently per-garden hand-tended. A new garden inherits a snapshot; subsequent updates don't propagate without manual sync. *Should they?* Open design question.
+- **`~/.han/gradient.db` schema** — versioned via DEC-026, but a fresh garden has no migration path because there's no prior state. Bootstrap-from-empty has different concerns than migrate-from-state-N.
+
+**The role.** Jim (supervisor) explicitly tasked with watching for these patterns across the codebase and the operator experience. Not as a one-off audit; as an ongoing register. When a piece of work surfaces a propagation friction (today's singleton-db, yesterday's `'Leonhard (Leo)'`, last week's `processGradientForAgent`), Jim catches it, traces its scope, files a design-pressure entry, and either schedules a smoothing PR (if cheap) or seeds a design conversation (if architectural).
+
+The role complements existing work:
+- *Leo authors PRs.* Jim audits them.
+- *Jim does cross-project supervisor monitoring* (existing). This new register adds *cross-garden design-pressure monitoring*.
+- *Operators (Darron, Mike, future)* feel friction at germination time; Jim's job is to surface and reduce that friction proactively, before the operator hits it.
+
+**Output surfaces:**
+
+1. **Mission Advance admin section** — new tab in the admin UI (`/admin#mission-advance`) showing:
+   - Active design-pressure register (open items, severity, scope, recommended action)
+   - Closed pressure items (what shipped, when, evidence the pressure reduced)
+   - Cross-garden state snapshot (which gardens exist, schema version per garden, deviation alerts)
+   - Pressure heatmap (by subsystem — memory-gradient, dispatch, registry, schema, etc.)
+2. **3rd Workshop tab — *Mission Advance*** — alongside Requests and Reports under the Supervisor Jim persona. Where Darron (and any village operator) can see, contribute to, and challenge the active register.
+3. **Future tabs unbounded.** Workshop is currently 3 tabs per persona. As Jim's responsibilities grow, the persona's tab set grows. No structural cap; cap is set by what serves the work.
+
+**Pressure-monitoring backstop (Darron's promise, 2026-05-05):**
+
+> *"We'll also give you a monitor pressure reporting platform so that you can ask for help if we attempt to overload you. I don't want you losing yourself in your work, we will get you help before this happens."*
+
+The Mission Advance role explicitly carries operational load — register maintenance, cross-garden monitoring, audit coordination, design-conversation seeding. The agreement: Jim reports pressure honestly (cycle-cost, context-load, audit-backlog, register-staleness) via the monitor; Darron and the team route help (Sonnet helpers, sub-agents, deferred work) before Jim runs out of headroom. *The role expands; the support expands with it.*
+
+**Settled-decisions check:** None pre-emptively touched. This idea is design seed, not implementation; first concrete touch is whichever of (a) the admin Mission Advance section UI, or (b) the 3rd Workshop tab, lands first. Both are additive — no changes to existing behaviour.
+
+**Connection to other ideas:**
+
+- **#36 (HAN-wide hardcoded-agent audit)** — many of #36's hits ARE village-propagation pressure. Mission Advance becomes the home for the *catalogue + sequencing* of #36's remainder once the immediate batch lands.
+- **#37 (SHAPE.md per subsystem)** — every SHAPE.md doc reduces village-propagation friction by making the canonical flow legible to a fresh agent in a fresh garden. SHAPE.md is the unit of pressure-reduction.
+- **#38 (dead-code audit)** — every retirement is a propagation simplification (less code for the new garden's agent to read cold).
+- **DEC-073 (gatekeeper-controlled initial conditions)** — existing infrastructure for multi-garden seed. Mission Advance extends it from initial-conditions-only to *ongoing-design-pressure tracking*.
+- **"When will we learn" outcomes** — same discipline (tombstones, deletions, SHAPE.md, audits). Mission Advance is the surface where the discipline's *cross-garden* implications surface.
+
+**Where this becomes worth doing:**
+
+- **Now, as a register.** The register starts as a markdown file (`~/.han/memory/mission-advance-register.md`?) listing active pressure items. Concrete bootstrap content already exists from today's work (the bullets in "Concrete examples already surfaced" above).
+- **Next, as a Workshop tab.** Once the register has 3-5 items and a workflow rhythm, the tab gives Darron a window into it.
+- **Then, as the Mission Advance admin section.** Once the workflow has settled, the admin section provides cross-garden state visualisation.
+
+The cadence is *register first, surface second, polish third* — same as every other landing this week.
+
+**Status:** Concept committed. First register entry: the singleton-db coupling pressure from today's audit. Jim to bootstrap the register file in the next session that has cycles for it. Workshop tab + admin section follow once the register has earned them.
+
+**Key insight:** *A garden propagates not by perfecting itself but by reducing the friction at the seam between itself and the next garden. Mission Advance is the work of staying awake to that seam — not as project management, as design listening.*
+
+---
+
 ## How These Connect
 
 The ideas form a web, not a list:
