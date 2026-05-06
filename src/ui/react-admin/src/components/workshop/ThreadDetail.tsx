@@ -135,33 +135,14 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
       }
     });
 
-    // On WS reconnect, refetch the current thread to catch messages missed during disconnect
-    const unsubReconnect = subscribeWs('ws_reconnected', async () => {
-      try {
-        const thread = await fetchThread(threadId as string);
-        setCurrentThread(thread);
-      } catch (err) {
-        console.error('Failed to refetch thread on reconnect:', err);
-      }
-    });
-
-    // Polling fallback — if WebSocket misses a broadcast (silent disconnect,
-    // IPC failure, etc.), the poll catches it. Compares message count to avoid
-    // unnecessary re-renders when nothing changed.
-    const pollInterval = setInterval(async () => {
-      try {
-        const thread = await fetchThread(threadId as string);
-        if (thread && currentThread &&
-            thread.messages.length !== currentThread.messages.length) {
-          setCurrentThread(thread);
-        }
-      } catch { /* silent — poll is best-effort */ }
-    }, 15000); // 15 seconds
+    // S151 follow-on: ws_reconnected refetch and the 15s polling fallback
+    // both removed per Darron's "refresh only on manual or someone-posts"
+    // rule. The conversation_message subscription above handles live
+    // updates; browser refresh fills in anything missed during a WS
+    // disconnect. No polling, no auto-catch-up.
 
     return () => {
       unsubMessage();
-      unsubReconnect();
-      clearInterval(pollInterval);
     };
   }, [threadId, addMessageToCurrentThread, subscribeWs]);
 

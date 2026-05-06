@@ -1687,10 +1687,16 @@ generated through the separate filesystem scan in `processGradientForAgent`.
 **Status:** Fully resolved (S104 + S108). S104 fixed the crash: `GET /api/conversations` returns
 `{ success, conversations: [...] }` but `WebSocketProvider.tsx` passed the whole object to
 `setConversations()`. Fixed with proper unwrapping. S108 completed the fix with a multi-layer
-reliability approach: (1) all four conversation-displaying components now refetch on
-`ws_reconnected`, (2) 3-strike heartbeat tolerance on server (90s vs 30s), (3) app-level
-keepalive ping every 20s, (4) instant wake reconnect via `visibilitychange` listener,
-(5) 15-second polling fallback on all conversation pages as safety net.
+reliability approach: (1) 3-strike heartbeat tolerance on server (90s vs 30s), (2) app-level
+keepalive ping every 20s, (3) instant wake reconnect via `visibilitychange` listener in
+`WebSocketProvider.tsx` (which RECONNECTS the WS when the tab becomes visible — does NOT
+trigger refetch). **S151 follow-on (2026-05-06):** the original ws_reconnected blanket
+refetches in four components AND the 15-second polling fallback in ThreadDetail AND the
+useVisibilitySync direct-refetch hook were all removed per Darron's "refresh only on
+manual or someone-posts" rule. The only auto-refresh paths now are the WebSocket
+`conversation_message` and `conversation_created` event subscriptions in each component
+(live updates when someone posts). Browser refresh fills in anything missed during a WS
+disconnect.
 
 ---
 
@@ -2488,9 +2494,9 @@ The server pings each WebSocket client every 30s. Clients that miss **3 consecut
 - Exponential backoff with jitter
 - **Instant wake reconnect (S108):** `visibilitychange` listener in `WebSocketProvider.tsx` detects when the device wakes from sleep/hibernate and triggers immediate reconnection, rather than waiting for a stale setTimeout to fire
 
-### Polling Fallback (S108)
+### Polling Fallback — RETIRED 2026-05-06 (S151)
 
-All conversation-displaying components (Workshop ThreadDetail, ConversationsPage, MemoryPage) poll every 15 seconds as a safety net. If a WebSocket broadcast is missed (e.g. during brief disconnection), the poll catches it within 15s. This complements — not replaces — the WebSocket real-time path.
+The 15-second polling fallback that previously lived in Workshop ThreadDetail (it was only ever in that one component, despite earlier doc claims to the contrary) has been removed. Per Darron's "refresh only on manual or someone-posts" rule, the React admin no longer polls and no longer auto-refetches on WS reconnect or tab-visibility. The only auto-refresh paths are the WebSocket `conversation_message` and `conversation_created` event subscriptions in each component. If the WebSocket was disconnected and missed messages, those messages appear when the user manually refreshes the browser. Live updates via WS work normally; the WebSocketProvider's visibility handler still RECONNECTS the WS on tab-visible so live updates resume after sleep — it just doesn't trigger refetches anymore.
 
 ---
 

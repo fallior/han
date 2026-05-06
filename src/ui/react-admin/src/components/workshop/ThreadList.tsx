@@ -128,16 +128,12 @@ export function ThreadList() {
       }
     });
 
-    // On WS reconnect (e.g. after server restart), refetch thread list
-    // to catch anything missed while disconnected
-    const unsubReconnect = subscribeWs('ws_reconnected', () => {
-      fetchData();
-    });
+    // S151 follow-on: ws_reconnected refetch removed per Darron's "refresh
+    // only on manual or someone-posts" rule.
 
     return () => {
       unsubCreated();
       unsubMessage();
-      unsubReconnect();
     };
   }, [subscribeWs, nestedTab, fetchData]);
 

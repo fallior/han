@@ -57,18 +57,13 @@ export default function MemoryPage() {
       }
     });
 
-    // On WS reconnect, refetch everything to catch missed messages
-    const unsubReconnect = subscribeWs('ws_reconnected', () => {
-      fetchGroupedConversations();
-      if (selectedId) {
-        fetchConversationDetail(selectedId);
-      }
-    });
+    // S151 follow-on: ws_reconnected refetch removed per Darron's "refresh
+    // only on manual or someone-posts" rule. See ConversationsPage.tsx for
+    // the same change with the same reasoning.
 
     return () => {
       unsubMessage();
       unsubCreated();
-      unsubReconnect();
     };
   }, [subscribeWs, selectedId]);
 

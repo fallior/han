@@ -64,18 +64,15 @@ export default function ConversationsPage() {
       }
     });
 
-    // On WS reconnect, refetch everything to catch messages missed during disconnect
-    const unsubReconnect = subscribeWs('ws_reconnected', () => {
-      fetchGroupedConversations();
-      if (selectedId) {
-        fetchConversationDetail(selectedId);
-      }
-    });
+    // S151 follow-on: ws_reconnected refetch removed per Darron's "refresh
+    // only on manual or someone-posts" rule. Live updates via the
+    // conversation_message + conversation_created subscriptions above are
+    // the only auto-refresh path. Browser refresh is the manual fallback
+    // when the WS was down and missed messages need to be filled in.
 
     return () => {
       unsubMessage();
       unsubCreated();
-      unsubReconnect();
     };
   }, [subscribeWs, selectedId]);
 

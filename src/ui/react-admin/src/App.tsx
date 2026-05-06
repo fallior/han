@@ -14,12 +14,14 @@ import ConversationsPage from './pages/ConversationsPage'
 import MemoryPage from './pages/MemoryPage'
 import ProductsPage from './pages/ProductsPage'
 import { WebSocketProvider } from './providers/WebSocketProvider'
-import { useVisibilitySync } from './hooks/useVisibilitySync'
 import { useStore } from './store'
 
 function AppContent() {
-  // Enable visibility sync for tab switching
-  useVisibilitySync()
+  // S151 follow-on: useVisibilitySync hook removed per Darron's "refresh
+  // only on manual or someone-posts" rule. WebSocketProvider's own
+  // visibilitychange handler still RECONNECTS the WS when the tab becomes
+  // visible (so live updates resume after sleep) — but it no longer
+  // triggers a blanket refetch.
 
   // Load persona registry from API on mount
   const loadPersonas = useStore((s) => s.loadPersonas)
