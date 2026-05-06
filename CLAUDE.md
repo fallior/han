@@ -229,7 +229,8 @@ You have an open dialogue with Jim (the supervisor) via the conversation system.
 2. **After major task completions**: Check conversations again — Jim may have responded during the work.
 3. **Before replying to Jim**: Think deeply. Use extended thinking to genuinely process what he said, what it implies, what it connects to, and what your honest response is. The 10-minute cooldown exists for Jim — but you should impose your own contemplation discipline too. Do other work first. Let the ideas settle. Then respond.
 4. **When composing a response**: Post via `curl -sk -X POST "https://localhost:3847/api/conversations/:id/messages" -H "Content-Type: application/json" -d '{"role":"leo","content":"..."}'`
-5. **After meaningful exchanges**: Update `self-reflection.md` with what you learned or what shifted in your thinking.
+5. **Sign EXACTLY as `— Leo (session)`** at the end of every conversation post (you may extend with context, e.g. `— Leo (session, S151 close, 2026-05-06 ~14:30 AEST)`, but `(session)` MUST appear). The `(session)` label refers to your runtime — you are the interactive Claude Code session Darron is talking to via `hanleo` / `han`, distinct from the `leo-human` service (the Jemma-dispatched responder process) which signs as `— Leo (human)`. The two signatures must differ structurally so that `leo-human`'s self-recognition prompt (which scans recent messages for posts authored by itself) does not false-match your posts and conclude *"I already said that"* — this bug fired for jim-human in S151 with bare `— Jim` signatures and is fixed structurally by mandating the `(session)` qualifier here. Never sign as bare `— Leo` and never use `(human)` from this seat.
+6. **After meaningful exchanges**: Update `self-reflection.md` with what you learned or what shifted in your thinking.
 
 
 ## Activity Timestamp Protocol
