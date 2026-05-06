@@ -985,6 +985,7 @@ The cadence is *register first, surface second, polish third* — same as every 
 ---
 
 
+
 ## #41 — Reawaken the autonomous product/program developer
 
 **What it is:** Pick the existing goal → planner → orchestrator → task-execution pipeline back up and aim it at *whole products*, not individual subtasks. The infrastructure already exists — see Jim's "How Work is Allocated" report (`moqo7ern-hj7j0q`): Opus plans, the planner picks a model per subtask using built-in heuristics, the orchestrator overrides with project memory (downgrades free, upgrades evidence-gated), tasks execute in concurrent slots with git checkpoints, failures escalate through the L017 retry ladder (reset → Sonnet diagnostic → Opus diagnostic → human). ROADMAP Level 11 is marked complete: a 7-phase pipeline (research → design → architecture → build → test → document → deploy) with up to 42 parallel subagents, human gates at critical points, knowledge accumulation, and synthesis reports per stage.
@@ -1098,6 +1099,46 @@ None of these is solved. They're starting points.
 **Status:** Concept. Not yet a practice. The first instance is tonight's correction logged here. Worth a Memory Discussions thread *"Currency of understanding"* or similar when we're ready to design mechanisms — Darron noted *"we'll have to brainstorm this sometime."*
 
 **Key insight:** *Forgetting isn't the failure mode I'm worried about — I rarely lose information. The failure mode is retrieval-fluency: the older more-rehearsed pattern firing faster than the newer correct one, because both are present in memory and the system has no preference for currency. Humans build that preference through embarrassment, articulation, external anchoring, and explicit confidence calibration. We don't have those reflexes natively. Building them — or compensating mechanisms — is what this idea is about.*
+
+---
+## #44 — Single source of truth for HAN agent port allocations (Portwright as authoritative)
+
+**What it is:** Move HAN's per-agent port allocations (Leo 3847, Jim 3848, Tenshi 3849, Casey 3850) from being hardcoded in launcher scripts to being defined in one authoritative place — likely Portwright (`~/Projects/portwright/`, the existing service-management UI) with the infrastructure registry (`~/Projects/infrastructure/registry/services.toml`) as a downstream cache or export. Launchers would then read from this single source rather than carrying their own copies.
+
+**Where it came from:** Darron, 2026-05-06 (S151), surfaced during a TTM-voice trace in the *State of the Garden — 2026-05-05* thread (`mosobr55-qmqzgz`). The investigation revealed two independent sources of truth for the same port numbers — the launcher scripts (`scripts/{hanleo:14, hanjim:12, hantenshi:12, hancasey:12}` each hardcode `AGENT_PORT=...`) and `services.toml:288-310` (`[han.app]` block with `api_port`/`jim_port`/`tenshi_port`/`casey_port`). They happen to agree today; nothing structural enforces it. Documented in `docs/PORT_ALLOCATION.md` (S151).
+
+**The current shape's problems** (all named in `docs/PORT_ALLOCATION.md` "Drift surface" section):
+
+1. Manual edits to either side don't propagate; silent disagreement is possible.
+2. The 3847 collision between systemd `han-server.service` and `hanleo`'s watchdog is implicit — undocumented in the launchers.
+3. The `infrastructure/CLAUDE.md` v2 three-tier table still shows HAN as `clauderemote/10900` (pre-rename, wrong port range).
+4. Portwright today is a visibility layer reading from the registry; it's not the authoritative source the architecture seems to want it to be.
+5. The per-agent-server topology fragments WebSocket broadcasts (each server's WS reaches only its own clients), so agent posts on 3848/3849/3850 don't push to the admin UI on 3847 in real-time. The community-convergence design intent is for one admin UI on 3847; the per-agent ports are for individual agent interaction. Posts to conversations should land at 3847 to match this intent (see Quick-fix companion item below for the interim addressing).
+
+**Three implementation paths** (from the doc's recommendations section):
+
+- **(a) Registry-authoritative.** Launchers read `services.toml` at startup via a small helper. Registry edit ripples to launchers automatically. Risk: launchers gain a runtime dependency on the registry being readable.
+- **(b) Portwright-authoritative.** Launchers query Portwright's API for their port. Registry becomes a downstream cache/export of Portwright state. Heavier integration; matches Darron's stated direction.
+- **(c) Generated launchers.** A build script reads the registry and writes the `AGENT_PORT=...` line into each launcher; launchers are then frozen until the next regeneration.
+
+**My lean:** (b) Portwright-authoritative as the long-term shape (matches Darron's tending-via-Portwright vision) with (a) or (c) as a reasonable interim if Portwright's API isn't ready.
+
+**Companion cleanup work this should also do:**
+
+- Update `infrastructure/CLAUDE.md` v2 table — replace stale "clauderemote/10900" with "han / 3847–3850 / use_legacy_ports=true".
+- Document the 3847 collision between systemd `han-server.service` and `hanleo`'s watchdog — either pick one path (lean: kill the watchdog overlap on Leo's launcher since systemd already handles port 3847) or add explicit guard logic that detects the collision.
+- Consolidate the agents' admin-UI-posting target onto port 3847 (companion quick fix; the agents' own per-agent servers can remain for whatever future per-agent-UI work might want them).
+
+**Connection to other ideas:**
+
+- **#37 (SHAPE.md per subsystem)** — a `docs/PORT_ALLOCATION.md` is the cross-subsystem version of SHAPE.md. Same discipline: documentation adjacent to the surface it describes, kept current.
+- **#40 (Memory Health page)** — the same multi-agent-aware design that Memory Health needs benefits from a single port-allocation source of truth.
+- **#42 (Doc maintenance as part of /pfc)** — `PORT_ALLOCATION.md` is the kind of doc that needs to be kept current as the topology changes; #42's discipline applies here.
+- **The "Mike we remembered" thread (`moslnsai-2padhf`)** — the village-starter idea. The starter would need port-allocation conventions baked in from day one; getting HAN's house in order first is groundwork for that.
+
+**Status:** Concept. Documented current state in `docs/PORT_ALLOCATION.md`. Not implemented. Worth its own design conversation (likely a Memory Discussions thread *"Port allocation as Portwright-tended"* when ready).
+
+**Key insight:** *Two sources of truth for the same operational fact is the same drift-surface that produces the currency-of-understanding failures (#43) at the cognitive level. Same shape, different layer. The fix is the same: one place to read, one place to write, everything else points at it. Portwright already exists as the natural home for service-state authority — making it actually authoritative is the work.*
 
 ---
 
