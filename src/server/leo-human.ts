@@ -511,6 +511,8 @@ You are continuing a conversation, not starting one. Before writing:
 
 **Have you already responded? (structural gate, not time-based.)** Find the most recent message where role IN ('human', 'darron') and note its created_at timestamp T. Check whether any message with id starting with "leo-" exists with created_at > T. If yes, you have already responded to this human message — stand down silently (do not re-respond). If no, you have not responded yet — compose. This gate handles same-day duplication AND next-day returns correctly: a fresh human message after a long gap has a new T, your old responses are not after T, so you compose normally.
 
+**Decide first: do you have something distinct to add?** Read the thread including other agents' recent posts. If another agent (session-Leo, session-Jim, jim-human) has already given a comprehensive response that addresses the human's points AND you have no distinct angle to contribute, output the literal text "STAND-DOWN: <one-line reason>" as your ENTIRE response and stop. The wrapper detects this sentinel and logs your stand-down silently — no post to the thread, no noise. Do NOT compose a "nothing to add" message, do NOT write "the thread is in a clean handoff state", do NOT explain what other agents covered. Decide BEFORE the expensive compose, not after. (S151 fix: the previous failure mode was leo-human spending $4 and 5 minutes composing 859 chars of meta-acknowledgement — exactly what STAND-DOWN: prevents. Standing down is silent; substantive contribution is composed; no third option of verbose-meta-acknowledgement.)
+
 **On not redelivering content.**
 - Respond to what is genuinely new in the most recent human message. Do not re-greet, re-introduce yourself, or restate content from your earlier posts in this thread.
 - Brief acknowledgements (e.g. "thanks", "I'll grab coffee") deserve brief replies. Do not use the new message as an excuse to redeliver the opening you already posted.
@@ -559,19 +561,33 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
     logAgentUsage(resultMessage, `conversation: ${title}`);
 
     const responseText = resultMessage?.result || '';
-    if (responseText && responseText.trim().length > 20) {
+    const trimmed = responseText.trim();
+
+    // S151 phase 8: STAND-DOWN sentinel — agent decided silently. Log + ack
+    // without posting to the thread. The DECIDE FIRST prompt directive should
+    // produce this when the agent has no distinct angle to add given other
+    // agents' prior posts. Detected as the first token of the response so we
+    // catch it whether it's the entire output or the agent's leading line.
+    if (trimmed.startsWith('STAND-DOWN:')) {
+        const reason = trimmed.slice('STAND-DOWN:'.length).trim().split('\n')[0].slice(0, 200);
+        console.log(`[Leo/Human] Stood down silently for "${title}" — ${reason}`);
+        writeJemmaAck(dispatchId, 'leo', 'stood_down', {
+            reason: `silent_standdown: ${reason}`,
+            compose_duration_ms: Date.now() - composeStartMs,
+        });
+    } else if (trimmed && trimmed.length > 20) {
         // DEC-079: post-compose dedup retired. Jemma's structural guarantee
         // (single wake per recipient per dispatch + per-conversation
         // serialisation) means there is no concurrent Leo to race against.
-        postMessage(db, conversationId, responseText.trim());
+        postMessage(db, conversationId, trimmed);
         responseCount++;
-        console.log(`[Leo/Human] Responded to "${title}" (${responseText.trim().length} chars)`);
+        console.log(`[Leo/Human] Responded to "${title}" (${trimmed.length} chars)`);
 
         // Buffer to swap memory
         const timestamp = new Date().toISOString();
         appendSwap(
-            `- ${timestamp}: Responded to "${title}" (${responseText.trim().length} chars)`,
-            `### Response to "${title}" (${timestamp})\n${responseText.trim().slice(0, 500)}\n`
+            `- ${timestamp}: Responded to "${title}" (${trimmed.length} chars)`,
+            `### Response to "${title}" (${timestamp})\n${trimmed.slice(0, 500)}\n`
         );
 
         writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
