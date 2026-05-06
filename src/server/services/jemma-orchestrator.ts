@@ -561,17 +561,20 @@ function writeDistress(row: DispatchRow, state: RecipientState, severity: 'warni
 async function handleAllFailed(row: DispatchRow, states: RecipientState[]): Promise<void> {
     writeDistress(row, states[states.length - 1], 'severe');
 
-    // Post system notice to thread (reserved for all-failed case only)
-    try {
-        const msgId = crypto.randomUUID();
-        const content = `[System] No agent was able to respond (dispatch ${row.id}). Engineering notified. Re-prompt to retry.`;
-        db.prepare(`
-            INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
-            VALUES (?, ?, 'system', ?, ?)
-        `).run(msgId, row.conversation_id, content, new Date().toISOString());
-    } catch (err) {
-        console.error('[Orchestrator] Failed to post all-failed notice:', (err as Error).message);
-    }
+    // S151 follow-on: the user-facing "[System] No agent was able to respond"
+    // message that this function used to post to the thread has been removed.
+    // It fired on watchdog-timeout, which had no connection to whether agents
+    // would eventually post — agents composing 5K+ char responses regularly
+    // crossed the 285s timeout while still successfully composing. The
+    // false-positive system messages added noise without naming a real
+    // failure. Per Darron: "I'll notice if no one responds; I don't need to
+    // be given an arbitrary timeout call that has no connection to the truth."
+    //
+    // Distress writes (writeDistress above) and ntfy pushes (below) remain —
+    // those go to engineering surfaces (~/.han/health/), not the user-facing
+    // thread. The structural-failure case (no eligible recipients at dispatch
+    // time) posts its own system message immediately at the no-recipients
+    // path in routes/conversations.ts:classifyAndDispatch.
 
     // ntfy push
     const topic = ntfyTopic();

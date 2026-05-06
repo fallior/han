@@ -23,6 +23,42 @@ function getActiveAgents(): Set<string> {
     } catch { /* fall through */ }
     return new Set<string>(['leo', 'jim']);
 }
+
+// Map a conversation_messages.role value to an agent slug. Most roles already
+// match (leo→leo, tenshi→tenshi, casey→casey); 'supervisor' is Jim's
+// conversation role for historical reasons. Returns null for non-agent roles
+// (human, darron, system, discord, user, etc.).
+function roleToAgentSlug(role: string): string | null {
+    if (role === 'supervisor') return 'jim';
+    if (['leo', 'tenshi', 'casey', 'sevn', 'six'].includes(role)) return role;
+    return null;
+}
+
+// Conversation participant register (#45 follow-on, S151).
+//
+// Returns the list of *active* agent slugs who have ever posted in this
+// conversation. Derived from conversation_messages — no separate table; the
+// register IS the message log read through a participant lens. Used by the
+// classifier fallback when Gemma times out: instead of guessing via regex,
+// we spray the dispatch to everyone who has been in this conversation.
+//
+// Trade-off named: there is no manual override path here. To force-add an
+// agent who hasn't posted yet, post on their behalf or wait for them to post
+// once. A real `conversation_participants` table is future work if needed.
+function getConversationParticipants(conversationId: string): string[] {
+    const active = getActiveAgents();
+    try {
+        const rows = db.prepare(
+            'SELECT DISTINCT role FROM conversation_messages WHERE conversation_id = ?'
+        ).all(conversationId) as { role: string }[];
+        return rows
+            .map(r => roleToAgentSlug(r.role))
+            .filter((slug): slug is string => slug !== null && active.has(slug));
+    } catch (err) {
+        console.warn(`[Conversations] getConversationParticipants failed for ${conversationId}: ${(err as Error).message}`);
+        return [];
+    }
+}
 const router = Router();
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b';
@@ -39,7 +75,7 @@ interface AddresseeResult {
     reasoning: string;
 }
 
-async function classifyAddressee(content: string, discussionType: string): Promise<AddresseeResult> {
+async function classifyAddressee(content: string, discussionType: string, conversationId: string): Promise<AddresseeResult> {
     // Active register filter (DEC-079, #31): only agents listed in
     // `~/.han/config.json:agents.active` are eligible recipients. Casey/tenshi
     // (designed personas without runtime services) are filtered out here, so
@@ -107,26 +143,31 @@ JSON only: {${agentFields}, "reasoning": "brief"}`,
             reasoning: result.reasoning || '',
         };
     } catch (err: any) {
-        // Fallback: tab-based routing + simple name matching
-        console.warn(`[Conversations] Gemma classification failed (${err.message}), using fallback`);
-        const contentLower = content.toLowerCase();
+        // Fallback (S151 redesign — replaces the regex+tab routing that was
+        // missing agents on memory-thread classifications). Two layers:
+        //   1. Spray to the conversation register — the active-agent slugs
+        //      who have ever posted in this conversation. Honest about who's
+        //      "in the room" without trying to re-read intent.
+        //   2. If the register is empty (brand-new thread, no agent has
+        //      posted yet), default to all active local agents — preserves
+        //      the original "everyone gets to see new threads" behaviour.
+        //
+        // The tab-owner heuristic from the old fallback is dropped: tab
+        // ownership is metadata, not addressee intent. Memory Discussions
+        // threads are no one's tab anyway; agent-tab threads get all
+        // participating agents, which is a superset of just the tab owner.
+        console.warn(`[Conversations] Gemma classification failed (${err.message}), using register-spray fallback`);
 
-        if (tabOwner) {
-            return { recipients: [tabOwner.name], reasoning: 'fallback: tab owner' };
+        const participants = getConversationParticipants(conversationId);
+        if (participants.length > 0) {
+            return {
+                recipients: participants,
+                reasoning: `fallback: register spray (${participants.length} prior participants)`,
+            };
         }
-
-        // Check mention patterns for each agent
-        const mentioned = localAgents.filter(p => {
-            const patterns = getMentionPatterns(p);
-            return patterns.some(pat => {
-                try { return new RegExp(pat, 'i').test(contentLower); }
-                catch { return false; }
-            });
-        }).map(p => p.name);
-
         return {
-            recipients: mentioned.length > 0 ? mentioned : localAgents.map(p => p.name),
-            reasoning: 'fallback: regex + tab routing',
+            recipients: localAgents.map(p => p.name),
+            reasoning: 'fallback: all active agents (new thread, register empty)',
         };
     }
 }
@@ -144,13 +185,34 @@ function classifyAndDispatch(
     timestamp: string,
 ): void {
     console.log(`[Conversations] Classifying addressee for message in ${discussionType} thread`);
-    classifyAddressee(content, discussionType).then(async ({ recipients, reasoning }) => {
+    classifyAddressee(content, discussionType, conversationId).then(async ({ recipients, reasoning }) => {
         // DEC-079: Jemma orchestration is the sole dispatch path. The legacy
         // parallel-fanout fallback was removed alongside the compose-lock —
         // Jemma's serial dispatch + per-conversation serialisation provides
         // the structural guarantee that supersedes the runtime locks.
+        //
+        // S151 follow-on: with the register-spray fallback in classifyAddressee,
+        // recipients=0 only happens when there are no active local agents at
+        // all (a structural failure — agent registry empty). When it does
+        // happen, post a system message immediately so the operator knows.
+        // This replaces the timeout-triggered "[System] No agent was able to
+        // respond" that handleAllFailed used to post — the new message fires
+        // on the structural condition, not on an arbitrary watchdog timeout.
         if (recipients.length === 0) {
-            console.log(`[Conversations] No active recipients for ${discussionType} — skipping dispatch`);
+            console.warn(`[Conversations] No eligible recipients for ${discussionType} — posting structural-failure system message`);
+            try {
+                const sysId = generateId();
+                const now = new Date().toISOString();
+                conversationMessageStmts.insert.run(
+                    sysId,
+                    conversationId,
+                    'system',
+                    `[System] No agents online to receive this message. Active-agent registry is empty (~/.han/config.json:agents.active). Engineering attention required.`,
+                    now,
+                );
+            } catch (err: any) {
+                console.error(`[Conversations] Failed to post no-recipients system message: ${err.message}`);
+            }
             return;
         }
         try {
