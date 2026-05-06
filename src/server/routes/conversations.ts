@@ -91,7 +91,7 @@ JSON only: {${agentFields}, "reasoning": "brief"}`,
                 stream: false,
                 format: 'json',
             }),
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(20000),
         });
 
         if (!res.ok) throw new Error(`Ollama ${res.status}`);

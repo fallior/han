@@ -53,7 +53,6 @@ const SIGNAL_NAME = 'jim-human-wake';
 // See "Opus 4.7 how does it feel?" (mo5oo404-61thz0) for the reasoning.
 const MODEL_PREFERENCE = ['claude-opus-4-6', 'sonnet', 'haiku'] as const;
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000;
-const CLAIM_TTL_MS = 5 * 60 * 1000; // 5 min claim expiry
 
 const DISCORD_ATTACHMENT_HINT = `Discord attachments: when your prompt contains a "[Downloaded to]" section listing paths under ~/.han/downloads/discord/, those are real files attached to the Discord message. Open each path with the Read tool (works on text, code, images, PDFs) before responding. Never claim you cannot read Discord attachments — the paths are already in your prompt.`;
 
@@ -118,56 +117,6 @@ function getRecentMessages(db: Database.Database, conversationId: string, limit 
 function getConversationTitle(db: Database.Database, conversationId: string): string {
     const row = db.prepare('SELECT title FROM conversations WHERE id = ?').get(conversationId) as any;
     return row?.title || 'Unknown conversation';
-}
-
-// ── Conversation claim mechanism ──────────────────────────────
-// Prevents duplicate responses when multiple Jim processes
-// try to respond to the same conversation concurrently.
-
-function claimConversation(conversationId: string): boolean {
-    const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
-    try {
-        // Check for existing valid claim
-        if (fs.existsSync(claimPath)) {
-            const content = fs.readFileSync(claimPath, 'utf8');
-            const claim = JSON.parse(content);
-            if (Date.now() - claim.timestamp < CLAIM_TTL_MS) {
-                // Only blocked by Jim. Leo's claims don't block Jim — both
-                // agents can respond to the same thread when Darron addresses both.
-                if (claim.agent === 'jim') {
-                    console.log(`[Jim/Human] Conversation ${conversationId} already claimed by jim`);
-                    return false;
-                }
-                // Leo has a claim — Jim can still respond independently
-                console.log(`[Jim/Human] Conversation ${conversationId} claimed by ${claim.agent} — Jim proceeding independently`);
-            }
-            // Expired claim — overwrite
-        }
-        // Write our claim
-        fs.writeFileSync(claimPath, JSON.stringify({
-            agent: 'jim',
-            timestamp: Date.now(),
-            pid: process.pid
-        }));
-        return true;
-    } catch {
-        // If we can't write the claim, proceed anyway (best effort)
-        return true;
-    }
-}
-
-function releaseConversationClaim(conversationId: string): void {
-    try {
-        const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
-        if (fs.existsSync(claimPath)) {
-            const content = fs.readFileSync(claimPath, 'utf8');
-            const claim = JSON.parse(content);
-            // Only release if we own the claim
-            if (claim.agent === 'jim') {
-                fs.unlinkSync(claimPath);
-            }
-        }
-    } catch { /* best effort */ }
 }
 
 function postMessage(db: Database.Database, conversationId: string, content: string): string {
@@ -451,19 +400,13 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         }
     }
 
-    // DEC-079: pre-compose and cross-agent dedup gates removed. Jemma's serial
-    // dispatch + per-conversation serialisation guarantees this agent is woken
-    // at most once per dispatch — there is no cheap case to catch and no
-    // cross-agent race to lock against. The same-agent claim below remains as
-    // an instance-level safety (single ensureSingleInstance pid-guard already
-    // covers most of this; the file claim is belt-and-braces against a stray
-    // worker before the pid-guard takes effect).
-
-    if (!claimConversation(conversationId)) {
-        console.log(`[Jim/Human] Could not claim "${title}" — another Jim process is responding`);
-        writeJemmaAck(dispatchId, 'jim', 'stood_down', { reason: 'claim_held_by_other_jim_process', compose_duration_ms: Date.now() - composeStartMs });
-        return;
-    }
+    // DEC-079 + S151 follow-on: all pre-compose dedup gates and the same-agent
+    // file-claim are removed. Jemma's serial dispatch + per-conversation
+    // serialisation (jemma-orchestrator.ts:236 conversationDispatchLocks) is
+    // the structural guarantee that this agent is woken at most once per
+    // dispatch. The single-instance pid-guard (ensureSingleInstance) prevents
+    // multiple Jim processes. No belt-and-braces needed — if the dispatcher
+    // fails, that's a separate problem to fix at the dispatch layer, not here.
 
     try {
         const conversationContext = recentMessages
@@ -556,8 +499,6 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
         console.error(`[Jim/Human] Compose error for "${title}":`, (err as Error).message);
         writeJemmaAck(dispatchId, 'jim', 'failed', { reason: (err as Error).message, compose_duration_ms: Date.now() - composeStartMs });
         throw err;
-    } finally {
-        releaseConversationClaim(conversationId);
     }
 }
 

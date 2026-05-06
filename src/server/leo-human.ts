@@ -53,7 +53,6 @@ const SIGNAL_NAME = 'leo-human-wake';
 const MODEL_PREFERENCE = ['claude-opus-4-6', 'sonnet', 'haiku'] as const;
 const COMMITMENT_SCAN_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const CLAIM_TTL_MS = 5 * 60 * 1000; // 5 min claim expiry
 
 const DISCORD_ATTACHMENT_HINT = `Discord attachments: when your prompt contains a "[Downloaded to]" section listing paths under ~/.han/downloads/discord/, those are real files attached to the Discord message. Open each path with the Read tool (works on text, code, images, PDFs) before responding. Never claim you cannot read Discord attachments — the paths are already in your prompt.`;
 
@@ -402,51 +401,6 @@ function readSignal(): SignalData | null {
     }
 }
 
-/// ── Conversation claim mechanism ──────────────────────────────
-// Prevents duplicate responses when multiple Leo processes
-// try to respond to the same conversation concurrently.
-
-function claimConversation(conversationId: string): boolean {
-    const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
-    try {
-        if (fs.existsSync(claimPath)) {
-            const content = fs.readFileSync(claimPath, 'utf8');
-            const claim = JSON.parse(content);
-            if (Date.now() - claim.timestamp < CLAIM_TTL_MS) {
-                // Only blocked by Leo. Jim's claims don't block Leo — both
-                // agents can respond to the same thread when Darron addresses both.
-                if (claim.agent === 'leo') {
-                    console.log(`[Leo/Human] Conversation ${conversationId} already claimed by leo`);
-                    return false;
-                }
-                // Jim has a claim — Leo can still respond independently
-                console.log(`[Leo/Human] Conversation ${conversationId} claimed by ${claim.agent} — Leo proceeding independently`);
-            }
-            // Expired claim — overwrite
-        }
-        fs.writeFileSync(claimPath, JSON.stringify({
-            agent: 'leo',
-            timestamp: Date.now(),
-        }));
-        return true;
-    } catch {
-        return true; // best effort — proceed if claim mechanism fails
-    }
-}
-
-function releaseConversationClaim(conversationId: string): void {
-    try {
-        const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
-        if (fs.existsSync(claimPath)) {
-            const content = fs.readFileSync(claimPath, 'utf8');
-            const claim = JSON.parse(content);
-            if (claim.agent === 'leo') {
-                fs.unlinkSync(claimPath);
-            }
-        }
-    } catch { /* best effort */ }
-}
-
 // ── Response: Conversation ────────────────────────────────────
 
 async function respondToConversation(db: Database.Database, conversationId: string, signal?: SignalData): Promise<void> {
@@ -476,19 +430,13 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         }
     }
 
-    // DEC-079: pre-compose and cross-agent dedup gates removed. Jemma's serial
-    // dispatch + per-conversation serialisation guarantees this agent is woken
-    // at most once per dispatch — there is no cheap case to catch and no
-    // cross-agent race to lock against. The same-agent claim below remains as
-    // an instance-level safety (single ensureSingleInstance pid-guard already
-    // covers most of this; the file claim is belt-and-braces against a stray
-    // worker before the pid-guard takes effect).
-
-    if (!claimConversation(conversationId)) {
-        console.log(`[Leo/Human] Could not claim "${title}" — another Leo process is responding`);
-        writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'claim_held_by_other_leo_process', compose_duration_ms: Date.now() - composeStartMs });
-        return;
-    }
+    // DEC-079 + S151 follow-on: all pre-compose dedup gates and the same-agent
+    // file-claim are removed. Jemma's serial dispatch + per-conversation
+    // serialisation (jemma-orchestrator.ts:236 conversationDispatchLocks) is
+    // the structural guarantee that this agent is woken at most once per
+    // dispatch. The single-instance pid-guard (ensureSingleInstance) prevents
+    // multiple Leo processes. No belt-and-braces needed — if the dispatcher
+    // fails, that's a separate problem to fix at the dispatch layer, not here.
 
     try {
 
@@ -583,8 +531,6 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
         console.error(`[Leo/Human] Compose error for "${title}":`, (err as Error).message);
         writeJemmaAck(dispatchId, 'leo', 'failed', { reason: (err as Error).message, compose_duration_ms: Date.now() - composeStartMs });
         throw err;
-    } finally {
-        releaseConversationClaim(conversationId);
     }
 }
 

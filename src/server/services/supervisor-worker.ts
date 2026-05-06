@@ -482,46 +482,6 @@ function readPostDelineation(): string | null {
     return null;
 }
 
-// ── Conversation claim mechanism ─────────────────────────────
-// Prevents duplicate responses when multiple Jim processes
-// try to respond to the same conversation concurrently.
-const CLAIM_TTL_MS = 5 * 60 * 1000; // 5 min claim expiry
-
-function claimConversation(conversationId: string): boolean {
-    const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
-    try {
-        if (fs.existsSync(claimPath)) {
-            const content = fs.readFileSync(claimPath, 'utf8');
-            const claim = JSON.parse(content);
-            if (Date.now() - claim.timestamp < CLAIM_TTL_MS) {
-                log(`[Worker] Conversation ${conversationId} already claimed by ${claim.agent}`);
-                return false;
-            }
-        }
-        fs.writeFileSync(claimPath, JSON.stringify({
-            agent: 'jim',
-            timestamp: Date.now(),
-            pid: process.pid
-        }));
-        return true;
-    } catch {
-        return true; // best effort — proceed if claim mechanism fails
-    }
-}
-
-function releaseConversationClaim(conversationId: string): void {
-    try {
-        const claimPath = path.join(SIGNALS_DIR, `responding-to-${conversationId}`);
-        if (fs.existsSync(claimPath)) {
-            const content = fs.readFileSync(claimPath, 'utf8');
-            const claim = JSON.parse(content);
-            if (claim.agent === 'jim') {
-                fs.unlinkSync(claimPath);
-            }
-        }
-    } catch { /* best effort */ }
-}
-
 // ── Rumination guard helpers ────────────────────────────────
 
 interface RuminationState {
