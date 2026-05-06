@@ -388,6 +388,44 @@ function writeJemmaAck(
     }
 }
 
+/**
+ * S151: progress-aware watchdog support. While composing, emit a 'composing'
+ * heartbeat ack every intervalMs so the orchestrator's watchdog reads our
+ * last_progress_at and doesn't fire prematurely on long composes. Returns
+ * a `stop()` function the caller MUST invoke (in a finally) when compose
+ * completes — otherwise the timer leaks.
+ */
+function getComposeHeartbeatIntervalMs(): number {
+    try {
+        const cfg = JSON.parse(fs.readFileSync(path.join(HAN_DIR, 'config.json'), 'utf8'));
+        const v = cfg?.agents?.compose_heartbeat_interval_ms;
+        if (typeof v === 'number' && v > 0) return v;
+    } catch { /* fall through */ }
+    return 30000;
+}
+
+function startHeartbeatAcks(dispatchId: string | undefined, agent: string): { stop: () => void } {
+    if (!dispatchId) return { stop: () => { /* noop */ } };
+    let seq = 0;
+    const intervalMs = getComposeHeartbeatIntervalMs();
+    const timer = setInterval(() => {
+        seq++;
+        try {
+            const ackFile = path.join(SIGNALS_DIR, `jemma-ack-${dispatchId}-hb-${seq}`);
+            fs.writeFileSync(ackFile, JSON.stringify({
+                dispatchId,
+                agent,
+                status: 'composing',
+                heartbeat_seq: seq,
+                ack_written_at: new Date().toISOString(),
+            }));
+        } catch (err) {
+            console.error(`[Leo/Human] Failed to write heartbeat ack ${seq} for ${dispatchId}:`, (err as Error).message);
+        }
+    }, intervalMs);
+    return { stop: () => clearInterval(timer) };
+}
+
 function readSignal(): SignalData | null {
     const signalPath = path.join(SIGNALS_DIR, SIGNAL_NAME);
     try {
@@ -486,28 +524,36 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
 
-    const q = agentQuery({
-        prompt,
-        options: {
-            model: activeModel,
-            maxTurns: 1000,
-            cwd: LEO_HUMAN_AGENT_DIR,
-            permissionMode: 'bypassPermissions',
-            allowDangerouslySkipPermissions: true,
-            env: cleanEnv,
-            persistSession: false,
-            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
-            systemPrompt: {
-                type: 'preset' as const,
-                preset: 'claude_code' as const,
-                append: DISCORD_ATTACHMENT_HINT,
-            },
-        },
-    });
-
+    // S151: emit 'composing' heartbeat-acks every N ms (config-driven, default 30s)
+    // so the orchestrator's progress-aware watchdog won't fire prematurely on
+    // long composes. stop() in finally ensures the timer always clears.
+    const heartbeat = startHeartbeatAcks(dispatchId, 'leo');
     let resultMessage: any = null;
-    for await (const message of q) {
-        if (message.type === 'result') resultMessage = message;
+    try {
+        const q = agentQuery({
+            prompt,
+            options: {
+                model: activeModel,
+                maxTurns: 1000,
+                cwd: LEO_HUMAN_AGENT_DIR,
+                permissionMode: 'bypassPermissions',
+                allowDangerouslySkipPermissions: true,
+                env: cleanEnv,
+                persistSession: false,
+                tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
+                systemPrompt: {
+                    type: 'preset' as const,
+                    preset: 'claude_code' as const,
+                    append: DISCORD_ATTACHMENT_HINT,
+                },
+            },
+        });
+
+        for await (const message of q) {
+            if (message.type === 'result') resultMessage = message;
+        }
+    } finally {
+        heartbeat.stop();
     }
 
     logAgentUsage(resultMessage, `conversation: ${title}`);

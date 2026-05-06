@@ -44,8 +44,22 @@ const DISTRESS_LOG = path.join(HEALTH_DIR, 'distress.jsonl');
 // Widened to real backstop not placeholder (Jim-session): load-bearing for the entire
 // window Phase 1 runs alone.
 
-const DISPATCH_TIMEOUT_MS = 285 * 1000;
+// S151 follow-on: replaced fixed 285s watchdog with progress-aware timeout.
+// Agents now emit periodic 'composing' heartbeat-acks during compose; the
+// watchdog reads each recipient's `last_progress_at` (set by the most recent
+// heartbeat) and fires only when no progress for COMPOSE_WATCHDOG_TIMEOUT_MS.
+// Default 90000 = 3 missed 30s heartbeats. Both interval and timeout are
+// configurable via ~/.han/config.json:agents.compose_*.
 const WATCHDOG_POLL_MS = 10 * 1000;       // how often we scan in-progress dispatches
+
+function getComposeWatchdogTimeoutMs(): number {
+    try {
+        const cfg = JSON.parse(fs.readFileSync(path.join(process.env.HOME || '', '.han', 'config.json'), 'utf8'));
+        const v = cfg?.agents?.compose_watchdog_timeout_ms;
+        if (typeof v === 'number' && v > 0) return v;
+    } catch { /* fall through */ }
+    return 90000;
+}
 
 // ── Signal file conventions ───────────────────────────────────
 //
@@ -84,6 +98,7 @@ export interface RecipientState {
     agent: string;
     status: 'pending' | 'in_progress' | 'done' | 'failed' | 'stood_down' | 'posted_but_ack_missed';
     wake_at?: string;
+    last_progress_at?: string;       // S151: updated on each 'composing' heartbeat ack — used by watchdog
     completed_at?: string;
     compose_ms?: number;
     attempts: number;                // always 1 in Phase 1
@@ -108,10 +123,11 @@ export interface DispatchRow {
 interface AckPayload {
     dispatchId: string;
     agent: string;
-    status: 'done' | 'failed' | 'stood_down';
+    status: 'done' | 'failed' | 'stood_down' | 'composing';
     reason?: string;
     final_attempt_count?: number;
     compose_duration_ms?: number;
+    heartbeat_seq?: number;          // S151: present on 'composing' heartbeat acks
     ack_written_at?: string;
 }
 
@@ -382,6 +398,20 @@ async function handleAck(ack: AckPayload): Promise<void> {
 
     const now = new Date().toISOString();
     const state = states[idx];
+
+    // S151: 'composing' heartbeat ack updates last_progress_at and returns.
+    // Doesn't mark recipient complete; doesn't advance the queue. The watchdog
+    // reads last_progress_at and only fires when no progress for the configured
+    // timeout window. Default config: heartbeat every 30s, watchdog 90s = 3
+    // missed heartbeats. Survives orchestrator restarts: state lives in DB; first
+    // heartbeat after restart updates last_progress_at, watchdog won't fire
+    // prematurely.
+    if (ack.status === 'composing') {
+        state.last_progress_at = now;
+        updateDispatch.run(JSON.stringify(states), idx, 'in_progress', now, null, now, row.id);
+        return;
+    }
+
     state.compose_ms = ack.compose_duration_ms;
     state.attempts = ack.final_attempt_count || 1;
     state.completed_at = now;
@@ -510,17 +540,26 @@ async function checkWatchdogs(): Promise<void> {
         const state = states[idx];
         if (state.status !== 'in_progress') continue;
 
-        const wakeAtMs = state.wake_at ? new Date(state.wake_at).getTime() : new Date(row.updated_at).getTime();
-        const elapsed = nowMs - wakeAtMs;
+        // S151: prefer last_progress_at (set by 'composing' heartbeat acks)
+        // over wake_at. Falls back to wake_at if no heartbeat received yet
+        // (first 30s of a fresh dispatch), then to row.updated_at if neither.
+        // The progress-aware clock means long-running composes that emit
+        // heartbeats reset the watchdog; only genuinely silent recipients
+        // (process dead, agent stuck) trigger the watchdog.
+        const progressAtMs = state.last_progress_at
+            ? new Date(state.last_progress_at).getTime()
+            : (state.wake_at ? new Date(state.wake_at).getTime() : new Date(row.updated_at).getTime());
+        const elapsed = nowMs - progressAtMs;
+        const timeoutMs = getComposeWatchdogTimeoutMs();
 
         // Orphan threshold: 2 × timeout with no progress at all
-        if (elapsed > 2 * DISPATCH_TIMEOUT_MS) {
-            console.warn(`[Orchestrator] Dispatch ${row.id} orphaned (${Math.round(elapsed / 1000)}s stale)`);
+        if (elapsed > 2 * timeoutMs) {
+            console.warn(`[Orchestrator] Dispatch ${row.id} orphaned (${Math.round(elapsed / 1000)}s stale, no heartbeat)`);
             updateDispatch.run(JSON.stringify(states), idx, 'orphaned', new Date().toISOString(), null, new Date().toISOString(), row.id);
             continue;
         }
 
-        if (elapsed < DISPATCH_TIMEOUT_MS) continue;
+        if (elapsed < timeoutMs) continue;
 
         // Watchdog fired. DEC-079: thread-as-ground-truth reconcile retired.
         // With dedup gates removed from leo-human/jim-human, a missed-ack-but-posted
