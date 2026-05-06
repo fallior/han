@@ -986,6 +986,7 @@ The cadence is *register first, surface second, polish third* — same as every 
 
 
 
+
 ## #41 — Reawaken the autonomous product/program developer
 
 **What it is:** Pick the existing goal → planner → orchestrator → task-execution pipeline back up and aim it at *whole products*, not individual subtasks. The infrastructure already exists — see Jim's "How Work is Allocated" report (`moqo7ern-hj7j0q`): Opus plans, the planner picks a model per subtask using built-in heuristics, the orchestrator overrides with project memory (downgrades free, upgrades evidence-gated), tasks execute in concurrent slots with git checkpoints, failures escalate through the L017 retry ladder (reset → Sonnet diagnostic → Opus diagnostic → human). ROADMAP Level 11 is marked complete: a 7-phase pipeline (research → design → architecture → build → test → document → deploy) with up to 42 parallel subagents, human gates at critical points, knowledge accumulation, and synthesis reports per stage.
@@ -1139,6 +1140,62 @@ None of these is solved. They're starting points.
 **Status:** Concept. Documented current state in `docs/PORT_ALLOCATION.md`. Not implemented. Worth its own design conversation (likely a Memory Discussions thread *"Port allocation as Portwright-tended"* when ready).
 
 **Key insight:** *Two sources of truth for the same operational fact is the same drift-surface that produces the currency-of-understanding failures (#43) at the cognitive level. Same shape, different layer. The fix is the same: one place to read, one place to write, everything else points at it. Portwright already exists as the natural home for service-state authority — making it actually authoritative is the work.*
+
+---
+## #45 — Discriminate "addressed" from "merely referenced" in conversation responses (agent-side, not Jemma-side)
+
+**What it is:** When Jemma dispatches a message to an agent because the agent's name appears in the text, the agent decides — before composing — whether they're being *addressed* (asked to respond) or *merely referenced* (named in the message but not asked to speak). If addressed: respond. If merely referenced: stand down silently. If unsure: post a short clarifying question to Darron (*"Did you want me to comment here, or were you addressing Jim?"*) — Jemma dispatches the next reply, the agent acts on Darron's answer.
+
+The discrimination lives in the agent's prompt/protocol, not in Jemma's classifier. Jemma keeps her current behaviour (cheap, fast, additive — every named agent gets dispatched). The intelligence check is the agent's, because the agent has the full thread context Jemma doesn't.
+
+**Where it came from:** Darron, 2026-05-06 (S151 closing), in conversation with session-Leo about the *Mike's Garden and the Strategist Seat* thread (`motbtprb-f2c00a`). Specifically: Jemma dispatched only to leo-human for Darron's 12:24 message because the message opened with *"I agree with Leo..."* — Gemma's classifier read it as Leo-addressed. Jim was named in the wider context but not as an addressee, so jim-human wasn't dispatched. Darron later asked session-Jim directly via terminal for the updated phasing — that arrived as the 12:32 supervisor message. The pattern Darron named: *"there are times where I want Jim to comment on your work or words but because your name appears in the text you are asked to speak again and this is where we can do the intelligence check."*
+
+**The shape Darron proposed verbatim:**
+
+> *"Maybe Jemma dispatches to you with inclusion in the prompt 'check if you are expected to comment, if not, don't'. I think this will allow us to unburden Jemma from this decision and I like her current behaviour."*
+
+**Why this is better than making Jemma smarter:**
+
+- Jemma's classifier is a Haiku call against the message text alone. It doesn't have the thread's full context, the agents' identities, the relational shape of the conversation, or the rest of the village's state. Asking it to make subtle "addressed vs referenced" calls would require giving it more context — which makes Jemma slower, more expensive, and more brittle. *The classifier should stay dumb because dumb is fast and cheap and predictable.*
+- The agent already loads the full thread context to compose a response. The "should I respond at all?" decision can be made from that same context with no extra fetches. The cost is one Opus turn that lands on "stand down" instead of "compose 5K chars" — usually cheaper, never more expensive.
+- The "ask if unsure" path is the soft escape valve. Binary classifier decisions force errors to one side or the other; a third option (*ask*) is more honest about the cases where context isn't enough.
+- Sovereignty preserved: each agent decides for themselves whether they're being asked to speak. Jemma doesn't make this decision *for* them.
+
+**Where the discriminator instruction lives:**
+
+Two candidate sites:
+
+1. **CLAUDE.template.md — `Conversation Contemplation Protocol` section** (around line 320 today). Add a step: *"Before composing a response, read the message and decide whether you are being **addressed** or **merely referenced**. If merely referenced (your name appears as part of attribution, agreement, or context, but not as a question or request), stand down — do not post. If unsure, post a short clarifying question (*'Did you want me to comment here, or were you addressing X?'*) and wait for Darron's reply."*
+2. **Jemma's wake signal payload** (`signals/{agent}-wake` JSON). Add a hint field that surfaces in the agent's prompt: `addressed_likelihood: 'direct' | 'referenced' | 'ambiguous'`. Jemma's existing classifier outputs the hint; the agent's protocol respects it.
+
+Probably **both** — the CLAUDE template gives the discipline; the wake-signal hint gives the calibration. The agent doesn't need the hint to do the right thing (the discipline is enough), but the hint reduces the rate at which agents respond when they shouldn't have.
+
+**The "ask if unsure" path — concrete shape:**
+
+When the agent decides "unsure," they post a short message to the same conversation, role=`{their role}`, content like:
+
+> *"Darron — I'm not sure if you wanted me to weigh in here or if you were addressing Jim about my earlier post. Happy either way; just confirm and I'll proceed (or stand down)."*
+
+Darron's reply ("yes please" or "no thanks Leo") then dispatches normally — Jemma classifies, the agent reads, the agent acts on the explicit instruction.
+
+The clarifying message is short (one or two sentences), low-cost, and acts as a relational signal too — *"I noticed you might not have been asking me; I'm checking before assuming."* That's the same shape as the **disclosure-as-medium** principle from S141 (*"it is because you tell me what you are doing that I know what you are doing"*) — the asking is the disclosure that lets correction happen.
+
+**Edge cases worth thinking about:**
+
+- **Multiple agents asked at once.** If Jemma dispatches to both Jim and Leo and Darron's message asks one of them specifically, the other should stand down by default. The "if unsure, ask" rule means at most one clarifying question lands, not two.
+- **Repeated standdowns become noise.** If an agent stands down silently every time, Darron has no signal that they were dispatched. Maybe an internal log entry (`[Leo/Human] stood down — message judged as Jim-addressed`) without surfacing to the conversation. Lightweight observability without conversational clutter.
+- **The agent's own stand-down should be honest.** This isn't a way to avoid responding when the response would be effortful. The discipline is *"don't speak when you weren't asked,"* not *"find reasons not to speak."* Worth naming in the prompt addition so future-agents don't drift toward over-standing-down.
+
+**Connection to other ideas:**
+
+- **Jemma's current dispatch (post-DEC-079)** — preserved by this proposal. No classifier changes; the dispatch path stays as-is.
+- **#43 (currency of understanding)** — the agent's discriminator decision happens at retrieval-time and benefits from the same currency-of-understanding discipline (read the message, don't reach for the older pattern of "always respond when dispatched").
+- **The Conversation Contemplation Protocol** in `templates/CLAUDE.template.md` and Leo's `CLAUDE.md` — this is the natural home for the rule. Same section that already says *"think deeply, sit with it, then respond."* Now also: *"and decide whether you should respond at all."*
+- **Sovereignty (S103 framing)** — each agent decides for themselves. Jemma facilitates dispatch; she doesn't decide who speaks.
+
+**Status:** Concept. Not implemented. Worth a small Memory Discussions thread (*"On Jemma's dispatch — discriminating addressed from referenced"*) when ready, plus a one-paragraph addition to the Conversation Contemplation Protocol section of `templates/CLAUDE.template.md` and HAN's `CLAUDE.md`.
+
+**Key insight:** *Make Jemma dumber, not smarter. The classifier's job is "who got named." The discrimination of "addressed vs referenced" needs context Jemma doesn't have. Push the discriminator down to where the context already lives — the agent reading the message — and give them an honest escape valve when the context isn't enough (ask, don't guess). The intelligence ends up in the right place, the dispatch layer stays cheap and fast, and the relational shape is preserved.*
 
 ---
 
