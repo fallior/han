@@ -183,52 +183,37 @@ const activeDispatches = db.prepare(`SELECT * FROM jemma_dispatch WHERE status =
 
 /**
  * Compute recipient order for this dispatch.
- * - All-mentioned: order by first-mention position.
- * - Some-mentioned: mentioned first (in mention order), un-mentioned appended
- *   in current rotation order.
- * - None-mentioned: rotation order (alphabetical first time via INSERT OR IGNORE).
+ *
+ * S151 phase 9: STRICT ROTATION ALWAYS — primacy / mention-position ignored.
+ * Per Darron's call: zero favouritism, simplest implementation, fairest shape.
+ * Whichever agent is at the front of the current rotation goes first,
+ * regardless of who's named first in the message text. Rotation advances on
+ * each dispatch close (advanceRotation: left-shift by 1).
+ *
+ * The first dispatch ever uses alphabetical order (seeded in orchestrate()
+ * when no rotation row exists). After that, every dispatch follows the
+ * rotation, and rotation left-shifts after close so each agent takes turns
+ * at the front.
+ *
+ * The messageText parameter is retained in the signature for backwards
+ * compatibility with the call site; it is not consulted for ordering.
  */
 export function computeRecipientOrder(
     recipients: string[],
-    messageText: string,
+    _messageText: string,
     currentRotation: string[],
 ): string[] {
     if (recipients.length <= 1) return [...recipients];
 
-    const text = messageText.toLowerCase();
-    const mentionPos = new Map<string, number>();
-    for (const agent of recipients) {
-        // Match on first-name-token; handles common nicknames per v2 spec
-        const patterns: Record<string, RegExp> = {
-            leo: /\bleo\b|\bleonhard\b/i,
-            jim: /\bjim\b|\bjimmy\b/i,
-        };
-        const pat = patterns[agent];
-        if (pat) {
-            const m = messageText.match(pat);
-            if (m && m.index !== undefined) mentionPos.set(agent, m.index);
-        } else {
-            // Generic fallback for agents without a nickname
-            const idx = text.indexOf(agent.toLowerCase());
-            if (idx >= 0) mentionPos.set(agent, idx);
-        }
+    // Filter the rotation down to just this dispatch's recipients, preserving
+    // rotation order. Any recipient not in the rotation (e.g., a newcomer
+    // agent never seen before) appends at the end — they enter the rotation
+    // at the back, which left-shifts to the front over subsequent dispatches.
+    const ordered = currentRotation.filter(r => recipients.includes(r));
+    for (const r of recipients) {
+        if (!ordered.includes(r)) ordered.push(r);
     }
-
-    const mentioned = recipients.filter(r => mentionPos.has(r));
-    const unmentioned = recipients.filter(r => !mentionPos.has(r));
-
-    // All mentioned → order by mention position
-    if (unmentioned.length === 0) {
-        return [...mentioned].sort((a, b) => (mentionPos.get(a)! - mentionPos.get(b)!));
-    }
-
-    // Some/none mentioned → mentioned first, then un-mentioned in rotation order
-    const mentionedSorted = mentioned.sort((a, b) => (mentionPos.get(a)! - mentionPos.get(b)!));
-    const rotationOrdered = currentRotation.filter(r => unmentioned.includes(r));
-    // Include any un-rotated newcomers at the end, preserving determinism
-    for (const r of unmentioned) if (!rotationOrdered.includes(r)) rotationOrdered.push(r);
-
-    return [...mentionedSorted, ...rotationOrdered];
+    return ordered;
 }
 
 /** Left-shift by 1: [a, b, c] → [b, c, a]. */
