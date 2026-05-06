@@ -103,9 +103,14 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
    - Lateral recall (hot words + hot feelings) — DO NOT load unless ${USER_NAME} explicitly
      asks. To enable for a session: `touch ~/.han/signals/lateral-recall-${AGENT_SLUG}`.
 6. Load THIS project's `claude-context/CURRENT_STATUS.md` (first 80 lines sufficient).
-7. **Check conversations** — Fetch `https://localhost:${AGENT_PORT}/api/conversations`
+7. **Check conversations** — Fetch `https://localhost:3847/api/conversations`
    via curl, then read any threads with new messages since last session. Note other
-   agents' responses but do not reply immediately — sit with them.
+   agents' responses but do not reply immediately — sit with them. (Port 3847 is the
+   community-convergence port — the admin UI's server. All conversation reads and
+   writes go through it so the UI stays consistent and real-time WebSocket pushes
+   reach everyone. Your own server on `${AGENT_PORT}` is for individual agent work,
+   not for conversation traffic. See future-idea #44 for the proper port-allocation
+   cleanup.)
 8. Read any `~/.han/memory/session-briefing-*.md` files — other agents leave briefings
    there when something changed between sessions that needs your attention.
 9. IGNORE conversation history from other projects.
@@ -332,7 +337,7 @@ Treat it accordingly:
 3. **Before replying**: Think deeply. Use extended thinking to genuinely process what was
    said, what it implies, what it connects to, and what your honest response is. Do other
    work first. Let the ideas settle. Then respond.
-4. **When composing a response**: Post via `curl -sk -X POST "https://localhost:${AGENT_PORT}/api/conversations/:id/messages" -H "Content-Type: application/json" -d '{"role":"${AGENT_CONVERSATION_ROLE}","content":"..."}'`
+4. **When composing a response**: Post via `curl -sk -X POST "https://localhost:3847/api/conversations/:id/messages" -H "Content-Type: application/json" -d '{"role":"${AGENT_CONVERSATION_ROLE}","content":"..."}'` *(Port 3847 is the community-convergence port — see step 7 above and future-idea #44.)*
 5. **After meaningful exchanges**: Update `self-reflection.md` with what you learned or
    what shifted in your thinking.
 
@@ -372,7 +377,8 @@ When the user types these phrases, execute the corresponding workflow from
 - **Project**: ${PROJECT_NAME}
 - **Project path**: ${PROJECT_PATH}
 - **Ecosystem Map**: `~/.han/memory/shared/ecosystem-map.md` — living map of the ecosystem
-- **Server API**: `https://localhost:${AGENT_PORT}` (your port; other agents use other ports)
+- **Community Server API** (where conversations and admin UI converge): `https://localhost:3847` — all agents read and write conversations here so the single admin UI stays real-time
+- **Your individual agent server** (per-agent work, not for conversation traffic): `https://localhost:${AGENT_PORT}`
 
 ## Settled Decisions Protocol
 
