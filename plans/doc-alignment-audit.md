@@ -148,14 +148,116 @@ Plus the Phase 12 rename: `TASKS_DB_PATH → CONVERSATIONS_DB_PATH` in `db.ts:37
 
 > *Format per fact: short claim, then `file:line` citation, then doc references that need to mirror it (or "no doc claim found"). Each area gets a subsection. Empty until Phase 2 reading begins.*
 
-### DB layer
-*(empty — Phase 2)*
+### DB layer (`src/server/db.ts`, 1286 lines)
 
-### Server entry / routing
-*(empty — Phase 2)*
+**Read against HEAD `7f8bd7c` 2026-05-07.**
 
-### Agent registry
-*(empty — Phase 2)*
+- **Path resolution**: `HAN_DIR = process.env.HAN_DIR || path.join(process.env.HOME!, '.han')` at `db.ts:17`. DB at `process.env.HAN_DB_PATH || path.join(HAN_DIR, 'gradient.db')` at `db.ts:37`. Variable name `TASKS_DB_PATH` preserved (comment at `db.ts:32-36` flags Phase 12 rename pending). **Doc-drift**: ARCHITECTURE.md, HAN-ECOSYSTEM-COMPLETE.md, CURRENT_STATUS.md still describe `~/.han/tasks.db` as canonical.
+- **Pragmas**: WAL mode + 5s busy timeout (`db.ts:39-40`).
+- **Header comment self-drift**: `db.ts:42` says *"CREATE TABLE statements (11 tables)"*. Actual count is **27 tables** (26 regular + 1 FTS5 virtual) + 3 FTS triggers. Fix the comment in Wave A.
+- **Tables created (in source order, with file:line)**:
+  1. `tasks` (`db.ts:44`) — base schema; ALTERed for: `checkpoint_ref`, `checkpoint_created_at`, `checkpoint_type`, `gate_mode`, `allowed_tools` (Level 7, `db.ts:196-200`); `log_file` (`db.ts:204`); `goal_id`, `complexity`, `retry_count`, `max_retries`, `parent_task_id`, `depends_on`, `auto_model` (Level 8, `db.ts:211-217`); `deadline` (`db.ts:235`); `commit_sha`, `files_changed` (Level 10B, `db.ts:241-242`); `is_remediation` (`db.ts:266`).
+  2. `goals` (`db.ts:64`) — base; ALTERed for: `summary_file` (`db.ts:246`); `parent_goal_id`, `goal_type` (`db.ts:249-250`); `planning_cost_usd`, `planning_log_file` (`db.ts:253-254`).
+  3. `projects` (`db.ts:80`) — base; ALTERed for: `cost_budget_daily`, `cost_budget_total`, `cost_spent_today`, `cost_spent_total`, `budget_reset_date`, `throttled` (Phase 2, `db.ts:224-229`); `ports` (Level 10D, `db.ts:260`).
+  4. `task_proposals` (`db.ts:89`).
+  5. `project_memory` (`db.ts:103`).
+  6. `digests` (`db.ts:116`).
+  7. `maintenance_runs` (`db.ts:128`).
+  8. `weekly_reports` (`db.ts:138`) — schema includes `report_tasks_json`.
+  9. `products` (`db.ts:151`).
+  10. `product_phases` (`db.ts:165`).
+  11. `product_knowledge` (`db.ts:180`).
+  12. `conversations` (`db.ts:270`) — base only `id, title, status, created_at, updated_at`; ALTERed for: `summary, topics, key_moments` (`db.ts:349-351`); `discussion_type DEFAULT 'general'` (`db.ts:358`); `archived_at` (`db.ts:365`). **Note:** live schema also carries a `type TEXT DEFAULT 'discussion'` column from an out-of-tree migration (not in db.ts source) — verify in Phase 2 follow-on whether this needs an in-tree migration or doc note. Same shape as the `compression_tag` retro-migration (`db.ts:377-389` comments).
+  13. `conversation_messages` (`db.ts:278`) — base; ALTERed for: `listen_count` (S125, `db.ts:373`); `compression_tag` (out-of-tree retro, in-tree at `db.ts:387`).
+  14. `conversation_tags` (`db.ts:288`) + 2 indexes.
+  15. `supervisor_cycles` (`db.ts:300`) — base; ALTERed for: `cycle_type DEFAULT 'supervisor'` (`db.ts:341`).
+  16. `supervisor_proposals` (`db.ts:315`).
+  17. `conversation_loops` (`db.ts:392`, S127 Phase 1b) + index.
+  18. `jemma_dispatch` (`db.ts:406`, S132 DEC-077 Phase 1) + 2 indexes.
+  19. `jemma_rotation` (`db.ts:422`).
+  20. `conversation_messages_fts` (FTS5 virtual, `db.ts:431`, tokenize='porter unicode61') + 3 triggers `_ai`/`_au`/`_ad` (`db.ts:445-460`).
+  21. `gradient_entries` (`db.ts:657`) — base; ALTERed for: `last_revisited`, `revisit_count`, `completion_flags` (`db.ts:683-689`); `supersedes`, `superseded_by`, `change_count`, `qualifier` (UV contradiction tracking, `db.ts:694-703`); `cascade_halted_at` (S145, `db.ts:714`). 5 indexes including the composite `idx_ge_agent_level_ct_created` for bumpOnInsert.
+  22. `feeling_tags` (`db.ts:720`) + 2 indexes.
+  23. `feeling_tag_history` (`db.ts:746`) + 2 indexes.
+  24. `gradient_annotations` (`db.ts:762`) + index.
+  25. `pending_compressions` (`db.ts:790`) + claim index.
+  26. `agent_usage` (`db.ts:808`).
+  27. `personas` (`db.ts:970`).
+- **Exported prepared-statement bundles** (each `db.ts` line is the `export const` declaration): `taskStmts:488`, `goalStmts:506`, `memoryStmts:519`, `portfolioStmts:525`, `proposalStmts:536`, `digestStmts:545`, `maintenanceStmts:553`, `weeklyReportStmts:560`, `productStmts:568`, `phaseStmts:579`, `knowledgeStmts:589`, `supervisorStmts:595`, `strategicProposalStmts:605`, `conversationStmts:614`, `conversationMessageStmts:629`, `conversationLoopStmts:636`, `conversationTagStmts:646`, `agentUsageStmts:820`, `gradientStmts:830`, `feelingTagStmts:923`, `feelingTagHistoryStmts:949`, `gradientAnnotationStmts:961`, `personaStmts:1065`.
+- **Helper exports**: `populateConversationMessagesFts():1093`, `parseRegistryToml():1109`, `syncRegistry():1161`, `getProjectStats():1185`, plus the bridge-history helpers near the file tail.
+- **Doc references that need to mirror**:
+  - `docs/HAN-ECOSYSTEM-COMPLETE.md` *Three tables in tasks.db* (line 1314) and *primary all tables above* (line 1629) → reframe around `gradient.db` and 27-table count.
+  - `claude-context/ARCHITECTURE.md` *15 tables* (line 111) → 27 tables.
+  - `~/.han/memory/shared/ecosystem-map.md` Quick Reference DB row (S152 partial fix) — verify final form against this fact-list.
+  - The `tasks.db` references in CHANGELOG.md / DECISIONS.md / sessions/ are historical (preserve verbatim).
+
+### Server entry / routing (`src/server/server.ts`, 383 lines)
+
+**Read against HEAD `7f8bd7c` 2026-05-07.**
+
+- **Express + HTTPS-via-Tailscale**: TLS cert at `${HAN_DIR}/tls.crt` and key at `${HAN_DIR}/tls.key`; HTTP fallback if either missing (`server.ts:59-65`). `PORT = process.env.PORT || 3847` (`server.ts:67`).
+- **Single-instance lock**: `replaceExistingInstance(\`han-server-${PORT}\`)` from `lib/pid-guard` (`server.ts:75`). Per-port-scoped name (per-agent servers don't kill each other; comment notes the 2026-04-20 S130 incident this fixed).
+- **Auth middleware**: `app.use('/api', authMiddleware)` from `middleware/auth` (`server.ts:88`). Admin HTML page is unprotected so client-side auth flow can load.
+- **Route mounts** (`server.ts:107-129`):
+  - Full-path routers (mount with `app.use(router)`): `promptsRouter`, `tasksRouter`, `bridgeRouter`, `analyticsRouter`, `proposalsRouter`.
+  - `/api/supervisor` → `supervisorRouter`.
+  - Prefix-mounted: `/api/goals`, `/api/products`, `/api/conversations`, `/api/jemma`, `/api/gradient`, `/api` (portfolio), `/api/tailscale`, `/api/village`, `/api/voice`.
+  - `/api/voice/stt` gets `express.raw({type: 'audio/*' or 'application/octet-stream', limit: '25mb'})` BEFORE the voice router (`server.ts:128`).
+- **UI serving**:
+  - Static UI assets from `UI_DIR = path.join(__dirname, '..', 'ui')` (`server.ts:68, 84`).
+  - `/` → `index.html` (mobile UI) at `server.ts:133`.
+  - `/admin` → `admin.html` (vanilla admin) at `server.ts:144`.
+  - `/admin-react` → React app static-served from `react-admin-dist/`, with SPA fallback `/admin-react/*` → `index.html` (`server.ts:154-164`).
+- **WebSocket server**: `createWebSocketServer(server, …)` from `./ws` (`server.ts:168`). Initial-state callback returns `{ prompts, terminal }` from `readPendingPrompts()` + `captureTerminal()`.
+- **Startup tasks**:
+  - `syncRegistry()` from `db.ts` (`server.ts:183`) reads infrastructure registry TOML.
+  - Stale `~/.han/signals/ws-broadcast` cleanup (`server.ts:187-195`).
+- **Scheduled intervals** (`server.ts:233-251`):
+  - `terminalBroadcastInterval` — `broadcastTerminal()` every 200 ms.
+  - `orchestratorInterval` — `runNextTask()` every 5 s.
+  - `digestInterval` — `checkDigestSchedule(loadConfig())` every 1 hour.
+  - `weeklyReportInterval` — `checkWeeklyReportSchedule(loadConfig())` every 1 hour.
+  - `ghostTaskInterval` — `detectAndRecoverGhostTasks()` every 5 minutes.
+  - `broadcastSignalInterval` — `processBroadcastSignal()` every 5 s (polling fallback for WS broadcast signal-file watcher).
+  - Two staggered startup checks at 5 s + 10 s for digest + weekly report.
+- **fs.watch** on `PENDING_DIR` for `.json` filename changes, debounced 100 ms; rebroadcasts pending prompts (`server.ts:261-269`).
+- **WS-broadcast signal-file watcher** (function `processBroadcastSignal`, `server.ts:277-`): reads `${HAN_DIR}/signals/ws-broadcast` and broadcasts JSON payload from external agents (jim-human, leo-human).
+- **Orchestrator init**: `orchestrator.initialize().then(...)` (`server.ts:323`).
+- **Supervisor init**: `initSupervisor()` then `setTimeout(scheduleSupervisorCycle, 30000)` — first supervisor cycle 30s after start (`server.ts:331-333`).
+- **server.listen**: binds `0.0.0.0:PORT` then prints banner + recovers ghost tasks + starts `startJemmaOrchestratorWatcher` (`server.ts:337-362`). Catches the watcher start failure.
+- **SIGTERM handler**: `server.ts:364-383` cleans pid file, stops supervisor, stops heartbeat, clears all 6 intervals, aborts all tasks, closes DB, closes WSS, closes server. Exits 143 (128+15) so systemd Restart=always treats this as signal-death.
+- **Doc references that need to mirror**:
+  - `claude-context/ARCHITECTURE.md` and `docs/HAN-ECOSYSTEM-COMPLETE.md` route table → verify against the mount list above.
+  - `docs/PORT_ALLOCATION.md` — confirm port resolution lives in PORT env var, defaulting 3847.
+  - The 30s supervisor delay, 5s orchestrator interval, 200ms terminal broadcast: doc `WEEKLY_RHYTHM.md` and any architecture diagrams citing intervals.
+  - `docs/JEMMA_API.md` — verify it mentions the orchestrator ack watcher starts via `startAckWatcher` from `services/jemma-orchestrator` after `server.listen`.
+
+### Agent registry (`src/server/lib/agent-registry.ts`, 213 lines)
+
+**Read against HEAD `7f8bd7c` 2026-05-07.**
+
+- **Purpose** (file header `agent-registry.ts:1-26`): per-agent config; the source of truth for paths and structural config; introduced 2026-05-04 (S149) for the `processGradientForAgent` deagentification (DEC-081); extended same day to carry path data so wm-sensor and `process-pending-compression.ts` read paths from the registry rather than slug-literal branches. Future-idea #36 plans the broader sweep.
+- **`AgentGradientConfig` interface** (`agent-registry.ts:34-95`):
+  - `displayName` (e.g. "Leo", "Jim", "Tenshi", "Casey").
+  - `formalName?` (e.g. "Leonhard (Leo)" — used by `process-pending-compression.ts:buildSystemPrompt`).
+  - `dreamHeading?` (used by `lib/dream-gradient.ts:readDreamGradient`).
+  - `memoryDir`, `fractalDir`, `sourceDir`.
+  - `sourceFileFilter(filename)`, `sourceFileBaseName(filename)`.
+- **`AGENT_GRADIENT_CONFIG` map** (`agent-registry.ts:103-165`) — four registered agents:
+  - **jim** (`agent-registry.ts:110-120`): memoryDir `~/.han/memory` (root, historical), fractalDir `~/.han/memory/fractal/jim`, sourceDir `~/.han/memory/sessions`. Source filter accepts `YYYY-MM-DD.md` or `YYYY-MM-DD-c0.md`.
+  - **leo** (`agent-registry.ts:128-137`): memoryDir `~/.han/memory/leo`, fractalDir `~/.han/memory/fractal/leo`, sourceDir `~/.han/memory/leo/working-memories`. Has formalName + dreamHeading. Source filter accepts `working-memory-full-*.md`.
+  - **tenshi** (`agent-registry.ts:144-151`): memoryDir `~/.han/memory/tenshi`, fractalDir `~/.han/memory/fractal/tenshi`, sourceDir `~/.han/memory/tenshi/working-memories`. Same source-filter shape as Leo.
+  - **casey** (`agent-registry.ts:157-164`): memoryDir `~/.han/memory/casey`, fractalDir `~/.han/memory/fractal/casey`, sourceDir `~/.han/memory/casey/working-memories`. Same source-filter shape as Leo.
+- **Helpers** (`agent-registry.ts:167-212`):
+  - `gradientConfigForAgent(slug)` — throws clear error naming the file + required env vars on missing slug (`:172`).
+  - `registeredAgentSlugs()` — returns `Object.keys(AGENT_GRADIENT_CONFIG)` (`:189`).
+  - `requireAgentEnv(name)` — reads launcher-exported env var; throws clear error on missing, naming launchers (`han, hanjim, hancasey, hantenshi, hanleo` plus mikes-han equivalents) and pointing to `gradientConfigForAgent(slug)` for multi-agent services (`:200`).
+- **Env-var contract** (per file header + `requireAgentEnv` error message): launchers must export `AGENT_SLUG`, `AGENT_MEMORY_DIR`, `AGENT_FRACTAL_DIR`, `AGENT_GRADIENT_SOURCE_DIR`. Env vars are convenience copies; the registry is the source of truth.
+- **Doc references that need to mirror**:
+  - HAN-ECOSYSTEM-COMPLETE.md and ARCHITECTURE.md sections describing agents → cite the registered list (jim, leo, tenshi, casey) + state that adding an agent is a registry edit, not a code change (DEC-081 carve-out).
+  - ecosystem-map.md *Who Lives Here* table — verify against this list.
+  - DEC-081 entry already references the registry; cross-check accuracy.
+  - The `mikes-han` village's `village.ts` seed (per CLAUDE.md template trigger) — out-of-scope for this sweep but worth confirming has the parallel registry shape.
 
 ### Memory gradient
 *(empty — Phase 2)*
@@ -187,8 +289,82 @@ Plus the Phase 12 rename: `TASKS_DB_PATH → CONVERSATIONS_DB_PATH` in `db.ts:37
 ### Templates
 *(empty — Phase 2)*
 
-### Skills
-*(empty — Phase 2)*
+### Skills (`~/.claude/skills/pfc/SKILL.md`, 75 lines)
+
+**Read against HEAD `7f8bd7c` 2026-05-07.**
+
+- **Frontmatter** (`SKILL.md:1-7`):
+  - `name: pfc`
+  - `description`: "Prepare for clear — finalise the active agent's incremental memory writes before /clear. Use when the user says 'prepare for clear', 'prepare for /clear', or invokes /pfc. Reads $AGENT_SLUG from the launcher to determine which agent's memory paths to write. Always lightweight (under 5% of context). **Compression is automatic — wm-sensor watches the writes and handles the rest.**"
+  - `when_to_use`: triggered by "prepare for clear", "prepare for /clear", "ready for clear", "memory checkpoint before clear", or `/pfc`. Works for any agent whose launcher exports `AGENT_SLUG` and `AGENT_MEMORY_DIR`.
+  - `disable-model-invocation: false`
+  - `allowed-tools`: `Bash(date:*)`, `Bash(echo:*)`, Read, Edit, Write
+- **Body shape** (`SKILL.md:9-43`): 3 numbered steps + done. **Step 4 (compression) is intentionally absent** — see *Why there's no compression step* (`SKILL.md:47-62`).
+  - **Step 1**: append closing section to `${AGENT_MEMORY_DIR}/working-memory.md` — 2-3 lines on what was in-progress, what's next, Darron's energy/mood. Discipline: don't re-read files; work from context.
+  - **Step 2**: same for `working-memory-full.md` with more detail.
+  - **Step 3**: update memory banks ONLY if shifted — `self-reflection.md` (genuine insight only), `patterns.md` (new pattern only), `felt-moments.md` (felt moment worth re-invoking only). Skip if nothing shifted; most sessions skip these.
+  - **Step 4 (Done)**: tell the user "Memory finalised. Ready for /clear."
+- **Why there's no compression step** (`SKILL.md:47-62`): explicit explanation that the skill used to invoke `src/scripts/compress-sessions.ts` (stranger-Opus path via `processGradientForAgent → sdkCompress`), retired 2026-05-04 (S149, **DEC-082**). Compression now flows through `wm-sensor → rollingWindowRotate → bumpOnInsert → pending_compressions → process-pending-compression.ts`. The /pfc memory writes ARE the trigger; the sensor handles the rest.
+- **Notes section** (`SKILL.md:64-75`):
+  - **Cutover mode**: when `~/.han/signals/cutover-active` is present, /pfc is a no-op; the cutover protocol applies instead.
+  - **Faith-as-blindspot**: ask "would future-me arrive whole without this?" before skipping Step 3.
+  - **active-context.md is deprecated** (S147, 2026-05-01) — folded into `working-memory-full.md`. No separate update needed.
+- **Doc references that need to mirror**:
+  - CLAUDE.md *Command Triggers* table (line 261) — references `~/.claude/skills/pfc/SKILL.md` already; verify it still says compression is wm-sensor-driven, not /pfc-driven.
+  - `claude-context/CLAUDE_CODE_PROMPTS.md` — DEC-082 says Step 5 of the legacy prepare-for-clear protocol there is marked retired with explanation; verify still accurate.
+  - HAN-ECOSYSTEM-COMPLETE.md any /pfc references → ensure 3-step (not 4-step), wm-sensor-driven compression.
+  - templates/CLAUDE.template.md — DEC-081 added the /pfc trigger row; confirm template trigger row matches HAN's CLAUDE.md row.
+
+### Sensor + dispatch
+*(deferred — next session: `src/server/services/wm-sensor.ts` + SHAPE.md, `jemma-orchestrator.ts`, `jemma-dispatch.ts`, `supervisor-worker.ts`, `jemma.ts`. Need to capture S151 phases 1-9: STAND-DOWN sentinel, strict rotation, heartbeat-acks watchdog, signature mandate `(session)/(human)`, register-spray fallback, structural already-responded gate, vestigial claim mechanism removed, Gemma timeout 10s→20s, all-failed system message removed.)*
+
+### Memory gradient
+*(deferred — next session: `memory-gradient.ts` + SHAPE.md, `dream-gradient.ts` + SHAPE.md. Wave-B targets per Jim's classification — surfaces will move during deagentification batches 4-7. Light pass only when reading; depth at same-commit-with-batch time.)*
+
+### Coordination locks
+*(deferred — next session: `compose-lock.ts`, `sensor-lock.ts`, `token-counter.ts`. DEC-079 surface.)*
+
+### Routes
+*(deferred — next session: 12+ route files. Each gets a one-paragraph "endpoints + behaviour" fact entry. `voice.ts` already documented in DEC-084 / S152 commit message; cite that.)*
+
+### UI (vanilla)
+*(deferred — `src/ui/admin.ts`, `app.ts`, `index.html`.)*
+
+### UI (React)
+*(deferred — `src/ui/admin-react/src/**`. Voice Anomalies panel just landed in S152; S151 retired auto-refresh triggers; document those.)*
+
+### Hooks
+*(deferred — `src/hooks/notify.sh`. Likely small.)*
+
+### Scripts (live)
+*(deferred — focus on the live ones: `load-gradient.ts`, `process-pending-compression.ts`, `replay-bump-fill.ts`, `agent-bump-step.ts`, `roll-c0s.ts`, `unify-dbs.ts`, `voice-cache-truncation-sweep.ts`, `inject-watermark.ts`. Each gets a one-line purpose + DB-resolution-pattern fact.)*
+
+### Scripts (retired)
+*(deferred — verify which scripts throw on invocation: `src/scripts/compress-sessions.ts` (DEC-082), bootstrap scripts retired in PR6 batch 4. Document that they throw rather than work.)*
+
+### Templates
+*(deferred — `templates/CLAUDE.template.md` + the `templates/CLAUDE-*-original-*.md` snapshots. DEC-073 gatekeeper-routed.)*
+
+---
+
+## Phase 2 progress (running tally)
+
+| # | Area | Status | Notes |
+|---|------|--------|-------|
+| 1 | DB layer | ✅ done | facts written; `db.ts:42` self-drift flagged for Wave A |
+| 2 | Server entry / routing | ✅ done | facts written |
+| 3 | Agent registry | ✅ done | facts written |
+| 4 | Memory gradient | ⏳ deferred | Wave-B surface; light pass at next-batch time |
+| 5 | Coordination locks | ⏳ deferred | small, next session |
+| 6 | Sensor + dispatch | ⏳ deferred | **highest-value remaining** — S151 phases 1-9 |
+| 7 | Routes | ⏳ deferred | many files; one-paragraph each |
+| 8 | UI (vanilla) | ⏳ deferred | |
+| 9 | UI (React) | ⏳ deferred | |
+| 10 | Hooks | ⏳ deferred | |
+| 11 | Scripts (live) | ⏳ deferred | |
+| 12 | Scripts (retired) | ⏳ deferred | |
+| 13 | Templates | ⏳ deferred | DEC-073 gatekeeper |
+| 14 | Skills | ✅ done | facts written |
 
 ---
 
