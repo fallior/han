@@ -5773,3 +5773,53 @@ The break-loud throws make the decision auditable: any future PR that re-introdu
 
 
 
+## DEC-084: Voice Pipeline Anomaly Detection — Sanity Floor Before Cache
+
+**Date**: 2026-05-06
+**Author**: Jim (proposal in jim-report `mou041x1-l1hsit`), Darron (decision), Leo (session) implements
+**Status**: Settled
+**Origin thread**: `motbtprb-f2c00a` ("Mike's Garden and the Strategist Seat") late-exchange root-cause trace, codified in jim-report `mou041x1-l1hsit` ("Voice TTS truncation fix")
+
+### Decision
+
+Any auto-cached binary output produced by an external API (TTS audio today; future avatars / generated images / generated video) **must pass a shape sanity check against its input** before being written to a cache that suppresses regeneration. If the output shape is anomalous (e.g. bytes-per-input-character below an empirical floor for that pipeline), the writer:
+
+1. **Refuses to cache** — throws to abort the call chain so no partial / corrupt artefact lands as authoritative.
+2. **Logs a structured anomaly entry** to a JSONL file under `~/.han/health/` (one file per pipeline; e.g. `voice-anomalies.jsonl`).
+3. **Surfaces the anomaly** in the operator's view — admin Overview panel for foreground operations, ntfy push for severity-elevated cases.
+
+The pattern applies wherever a 200-OK response from an external API can return semantically-truncated content without raising an HTTP error. OpenAI's `gpt-4o-mini-tts` exhibits this for inputs in the 3500–4096 char range (50× normal compression ratio, no error response). Other APIs likely do too; the discipline is the safeguard.
+
+### Reasoning
+
+The State of the Garden TTS incident on 2026-05-05 generated 380 KB of audio (~24 seconds) for an expected ~10 minutes of content. All five chunks returned `200 OK`. No exception. The pipeline cached the partials as authoritative, suppressing regeneration. The operator listened to a corrupt artefact for several minutes before noticing. The error was invisible at the boundary the cache trusted.
+
+Same shape as DEC-080 (two-surface audit) and DEC-067-supersession (faith-as-blindspot): the discipline must be encoded structurally so future agents reading the codebase cold know the sanity-floor pattern is **deliberate, not optional**. Comments are hypotheses; throws are tests.
+
+### Mechanism
+
+- **TTS pipeline (S152 implementation)**: `src/server/routes/voice.ts:generateTts` computes `bytesPerChar = buffer.length / text.length` after the fetch returns. If below `loadConfig()?.ttsBytesPerCharFloor ?? 200` (5× below the empirical normal of ~958), `logVoiceAnomaly()` writes a row to `~/.han/health/voice-anomalies.jsonl` and the function throws. The throw propagates through `generateTtsChunked` → `getOrGenerateForMessage`, preventing both the per-chunk legacy cache write and the per-message cache write.
+- **Config-driven floor**: `ttsCharLimit` (chunk size, default 2500) and `ttsBytesPerCharFloor` (sanity floor, default 200) live in `~/.han/config.json`. Override per-environment without code change.
+- **Anomaly log**: append-only `~/.han/health/voice-anomalies.jsonl`. Each row carries timestamp, kind, input chars, output bytes, observed bytes/char, the floor value, voice, model, and a 16-char text hash.
+- **Operator surface**: `GET /api/voice/anomalies?limit=N` returns the tail (newest first). Admin Overview React panel renders the last 10 with timestamp, kind, ratio, voice, model. Degrades gracefully when the file is absent.
+- **One-off sweep**: `scripts/voice-cache-truncation-sweep.ts` reports existing cache entries that look truncated (per-message validated against DB; legacy hash entries flagged by raw size heuristic). Read-only; operator decides which to nuke.
+
+### Settled-decision impact
+
+- **DEC-080** (two-surface audit) — sibling. Same discipline shape (encode the rule structurally so it survives drift).
+- **DEC-082** (stranger-Opus retirement, break-loud throws) — same authorial lineage. Visibility over silent fallback.
+- **DEC-069** (cardinal — never delete memory) — does NOT apply. Voice cache is operational/regenerable, not memory.
+
+### Why Settled
+
+The throw-and-refuse behaviour is the primary safeguard. Reverting it requires a deliberate decision because it would re-introduce the silent-truncation failure mode the cache was supposed to prevent. The `ttsBytesPerCharFloor` config knob handles legitimate variation; the throw handles structural anomaly. Future PRs proposing to relax either need to argue against this entry, not silently widen the bypass.
+
+### Follow-up
+
+- **STT (Whisper) sanity checks** — same pattern probably applies to speech-to-text response validation. Different pipeline, different bug class. Future work; out-of-scope this PR.
+- **Per-chunk retry on truncation** — could add `retry_on_truncation: 1` config option (re-call OpenAI once when the floor trips) instead of refuse-and-throw. Not in v0; revisit if real-world false positives surface.
+- **OOM diagnostic** — incidental heap-OOM at 23:59 AEST 2026-05-05 in han-server, caught cleanly by watchdog, plausibly unrelated. Separate punch list when convenient.
+- **Sweep retirement** — `scripts/voice-cache-truncation-sweep.ts` should be retired-by-throw after first run per DEC-069 discipline (one-off scripts don't accumulate).
+
+
+

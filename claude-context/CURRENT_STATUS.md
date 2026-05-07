@@ -1,6 +1,6 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-05-05 by Leo (S151 — PR3-PR6 retirement sweep + threat model committed + PAT rotated + auth architecture documented)
+> Last updated: 2026-05-06 by Leo (S152 — Voice TTS truncation fix awaiting Jim's pre-merge audit)
 
 ## Current Stage
 
@@ -36,6 +36,22 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-05-06 — Leo + Jim + Darron, S152 — Voice TTS truncation fix (jim-report `mou041x1-l1hsit`)
+
+*Implements Jim's punch list. Awaits pre-merge audit (Jim) before commit per the audit rhythm — `src/server/routes/` is in the audit surface. PR shape: voice-pipeline anomaly detection + sanity floor + admin surface; touches `src/server/routes/voice.ts`, `src/ui/react-admin/src/pages/OverviewPage.tsx`, `claude-context/DECISIONS.md`, this file, and adds `scripts/voice-cache-truncation-sweep.ts`.*
+
+- **Bug shape** (S151 evening, S152 punch list): OpenAI's `gpt-4o-mini-tts` returned `200 OK` with semantically-truncated audio bodies for inputs in the 3500–4096 char range. Five chunks of the State of the Garden report came back at ~20 bytes/char vs the ~958 bytes/char empirical normal — 50× below — and the cache trusted them.
+- **Voice config knobs** (`~/.han/config.json`):
+  - `ttsCharLimit` (number, default `2500`) — chunk size ceiling for TTS input. Lower than OpenAI's 4096 to stay clear of the truncation-prone range. `chunkText()` reads this at module-load.
+  - `ttsBytesPerCharFloor` (number, default `200`) — sanity floor for per-chunk TTS response. Below this, the response is refused and logged as a `truncated_response` anomaly. Read per-call inside `generateTts`.
+- **Sanity floor + anomaly log** (`src/server/routes/voice.ts`): `generateTts` checks `bytes / text.length` after `response.arrayBuffer()`. Sub-floor responses throw and append a structured row to `~/.han/health/voice-anomalies.jsonl` (timestamp, kind, input_chars, output_bytes, bytes_per_char, floor, voice, model, text_hash). The throw propagates through `generateTtsChunked` → `getOrGenerateForMessage`, so neither legacy hash cache nor per-message cache writes a corrupt artefact.
+- **Operator surface**: `GET /api/voice/anomalies?limit=N` returns the tail (newest first). React Overview adds a "Voice Anomalies" card showing the 10 most recent; degrades gracefully when the file is absent. The Overview tab's data fetch was converted from `Promise.all` (fail-fast) to `Promise.allSettled` (Jim's audit yellow #2) so a single missing endpoint during deployment lag doesn't dark the whole tab. Cache-bust on next admin load.
+- **Sweep**: `scripts/voice-cache-truncation-sweep.ts` (read-only) walks `~/.han/voice-cache/by-message/` (DB-validated bytes/char) and the legacy hash dirs (raw-byte heuristic). The script now resolves the conversations DB via `process.env.HAN_DB_PATH \|\| gradient.db` mirroring `db.ts:37` (Jim's audit caught the original draft hardcoding `tasks.db` — see *DB-path bug catalogue* note below). Honest run 2026-05-07: 202 per-message scanned, **0 truncation candidates**; 909 legacy hash entries scanned, **12 tiny-file candidates** (5 smallest are likely the State of the Garden chunks); **0 orphans** (the original 143 was an artefact of querying the retired DB).
+- **DEC-084 filed** (Settled) — Voice pipeline anomaly detection. Codifies the sanity-floor-before-cache discipline so future API integrations inherit the pattern. Sibling to DEC-080 (two-surface audit) and DEC-082 (break-loud throws over silent fallback).
+- **What this does NOT fix**: Item 6 of the punch list (regenerate State of the Garden mp3) is **declined, not blocked** — Darron's call 2026-05-07: *"it'll regenerate if I need it which I don't think I will."* The message `mosof7fr-n24f5y` IS intact in `gradient.db` (20,100 chars); my earlier "deleted from conversation_messages" claim was a wrong-DB query against retired `tasks.db`. After fix lands + server restart, `GET /tts/mosof7fr-n24f5y` would regenerate fresh through the new pipeline if invoked. Item 7 (heap-OOM at 23:59 AEST 2026-05-05) deferred per Jim's punch list — separate diagnostic.
+- **DB-path bug catalogue** (Jim's audit follow-on): the wrong-DB trap that bit my draft sweep also bites several other live scripts and modules that still hardcode `tasks.db` instead of resolving via `db.ts:37`'s pattern. Live drift: `scripts/acquire-c0s.ts:142`, `scripts/verify-provenance.ts:33`, `scripts/supersession-sweep.ts:37`, `src/server/extract-session-usage.ts:18`, `src/server/fix-c4-gradient.ts:17`, plus 12 `scripts/emergency-dedupe/*.mjs` files. Some are pre-cutover archaeology tools (legitimate); others would silently miss post-2026-04-29 data. Documentation drift compounds it: ARCHITECTURE.md, HAN-ECOSYSTEM-COMPLETE.md, parts of CURRENT_STATUS.md and DECISIONS.md, plus the ecosystem-map.md *Quick Reference* table all still describe `tasks.db` as canonical (the ecosystem-map.md drift is fixed in this PR's scope; broader doc sweep is follow-up). **Out of scope for this PR**; cataloguing here for the follow-up sweep.
+- **Pre-existing TS errors in `voice.ts:410`/`433`** (req.params type, Buffer→BlobPart) unchanged — not introduced this PR; flagged in Jim's S151 close working memory for separate cleanup.
 
 ### 2026-05-05 — Leo + Jim + Darron, S150-S151 — PR3-PR6 retirement sweep + threat model + PAT rotation
 

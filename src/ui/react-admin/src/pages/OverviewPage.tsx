@@ -70,6 +70,23 @@ interface ActivityData {
   events?: ActivityEvent[];
 }
 
+interface VoiceAnomaly {
+  timestamp: string;
+  kind: string;
+  input_chars?: number;
+  output_bytes?: number;
+  bytes_per_char?: number;
+  floor?: number;
+  voice?: string;
+  model?: string;
+  text_hash?: string;
+}
+
+interface VoiceAnomaliesData {
+  anomalies?: VoiceAnomaly[];
+  total?: number;
+}
+
 // Helper to get CSS variable color
 function chartColor(name: string): string {
   const style = getComputedStyle(document.documentElement);
@@ -81,6 +98,7 @@ export default function OverviewPage() {
   const [ecosystem, setEcosystem] = useState<EcosystemData | null>(null);
   const [supervisor, setSupervisor] = useState<SupervisorData | null>(null);
   const [activity, setActivity] = useState<ActivityData | null>(null);
+  const [voiceAnomalies, setVoiceAnomalies] = useState<VoiceAnomaliesData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedActivity, setExpandedActivity] = useState<Set<number>>(new Set());
 
@@ -89,22 +107,39 @@ export default function OverviewPage() {
   // Fetch all data
   const fetchData = async () => {
     try {
-      const [analyticsRes, ecosystemRes, supervisorRes, activityRes] = await Promise.all([
+      // Promise.allSettled — the new /api/voice/anomalies endpoint may be
+      // unavailable during deployment lag (server restart pending after a
+      // PR lands). Fail-fast Promise.all would dark the entire Overview tab
+      // on a single missing endpoint. Each fetch is now independent; missing
+      // sections render their empty-state copy.
+      const results = await Promise.allSettled([
         apiFetch('/api/analytics'),
         apiFetch('/api/ecosystem'),
         apiFetch('/api/supervisor/status'),
         apiFetch('/api/supervisor/activity?limit=20'),
+        apiFetch('/api/voice/anomalies?limit=10'),
       ]);
 
-      const analyticsData = await analyticsRes.json();
-      const ecosystemData = await ecosystemRes.json();
-      const supervisorData = await supervisorRes.json();
-      const activityData = await activityRes.json();
+      const parseJson = async (idx: number): Promise<any | null> => {
+        const r = results[idx];
+        if (r.status !== 'fulfilled') {
+          console.error(`[Overview] fetch #${idx} rejected:`, r.reason);
+          return null;
+        }
+        try { return await r.value.json(); } catch (err) {
+          console.error(`[Overview] fetch #${idx} json parse failed:`, err);
+          return null;
+        }
+      };
+
+      const [analyticsData, ecosystemData, supervisorData, activityData, voiceAnomaliesData] =
+        await Promise.all([parseJson(0), parseJson(1), parseJson(2), parseJson(3), parseJson(4)]);
 
       setAnalytics(analyticsData);
       setEcosystem(ecosystemData);
       setSupervisor(supervisorData);
       setActivity(activityData);
+      setVoiceAnomalies(voiceAnomaliesData);
     } catch (error) {
       console.error('Failed to fetch overview data:', error);
     } finally {
@@ -393,6 +428,43 @@ export default function OverviewPage() {
             events.map(renderActivityItem)
           )}
         </div>
+      </div>
+
+      {/* Voice Anomalies (recent TTS truncations / refusals) */}
+      <div className="admin-card">
+        <h2>Voice Anomalies</h2>
+        {voiceAnomalies && voiceAnomalies.anomalies && voiceAnomalies.anomalies.length > 0 ? (
+          <>
+            <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '0 12px 8px' }}>
+              {voiceAnomalies.total} total · showing {voiceAnomalies.anomalies.length} most recent
+            </p>
+            <div className="activity-list">
+              {voiceAnomalies.anomalies.map((a, i) => (
+                <div key={i} className="activity-item">
+                  <div className="activity-dot failed" />
+                  <div className="activity-body">
+                    <div className="activity-title">
+                      {a.kind || 'anomaly'}
+                      {a.bytes_per_char !== undefined && a.floor !== undefined &&
+                        ` · ${a.bytes_per_char} bytes/char (floor ${a.floor})`}
+                    </div>
+                    <div className="activity-meta">
+                      {a.timestamp ? timeSince(a.timestamp) : ''}
+                      {a.voice ? ` · ${a.voice}` : ''}
+                      {a.model ? ` · ${a.model}` : ''}
+                      {a.input_chars !== undefined ? ` · ${a.input_chars} chars in` : ''}
+                      {a.output_bytes !== undefined ? ` · ${a.output_bytes}B out` : ''}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px', padding: '12px' }}>
+            No voice anomalies recorded
+          </p>
+        )}
       </div>
     </div>
   );

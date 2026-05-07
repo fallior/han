@@ -143,6 +143,20 @@ async function getOrGenerateForMessage(
     return buffer;
 }
 
+// ── Anomaly logging ────────────────────────────────────────
+
+const VOICE_ANOMALIES_PATH = path.join(HAN_DIR, 'health', 'voice-anomalies.jsonl');
+
+function logVoiceAnomaly(entry: Record<string, any>): void {
+    try { fs.mkdirSync(path.dirname(VOICE_ANOMALIES_PATH), { recursive: true }); } catch { /* dir already exists or unwritable */ }
+    const row = JSON.stringify({ timestamp: new Date().toISOString(), ...entry });
+    try {
+        fs.appendFileSync(VOICE_ANOMALIES_PATH, row + '\n');
+    } catch (err) {
+        console.error('[Voice/Anomaly] Failed to append to voice-anomalies.jsonl:', err);
+    }
+}
+
 // ── Config helpers ──────────────────────────────────────────
 
 function getApiKey(): string {
@@ -182,7 +196,12 @@ function stripMarkdown(text: string): string {
 
 // ── Text chunking ──────────────────────────────────────────
 
-const TTS_CHAR_LIMIT = 4096;
+// OpenAI's documented ceiling is 4096, but `gpt-4o-mini-tts` was observed
+// returning truncated audio (50× below normal bytes/char) for inputs in the
+// 3500-4096 range without flagging an error. Default 2500 stays comfortably
+// below that range. Override via `ttsCharLimit` in ~/.han/config.json.
+// Bug: jim-report "Voice TTS truncation fix" punch list (mou041x1-l1hsit, S152).
+const TTS_CHAR_LIMIT: number = loadConfig()?.ttsCharLimit ?? 2500;
 
 /**
  * Split text into chunks that fit within OpenAI's TTS character limit.
@@ -267,6 +286,30 @@ async function generateTts(text: string, voice: string, model: string): Promise<
     }
 
     const buffer = Buffer.from(await response.arrayBuffer());
+
+    // Sanity floor — empirical normal is ~958 bytes/char; observed truncation
+    // bug (S152) returned ~20 bytes/char. Anything below the floor is refused
+    // and logged so a corrupt response never gets cached as authoritative.
+    // Override floor via `ttsBytesPerCharFloor` in ~/.han/config.json.
+    const bytesPerChar = buffer.length / text.length;
+    const FLOOR: number = loadConfig()?.ttsBytesPerCharFloor ?? 200;
+    if (bytesPerChar < FLOOR) {
+        logVoiceAnomaly({
+            kind: 'truncated_response',
+            input_chars: text.length,
+            output_bytes: buffer.length,
+            bytes_per_char: Number(bytesPerChar.toFixed(2)),
+            floor: FLOOR,
+            voice,
+            model,
+            text_hash: textHash(text),
+        });
+        throw new Error(
+            `OpenAI TTS returned suspiciously short audio: ${buffer.length} bytes for ${text.length} chars `
+            + `(${bytesPerChar.toFixed(1)} bytes/char, floor ${FLOOR}). Refusing to cache.`
+        );
+    }
+
     writeCache(key, buffer);
     return buffer;
 }
@@ -502,6 +545,27 @@ router.get('/active', (_req: Request, res: Response) => {
         return res.status(404).json({ error: 'No conversations found' });
     }
     res.json({ conversationId: latest.conversation_id });
+});
+
+// ── Voice anomalies (read tail of voice-anomalies.jsonl) ────
+
+router.get('/anomalies', (req: Request, res: Response) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit as string) || 10, 100);
+        if (!fs.existsSync(VOICE_ANOMALIES_PATH)) {
+            return res.json({ anomalies: [], total: 0 });
+        }
+        const content = fs.readFileSync(VOICE_ANOMALIES_PATH, 'utf8');
+        const lines = content.split('\n').filter(l => l.trim().length > 0);
+        const tail = lines.slice(-limit).reverse(); // newest first
+        const anomalies = tail.map(l => {
+            try { return JSON.parse(l); } catch { return { raw: l, parse_error: true }; }
+        });
+        res.json({ anomalies, total: lines.length });
+    } catch (err) {
+        console.error('[Voice/Anomalies] Error:', err);
+        res.status(500).json({ error: 'Failed to read anomalies', detail: (err as Error).message });
+    }
 });
 
 // ── Cache stats (for admin/debugging) ───────────────────────
