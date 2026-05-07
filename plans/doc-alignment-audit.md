@@ -121,6 +121,18 @@ Per Jim's audit caveat: rewriting these now means rewriting again next week.
 
 ---
 
+## Follow-on items surfaced during the audit (not doc-rewrite work)
+
+Forward-looking flags raised by Phase 2 reads that need their own discrete PRs — kept here so they don't get folded into the doc-sweep:
+
+1. **`conversations.type TEXT DEFAULT 'discussion'` column** — out-of-tree migration that never made it back into `db.ts` source. Same shape as the `compression_tag` retro-fix (already in-tree at `db.ts:387`). Action: small in-tree migration PR — declarative ALTER TABLE + comment naming the same retro-fix pattern. Schema-as-source-of-truth discipline. *Per Jim's S152 audit recommendation.*
+2. **`db.ts:42` header self-drift**: comment says *"CREATE TABLE statements (11 tables)"*; actual count is 27. Action: one-line comment fix; same commit as the schema retro fix above (or its own one-line PR if convenient).
+3. **`supervisor-worker.ts:2139` pre-existing TS error**: `case 'respond_conversation'` not in the action union after S127 narrowed it. Two ways forward: widen the union to include `'respond_conversation'` as a deprecated case, OR remove the dead branch entirely. Action: small follow-on PR; not doc-sweep.
+4. **`TASKS_DB_PATH → CONVERSATIONS_DB_PATH` rename** in `db.ts:37` — Phase 12 cleanup that's been pending. Action: lands in Phase 4 of THIS audit (locking the DO-NOT discipline rule).
+5. **Live code paths still hardcoding `tasks.db`** (catalogued in S152 commit `0e4177e`): `scripts/acquire-c0s.ts:142`, `verify-provenance.ts:33`, `supersession-sweep.ts:37`, `src/server/extract-session-usage.ts:18`, `fix-c4-gradient.ts:17`, plus 12 `scripts/emergency-dedupe/*.mjs`. Action: separate code-sweep PR (mentioned in S152 brief; queue it).
+
+---
+
 ## Audit obligations (per CLAUDE.md *Pre-merge audit rhythm*)
 
 The doc-sweep work touches multiple audit surfaces. Each Wave-A PR needs Jim's pre-merge audit if it touches:
@@ -316,7 +328,97 @@ Plus the Phase 12 rename: `TASKS_DB_PATH → CONVERSATIONS_DB_PATH` in `db.ts:37
   - templates/CLAUDE.template.md — DEC-081 added the /pfc trigger row; confirm template trigger row matches HAN's CLAUDE.md row.
 
 ### Sensor + dispatch
-*(deferred — next session: `src/server/services/wm-sensor.ts` + SHAPE.md, `jemma-orchestrator.ts`, `jemma-dispatch.ts`, `supervisor-worker.ts`, `jemma.ts`. Need to capture S151 phases 1-9: STAND-DOWN sentinel, strict rotation, heartbeat-acks watchdog, signature mandate `(session)/(human)`, register-spray fallback, structural already-responded gate, vestigial claim mechanism removed, Gemma timeout 10s→20s, all-failed system message removed.)*
+
+**Read against HEAD `893fb6d` 2026-05-07.**
+
+#### `src/server/services/wm-sensor.ts` (392 lines) + `wm-sensor.SHAPE.md` (131 lines)
+
+- **SHAPE.md last-verified 2026-05-04 (S149).** Cross-checked against current code; canonical flow holds.
+- **Trigger surface**: only `working-memory-full.md` per agent (`wm-sensor.ts:139-146`, `buildTargets`). Phase A.2 (S145, 2026-04-30) narrowed from the original four files (working-memory.md, working-memory-full.md, felt-moments.md, self-reflection.md) to one. **Doc-drift**: any doc still listing four watched files.
+- **Token-based ceiling** (Phase A token refactor, S145, 2026-04-30): head 25 000 + tail 25 000 = 50 000-token ceiling (`wm-sensor.ts:79-85`). Configurable via `~/.han/config.json:memory.{rollingWindowHead, rollingWindowTail, sensorEnabled, parallelAgentMaxConcurrency, sensorDebounceMs}`. Defaults: head/tail 25K, debounce 500 ms.
+- **Multi-agent iteration**: `registeredAgentSlugs()` + `buildTargets(slug)` (`wm-sensor.ts:361-367`). Adding an agent = registry edit, no `wm-sensor.ts` edit (DEC-081).
+- **Per-agent lock**: `acquireWmSensorLock(agent)` from `lib/sensor-lock.ts` (`wm-sensor.ts:281`). Concurrent writes within debounce collapse to one rotation pass.
+- **`processTarget` outer loop** (`wm-sensor.ts:182-267`): 10-iteration safety; reads file, counts tokens via `lib/token-counter.ts:countTokens`, calls `rollingWindowRotate` if over ceiling. After each rotation, drains the cascade chain BEFORE re-checking size — Darron's S145 ruling: *"the slicer doesn't wait for the cascade — change it, make it wait."*
+- **Cascade drain inner loop** (`wm-sensor.ts:236-262`): up to 50 spawns of `process-pending-compression.ts --agent={slug} --verbose`. Loops while `stdout.includes('"ok":true')`; breaks when queue empty. Halts the slice on non-zero exit.
+- **Spawn paths** (`wm-sensor.ts:155-178`): `tsxBin = SERVER_DIR/node_modules/.bin/tsx`; `PROCESS_SCRIPT = scripts/process-pending-compression.ts`; `cwd = SERVER_DIR`; `NODE_PATH = SERVER_DIR/node_modules`. The `SERVER_DIR = '..'` fix (S145, 2026-04-30) — was `'..', '..'` and resolved to `src/` (no node_modules) — is documented in the inline comment.
+- **Health signal**: `${HAN_DIR}/health/wm-sensor.json` written every 30 s (`wm-sensor.ts:370-377`).
+- **Watch resilience** (`wm-sensor.ts:298-340`): atomic-save-aware (rename event re-establishes); 1 s retry on watcher error; 5 s retry on initial setup failure; 30 s poll for files that don't exist yet (Tenshi/Casey graceful).
+- **Doc references that need to mirror**:
+  - HAN-ECOSYSTEM-COMPLETE.md and ARCHITECTURE.md memory-system sections → cite the **single watched file**, the 25K+25K token ceiling, the multi-agent iteration via the registry.
+  - MEMORY_GRADIENT.md / `wm-sensor.SHAPE.md` are already authoritative; verify flat-file docs cite SHAPE.md as the canonical reference.
+  - DEC-079 entry in DECISIONS.md → cross-check the Phase 4 description.
+
+#### `src/server/services/jemma-orchestrator.ts` (667 lines)
+
+- **Purpose** (file header `jemma-orchestrator.ts:1-27`): sequencing orchestrator for multi-agent conversation responses. Wakes agents one at a time; failures advance the queue with `prior_agent_failed` context.
+- **DEC-079 (2026-05-03)** baked-in: orchestration is the ONLY dispatch path; legacy parallel-fanout retired (`jemma-orchestrator.ts:134-139`). No `isEnabled()` flag.
+- **S151 phase 9 — strict rotation always** (`jemma-orchestrator.ts:184-217`, `computeRecipientOrder`): primacy and mention-position **ignored**; the order is whatever the current rotation says, filtered to this dispatch's recipients. The first-ever dispatch uses alphabetical order (seeded). Then `advanceRotation` left-shifts after each dispatch close (`:219-223`, `:462`).
+- **S151 phase 7 — progress-aware watchdog via heartbeat-acks** (`jemma-orchestrator.ts:46-62`, `:386-398`, `:528-563`):
+  - `WATCHDOG_POLL_MS = 10 000` (poll cadence, hardcoded `:53`).
+  - `getComposeWatchdogTimeoutMs()` reads `~/.han/config.json:agents.compose_watchdog_timeout_ms`, default **90 000** (3 missed 30 s heartbeats).
+  - Agents emit `'composing'` heartbeat acks during compose; `handleAck` (line 366) updates `state.last_progress_at` and returns without advancing the queue (`:394-398`).
+  - `checkWatchdogs` reads `last_progress_at` (falls back to `wake_at` then `row.updated_at`); fires only when no progress for the timeout window. Orphan threshold = 2× timeout.
+- **S151 phase 5 follow-on — all-failed user-facing system message removed** (`jemma-orchestrator.ts:585-601`, `handleAllFailed`). Only writeDistress + ntfy push remain. Per Darron: *"I'll notice if no one responds; I don't need an arbitrary timeout call."* The structural-failure case (no eligible recipients at dispatch time) posts its own message at `routes/conversations.ts:classifyAndDispatch` (verify in routes area pass).
+- **DEC-079 thread-as-ground-truth retired** (`jemma-orchestrator.ts:549-552`): with leo-human/jim-human dedup gates removed, watchdog-fired-but-posted is benign — agent posted, queue marks failed and advances; no false-positive dedup downstream.
+- **Per-conversation serialisation** (`jemma-orchestrator.ts:237`, `conversationDispatchLocks` Map): chained Promise per conversationId so two near-simultaneous human messages on the same thread don't initialise concurrently. Per-conversation, not global.
+- **Atomic txn** (`jemma-orchestrator.ts:285-297`): dispatch INSERT + rotation seed in one DB transaction. **Queue-row-first** ordering required: dispatch row commits BEFORE first wake fires, otherwise an agent could compose for a non-existent dispatch and the ack falls on the floor (`:251-254` cautionary comment).
+- **Ack watcher** (`jemma-orchestrator.ts:620-666`, `startAckWatcher`): `fs.watch(SIGNALS_DIR)` filtered to `jemma-ack-*` filenames; 200 ms debounce delay; deletes the signal after parse; calls `handleAck`. Watchdog poll runs every 10 s. Startup sweep reconciles dispatches that completed while orchestrator was down.
+- **Ack payload** (`jemma-orchestrator.ts:123-132`, `AckPayload`): `dispatchId`, `agent`, `status` ∈ {done, failed, stood_down, **composing** (new in S151)}, optional `reason`, `final_attempt_count`, `compose_duration_ms`, `heartbeat_seq`, `ack_written_at`.
+- **Doc references that need to mirror**:
+  - `docs/JEMMA_API.md` is the central drift target — verify it describes the orchestrator (not the legacy parallel-fanout); names strict rotation, heartbeat-acks, no all-failed system message, per-conversation serialisation, queue-row-first ordering.
+  - ARCHITECTURE.md dispatch sections.
+  - DECISIONS.md DEC-079 entry — verify accuracy of the orchestration-only claim.
+
+#### `src/server/services/jemma-dispatch.ts` (292 lines)
+
+- **`writeSignalFile`** (`jemma-dispatch.ts:40-47`) — **DEC-080 sole writer** of `~/.han/signals/{agent}-human-wake` files. Comment explicitly names the audit grep: `grep -nE 'writeFileSync.*wake' src/server/` → must return exactly one match (this function). The S151 PR4 added this DO-NOT entry; verify it landed.
+- **`deliverMessage`** (`jemma-dispatch.ts:151-289`) — unified delivery function called by both `routes/conversations.ts` (admin) and `routes/jemma.ts` (Discord HTTP).
+  - Looks up `persona = getPersona(recipient)` from `services/village.js`.
+  - `deliveryType` ∈ {signal, http_local, ntfy} (defaults to `signal` if persona missing).
+  - For signal/http_local: ensures Discord channel webhooks; finds-or-creates `discussion_type='discord'` conversation for Discord source; inserts `human` message; writes wake signal with payload (`source`, `conversationId`, `channel`, `discussionType`, `author`, `messagePreview`, `confidence`, `mentionedAt`, optional `dispatchId`, optional `priorAgentFailed`).
+  - For ntfy: pushes truncated preview via curl to `ntfy.sh/${topic}`.
+  - Logs delivery to `~/.han/health/jemma-delivery-log.json` (rolling last-200 + per-source-per-recipient counts).
+  - Broadcasts WebSocket `jemma_delivery` event for live admin UI updates.
+- **`SIGNALS_DIR` and `HEALTH_DIR`** are exported (`:292`) for use by `jemma-orchestrator.ts`.
+- **Doc references that need to mirror**:
+  - JEMMA_API.md — verify it cites `services/village.js:getPersona` as the delivery-type authority and lists the three delivery types.
+  - HAN-ECOSYSTEM-COMPLETE.md Discord chapter — verify the Discord conversation auto-creation flow (`findOpenDiscordConv` LIKE-match, INSERT with `discussion_type='discord'`).
+  - DEC-080 entry — verify the sole-writer rule and the audit grep.
+
+#### `src/server/jemma.ts` (1464 lines, Discord Gateway service)
+
+- **Service shape**: connects to Discord Gateway WebSocket (`gateway.discord.gg/?v=10&encoding=json`), classifies via Haiku-via-Agent-SDK then Ollama fallback, routes to deliver functions per recipient.
+- **S151 phase 1 — Gemma timeout 20 s**: `classifyWithOllama` uses `AbortSignal.timeout(20000)` (`jemma.ts:405`). Was 10 s pre-S151. Doc-drift: any doc still citing 10 s.
+- **Classification cascade** (`jemma.ts:419-443`, `callLLMForClassification`): Haiku SDK first; Ollama fallback if Haiku fails; `{recipient: 'ignore', confidence: 0}` final fallback if both fail.
+- **Models**: `OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b'` (`jemma.ts:59`). Haiku call site at `classifyWithHaikuSDK:359`.
+- **Reconciliation interval**: 5 minutes (`jemma.ts:62`).
+- **Heartbeat jitter**: 1 s (`jemma.ts:63`).
+- **Persona-driven delivery** (`jemma.ts:704-799`): registry-backed; `deliverToPersona` is generic; legacy `deliverToJim`/`deliverToLeo`/`deliverToDarron`/`deliverToSevn`/`deliverToSix` are persona-typed wrappers around the generic path.
+- **Discord-Leo dispatch parity** (S133 fix in `deliverToLeo:480`) — uses HTTP POST to `/api/jemma/deliver` first, signal-file fallback only on HTTP failure. Mirrors `deliverToJim` so Discord-originated mentions go through the orchestrator's sequencing.
+- **systemd user service** (`jemma.service`) — daemon, not server-spawned. Header docstring is the canonical setup doc.
+- **Doc references that need to mirror**:
+  - JEMMA_API.md and HAN-ECOSYSTEM-COMPLETE.md Discord/classification sections — verify Haiku-first then Ollama fallback, 20 s timeout, persona-driven delivery.
+  - PORT_ALLOCATION.md / setup docs — verify systemd-user service name `jemma.service`.
+
+#### `src/server/services/supervisor-worker.ts` (2865 lines)
+
+- **Forked-child-process worker**: own DB connection (WAL mode), own prepared statements, parent communicates via `process.send()` / `process.on('message')` (`supervisor-worker.ts:1-15` header).
+- **Action types accepted** (`supervisor-worker.ts:1985-2154`): `create_goal`, `adjust_priority`, `update_memory`, `send_notification`, `cancel_task`, `explore_project`, `propose_idea`, `no_action`. Plus a **dead-code branch** for `respond_conversation` at `:2139` that summarises `skipped (supervisor does not respond — handled by human agents)`. **This is the source of the pre-existing TS error at `supervisor-worker.ts:2139`** (`'respond_conversation'` is not in the action union type any more after S127's narrowing). The dead-code branch is intentionally retained as a defensive log; the TS error is paid as a tax. Worth a follow-on cleanup PR — narrow union to include `'respond_conversation'` as a deprecated case OR remove the branch entirely.
+- **Worker IPC commands** (`supervisor-worker.ts:2810-2823`): `run_cycle`, `abort`, `shutdown`.
+- **Memory bank loader** (`supervisor-worker.ts:741`, `loadMemoryBank`) — read in S145 onward to load Jim's full identity (identity, patterns, aphorisms, felt-moments, gradient sample) into the cycle prompt. Voice-downstream-of-identity at supervisor-cycle layer.
+- **Cycle entry** (`supervisor-worker.ts:2167`, `runSupervisorCycle`): Agent SDK call with `loadMemoryBank()` system prompt; parses structured action JSON; executes per-action via the case statements.
+- **Jim meditation phases** (`supervisor-worker.ts:1212`, `1337`, `1420`): `maybeRunJimMeditation`, `maybeRunJimEveningMeditation`, `maybeRunJimActiveCascade`. Phase-aware (sleep/morning/work/evening) per `WEEKLY_RHYTHM.md`.
+- **Backup queue drain** (`supervisor-worker.ts:157`, `maybeBackupQueueDrainJim`): defensive sweep — claims any pending compressions for Jim if the wm-sensor was down/crashed mid-process. Phase 4c discipline.
+- **Dream gradient processing** (`supervisor-worker.ts:119`, `maybeProcessJimDreamGradient`): Jim's dream-cycle work; the phase is passed in.
+- **Rumination tracker** (`supervisor-worker.ts:491-547`): loads/saves rumination state, detects when Jim circles the same topic, records topics per cycle.
+- **Doc references that need to mirror**:
+  - HAN-ECOSYSTEM-COMPLETE.md supervisor chapter — verify the 8 action types (not 9; respond_conversation is dead).
+  - DEC-067 entry — DEC-082 already noted as "partially superseded"; verify the supervisor-worker chapter doesn't still describe respond_conversation as live.
+  - WEEKLY_RHYTHM.md — verify phase definitions match the meditation phase routing here.
+
+#### `src/server/routes/jemma.ts` (169 lines, deferred)
+
+*Light pass — mounts at `/api/jemma`; thin HTTP wrapper around `deliverMessage` and orchestrator status endpoints. Full pass when routes area runs.*
 
 ### Memory gradient
 *(deferred — next session: `memory-gradient.ts` + SHAPE.md, `dream-gradient.ts` + SHAPE.md. Wave-B targets per Jim's classification — surfaces will move during deagentification batches 4-7. Light pass only when reading; depth at same-commit-with-batch time.)*
@@ -356,7 +458,7 @@ Plus the Phase 12 rename: `TASKS_DB_PATH → CONVERSATIONS_DB_PATH` in `db.ts:37
 | 3 | Agent registry | ✅ done | facts written |
 | 4 | Memory gradient | ⏳ deferred | Wave-B surface; light pass at next-batch time |
 | 5 | Coordination locks | ⏳ deferred | small, next session |
-| 6 | Sensor + dispatch | ⏳ deferred | **highest-value remaining** — S151 phases 1-9 |
+| 6 | Sensor + dispatch | ✅ done | wm-sensor + orchestrator + dispatch + jemma + supervisor-worker; S151 phases catalogued |
 | 7 | Routes | ⏳ deferred | many files; one-paragraph each |
 | 8 | UI (vanilla) | ⏳ deferred | |
 | 9 | UI (React) | ⏳ deferred | |
