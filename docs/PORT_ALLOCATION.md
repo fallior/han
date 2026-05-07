@@ -248,4 +248,4 @@ Every step traces to a file path. The shape of the bug is clear once the per-age
 
 ---
 
-*Last updated: 2026-05-06 by Leo (S151). Verified against code state at HEAD `74c8c38`. To update: re-run the verification (grep `AGENT_PORT=` across launchers, read `services.toml` `[han.app]` block, check `journalctl --user -u han-server` and `~/.han/*-server.pid` files). If reality has drifted from this doc, update this doc.*
+*Last verified: 2026-05-07 by Leo (S152 doc-alignment audit). Re-checked at HEAD `08fdac5` against the launchers (`hanleo`, `hanjim`, `hancasey`, `hantenshi`), `services.toml` lines 288–310, and `src/server/server.ts:67` PORT default. No port-allocation changes since the S151 authoring at `74c8c38` — the only intervening commits are the S152 voice fix (`0e4177e`) and the doc-alignment audit register itself. To update: re-run the verification (grep `AGENT_PORT=` across launchers, read `services.toml` `[han.app]` block, check `journalctl --user -u han-server` and `~/.han/*-server.pid` files). If reality has drifted from this doc, update this doc.*

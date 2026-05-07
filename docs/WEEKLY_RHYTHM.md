@@ -21,12 +21,25 @@ defeats the experiment.
 
 Rest days (Saturday, Sunday) are sleep phase all day.
 
-### Nightly Dream Compression (S103)
+### Nightly Dream Compression (S103, post-S145 Phase A.2)
 
-At the sleep→waking transition (06:00), Leo's heartbeat force-rotates both working memory
-files and compresses overnight content through the gradient as a single c1. Uses the shared
-clock (`getSharedDayPhase()`), not Leo's wrapper, so it fires on rest days too. The 50KB
-threshold rotation remains as a safety net for multi-day accumulation.
+At the sleep→waking transition (06:00), Leo's heartbeat force-rotates the working-memory-full
+file and compresses overnight content through the gradient as a single c1. Uses the shared
+clock (`getSharedDayPhase()`), not Leo's wrapper, so it fires on rest days too.
+
+**S145 Phase A.2 (2026-04-30):** the slicer's domain narrowed to **working-memory-full.md
+only** (per agent). felt-moments and self-reflection are loaded WHOLE at session/cycle start
+(hand-curated, not chunked); the compressed working-memory.md is a hand-curated artefact left
+untouched by the slicer to prevent duplicate-content c0s. Plural "both files" in earlier
+versions of this doc reflected the pre-S145 design.
+
+**S145 Phase A token refactor:** the rotation threshold is **50,000 tokens** (head 25,000 +
+tail 25,000) measured via `lib/token-counter.ts:countTokens`, NOT 50,000 bytes/chars. Earlier
+"50KB threshold" wording was pre-token-refactor. Threshold configurable via
+`~/.han/config.json:memory.{rollingWindowHead, rollingWindowTail}`. The wm-sensor's per-write
+debounce + ceiling check is the primary trigger; this nightly force-rotation remains as a
+predictable cadence trigger for multi-day accumulation patterns the per-write watcher would
+take longer to surface.
 
 ## Leo's Rhythm (leo-heartbeat.ts)
 

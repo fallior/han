@@ -449,6 +449,23 @@ Plus the Phase 12 rename: `TASKS_DB_PATH → CONVERSATIONS_DB_PATH` in `db.ts:37
 
 ---
 
+## Wave A progress (running tally)
+
+| Doc | Status | Commit | Notes |
+|-----|--------|--------|-------|
+| `~/.han/memory/wiki/index.md` | ✅ done (working tree) | (separate `~/.han/memory/` repo) | jemma entry made agent-agnostic + persona-driven delivery + S151 phase 1 timeout |
+| `docs/PORT_ALLOCATION.md` | ✅ done | (this commit) | Verification footer bumped to S152 HEAD; no port-allocation changes since S151 |
+| `docs/WEEKLY_RHYTHM.md` | ✅ done | (this commit) | Nightly Dream Compression corrected for S145 Phase A.2 narrowing + token refactor; structure UNCHANGED (R001 honoured) |
+| `README.md` | ⏳ next | — | Top-level overview pass |
+| `docs/GRADIENT_SPEC.md` | ⏳ next | — | Cap formula verify against memory-gradient.ts |
+| `docs/JEMMA_API.md` | ⏳ next | — | Strict rotation, heartbeat-acks, no all-failed message, persona-driven delivery (now have facts) |
+| `docs/websocket-broadcast-design.md` | ⏳ next | — | Verify against current ws surface |
+| `claude-context/ARCHITECTURE.md` | ⏳ next | — | Non-dispatch sections only first; dispatch sections after fact-list extends |
+| `claude-context/CURRENT_STATUS.md` | ⏳ next | — | Non-activity-log sections |
+| `~/.han/memory/shared/ecosystem-map.md` | ⏳ partial (S152) → complete sweep | — | Three lines fixed in S152; full sweep pending |
+| `claude-context/DECISIONS.md` | ⏳ next | — | Surgical: live links to retired files only |
+| `docs/HAN-ECOSYSTEM-COMPLETE.md` | ⏳ next | — | DB row + table-count surgical edits Wave A; full chapters Wave B |
+
 ## Phase 2 progress (running tally)
 
 | # | Area | Status | Notes |
