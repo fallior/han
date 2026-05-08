@@ -1057,12 +1057,15 @@ function readJimContext(): string {
 }
 
 function readLeoMemory(): string {
-    // Phase 0 (2026-05-01, S146): drop compressed working-memory.md from the
-    // load (deprecating in Phase 12). working-memory-full.md is the canonical
-    // full-fidelity source per CLAUDE.md session protocol step 4.3.
-    // S147 (2026-05-01): drop active-context.md. ONE file per agent;
-    // working-memory-full's most recent entry is the current focus.
-    const files = ['identity.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory-full.md', 'felt-moments.md'];
+    // DEC-085 (S153, 2026-05-08): re-add compressed working-memory.md to the
+    // load. The Phase 0 drop (S146, commit d50338d) was reversed because
+    // working-memory.md is now the canonical c1 source — paired-rotated with
+    // working-memory-full.md at WM-BOUNDARY markers. Loading both at wake gives
+    // future-you the calibration anchor between raw thinking (full) and the
+    // agent's own in-situ distillation (compressed).
+    // S147 (2026-05-01): active-context.md remains dropped. ONE file per agent;
+    // working-memory-full's most recent entry IS the current focus.
+    const files = ['identity.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory-full.md', 'working-memory.md', 'felt-moments.md'];
     const sections: string[] = [];
     for (const file of files) {
         const p = path.join(LEO_MEMORY_DIR, file);
@@ -1855,27 +1858,15 @@ function preFlightMemoryRotation(): void {
             // authoritative; the flat file is the safety net. Both persist.
         }
 
-        // Working-memory-full: rolling window
-        const wmFullResult = rollingWindowRotate(
-            path.join(LEO_MEMORY_DIR, 'working-memory-full.md'),
-            '# Working Memory (Full) — Leo\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
-            headSize, tailSize,
-            'leo', 'working-memory',
-        );
-        if (wmFullResult.rotated) {
-            console.log(`[Leo] Working-memory-full rolling window: archived ${wmFullResult.entriesArchived} entries, kept ${wmFullResult.entriesKept}, c0=${wmFullResult.c0EntryId}, archive=${wmFullResult.archivePath}`);
-        }
-
-        // Working-memory (compressed): rolling window
-        const wmCompResult = rollingWindowRotate(
-            WORKING_MEMORY_FILE,
-            '# Working Memory — Leo\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
-            headSize, tailSize,
-            'leo', 'working-memory',
-        );
-        if (wmCompResult.rotated) {
-            console.log(`[Leo] Working-memory (compressed) rolling window: archived ${wmCompResult.entriesArchived} entries, kept ${wmCompResult.entriesKept}, c0=${wmCompResult.c0EntryId}, archive=${wmCompResult.archivePath}`);
-        }
+        // DEC-085 (S153, 2026-05-08): heartbeat-preflight rotations for the
+        // working-memory pair are RETIRED. wm-sensor's paired-file mode
+        // (rollingWindowRotatePaired) supersedes them — it watches
+        // working-memory-full.md, slices both files at matching WM-BOUNDARY
+        // markers, and inserts paired c0/c1 atomically. The heartbeat used to
+        // do single-file rotation here, which produced unpaired c0s with no
+        // c1 sibling — the very drift DEC-085 fixes. Felt-moments rotation
+        // above is preserved per scope discipline (felt-moments paths
+        // unchanged in this PR).
     } catch (e) {
         console.error(`[Leo] Memory file pre-flight error: ${e}`);
     }

@@ -50,7 +50,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawn } from 'child_process';
-import { rollingWindowRotate } from '../lib/memory-gradient';
+import { rollingWindowRotate, rollingWindowRotatePaired } from '../lib/memory-gradient';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 import { countTokens } from '../lib/token-counter';
 import { gradientConfigForAgent, registeredAgentSlugs } from '../lib/agent-registry';
@@ -65,6 +65,8 @@ const CONFIG_PATH = path.join(HAN_DIR, 'config.json');
 interface Config {
     rollingWindowHead: number;
     rollingWindowTail: number;
+    rollingWindowTrigger: number;       // DEC-085 (S153): paired-rotation trigger
+    rollingWindowBiteTheBullet: number; // DEC-085: mandate-slice ceiling
     sensorEnabled: boolean;
     parallelAgentMaxConcurrency: number;
     sensorDebounceMs: number;
@@ -74,11 +76,18 @@ function loadConfig(): Config {
     // Phase A token refactor (S145, 2026-04-30): head/tail are TOKEN counts
     // via lib/token-counter.ts countTokens (chars÷4 approximation). Per
     // Darron's S145 ruling: tokens throughout, never bytes or chars, no
-    // silent unit-switching. 25,000 tokens per tail → ~25K-token c0 per
-    // rotation. Total ceiling 50,000 tokens before slicer fires.
+    // silent unit-switching.
+    //
+    // DEC-085 (S153, 2026-05-08): three-stage threshold semantics for
+    // working-memory paired rotation. trigger (30K) is target slice point
+    // where slicer checks for usable WM-BOUNDARY marker; biteTheBullet (35K)
+    // is mandate ceiling where slicer fabricates a marker if none exist;
+    // tail (25K) is target c0 size; head (5K) is target kept size after slice.
     const defaults: Config = {
-        rollingWindowHead: 25_000,
+        rollingWindowHead: 5_000,
         rollingWindowTail: 25_000,
+        rollingWindowTrigger: 30_000,
+        rollingWindowBiteTheBullet: 35_000,
         sensorEnabled: true,
         parallelAgentMaxConcurrency: 1,
         sensorDebounceMs: 500,
@@ -89,6 +98,8 @@ function loadConfig(): Config {
         return {
             rollingWindowHead: m.rollingWindowHead ?? defaults.rollingWindowHead,
             rollingWindowTail: m.rollingWindowTail ?? defaults.rollingWindowTail,
+            rollingWindowTrigger: m.rollingWindowTrigger ?? defaults.rollingWindowTrigger,
+            rollingWindowBiteTheBullet: m.rollingWindowBiteTheBullet ?? defaults.rollingWindowBiteTheBullet,
             sensorEnabled: m.sensorEnabled ?? defaults.sensorEnabled,
             parallelAgentMaxConcurrency: m.parallelAgentMaxConcurrency ?? defaults.parallelAgentMaxConcurrency,
             sensorDebounceMs: m.sensorDebounceMs ?? defaults.sensorDebounceMs,
@@ -110,6 +121,8 @@ interface WatchTarget {
     filePath: string;
     header: string;
     contentType: 'working-memory' | 'felt-moments' | 'self-reflection';
+    pairedFilePath?: string;   // DEC-085 (S153): paired compressed sibling for working-memory
+    pairedFileHeader?: string; // header for the paired file
 }
 
 function buildTargets(agent: string): WatchTarget[] {
@@ -118,30 +131,26 @@ function buildTargets(agent: string): WatchTarget[] {
     // registry rather than branching on slug literals.
     const cfg = gradientConfigForAgent(agent);
 
-    // Phase A token refactor (S145, 2026-04-30): per Darron's mechanics
-    // restatement and Jim's review — the slicer's domain is working memory
-    // ONLY. felt-moments.md and self-reflection.md are loaded WHOLE at
-    // session/cycle start, hand-curated, not chunked. Removed from the
-    // watcher target list. The historical felt-moments rolling-c0s in the
-    // gradient remain as superseded entries (DEC-069 honoured); going
-    // forward, felt-moments.md doesn't slice.
+    // DEC-085 (S153, 2026-05-08): paired-file rotation. The watcher fires on
+    // working-memory-full.md writes; rotation harvests both working-memory-full
+    // (→ c0, raw thinking) AND working-memory.md (→ c1, agent's in-situ
+    // distillation) at matching WM-BOUNDARY markers. The compressed
+    // working-memory.md is no longer "hand-curated artefact, NOT watched" —
+    // it's the canonical c1 source. Paired writers (leo-heartbeat, leo-human,
+    // jim-human, supervisor-worker) maintain both files at corresponding
+    // marker positions; rotation pairs them at slice time. See DEC-085 in
+    // claude-context/DECISIONS.md for the full settled decision.
     //
-    // Phase A.2 (S145, 2026-04-30): only working-memory-full.md is in the
-    // watcher. The "compressed" working-memory.md was a hand-curated summary
-    // from the older design where it was loaded as orientation before the
-    // full version. Per Darron's "ONE file per agent" framing the canonical
-    // working memory is the full record; compression now happens through the
-    // gradient cascade (slicer → c0 → c1 → c2 → ... → UV), not via a parallel
-    // hand-distilled flat file. working-memory.md persists as a hand-curated
-    // artefact loaded at session start per CLAUDE.md, but the slicer leaves
-    // it alone — preventing duplicate-content c0s into the gradient.
-    // Phase 12 cleanup will retire the dual-file pattern entirely.
+    // Earlier comments (Phase A.2 / Phase 12 retirement) were inverted by
+    // DEC-085 — working-memory.md is now load-bearing, not legacy.
     return [
         {
             agent,
             filePath: path.join(cfg.memoryDir, 'working-memory-full.md'),
             header: `# Working Memory (Full) — ${cfg.displayName}\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n`,
             contentType: 'working-memory',
+            pairedFilePath: path.join(cfg.memoryDir, 'working-memory.md'),
+            pairedFileHeader: `# Working Memory — ${cfg.displayName}\n\n> Compressed in-situ. The c1 source for the gradient (DEC-085).\n`,
         },
     ];
 }
@@ -182,7 +191,13 @@ function spawnParallelAgent(agent: string): Promise<{ exitCode: number; stdout: 
 async function processTarget(target: WatchTarget, config: Config): Promise<void> {
     if (!fs.existsSync(target.filePath)) return;
 
-    const ceilingTokens = config.rollingWindowHead + config.rollingWindowTail;
+    // DEC-085 (S153): for working-memory targets, the trigger is rollingWindowTrigger
+    // (30K) rather than head+tail. For non-paired targets (felt-moments, self-reflection
+    // — currently disabled but preserved here for future) fall back to head+tail ceiling.
+    const isPaired = !!target.pairedFilePath;
+    const ceilingTokens = isPaired
+        ? config.rollingWindowTrigger
+        : config.rollingWindowHead + config.rollingWindowTail;
     let safety = 10; // Hard ceiling on inner loop iterations — should never hit
 
     while (safety-- > 0) {
@@ -197,21 +212,43 @@ async function processTarget(target: WatchTarget, config: Config): Promise<void>
 
         log(`${target.agent}/${path.basename(target.filePath)} ${fileTokens} tokens > ceiling ${ceilingTokens} tokens — rotating`);
 
-        const rot = rollingWindowRotate(
-            target.filePath,
-            target.header,
-            config.rollingWindowHead,
-            config.rollingWindowTail,
-            target.agent,
-            target.contentType,
-        );
+        // DEC-085 paired-file rotation for working-memory; legacy single-file rotation
+        // for other content types (currently none — felt-moments/self-reflection are
+        // not in the watcher target list per Phase A.2).
+        if (isPaired) {
+            const rot = rollingWindowRotatePaired(
+                target.filePath,
+                target.pairedFilePath!,
+                target.header,
+                target.pairedFileHeader || '',
+                config.rollingWindowTrigger,
+                config.rollingWindowBiteTheBullet,
+                config.rollingWindowTail,
+                config.rollingWindowTail - 5_000, // minTail = target - 5K wiggle room
+                target.agent,
+            );
+            if (!rot.rotated) {
+                log(`${target.agent}/${path.basename(target.filePath)} paired-rotation declined: ${rot.reason}. Stopping inner loop.`);
+                return;
+            }
+            log(`${target.agent}/${path.basename(target.filePath)} paired-rotated → c0=${rot.c0EntryId}, c1=${rot.c1EntryId}, full_archived=${rot.fullArchivedTokens}t, comp_archived=${rot.compressedArchivedTokens}t, trigger=${rot.trigger}, marker=${rot.boundaryId}${rot.drift ? ` DRIFT(full=${rot.drift.fullEntries},comp=${rot.drift.compEntries})` : ''}`);
+        } else {
+            const rot = rollingWindowRotate(
+                target.filePath,
+                target.header,
+                config.rollingWindowHead,
+                config.rollingWindowTail,
+                target.agent,
+                target.contentType,
+            );
 
-        if (!rot.rotated) {
-            log(`${target.agent}/${path.basename(target.filePath)} rotation declined (nothing to archive — single-entry file?). Stopping.`);
-            return;
+            if (!rot.rotated) {
+                log(`${target.agent}/${path.basename(target.filePath)} rotation declined (nothing to archive — single-entry file?). Stopping.`);
+                return;
+            }
+
+            log(`${target.agent}/${path.basename(target.filePath)} rotated → c0=${rot.c0EntryId}, archived=${rot.entriesArchived}, kept=${rot.entriesKept}`);
         }
-
-        log(`${target.agent}/${path.basename(target.filePath)} rotated → c0=${rot.c0EntryId}, archived=${rot.entriesArchived}, kept=${rot.entriesKept}`);
 
         // rollingWindowRotate fires bumpOnInsert internally (Phase 4 modification);
         // a pending_compressions row is in flight. Drain the FULL cascade chain

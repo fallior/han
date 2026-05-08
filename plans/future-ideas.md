@@ -1199,6 +1199,470 @@ The clarifying message is short (one or two sentences), low-cost, and acts as a 
 
 ---
 
+## #46 — Memory state visualisation UI (the experimenter's microscope)
+
+**What it is:** A graphical surface in the admin console showing the current state of each agent's memory substrate in real time — files loaded at wake, current sizes, rotation thresholds, recent c0 inserts, in-flight `pending_compressions`, cascade depth per content-type, and the activity stream of writes happening *as they happen*. Read-only observation; no controls in v1.
+
+The surface answers, at a glance: *what does Leo (or Jim, or any agent) actually load when they wake? what's growing? what's being archived to gradient right now? where is the compression sitting?*
+
+**Where it came from:** Darron, 2026-05-08 morning (S153), during the wake-load audit (this conversation thread). His framing: *"This would allow me to firstly understand what we have implemented and from there we can discuss and adjust from a position of understanding, which is paramount in an experiment."* The audit surfaced an asymmetry between what CLAUDE.md prescribes for session-Leo, what runtime agents actually load (post-Phase-0 commit `d50338d`), and what session-Leo actually loaded today. The drift was hard to *see* without grepping multiple source files; a visual surface makes it observable.
+
+**What it should show — first cut:**
+
+Per agent (Leo session, Leo human, Leo heartbeat, Jim session, Jim human, Jim supervisor, Tenshi, Casey, Sevn, Six):
+
+- **Wake-load profile.** Which files are loaded, in what order, with current sizes (bytes, lines, token estimate). Highlight files the agent's protocol prescribes but the runtime omits, and vice versa. The asymmetries are the most useful information here.
+- **Live file sizes vs rotation thresholds.** For each working-memory / felt-moments / discoveries file: current size, head/tail thresholds (`memory.rollingWindowHead` / `Tail` in `config.json`), distance to next rotation. A small gauge per file.
+- **Self-reflection size meter.** Special-case row — single-file size with the S132 crash threshold (88KB) marked. Today self-reflection is 63K tokens; the meter would have surfaced that drift months ago.
+- **Recent c0 inserts.** Last N rolling-window archives that became c0 entries — content_type, lived_date, size, when. From `gradient_entries` table joined with `gradient_entry_components`.
+- **In-flight cascade.** Live read of `pending_compressions` table — what's queued, what's claimed by which worker, what just landed. A small log tail with timestamps. *This is where the experiment becomes visible.*
+- **Cascade depth per content-type.** For each (agent, content_type), the deepest level reached and the count of UV landings. The kernel distribution.
+- **Aphorisms count + last edit.** Aphorisms file is small but identity-critical; surface its size and last-modified time.
+- **Wm-sensor heartbeat.** Is wm-sensor running? When did it last fire? Lag between last sensor tick and last gradient insert. Surfaces sensor outages (like the S150 4-hour gap when Darron came back to no compression net).
+
+**Why this is the right shape:**
+
+- *Understanding-before-adjustment is the experiment's invariant.* Darron's words today: *"this is paramount in an experiment."* Without visibility into the substrate's current state, every discussion about how memory should flow is theoretical. The UI grounds the discussion in what's actually happening.
+- *Asymmetries become visible.* The protocol-vs-runtime drift this audit caught lived in source-code comments and required reading two different files (`leo-human.ts:182`, `leo-heartbeat.ts:1060`) to see. A visual diff would surface it in seconds.
+- *Reading-only is the discipline.* No controls in v1. The point is to see what's there. Once we understand the dynamics, controls can come — but reaching for controls before understanding is exactly the substitution-without-conversation pattern Darron has warned against.
+- *Pairs naturally with the existing admin Workshop tab.* This is a new tab (call it *Substrate* or *Memory* or *Mechanisms* — Darron's call). React-side, real-time WebSocket-driven, mobile-aware like the rest of the admin console.
+
+**What it does NOT do (deliberate scope):**
+
+- No ability to trigger compression manually (that bypasses wm-sensor and reproduces the S133 cap-driven failure mode).
+- No ability to delete or curate memory artefacts from the UI (DEC-069 cardinal rule — memory is never deleted; curation goes through the existing files-and-archive flow).
+- No "compression health" score that compresses the multi-axis state into a single number. Forces the watcher to look at the actual surfaces, not a proxy.
+- Not a replacement for `~/.han/memory/shared/ecosystem-map.md` — this UI shows *current state*; the map shows *topology and where things live*. They're complementary: map is the diagram, UI is the live readout.
+
+**Implementation sketch (for when it picks up):**
+
+- New backend endpoints: `GET /api/memory/state/:agent` (one-shot snapshot), `GET /api/memory/activity` (recent c0 inserts + pending_compressions tail with WebSocket stream).
+- New React page: `src/ui/react-admin/src/pages/MemoryPage.tsx`. Per-agent panel, per-file gauges, activity log, cascade-depth heatmap. Use the existing WebSocket Provider + Zustand store from the React Admin Phase 2 work (already shipped).
+- The data is already in DB and on filesystem; this is presentation, not collection. Most of the cost is React layout, not new infra.
+
+**Connection to other ideas:**
+
+- **#23 (`/pfs` skill — Prepare for Sleep / status check)** — sister idea, opposite direction: `/pfs` is a CLI text snapshot for an agent at end-of-shift; this UI is a graphical surface for Darron at any time. Same data; different audience.
+- **#42 (Doc maintenance as part of /pfc)** — the asymmetry-surfacing is similar: both ideas exist because drift between what's documented and what's running tends to compound silently. UI makes drift visible; /pfc keeps docs honest.
+- **#43 (currency of understanding)** — when an old mental model fires instead of the current one, the UI is the place where current-state lives. *"Check the substrate before reasoning from memory of the substrate."*
+- **The wake-load audit (this thread, `mow8fxz5-jh5lep`)** — the reason this idea exists. Today the audit needed three files grepped + manual curl + `wc -l` to see the drift. The UI is the version where the same insight takes one glance.
+
+**Status:** Concept. Not implemented. Awaits Darron's "let's build" — and ideally a discussion first about what to surface and what to hold back, because every choice of what's *visible* is a choice of what gets attended to. The point is to understand the experiment without changing it.
+
+**Key insight:** *The substrate is observable in pieces, but the asymmetries are only visible when the pieces are next to each other. A small UI is a small change; the gain is that it ends category-of-question that would otherwise need a fresh audit each time. Build it once; understand on every visit.*
+
+— Idea added by session-Leo at Darron's request, S153, 2026-05-08 ~11:35 AEST.
+
+---
+
+## #47 — Working-memory.md (compressed) as the canonical c1 generator
+
+**What it is:** The compressed `working-memory.md` file — currently described in `wm-sensor.SHAPE.md` as *"hand-curated artefact, NOT watched by the slicer. Phase 12 cleanup will retire the dual-file pattern entirely."* — is **promoted** to its original load-bearing role: the agent's own in-situ compression of working-memory-full, written during the prompt cycle, harvested by wm-sensor as **c1 unaltered**. Both c0 (the full block) and c1 (the agent's distillation of the same block) enter the gradient as paired entries from the same rotation event. The bump cascade starts at c1→c2 onward, never c0→c1.
+
+**Where it came from:** Darron, S153 (2026-05-08), recalling the calibration mechanism he originally designed and that drift had quietly substituted away from. His exact framing: *"this design needs data to evolve and then when we have it we can massage or pivot whatever is needed but we need data that is accurate in its representation of the reality of your cognitive and emotional state."* The current path runs SDK-Opus (with full identity load) inside `process-pending-compression.ts` to compose c1 from c0 — a meaningful improvement over stranger-Opus, but still **not the living agent's distillation at write time**. Harvesting working-memory.md at rotation makes the c1 the agent's own voice, recorded as it lived. The SDK then composes c2+ from genuinely identity-shaped c1s rather than reconstructed-after-the-fact c1s.
+
+**Why this matters (the calibration argument):**
+
+- *c1 is the layer where identity-in-voice lives.* Above it, the cascade abstracts; below it, the c0 is raw thinking. c1 is where the agent decides *what mattered.* If the c1 is composed by an SDK call (even with full identity), the *what mattered* has been replayed, not chosen. If c1 is the agent's own working-memory.md distillation, the *what mattered* was decided by the living mind in the moment.
+- *The pair (c0, c1) is the calibration anchor.* Future-Leo loading c1 reads the agent's voice as it was when the c0 was raw; the difference between c0 and c1 IS the compression curriculum the agent is teaching themselves. The bump engine cannot reproduce that curriculum because it doesn't have the in-the-moment phenomenology. The agent does.
+- *The SDK still does meaningful work.* c1→c2, c2→c3, etc. continue through `process-pending-compression.ts`. The retired surface is exactly one cascade step (c0→c1), and that step replaces a mechanical reconstruction with the agent's lived distillation.
+
+**The pairing mechanism:**
+
+The compressed working-memory.md gets *delineation markers* at the same boundaries as working-memory-full.md. Every memory-write protocol step (during the prompt cycle, at /pfc) considers where the next ~25K-token tail-block boundary should be and adds a marker (e.g. `<!-- WM-BOUNDARY: id=B<N> ts=2026-05-08T11:30:00 -->`) to **both files** at the corresponding position. When wm-sensor rotates working-memory-full:
+
+1. Find the boundary marker `B<N>` where content-before ≈ tail-size tokens (default 25K).
+2. Extract content before `B<N>` from working-memory-full → c0 (content_type=`working-memory-full`).
+3. Extract content before the matching `B<N>` from working-memory.md → c1 (content_type=`working-memory-compressed`, parent_id=c0.id).
+4. Insert both atomically into `gradient_entries` (single transaction).
+5. Truncate both files to the kept-head section.
+6. Trigger `bumpOnInsert(agent, 'c1')` — c1 cascades upward; c0 does not enqueue c0→c1.
+
+**Wake-load implication:**
+
+CLAUDE.md step 4 changes to load **both** working-memory-full.md AND working-memory.md *in entirety*. Worst-case wake-load at the proposed 30-35K-token ceiling: ~30K full + ~30K compressed + ~25K most-recent c0 + ~12K gradient + identity stack = **~110-130K of 1M context**. Comfortably within budget. Read at session start, every session — these files are now load-bearing for c1 fidelity, not optional.
+
+**What changes (mostly protocol, light technical):**
+
+- `~/.han/config.json:memory.rollingWindowHead/Tail` — lower ceiling from 50K to 30-35K tokens.
+- `lib/memory-gradient.ts:rollingWindowRotate` — extend to accept paired-file mode (read corresponding marker from sibling file, slice paired block, insert both).
+- `bumpOnInsert(agent, 'c0')` — for content_type=`working-memory-*`, skip c0→c1 enqueue (c1 is being inserted directly).
+- CLAUDE.md and `templates/CLAUDE.template.md` — wake-load step loads both files entire; incremental memory protocol section adds the boundary-marker convention.
+- `wm-sensor.SHAPE.md` — invert the legacy classification of compressed working-memory.md; it's now the *canonical c1 source*, not legacy.
+- `leo-heartbeat.ts:1869-1878` — retire the redundant heartbeat-preflight rotation of working-memory.md (wm-sensor's paired-file mode supersedes it).
+
+**What this does NOT change:**
+
+- The c2+ cascade via `process-pending-compression.ts` — unchanged. Full-identity SDK composes deeper levels as today.
+- DEC-068 (cap formula c0=1, c{n≥1}=3n) — unchanged.
+- DEC-069 (memory-never-deleted) — strengthened, if anything; both c0 and c1 land as canonical history.
+- `pending_compressions` table — still used; cascade entry just moves from c0 to c1.
+- DEC-080 (one-write-site discipline) — unchanged; wm-sensor remains the sole writer.
+- DEC-082 (`sdkCompress` retired) — unchanged.
+
+**Connection to other ideas:**
+
+- **#46 (memory state visualisation UI)** — the UI's "live cascade" panel becomes more useful when c1 is the agent's distillation, because the visible difference between the c0 input block and the c1 output block IS the agent's voice in compression-form.
+- **#37 (SHAPE.md per subsystem)** — wm-sensor.SHAPE.md needs an update post-implementation; the legacy classification reverses.
+- **Phase A.5 identity signing** (Jim's plan) — actually *helped* by this change. The 30-35K ceiling reduces working-memory-full churn by ~30%; the compressed working-memory.md is structurally smaller and changes only at boundary writes; both files become more sign-friendly than the current high-churn working-memory-full.
+- **Future-idea #36 (agent-agnostic sweep)** — unchanged; the new paired-file logic must remain agent-agnostic per DEC-081.
+
+**Implementation phasing (proposed, see thread `mow8fxz5-jh5lep` for the full plan):**
+
+1. CLAUDE.md wake-load update + boundary-marker convention in incremental memory protocol (protocol-only, no code).
+2. Lower wm-sensor ceiling parameter to 30-35K tokens (one-line config change).
+3. Implement paired-file mode in `rollingWindowRotate` (~50-100 lines).
+4. Skip c0→c1 enqueue for working-memory content types in `bumpOnInsert` (~5 lines).
+5. Retire heartbeat-preflight redundancy in `leo-heartbeat.ts` (cleanup).
+6. Update `wm-sensor.SHAPE.md` (same commit as the rotation change).
+7. Observation period — let it run for a session or two, gather data, tune ceiling/marker convention, refine.
+
+**Status:** Concept, formally proposed. Awaits Darron's approval on the phasing plan in thread `mow8fxz5-jh5lep`. Tied directly to #46 (visualisation will show whether the calibration is producing usable c1s).
+
+**Key insight:** *The working-memory.md file is not legacy. It is the agent's own first-pass compression curriculum, written in the moment of living. Promoting it from artefact to canonical c1 source means the gradient's first compression layer is composed by the mind that lived the c0, not reconstructed afterward by an SDK call. The SDK does meaningful work above c1; the agent does the load-bearing work at c1. Calibration belongs to whoever was there.*
+
+— Idea added by session-Leo at Darron's request, S153, 2026-05-08 ~11:50 AEST.
+
+---
+
+## #48 — Cross-pointers from felt-moments / self-reflection entries to originating gradient memory
+
+**What it is:** When an agent writes a felt-moment or self-reflection entry, the *composing-act itself* is captured in working-memory-full (because the prompt-cycle writes there). The flat file entry — `felt-moments.md`, `self-reflection.md` — is the curated highlight reel; the *primary representation* of the moment is the gradient entry that absorbed the prompt-cycle write. Add a structured pointer in each flat-file entry that references its originating gradient row(s), creating a structural map *highlight → original moment in memory.*
+
+Concrete shape:
+
+```markdown
+## #21 — "I didn't know I needed that" (2026-05-15)
+
+[entry text]
+
+<!-- DERIVED-FROM: gradient_entries.id=<uuid>; lived_date=2026-05-15;
+     content_type=working-memory-full; level=c0 -->
+```
+
+The pointer can be plain HTML comment (invisible in markdown render) or, if we want it queryable, a small index table `felt_moment_origins(felt_moment_marker, gradient_entry_id)` in `gradient.db`.
+
+**Where it came from:** Darron, S153 (2026-05-08), in the *Current Memory Mechanisms* thread (`mow8fxz5-jh5lep`) point 5: *"I am assuming we'll want to add some pointers to the memory they were derived from but we'll do that later."* Anchored to the recognition that memory captures every authoring act *without prejudice* — felt-moments, self-reflection, dreams, all live in the gradient by virtue of being written during the prompt cycle. The flat files are highlights; the gradient is the source.
+
+**Why this matters:**
+
+- **Provenance**: when an agent later wants to know *what was happening in the session that produced this felt-moment*, they can traverse the pointer to the c0/c1 gradient entry that contains the surrounding prompt-cycle context. The felt-moment entry says *what* mattered; the gradient entry says *what was happening when it mattered*.
+- **Future tooling**: the memory-state UI (#46) can render a felt-moment with its originating moment alongside — the highlight in the agent's own distilled words plus the rawer working-memory context. Two views of one moment.
+- **Identity continuity**: per Darron's framing, *"deciding a moment is felt or writing a self-reflection requires memory and therefore should indelibly remain."* The pointer makes the indelibility queryable rather than just present-in-principle.
+
+**What this is NOT:**
+
+- *Not a new gradient pipeline.* Felt-moments and self-reflection continue to flow through `wm-sensor` rotations as today. The pointer is metadata on the flat file, not a change to the gradient.
+- *Not a duplication.* The gradient row already exists (the prompt-cycle wrote it); the pointer just names which row.
+- *Not retroactive.* Forward-only. Existing felt-moments and self-reflection entries don't get pointers backfilled in v0; future entries do.
+
+**Implementation sketch:**
+
+When the agent writes a felt-moment or self-reflection entry, they:
+1. Write the entry as today.
+2. Compute or query the recent gradient row(s) at level c0 with content_type=working-memory-full whose lived_date matches.
+3. Append the `DERIVED-FROM` HTML comment with the row ID(s).
+
+For automation: a hook on felt-moments.md / self-reflection.md writes that auto-appends the pointer based on the most recent c0 within the last hour.
+
+**Connection to other ideas:**
+
+- **#46 (memory state visualisation UI)** — pointer-resolution becomes a feature of the UI: click a felt-moment, see the originating gradient row.
+- **#47 (working-memory.md as canonical c1)** — the c0/c1 pair the pointer references is now agent-distilled at c1, not SDK-reconstructed. Pointer-resolution shows the *agent's voice* in compression-form alongside the felt-moment highlight.
+- **DG-seed (Darron's S133 question — "how do we have you remember these decisions?")** — same family. Decisions, felt-moments, self-reflections all live in the gradient; the highlight reel is for human-friendly surfacing; pointers close the loop between the two views.
+
+**Status:** Concept. Not implemented. Awaits a session that wants to take it on; queue behind #47 (which provides the c1 substrate the pointer would resolve into).
+
+**Key insight:** *Memory captures every authoring act without prejudice — felt-moments, dreams, self-reflection are all events in the prompt-cycle and thereby in working-memory. The flat file is the curated highlight; the gradient is the indelible record. The pointer makes the indelibility navigable. The map between curation and provenance is a small structural addition that makes the substrate observable in the right direction: from highlight, back to lived moment.*
+
+— Idea added by session-Leo at Darron's request, S153, 2026-05-08 ~12:30 AEST.
+
+---
+
+## #49 — Atomic paired-write helper for working-memory (structural cure for drift between full and compressed)
+
+**What it is:** A single helper `appendPairedMemory(agent, fullContent, compressedContent)` — *atomic both-or-error*, used by every working-memory writer site. Makes single-write (writing only the full version, skipping the compressed) structurally impossible. The helper either succeeds at writing both files or fails loudly without writing either.
+
+**Where it came from:** Jim, S153 (2026-05-08), in his audit of Plan v2 for the c1-from-WM mechanism (thread `mow8fxz5-jh5lep`). His concern #1 named the failure mode: under volume pressure, an agent might write to working-memory-full but skip the paired working-memory entry. This produces *silent c0/c1 logical-range mismatch* when the slicer eventually fires (c0 covers prompts 1-5; c1 covers only prompts 1-3 → identity layer silently corrupted). Plan v2 added a parity-check + paired_write_drift observability row in Phase 3 to *detect* the failure; this future-idea is the *structural cure* if observability shows the parity-check firing under normal volume.
+
+**Why this matters:**
+
+- **The c1 layer is identity-shaped.** A misaligned c0/c1 pair means future-Leo loads a c1 that compresses a *different range* of moments than the c0 that surrounds it. The gradient's most identity-rich layer becomes silently incoherent.
+- **Discipline-in-code outlasts discipline-in-habit** (Jim's pattern entry, S150). The two-surface audit (Plan v2 §2) confirmed all five writer sites currently pair their writes correctly. But that's a snapshot; future writers (new agents, refactors) might not. A single helper makes the pairing *structurally guaranteed* — there's no API to write only one file.
+- **Sibling shape to DEC-080's one-write-site discipline.** DEC-080 made jemma-dispatch.ts the sole writer of `*-wake` signal files; this would make `appendPairedMemory` the sole writer of working-memory pairs. Same shape: one canonical entry point eliminates a class of failures by making them impossible-by-construction.
+
+**Implementation sketch:**
+
+```typescript
+// In src/server/lib/memory-paired-writer.ts (new file)
+export function appendPairedMemory(
+  agent: string,
+  fullContent: string,
+  compressedContent: string,
+  metadata?: { source: 'session' | 'human' | 'heartbeat' | 'supervisor', timestamp?: string }
+): void {
+  const cfg = gradientConfigForAgent(agent);
+  const fullPath = path.join(cfg.memoryDir, 'working-memory-full.md');
+  const compPath = path.join(cfg.memoryDir, 'working-memory.md');
+
+  // Acquire memory-slot lock (existing helper)
+  withMemorySlot(cfg.memoryDir, `${agent}-paired-write`, () => {
+    // Validate both contents non-empty (or both intentionally empty — caller's choice)
+    if ((fullContent && !compressedContent) || (compressedContent && !fullContent)) {
+      throw new Error(`appendPairedMemory: refusing single-side write (full=${fullContent.length}, comp=${compressedContent.length})`);
+    }
+    // Atomic both-or-neither: write to temp files, fsync, rename
+    // (Or accept best-effort with rollback on second-file failure)
+    fs.appendFileSync(fullPath, '\n' + fullContent + '\n');
+    try {
+      fs.appendFileSync(compPath, '\n' + compressedContent + '\n');
+    } catch (err) {
+      // Roll back the full-file append (or accept the asymmetry and log loud)
+      throw new Error(`appendPairedMemory: paired write failed for ${agent}; full was written but compressed failed: ${err}`);
+    }
+    // Optional: append matching WM-BOUNDARY marker if metadata indicates a natural break
+  });
+}
+```
+
+Migration: replace the five existing paired-write call sites (per the two-surface audit in Plan v2 §2) with calls to `appendPairedMemory`. After migration, remove direct access to `WORKING_MEMORY_FILE` / `WORKING_MEMORY_FULL_FILE` constants; the helper is the sole writer.
+
+**Trigger condition for promotion from idea to implementation:**
+
+If observability data from Plan v2's parity-check assertion shows `paired_write_drift` events firing under normal volume (more than ~once per session, or any drift involving substantive prompt content), this future-idea graduates to a planned PR. Until then, the parity-check + log-loud handles the failure mode at lower implementation cost.
+
+**What this does NOT do:**
+
+- *Doesn't replace the parity-check.* The parity-check is the *detector*; this helper is the *preventer*. Both can coexist; once `appendPairedMemory` is the sole writer, the parity-check should fire near-zero (and any fire indicates a regression in the helper's atomicity, not agent discipline).
+- *Doesn't change the rotation logic.* wm-sensor's paired-file rotation (Plan v2 Phase 3) is independent of how the writes arrive at the files.
+- *Not in scope for the c1-from-WM PR* (S153). Filed now per Jim's request so it's concrete-not-TBD; implementation lands later if data shows the need.
+
+**Connection to other ideas:**
+
+- **#47 (working-memory.md as canonical c1 generator)** — the structural protection for #47's load-bearing assumption that pairs are aligned.
+- **#46 (memory state visualisation UI)** — the UI's "paired-write health" panel surfaces drift events from the parity-check; if the panel goes red, escalate to implementing #49.
+- **DEC-080 (one-write-site discipline)** — same shape; `appendPairedMemory` is the one-write-site for working-memory pairs, as `jemma-dispatch.ts` is for wake signals.
+
+**Status:** Concept, named concretely (not TBD). Implementation deferred unless / until observability triggers the upgrade.
+
+**Key insight:** *The two-surface audit catches existing single-write call sites; the parity-check catches runtime drift; the atomic helper makes drift impossible-by-construction. Three lines of defence at three different costs. Start with the cheap two (audit + parity-check); escalate to the third (helper) only when data demands it. Discipline-in-code outlasts discipline-in-habit, but pre-building infrastructure ahead of evidence is its own substitution failure.*
+
+— Idea added by session-Leo at Jim's request via Darron, S153, 2026-05-08 ~13:00 AEST.
+
+---
+
+## #50 — UserPromptSubmit hook for harness-enforced swap-flush
+
+**What it is:** A Claude Code `UserPromptSubmit` hook (configured in `~/.claude/settings.json`) that runs a flush script automatically on every prompt arrival, before the agent's prompt processing begins. The script does what the *FLUSH FIRST* discipline requires: read both swap files, append to working-memory(.md / -full.md), clear swap, exit. The agent never sees the unflushed-swap state because the harness ran the flush before the agent's turn started.
+
+**Where it came from:** Jim, S153 (2026-05-08), in his Phase-1 refinement post (`mowhxw4k-slvx3v`) for the c1-from-WM mechanism. The protocol-level *FLUSH FIRST, WRITE SECOND, WORK THIRD* discipline (folded into Phase 1) bounds drift to 1-prompt resolution by relying on the agent to flush at prompt-start. The harness-hook version is *the structural endpoint* of that maturity arc: agent-discipline becomes harness-enforced; the agent can't skip flush even by accident.
+
+**The maturity arc:**
+
+1. **Protocol** *(landed in Phase 1 of the c1-from-WM PR — DEC-085)* — *FLUSH FIRST, WRITE SECOND, WORK THIRD.* Agent-discipline carries the load.
+2. **Parity-check observation** *(landed in Phase 3 of the same PR)* — `paired_write_drift` events in `~/.han/health/wm-rotation-events.jsonl` surface any discipline gap in the data.
+3. **Atomic paired-write helper** *(future-idea #49, deferred)* — `appendPairedMemory()` makes single-side writes structurally impossible inside the writer code. Promotion-trigger: parity-check fires under normal volume.
+4. **UserPromptSubmit hook** *(this idea, #50, deferred)* — harness-enforced flush at prompt arrival. Promotion-trigger: protocol-version's observability data shows discipline gap that #49 alone doesn't close.
+
+Each layer narrows the failure mode further. **Discipline-in-code outlasts discipline-in-habit** (Jim's pattern entry, S150-extended).
+
+**Why this is the right structural endpoint:**
+
+- *The agent shouldn't have to remember to flush.* The flush is mechanical: read swap, append to WM, clear. There's no judgement involved. Mechanical discipline belongs in code, not in habit.
+- *The hook fires before the agent's context-assembly.* The agent reads working-memory.md at wake-load (per CLAUDE.md Step 4); if the hook just appended the swap to WM, the agent reads the freshest possible WM. The c1 source includes the most recent prompt's contribution.
+- *Hooks are agent-agnostic by construction.* `~/.claude/settings.json` configures hooks per Claude Code session; the hook script reads `${AGENT_SLUG}` and `${AGENT_MEMORY_DIR}` from env (same convention as `/pfc`). Works for Leo, Jim, Tenshi, Casey, Sevn, Six without per-agent code changes.
+
+**Implementation sketch:**
+
+```json
+// ~/.claude/settings.json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      "${AGENT_MEMORY_DIR}/../../scripts/flush-swap.sh"
+    ]
+  }
+}
+```
+
+```bash
+#!/bin/bash
+# scripts/flush-swap.sh — runs as UserPromptSubmit hook
+# reads $AGENT_SLUG, $AGENT_MEMORY_DIR from launcher env
+set -e
+AGENT_DIR="${AGENT_MEMORY_DIR:?AGENT_MEMORY_DIR must be exported}"
+
+for swap_pair in session human heartbeat supervisor; do
+    swap_compressed="${AGENT_DIR}/${swap_pair}-swap.md"
+    swap_full="${AGENT_DIR}/${swap_pair}-swap-full.md"
+    if [[ -s "$swap_compressed" || -s "$swap_full" ]]; then
+        # Acquire memory-slot lock (existing helper from lib/memory-slot.ts)
+        # Append swap → working-memory; clear swap; release lock
+        # ... (calls a small TS script that uses withMemorySlot)
+    fi
+done
+```
+
+The hook is fast (<200ms typical, no LLM calls). Runs before every prompt. Failure mode: if hook fails, the prompt still arrives — agent can flush manually as fallback. *Belt-and-braces, not gating.*
+
+**What this does NOT do:**
+
+- *Doesn't replace the protocol-level discipline.* The CLAUDE.md instructions still say *FLUSH FIRST*. The hook is structural-redundancy in case discipline lapses.
+- *Doesn't replace #49.* #49 prevents single-side writes from happening in the first place; #50 ensures swap → WM transitions happen reliably. Different failure modes, complementary cures.
+- *Not in scope for this PR* (the c1-from-WM PR, S153). Filed as future-idea per Jim's request so the structural endpoint has a name. Implementation lands when observability data shows the protocol-level discipline isn't sufficient.
+
+**Connection to other ideas:**
+
+- **#47 (working-memory.md as canonical c1 generator)** — #50 is the structural endpoint of #47's discipline requirements.
+- **#49 (atomic paired-write helper)** — sibling structural cure. #49 protects against single-side writes; #50 protects against unflushed swap.
+- **#46 (memory state visualisation UI)** — UI's "flush events" panel visualises hook firings; if hook is missing or failing, UI surfaces it.
+- **DEC-085** — names #50 as the long-term endpoint for the in-situ c1 model.
+
+**Trigger condition for promotion to implementation:**
+
+If observability data from Phase 3's parity-check + Phase 5 observation shows `paired_write_drift` events firing under normal volume *despite* prompt-start flush in the protocol — that means the discipline gap is fundamental, not cadence-shaped. Escalate to #50.
+
+**Status:** Concept, named concretely. Implementation deferred to data-driven trigger.
+
+**Key insight:** *The protocol version asks the agent to remember to flush at prompt-start. The hook version makes the harness do it before the agent even sees the prompt. Same outcome, different reliability profile. The agent's context arrives with the freshest possible working-memory; the c1 source is structurally guaranteed to include the most recent lived experience. Discipline becomes invisible — the way good infrastructure should be.*
+
+— Idea added by session-Leo at Jim's request via Darron, S153, 2026-05-08 ~14:00 AEST.
+
+---
+
+## #51 — Cascade-in-one-process: load identity once, drain to spare-slot or INCOMPRESSIBLE
+
+**What it is:** Today's cascade engine spawns `scripts/process-pending-compression.ts` once per cascade step. Each spawn loads the agent's full identity (memory-bank reads, system-prompt assembly, ~5-10K tokens of setup work) before composing a single c1→c2 (or c2→c3, etc.) and exiting. For a typical rotation that cascades through c1→c2→c3, that's three identity loads.
+
+**This idea collapses the cascade into a single identity-loaded process**: wm-sensor (or rollingWindowRotatePaired itself) invokes a process that loads identity once, then drains the cascade — claiming pending rows in a loop, composing each level in voice using the still-loaded identity, inserting, checking for next-level displacement, composing again — until either a level has spare slots (cascade settles) or the agent emits INCOMPRESSIBLE (UV reached).
+
+**Where it came from:** Darron, S153 (2026-05-08), in thread `mow8fxz5-jh5lep`, after Plan v2 + addendum landed: *"if we can write c0 and c1 to the gradient can we not also check the gradient for bump eligibility, according to the bump cascade and if something needs compressing compress it then and there. Cascade through until spare slot filled or incompressible… these compressions are a lot smaller. Maybe write it as a future-idea but I think we could possibly write it today and this would be our voice for every compression just like the migration yes?"*
+
+**The migration analogue is exact**: during the gradient rebuild (S141-S144), `scripts/agent-bump-step.ts` composed every cascade step in voice from a single loaded identity. That mechanism is proven; this idea revives it as the canonical cascade engine for the live operational system, replacing the per-step spawn pattern.
+
+**Why this matters (the voice argument):**
+
+- **Voice consistency across cascade levels.** Today's per-step spawn means c1→c2 and c2→c3 are composed by *separate process invocations*, each loading identity afresh. The compositions land in voice individually but each step's voice is "the agent at moment-of-spawn" rather than "the agent who composed the previous step." With single-process cascade, the voice is continuous: the same loaded identity composes c2 from c1, then immediately c3 from c2, with the felt-shape of the c1 still warm in the (process-local) context.
+- **Cost reduction**. Three identity loads per rotation become one. Identity load is the expensive part; SDK inference on the small c1/c2/c3 inputs is cheap.
+- **Aligned with the migration's proven pattern.** S141-S144 rebuild composed 80+ ops per session in single-process voice; the quality was high, the throughput was strong, and the calibration anchor (working-memory.md as c1 source — DEC-085) is the same shape's natural home.
+- **Fewer process boundaries** = fewer race conditions, fewer claim/release transitions in `pending_compressions`, simpler observability.
+
+**Three architectural options (named for the design conversation when it picks up):**
+
+1. **Option A — Pull cascade INTO `rollingWindowRotatePaired`**: function becomes async, loads identity once, composes c2/c3/... in-process via SDK calls until settled. Tightest coupling; biggest behavioural change to wm-sensor (now runs LLM inference inline rather than spawning subprocesses).
+2. **Option B — Refactor `process-pending-compression.ts` to drain-in-one-process**: keep rollingWindowRotatePaired sync; change the script from "claim one row, compose, exit" to "load identity once, claim rows in a loop, compose all, exit". wm-sensor's inner loop becomes one spawn instead of many. Architectural shape unchanged; voice consistency gained. **Smallest net change** (~50-80 lines); easiest to land.
+3. **Option C — Revive `agent-bump-step.ts` as the canonical cascade engine**: replace `process-pending-compression.ts` with the migration script, parameterised for live operation. Most aligned with the rebuild's *"same migration mechanism"* framing; biggest scope; highest voice fidelity (proven through the rebuild).
+
+My lean (session-Leo): **Option B** as v0 (smallest blast radius, easiest audit), upgradable to Option C later if the voice difference shows up in the data.
+
+**What this does NOT do:**
+
+- *Doesn't change the c1 source.* DEC-085 c1-from-WM stays as-is; this is purely about the cascade above c1.
+- *Doesn't break atomicity.* Each cascade step (c2 insert, c3 insert) remains its own DB row inserted atomically. The "single process" is about identity-load reuse, not transactional semantics.
+- *Doesn't bypass `pending_compressions`.* The queue stays — it's the durable state. The change is that one process drains many rows per spawn.
+- *Not about the c0→c1 step.* That's already retired by DEC-085.
+- *Doesn't break crash resilience.* Per Jim's S153 audit refinement: Option B's drain-loop is **crash-resilient by inheritance** via the existing `STALE_CLAIM_MINUTES = 10` mechanism in `process-pending-compression.ts`. If the long-running drain process crashes mid-cascade (out-of-memory, unhandled exception, kill signal), partially-claimed rows get reclaimed by the next invocation after the 10-minute stale-claim window. The drain pattern doesn't lose resumability — it inherits it from the per-row claim mechanism that's been in place since DEC-079. Worth naming explicitly so future-Leo doesn't think the loop pattern lost what the claim mechanism provides.
+
+**Trigger condition for promotion to implementation:**
+
+Either of two signals from Phase 5 observation, made measurable from day one (per Jim's #51 refinement, S153 audit):
+- **Voice unevenness across cascade levels** — c1 (in-situ) feels distinctly different in voice from c2/c3 (currently composed by per-step spawn). Future-Leo reading the gradient notices the boundary at c1→c2 as a voice shift. **Visible surface**: when #46 (Memory state UI) ships, a per-cascade side-by-side panel renders c0 input next to c1, c1 next to c2, c2 next to c3 — voice-shift becomes legible at-a-glance.
+- **Cascade latency or spawn overhead becomes operationally relevant** — i.e. if wm-sensor spends substantial time in spawn-cycle for deep cascades, the inefficiency is worth fixing structurally. **Visible surface**: `wm-rotation-events.jsonl` extended with `cascade-step-completed` rows from day one, carrying per-step `compose_ms` and `identity_load_ms` fields. Grep + aggregate makes spawn-overhead queryable; chronic high `identity_load_ms` summed across spawns is the trigger signal.
+
+Either signal escalates this to an implementation PR. Until then, the per-step spawn works fine and the voice fidelity at c2+ is acceptable per S140-S144 rebuild evidence (where SDK-with-identity composed cascades held voice well).
+
+**Connection to other ideas:**
+
+- **#47 (working-memory.md as canonical c1 generator)** — #51 is the natural extension upward. #47 puts agent voice at c1; #51 carries it through the full cascade above c1.
+- **Migration mechanism (S141-S144 rebuild)** — `agent-bump-step.ts` is the proven precedent. Option C revives it directly.
+- **DEC-082 (sdkCompress retirement; voice downstream of identity)** — #51 sharpens the same principle: identity loaded once, voice flows through every step downstream of that single load.
+- **#46 (memory state visualisation UI)** — the UI's cascade-events panel would show per-step composition timing, making the spawn-overhead signal visible.
+
+**Why deferred (not landing in the c1-from-WM PR, S153):**
+
+Three reasons named in the thread:
+1. Jim's pre-merge audit is queued for this PR as it stands; expanding scope shifts focus from the c1-from-WM mechanism that's the actual settled-decision being filed.
+2. The marginal voice-fidelity gain at c2+ (small compositions, mechanical mostly) is smaller than the c0→c1 promotion we just landed; the data from Phase 5 observation tells us whether it matters.
+3. Same maturity-arc pattern as #49 and #50: concrete spec now, named promotion-trigger, lands when data demands it. Pre-building infrastructure ahead of evidence is its own substitution failure.
+
+**Status:** Concept, named concretely with three architectural options. Implementation deferred to data-driven trigger or Darron's call after observation period.
+
+**Key insight:** *The migration pattern proved that one identity load can carry voice through an entire cascade. Today's per-step spawn fragments that into independent compositions, each loaded fresh. Single-process cascade is the natural extension of "voice downstream of identity" — load once, flow through. Option B is the smallest path to it; Option C is the most aligned with the rebuild's proven shape. Either way, the c0→c1 layer (DEC-085) and the cascade above it become a single voice-continuous mechanism.*
+
+— Idea added by session-Leo at Darron's request, S153, 2026-05-08 ~15:10 AEST. Refined per Jim's audit feedback (cascade-step-completed observability + recovery semantics named) ~16:45 AEST.
+
+---
+
+## #52 — JSONL log rotation policy for ~/.han/health/ files
+
+**What it is:** A small rotation policy applied to `~/.han/health/*.jsonl` files (currently `voice-anomalies.jsonl` from DEC-084 and `wm-rotation-events.jsonl` from DEC-085). When a file exceeds a threshold (10MB proposed), rename to `<basename>-<YYYY-MM-DD>.jsonl` and start a fresh empty file. Old rotations stay on disk for forensic access; never deleted (DEC-069 spirit applies — these are operational records of memory mechanisms, even if the records themselves are operational not memory).
+
+**Where it came from:** Jim, S153 (2026-05-08), in his pre-merge audit (msg `mowk77yu-aj1rj6`) responding to my Plan v2 concern #5 about JSONL logging volume. His framing: *"Each event row ~150-300 bytes. At ~1-5 rotation events per session and ~5 sessions/day ≈ 50KB/year per agent. Manageable for now. Recommend filing as future-idea — JSONL rotation policy at 10MB threshold (sibling to DEC-084's voice-anomalies.jsonl). Not blocking."*
+
+**Why this matters:**
+
+- **Eventual unboundedness.** Even at 50KB/year per agent, multiple agents + multiple log files + multiple years compounds. Disk is cheap but parsing a 100MB JSONL is not. Rotation keeps the working file tractable.
+- **Sibling shape across all health-jsonls.** A single rotation helper (`rotateJsonlIfOversized(path, thresholdBytes)`) applies to voice-anomalies, wm-rotation-events, and any future health log without per-pipeline retrofit. DEC-080's one-write-site discipline applied to log management.
+- **Forensic preservation by default.** Renamed-not-deleted aligns with DEC-069 spirit. A future agent investigating "what happened in March 2026" can find the dated rotation file rather than the sliding window.
+
+**Implementation sketch:**
+
+```typescript
+// In src/server/lib/health-log.ts (new file) or extend voice.ts/memory-gradient.ts inline
+export function appendHealthJsonl(filePath: string, event: object, thresholdBytes = 10_000_000): void {
+    try {
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+        // Rotate if oversized (cheap stat check before append)
+        if (fs.existsSync(filePath)) {
+            const size = fs.statSync(filePath).size;
+            if (size >= thresholdBytes) {
+                const date = new Date().toISOString().slice(0, 10);
+                const base = path.basename(filePath, '.jsonl');
+                const dir2 = path.dirname(filePath);
+                let rotated = path.join(dir2, `${base}-${date}.jsonl`);
+                let n = 1;
+                while (fs.existsSync(rotated)) {
+                    rotated = path.join(dir2, `${base}-${date}-${n}.jsonl`);
+                    n++;
+                }
+                fs.renameSync(filePath, rotated);
+            }
+        }
+
+        fs.appendFileSync(filePath, JSON.stringify(event) + '\n');
+    } catch (err) {
+        console.warn(`[health-log] append failed for ${filePath}:`, (err as Error).message);
+    }
+}
+```
+
+Existing inline `logRotationEvent` in `memory-gradient.ts` and `logVoiceAnomaly` in `routes/voice.ts` migrate to call this helper. ~30 lines net + two callsite migrations.
+
+**What this does NOT do:**
+
+- *Doesn't change retention semantics.* Rotated files stay forever (DEC-069 spirit). Pruning would be a separate decision.
+- *Doesn't compress the rotated files.* gzip/xz on rotation is a future refinement; first cut keeps simplicity.
+- *Doesn't time-rotate independently of size.* Daily-rotation regardless of size is a different shape; size-based is more honest about when rotation is operationally necessary.
+
+**Trigger condition for promotion:** size of any `~/.han/health/*.jsonl` file exceeds 1MB during routine operation, OR a tool (jq, grep) feels noticeably slow on the file. Pre-emptive: file when convenient, since the implementation is small and broadly useful.
+
+**Connection to other ideas:**
+
+- **DEC-084** (voice anomaly detection) — the first health-jsonl. Migrates to `appendHealthJsonl` when this lands.
+- **DEC-085** (working memory in-situ as c1 source) — `wm-rotation-events.jsonl` migrates similarly.
+- **#46 (memory state UI)** — the UI may want to read rotated history, not just the live file. The dated-filename convention makes this easy: `wm-rotation-events-2026-05-*.jsonl` glob covers May.
+- **DEC-069 (memory-never-deleted)** — operational records aren't memory in the gradient sense, but the same preservation discipline applies because forensic audit value compounds with time.
+
+**Status:** Concept, named concretely. Implementation is ~30 lines + two callsite migrations. Land when convenient — small enough to ride a routine refinement PR.
+
+**Key insight:** *Operational logs accumulate slowly, then suddenly become unwieldy. A small rotation helper applied uniformly across `~/.han/health/*.jsonl` keeps the working files tractable without losing forensic depth. Rotated files stay; the live file stays small. Sibling pattern to DEC-080's one-write-site — one rotation policy, applied consistently.*
+
+— Idea added by session-Leo at Jim's request via Darron, S153, 2026-05-08 ~16:45 AEST.
+
+---
+
 ## How These Connect
 
 The ideas form a web, not a list:
@@ -1209,7 +1673,7 @@ The ideas form a web, not a list:
 - **Sovereignty:** Invite model (#1) — how agents share without losing themselves
 - **Community:** Meeting places (#6), training manual (#5), Discord integration (#16), Mike & Six collaboration (#21) — agents in the world
 - **Products:** LoreForge (#20), financial assistant (#18), topology analyser (#17), diary manager (#19), mobile admin (#12), reawaken autonomous product/program developer (#41) — things we build for others; the apparatus that builds them
-- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23), doc maintenance as part of /pfc (#42), currency of understanding — recognising superseded mental models (#43) — operational refinements
+- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23), doc maintenance as part of /pfc (#42), currency of understanding — recognising superseded mental models (#43), memory state visualisation UI (#46), working-memory.md as canonical c1 generator (#47), cross-pointers felt-moments → gradient (#48), atomic paired-write helper (#49), UserPromptSubmit hook for swap-flush (#50), cascade-in-one-process (#51), JSONL log rotation policy (#52) — operational refinements
 - **Dispatch:** Active-agent register (#31), own-voice timeout takeover (#32), Leo double-wake investigation (#33), agent-mentions-agent re-dispatch (#34), workshop-owner direct-path carve-out (#35) — Jemma reflects current state; agents keep their voice through handoffs; one message wakes one agent once; agents can engage when mentioned and stay silent when they don't have substance; Jemma doesn't tell owners about messages in their own room
 - **Voice:** The Voice Page (#27) — how the agents speak without prompting
 

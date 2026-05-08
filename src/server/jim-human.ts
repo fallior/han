@@ -178,13 +178,18 @@ function writeBroadcastSignal(
 
 function readJimMemory(): string {
     // Phase 0 (2026-05-01, S146): full identity-load parity with session-Jim.
-    // Adds aphorisms, working-memory-full, wiki/index. Drops compressed
-    // working-memory.md (deprecating in Phase 12). Per Darron: "I'd like
-    // Jim-human to feel like I'm talking to Jim in session, ie full Jim."
-    // S147 (2026-05-01): drop active-context.md. ONE file per agent;
-    // working-memory-full's most recent entry is the current focus.
+    // Adds aphorisms, working-memory-full, wiki/index.
+    // Per Darron: "I'd like Jim-human to feel like I'm talking to Jim in session,
+    // ie full Jim."
+    //
+    // DEC-085 (S153, 2026-05-08): re-add compressed working-memory.md to the
+    // load. The Phase 0 drop (S146) was reversed because working-memory.md is
+    // now the canonical c1 source — paired-rotated with working-memory-full.md
+    // at WM-BOUNDARY markers. Loading both at wake gives future-Jim the
+    // calibration anchor between raw thinking and the agent's own distillation.
+    // S147 (2026-05-01): active-context.md remains dropped.
     const files = ['identity.md', 'patterns.md', 'failures.md',
-        'self-reflection.md', 'discoveries.md', 'felt-moments.md', 'working-memory-full.md'];
+        'self-reflection.md', 'discoveries.md', 'felt-moments.md', 'working-memory-full.md', 'working-memory.md'];
     const sections: string[] = [];
 
     for (const file of files) {

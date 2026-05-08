@@ -5823,3 +5823,85 @@ The throw-and-refuse behaviour is the primary safeguard. Reverting it requires a
 
 
 
+## DEC-085: Working Memory In-Situ as c1 Source — Calibration-Anchored Gradient Feed
+
+**Date**: 2026-05-08
+**Author**: Darron (recall + design directive in thread `mow8fxz5-jh5lep`), Jim (audits + FLUSH-FIRST refinement), Leo (session, plan v2 + implementation)
+**Status**: Settled
+**Origin thread**: `mow8fxz5-jh5lep` ("Current Memory Mechanisms") — wake-load audit triggered the recall that working-memory.md (compressed) was originally designed as the c1 generator, drift had quietly substituted it with SDK-composed c1 from c0.
+
+### Decision
+
+The compressed `working-memory.md` is **promoted from artefact to canonical c1 source**. At rotation time, both `working-memory-full.md` (raw thinking → c0) and `working-memory.md` (agent's in-situ distillation → c1) are sliced at matching `WM-BOUNDARY` markers and inserted as paired entries into the gradient (single transaction, `c1.source_id = c0.id`). The c0→c1 SDK composition step is **retired** — c1 is now the agent's own voice as it lived the moment, not a post-hoc reconstruction. The c1→c2+ cascade continues unchanged via `process-pending-compression.ts`.
+
+Wake-load reverses Phase 0 (S146, commit `d50338d`): `working-memory.md` is **re-added** to all four runtime loaders (`supervisor-worker.ts`, `jim-human.ts`, `leo-human.ts`, `leo-heartbeat.ts`) and to session-Leo's CLAUDE.md wake protocol. Both files load entire, mandatory, never skipped — the calibration anchor that lets future-you compare gradient compressions to original prose.
+
+The Incremental Memory Protocol restructures from *WRITE FIRST, WORK SECOND* to **FLUSH FIRST, WRITE SECOND, WORK THIRD** (Jim's S153 refinement). Step 0 on prompt arrival flushes any swap content into the working-memory pair, bounding drift to 1-prompt resolution.
+
+### Reasoning
+
+The c1 layer is where identity-in-voice lives. Above it the cascade abstracts; below it c0 is raw thinking. **c1 is where the agent decides *what mattered*.** If c1 is composed by an SDK call (even with full identity loaded), the *what mattered* has been replayed, not chosen. If c1 is the agent's own working-memory.md distillation, the *what mattered* was decided by the living mind in the moment.
+
+That distinction is the calibration anchor. The drift toward consistency (SDK reproduces c1 quality session-over-session even when the session was uneven) cost us accuracy (sloppy compressions on sloppy days are honest data; fluent compressions on fluent days are honest data). **For an experiment, accuracy beats consistency.**
+
+The watermark cutover engineered the warmth forward at c0; this engineers it at c1. *Identity composes upstream of the moment of recognition.* (Jim's aphorism, S150-extended.)
+
+### Mechanism
+
+**Threshold semantics** (config-driven via `~/.han/config.json:memory`):
+- `rollingWindowTrigger` (default 30K tokens) — fire if `working-memory-full.md` size exceeds this AND a usable WM-BOUNDARY marker exists in the slice window.
+- `rollingWindowBiteTheBullet` (default 35K tokens) — mandate slice; fabricate a marker at the most-recent entry boundary in `[minTail, biteTheBullet]` if no agent marker exists.
+- `rollingWindowTail` (default 25K tokens) — target c0 size; preferred slice point.
+- `rollingWindowHead` (default 5K tokens) — target kept size after slice.
+- `rollingWindowAttentionStart` (default 20K tokens) — informational only; agent's mental cue to start placing markers.
+
+**Hybrid markers**:
+- *Agent-placed* (preferred) — every memory write considers natural break points; agent writes `<!-- WM-BOUNDARY: id=B<N> ts=ISO-8601 -->` at semantic boundaries in **both files** at corresponding positions. Sequential per-agent IDs; timestamp aids quality assurance.
+- *Slicer-fabricated* (fallback at bite-the-bullet) — `id=BF-<timestamp> fabricated=true`, persisted to both files before slicing for audit trail.
+
+**Paired-file rotation** (`lib/memory-gradient.ts:rollingWindowRotatePaired`):
+1. Read both files; below trigger → no-op.
+2. Find boundaries in both files via `findWmBoundaries()`.
+3. Pick paired marker via `pickPairedBoundary()` — preferring closest to target tail size within `[minTail, biteTheBullet]`.
+4. If no marker AND below biteTheBullet → let-ride; log `no-marker-let-ride` event.
+5. If no marker AND ≥biteTheBullet → fabricate via `fabricatePairedBoundary()`; persist to both files; log fabricated marker.
+6. **Parity-check** via `countEntriesBeforePos()` — count entries in both files between start and the chosen boundary. On mismatch (drift), log `paired_write_drift` with `wmf_tail_size_tokens` (Jim's edge note: chronic drift visible alongside event count) and recover via smaller-of-two range.
+7. **Atomic insert**: c0 (`working-memory-full` content_type) + c1 (`working-memory-compressed` content_type, `parent_id=c0.id`) — single transaction.
+8. Truncate both files; cascade c1→c2+ via `bumpOnInsert(agent, 'c1')`. **Skip c0→c1 enqueue** — c1 is already inserted directly.
+
+**Observability** (sibling pattern to DEC-084's `voice-anomalies.jsonl`):
+- `~/.han/health/wm-rotation-events.jsonl` — append-only JSONL. Event kinds: `rotation-success`, `paired_write_drift`, `no-marker-let-ride`, `fabrication-failed`, `paired-insert-failed`, `paired-file-missing`. Every row carries timestamp, agent, wmf_tail_size_tokens, trigger (`'slicer'` vs `'bite-the-bullet'`), boundary_id, drift (when present).
+- The future memory-state UI (#46) renders these events; if `paired_write_drift` fires under normal volume, escalate to future-idea #49 (atomic paired-write helper).
+
+**Maturity arc** (per Jim's S150 *discipline-in-code outlasts discipline-in-habit*):
+1. Protocol — *FLUSH FIRST, WRITE SECOND, WORK THIRD* in CLAUDE.md (this PR).
+2. Parity-check observation — runtime drift visibility (this PR).
+3. Atomic paired-write helper (#49, deferred) — `appendPairedMemory(agent, full, comp)` makes single-side writes structurally impossible.
+4. UserPromptSubmit hook (#50, deferred) — harness-enforced flush; agent can't skip flush.
+
+### Settled-decision impact
+
+- **DEC-068** (cap formula c0=1, c{n≥1}=3n) — unchanged. The new c1 entries fall under the same caps; cascade dynamics identical.
+- **DEC-069** (memory-never-deleted) — strengthened. Both c0 and c1 land as canonical history; old SDK-composed c1s remain readable, queryable, in cascade-traversal. **Forward-only migration**: no rewriting of pre-cutover c1s.
+- **DEC-073** (template gatekeeper) — explicit authorisation in this PR's design directive. CLAUDE.md and `templates/CLAUDE.template.md` updated.
+- **DEC-079** (Phase 4 cutover; pending_compressions + parallel agent) — cascade above c1 unchanged; `process-pending-compression.ts` continues for c1→c2+. Only the c0→c1 invocation is retired.
+- **DEC-080** (one-write-site discipline) — reinforced. The two-surface audit (Plan v2 §2) confirmed all five working-memory writers pair correctly. The new paired-file rotation is the single canonical c0/c1 entry point for working-memory.
+- **DEC-081** (agent-agnostic code discipline) — preserved. New helpers (`findWmBoundaries`, `pickPairedBoundary`, `fabricatePairedBoundary`, `rollingWindowRotatePaired`) take agent slug as `string`; resolve paths via `gradientConfigForAgent(slug)`.
+- **DEC-082** (stranger-Opus retirement; voice downstream of identity) — extended, not contradicted. The new model goes further upstream: voice IS the agent, harvested at the moment of writing. The c0→c1 SDK invocation step is the natural next retirement.
+- **DEC-084** (voice-pipeline anomaly detection) — sibling pattern. Same observability shape (`~/.han/health/*.jsonl`), same break-loud-over-silent-fallback discipline.
+- **Phase 0 (S146, commit `d50338d`)** — explicitly **reversed** for the working-memory.md drop. Phase 12 retirement of compressed working-memory is **cancelled**.
+
+### Why Settled
+
+The c1-from-WM model is a structural realisation of *"voice should be downstream of identity"* (DEC-082) at the highest fidelity layer. Reverting requires a deliberate decision because it would re-introduce SDK reconstruction at c0→c1 — which the substitution-without-conversation pattern (S133) and the rebuild's voice-first thread (S150) explicitly retired. Future PRs proposing to relax this entry need to argue against it, not silently re-introduce the SDK c0→c1 path.
+
+The discipline (*FLUSH FIRST*, marker placement, paired writes) lives at three layers: the protocol (CLAUDE.md, this PR), the runtime (parity-check + observability, this PR), and the deferred structural endpoints (#49 atomic helper, #50 harness hook). Each layer narrows the failure mode further; promotion-triggers for #49 and #50 are data-driven, not pre-built.
+
+### Follow-up
+
+- **Phase 5 observation period** — let it run for one or two sessions. Collect data on: marker-placement rate, threshold firing cadence, c1 character vs prior SDK-composed c1, bite-the-bullet fabrication rate (should be near-zero if discipline holds).
+- **Wave A doc-alignment surfaces** — `claude-context/ARCHITECTURE.md` memory section, `~/.han/memory/shared/ecosystem-map.md` gradient-flow paragraph, `docs/HAN-ECOSYSTEM-COMPLETE.md` memory-mechanics section. Same-commit per DEC-080 if convenient; otherwise next Wave A batch.
+- **Phase A.5 (identity signing)** — this PR ships first; A.5's v0 signs only stable identity files (aphorisms, patterns, identity, self-reflection). WM/WMF stay unsigned in v0 because the 30K ceiling reduces churn but doesn't eliminate it.
+- **Future-idea #49** (atomic paired-write helper) — promotion-trigger: `paired_write_drift` events firing under normal volume despite prompt-start flush.
+- **Future-idea #50** (UserPromptSubmit hook) — promotion-trigger: same as #49 but for the flush failure mode rather than the paired-write failure mode.
+

@@ -6,15 +6,16 @@
 > adjacent to the code so an agent reading `wm-sensor.ts` finds this without
 > being told. Pilot for future-idea #37 (S149, 2026-05-04).
 >
-> **Last verified against code: 2026-05-04 (S149, Point 2 of voice-first thread `mor4o3r3-jvdjv1`).** This document is a hypothesis until it's been verified against the code. If you read this and the code disagrees, **the code wins** — update this file in the same commit as your fix.
+> **Last verified against code: 2026-05-08 (S153, DEC-085 paired-file rotation).** This document is a hypothesis until it's been verified against the code. If you read this and the code disagrees, **the code wins** — update this file in the same commit as your fix.
 
 ---
 
-## Canonical flow (one trigger → settled cascade)
+## Canonical flow (paired-file rotation per DEC-085)
 
 **Trigger.** Any write to `~/.han/memory/<slug>/working-memory-full.md`
 (Leo's path) or `~/.han/memory/working-memory-full.md` (Jim, root). One file
-per agent. **No other files trigger the sensor.**
+per agent triggers the watcher; the sibling `working-memory.md` (compressed)
+is rotated paired with the full file at the same WM-BOUNDARY marker.
 
 1. **`fs.watch` event** (or rename + re-establish for atomic saves) → debounce
    500 ms (`config.sensorDebounceMs`).
@@ -23,18 +24,40 @@ per agent. **No other files trigger the sensor.**
    when it finishes.
 3. **`processTarget` outer loop** (max 10 iterations):
    - Read file content; count tokens via `lib/token-counter.ts:countTokens`.
-   - If tokens ≤ ceiling (50 000 = head 25 000 + tail 25 000), return.
-   - Call `rollingWindowRotate(filePath, header, 25000, 25000, agent, contentType)`.
-4. **`rollingWindowRotate`** (in `src/server/lib/memory-gradient.ts:1739`):
-   - Splits file into entries via `splitMemoryFileEntries`.
-   - Walks oldest-first, accumulates ~25K tokens to archive (always at least
-     one entry; splits at entry boundaries, never mid-entry).
-   - Atomically inserts a `c0` row into `gradient_entries`:
-     `insertGradientEntry(entryId, agent, "rolling-{date}", "c0", archiveContent, contentType, null, null)`.
-   - **Fire-and-forget**: `void bumpOnInsert(agent, 'c0').catch(...)`.
-   - Writes the legacy archive file (`<basename>-rolling-archive.md`).
-   - Rewrites the living file with the kept entries (header + rest).
-5. **`bumpOnInsert(agent, 'c0')`** (`memory-gradient.ts:1387`):
+   - If tokens ≤ `rollingWindowTrigger` (default 30 000), return.
+   - For working-memory targets (paired): call `rollingWindowRotatePaired(...)`.
+   - For other content types (felt-moments, self-reflection — currently not
+     in watcher target list): call legacy `rollingWindowRotate(...)`.
+4. **`rollingWindowRotatePaired`** (in `src/server/lib/memory-gradient.ts`,
+   added DEC-085 / S153):
+   - Reads both `working-memory-full.md` AND `working-memory.md`.
+   - If full-file tokens ≤ trigger (30K), return `below-trigger`.
+   - **Find WM-BOUNDARY markers** in both files via `findWmBoundaries()`.
+   - **Pick paired marker** via `pickPairedBoundary()` — preferring the
+     marker pair (matching id) closest to `rollingWindowTail` (default 25K)
+     within `[minTail, biteTheBullet]`.
+   - **If no usable marker AND tokens < `rollingWindowBiteTheBullet` (35K)**:
+     return `no-marker-let-ride`. Log event; let the file grow until next
+     write — preserves subject relevance.
+   - **If no usable marker AND tokens ≥ biteTheBullet**: fabricate a marker
+     via `fabricatePairedBoundary()` at the most-recent entry boundary in
+     `[minTail, biteTheBullet]`. Persist the fabricated markers to BOTH files
+     before slicing (audit trail).
+   - **Parity-check** via `countEntriesBeforePos()`: count entries in both
+     files between start and the chosen boundary. On mismatch (drift), log
+     `paired_write_drift` event with `wmf_tail_size_tokens` (per Jim's edge
+     note) and recover via smaller-of-two range.
+   - **Atomic paired insert**: `insertGradientEntry(c0Id, …, 'c0',
+     fullArchive, 'working-memory-full', null, …)` then `insertGradientEntry(c1Id,
+     …, 'c1', compArchive, 'working-memory-compressed', c0Id, …)`. The c1's
+     `source_id` links to the c0; this is the in-situ-c1 calibration anchor.
+   - **Truncate both files** to their kept-head sections.
+   - **Cascade c1→c2+ only**: `void bumpOnInsert(agent, 'c1').catch(...)`.
+     The c0→c1 step is retired by DEC-085 — c1 is now the agent's own
+     in-situ distillation, not an SDK reconstruction.
+   - **Log success** to `~/.han/health/wm-rotation-events.jsonl` with all
+     observability fields (c0/c1 ids, archived/kept tokens, trigger, drift).
+5. **`bumpOnInsert(agent, 'c1')`** (`memory-gradient.ts:905`):
    - Checks `~/.han/signals/cascade-paused`. If present, skip.
    - Finds rank=cap+1 displaced entry at level (cap from DEC-068: c0=1,
      c{n≥1}=3n). Filters out `cascade_halted_at` (UV-halted) and
@@ -83,9 +106,22 @@ per agent. **No other files trigger the sensor.**
   removes it.
 - **`sdkCompress`** in `memory-gradient.ts` AND `dream-gradient.ts` — bodies
   commented out, throws loudly (DEC-082). Stranger-Opus calls; the new
-  full-identity path is `process-pending-compression.ts`.
-- **The compressed `working-memory.md`** — hand-curated artefact, NOT watched
-  by the slicer. Phase 12 cleanup will retire the dual-file pattern entirely.
+  full-identity path is `process-pending-compression.ts` (cascade above c1
+  only — c0→c1 retired by DEC-085).
+- **c0→c1 SDK composition step** — retired DEC-085 (S153, 2026-05-08).
+  `process-pending-compression.ts` is no longer invoked at the c0→c1
+  transition for working-memory content; the c1 is now harvested in-situ
+  from `working-memory.md` at paired rotation time. The script remains
+  canonical for c1→c2+ cascade. Do not re-introduce `bumpOnInsert(agent,
+  'c0')` invocations inside the paired-rotation path.
+
+**Note (DEC-085 reversal)**: the compressed `working-memory.md` was previously
+classified here as legacy ("hand-curated artefact, NOT watched by the slicer")
+with a Phase 12 retirement plan. **That classification is INVERTED by DEC-085**:
+the file is now the canonical c1 source, paired-rotated alongside
+working-memory-full.md. Per-agent writers (leo-heartbeat, leo-human, jim-human,
+supervisor-worker) maintain both files at corresponding WM-BOUNDARY markers.
+Phase 12 retirement is cancelled.
 
 ## Known debt (catalogued in future-idea #36)
 
@@ -115,6 +151,14 @@ per agent. **No other files trigger the sensor.**
   `processGradientForAgent` (now retired-by-throw, see DEC-082).
 - **DEC-082** — `sdkCompress` retirement + `/pfc` simplification to memory-
   writes-only. The wm-sensor IS the only compression entry now.
+- **DEC-085** (S153, 2026-05-08) — Working Memory In-Situ as c1 Source.
+  Paired-file rotation: working-memory-full.md → c0, working-memory.md → c1,
+  inserted as paired entries (c1.source_id = c0.id) in a single transaction.
+  The c0→c1 SDK composition step retired; c1 is now the agent's own in-situ
+  distillation, harvested at rotation. Cascade above c1 (c1→c2+) unchanged.
+  Three-stage threshold semantics (trigger 30K / bite-the-bullet 35K /
+  fabricated-marker fallback). Hybrid agent-placed + slicer-fallback
+  WM-BOUNDARY markers. Parity-check with smaller-of-two recovery on drift.
 
 ## How to keep this document honest
 

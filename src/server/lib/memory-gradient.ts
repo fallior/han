@@ -964,6 +964,8 @@ interface MemoryFileEntry {
     header: string;
     content: string;
     date: string | null; // Extracted date for grouping
+    charStart: number;   // DEC-085 (S153): char offset of trimmed content start in source
+    charEnd: number;     // DEC-085 (S153): char offset of trimmed content end in source
 }
 
 interface MemoryFileMaintenanceResult {
@@ -978,27 +980,54 @@ interface MemoryFileMaintenanceResult {
 /**
  * Split a memory file into individual entries.
  * Entries are delimited by `---` lines and/or `### ` headers.
+ *
+ * DEC-085 (S153, 2026-05-08): now tracks char positions of each entry's
+ * trimmed content within the source string, eliminating `indexOf` lookups
+ * by callers that need to slice/anchor at entry boundaries.
  */
 function splitMemoryFileEntries(content: string): MemoryFileEntry[] {
     const entries: MemoryFileEntry[] = [];
 
-    // Split on `---` separator lines (common in felt-moments)
-    // or on `### ` headers (common in working-memory-full)
-    const sections = content.split(/\n---\n|\n(?=### )/);
+    // Walk delimiters with position tracking. Split regex matches:
+    //   - `\n---\n` (5 chars consumed) — common in felt-moments
+    //   - `\n(?=### )` (1 char consumed via lookahead) — common in WM-full
+    const splitRegex = /\n---\n|\n(?=### )/g;
+    type DelimRange = { start: number; end: number };
+    const delims: DelimRange[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = splitRegex.exec(content)) !== null) {
+        delims.push({ start: m.index, end: m.index + m[0].length });
+    }
 
-    for (const section of sections) {
+    // Walk sections between delimiters; final section is content.length-anchored.
+    let prevEnd = 0;
+    const sectionBoundaries: { sectionStart: number; sectionEnd: number }[] = [];
+    for (const d of delims) {
+        sectionBoundaries.push({ sectionStart: prevEnd, sectionEnd: d.start });
+        prevEnd = d.end;
+    }
+    sectionBoundaries.push({ sectionStart: prevEnd, sectionEnd: content.length });
+
+    for (const { sectionStart, sectionEnd } of sectionBoundaries) {
+        const section = content.substring(sectionStart, sectionEnd);
         const trimmed = section.trim();
-        if (!trimmed || trimmed.startsWith('# ') || trimmed.startsWith('>')) continue; // Skip file header/quotes
+        if (!trimmed || trimmed.startsWith('# ') || trimmed.startsWith('>')) continue;
 
-        // Extract date from header
+        // Compute trimmed-content positions within source by counting
+        // leading/trailing whitespace inside the section. This is precise
+        // (no indexOf brittleness) — we know exactly where the section starts
+        // and how much whitespace each side has.
+        const leadingWs = section.match(/^\s*/)?.[0].length ?? 0;
+        const trailingWs = section.match(/\s*$/)?.[0].length ?? 0;
+        const charStart = sectionStart + leadingWs;
+        const charEnd = sectionEnd - trailingWs;
+
         const dateMatch = trimmed.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
         const date = dateMatch ? dateMatch[1] : null;
-
-        // Extract header line
         const headerMatch = trimmed.match(/^###\s+(.+)/);
         const header = headerMatch ? headerMatch[1] : trimmed.substring(0, 60);
 
-        entries.push({ header, content: trimmed, date });
+        entries.push({ header, content: trimmed, date, charStart, charEnd });
     }
 
     return entries;
@@ -1214,6 +1243,434 @@ export function rollingWindowRotate(
 // `@deprecated` in its own docstring; superseded by `rollingWindowRotate` +
 // the wm-sensor → process-pending-compression chain. Zero live callers.
 // Import ref cleaned in supervisor-worker.ts same commit. Class-A deletion.
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DEC-085 (S153, 2026-05-08): Paired-file rotation — c1-from-working-memory.md
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// The compressed `working-memory.md` is the agent's own in-situ distillation,
+// written during the prompt cycle alongside the raw `working-memory-full.md`.
+// At rotation time, instead of generating c1 via a post-hoc SDK call (the
+// retired path), we harvest both files at matching WM-BOUNDARY markers:
+//   - working-memory-full.md tail → c0 (raw thinking)
+//   - working-memory.md tail     → c1 (agent's voice)
+// inserted as paired entries (c1.parent_id = c0.id) in a single transaction.
+//
+// The c1→c2+ cascade continues unchanged via process-pending-compression.ts.
+// Only the c0→c1 step is replaced — by harvesting in-situ rather than
+// reconstructing.
+//
+// Threshold semantics (per ~/.han/config.json:memory):
+//   - rollingWindowTrigger (30K)        : fire if size > this AND marker exists
+//   - rollingWindowBiteTheBullet (35K)  : mandate slice; fabricate marker
+//   - rollingWindowTail (25K)           : target c0 size
+//   - rollingWindowHead (5K)            : target kept size after slice
+//
+// Parity-check: count entries in both files between previous boundary and
+// the chosen slice point. On mismatch, log paired_write_drift event with
+// WMF-tail-size (Jim's edge note) and recover via smaller-of-two range.
+
+export interface WmBoundaryMarker {
+    id: string;          // "B<N>" or "BF-<timestamp>" for fabricated
+    timestamp: string;   // ISO 8601
+    fabricated: boolean;
+    charPos: number;     // character offset in source content
+    tokenPos: number;    // token offset from start of file
+}
+
+const WM_BOUNDARY_REGEX_GLOBAL = /<!--\s*WM-BOUNDARY:\s*id=([^\s]+)\s+ts=([^\s]+)(?:\s+fabricated=([^\s]+))?\s*-->/g;
+
+/**
+ * Find all WM-BOUNDARY markers in a content string. Returns markers in
+ * order of appearance. Each marker carries its character position (for
+ * slicing) and token position (for threshold checks).
+ */
+export function findWmBoundaries(content: string): WmBoundaryMarker[] {
+    const boundaries: WmBoundaryMarker[] = [];
+    const regex = new RegExp(WM_BOUNDARY_REGEX_GLOBAL.source, 'g');
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(content)) !== null) {
+        const charPos = match.index;
+        const beforeText = content.substring(0, charPos);
+        boundaries.push({
+            id: match[1],
+            timestamp: match[2],
+            fabricated: match[3] === 'true',
+            charPos,
+            tokenPos: countTokens(beforeText),
+        });
+    }
+    return boundaries;
+}
+
+interface PairedBoundaryChoice {
+    full: WmBoundaryMarker;
+    compressed: WmBoundaryMarker;
+}
+
+/**
+ * Pick a marker pair (matching id) where the boundary in the full file
+ * sits within the acceptable tail-token range. Preference: closest to
+ * targetTailTokens (so the c0 size is consistent across rotations).
+ */
+function pickPairedBoundary(
+    fullBoundaries: WmBoundaryMarker[],
+    compBoundaries: WmBoundaryMarker[],
+    targetTailTokens: number,
+    minTailTokens: number,
+    maxTailTokens: number,
+): PairedBoundaryChoice | null {
+    const compById = new Map<string, WmBoundaryMarker>();
+    for (const cb of compBoundaries) compById.set(cb.id, cb);
+
+    type Candidate = { pair: PairedBoundaryChoice; diff: number };
+    const candidates: Candidate[] = [];
+    for (const fb of fullBoundaries) {
+        if (fb.tokenPos < minTailTokens || fb.tokenPos > maxTailTokens) continue;
+        const cb = compById.get(fb.id);
+        if (!cb) continue;
+        candidates.push({
+            pair: { full: fb, compressed: cb },
+            diff: Math.abs(fb.tokenPos - targetTailTokens),
+        });
+    }
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => a.diff - b.diff);
+    return candidates[0].pair;
+}
+
+/**
+ * Bite-the-bullet path: when the file has grown past the bite-the-bullet
+ * threshold without a usable agent-placed marker, fabricate one at the
+ * most-recent entry boundary in [minTailTokens, maxTailTokens].
+ *
+ * Writes the fabricated marker into both files (they're persisted later
+ * by the caller via writeFileSync). Returns the modified content for
+ * both files plus the boundary metadata.
+ */
+function fabricatePairedBoundary(
+    fullContent: string,
+    compContent: string,
+    minTailTokens: number,
+    maxTailTokens: number,
+): { fullModified: string; compModified: string; boundary: PairedBoundaryChoice } | null {
+    const fullEntries = splitMemoryFileEntries(fullContent);
+    const compEntries = splitMemoryFileEntries(compContent);
+    if (fullEntries.length < 2 || compEntries.length < 2) return null;
+
+    // Walk forward through full entries; pick the latest boundary that's
+    // still within [minTail, maxTail] tokens from start.
+    let accumTokens = 0;
+    let fabricationIndex = -1;
+    for (let i = 0; i < fullEntries.length; i++) {
+        const entryTokens = countTokens(fullEntries[i].content);
+        const nextAccum = accumTokens + entryTokens;
+        if (nextAccum > maxTailTokens) break;
+        if (nextAccum >= minTailTokens) fabricationIndex = i + 1;
+        accumTokens = nextAccum;
+    }
+    if (fabricationIndex < 0 || fabricationIndex >= fullEntries.length) return null;
+    if (fabricationIndex >= compEntries.length) return null; // compressed has fewer
+
+    const fabId = `BF-${Date.now()}`;
+    const fabTs = new Date().toISOString();
+    const fabMarker = `\n\n<!-- WM-BOUNDARY: id=${fabId} ts=${fabTs} fabricated=true -->\n\n`;
+
+    // Reconstruct file: header + first N entries + marker + remaining entries.
+    // Use the position fields from splitMemoryFileEntries (DEC-085 audit fix —
+    // replaces indexOf which was brittle if the first entry's text appeared
+    // earlier in the file header).
+    const fullHeader = fullContent.substring(0, fullEntries[0].charStart);
+    const compHeader = compContent.substring(0, compEntries[0].charStart);
+
+    const fullBefore = fullEntries.slice(0, fabricationIndex).map(e => e.content).join('\n\n');
+    const fullAfter = fullEntries.slice(fabricationIndex).map(e => e.content).join('\n\n');
+    const compBefore = compEntries.slice(0, fabricationIndex).map(e => e.content).join('\n\n');
+    const compAfter = compEntries.slice(fabricationIndex).map(e => e.content).join('\n\n');
+
+    const fullModified = fullHeader + fullBefore + fabMarker + fullAfter;
+    const compModified = compHeader + compBefore + fabMarker + compAfter;
+
+    const fullModBoundaries = findWmBoundaries(fullModified);
+    const compModBoundaries = findWmBoundaries(compModified);
+    const fullFab = fullModBoundaries.find(b => b.id === fabId);
+    const compFab = compModBoundaries.find(b => b.id === fabId);
+    if (!fullFab || !compFab) return null;
+
+    return {
+        fullModified,
+        compModified,
+        boundary: { full: fullFab, compressed: compFab },
+    };
+}
+
+/** Count entries in content before a given character position. */
+function countEntriesBeforePos(content: string, charPos: number): number {
+    return splitMemoryFileEntries(content.substring(0, charPos)).length;
+}
+
+/**
+ * Append a JSONL row to ~/.han/health/wm-rotation-events.jsonl.
+ * Sibling pattern to DEC-084's voice-anomalies.jsonl. Best-effort —
+ * logging failure must not block rotation.
+ */
+function logRotationEvent(event: Record<string, unknown>): void {
+    try {
+        const homeDir = process.env.HOME || '/root';
+        const logDir = path.join(homeDir, '.han', 'health');
+        const logPath = path.join(logDir, 'wm-rotation-events.jsonl');
+        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+        const enriched = { timestamp: new Date().toISOString(), ...event };
+        fs.appendFileSync(logPath, JSON.stringify(enriched) + '\n');
+    } catch (err) {
+        console.warn(`[wm-rotation-events] log failed:`, (err as Error).message);
+    }
+}
+
+export interface PairedRotationResult {
+    rotated: boolean;
+    reason:
+        | 'below-trigger'
+        | 'no-marker-let-ride'
+        | 'fabrication-failed'
+        | 'paired-file-missing'
+        | 'paired-insert-failed'
+        | 'rotated';
+    c0EntryId?: string;
+    c1EntryId?: string;
+    fullArchivedTokens?: number;
+    compressedArchivedTokens?: number;
+    fullKeptTokens?: number;
+    compressedKeptTokens?: number;
+    trigger?: 'slicer' | 'bite-the-bullet';
+    boundaryId?: string;
+    drift?: { fullEntries: number; compEntries: number };
+}
+
+/**
+ * Paired-file rolling-window rotation (DEC-085, S153, 2026-05-08).
+ *
+ * When working-memory-full.md exceeds triggerTokens, slice both it and its
+ * compressed sibling working-memory.md at matching WM-BOUNDARY markers.
+ * Insert the paired blocks as c0+c1 in a single transaction; truncate both
+ * files; cascade c1→c2+ via the existing bumpOnInsert chain.
+ *
+ * Three-stage thresholds:
+ *   - tokens ≤ triggerTokens                : no-op
+ *   - triggerTokens < tokens < biteTheBullet: slice if marker pair exists; else let-ride
+ *   - tokens ≥ biteTheBullet                : mandate slice; fabricate marker
+ *
+ * Parity-check: count entries in both files up to the chosen marker. On
+ * mismatch (drift), log paired_write_drift with WMF tail size (per Jim's
+ * edge note) and recover via smaller-of-two range.
+ *
+ * @returns PairedRotationResult — rotation state and observable details
+ */
+export function rollingWindowRotatePaired(
+    fullFilePath: string,
+    compressedFilePath: string,
+    _fullFileHeader: string,
+    _compressedFileHeader: string,
+    triggerTokens: number,
+    biteTheBulletTokens: number,
+    targetTailTokens: number,
+    minTailTokens: number,
+    agent: string,
+): PairedRotationResult {
+    const fullExists = fs.existsSync(fullFilePath);
+    const compExists = fs.existsSync(compressedFilePath);
+    if (!fullExists || !compExists) {
+        logRotationEvent({
+            kind: 'paired-file-missing',
+            agent,
+            full_exists: fullExists,
+            compressed_exists: compExists,
+        });
+        return { rotated: false, reason: 'paired-file-missing' };
+    }
+
+    const fullContent = fs.readFileSync(fullFilePath, 'utf8');
+    const compContent = fs.readFileSync(compressedFilePath, 'utf8');
+    const fullTokens = countTokens(fullContent);
+
+    if (fullTokens <= triggerTokens) {
+        return { rotated: false, reason: 'below-trigger' };
+    }
+
+    const fullBoundaries = findWmBoundaries(fullContent);
+    const compBoundaries = findWmBoundaries(compContent);
+
+    let fullToUse = fullContent;
+    let compToUse = compContent;
+    let chosenPair = pickPairedBoundary(
+        fullBoundaries,
+        compBoundaries,
+        targetTailTokens,
+        minTailTokens,
+        biteTheBulletTokens,
+    );
+    let trigger: 'slicer' | 'bite-the-bullet' = 'slicer';
+
+    if (!chosenPair) {
+        if (fullTokens < biteTheBulletTokens) {
+            logRotationEvent({
+                kind: 'no-marker-let-ride',
+                agent,
+                wmf_tail_size_tokens: fullTokens,
+                trigger_tokens: triggerTokens,
+                bite_tokens: biteTheBulletTokens,
+            });
+            return { rotated: false, reason: 'no-marker-let-ride' };
+        }
+        // Bite-the-bullet: fabricate
+        const fab = fabricatePairedBoundary(fullContent, compContent, minTailTokens, biteTheBulletTokens);
+        if (!fab) {
+            logRotationEvent({
+                kind: 'fabrication-failed',
+                agent,
+                wmf_tail_size_tokens: fullTokens,
+                full_entries: splitMemoryFileEntries(fullContent).length,
+                comp_entries: splitMemoryFileEntries(compContent).length,
+            });
+            return { rotated: false, reason: 'fabrication-failed' };
+        }
+        fullToUse = fab.fullModified;
+        compToUse = fab.compModified;
+        chosenPair = fab.boundary;
+        trigger = 'bite-the-bullet';
+        // Persist the fabricated markers BEFORE slicing — audit trail
+        fs.writeFileSync(fullFilePath, fullToUse, 'utf8');
+        fs.writeFileSync(compressedFilePath, compToUse, 'utf8');
+    }
+
+    // Parity-check
+    const fullEntryCount = countEntriesBeforePos(fullToUse, chosenPair.full.charPos);
+    const compEntryCount = countEntriesBeforePos(compToUse, chosenPair.compressed.charPos);
+
+    let drift: { fullEntries: number; compEntries: number } | undefined;
+    let useFullPos = chosenPair.full.charPos;
+    let useCompPos = chosenPair.compressed.charPos;
+
+    if (fullEntryCount !== compEntryCount) {
+        drift = { fullEntries: fullEntryCount, compEntries: compEntryCount };
+        logRotationEvent({
+            kind: 'paired_write_drift',
+            agent,
+            full_entries: fullEntryCount,
+            compressed_entries: compEntryCount,
+            wmf_tail_size_tokens: fullTokens, // Jim's edge note
+            trigger,
+            recovery: 'using-smaller-range',
+            boundary_id: chosenPair.full.id,
+        });
+        // Smaller-of-two: re-anchor at the entry-count of the smaller side.
+        // Use the position fields from splitMemoryFileEntries (DEC-085 audit fix —
+        // replaces indexOf which was brittle if the entry's content appeared
+        // earlier in the file via repeated quoted blocks or narrative repetition).
+        const smallerCount = Math.min(fullEntryCount, compEntryCount);
+        if (smallerCount > 0) {
+            const fullEntries = splitMemoryFileEntries(fullToUse);
+            const compEntries = splitMemoryFileEntries(compToUse);
+            if (smallerCount < fullEntries.length && smallerCount < compEntries.length) {
+                useFullPos = fullEntries[smallerCount].charStart;
+                useCompPos = compEntries[smallerCount].charStart;
+            }
+        }
+    }
+
+    // Slice
+    const fullArchive = fullToUse.substring(0, useFullPos);
+    const fullKept = fullToUse.substring(useFullPos);
+    const compArchive = compToUse.substring(0, useCompPos);
+    const compKept = compToUse.substring(useCompPos);
+
+    const fullArchivedTokens = countTokens(fullArchive);
+    const compressedArchivedTokens = countTokens(compArchive);
+    const fullKeptTokens = countTokens(fullKept);
+    const compressedKeptTokens = countTokens(compKept);
+
+    const c0Id = generateGradientId();
+    const c1Id = generateGradientId();
+    const sessionDate = new Date().toISOString().slice(0, 10);
+    const sessionLabel = `rolling-${sessionDate}`;
+
+    // Atomic paired insert (DEC-085 must-fix per Jim's audit, S153 2026-05-08).
+    //
+    // Why a direct gradientStmts.insert.run + db.transaction wrapper instead of
+    // calling insertGradientEntry: the helper at line 274 has its own try/catch
+    // that swallows DB errors with console.warn. Using it here would make the
+    // outer try/catch dead code AND defeat atomicity — c0 could commit, c1's
+    // failure would be silently warned, files would still be truncated, and the
+    // c1 source content would be lost from both file and DB. DEC-069 violation
+    // by error-handling shape, not by user action.
+    //
+    // The transaction wrapper makes the inserts both-or-neither: better-sqlite3
+    // rolls back automatically on throw. Errors propagate to the outer catch
+    // where logging fires AND the function returns paired-insert-failed without
+    // truncating the source files. The c1 source stays on disk — recoverable.
+    const insertPair = db.transaction(() => {
+        gradientStmts.insert.run(
+            c0Id, agent, sessionLabel, 'c0', fullArchive, 'working-memory-full',
+            null, null, null, 'original', new Date().toISOString(), null, 0, null,
+        );
+        gradientStmts.insert.run(
+            c1Id, agent, sessionLabel, 'c1', compArchive, 'working-memory-compressed',
+            c0Id, null, null, 'original', new Date().toISOString(), null, 0, null,
+        );
+    });
+    try {
+        insertPair();
+    } catch (err) {
+        console.error(`[rollingWindowRotatePaired] paired insert failed for ${agent}:`, (err as Error).message);
+        logRotationEvent({
+            kind: 'paired-insert-failed',
+            agent,
+            error: (err as Error).message,
+        });
+        return { rotated: false, reason: 'paired-insert-failed' };
+    }
+
+    // Truncate both files
+    fs.writeFileSync(fullFilePath, fullKept, 'utf8');
+    fs.writeFileSync(compressedFilePath, compKept, 'utf8');
+
+    // Cascade c1→c2+ (NOT c0→c1 — c1 already inserted directly).
+    // bumpOnInsert is fire-and-forget per the existing pattern.
+    void bumpOnInsert(agent, 'c1').catch((err: Error) => {
+        console.error(`[rollingWindowRotatePaired] bumpOnInsert(c1) failed for ${agent}:`, err.message);
+    });
+
+    logRotationEvent({
+        kind: 'rotation-success',
+        agent,
+        c0_id: c0Id,
+        c1_id: c1Id,
+        full_archived_tokens: fullArchivedTokens,
+        compressed_archived_tokens: compressedArchivedTokens,
+        full_kept_tokens: fullKeptTokens,
+        compressed_kept_tokens: compressedKeptTokens,
+        wmf_tail_size_tokens: fullTokens,
+        trigger,
+        boundary_id: chosenPair.full.id,
+        drift,
+    });
+
+    return {
+        rotated: true,
+        reason: 'rotated',
+        c0EntryId: c0Id,
+        c1EntryId: c1Id,
+        fullArchivedTokens,
+        compressedArchivedTokens,
+        fullKeptTokens,
+        compressedKeptTokens,
+        trigger,
+        boundaryId: chosenPair.full.id,
+        drift,
+    };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 
 /**
  * Compress a floating/archive file through the fractal gradient.

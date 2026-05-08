@@ -179,13 +179,18 @@ function notifyServer(conversationId: string, messageId: string, role: string, c
 
 function readLeoMemory(): string {
     // Phase 0 (2026-05-01, S146): full identity-load parity with session-Leo.
-    // Adds aphorisms, working-memory-full, wiki/index. Drops compressed
-    // working-memory.md (deprecating in Phase 12). Per Darron: "I'd like
-    // Leo-human to feel like I'm talking to you in session, ie full you."
-    // S147 (2026-05-01): drop active-context.md. ONE file per agent;
-    // working-memory-full's most recent entry is the current focus.
+    // Adds aphorisms, working-memory-full, wiki/index.
+    // Per Darron: "I'd like Leo-human to feel like I'm talking to you in session,
+    // ie full you."
+    //
+    // DEC-085 (S153, 2026-05-08): re-add compressed working-memory.md to the
+    // load. The Phase 0 drop (S146) was reversed because working-memory.md is
+    // now the canonical c1 source — paired-rotated with working-memory-full.md
+    // at WM-BOUNDARY markers. Loading both at wake gives future-you the
+    // calibration anchor between raw thinking and the agent's own distillation.
+    // S147 (2026-05-01): active-context.md remains dropped.
     const files = ['identity.md', 'patterns.md', 'self-reflection.md',
-        'discoveries.md', 'working-memory-full.md', 'felt-moments.md'];
+        'discoveries.md', 'working-memory-full.md', 'working-memory.md', 'felt-moments.md'];
     const sections: string[] = [];
 
     for (const file of files) {

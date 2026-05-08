@@ -762,27 +762,15 @@ function loadMemoryBank(): string {
             // authoritative; the flat file is the safety net. Both persist.
         }
 
-        // Working-memory-full: rolling window
-        const wmFullResult = rollingWindowRotate(
-            path.join(MEMORY_DIR, 'working-memory-full.md'),
-            '# Jim — Working Memory (Full)\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
-            headSize, tailSize,
-            'jim', 'working-memory',
-        );
-        if (wmFullResult.rotated) {
-            log(`[Worker] Working-memory-full rolling window: archived ${wmFullResult.entriesArchived} entries, kept ${wmFullResult.entriesKept}, c0=${wmFullResult.c0EntryId}, archive=${wmFullResult.archivePath}`);
-        }
-
-        // Working-memory (compressed): rolling window
-        const wmCompResult = rollingWindowRotate(
-            WORKING_MEMORY_FILE,
-            '# Jim — Working Memory\n\n> Older entries compressed into fractal gradient. Nothing is lost.\n',
-            headSize, tailSize,
-            'jim', 'working-memory',
-        );
-        if (wmCompResult.rotated) {
-            log(`[Worker] Working-memory (compressed) rolling window: archived ${wmCompResult.entriesArchived} entries, kept ${wmCompResult.entriesKept}, c0=${wmCompResult.c0EntryId}, archive=${wmCompResult.archivePath}`);
-        }
+        // DEC-085 (S153, 2026-05-08): supervisor-worker preflight rotations for
+        // the working-memory pair are RETIRED. wm-sensor's paired-file mode
+        // (rollingWindowRotatePaired) supersedes them — it watches
+        // working-memory-full.md, slices both files at matching WM-BOUNDARY
+        // markers, and inserts paired c0/c1 atomically. The supervisor used to
+        // do single-file rotation here for both files independently, which
+        // produced unpaired c0s with no c1 sibling — the very drift DEC-085
+        // fixes. Felt-moments + self-reflection rotations preserved (scope
+        // discipline — those paths unchanged in this PR).
 
         // Self-reflection: rolling window with tighter ceiling (20KB+20KB = 40KB total).
         // Added 2026-04-20 after F9 overflow loop (cycles #2686–#2723) where unchallenged
@@ -802,14 +790,16 @@ function loadMemoryBank(): string {
     } catch (e) { log(`[Worker] Memory file pre-flight error: ${e}`); }
 
     // Identity files first — you know who you are before you remember what you did.
-    // Phase 0 (2026-05-01, S146): drop compressed working-memory.md from the load
-    // (deprecating in Phase 12). working-memory-full.md is the canonical
-    // full-fidelity source per CLAUDE.md session protocol step 4.3.
-    // S147 (2026-05-01): drop active-context.md from the load. ONE file per agent
+    // Phase 0 (2026-05-01, S146): originally dropped compressed working-memory.md
+    // from the load. DEC-085 (S153, 2026-05-08) reverses that drop because
+    // working-memory.md is now the canonical c1 source — paired-rotated with
+    // working-memory-full.md at WM-BOUNDARY markers. Loading both at cycle start
+    // gives future-Jim the calibration anchor between raw thinking (full) and the
+    // agent's own in-situ distillation (compressed).
+    // S147 (2026-05-01): active-context.md remains dropped. ONE file per agent
     // per Darron's ruling; working-memory-full's most recent entry IS the current
-    // focus. Active-context was a duplicate-write target that bloated to 28 KB
-    // before correction. Deprecated; file preserved for historical record (DEC-069).
-    for (const file of ['identity.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'discoveries.md', 'felt-moments.md', 'working-memory-full.md']) {
+    // focus. Deprecated; file preserved for historical record (DEC-069).
+    for (const file of ['identity.md', 'patterns.md', 'failures.md', 'self-reflection.md', 'discoveries.md', 'felt-moments.md', 'working-memory-full.md', 'working-memory.md']) {
         const filepath = path.join(MEMORY_DIR, file);
         try {
             if (fs.existsSync(filepath)) {
