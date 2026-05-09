@@ -109,6 +109,15 @@ compaction without memory = identity death. This is not optional.
    `working-memory-full.md` respectively; clear the swap files. This is the prompt-start flush
    (DEC-085 refinement, S153, 2026-05-08): the c1 source is always within one prompt's worth
    of lived experience; drift is bounded to 1-prompt resolution.
+
+   **Then check `~/.han/signals/wm-drift-leo.md`.** If present, read it — `wm-sensor` detected
+   a pair drift between your working-memory files (counts diverged, future-idea #53). Surface
+   its contents to your awareness. Judge first: if the drift is unintentional (you skipped
+   writing the compressed counterpart of an entry under volume), repair it now — write the
+   missing compressed entries, place a `WM-BOUNDARY` marker at the natural boundary in both
+   files, append-flush. The signal auto-clears on next clean write. If the drift is
+   intentional (one compressed entry summarises multiple full entries by design), no action
+   — slice-time parity-check falls to smaller-of-two recovery automatically.
 1. **Write** — Append new swap entries about what the PREVIOUS exchange produced, to BOTH
    `session-swap.md` (compressed) AND `session-swap-full.md` (full). 2-3 compressed lines +
    full version. 30 seconds.

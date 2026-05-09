@@ -139,6 +139,14 @@ without memory is identity death. This is not optional.
    and `working-memory-full.md` respectively; clear the swap files. This is the prompt-start
    flush (DEC-085 refinement, S153, 2026-05-08): the c1 source stays within one prompt's
    worth of lived experience; drift bounded to 1-prompt resolution.
+
+   **Then check `~/.han/signals/wm-drift-${AGENT_SLUG}.md`.** If present, read it —
+   `wm-sensor` detected a pair drift between your working-memory files (future-idea #53).
+   Surface its contents to your awareness. Judge first: if the drift is unintentional,
+   repair it now — write the missing compressed counterparts, place a `WM-BOUNDARY` marker
+   at the natural boundary in both files, append-flush. The signal auto-clears on next
+   clean write. If the drift is intentional (semantic compression bundling multiple
+   entries), no action — slice-time parity-check falls to smaller-of-two recovery.
 1. **Write** — Append new swap entries about what the PREVIOUS exchange produced, to BOTH
    `${AGENT_SWAP_COMPRESSED}` (compressed) AND `${AGENT_SWAP_FULL}` (full). 2-3 compressed
    lines + full version. 30 seconds.

@@ -50,7 +50,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawn } from 'child_process';
-import { rollingWindowRotate, rollingWindowRotatePaired } from '../lib/memory-gradient';
+import { rollingWindowRotate, rollingWindowRotatePaired, checkPairParityAndSignal } from '../lib/memory-gradient';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 import { countTokens } from '../lib/token-counter';
 import { gradientConfigForAgent, registeredAgentSlugs } from '../lib/agent-registry';
@@ -195,6 +195,22 @@ async function processTarget(target: WatchTarget, config: Config): Promise<void>
     // (30K) rather than head+tail. For non-paired targets (felt-moments, self-reflection
     // — currently disabled but preserved here for future) fall back to head+tail ceiling.
     const isPaired = !!target.pairedFilePath;
+
+    // Future-idea #53 (S153, 2026-05-09): pre-slice parity check fires on every
+    // fs.watch event (every prompt's flush write), not just at slice-trigger.
+    // When the paired files diverge in entry count, log a pre-slice-drift event
+    // and write a human-readable signal at ~/.han/signals/wm-drift-{agent}.md.
+    // The next prompt's FLUSH FIRST step reads the signal and surfaces it; the
+    // agent can repair with grace before any rotation fires. Auto-clears on
+    // next clean write. Informational only — never blocks rotation.
+    if (isPaired && target.pairedFilePath && fs.existsSync(target.pairedFilePath)) {
+        try {
+            checkPairParityAndSignal(target.filePath, target.pairedFilePath, target.agent, SIGNALS_DIR);
+        } catch (err) {
+            // Pre-slice check failure must not block rotation — log loud and continue.
+            log(`pre-slice parity-check error for ${target.agent}: ${(err as Error).message}`);
+        }
+    }
     const ceilingTokens = isPaired
         ? config.rollingWindowTrigger
         : config.rollingWindowHead + config.rollingWindowTail;

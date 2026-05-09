@@ -1409,6 +1409,151 @@ function countEntriesBeforePos(content: string, charPos: number): number {
     return splitMemoryFileEntries(content.substring(0, charPos)).length;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Future-idea #53 (S153, 2026-05-09): Pre-slice parity-check + drift signal
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// Sibling to the slice-time parity-check inside rollingWindowRotatePaired —
+// fires earlier (every fs.watch event, not just at slice-trigger). When the
+// paired files diverge in entry count, log a pre-slice-drift event and write
+// a human-readable signal at ~/.han/signals/wm-drift-{agent}.md. The next
+// prompt's FLUSH FIRST step reads the signal and surfaces it; the agent can
+// repair with grace before any rotation fires. Auto-clears on next clean
+// write (parity check fires on every fs event).
+
+export interface PairParityResult {
+    inSync: boolean;
+    fullCount: number;
+    compCount: number;
+    drift: number;
+    unpairedSide: 'full' | 'compressed' | null;
+    unpairedEntries: { header: string; date: string | null }[];
+}
+
+/**
+ * Compare entry counts between the paired working-memory files. Returns
+ * a parity result; a count mismatch is "drift" — informational, not an
+ * error. Intentional asymmetry (one compressed entry summarising multiple
+ * full entries) shows up the same way; the signal lets the agent judge.
+ */
+export function checkPairParity(
+    fullPath: string,
+    compPath: string,
+): PairParityResult {
+    const fullContent = fs.readFileSync(fullPath, 'utf8');
+    const compContent = fs.readFileSync(compPath, 'utf8');
+    const fullEntries = splitMemoryFileEntries(fullContent);
+    const compEntries = splitMemoryFileEntries(compContent);
+    const drift = Math.abs(fullEntries.length - compEntries.length);
+    const inSync = drift === 0;
+    const unpairedSide: 'full' | 'compressed' | null = inSync
+        ? null
+        : (fullEntries.length > compEntries.length ? 'full' : 'compressed');
+    const unpaired = unpairedSide === 'full'
+        ? fullEntries.slice(compEntries.length)
+        : unpairedSide === 'compressed'
+            ? compEntries.slice(fullEntries.length)
+            : [];
+    return {
+        inSync,
+        fullCount: fullEntries.length,
+        compCount: compEntries.length,
+        drift,
+        unpairedSide,
+        unpairedEntries: unpaired.map((e) => ({ header: e.header, date: e.date })),
+    };
+}
+
+/**
+ * Render a human-readable markdown drift signal for the agent to read at
+ * next prompt's FLUSH FIRST step. The signal is informational; the agent
+ * judges whether the drift is intentional (semantic compression bundling
+ * multiple entries) or unintentional (skipped writing the compressed
+ * counterpart under volume).
+ */
+export function renderDriftSignal(agent: string, parity: PairParityResult): string {
+    const ts = new Date().toISOString();
+    const unpairedList = parity.unpairedEntries.length > 0
+        ? parity.unpairedEntries.map((e) => `- ${e.date ? `(${e.date}) ` : ''}${e.header}`).join('\n')
+        : '_(no entry headers extracted; the drift may be in file headers or non-### content)_';
+    return `# Working-Memory Pair Drift Detected
+
+**Detected at**: ${ts}
+**Agent**: ${agent}
+
+**Counts**: \`working-memory-full.md\` has **${parity.fullCount}** entries; \`working-memory.md\` has **${parity.compCount}** entries (drift = ${parity.drift}, on the **${parity.unpairedSide ?? 'unknown'}** side).
+
+**Unpaired entries** (most recent — drift typically lives at the tail end of one file):
+
+${unpairedList}
+
+---
+
+## Action — judge first, then act
+
+If the drift is **unintentional** (you skipped writing the compressed counterpart of an entry under volume pressure), repair it now:
+
+1. Read the unpaired entries above and write compressed counterparts to the side that's missing them — \`working-memory.md\` if \`unpairedSide=full\`, \`working-memory-full.md\` if \`unpairedSide=compressed\`.
+2. Place a \`<!-- WM-BOUNDARY: id=B<N> ts=ISO-8601 -->\` marker in BOTH files at corresponding positions (the natural break after these entries).
+3. Append-flush. The next \`fs.watch\` event re-checks parity; if you've repaired the drift, this signal auto-clears.
+
+If the drift is **intentional** (one compressed entry summarises multiple full entries by design), no action needed. Slice-time parity-check falls to smaller-of-two recovery automatically; the c0/c1 pair stays aligned at the entry-count of the smaller side, and the surplus entries on the larger side rotate next cycle.
+
+---
+
+*Signal written by \`wm-sensor\` per future-idea #53. Auto-clears on next clean write. \`pre-slice-drift\` events are also logged to \`~/.han/health/wm-rotation-events.jsonl\` for forensic record.*
+`;
+}
+
+/**
+ * Run the pre-slice parity check and produce / clear the drift signal.
+ *
+ * This is the orchestrator wm-sensor's processTarget calls on every
+ * fs.watch event for paired targets. Bundled here so the policy
+ * (count-then-log-then-signal-or-clear) lives next to the helpers
+ * it composes; wm-sensor stays free of the policy specifics.
+ *
+ * Returns the PairParityResult so callers can also act on it (e.g.
+ * skip rotation if drift is severe, though we don't gate by default —
+ * the signal is informational).
+ */
+export function checkPairParityAndSignal(
+    fullPath: string,
+    compPath: string,
+    agent: string,
+    signalsDir: string,
+): PairParityResult {
+    const parity = checkPairParity(fullPath, compPath);
+    const signalPath = path.join(signalsDir, `wm-drift-${agent}.md`);
+
+    if (parity.inSync) {
+        // Auto-clear: signal files are operational, not memory (DEC-069 N/A).
+        if (fs.existsSync(signalPath)) {
+            try { fs.unlinkSync(signalPath); } catch { /* best-effort */ }
+        }
+        return parity;
+    }
+
+    // Drift detected — log + write signal
+    logRotationEvent({
+        kind: 'pre-slice-drift',
+        agent,
+        full_entries: parity.fullCount,
+        compressed_entries: parity.compCount,
+        drift_count: parity.drift,
+        unpaired_side: parity.unpairedSide,
+    });
+    try {
+        if (!fs.existsSync(signalsDir)) fs.mkdirSync(signalsDir, { recursive: true });
+        fs.writeFileSync(signalPath, renderDriftSignal(agent, parity), 'utf8');
+    } catch (err) {
+        console.warn(`[checkPairParityAndSignal] signal write failed for ${agent}:`, (err as Error).message);
+    }
+    return parity;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+
 /**
  * Append a JSONL row to ~/.han/health/wm-rotation-events.jsonl.
  * Sibling pattern to DEC-084's voice-anomalies.jsonl. Best-effort —

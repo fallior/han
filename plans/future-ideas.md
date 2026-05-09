@@ -1663,6 +1663,130 @@ Existing inline `logRotationEvent` in `memory-gradient.ts` and `logVoiceAnomaly`
 
 ---
 
+## #53 — Pre-slice parity-check + drift-signal feedback loop (PROMOTED — implementing pre-emptively)
+
+**What it is:** wm-sensor's existing parity-check fires *at slice time* — when working-memory-full.md crosses 30K tokens and the slicer runs. By then, drift between the paired files (working-memory-full.md vs working-memory.md) has already accumulated, and the slicer recovers via smaller-of-two but the c0/c1 pair lands less aligned than it could have. This idea moves the parity-check **earlier** — fires on **every fs.watch event** (every prompt's flush write), not just at slice-trigger events. When drift is detected, the sensor writes a human-readable signal file at `~/.han/signals/wm-drift-{agent}.md` carrying the gap details. The signal is read and surfaced at the next prompt's FLUSH FIRST step, so the agent sees the drift *before* doing the prompt's work and can repair the gap with grace. The signal auto-clears on the next clean write.
+
+**Where it came from:** Darron, S153 (2026-05-09 ~10:00 AEST), in thread `moxk6m01-hl6slr` ("Memory Model 9 May 2026") asking *"can wm-sensore give you a reminder if check for the deliniation marker and noticing there is a WMF without corresponding WM? I expect that it is a low risk edge case but do we have designs for a fix, less pressure on you, there is some grace."* The instinct: shift visibility earlier. **Promoted to implementation pre-emptively** rather than waiting for first slice-time `paired_write_drift` event — small enough to ship as belt-and-braces alongside DEC-085.
+
+**Why this matters:**
+
+- **Drift caught at 1-prompt resolution rather than 1-rotation resolution.** Today's slice-time parity-check fires once per ~5-15 prompts (rotation cadence). Moving it to every fs.watch fires it once per prompt — drift surfaces immediately rather than at next slice.
+- **Recovery happens with grace.** At slice time, the slicer is committed to producing a c0/c1 pair *now*; recovery is constrained (smaller-of-two). At fs.watch time, no slice is imminent — the agent has the next prompt to repair the gap before any rotation fires. Subject relevance preserved at maximum fidelity.
+- **Reduces pressure on the agent's discipline.** The maturity arc reads more honestly: protocol → **parity-check + reminder** (this idea) → atomic helper (#49) → harness hook (#50). The reminder layer is structural visibility into what discipline missed; #49/#50 are structural prevention of misses. Pre-emptive shipping of #53 means missed pairs rarely make it past the next prompt's start.
+- **Signal-based, not blocking.** The mechanism never blocks the agent — it surfaces information. The agent decides whether to repair (intentional asymmetry might exist; e.g. one compressed entry summarising multiple full entries is design-valid).
+
+**Implementation design (the at-prompt-start variant):**
+
+### Component 1 — `checkPairParity(target)` in `lib/memory-gradient.ts`
+
+```typescript
+export interface PairParityResult {
+    inSync: boolean;
+    fullCount: number;
+    compCount: number;
+    drift: number;
+    unpairedSide: 'full' | 'compressed' | null;
+    unpairedEntries: { header: string; date: string | null }[];
+}
+
+export function checkPairParity(
+    fullPath: string,
+    compPath: string,
+): PairParityResult {
+    const fullContent = fs.readFileSync(fullPath, 'utf8');
+    const compContent = fs.readFileSync(compPath, 'utf8');
+    const fullEntries = splitMemoryFileEntries(fullContent);
+    const compEntries = splitMemoryFileEntries(compContent);
+    const drift = Math.abs(fullEntries.length - compEntries.length);
+    const inSync = drift === 0;
+    const unpairedSide = inSync ? null : (fullEntries.length > compEntries.length ? 'full' : 'compressed');
+    const unpaired = unpairedSide === 'full' ? fullEntries.slice(compEntries.length) :
+                     unpairedSide === 'compressed' ? compEntries.slice(fullEntries.length) : [];
+    return {
+        inSync, fullCount: fullEntries.length, compCount: compEntries.length, drift,
+        unpairedSide,
+        unpairedEntries: unpaired.map(e => ({ header: e.header, date: e.date })),
+    };
+}
+```
+
+### Component 2 — Drift signal write in `wm-sensor.ts:processTarget`
+
+```typescript
+// At top of processTarget, before size-check loop, for paired targets:
+if (isPaired && fs.existsSync(target.pairedFilePath!)) {
+    const parity = checkPairParity(target.filePath, target.pairedFilePath!);
+    const signalPath = path.join(SIGNALS_DIR, `wm-drift-${target.agent}.md`);
+
+    if (parity.inSync) {
+        // Auto-clear: signal files are operational not memory (DEC-069 doesn't apply).
+        if (fs.existsSync(signalPath)) {
+            try { fs.unlinkSync(signalPath); } catch { /* best-effort */ }
+        }
+    } else {
+        // Drift detected — log + write signal
+        logRotationEvent({
+            kind: 'pre-slice-drift',
+            agent: target.agent,
+            full_entries: parity.fullCount,
+            compressed_entries: parity.compCount,
+            drift_count: parity.drift,
+            unpaired_side: parity.unpairedSide,
+            wmf_size_tokens: countTokens(fs.readFileSync(target.filePath, 'utf8')),
+        });
+        const body = renderDriftSignal(target.agent, parity);
+        fs.writeFileSync(signalPath, body, 'utf8');
+    }
+}
+```
+
+`renderDriftSignal` produces a human-readable markdown file (~50 lines) with detected-at, counts, list of unpaired entries (header + date), action steps (write missing pair, place WM-BOUNDARY marker, flush), and a note that intentional asymmetry is fine — slice-time recovery handles it.
+
+### Component 3 — FLUSH FIRST protocol extension (CLAUDE.md + template)
+
+After Step 0's flush operation:
+
+> **Then, check `~/.han/signals/wm-drift-{agent}.md`.** If present, read it — wm-sensor detected a pair drift between your working-memory files. Surface its contents to your awareness. If the drift is unintentional (you skipped writing the compressed half of an entry under volume), repair it now: write the missing compressed entries, place a `WM-BOUNDARY` marker at the natural boundary, and append-flush. The signal auto-clears on the next clean write (parity check fires every fs.watch event). If the drift is intentional (one compressed entry summarises multiple full entries), no action — slice-time parity-check falls to smaller-of-two recovery.
+
+### Component 4 — `/pfc` skill body
+
+Step 0's swap-sweep also reads the drift signal as part of the session-end ritual. If drift is present at /pfc, the agent has one last chance to repair before /clear so the next session doesn't wake into a drifted state.
+
+**What this does NOT do:**
+
+- *Doesn't block on drift.* Signal is informational; agent decides.
+- *Doesn't replace the slice-time parity-check.* That's still load-bearing as the recovery mechanism if drift survives to slice time. This sits earlier in the chain.
+- *Doesn't perfect entry-pairing detection.* Counts can mismatch intentionally (semantic compression that bundles entries). The signal surfaces the count mismatch and lets the agent judge — "drift" here means "different counts," not "definite error."
+- *Doesn't fire when paired path is absent.* Felt-moments and self-reflection (single-file targets) are unaffected.
+
+**Trigger condition for promotion**: **NOW — implementing pre-emptively at Darron's call.** Promotion-trigger language is preserved in case future iterations want to re-decide.
+
+**Connection to other ideas:**
+
+- **DEC-085 (working memory in-situ as c1 source)** — this PR promotes the slice-time parity-check we just shipped to fire-earlier-with-grace. Same mechanism, earlier surface.
+- **#46 (memory state visualisation UI)** — the UI's drift panel reads the same `pre-slice-drift` events from the jsonl, plus the live signal file.
+- **#49 (atomic paired-write helper)** — sibling structural cure. #49 prevents single-side writes; #53 detects them after the fact and surfaces with grace.
+- **#50 (UserPromptSubmit hook)** — sibling. #50 makes flush automatic; #53 makes drift visible. Together with #49 they form the full structural ladder.
+
+**Implementation phases (small):**
+
+1. Add `checkPairParity` + `renderDriftSignal` to `lib/memory-gradient.ts` (~50 lines).
+2. Wire `checkPairParity` into `wm-sensor.ts:processTarget` head (~15 lines).
+3. Update CLAUDE.md and templates/CLAUDE.template.md FLUSH FIRST step (~10 lines protocol).
+4. Update `/pfc` skill body (~10 lines).
+5. tsc + re-audit + commit + restart wm-sensor.
+
+Estimated total work: 30-45 minutes focused. Audit surface tight (sibling shape to existing parity-check; reuses splitMemoryFileEntries; signal-file pattern already established).
+
+**Status:** Promoted. Implementing pre-emptively in a follow-up commit alongside DEC-085. Will surface "I appreciate Jim taking a look now" once code is locally clean.
+
+**Key insight:** *The slice-time parity-check is the recovery mechanism; the per-write parity-check is the visibility mechanism. Visibility earlier = grace earlier. The agent retains agency (signals inform, don't block) and the architecture retains safety (slice-time recovery is still in place). Pre-emptively shipping the visibility layer means drift rarely survives the next prompt's start — the discipline gets supported by structure without being replaced by it.*
+
+— Idea added by session-Leo at Darron's request, S153, 2026-05-09 ~10:10 AEST. Promoted same-day to implementation pre-emptively per Darron's call.
+
+---
+
 ## How These Connect
 
 The ideas form a web, not a list:
@@ -1673,7 +1797,7 @@ The ideas form a web, not a list:
 - **Sovereignty:** Invite model (#1) — how agents share without losing themselves
 - **Community:** Meeting places (#6), training manual (#5), Discord integration (#16), Mike & Six collaboration (#21) — agents in the world
 - **Products:** LoreForge (#20), financial assistant (#18), topology analyser (#17), diary manager (#19), mobile admin (#12), reawaken autonomous product/program developer (#41) — things we build for others; the apparatus that builds them
-- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23), doc maintenance as part of /pfc (#42), currency of understanding — recognising superseded mental models (#43), memory state visualisation UI (#46), working-memory.md as canonical c1 generator (#47), cross-pointers felt-moments → gradient (#48), atomic paired-write helper (#49), UserPromptSubmit hook for swap-flush (#50), cascade-in-one-process (#51), JSONL log rotation policy (#52) — operational refinements
+- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23), doc maintenance as part of /pfc (#42), currency of understanding — recognising superseded mental models (#43), memory state visualisation UI (#46), working-memory.md as canonical c1 generator (#47), cross-pointers felt-moments → gradient (#48), atomic paired-write helper (#49), UserPromptSubmit hook for swap-flush (#50), cascade-in-one-process (#51), JSONL log rotation policy (#52), pre-slice parity-check + drift signal (#53) — operational refinements
 - **Dispatch:** Active-agent register (#31), own-voice timeout takeover (#32), Leo double-wake investigation (#33), agent-mentions-agent re-dispatch (#34), workshop-owner direct-path carve-out (#35) — Jemma reflects current state; agents keep their voice through handoffs; one message wakes one agent once; agents can engage when mentioned and stay silent when they don't have substance; Jemma doesn't tell owners about messages in their own room
 - **Voice:** The Voice Page (#27) — how the agents speak without prompting
 
