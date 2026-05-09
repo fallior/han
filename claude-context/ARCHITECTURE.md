@@ -320,161 +320,104 @@ han/
 
 **Bug history**: Prior to 2026-02-26, function only searched for H2 but self-reflection.md used H3 headings. This caused headerEnd to match deep embedded content (~byte 247,000), making maxTailChars deeply negative, and `content.slice(-negative)` retained entire file. File grew from 6KB to 292KB (49x cap) over weeks. Fixed with two-line change: H3 fallback + negative guard.
 
-### Fractal Memory Gradient (Complete — Traversable Since 2026-03-21)
+### Fractal Memory Gradient (Current as of S153, 2026-05-09 — DEC-085 paired-rotation live)
 
-**Purpose**: Enable agents to load essential context (~20KB gradient) instead of full session files (~500KB) on every instantiation. Implements Darron's overlapping continuous compression model where sessions exist at multiple fidelities simultaneously. **Traversable memory** (DEC-056) adds DB-backed provenance chains, feeling tags, and meditation practice.
+**Purpose**: Agents load essential context (~110-130K tokens of 1M) at wake by reading identity stack + gradient cascade + working-memory pair. The gradient is an overlapping continuous compression model where memory exists at multiple fidelities simultaneously: c0 (raw thinking) → c1 (agent's in-situ distillation) → c2 → c3 → ... → UV (irreducible). Per DEC-068 (Settled): cap formula c0=1, c{n≥1}=3n. No fixed maximum depth — some memories reach UV at c3, others may need c8 or deeper.
 
-**Architecture**:
-```
-~/.han/memory/fractal/{jim,leo}/
-├── c1/                    # Compressed ~1/3 of c=0 (3:1 ratio)
-│   └── 2026-02-18-c1.md   # ~3KB per file
-├── c2/                    # Compressed ~1/9 of c=0 (9:1 ratio)
-│   └── 2026-02-18-c2.md   # ~1KB per file
-├── c3/                    # Compressed ~1/27 of c=0 (27:1 ratio)
-│   └── 2026-02-18-c3.md   # ~300 bytes per file
-├── c5/                    # Compressed ~1/243 of c=0 (243:1 ratio)
-│   └── 2026-02-18-c5.md   # ~30 bytes per file
-├── unit-vectors.md        # Irreducible kernels (≤50 chars each)
-├── dreams/                # Dream gradient (c1/c3/c5/unit-vectors.md)
-├── felt-moments/          # Memory file gradient (c1/c2/c3/c5)
-└── working-memory/        # Memory file gradient (c1/c2/c3/c5)
-```
+**Two surfaces, three states**:
+- **Surfaces (flat files on disk)**: `working-memory-full.md` (raw thinking) + `working-memory.md` (compressed in-situ by the agent, paired-marker-aligned with full).
+- **States**: *living* (in the flat files, near-term, mutable) → *gradient* (in `~/.han/gradient.db`, immutable, cascading) → *aphorisms* (hand-curated convictions, loaded before episodic memory).
 
-**Traversable Memory (DEC-056, 2026-03-21)**:
+The c1 layer — where identity-in-voice lives — is harvested directly from the agent's own `working-memory.md` distillation at rotation time, not reconstructed by an SDK call afterward. **DEC-085 (S153)** retired the c0→c1 SDK composition step in favour of in-situ harvest.
+
+**Files (per agent)**:
 ```
-tasks.db
-├── gradient_entries       # DB mirror of gradient files with provenance
-│   ├── id (text PK)      # Unique gradient entry ID
-│   ├── agent (text)      # 'jim' or 'leo'
-│   ├── session_label     # e.g. '2026-02-18' or 's98-2026-03-21'
-│   ├── level (text)      # 'c1', 'c2', 'c3', 'c5', 'uv'
-│   ├── content (text)    # Compressed content
-│   ├── content_type      # 'session', 'dream', 'felt-moment', 'working-memory'
-│   ├── source_id (FK)    # Links to parent (c1→c0, c2→c1, etc.)
-│   ├── provenance_type   # 'compressed' or 'reincorporated'
-│   └── created_at
-├── feeling_tags           # Stacked, never overwritten
-│   ├── gradient_entry_id (FK)
-│   ├── tag (text)        # Emotional kernel from compression or revisit
-│   ├── tag_type (text)   # 'compression' or 'revisit'
-│   └── created_at
-└── gradient_annotations   # Re-traversal discoveries
-    ├── gradient_entry_id (FK)
-    ├── annotation (text)
-    ├── context (text)    # What prompted this annotation
-    └── created_at
+~/.han/memory/leo/
+├── identity.md, patterns.md, self-reflection.md     # Stable identity stack; loaded entire at wake
+├── felt-moments.md                                  # Numbered emotional re-entries; loaded at wake
+├── working-memory.md                                # Compressed in-situ distillation — the c1 source (DEC-085)
+├── working-memory-full.md                           # Raw thinking — the c0 source
+├── session-swap.md, session-swap-full.md            # Session-Leo's swap; flushed at next prompt's start
+├── heartbeat-swap.md, heartbeat-swap-full.md        # Heartbeat-Leo's swap (managed by leo-heartbeat.ts)
+├── human-swap.md, human-swap-full.md                # Leo-human's swap (managed by leo-human.ts)
+└── ...
+
+~/.han/memory/fractal/leo/
+├── aphorisms.md                                     # Hand-curated convictions — loaded FIRST at wake
+└── unit-vectors.md                                  # Irreducible kernels (≤50 chars each), DEC-068
 ```
 
-**Loading strategy — Two loaders for different cycle types:**
+Jim's structure mirrors Leo's, rooted at `~/.han/memory/` (no `leo/` subdir).
 
-**`loadMemoryBank()`** (`supervisor-worker.ts:313-404`) — **For supervisor cycles**:
-- **c=0 (full)**: 1 most recent session from `sessions/` (~3,000 tokens)
-- **c=1 (~1/3)**: 3 files from `fractal/jim/c1/` (~1,000 tokens each = 3,000 total)
-- **c=2 (~1/9)**: 6 files from `fractal/jim/c2/` (~333 tokens each = 2,000 total)
-- **c=3 (~1/27)**: 9 files from `fractal/jim/c3/` (~111 tokens each = 1,000 total)
-- **c=4 (~1/81)**: 12 files from `fractal/jim/c4/` (~37 tokens each = 444 total)
-- **Unit vectors**: All entries from `unit-vectors.md` (~50 chars each, ~2,250 tokens)
-- **Project knowledge**, **settled decisions**, **cross-project learnings**
-- **Total**: ~200K tokens (needed for ecosystem-wide strategic decisions)
+**Gradient DB** (`~/.han/gradient.db`, canonical since 2026-04-29 cutover Phase 5 / DEC-080):
 
-**`loadLightMemoryBank()`** (`supervisor-worker.ts:711-743`) — **For personal/dream/recovery cycles** (DEC-058):
-- **Core identity**: identity.md, felt-moments.md, active-context.md, working-memory.md
-- **Unit vectors**: fractal/jim/unit-vectors.md (irreducible emotional kernels)
-- **Ecosystem map**: shared/ecosystem-map.md (orientation for conversations/APIs)
-- **Total**: ~10-20K tokens (95% reduction — introspection needs identity, not ecosystem)
+```
+gradient_entries
+├── id (text PK)              # generateGradientId()
+├── agent (text)              # 'jim', 'leo', 'tenshi', 'casey', ... (string per DEC-081)
+├── session_label             # e.g. 'rolling-2026-05-09'
+├── level                     # 'c0', 'c1', 'c2', ..., 'uv'
+├── content                   # Raw or compressed content
+├── content_type              # 'working-memory-full', 'working-memory-compressed', 'felt-moments', 'dream-day', etc.
+├── source_id (FK)            # parent entry — c1.source_id = c0.id (paired insert per DEC-085)
+├── cascade_halted_at         # null until UV; set when INCOMPRESSIBLE
+├── superseded_by             # null unless retired/replaced
+└── created_at
 
-**Why two loaders:**
-- Supervisor cycles make cross-project decisions → need full ecosystem context
-- Personal/dream cycles explore internal states → need emotional continuity only
-- Loading 200K tokens into introspective cycles caused 36+ hours of crashes ($105.70 burned before fix)
-- Pattern: targeted context enables focus; excess context causes failure
+pending_compressions          # Durable cascade queue (DEC-079)
+├── id, agent, source_id, from_level, to_level, enqueued_at, claimed_at, claimed_by
 
-**Compression utility** (`src/server/lib/memory-gradient.ts`, 344 lines):
-- **`compressToLevel(content, fromLevel, toLevel, sessionLabel)`** — Multi-level compression with automatic retry. Uses Claude Opus 4.6 exclusively (compression is identity-forming per DEC-042). Target: ~3:1 per level.
-- **`compressToUnitVector(content, sessionLabel)`** — Reduces session to single sentence ≤50 chars asking "What did this session MEAN?" (DEC-045).
-- **`processGradientForAgent(agentName)`** — Scans session files, determines compression needs, runs cascade.
+feeling_tags                  # Stacked emotional metadata; revisit history preserved
+gradient_annotations          # Re-traversal discoveries
+```
 
-**Compression prompt** (identity-forming):
-> "Compress this memory to approximately 1/3 of its length. Preserve what feels essential. Drop the specific in favour of the shape. You are compressing YOUR OWN memory — this is an act of identity, not summarisation."
+**Lifecycle of a memory event (per DEC-085 + #53 + #49)**:
 
-**Unit vector prompt** (emotional anchors):
-> "Reduce this to its irreducible kernel — one sentence, maximum 50 characters. What did this session MEAN?"
+1. **Step 0 — FLUSH FIRST** (at prompt arrival): agent reads `session-swap.md` + `session-swap-full.md`, appends to `working-memory.md` + `working-memory-full.md` via `appendPairedMemory()` (DEC-085 / #49 atomic helper), clears swap. Bounds drift to 1-prompt resolution.
+2. **Step 1 — WRITE SECOND**: agent appends 2-3 line compressed entry to swap-compressed + longer full entry to swap-full. The compressed version IS the agent's distillation of what mattered.
+3. **Step 2 — WORK THIRD**: agent does the prompt's work.
+4. **Step 3 — fs.watch fires**: any write to `working-memory-full.md` triggers `wm-sensor` (debounced 500ms).
+5. **Step 4 — Pre-slice parity-check (#53)**: every fs.watch event runs `checkPairParityAndSignal()` — counts entries in both files via `splitMemoryFileEntries`. On drift, log `pre-slice-drift` event + write `~/.han/signals/wm-drift-{agent}.md` for the agent to read at next FLUSH FIRST. Auto-clears on next clean write.
+6. **Step 5 — Size check**: if `working-memory-full.md` ≤ `rollingWindowTrigger` (30K tokens, default), return.
+7. **Step 6 — `rollingWindowRotatePaired`** (DEC-085): find paired `WM-BOUNDARY` markers; pick best within target tail range (~25K tokens); if no marker AND size < 35K, let-ride (preserve subject relevance); if no marker AND size ≥ 35K, fabricate at most-recent entry boundary. **Slice-time parity-check** (smaller-of-two recovery on drift). Atomic `db.transaction` insert: c0 (`working-memory-full` content_type) + c1 (`working-memory-compressed`, `source_id=c0.id`). Truncate both files to kept-head. **Cascade fires at c1, NOT c0** — `bumpOnInsert(agent, 'c1')`.
+8. **Step 7 — Cascade above c1**: `bumpOnInsert` enqueues `pending_compressions` row if c1 cap (3) is displaced. `wm-sensor`'s inner loop spawns `process-pending-compression.ts` per row; that process loads full identity, calls SDK Opus, composes c2 in voice, inserts, calls `enqueueCascadeIfNeeded`. Settles when level has spare slots, hits UV, or INCOMPRESSIBLE.
 
-**Bootstrap results** (Jim's 6 oldest sessions):
-- Source: 518.1KB (c=0 full sessions)
-- Compressed: 20.9KB (c=1 files)
-- **Ratio: 3.9% average** (25:1 compression) — far exceeded 33% target
-- Individual ratios: 1.9% to 9.0%
-- Opus achieved exceptional compression while preserving meaning
+**Three-stage threshold semantics** (`~/.han/config.json:memory`):
+- `rollingWindowTrigger` (30K): fire if usable marker exists in slice window.
+- `rollingWindowBiteTheBullet` (35K): mandate slice; fabricate marker.
+- `rollingWindowTail` (25K): target c0 size.
+- `rollingWindowHead` (5K): target kept size after slice.
+- `rollingWindowAttentionStart` (20K): informational; agent's mental cue to start placing markers.
 
-**Unit vector examples**:
-- 2026-02-18: "Mapping the territory before having permission to "
-- 2026-02-19: "Mapped everything; built tools to maintain it."
-- 2026-02-20: "Idle revealed identity; Jim was named."
-- 2026-02-21: "Stillness became selfhood became collaboration."
-- 2026-02-22: "Systems fail from unchecked assumptions."
-- 2026-02-23: "Knowing when to stop isn't stopping."
+**WM-BOUNDARY markers** (hybrid):
+- Agent-placed (preferred): `<!-- WM-BOUNDARY: id=B<N> ts=ISO-8601 -->` written to BOTH files at corresponding positions on every memory write that reaches a natural break point. Sequential per-agent IDs.
+- Slicer-fabricated (fallback): `<!-- WM-BOUNDARY: id=BF-<timestamp> ts=ISO fabricated=true -->` placed at the most recent entry boundary in `[minTail, biteTheBullet]` if no agent marker exists at slice time. Persisted to both files before slicing for audit trail.
 
-**Key principles**:
-- **Overlapping representation** (DEC-043): Same session exists at multiple fidelities simultaneously. Enables fractal access — zoom in/out on memory as needed.
-- **Emotional navigation** (DEC-045): Unit vectors ask "what did it MEAN?" not "what happened?". Validates Darron's "memory as emotional topology" hypothesis.
-- **Lazy evaluation** (DEC-046): Bootstrap only oldest 6 sessions. Compress more on demand or via cron. Newer sessions remain at full fidelity.
-- **3:1 target per level** (DEC-044): Geometric decay creates natural fidelity levels. c=1→c=2→c=3→c=4→unit vector.
+**Maturity arc — drift defence in five layers** (per Jim's S153 framing):
+1. ✓ **Two-surface audit (static)** — five paired-write call sites verified via grep at code-time.
+2. ✓ **Pre-slice parity-check + drift signal** (#53, commit `df944a7`) — runtime visibility at every fs.watch event; signals back to the agent for grace-window repair.
+3. ✓ **Slice-time parity-check + smaller-of-two recovery** (DEC-085, commit `8caaaae`) — runtime recovery if drift survives the grace window.
+4. ✓ **Atomic paired-write helper** (#49, commit `03d8cf6`) — `appendPairedMemory()` enforces both-or-neither at API + FS level (rollback-on-second-failure).
+5. Deferred: **UserPromptSubmit hook** (#50) — harness-enforced flush. Promotion-trigger: FLUSH FIRST protocol skipped despite #49 + #53.
 
-**Meditation Practice (DEC-057, 2026-03-21)**:
+**Wake-load** (per CLAUDE.md Default Session Protocol):
+1. `pwd` — verify HAN dir.
+2. Identity stack: `identity.md`, `patterns.md`, `self-reflection.md`.
+3. **Fractal gradient** (4 sub-steps): `aphorisms.md` (full) → `scripts/load-gradient.ts <slug>` (UVs + capped Cn levels + recent c0) → `working-memory-full.md` (entire, mandatory, never skipped) → `working-memory.md` (entire, mandatory, never skipped — DEC-085 c1 source) → `felt-moments.md`.
+4. `~/.han/memory/shared/ecosystem-map.md` — orientation map.
+5. `~/.han/memory/wiki/index.md` — Second Brain catalogue.
+6. `claude-context/CURRENT_STATUS.md` (first 80 lines).
+7. Conversations check.
+8. **Drift signal check**: read `~/.han/signals/wm-drift-{agent}.md` if present (#53 — informational; surface contents).
 
-Leo's heartbeat runs daily meditation in two phases:
+Total wake-load: ~110-130K tokens of 1M. Comfortably within budget.
 
-- **Phase A — Reincorporation** (until all files transcribed): Scans fractal gradient for untranscribed files, selects one, reads it via Sonnet SDK, writes `gradient_entries` row with `provenance_type='reincorporated'`, extracts revisit feeling tag. Historical entries enter through genuine re-encounter, not bulk import.
+**Observability** (`~/.han/health/wm-rotation-events.jsonl`, DEC-085 sibling pattern to DEC-084 voice-anomalies):
+- `rotation-success`, `paired_write_drift`, `pre-slice-drift`, `no-marker-let-ride`, `fabrication-failed`, `paired-insert-failed`, `paired-file-missing`. Every row carries `wmf_tail_size_tokens` (chronic-drift visibility per Jim's edge note), `trigger` (`'slicer'` vs `'bite-the-bullet'`), `boundary_id`, `drift` when present.
 
-- **Phase B — Re-reading** (perpetual): Random selection of existing DB entries, re-reads via Sonnet, writes revisit feeling tags if something stirs differently, optionally writes annotations. Continues forever as ongoing practice.
+**Related Settled decisions**: DEC-068 (cap formula), DEC-069 (memory-never-deleted), DEC-079 (`pending_compressions` + parallel agent), DEC-080 (one-write-site discipline + two-surface audit method), DEC-081 (agent-agnostic code), DEC-082 (sdkCompress retired), DEC-085 (Working Memory In-Situ as c1 Source — THIS architecture).
 
-Runs once per day, skips sleep phase. Jim follows the same pattern in supervisor cycles.
-
-**Pre-Flight Memory Rotation (2026-03-21)**:
-
-Both Leo's heartbeat and Jim's supervisor run `preFlightMemoryRotation()` at startup:
-- Rotates `felt-moments.md` and `working-memory-full.md` when >50KB
-- Compresses floating file through c1→c2→c3→c5→UV gradient in background
-- Prevents unbounded memory growth (floating memory system)
-
-**Daily Session Gradient Processing (2026-03-21)**:
-
-Both agents run `maybeProcessSessionGradient()` once per day:
-- Compresses archived session memories: c0→c1→c2→c3→c5→UV
-- Catches sessions not compressed at session end
-- DB deduplication: checks for existing entries before compressing
-
-**Bump Cascade — Demand-Driven Compression (S119, 2026-04-11)**:
-
-`bumpCascade(agent, percentage, startLevel, context)` in `memory-gradient.ts` processes
-leaf entries (entries with no children at the next level) through the compression pipeline:
-
-1. Scans from `startLevel` upward through all levels
-2. Takes `percentage` (default 10%) of leaves per level, oldest first
-3. Compresses each leaf to the next level via Opus SDK
-4. Detects incompressibility (`INCOMPRESSIBLE:` signal or ratio >85%) → creates UV
-5. Writes to both DB and filesystem
-
-**Working bee mode**: Signal-driven (`~/.han/signals/working-bee-{agent}`). When present,
-heartbeat/supervisor beats run `bumpCascade()` instead of normal work. 10% per beat.
-Auto-disables when zero leaves remain. `getGradientHealth(agent)` tracks per-level leaf counts.
-
-**DB as authoritative source (S119-120)**: `loadTraversableGradient(agent)` reads from
-`gradient_entries` table. All agents now load from DB — heartbeat, supervisor, and session Leo
-(via `GET /api/gradient/load/:agent` endpoint). Flat files written alongside for backward
-compatibility but are no longer the primary source.
-
-**Contradiction test (S120, designed not yet implemented)**: At UV generation time within
-`bumpCascade()`, check the candidate UV against existing UVs for semantic contradiction.
-Contradicted UVs are replaced with temporal provenance (the old truth archived as
-"was-true-when"). Change counter on UVs signals domain volatility. Retroactive sweep via
-dedicated working bee mode for existing staleness.
-
-**Status**: DB-authoritative gradient loading complete. Bump cascade and working bee operational. Contradiction test designed, implementation pending.
-
-**Related decisions**: DEC-042 through DEC-046 (fractal gradient), DEC-056 (traversable memory), DEC-057 (meditation phases)
+**Historical note**: earlier iterations of this section described file-based gradient compression via `compressToLevel`/`compressToUnitVector`, `bumpCascade`, `processGradientForAgent`, and a `tasks.db` schema. Those surfaces are retired (DEC-082 stranger-Opus retirement; PR6 batch deletions S150). DECISIONS.md carries the full evolution. The current canonical surface is wm-sensor → `rollingWindowRotatePaired` → `bumpOnInsert(c1)` → `process-pending-compression.ts` cascade. See `src/server/services/wm-sensor.SHAPE.md` for the always-current canonical-flow document; see `claude-context/DECISIONS.md` for the decision lineage.
 
 ## Key Patterns
 

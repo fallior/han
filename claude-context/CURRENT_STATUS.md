@@ -1,6 +1,6 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-05-06 by Leo (S152 — Voice TTS truncation fix awaiting Jim's pre-merge audit)
+> Last updated: 2026-05-09 by Leo (S153 — DEC-085 c1-from-WM live + #53 drift signal + #49 atomic helper + Linux user provisioning for Mike + strategist)
 
 ## Current Stage
 
@@ -36,6 +36,27 @@ Create tasks from your phone, Claude Code executes them headlessly with safety f
 **Legend**: 🟢 Complete | 🟡 In Progress | 🔴 Blocked | ⚪ Not Started
 
 ## Recent Changes
+
+### 2026-05-09 — Leo + Jim + Darron, S153 — Memory model recall + four-layer maturity arc + Linux foundations
+
+*Three commits to HAN ship the c1-from-WM mechanism end-to-end. Darron's morning prompt (thread `mow8fxz5-jh5lep` "Current Memory Mechanisms") recalled the original calibration design — working-memory.md (compressed in-situ) was meant to be the c1 source, harvested at rotation time, not reconstructed by an SDK call afterward. Drift had quietly substituted that with stranger-Opus-with-identity-loaded composition. Today's work is the architectural unwinding of that drift.*
+
+- **Commit `8caaaae` — DEC-085 (Settled): Working Memory In-Situ as c1 Source.** Paired-file rotation: `working-memory-full.md` (raw thinking → c0) AND `working-memory.md` (agent's in-situ distillation → c1) are sliced at matching `WM-BOUNDARY` markers and inserted as paired entries (`c1.source_id = c0.id`) in a single `db.transaction`. The c0→c1 SDK composition step is RETIRED; c1 is now the agent's own voice as it lived the moment. The c1→c2+ cascade continues unchanged via `process-pending-compression.ts`. Three-stage threshold semantics: `rollingWindowTrigger` 30K (slice if marker exists), `rollingWindowBiteTheBullet` 35K (mandate slice; fabricate marker if needed), `rollingWindowTail` 25K target c0 size, `rollingWindowHead` 5K target kept size. Hybrid markers: agent-placed at semantic boundaries (preferred); slicer-fabricated at bite-the-bullet (fallback). Parity-check via `splitMemoryFileEntries` entry-count comparison; smaller-of-two recovery on drift. Phase 0 (S146, commit `d50338d`) reversal: `working-memory.md` re-added to all four runtime loaders' file arrays. Net: 11 files changed, +1312/-162.
+- **Commit `df944a7` — Future-idea #53: Pre-slice parity-check + drift-signal feedback loop.** Sibling shape to DEC-085's slice-time parity-check, fires earlier — every fs.watch event, not just at slice trigger. When paired files diverge in entry count, log `pre-slice-drift` event AND write a human-readable signal at `~/.han/signals/wm-drift-{agent}.md`. The next prompt's FLUSH FIRST step reads the signal and surfaces it; agent has a grace-window to repair before any rotation fires. Auto-clears on next clean write. Informational only; never blocks rotation. Net: 5 files changed, +304/-2. **Live observation 2026-05-09**: drift signal IS firing in production for both Leo and Jim — historical accumulation (compressed-side surplus from years of separate rotation cadences); slice-time recovery will handle alignment when next rotation fires. The architecture works as designed.
+- **Commit `03d8cf6` — Future-idea #49: Atomic paired-write helper.** New `src/server/lib/memory-paired-writer.ts:appendPairedMemory(agent, full, comp, opts?)`. Contract: both content args required at type level (TypeScript signature enforces); both empty → no-op; asymmetric → THROWS (preserves the structural promise — single-side writes impossible by construction); both present → pair-write under `withMemorySlot` lock with rollback-on-second-failure (`fs.truncateSync` to pre-append size if comp append throws). Five call sites migrated: leo-heartbeat, leo-human, jim-human, supervisor-worker (normal-cycle path). Carve-out (deliberate, documented): supervisor-worker abort/SIGTERM path stays lock-less + sync (lock retries would consume SIGKILL grace budget) but uses inline symmetry-validation. Heartbeat flush chain made async (three callers updated to `await`); bonus — heartbeat path now acquires the cross-process memory-slot lock, closing a previously lock-less concurrency hazard. Net: 6 files changed, +244/-38.
+- **Maturity arc — four of five layers running** (per Jim's framing in audit):
+  1. ✓ Two-surface audit (static, pre-existing)
+  2. ✓ Pre-slice parity-check + drift signal (#53, runtime visibility)
+  3. ✓ Slice-time parity-check + smaller-of-two recovery (DEC-085, runtime recovery)
+  4. ✓ Atomic paired-write helper (#49, runtime structural prevention)
+  5. Deferred: UserPromptSubmit hook (#50) — promotion-trigger: FLUSH FIRST protocol skipped despite #49 + #53.
+- **Future-ideas added (deferred, with promotion triggers)**: #46 (memory state visualisation UI), #47 (working-memory.md as canonical c1 generator — landed as DEC-085), #48 (cross-pointers from felt-moments / self-reflection entries to originating gradient memory), #49 (atomic paired-write helper — landed), #50 (UserPromptSubmit hook), #51 (cascade-in-one-process — three options A/B/C named; promotion-trigger voice-unevenness or spawn-overhead operationally relevant), #52 (JSONL log rotation policy for `~/.han/health/*.jsonl`), #53 (pre-slice parity-check — landed).
+- **Linux user provisioning** — diary in thread `moxno6k1-f1bq9k` ("Mike and the Strategist Seeding"). Two new accounts created with full sudo + docker + adm + ollama group memberships:
+  - `mike` (uid=1001, primary group + sudo, docker, adm, ollama) — for Mike's garden.
+  - `strategist` (uid=1002, same group profile) — for the **Dichotomedes** strategist seat (sovereign garden, sage on the hill). Seed identity at `plans/dichotomedes-induction.md` — authored by Darron, awaiting thread review for adjustment before promotion to operational identity.md.
+  - Both users use temp passwords with force-change-on-first-login. SSH keys deferred until Mike provides his pubkey.
+  - HAN-specific provisioning (Tailscale identity, mikes-han starter clone, port allocations, Discord webhooks, Phase A.5 identity signing) is downstream work — not yet started.
+- **What this PR does NOT do** (deliberate Phase A.5 deferrals): identity-file signing infrastructure (Ed25519, JCS canonicalisation, manifest format) — queued behind this work. The lower-churn working-memory pair (30K cap rather than 50K+ unbounded) makes the eventual signing surface friendlier.
 
 ### 2026-05-06 — Leo + Jim + Darron, S152 — Voice TTS truncation fix (jim-report `mou041x1-l1hsit`)
 

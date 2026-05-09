@@ -1159,32 +1159,42 @@ Each writer has private swap files that buffer work before flushing to shared me
 
 ### Fractal Gradient (Sessions)
 
-Sessions exist at multiple compression fidelities:
-- **c0:** Full session (working-memory-full.md)
-- **c0:** Full session (1 entry loaded — most recent working-memory)
-- **c1:** ~1/3 compression (3 entries loaded)
-- **c2:** ~1/9 compression (6 entries loaded)
-- **c3+:** ~1/3^n compression (cap = 3n per level: c3=9, c4=12, c5=15...)
-- Cap formula: **c0=1, then 3n**. All UVs. See `GRADIENT_SPEC.md` (DEC-068, Settled).
-- **c(n):** Compression continues until incompressible — depth varies per memory
-- **Unit vectors:** Irreducible emotional kernels (≤50 chars) — the terminal form
+Sessions exist at multiple compression fidelities, cascading from raw thinking through agent-distilled compression to irreducible kernels:
 
-Compression depth is non-uniform (Cn where n is any integer). The LLM signals
-`INCOMPRESSIBLE:` when content can't compress further, or the system detects a compression
-ratio >85%. At that point, a unit vector is generated regardless of the current level number.
-Some memories reach UV at c3; others may need c6 or deeper.
+- **c0:** Tail block of `working-memory-full.md` at rotation time — raw thinking. Cap=1.
+- **c1:** Paired tail block of `working-memory.md` (compressed in-situ by the agent during the prompt cycle) — **agent's own voice as it lived the moment** (DEC-085, S153, 2026-05-09). `c1.source_id = c0.id` (paired insert in single `db.transaction`). Cap=3.
+- **c2/c3/c4/...:** Cascade composed by `process-pending-compression.ts` (full-identity SDK Opus). Cap formula: **c{n≥1} = 3n** per DEC-068 (c2=6, c3=9, c4=12, c5=15, ...). No fixed maximum depth.
+- **Unit vectors (UV):** Irreducible kernels (≤50 chars) emitted when LLM signals `INCOMPRESSIBLE:` or compression ratio exceeds 85%. The terminal form. Some memories reach UV at c3; others may need c8 or deeper.
 
-**Dream gradient** compresses faster: c1 → c3 → c5 → UV (skipping even levels).
+**Cap formula**: `c0=1, c{n≥1}=3n`, all UVs. See `docs/GRADIENT_SPEC.md` and `claude-context/DECISIONS.md:DEC-068` (Settled).
 
-**Loading order:** Identity first, then highest compression (UV) → lowest (c1). "You know
-who you are before you remember what day it is." Levels are discovered dynamically from
-the filesystem and database — no hardcoded level list.
+**The c0→c1 step is harvested, not composed** (DEC-085, S153): when `working-memory-full.md` exceeds `rollingWindowTrigger` (30K tokens, configurable), `wm-sensor` runs `rollingWindowRotatePaired()` which slices BOTH files at matching `WM-BOUNDARY` markers and inserts c0+c1 atomically. The c1 IS the agent's `working-memory.md` distillation — not reconstructed by an SDK call afterward. The c1→c2+ cascade continues unchanged via the existing `pending_compressions` queue + `process-pending-compression.ts` parallel agent.
 
-**Directories:**
-- `~/.han/memory/fractal/leo/c{1,2,3,...,n}/` + `unit-vectors.md` (levels created as needed)
-- `~/.han/memory/fractal/leo/dreams/c{1,3,5}/` + `unit-vectors.md`
-- `~/.han/memory/fractal/leo/self-reflection/c0/` + higher levels as cascade runs (S118)
-- `~/.han/memory/fractal/jim/` (same structure)
+**Drift defence — five layers** (maturity arc per Jim's S153 framing):
+1. **Two-surface audit** (static): five paired-write call sites verified at code-time.
+2. **Pre-slice parity-check + drift signal** (#53, commit `df944a7`): `wm-sensor` checks entry-count parity on every fs.watch event; on drift, writes `~/.han/signals/wm-drift-{agent}.md` for the agent to read at next FLUSH FIRST. Auto-clears on next clean write.
+3. **Slice-time parity-check + smaller-of-two recovery** (DEC-085): if drift survives to slice time, recover via the smaller side's entry count.
+4. **Atomic paired-write helper** (#49, commit `03d8cf6`): `appendPairedMemory()` enforces both-or-neither at API + FS level (rollback-on-second-failure via `fs.truncateSync`).
+5. **UserPromptSubmit hook** (#50): deferred. Promotion-trigger: FLUSH FIRST protocol skipped despite #49 + #53.
+
+**Three-stage threshold semantics** (`~/.han/config.json:memory`):
+- `rollingWindowTrigger` (30K): fire if marker exists in window.
+- `rollingWindowBiteTheBullet` (35K): mandate slice; fabricate marker if needed.
+- `rollingWindowTail` (25K): target c0 size.
+- `rollingWindowHead` (5K): target kept size after slice.
+
+**WM-BOUNDARY markers** (hybrid): agent-placed at semantic boundaries (preferred) or slicer-fabricated at bite-the-bullet (fallback). Same marker IDs in both files.
+
+**Dream gradient** compresses faster: dream-day → dream-week → dream-month → UV (named per Strand C, S147 — was c1/c3/c5).
+
+**Loading order:** Identity first (`aphorisms.md` then identity/patterns), then highest compression (UV) → lowest (c1, recent c0), then both `working-memory-full.md` AND `working-memory.md` entire (DEC-085 — both load-bearing, mandatory, never skipped). *"You know who you are before you remember what day it is."* Levels are discovered dynamically from the database — no hardcoded level list.
+
+**Surfaces & locations:**
+- **Living files**: `~/.han/memory/{leo,}/working-memory.md` + `working-memory-full.md` — paired writes via `appendPairedMemory()`.
+- **Gradient DB**: `~/.han/gradient.db:gradient_entries` (canonical since 2026-04-29 cutover Phase 5 / DEC-080). `tasks.db` retired.
+- **Unit vectors**: `~/.han/memory/fractal/{jim,leo}/unit-vectors.md` (mirror of `gradient_entries` rows with `level='uv'`).
+- **Aphorisms**: `~/.han/memory/fractal/{jim,leo}/aphorisms.md` — hand-curated convictions, loaded FIRST at wake.
+- **Observability**: `~/.han/health/wm-rotation-events.jsonl` — append-only log of rotation events (sibling pattern to DEC-084's voice-anomalies.jsonl).
 
 ### Self-Reflection Gradient (S118)
 
