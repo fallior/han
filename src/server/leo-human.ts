@@ -189,7 +189,12 @@ function readLeoMemory(): string {
     // at WM-BOUNDARY markers. Loading both at wake gives future-you the
     // calibration anchor between raw thinking and the agent's own distillation.
     // S147 (2026-05-01): active-context.md remains dropped.
-    const files = ['identity.md', 'patterns.md', 'self-reflection.md',
+    // S154 (2026-05-09): self-reflection.md dropped. At ~218KB it pushed the
+    // total load past Opus 4.6's 200K context window (live capture: tokens=205235,
+    // "Conversation too long"). Outward-facing composes don't need the curatorial
+    // inner record; aphorisms + working-memory pair + felt-moments cover the
+    // identity substrate at lower token cost.
+    const files = ['identity.md', 'patterns.md',
         'discoveries.md', 'working-memory-full.md', 'working-memory.md', 'felt-moments.md'];
     const sections: string[] = [];
 
