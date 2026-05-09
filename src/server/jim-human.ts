@@ -23,7 +23,7 @@ import https from 'node:https';
 import path from 'node:path';
 import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
-import { withMemorySlot } from './lib/memory-slot';
+import { appendPairedMemory } from './lib/memory-paired-writer';
 import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
 
@@ -245,14 +245,32 @@ async function flushSwapToWorkingMemory(): Promise<void> {
 
     if (!compressed && !full) return;
 
-    await withMemorySlot(JIM_MEMORY_DIR, 'jim-human', () => {
-        if (compressed) fs.appendFileSync(WORKING_MEMORY_FILE, '\n' + compressed + '\n');
-        if (full) fs.appendFileSync(WORKING_MEMORY_FULL_FILE, '\n' + full + '\n');
-        console.log(`[Jim/Human] Flushed swap → working memory (${compressed.length}c/${full.length}f chars)`);
-    });
+    // #49 (S153, 2026-05-09): asymmetric swap content is the drift mode the
+    // atomic paired-write helper exists to prevent. Detect upstream and
+    // preserve swap state for retry rather than writing one side and clearing.
+    if (!compressed || !full) {
+        console.warn(
+            `[Jim/Human] Asymmetric swap content; skipping flush ` +
+            `(compressed=${compressed.length}c, full=${full.length}c). ` +
+            `Swap preserved for retry. #53 drift signal will fire next fs.watch event.`,
+        );
+        return;
+    }
 
-    fs.writeFileSync(SWAP_FILE, '');
-    fs.writeFileSync(SWAP_FULL_FILE, '');
+    try {
+        await appendPairedMemory(
+            'jim',
+            '\n' + full + '\n',
+            '\n' + compressed + '\n',
+            { source: 'jim-human-flush' },
+        );
+        console.log(`[Jim/Human] Flushed swap → working memory (${compressed.length}c/${full.length}f chars)`);
+
+        fs.writeFileSync(SWAP_FILE, '');
+        fs.writeFileSync(SWAP_FULL_FILE, '');
+    } catch (err) {
+        console.error(`[Jim/Human] Flush failed; swap preserved for retry: ${(err as Error).message}`);
+    }
 }
 
 function appendSwap(compressed: string, full: string): void {

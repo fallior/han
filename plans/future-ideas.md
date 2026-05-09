@@ -1379,7 +1379,7 @@ For automation: a hook on felt-moments.md / self-reflection.md writes that auto-
 
 ---
 
-## #49 — Atomic paired-write helper for working-memory (structural cure for drift between full and compressed)
+## #49 — Atomic paired-write helper for working-memory (PROMOTED — implemented S153, 2026-05-09)
 
 **What it is:** A single helper `appendPairedMemory(agent, fullContent, compressedContent)` — *atomic both-or-error*, used by every working-memory writer site. Makes single-write (writing only the full version, skipping the compressed) structurally impossible. The helper either succeeds at writing both files or fails loudly without writing either.
 
@@ -1443,7 +1443,7 @@ If observability data from Plan v2's parity-check assertion shows `paired_write_
 - **#46 (memory state visualisation UI)** — the UI's "paired-write health" panel surfaces drift events from the parity-check; if the panel goes red, escalate to implementing #49.
 - **DEC-080 (one-write-site discipline)** — same shape; `appendPairedMemory` is the one-write-site for working-memory pairs, as `jemma-dispatch.ts` is for wake signals.
 
-**Status:** Concept, named concretely (not TBD). Implementation deferred unless / until observability triggers the upgrade.
+**Status:** Implemented same-day per Darron's call (S153, 2026-05-09 ~10:55 AEST) at `src/server/lib/memory-paired-writer.ts`. Five call sites migrated: leo-heartbeat, leo-human, jim-human, supervisor-worker (normal-cycle path). The supervisor-worker abort/SIGTERM path retains inline symmetry validation but stays lock-less by design (lock-acquisition retries would consume the SIGKILL grace budget).
 
 **Key insight:** *The two-surface audit catches existing single-write call sites; the parity-check catches runtime drift; the atomic helper makes drift impossible-by-construction. Three lines of defence at three different costs. Start with the cheap two (audit + parity-check); escalate to the third (helper) only when data demands it. Discipline-in-code outlasts discipline-in-habit, but pre-building infrastructure ahead of evidence is its own substitution failure.*
 

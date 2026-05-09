@@ -51,6 +51,7 @@ import { execSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
 import { loadTraversableGradient, rotateMemoryFile, activeCascade, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
+import { appendPairedMemory } from './lib/memory-paired-writer.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -767,11 +768,27 @@ function addDelineation(): void {
     }
 }
 
-function writeSwapToWorkingMemory(postDelineationOnly = false): boolean {
+async function writeSwapToWorkingMemory(postDelineationOnly = false): Promise<boolean> {
     try {
         const content = postDelineationOnly ? getPostDelineationContent() : readSwapContents();
 
-        if (!content.compressed.trim() && !content.full.trim()) {
+        const compTrimmed = content.compressed.trim();
+        const fullTrimmed = content.full.trim();
+
+        if (!compTrimmed && !fullTrimmed) {
+            return false;
+        }
+
+        // #49 (S153, 2026-05-09): asymmetric swap content is the drift mode the
+        // atomic paired-write helper exists to prevent. Detect upstream and skip
+        // the write entirely. Swap state remains in heartbeat-swap.{md,full.md}
+        // so a subsequent flush can attempt again with both sides populated.
+        if (!compTrimmed || !fullTrimmed) {
+            console.warn(
+                `[Leo] Asymmetric heartbeat swap; skipping flush ` +
+                `(compressed=${compTrimmed.length}c, full=${fullTrimmed.length}c). ` +
+                `Swap preserved for retry. #53 drift signal will fire next fs.watch event.`,
+            );
             return false;
         }
 
@@ -783,9 +800,14 @@ function writeSwapToWorkingMemory(postDelineationOnly = false): boolean {
             }
         } catch { /* file may not exist yet */ }
 
-        // Append swap contents to shared working memory
-        fs.appendFileSync(WORKING_MEMORY_FILE, content.compressed);
-        fs.appendFileSync(WORKING_MEMORY_FULL_FILE, content.full);
+        // Atomic paired-write via appendPairedMemory (#49) — replaces the
+        // previous lock-less two-call appendFileSync pattern.
+        await appendPairedMemory(
+            'leo',
+            content.full,
+            content.compressed,
+            { source: 'leo-heartbeat-flush' },
+        );
 
         // Update mtime after our write
         try {
@@ -800,8 +822,8 @@ function writeSwapToWorkingMemory(postDelineationOnly = false): boolean {
     }
 }
 
-function flushHeartbeatSwap(postDelineationOnly = false): void {
-    const written = writeSwapToWorkingMemory(postDelineationOnly);
+async function flushHeartbeatSwap(postDelineationOnly = false): Promise<void> {
+    const written = await writeSwapToWorkingMemory(postDelineationOnly);
     if (!written) {
         console.log('[Leo] Heartbeat swap empty — nothing to flush');
     }
@@ -2536,7 +2558,7 @@ async function heartbeat(): Promise<void> {
 
         beatCounter++;
         writeHealthSignal(null, beatType);
-        flushHeartbeatSwap(resumingFromInterruption);
+        await flushHeartbeatSwap(resumingFromInterruption);
         resumingFromInterruption = false;
         return;
     }
@@ -2584,7 +2606,7 @@ async function heartbeat(): Promise<void> {
     } catch (err) {
         if (abort.signal.aborted) {
             console.log('[Leo] Beat interrupted by CLI — writing swap to memory, adding delineation');
-            writeSwapToWorkingMemory();
+            await writeSwapToWorkingMemory();
             addDelineation();
         } else {
             console.error('[Leo] Error:', (err as Error).message);
@@ -2608,7 +2630,7 @@ async function heartbeat(): Promise<void> {
     // Normal completion: flush heartbeat swap to shared working memory
     // If resuming from interruption, only flush post-delineation content
     // (pre-delineation was already written to working memory on abort)
-    flushHeartbeatSwap(resumingFromInterruption);
+    await flushHeartbeatSwap(resumingFromInterruption);
     resumingFromInterruption = false;
 
     // Write health signal at end of every successful beat (Robin Hood Protocol)

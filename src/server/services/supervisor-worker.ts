@@ -32,7 +32,7 @@ import type {
 } from './supervisor-protocol';
 import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, type DayPhase } from '../lib/day-phase';
-import { withMemorySlot } from '../lib/memory-slot';
+import { appendPairedMemory } from '../lib/memory-paired-writer';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 import { spawn as spawnChild } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
@@ -1911,15 +1911,25 @@ function savePartialCycleWork(cycleNumber: number, cycleType: string, partialCon
         addDelineation();
         log(`[Worker] Gary Protocol: delineation added after interrupted ${cycleType} cycle #${cycleNumber}`);
 
-        // Flush swap to working memory (pre-delineation content)
+        // Flush swap to working memory (pre-delineation content).
+        //
+        // #49 carve-out (S153, 2026-05-09): this path is deliberately lock-less
+        // and synchronous — during abort/SIGTERM, withMemorySlot's retry-with-
+        // sleep would consume the SIGKILL grace budget before flush completes.
+        // The abort path uses inline symmetry validation instead of the
+        // appendPairedMemory helper. Trade-off: lose the cross-process lock
+        // (which is fine — abort happens rarely and the slicer is unlikely to
+        // be writing concurrently); preserve #49's structural promise that we
+        // never write single-side under the working-memory paired-file model.
         const swapContent = fs.readFileSync(SUPERVISOR_SWAP_FILE, 'utf8').trim();
         const swapFullContent = fs.readFileSync(SUPERVISOR_SWAP_FULL_FILE, 'utf8').trim();
-        if (swapContent || swapFullContent) {
-            // Synchronous flush — no memory slot contention during abort/SIGTERM
-            if (swapContent) fs.appendFileSync(WORKING_MEMORY_FILE, '\n' + swapContent + '\n');
-            if (swapFullContent) fs.appendFileSync(WORKING_MEMORY_FULL_FILE, '\n' + swapFullContent + '\n');
+        if (swapContent && swapFullContent) {
+            fs.appendFileSync(WORKING_MEMORY_FILE, '\n' + swapContent + '\n');
+            fs.appendFileSync(WORKING_MEMORY_FULL_FILE, '\n' + swapFullContent + '\n');
             fs.writeFileSync(SUPERVISOR_SWAP_FILE, '');
             fs.writeFileSync(SUPERVISOR_SWAP_FULL_FILE, '');
+        } else if (swapContent || swapFullContent) {
+            log(`[Worker] Abort path: asymmetric swap (compressed=${swapContent.length}c, full=${swapFullContent.length}c) — preserving for next cycle (#49 symmetry promise)`);
         }
 
         // Log to session file
@@ -2682,14 +2692,26 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             const swapContent = fs.existsSync(SUPERVISOR_SWAP_FILE) ? fs.readFileSync(SUPERVISOR_SWAP_FILE, 'utf8').trim() : '';
             const swapFullContent = fs.existsSync(SUPERVISOR_SWAP_FULL_FILE) ? fs.readFileSync(SUPERVISOR_SWAP_FULL_FILE, 'utf8').trim() : '';
 
-            if (swapContent || swapFullContent) {
-                await withMemorySlot(MEMORY_DIR, 'supervisor', async () => {
-                    if (swapContent) fs.appendFileSync(WORKING_MEMORY_FILE, '\n' + swapContent + '\n');
-                    if (swapFullContent) fs.appendFileSync(WORKING_MEMORY_FULL_FILE, '\n' + swapFullContent + '\n');
+            // #49 (S153, 2026-05-09): atomic paired-write via appendPairedMemory.
+            // Asymmetric content (one side present, other empty) is the drift
+            // mode the helper exists to prevent — handle upstream and preserve
+            // swap state for retry.
+            if (swapContent && swapFullContent) {
+                try {
+                    await appendPairedMemory(
+                        'jim',
+                        '\n' + swapFullContent + '\n',
+                        '\n' + swapContent + '\n',
+                        { source: 'supervisor-worker-flush' },
+                    );
                     // Clear swap files after successful flush
                     fs.writeFileSync(SUPERVISOR_SWAP_FILE, '');
                     fs.writeFileSync(SUPERVISOR_SWAP_FULL_FILE, '');
-                });
+                } catch (err: any) {
+                    log(`[Worker] Paired flush failed; swap preserved for retry: ${err.message}`);
+                }
+            } else if (swapContent || swapFullContent) {
+                log(`[Worker] Asymmetric swap content (compressed=${swapContent.length}c, full=${swapFullContent.length}c) — skipping flush, swap preserved. #53 drift signal will fire next fs.watch event.`);
             }
         } catch (err: any) {
             log(`[Worker] Swap flush failed: ${err.message}`);
