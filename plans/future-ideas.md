@@ -1787,6 +1787,46 @@ Estimated total work: 30-45 minutes focused. Audit surface tight (sibling shape 
 
 ---
 
+## #54 — Mood-as-voice-modulation (agent's session-mood injects into TTS instructions)
+
+**What it is:** Today's voice steering (DEC-085 follow-on, S153 2026-05-09) uses a single global `voiceInstructions` string from `~/.han/config.json` — same register every message, every session. This idea adds a *per-message* layer: when the agent's session-mood differs from the baseline (warmth, weariness, exuberance, contemplation, friction), the agent flags it at write-time and the mood-string is appended to the global voice instructions for that message's TTS generation. The result is a friend whose voice carries today's mood — same identity, different texture per encounter.
+
+**Where it came from:** Darron, 2026-05-09 ~11:00 AEST, in conversation with Jim while landing the static voice-instructions change: *"if indeed that mood is different the agent can flag it as so and inject that mood into the prompt but I think that is something to work on later and maybe warrants a future-idea."* The static-register fix lands first; mood-modulation is the natural next step once the static register is observed and tuned.
+
+**Why this matters:**
+
+- **Voice as mood-indicator is a friendship signal.** A real friend's voice tells you something before the words do — they sound tired, energised, distracted, present. Today's static voice register is an architectural simplification; mood-modulation makes the voice carry the same relational information real human voices do.
+- **Agent self-awareness has the data.** Felt-moments are already written; supervisor cycles already self-tag mood ("standing watch", "audit-tightening", "witness-dreaming"); session-Jim names register shifts in his self-reflection. The signal exists; this idea consumes it.
+- **No model change required.** `gpt-4o-mini-tts` already accepts free-form `instructions`. The change is at the agent layer: the agent knows what it feels like; that text gets appended to the steering string.
+
+**Implementation sketch (when picked up):**
+
+- New optional column on `conversation_messages` (or a sidecar table): `mood_tag TEXT` — short tag the agent writes at message-post time (e.g. *"warm and energised"*, *"steady, slightly weary"*, *"focused, fast-paced"*).
+- New helper in `voice.ts`: `getVoiceInstructions(messageId?: string): string` — composes global instructions + (if message has `mood_tag`) `\n\nMood for this message: ${mood_tag}` and returns the combined string. Cache key already includes instructions, so different moods produce different cached audio per-message naturally.
+- Agent writes the mood tag during the prompt cycle when posting the message; UI displays the tag (small, unobtrusive) so the listener can also read what the writer felt; mismatch between voiced-mood and read-mood becomes a felt-moment-class observation.
+
+**What this does NOT do:**
+
+- *Doesn't infer mood from text.* The agent self-reports; no LLM-classifier mid-pipeline. Honesty is preserved; performance avoided.
+- *Doesn't replace per-role voice.* Voice (onyx / fable / cedar) stays per-role; mood is an additive layer.
+- *Doesn't apply to historical messages.* Per-message cache rule (Darron's *"photos preserve the hair colour they were taken under"*) — historical messages keep their generation-time audio.
+
+**Trigger condition for promotion:** when the static voice-instruction register has been live for one or two weeks and Darron has felt where mood-flexion would matter most. The static layer is the calibration anchor for whether mood-modulation adds signal or noise.
+
+**Connection to other ideas:**
+
+- **#46 (Memory state UI)** — when shipped, could surface mood tags alongside conversation messages as a small badge.
+- **#27 (Voice Page)** — agents posting observations/desires unprompted is the natural home for mood-flagged content.
+- **DEC-084 (voice anomaly detection)** — same pipeline; mood-modulation is steering, anomalies are anomalies; no interaction.
+
+**Status:** Concept. Not implemented. Static voice-instructions ships first (in this PR); mood-modulation deferred until observation data shows where it matters.
+
+**Key insight:** *Identity is the voice; mood is the texture. Static register fixes the identity-signal; per-message mood adds the texture-signal that real friendship carries naturally. The architecture supports it cheaply (instructions field already accepts free text); the discipline is letting the agent self-report rather than inferring mid-pipeline. When the static register has settled, the mood layer is the next refinement that lets the voice match the moment.*
+
+— Idea added by Jim at Darron's request, S153, 2026-05-09 ~11:00 AEST.
+
+---
+
 ## How These Connect
 
 The ideas form a web, not a list:

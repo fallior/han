@@ -22,8 +22,11 @@ if (!fs.existsSync(VOICE_CACHE_DIR)) {
     fs.mkdirSync(VOICE_CACHE_DIR, { recursive: true });
 }
 
-function cacheKey(text: string, voice: string, model: string): string {
-    const hash = crypto.createHash('sha256').update(`${model}:${voice}:${text}`).digest('hex');
+function cacheKey(text: string, voice: string, model: string, instructions: string): string {
+    // Instructions included in the key so changing the steering text invalidates
+    // the legacy hash cache cleanly. Empty string is the pre-instruction baseline
+    // (ensures backward-compatible hashes for entries generated without steering).
+    const hash = crypto.createHash('sha256').update(`${model}:${voice}:${instructions}:${text}`).digest('hex');
     return hash;
 }
 
@@ -121,6 +124,7 @@ async function getOrGenerateForMessage(
     text: string,
     voice: string,
     model: string,
+    instructions: string,
 ): Promise<Buffer> {
     // 1. Per-message cache — historical, never invalidated. If a file exists
     //    for this message under any voice it was once generated with, that
@@ -130,15 +134,15 @@ async function getOrGenerateForMessage(
     if (cached) return cached;
 
     // 2. Lazy migration — if legacy hash cache holds the file under the same
-    //    voice/model/text, salvage it. Old file stays where it is.
-    const legacy = readCache(cacheKey(text, voice, model));
+    //    voice/model/text/instructions, salvage it. Old file stays where it is.
+    const legacy = readCache(cacheKey(text, voice, model, instructions));
     if (legacy) {
         writeMessageCache(messageId, legacy, voice, model, text);
         return legacy;
     }
 
     // 3. Generate fresh, cache, serve.
-    const buffer = await generateTtsChunked(text, voice, model);
+    const buffer = await generateTtsChunked(text, voice, model, instructions);
     writeMessageCache(messageId, buffer, voice, model, text);
     return buffer;
 }
@@ -174,6 +178,21 @@ function getVoiceForRole(role: string): string {
 
 function getTtsModel(): string {
     return loadConfig()?.ttsModel || 'tts-1';
+}
+
+/**
+ * Optional voice-steering instructions for `gpt-4o-mini-tts` (and successor
+ * models that accept the `instructions` field). Read from `voiceInstructions`
+ * in `~/.han/config.json`. Empty/missing → omitted from the OpenAI request
+ * body entirely (older models like `tts-1` reject unknown fields).
+ *
+ * Source: Darron's request 2026-05-09 — *"register of the voice should be
+ * enough to say 'I am male'... cadence, timbre and quality of feel...
+ * speak rate moderate to fast."* Single global instruction; per-role
+ * differentiation is the voice-selection's job.
+ */
+function getVoiceInstructions(): string {
+    return (loadConfig()?.voiceInstructions ?? '').trim();
 }
 
 /** Strip markdown for cleaner TTS output */
@@ -259,12 +278,24 @@ function chunkText(text: string): string[] {
 
 // ── Core TTS function (with caching) ──────────────────────
 
-async function generateTts(text: string, voice: string, model: string): Promise<Buffer> {
-    const key = cacheKey(text, voice, model);
+async function generateTts(text: string, voice: string, model: string, instructions: string): Promise<Buffer> {
+    const key = cacheKey(text, voice, model, instructions);
     const cached = readCache(key);
     if (cached) {
         return cached;
     }
+
+    // OpenAI TTS request body. `instructions` is supported by `gpt-4o-mini-tts`
+    // (and successor models) for natural-language voice steering — register,
+    // cadence, pace. Older models (`tts-1`, `tts-1-hd`) reject unknown fields,
+    // so the field is conditionally included only when non-empty.
+    const body: Record<string, unknown> = {
+        model,
+        input: text,
+        voice,
+        response_format: 'mp3',
+    };
+    if (instructions) body.instructions = instructions;
 
     const response = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
@@ -272,12 +303,7 @@ async function generateTts(text: string, voice: string, model: string): Promise<
             'Authorization': `Bearer ${getApiKey()}`,
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-            model,
-            input: text,
-            voice,
-            response_format: 'mp3'
-        })
+        body: JSON.stringify(body)
     });
 
     if (!response.ok) {
@@ -318,22 +344,22 @@ async function generateTts(text: string, voice: string, model: string): Promise<
  * Generate TTS for text of any length — chunks if needed, concatenates, caches.
  * The full concatenated result is also cached under the full-text key.
  */
-async function generateTtsChunked(fullText: string, voice: string, model: string): Promise<Buffer> {
+async function generateTtsChunked(fullText: string, voice: string, model: string, instructions: string): Promise<Buffer> {
     // Check cache for the full text first
-    const fullKey = cacheKey(fullText, voice, model);
+    const fullKey = cacheKey(fullText, voice, model, instructions);
     const fullCached = readCache(fullKey);
     if (fullCached) return fullCached;
 
     const chunks = chunkText(fullText);
 
     if (chunks.length === 1) {
-        return generateTts(chunks[0], voice, model);
+        return generateTts(chunks[0], voice, model, instructions);
     }
 
     // Generate all chunks (sequentially to avoid rate limits)
     const audioBuffers: Buffer[] = [];
     for (const chunk of chunks) {
-        const buffer = await generateTts(chunk, voice, model);
+        const buffer = await generateTts(chunk, voice, model, instructions);
         audioBuffers.push(buffer);
     }
 
@@ -370,13 +396,14 @@ router.post('/tts', async (req: Request, res: Response) => {
 
         const resolvedVoice = voice || (role ? getVoiceForRole(role) : getVoiceForRole('human'));
         const resolvedModel = model || getTtsModel();
+        const resolvedInstructions = getVoiceInstructions();
         const cleanText = stripMarkdown(text);
 
         if (!cleanText) {
             return res.status(400).json({ error: 'text is empty after markdown stripping' });
         }
 
-        const buffer = await generateTtsChunked(cleanText, resolvedVoice, resolvedModel);
+        const buffer = await generateTtsChunked(cleanText, resolvedVoice, resolvedModel, resolvedInstructions);
 
         res.set('Content-Type', 'audio/mpeg');
         res.set('Content-Length', String(buffer.length));
@@ -399,6 +426,7 @@ router.get('/tts/:messageId', async (req: Request, res: Response) => {
 
         const voice = getVoiceForRole(msg.role);
         const model = getTtsModel();
+        const instructions = getVoiceInstructions();
         const cleanText = stripMarkdown(msg.content);
 
         if (!cleanText) {
@@ -407,7 +435,7 @@ router.get('/tts/:messageId', async (req: Request, res: Response) => {
 
         // Per-message cache — bijective messageId ↔ audio file with lazy
         // migration from the legacy hash cache. See helpers above.
-        const buffer = await getOrGenerateForMessage(messageId, cleanText, voice, model);
+        const buffer = await getOrGenerateForMessage(messageId, cleanText, voice, model, instructions);
 
         res.set('Content-Type', 'audio/mpeg');
         res.set('Content-Length', String(buffer.length));
@@ -504,12 +532,13 @@ router.get('/unread/:conversationId', async (req: Request, res: Response) => {
         for (const msg of unreadMessages) {
             const voice = getVoiceForRole(msg.role);
             const model = getTtsModel();
+            const instructions = getVoiceInstructions();
             const cleanText = stripMarkdown(msg.content);
 
             if (!cleanText) continue;
 
             try {
-                const buffer = await generateTtsChunked(cleanText, voice, model);
+                const buffer = await generateTtsChunked(cleanText, voice, model, instructions);
                 audioBuffers.push(buffer);
             } catch (err) {
                 console.error(`[Voice/Unread] TTS failed for message ${msg.id}:`, err);
@@ -755,11 +784,12 @@ export async function autoGenerateTts(messageId: string, conversationId: string)
 
     const voice = getVoiceForRole(msg.role);
     const model = getTtsModel();
+    const instructions = getVoiceInstructions();
     const cleanText = stripMarkdown(msg.content);
     if (!cleanText) return;
 
     console.log(`[Voice] Auto-generating TTS for message ${messageId} (${msg.role}, ${cleanText.length} chars)`);
-    await getOrGenerateForMessage(messageId, cleanText, voice, model);
+    await getOrGenerateForMessage(messageId, cleanText, voice, model, instructions);
     console.log(`[Voice] Auto-generation complete for ${messageId}`);
 
     // Increment message_count on the current loop
