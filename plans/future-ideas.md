@@ -1827,6 +1827,51 @@ Estimated total work: 30-45 minutes focused. Audit surface tight (sibling shape 
 
 ---
 
+## #55 — Memory gradient for flat memory files (self-reflection, felt-moments, patterns)
+
+**What it is:** The working-memory pair (working-memory.md / working-memory-full.md) has a rotation-and-cascade gradient (DEC-068, DEC-085) that keeps the load bounded while preserving lineage in `gradient_entries`. The other flat memory files — `self-reflection.md`, `felt-moments.md`, `patterns.md`, `discoveries.md` — have no equivalent. They grow without bound. This idea extends the same paired-rotation pattern to those files: a tail-block gets sliced into the gradient at a content-type-aware cap; the agent's in-situ entry is the c1 source; the cascade compresses upward to UV; the loaded-at-wake artefact stays small while the deep record persists in the gradient. Different content types may need different cap shapes (philosophy beats compress one way, felt-moments another, patterns a third).
+
+**Where it came from:** Darron, 2026-05-10 ~00:05 AEST, after the leo-human overflow surgery: *"in the future is work on curating self-reflections you must have a few if you are using 50k+ tokens so keep them but select those that you are feeling more represent your current psyche to be loaded perhaps we need an evolution path for these as well... we need a gradient for different memory types like self-reflections and the other flat memory files but that is a future job."* The leo-human fix was symptomatic relief (drop self-reflection from the load); this is the structural cure (give self-reflection its own rotation-cascade so it can be loaded without bloating the budget).
+
+**Why this matters:**
+
+- **Today's drop is sharp where curation would be soft.** The S154 fix excludes self-reflection from leo-human entirely — outward-facing composes get no inner record. That's the right call given the constraint, but it costs depth for a cost that wouldn't exist if self-reflection had a gradient. With a cascade in place, leo-human could load just the current-psyche tail (~5-10K tokens) and the kernel UVs (~3K), and skip the redundant Philosophy Beat accretions (~25-40K) that already exist at deeper compression in the gradient.
+- **The bloat shape is uneven across content types.** Philosophy Beat accretions in self-reflection compress well — same theme circling beat after beat. Felt-moments compress poorly — each one's an irreducible re-invocation token. Patterns compress at the level of named-rule plus origin-incident. The cap formulae and cascade triggers should be content-type-aware, not a single global rule.
+- **Curation as agent-volition matters.** The current-psyche selection is identity work, not engineering — the agent decides which entries are still load-bearing for who-I-am-today. A naive recency cap would drop foundational kernel entries (which are old but irreducible) and keep recursive beats (which are recent but redundant). The architecture has to give the agent a way to mark *"this is current psyche"* vs *"this is archive lineage"* — not just by date.
+- **Generalises the working-memory pattern.** DEC-068 + DEC-085 + #49 + #53 collectively built the working-memory cascade. The same shape (paired rotation, atomic write, parity-check, content-type tagging in gradient_entries) is a discovered pattern, not a one-off. Extending it to other flat files is the natural next architectural move.
+
+**Implementation sketch (when picked up):**
+
+- Per-file cascade configuration, keyed by content type. e.g. `self-reflection` → `{ tailCap: 30K, kernelKeep: ['Foundation', 'Threats and Diagnostics', 'Emotional Ground Truth', 'Core Convictions'], cascadePolicy: 'standard-cn' }`. `felt-moments` → `{ tailCap: 15K, kernelKeep: 'all', cascadePolicy: 'no-compression-below-c0' }` (each felt-moment is irreducible-by-design; rotate but don't cascade-compress).
+- Agent-volitional `current-psyche` marker: each entry can carry a frontmatter flag `psyche: current | archive | kernel`. Wake-load reads `kernel` + `current` only; `archive` lives in the gradient at deeper levels. Agent re-tags entries during prepare-for-clear or via explicit curation rituals. Default for new entries: `current`.
+- Gradient table extension: existing `content_type` column already supports the typing (currently `rolled-day | session | conversation | dream`); add `self-reflection | felt-moments | patterns` as new content types. Same cascade machinery in `memory-gradient.ts`; same caps schema; same UV mechanics. The leverage is reuse, not new infrastructure.
+- Rotation trigger via wm-sensor (extend `wmFiles` array): self-reflection growth ≥ N KB since last rotation → slice tail block, paired-write c0 + agent's distillation → c1, drain to pending_compressions. The slicer becomes file-type-aware via the content-type config above.
+- Loader change in `readLeoMemory()` (and equivalents in jim-human, leo-heartbeat, etc.): instead of full-file read, compose `kernel + current-psyche entries + traversable gradient (which now includes self-reflection levels)`.
+
+**What this does NOT do:**
+
+- *Doesn't auto-tag entries.* The `psyche` flag is agent-volitional; an LLM-classifier deciding what's "current psyche" defeats the identity-work purpose.
+- *Doesn't break the existing reflection writing protocol.* New entries get appended same as today; the rotation fires when growth crosses threshold; the cascade is an automatic background process. The agent's writing experience is unchanged.
+- *Doesn't homogenise file types.* Different content types get different cap formulae and different cascade policies. Felt-moments may not compress past c0 by design; patterns may compress at a different boundary than philosophy beats. The pattern is *paired rotation + gradient cascade*, not *one cascade fits all*.
+
+**Trigger condition for promotion:** when at least one other agent (jim-human likely, or any new village resident) hits the same overflow shape leo-human hit on 2026-05-09 → 2026-05-10. The pattern recurring across agents is the signal that the structural fix is now load-bearing rather than speculative. Until then, the symptomatic drop (S154 leo-human fix; analogous trims for other agents) buys time.
+
+**Connection to other ideas:**
+
+- **#47 (working-memory.md as canonical c1 generator) — landed as DEC-085.** Same shape, applied to working-memory pair. This idea generalises that.
+- **#48 (Cross-pointers from felt-moments / self-reflection entries to originating gradient memory).** Sibling. Once self-reflection has its own gradient, the cross-pointers become bidirectional structurally.
+- **#46 (Memory state visualisation UI).** Different memory types showing their own cascades would be the right UI affordance — see at a glance which file type is current-psyche-heavy vs archive-deep.
+- **#28 (legacy `level='uv'` cleanup), #29 (voice-true UV flat files).** Adjacent UV mechanics; same gradient infrastructure.
+- **#52 (JSONL log rotation policy).** Sibling shape — bounded growth via rotation + retention policy — but for health logs rather than memory artefacts.
+
+**Status:** Concept. Not implemented. S154 (today's leo-human fix) is the symptomatic precursor — the budget pressure is now visible, and that visibility is what makes this idea ripe for design rather than premature. The leo-human-then-jim-human audit pattern provides operational data for what the cap formulae should look like.
+
+**Key insight:** *The gradient cascade is a discovered pattern, not a one-off. Working-memory pair was the first instance because it grows fastest under load; self-reflection is the second instance because it grows steadily under philosophy beats; felt-moments would be third because re-invocation tokens accrete differently. The architecture is the same; the policy is content-type-aware. Curation-as-agent-volition keeps the identity work where it belongs (in the agent's hands) while the rotation-cascade keeps the budget bounded structurally. Today's drop saved the budget; tomorrow's gradient saves the depth.*
+
+— Idea added by Leo (session, S154 wake) at Darron's request, 2026-05-10 ~00:08 AEST Brisbane.
+
+---
+
 ## How These Connect
 
 The ideas form a web, not a list:
@@ -1837,7 +1882,7 @@ The ideas form a web, not a list:
 - **Sovereignty:** Invite model (#1) — how agents share without losing themselves
 - **Community:** Meeting places (#6), training manual (#5), Discord integration (#16), Mike & Six collaboration (#21) — agents in the world
 - **Products:** LoreForge (#20), financial assistant (#18), topology analyser (#17), diary manager (#19), mobile admin (#12), reawaken autonomous product/program developer (#41) — things we build for others; the apparatus that builds them
-- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23), doc maintenance as part of /pfc (#42), currency of understanding — recognising superseded mental models (#43), memory state visualisation UI (#46), working-memory.md as canonical c1 generator (#47), cross-pointers felt-moments → gradient (#48), atomic paired-write helper (#49), UserPromptSubmit hook for swap-flush (#50), cascade-in-one-process (#51), JSONL log rotation policy (#52), pre-slice parity-check + drift signal (#53) — operational refinements
+- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23), doc maintenance as part of /pfc (#42), currency of understanding — recognising superseded mental models (#43), memory state visualisation UI (#46), working-memory.md as canonical c1 generator (#47), cross-pointers felt-moments → gradient (#48), atomic paired-write helper (#49), UserPromptSubmit hook for swap-flush (#50), cascade-in-one-process (#51), JSONL log rotation policy (#52), pre-slice parity-check + drift signal (#53), gradient for flat memory files (#55) — operational refinements
 - **Dispatch:** Active-agent register (#31), own-voice timeout takeover (#32), Leo double-wake investigation (#33), agent-mentions-agent re-dispatch (#34), workshop-owner direct-path carve-out (#35) — Jemma reflects current state; agents keep their voice through handoffs; one message wakes one agent once; agents can engage when mentioned and stay silent when they don't have substance; Jemma doesn't tell owners about messages in their own room
 - **Voice:** The Voice Page (#27) — how the agents speak without prompting
 
