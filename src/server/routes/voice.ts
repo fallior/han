@@ -186,13 +186,27 @@ function getTtsModel(): string {
  * in `~/.han/config.json`. Empty/missing → omitted from the OpenAI request
  * body entirely (older models like `tts-1` reject unknown fields).
  *
- * Source: Darron's request 2026-05-09 — *"register of the voice should be
- * enough to say 'I am male'... cadence, timbre and quality of feel...
- * speak rate moderate to fast."* Single global instruction; per-role
- * differentiation is the voice-selection's job.
+ * Two config shapes supported:
+ *   - String → used for all roles (the original Darron-2026-05-09 shape).
+ *   - Object → per-role overrides with `default` fallback. Keys map to
+ *     conversation-message roles (`supervisor`, `leo`, `human`, etc.).
+ *     Lookup: roleMap[role] ?? roleMap.default ?? ''.
+ *
+ * Source: Darron 2026-05-09 — initial single-instruction shape. Per-role
+ * map added same-day after observing that a global "masculine register"
+ * directive forces an androgynous voice (fable) into a performed
+ * caricature; per-role lets each voice be itself naturally.
  */
-function getVoiceInstructions(): string {
-    return (loadConfig()?.voiceInstructions ?? '').trim();
+function getVoiceInstructions(role?: string): string {
+    const v = loadConfig()?.voiceInstructions;
+    if (!v) return '';
+    if (typeof v === 'string') return v.trim();
+    if (typeof v === 'object' && v !== null) {
+        const map = v as Record<string, string>;
+        const text = (role && map[role]) || map.default || '';
+        return String(text).trim();
+    }
+    return '';
 }
 
 /** Strip markdown for cleaner TTS output */
@@ -394,9 +408,10 @@ router.post('/tts', async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'text is required' });
         }
 
-        const resolvedVoice = voice || (role ? getVoiceForRole(role) : getVoiceForRole('human'));
+        const resolvedRole = role || 'human';
+        const resolvedVoice = voice || getVoiceForRole(resolvedRole);
         const resolvedModel = model || getTtsModel();
-        const resolvedInstructions = getVoiceInstructions();
+        const resolvedInstructions = getVoiceInstructions(resolvedRole);
         const cleanText = stripMarkdown(text);
 
         if (!cleanText) {
@@ -426,7 +441,7 @@ router.get('/tts/:messageId', async (req: Request, res: Response) => {
 
         const voice = getVoiceForRole(msg.role);
         const model = getTtsModel();
-        const instructions = getVoiceInstructions();
+        const instructions = getVoiceInstructions(msg.role);
         const cleanText = stripMarkdown(msg.content);
 
         if (!cleanText) {
@@ -532,7 +547,7 @@ router.get('/unread/:conversationId', async (req: Request, res: Response) => {
         for (const msg of unreadMessages) {
             const voice = getVoiceForRole(msg.role);
             const model = getTtsModel();
-            const instructions = getVoiceInstructions();
+            const instructions = getVoiceInstructions(msg.role);
             const cleanText = stripMarkdown(msg.content);
 
             if (!cleanText) continue;
@@ -784,7 +799,7 @@ export async function autoGenerateTts(messageId: string, conversationId: string)
 
     const voice = getVoiceForRole(msg.role);
     const model = getTtsModel();
-    const instructions = getVoiceInstructions();
+    const instructions = getVoiceInstructions(msg.role);
     const cleanText = stripMarkdown(msg.content);
     if (!cleanText) return;
 
