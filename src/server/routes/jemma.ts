@@ -8,6 +8,20 @@ import { Router, Request, Response } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { deliverMessage, deliveryStatsFile, HEALTH_DIR } from '../services/jemma-dispatch';
+import { personaStmts } from '../db';
+
+// Phase A Batch 5 (S155, 2026-05-10): registry-driven recipient validation per
+// DEC-081. Recipients are *active* personas with kind ∈ {agent, human}; gateways
+// (jemma, future dispatch agents) are NOT valid recipients of dispatch.
+// Sources of truth:
+//   - Agents: agent-registry.ts (the gradient/dispatch infra)
+//   - Humans: db.ts personas seed (kind='human') — Darron today; Mike when his
+//     village provisions; future-idea is to lift to persona-registry per Batch 7
+//     Alt B so the seed becomes a structured source-of-truth.
+function getValidRecipientSlugs(): Set<string> {
+    const personas = personaStmts.getActive.all() as Array<{ name: string; kind: string }>;
+    return new Set(personas.filter(p => p.kind === 'agent' || p.kind === 'human').map(p => p.name));
+}
 
 const router = Router();
 
@@ -64,10 +78,14 @@ router.post('/deliver', async (req: Request, res: Response) => {
             });
         }
 
-        if (!['jim', 'leo', 'darron'].includes(recipient)) {
+        const validRecipients = getValidRecipientSlugs();
+        if (!validRecipients.has(recipient)) {
+            const recipientList = [...validRecipients].sort().join(', ');
             return res.status(400).json({
                 success: false,
-                error: 'recipient must be jim, leo, or darron'
+                error: recipientList
+                    ? `recipient must be one of: ${recipientList}`
+                    : 'no valid recipients registered (check agent-registry.ts + personas seed)'
             });
         }
 

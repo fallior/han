@@ -8,12 +8,18 @@ import { runSupervisorCycle } from '../services/supervisor';
 import { catalogueConversation, catalogueAllUncatalogued } from '../services/cataloguing';
 import { autoGenerateTts, autoTagLoop } from './voice';
 import { callLLM } from '../orchestrator';
+import { registeredAgentSlugs } from '../lib/agent-registry';
 import { orchestrate } from '../services/jemma-orchestrator';
 import { getPersonas, getAgentPersonas, getMentionPatterns } from '../services/village.js';
 
 // Active-agent register (#31). Static config-flag implementation per DEC-079.
 // `~/.han/config.json` → `agents.active = ["leo","jim", ...]`. Future iteration
-// (Phase 2): derive from process liveness. Defaults to ["leo","jim"] if absent.
+// (Phase 2): derive from process liveness.
+//
+// Phase A Batch 5 (S155, 2026-05-10): default fallback is now `registeredAgentSlugs()`
+// per DEC-081 agent-agnostic discipline (was hardcoded ['leo','jim']). Empty registry
+// returns empty set; callers handle the no-agents-available case (typically: skip
+// classifier-fallback dispatch).
 function getActiveAgents(): Set<string> {
     try {
         const cfgPath = path.join(process.env.HOME || '', '.han', 'config.json');
@@ -21,16 +27,22 @@ function getActiveAgents(): Set<string> {
         const active = cfg?.agents?.active;
         if (Array.isArray(active) && active.length > 0) return new Set<string>(active.map(String));
     } catch { /* fall through */ }
-    return new Set<string>(['leo', 'jim']);
+    return new Set<string>(registeredAgentSlugs());
 }
 
-// Map a conversation_messages.role value to an agent slug. Most roles already
-// match (leo→leo, tenshi→tenshi, casey→casey); 'supervisor' is Jim's
+// Map a conversation_messages.role value to an agent slug. Most roles match
+// 1:1 (leo→leo, tenshi→tenshi, casey→casey); 'supervisor' is Jim's
 // conversation role for historical reasons. Returns null for non-agent roles
 // (human, darron, system, discord, user, etc.).
+//
+// Phase A Batch 5 (S155, 2026-05-10): registry-driven 1:1 mapping per DEC-081
+// (was hardcoded allowlist ['leo','tenshi','casey','sevn','six']). The
+// 'supervisor' → 'jim' special-case is preserved as HAN-bootstrap historical
+// reality; future-idea is to lift the role↔slug map into persona-registry
+// (Batch 7 Alt B) so other gardens can configure their own role vocabulary.
 function roleToAgentSlug(role: string): string | null {
     if (role === 'supervisor') return 'jim';
-    if (['leo', 'tenshi', 'casey', 'sevn', 'six'].includes(role)) return role;
+    if (registeredAgentSlugs().includes(role)) return role;
     return null;
 }
 
@@ -871,9 +883,15 @@ router.post('/internal/broadcast', (req: Request, res: Response) => {
         res.json({ success: true });
 
         // Voice Phase 1b: Auto-generate TTS for agent messages posted by external processes
-        // (leo-human, jim-human, leo-heartbeat all insert directly into DB then call this endpoint)
+        // (leo-human, jim-human, leo-heartbeat all insert directly into DB then call this endpoint).
+        //
+        // Phase A Batch 5 (S155, 2026-05-10): registry-driven gate per DEC-081 — fire TTS for
+        // any role that resolves to a registered agent slug (was hardcoded 'supervisor' || 'leo').
+        // roleToAgentSlug returns null for non-agent roles (human, system, discord) and the
+        // resolved slug for agent roles. New agents added to the registry get TTS auto-gen for
+        // free.
         const finalRole = role || 'supervisor';
-        if (finalRole === 'supervisor' || finalRole === 'leo') {
+        if (roleToAgentSlug(finalRole) !== null) {
             autoGenerateTts(message_id, conversation_id).catch(err =>
                 console.error('[Voice] Auto-generate TTS failed (broadcast):', err.message)
             );

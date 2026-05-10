@@ -121,12 +121,32 @@ export async function fetchDiscordContext(channelId: string, limit: number = 10)
 
 // ── Webhook Auto-Provisioning ─────────────────────────────────
 
-const PERSONAS = ['leo', 'jim', 'jemma'] as const;
+// Phase A Batch 5 (S155, 2026-05-10): registry-driven personas list per
+// DEC-081. Was hardcoded `['leo', 'jim', 'jemma'] as const`. Now derived
+// from db.ts personas seed: agents (kind='agent') + the gateway (kind='gateway')
+// which webhooks need too. Humans (kind='human', e.g. darron) NOT included
+// since humans don't have webhooks (they post via the Discord client directly).
+//
+// Future-idea: lift to persona-registry per Batch 7 Alt B so the seed becomes
+// a structured source-of-truth.
+import { personaStmts } from '../db';
+
+function getWebhookPersonas(): string[] {
+    const personas = personaStmts.getActive.all() as Array<{ name: string; kind: string }>;
+    return personas
+        .filter(p => p.kind === 'agent' || p.kind === 'gateway')
+        .map(p => p.name);
+}
 
 /**
  * Avatar file mapping — persona → filename in _screenshots/.
  * Leo: Euler's Identity (v5, SVG-rendered). Jim: Starfleet badge (v3, FLUX).
  * Set on webhooks at creation time so every message carries the avatar automatically.
+ *
+ * Phase A Batch 5 (S155, 2026-05-10): kept as literal map for now — avatar
+ * filenames are HAN-bootstrap-specific (Leo's Euler, Jim's Starfleet). New
+ * agents added to the registry without an avatar entry get no avatar (graceful
+ * fallback in loadAvatarDataUri). Mike's village will populate its own map.
  */
 const PERSONA_AVATARS: Record<string, string> = {
     leo: 'leo-avatar-v5.png',
@@ -250,9 +270,10 @@ export async function ensureChannelWebhooks(channelId: string): Promise<string |
         console.log(`[Discord] Auto-registered channel: ${channelName} = ${channelId}`);
     }
 
-    // Ensure webhooks exist for all personas
+    // Ensure webhooks exist for all personas (registry-driven per Phase A Batch 5)
     let configChanged = !channels[channelName] || channels[channelName] !== channelId;
-    for (const persona of PERSONAS) {
+    const personasNeedingWebhooks = getWebhookPersonas();
+    for (const persona of personasNeedingWebhooks) {
         if (!webhooks[persona]) webhooks[persona] = {};
         if (webhooks[persona][channelName]) continue;
 

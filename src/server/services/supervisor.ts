@@ -164,19 +164,19 @@ function checkLeoHealth(): void {
                 if (updatedAge < 2) {
                     // Success — health file recently updated
                     console.log('[Robin Hood] Leo resurrection successful');
-                    logResurrectionResult(true, `Restarted after ${Math.round(ageMinutes)}min down`);
+                    logResurrectionResult(true, `Restarted after ${Math.round(ageMinutes)}min down`, 'leo');
                     return;
                 }
             }
 
             // Health file not updated — failure
             console.error('[Robin Hood] Leo health file not updated after restart');
-            logResurrectionResult(false, `Restart failed: health file not updated after ${Math.round(ageMinutes)}min down`);
+            logResurrectionResult(false, `Restart failed: health file not updated after ${Math.round(ageMinutes)}min down`, 'leo');
             escalateToNtfy(`Failed to resurrect Leo (heartbeat). Last seen ${Math.round(ageMinutes)}min ago. Manual intervention needed.`);
         } catch (err) {
             const msg = (err as Error).message;
             console.error('[Robin Hood] Resurrection failed:', msg);
-            logResurrectionResult(false, `Restart failed: ${msg}`);
+            logResurrectionResult(false, `Restart failed: ${msg}`, 'leo');
             escalateToNtfy(`Failed to resurrect Leo (heartbeat). Last seen ${Math.round(ageMinutes)}min ago. Manual intervention needed.`);
         }
     } catch (err) {
@@ -295,7 +295,12 @@ function checkResurrectionCooldown(): boolean {
     }
 }
 
-function logResurrectionResult(success: boolean, reason: string, target: string = 'leo'): void {
+// Phase A Batch 5 (S155, 2026-05-10): removed `target: string = 'leo'` default
+// per DEC-081 agent-agnostic discipline. Target is now required — three callers
+// (Leo resurrection branches, all in checkLeoHealth above) pass 'leo' explicitly;
+// jemma resurrection branches already pass 'jemma'. Future agents/gateways needing
+// resurrection logging pass their own slug.
+function logResurrectionResult(success: boolean, reason: string, target: string): void {
     try {
         fs.mkdirSync(HEALTH_DIR, { recursive: true });
         const entry = {
