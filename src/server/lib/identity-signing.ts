@@ -76,6 +76,16 @@ export interface ManifestFileEntry {
     size_bytes: number;
 }
 
+/**
+ * Manifest is JCS-canonicalised before signing (RFC 8785).
+ * Field-value scope is locked to ASCII-printable strings + numbers + arrays of same;
+ * no Unicode surrogate-pair handling required for v0 because no field accepts
+ * arbitrary user-supplied text (agent slugs, ISO timestamps, hex hashes, absolute
+ * paths, key fingerprints — all ASCII by construction). If extending the manifest
+ * with user-text fields post-v1, the JCS canonicaliser at lib/jcs.ts handles
+ * surrogate pairs per RFC 8785 §3.2.2.2 (UTF-16 sort order); but the interface's
+ * design intent is that no such field exists. See DEC-083 for the rationale.
+ */
 export interface IdentityManifest {
     agent: string;
     agent_id: string;       // forward-compat for future re-keying independent of slug
