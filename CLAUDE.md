@@ -134,15 +134,23 @@ because the swap files persist; the next prompt (or `/pfc`) flushes them. A prom
 risked never running if the agent's response was interrupted. Prompt-start flush is the safer
 ordering for the same data.
 
-### WM-BOUNDARY markers (DEC-085, S153, 2026-05-08)
+### WM-BOUNDARY markers (DEC-085 + Amendment 2026-05-10)
 
-When you flush session-swap to working-memory.md and working-memory-full.md, **also consider where the next clean break point is** in the growing full file. If the natural narrative arc has reached a stopping point (end of an investigation, end of a decision arc, end of a felt-moment cluster, end of an implementation), place a marker at that position in **both files** at the corresponding write-position:
+**Amendment 2026-05-10 — marker placement intent shift**: markers are now placed at **end-of-thought-completion** ("I'm done with this batch, ready for slice"), NOT at semantic-break-within-content. The marker is the agent's "ready-to-slice" signal + paired-ID handshake — it does NOT determine slice position. The slicer takes the WHOLE file content regardless of marker location, strips marker text from c0/c1 content, and stores the id+ts in `qualifier` as audit metadata. Both files reset to header-only after slice (no kept-head).
+
+**One marker per file pair at any time.** When you place a new marker, any pre-existing marker in either file is removed atomically (via `placePairedMarker(agent)`). This is enforced by the helper — agent doesn't manage the strip-and-replace manually.
+
+**Auto-fabrication at prompt-start**: when WMF crosses ~25K tokens with no marker present, `ensureMarkerOrFabricate(agent)` (called automatically after every `appendPairedMemory`) places a fabricated marker at end-of-file as the slice-ready baseline. Your subsequent semantic placement REPLACES that auto-marker (one-marker-at-a-time). In steady state with regular semantic placement, auto-fabrication should be rare.
+
+**When to place a semantic marker**: when you've just written swap entries that complete a logical unit of work (end of an investigation, end of a decision arc, end of a felt-moment cluster, end of an implementation, end of a session/pfc). The amendment sharpens this from "any clean break point" to "the agent's intentional ready-to-slice signal".
+
+**Marker syntax** (unchanged):
 
 ```
 <!-- WM-BOUNDARY: id=B<N> ts=2026-05-08T13:30:00 -->
 ```
 
-Marker IDs are sequential per-agent (`B1`, `B2`, …); the timestamp aids quality assurance and disambiguation.
+Marker IDs are now timestamp-suffixed (`B<unix-ms>`) by `placePairedMarker` to guarantee uniqueness across agents and time; the timestamp aids quality assurance and disambiguation. Fabricated markers carry `fabricated=true` flag.
 
 **Three-stage threshold semantics** (see `~/.han/config.json:memory.rollingWindow*`):
 - **~20K tokens of working-memory-full growth since last marker**: agent's mental cue to start watching for a clean break point. Discipline, not code — the slicer doesn't know about 20K, but you should.

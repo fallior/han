@@ -1593,33 +1593,48 @@ export interface PairedRotationResult {
 }
 
 /**
- * Paired-file rolling-window rotation (DEC-085, S153, 2026-05-08).
+ * Paired-file rolling-window rotation (DEC-085 + Amendment 2026-05-10).
  *
- * When working-memory-full.md exceeds triggerTokens, slice both it and its
- * compressed sibling working-memory.md at matching WM-BOUNDARY markers.
- * Insert the paired blocks as c0+c1 in a single transaction; truncate both
- * files; cascade c1→c2+ via the existing bumpOnInsert chain.
+ * **Amendment 2026-05-10 (Darron's S155 directive)**: whole-file slice with
+ * marker as metadata. The slicer takes the ENTIRE content of both files
+ * (with markers stripped from c0/c1 content; marker id+ts captured in
+ * `qualifier` for audit). Both files reset to header-only after slice. The
+ * "kept-head" concept is RETIRED — live files contain only what hasn't yet
+ * been gradient-ingested; no overlap with gradient.
  *
- * Three-stage thresholds:
+ * Marker semantics:
+ *   - One marker per file pair at any time (paired by id)
+ *   - Markers are placed by the agent at end-of-thought-completion
+ *     (semantic placement) OR auto-fabricated at end-of-file at prompt-start
+ *     when WMF crosses ~25K tokens with no marker present (per
+ *     `ensureMarkerOrFabricate` in memory-paired-writer.ts)
+ *   - Markers are "ready-to-slice" signals + paired-ID handshake. They do
+ *     NOT determine slice position — slicer takes whole file regardless.
+ *   - At slice time: marker stripped from content, id+ts stored in qualifier
+ *     as `boundary:<id>:<ts>`, both files reset to header-only.
+ *
+ * Three-stage thresholds (unchanged):
  *   - tokens ≤ triggerTokens                : no-op
  *   - triggerTokens < tokens < biteTheBullet: slice if marker pair exists; else let-ride
  *   - tokens ≥ biteTheBullet                : mandate slice; fabricate marker
+ *                                             at end-of-file (last-resort safety)
  *
- * Parity-check: count entries in both files up to the chosen marker. On
- * mismatch (drift), log paired_write_drift with WMF tail size (per Jim's
- * edge note) and recover via smaller-of-two range.
+ * Parity-check now operates on whole-file entry counts. With #49 paired-write
+ * discipline + #53 prompt-start drift signal + the trim-to-correlation cleanup,
+ * drift should be near-zero going forward. Smaller-of-two recovery still applies
+ * if drift is detected, but truncates both archives to the smaller-side count.
  *
  * @returns PairedRotationResult — rotation state and observable details
  */
 export function rollingWindowRotatePaired(
     fullFilePath: string,
     compressedFilePath: string,
-    _fullFileHeader: string,
-    _compressedFileHeader: string,
+    fullFileHeader: string,
+    compressedFileHeader: string,
     triggerTokens: number,
     biteTheBulletTokens: number,
-    targetTailTokens: number,
-    minTailTokens: number,
+    _targetTailTokens: number, // RETIRED in amendment — kept for signature compat
+    _minTailTokens: number,    // RETIRED in amendment — kept for signature compat
     agent: string,
 ): PairedRotationResult {
     const fullExists = fs.existsSync(fullFilePath);
@@ -1642,21 +1657,28 @@ export function rollingWindowRotatePaired(
         return { rotated: false, reason: 'below-trigger' };
     }
 
+    // Find markers — used only for ID-handshake + metadata, not slice position.
     const fullBoundaries = findWmBoundaries(fullContent);
     const compBoundaries = findWmBoundaries(compContent);
 
+    // Pick a paired marker (matching id) — ANY pair will do since slicer takes
+    // whole file. Prefer the most recent marker for metadata. If none matched,
+    // fall through to bite-the-bullet fabrication at end-of-file.
+    let chosenMarker: { id: string; timestamp: string; fabricated: boolean } | null = null;
+    const compById = new Map(compBoundaries.map(b => [b.id, b]));
+    for (let i = fullBoundaries.length - 1; i >= 0; i--) {
+        const fb = fullBoundaries[i];
+        if (compById.has(fb.id)) {
+            chosenMarker = { id: fb.id, timestamp: fb.timestamp, fabricated: fb.fabricated };
+            break;
+        }
+    }
+
     let fullToUse = fullContent;
     let compToUse = compContent;
-    let chosenPair = pickPairedBoundary(
-        fullBoundaries,
-        compBoundaries,
-        targetTailTokens,
-        minTailTokens,
-        biteTheBulletTokens,
-    );
     let trigger: 'slicer' | 'bite-the-bullet' = 'slicer';
 
-    if (!chosenPair) {
+    if (!chosenMarker) {
         if (fullTokens < biteTheBulletTokens) {
             logRotationEvent({
                 kind: 'no-marker-let-ride',
@@ -1667,34 +1689,31 @@ export function rollingWindowRotatePaired(
             });
             return { rotated: false, reason: 'no-marker-let-ride' };
         }
-        // Bite-the-bullet: fabricate
-        const fab = fabricatePairedBoundary(fullContent, compContent, minTailTokens, biteTheBulletTokens);
-        if (!fab) {
-            logRotationEvent({
-                kind: 'fabrication-failed',
-                agent,
-                wmf_tail_size_tokens: fullTokens,
-                full_entries: splitMemoryFileEntries(fullContent).length,
-                comp_entries: splitMemoryFileEntries(compContent).length,
-            });
-            return { rotated: false, reason: 'fabrication-failed' };
-        }
-        fullToUse = fab.fullModified;
-        compToUse = fab.compModified;
-        chosenPair = fab.boundary;
-        trigger = 'bite-the-bullet';
+        // Bite-the-bullet: fabricate at END-OF-FILE in both files (whole-file
+        // slice means marker position is irrelevant; just need a paired ID).
+        const fabId = `BF-${Date.now()}`;
+        const fabTs = new Date().toISOString();
+        const fabMarker = `\n\n<!-- WM-BOUNDARY: id=${fabId} ts=${fabTs} fabricated=true -->\n`;
+        fullToUse = fullContent.replace(/\n+$/, '') + fabMarker;
+        compToUse = compContent.replace(/\n+$/, '') + fabMarker;
         // Persist the fabricated markers BEFORE slicing — audit trail
         fs.writeFileSync(fullFilePath, fullToUse, 'utf8');
         fs.writeFileSync(compressedFilePath, compToUse, 'utf8');
+        chosenMarker = { id: fabId, timestamp: fabTs, fabricated: true };
+        trigger = 'bite-the-bullet';
     }
 
-    // Parity-check
-    const fullEntryCount = countEntriesBeforePos(fullToUse, chosenPair.full.charPos);
-    const compEntryCount = countEntriesBeforePos(compToUse, chosenPair.compressed.charPos);
+    // Parity-check on WHOLE-FILE entry counts (the slice now takes everything;
+    // entry-count drift between files is informational + recovery shrinks both
+    // archives to the smaller-side count).
+    const fullEntries = splitMemoryFileEntries(fullToUse);
+    const compEntries = splitMemoryFileEntries(compToUse);
+    const fullEntryCount = fullEntries.length;
+    const compEntryCount = compEntries.length;
 
     let drift: { fullEntries: number; compEntries: number } | undefined;
-    let useFullPos = chosenPair.full.charPos;
-    let useCompPos = chosenPair.compressed.charPos;
+    let fullArchive: string;
+    let compArchive: string;
 
     if (fullEntryCount !== compEntryCount) {
         drift = { fullEntries: fullEntryCount, compEntries: compEntryCount };
@@ -1703,64 +1722,49 @@ export function rollingWindowRotatePaired(
             agent,
             full_entries: fullEntryCount,
             compressed_entries: compEntryCount,
-            wmf_tail_size_tokens: fullTokens, // Jim's edge note
+            wmf_tail_size_tokens: fullTokens,
             trigger,
-            recovery: 'using-smaller-range',
-            boundary_id: chosenPair.full.id,
+            recovery: 'using-smaller-count-whole-file',
+            boundary_id: chosenMarker.id,
         });
-        // Smaller-of-two: re-anchor at the entry-count of the smaller side.
-        // Use the position fields from splitMemoryFileEntries (DEC-085 audit fix —
-        // replaces indexOf which was brittle if the entry's content appeared
-        // earlier in the file via repeated quoted blocks or narrative repetition).
+        // Smaller-of-two recovery: archive only the first N entries from each
+        // (where N = smaller count). The surplus entries on the larger side
+        // remain in the live file for the next rotation.
         const smallerCount = Math.min(fullEntryCount, compEntryCount);
-        if (smallerCount > 0) {
-            const fullEntries = splitMemoryFileEntries(fullToUse);
-            const compEntries = splitMemoryFileEntries(compToUse);
-            if (smallerCount < fullEntries.length && smallerCount < compEntries.length) {
-                useFullPos = fullEntries[smallerCount].charStart;
-                useCompPos = compEntries[smallerCount].charStart;
-            }
+        if (smallerCount === 0) {
+            // Edge case: one side has zero entries (only header). Skip slice.
+            return { rotated: false, reason: 'no-marker-let-ride' };
         }
+        const fullCutPos = fullEntries[smallerCount - 1].charEnd;
+        const compCutPos = compEntries[smallerCount - 1].charEnd;
+        fullArchive = stripMarkersFromContent(fullToUse.substring(0, fullCutPos));
+        compArchive = stripMarkersFromContent(compToUse.substring(0, compCutPos));
+    } else {
+        // Clean parity — whole-file slice
+        fullArchive = stripMarkersFromContent(fullToUse);
+        compArchive = stripMarkersFromContent(compToUse);
     }
-
-    // Slice
-    const fullArchive = fullToUse.substring(0, useFullPos);
-    const fullKept = fullToUse.substring(useFullPos);
-    const compArchive = compToUse.substring(0, useCompPos);
-    const compKept = compToUse.substring(useCompPos);
 
     const fullArchivedTokens = countTokens(fullArchive);
     const compressedArchivedTokens = countTokens(compArchive);
-    const fullKeptTokens = countTokens(fullKept);
-    const compressedKeptTokens = countTokens(compKept);
 
     const c0Id = generateGradientId();
     const c1Id = generateGradientId();
     const sessionDate = new Date().toISOString().slice(0, 10);
     const sessionLabel = `rolling-${sessionDate}`;
+    const qualifier = `boundary:${chosenMarker.id}:${chosenMarker.timestamp}` +
+        (chosenMarker.fabricated ? ':fabricated' : '');
 
     // Atomic paired insert (DEC-085 must-fix per Jim's audit, S153 2026-05-08).
-    //
-    // Why a direct gradientStmts.insert.run + db.transaction wrapper instead of
-    // calling insertGradientEntry: the helper at line 274 has its own try/catch
-    // that swallows DB errors with console.warn. Using it here would make the
-    // outer try/catch dead code AND defeat atomicity — c0 could commit, c1's
-    // failure would be silently warned, files would still be truncated, and the
-    // c1 source content would be lost from both file and DB. DEC-069 violation
-    // by error-handling shape, not by user action.
-    //
-    // The transaction wrapper makes the inserts both-or-neither: better-sqlite3
-    // rolls back automatically on throw. Errors propagate to the outer catch
-    // where logging fires AND the function returns paired-insert-failed without
-    // truncating the source files. The c1 source stays on disk — recoverable.
+    // The transaction wrapper makes the inserts both-or-neither.
     const insertPair = db.transaction(() => {
         gradientStmts.insert.run(
             c0Id, agent, sessionLabel, 'c0', fullArchive, 'working-memory-full',
-            null, null, null, 'original', new Date().toISOString(), null, 0, null,
+            null, null, null, 'original', new Date().toISOString(), null, 0, qualifier,
         );
         gradientStmts.insert.run(
             c1Id, agent, sessionLabel, 'c1', compArchive, 'working-memory-compressed',
-            c0Id, null, null, 'original', new Date().toISOString(), null, 0, null,
+            c0Id, null, null, 'original', new Date().toISOString(), null, 0, qualifier,
         );
     });
     try {
@@ -1775,12 +1779,27 @@ export function rollingWindowRotatePaired(
         return { rotated: false, reason: 'paired-insert-failed' };
     }
 
-    // Truncate both files
-    fs.writeFileSync(fullFilePath, fullKept, 'utf8');
-    fs.writeFileSync(compressedFilePath, compKept, 'utf8');
+    // RESET both files to header-only (Amendment 2026-05-10: no kept-head).
+    // The drift-recovery branch leaves surplus entries in the live file; the
+    // clean-parity branch resets to just the header. Either way, no overlap
+    // between live and gradient.
+    if (drift) {
+        // Surplus entries on the larger side stay in the live file for next slice.
+        const smallerCount = Math.min(fullEntryCount, compEntryCount);
+        const fullSurplus = fullEntries.slice(smallerCount).map(e => e.content).join('\n\n');
+        const compSurplus = compEntries.slice(smallerCount).map(e => e.content).join('\n\n');
+        const fullHead = fullFileHeader || `# ${path.basename(fullFilePath, '.md')}\n`;
+        const compHead = compressedFileHeader || `# ${path.basename(compressedFilePath, '.md')}\n`;
+        fs.writeFileSync(fullFilePath, fullHead + (fullSurplus ? '\n' + fullSurplus + '\n' : '\n'), 'utf8');
+        fs.writeFileSync(compressedFilePath, compHead + (compSurplus ? '\n' + compSurplus + '\n' : '\n'), 'utf8');
+    } else {
+        const fullHead = fullFileHeader || `# ${path.basename(fullFilePath, '.md')}\n`;
+        const compHead = compressedFileHeader || `# ${path.basename(compressedFilePath, '.md')}\n`;
+        fs.writeFileSync(fullFilePath, fullHead + '\n', 'utf8');
+        fs.writeFileSync(compressedFilePath, compHead + '\n', 'utf8');
+    }
 
     // Cascade c1→c2+ (NOT c0→c1 — c1 already inserted directly).
-    // bumpOnInsert is fire-and-forget per the existing pattern.
     void bumpOnInsert(agent, 'c1').catch((err: Error) => {
         console.error(`[rollingWindowRotatePaired] bumpOnInsert(c1) failed for ${agent}:`, err.message);
     });
@@ -1792,11 +1811,12 @@ export function rollingWindowRotatePaired(
         c1_id: c1Id,
         full_archived_tokens: fullArchivedTokens,
         compressed_archived_tokens: compressedArchivedTokens,
-        full_kept_tokens: fullKeptTokens,
-        compressed_kept_tokens: compressedKeptTokens,
+        full_kept_tokens: 0,         // Amendment: no kept-head
+        compressed_kept_tokens: 0,   // Amendment: no kept-head
         wmf_tail_size_tokens: fullTokens,
         trigger,
-        boundary_id: chosenPair.full.id,
+        boundary_id: chosenMarker.id,
+        boundary_qualifier: qualifier,
         drift,
     });
 
@@ -1807,12 +1827,22 @@ export function rollingWindowRotatePaired(
         c1EntryId: c1Id,
         fullArchivedTokens,
         compressedArchivedTokens,
-        fullKeptTokens,
-        compressedKeptTokens,
+        fullKeptTokens: 0,
+        compressedKeptTokens: 0,
         trigger,
-        boundaryId: chosenPair.full.id,
+        boundaryId: chosenMarker.id,
         drift,
     };
+}
+
+/**
+ * Strip WM-BOUNDARY markers from a content string (and surrounding blank lines).
+ * Used at slice time to keep marker text out of c0/c1 content per Darron's
+ * "marker may persist into meaning" worry — markers are metadata in the
+ * `qualifier` column, not content-bearing.
+ */
+function stripMarkersFromContent(content: string): string {
+    return content.replace(/\n*<!--\s*WM-BOUNDARY:\s*id=[^\s]+\s+ts=[^\s]+(?:\s+fabricated=[^\s]+)?\s*-->\n*/g, '\n');
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

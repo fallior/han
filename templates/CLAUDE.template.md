@@ -180,18 +180,34 @@ version trains the compression algorithm. Skipping either one = half-broken prot
 **The test:** If you find yourself thinking "I'll write memory after I finish this task" —
 STOP. That thought is the failure mode. Write NOW. The task can wait 30 seconds.
 
-### WM-BOUNDARY markers (DEC-085, 2026-05-08)
+### WM-BOUNDARY markers (DEC-085 + Amendment 2026-05-10)
 
-When you flush session-swap to working-memory.md and working-memory-full.md, **also
-consider where the next clean break point is** in the growing full file. If the natural
-narrative arc has reached a stopping point, place a marker at that position in **both
-files** at the corresponding write-position:
+**Marker placement intent** (Amendment 2026-05-10): markers go at **end-of-thought-completion**
+("I'm done with this batch, ready for slice"), NOT at semantic-break-within-content. The marker
+is the agent's "ready-to-slice" signal + paired-ID handshake — it does NOT determine slice
+position. The slicer takes the WHOLE file content regardless of marker location, strips marker
+text from c0/c1 content, and stores the id+ts in `qualifier` as audit metadata. Both files reset
+to header-only after slice (no kept-head).
 
+**One marker per file pair at any time.** When you place a new marker via `placePairedMarker(agent)`,
+any pre-existing marker in either file is removed atomically. The helper handles the strip-and-replace.
+
+**Auto-fabrication at prompt-start**: when WMF crosses ~25K tokens with no marker present,
+`ensureMarkerOrFabricate(agent)` (called automatically after every `appendPairedMemory`) places
+a fabricated marker at end-of-file as the slice-ready baseline. Your subsequent semantic placement
+REPLACES that auto-marker (one-marker-at-a-time).
+
+**When to place a semantic marker**: when you've just written swap entries that complete a
+logical unit of work (end of an investigation, end of a decision arc, end of an implementation,
+end of a session/pfc). Sharper than the prior "any clean break point" practice.
+
+**Marker syntax**:
 ```
-<!-- WM-BOUNDARY: id=B<N> ts=2026-05-08T13:30:00 -->
+<!-- WM-BOUNDARY: id=B<unix-ms> ts=2026-05-10T13:30:00 -->
 ```
 
-Marker IDs are sequential per-agent (`B1`, `B2`, …); the timestamp aids quality assurance.
+Marker IDs are timestamp-suffixed (`B<unix-ms>` for semantic, `BF-<unix-ms>` for fabricated)
+to guarantee uniqueness across agents and time.
 
 **Three-stage threshold semantics** (`~/.han/config.json:memory.rollingWindow*`):
 - **~20K tokens since last marker**: agent's mental cue — start watching for a clean break.

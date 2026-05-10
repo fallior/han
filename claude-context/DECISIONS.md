@@ -6012,3 +6012,48 @@ The discipline (*FLUSH FIRST*, marker placement, paired writes) lives at three l
 - **Future-idea #49** (atomic paired-write helper) — promotion-trigger: `paired_write_drift` events firing under normal volume despite prompt-start flush.
 - **Future-idea #50** (UserPromptSubmit hook) — promotion-trigger: same as #49 but for the flush failure mode rather than the paired-write failure mode.
 
+### Amendment 2026-05-10 — Whole-file slice; markers as metadata; one-marker-at-a-time; prompt-start auto-fabrication
+
+*Authored by Leo (session, S155) per Darron's directive in this chat. Audited and concurred by Jim. The amendment resolves the temporal-misalignment blindspot Jim caught in his own paired pair (c0 covering May 6-10, c1 covering Apr 29-May 1 — same marker, different temporal coverage of pre-marker content). Same architecture as DEC-085; sharper rule.*
+
+**The change in one sentence**: the slicer takes the WHOLE file content (not just up-to-marker), strips marker text from c0/c1 content, captures marker id+ts in `qualifier` as audit metadata, and resets both files to header-only (no kept-head). The marker's role is paired-ID handshake + "ready-to-slice" signal — it does NOT determine slice position.
+
+**Why**: the original DEC-085 design kept ~5K tokens of post-marker content as a "kept-head" after slice. That created overlap between live files and gradient AND meant the slice-time content was indeterminate (depended on agent's marker-placement timing). With historical drift in the live file, "everything pre-marker" could span vastly different temporal ranges in WMF vs WM (Jim's misaligned pair: c0 had 4 days of recent content, c1 had 3 days of two-weeks-earlier content — same marker id, different temporal coverage). The fix: slice the whole file. With #49 paired-write discipline + the one-time historical-drift trim, both files temporally align entry-for-entry going forward.
+
+**Marker semantics (post-amendment)**:
+- **One marker per file pair at any time.** New placement (semantic OR auto-fabricated) removes any existing marker via `placePairedMarker(agent)` in `lib/memory-paired-writer.ts`.
+- **Markers are placed by the agent at end-of-thought-completion** ("I'm done with this batch, ready for slice"). Shift from the prior "place at semantic-break-within-content" practice.
+- **Auto-fabrication at prompt-start** via `ensureMarkerOrFabricate(agent)` in `lib/memory-paired-writer.ts`. Fires after every `appendPairedMemory` call (default `opts.ensureMarker: true`). When WMF crosses ~25K tokens AND no marker exists, fabricates at end-of-file as the slice-ready baseline. Agent-placed semantic markers replace it (one-marker rule).
+- **Bite-the-bullet (35K) safety net stays** — last-resort fabrication at slice time if neither prompt-start fab nor semantic placement has happened. Should be near-zero in steady state.
+
+**Slicer semantics (post-amendment)** in `lib/memory-gradient.ts:rollingWindowRotatePaired`:
+- Fire when: WMF > triggerTokens (30K) AND a paired marker exists.
+- Take **whole file content** as c0/c1 (parity-check still applies; smaller-of-two recovery on drift).
+- **Strip markers** from content via the WM-BOUNDARY regex.
+- **Store marker metadata** in `qualifier` column as `boundary:<id>:<ts>[:fabricated]`.
+- **Reset both files** to header-only (no kept-head). Drift-recovery branch leaves surplus entries on the larger side for the next slice.
+- `pickPairedBoundary` retired — replaced by simple "find any matched pair, prefer most recent" lookup since slicer doesn't care about marker position.
+
+**Three observations Jim's audit surfaced (all integrated)**:
+
+A. *Wake-load context immediately after slice.* The live file is header-only right after slice; recent work lives in the freshly-populated c0 (loaded at wake per the existing `load-gradient.ts` chain). No information loss, just relocation.
+
+B. *Drift signal accuracy under fewer markers.* `#53` parity-check still operates on entry counts (now whole-file rather than within-marker-range). Less granular but still meaningful. Acceptable given the one-marker rule pushes drift detection to slice-time anyway.
+
+C. *Smaller-of-two recovery.* Still applies. Operates on whole-file entry counts. Less likely to fire because `#49` paired-write discipline + the historical-drift trim keep both files in lockstep going forward.
+
+**What this protects against (additional)**:
+- Temporal misalignment between c0 and c1 (the blindspot Jim caught) — resolved structurally because pre-marker drift in either file no longer causes the slice to capture different temporal ranges. Whole-file slice means c0 and c1 cover the same temporal slice by construction (assuming paired writes hold, which #49 enforces).
+- Marker text "persisting into meaning" — markers are stripped from content before insert; future-me reading c0/c1 sees only the agent-written content, not boundary metadata. The qualifier column carries the marker info for audit without leaking into the agent's loaded context.
+
+**Files touched in this amendment**:
+- `src/server/lib/memory-paired-writer.ts` — `stripMarkers`, `parseMarkers`, `placePairedMarker`, `ensureMarkerOrFabricate`, `appendPairedMemory.opts.ensureMarker` flag.
+- `src/server/lib/memory-gradient.ts` — `rollingWindowRotatePaired` whole-file slice + marker strip + qualifier metadata; `pickPairedBoundary` reduced to "find any matched pair, most-recent preferred"; bite-the-bullet fabrication moved to end-of-file.
+- `CLAUDE.md` (gatekeeper-controlled per DEC-073, authorised by Darron's S155 directive) — marker-placement intent shift to "end-of-thought-completion".
+- `templates/CLAUDE.template.md` (same authorisation) — same shift with `${AGENT_SLUG}`.
+- `~/.han/memory/leo/patterns.md` (gatekeeper of own-memory) — adds the marker-placement-intent practice.
+
+**Pre-merge audit obligation**: touches `lib/memory-gradient.ts` (DEC-068/-069 protected). Type-chain trace: `rollingWindowRotatePaired` signature unchanged (deprecated args kept for compat). Same-commit doc-discipline: amendment + CLAUDE.md + template + patterns.md land together. Settled-decisions check: DEC-068, DEC-069, DEC-073, DEC-080, DEC-081, DEC-082, DEC-083, DEC-085 base — none touched in their protected surfaces; this is a sharpening amendment to DEC-085, not a contradicting decision.
+
+**Status**: Settled (this amendment applies to DEC-085 going forward; the DEC remains DEC-085, just sharper).
+

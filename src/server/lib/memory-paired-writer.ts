@@ -36,10 +36,47 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { gradientConfigForAgent } from './agent-registry';
 import { withMemorySlot } from './memory-slot';
+import { countTokens } from './token-counter';
+
+/**
+ * WM-BOUNDARY marker — paired-ID handshake between WMF and WM at slice time.
+ *
+ * DEC-085 Amendment 2026-05-10: marker is METADATA, not content. The slicer
+ * strips the marker text from c0/c1 content before insert and stores the id
+ * + timestamp in `qualifier` for audit. The marker's role is ID-handshake +
+ * "ready-to-slice" signal — it does NOT determine slice position. The slicer
+ * takes the WHOLE file content; live files reset to header-only after slice.
+ */
+const WM_BOUNDARY_REGEX_STRIP = /\n*<!--\s*WM-BOUNDARY:\s*id=[^\s]+\s+ts=[^\s]+(?:\s+fabricated=[^\s]+)?\s*-->\n*/g;
+const WM_BOUNDARY_REGEX_PARSE = /<!--\s*WM-BOUNDARY:\s*id=([^\s]+)\s+ts=([^\s]+)(?:\s+fabricated=([^\s]+))?\s*-->/g;
+
+/** Remove all WM-BOUNDARY markers from a content string (and surrounding blank lines). */
+export function stripMarkers(content: string): string {
+    return content.replace(WM_BOUNDARY_REGEX_STRIP, '\n');
+}
+
+/** Parse all WM-BOUNDARY markers in a content string. */
+export function parseMarkers(content: string): { id: string; timestamp: string; fabricated: boolean }[] {
+    const out: { id: string; timestamp: string; fabricated: boolean }[] = [];
+    const regex = new RegExp(WM_BOUNDARY_REGEX_PARSE.source, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(content)) !== null) {
+        out.push({ id: m[1], timestamp: m[2], fabricated: m[3] === 'true' });
+    }
+    return out;
+}
 
 export interface AppendPairedMemoryOpts {
     /** Caller identifier for log context (e.g. 'leo-human-flush'). */
     source?: string;
+    /**
+     * If true (default), call `ensureMarkerOrFabricate(agent)` after the paired
+     * write succeeds. The marker check is fast (read both files, count tokens,
+     * scan for marker presence) and ensures a marker exists when WMF crosses
+     * the autoFabricateAtTokens threshold (~25K). Set false in tests or when
+     * the caller wants explicit control over marker placement.
+     */
+    ensureMarker?: boolean;
 }
 
 /**
@@ -122,4 +159,143 @@ export async function appendPairedMemory(
             `Caller must preserve swap state and retry.`,
         );
     }
+
+    // DEC-085 Amendment 2026-05-10: post-write marker check. If WMF has crossed
+    // the auto-fabricate threshold (~25K tokens) and no marker exists yet, place
+    // an auto-fabricated marker at end-of-file. Cheap (couple of reads); idempotent
+    // when marker already exists.
+    if (opts.ensureMarker !== false) {
+        try {
+            await ensureMarkerOrFabricate(agent, { source });
+        } catch (err) {
+            // Marker check failure is observability, not a write failure —
+            // log loud but don't re-throw (the paired write itself succeeded).
+            console.warn(
+                `[appendPairedMemory] ensureMarkerOrFabricate failed for ${agent} (${source}): ` +
+                `${(err as Error).message}`,
+            );
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DEC-085 Amendment 2026-05-10: Marker primitives (one-marker-at-a-time +
+// prompt-start auto-fabrication). See DECISIONS.md DEC-085 amendment.
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface PlacePairedMarkerOpts {
+    /** Caller identifier for log context. */
+    source?: string;
+    /** If true, marker carries `fabricated=true` flag. Default false. */
+    fabricated?: boolean;
+}
+
+/**
+ * Atomically place a single WM-BOUNDARY marker at end-of-file in BOTH
+ * working-memory files for the agent. Removes any pre-existing markers in
+ * either file (one-marker-at-a-time discipline per Darron's S155 directive).
+ *
+ * The marker is the "ready-to-slice" signal + paired-ID handshake. It does
+ * NOT determine slice position (the slicer takes whole-file regardless of
+ * marker location). At slice time, the marker is stripped from c0/c1 content
+ * and stored in `qualifier` as audit metadata.
+ *
+ * @returns the placed marker id (also embedded in both files)
+ */
+export async function placePairedMarker(
+    agent: string,
+    opts: PlacePairedMarkerOpts = {},
+): Promise<string> {
+    const cfg = gradientConfigForAgent(agent);
+    const fullPath = path.join(cfg.memoryDir, 'working-memory-full.md');
+    const compPath = path.join(cfg.memoryDir, 'working-memory.md');
+    const source = opts.source ?? 'unknown';
+    const fabricated = opts.fabricated ?? false;
+
+    const id = fabricated ? `BF-${Date.now()}` : `B${Date.now()}`;
+    const ts = new Date().toISOString();
+    const fabFlag = fabricated ? ' fabricated=true' : '';
+    const marker = `\n\n<!-- WM-BOUNDARY: id=${id} ts=${ts}${fabFlag} -->\n`;
+
+    const slotResult = await withMemorySlot(cfg.memoryDir, `${agent}-marker-place`, () => {
+        if (!fs.existsSync(fullPath) || !fs.existsSync(compPath)) {
+            throw new Error(`placePairedMarker: paired files missing for ${agent}`);
+        }
+        const fullContent = fs.readFileSync(fullPath, 'utf8');
+        const compContent = fs.readFileSync(compPath, 'utf8');
+
+        // Strip any existing markers (one-marker-at-a-time)
+        const fullStripped = stripMarkers(fullContent);
+        const compStripped = stripMarkers(compContent);
+
+        // Append the new marker at end-of-file in both
+        const fullSizeBefore = fs.statSync(fullPath).size;
+        fs.writeFileSync(fullPath, fullStripped.replace(/\n+$/, '') + marker);
+        try {
+            fs.writeFileSync(compPath, compStripped.replace(/\n+$/, '') + marker);
+            return true;
+        } catch (err) {
+            // Roll back full
+            try { fs.truncateSync(fullPath, fullSizeBefore); } catch {/* best-effort */}
+            throw new Error(
+                `placePairedMarker: comp write failed for ${agent} (${source}): ${(err as Error).message}`,
+            );
+        }
+    });
+
+    if (slotResult === null) {
+        throw new Error(`placePairedMarker: failed to acquire memory slot for ${agent} (${source})`);
+    }
+
+    return id;
+}
+
+export interface EnsureMarkerOpts {
+    source?: string;
+    /**
+     * Token threshold above which auto-fabrication fires. Default 25000.
+     * Mirrors the legacy rollingWindowTail target — when WMF reaches ~25K
+     * tokens with no marker, auto-fabricate at end-of-file as a "ready-
+     * to-slice" baseline. Agent-placed semantic markers override this when
+     * placed (per the one-marker-at-a-time rule).
+     */
+    autoFabricateAtTokens?: number;
+}
+
+/**
+ * Check whether the agent's working-memory pair has a marker; if not AND
+ * WMF has crossed the auto-fabricate threshold, place a fabricated marker
+ * at end-of-file. Idempotent: if a marker already exists, no-op. If WMF
+ * is below threshold, no-op.
+ *
+ * Called automatically after `appendPairedMemory` (via opts.ensureMarker,
+ * default true). Can also be called directly from FLUSH FIRST agent-protocol
+ * hooks.
+ *
+ * @returns 'fabricated' if a new marker was placed, 'exists' if one was
+ *          already present, 'below-threshold' if WMF too small to need one,
+ *          'paired-files-missing' if the files don't exist yet.
+ */
+export async function ensureMarkerOrFabricate(
+    agent: string,
+    opts: EnsureMarkerOpts = {},
+): Promise<'fabricated' | 'exists' | 'below-threshold' | 'paired-files-missing'> {
+    const cfg = gradientConfigForAgent(agent);
+    const fullPath = path.join(cfg.memoryDir, 'working-memory-full.md');
+    const compPath = path.join(cfg.memoryDir, 'working-memory.md');
+    const threshold = opts.autoFabricateAtTokens ?? 25000;
+
+    if (!fs.existsSync(fullPath) || !fs.existsSync(compPath)) return 'paired-files-missing';
+
+    const fullContent = fs.readFileSync(fullPath, 'utf8');
+    const compContent = fs.readFileSync(compPath, 'utf8');
+
+    const existing = parseMarkers(fullContent);
+    if (existing.length > 0) return 'exists';
+
+    const fullTokens = countTokens(fullContent);
+    if (fullTokens < threshold) return 'below-threshold';
+
+    await placePairedMarker(agent, { source: opts.source ?? 'auto-fab', fabricated: true });
+    return 'fabricated';
 }
