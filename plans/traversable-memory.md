@@ -223,7 +223,7 @@ The file-based gradient stays as-is. The database is a parallel write. Files rem
 
 **Key files to modify:**
 - `src/server/lib/dream-gradient.ts` — `processDreamGradient()`, `compressDreamNight()`, `compressDreamToC3()`, `compressDreamToC5()`, `compressDreamToUV()`
-- `src/server/lib/memory-gradient.ts` — `compressMemoryFileGradient()`, `compressToLevel()`, `compressToUnitVector()`
+- `src/server/lib/memory-gradient.ts` — `rollingWindowRotatePaired()` (DEC-085 Amendment, current), `compressToLevel()`, `compressToUnitVector()`. **`compressMemoryFileGradient()` retired-by-throw 2026-05-10 (Phase A Batch 6).**
 - `src/server/db.ts` — new tables and prepared statements
 
 ### Phase 2: Compression prompt modification
