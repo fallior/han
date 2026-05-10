@@ -121,44 +121,29 @@ export async function fetchDiscordContext(channelId: string, limit: number = 10)
 
 // ── Webhook Auto-Provisioning ─────────────────────────────────
 
-// Phase A Batch 5 (S155, 2026-05-10): registry-driven personas list per
-// DEC-081. Was hardcoded `['leo', 'jim', 'jemma'] as const`. Now derived
-// from db.ts personas seed: agents (kind='agent') + the gateway (kind='gateway')
-// which webhooks need too. Humans (kind='human', e.g. darron) NOT included
-// since humans don't have webhooks (they post via the Discord client directly).
-//
-// Future-idea: lift to persona-registry per Batch 7 Alt B so the seed becomes
-// a structured source-of-truth.
-import { personaStmts } from '../db';
+// Phase A Batch 7 (S155, 2026-05-10): persona-registry-driven per the hybrid
+// Alt B+C design (typed module + in-code values; JSON-loader available as
+// additive future). Webhooks for kind ∈ {agent, gateway} (humans post via
+// the Discord client directly, not via webhook).
+import { personasByKind, personaConfigOrUndefined } from '../lib/persona-registry';
 
 function getWebhookPersonas(): string[] {
-    const personas = personaStmts.getActive.all() as Array<{ name: string; kind: string }>;
-    return personas
-        .filter(p => p.kind === 'agent' || p.kind === 'gateway')
-        .map(p => p.name);
+    return personasByKind('agent', 'gateway').map(p => p.name);
 }
 
 /**
- * Avatar file mapping — persona → filename in _screenshots/.
- * Leo: Euler's Identity (v5, SVG-rendered). Jim: Starfleet badge (v3, FLUX).
- * Set on webhooks at creation time so every message carries the avatar automatically.
+ * Load a persona's avatar as a Discord-compatible data URI
+ * (data:image/png;base64,...). Returns null if the persona is not registered
+ * or has no `discordAvatarPath` configured (e.g. Jemma uses Discord's default).
  *
- * Phase A Batch 5 (S155, 2026-05-10): kept as literal map for now — avatar
- * filenames are HAN-bootstrap-specific (Leo's Euler, Jim's Starfleet). New
- * agents added to the registry without an avatar entry get no avatar (graceful
- * fallback in loadAvatarDataUri). Mike's village will populate its own map.
- */
-const PERSONA_AVATARS: Record<string, string> = {
-    leo: 'leo-avatar-v5.png',
-    jim: 'jim-avatar-v3.png',
-};
-
-/**
- * Load a persona's avatar as a Discord-compatible data URI (data:image/png;base64,...).
- * Returns null if the file doesn't exist (e.g. Jemma has no custom avatar).
+ * Phase A Batch 7 (S155, 2026-05-10): avatar path lifted from the legacy
+ * `PERSONA_AVATARS` map into `PersonaConfig.discordAvatarPath`. Single
+ * source of truth; new personas register their avatar with the rest of
+ * their config in `lib/persona-registry.ts`.
  */
 function loadAvatarDataUri(persona: string): string | null {
-    const filename = PERSONA_AVATARS[persona];
+    const config = personaConfigOrUndefined(persona);
+    const filename = config?.discordAvatarPath;
     if (!filename) return null;
     const avatarPath = path.join(AVATARS_DIR, filename);
     try {

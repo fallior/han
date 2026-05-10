@@ -11,6 +11,7 @@ import type {
     RegistryProject,
     BridgeEvent,
 } from './types';
+import { PERSONA_CONFIG } from './lib/persona-registry';
 
 // ── Path constants ──────────────────────────────────────────
 
@@ -1006,60 +1007,33 @@ const seedPersona = db.prepare(`INSERT OR IGNORE INTO personas
      color, workshop_tabs, mention_patterns, classification_hint, agent_port, session_prefix, instance, is_local)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
-const personaSeeds: Array<[string, string, string, string, string, string, string | null, string | null,
-    string, string, string, string | null, number | null, string | null, string, number]> = [
-    ['leo', 'Philosopher Leo', 'agent', 'signal',
-        '{"wake_signals":["leo-human-wake"]}',
-        'leo', '~/.han/memory/leo/', '~/.han/memory/fractal/leo/',
-        'green', '[{"key":"leo-question","label":"Questions"},{"key":"leo-postulate","label":"Postulates"}]',
-        '["\\\\bleo\\\\b","\\\\bleonhard\\\\b"]', 'Leo: code review, implementation, philosophy',
-        3847, 'leo', 'han', 1],
-    ['jim', 'Supervisor Jim', 'agent', 'http_local',
-        '{"server_url":"https://localhost:3847","fallback_signals":["jim-human-wake"]}',
-        'supervisor', '~/.han/memory/', '~/.han/memory/fractal/jim/',
-        'purple', '[{"key":"jim-request","label":"Requests"},{"key":"jim-report","label":"Reports"}]',
-        '["\\\\bjim\\\\b","\\\\bjimmy\\\\b"]', 'Jim: technical/system topics, supervisor requests, strategic decisions',
-        3848, 'jim', 'han', 1],
-    ['darron', 'Dreamer Darron', 'human', 'ntfy',
-        '{}',
-        'human', null, null,
-        'blue', '[{"key":"darron-thought","label":"Thoughts"},{"key":"darron-musing","label":"Musings"}]',
-        '["\\\\bdarron\\\\b"]', 'Darron: general discussion, vision, direction',
-        null, null, 'han', 1],
-    ['jemma', 'Dispatcher Jemma', 'gateway', 'none',
-        '{}',
-        'jemma', null, null,
-        'amber', '[{"key":"jemma-messages","label":"Messages"},{"key":"jemma-stats","label":"Stats"}]',
-        '[]', null,
-        null, null, 'han', 1],
-    ['tenshi', 'Guardian Tenshi', 'agent', 'signal',
-        '{"wake_signals":["tenshi-human-wake"]}',
-        'tenshi', '~/.han/memory/tenshi/', '~/.han/memory/fractal/tenshi/',
-        'red', '[]',
-        '["\\\\btenshi\\\\b"]', 'Tenshi: security, vulnerability, bug hunting',
-        3849, 'tenshi', 'han', 1],
-    ['casey', 'Operator Casey', 'agent', 'signal',
-        '{"wake_signals":["casey-human-wake"]}',
-        'casey', '~/.han/memory/casey/', '~/.han/memory/fractal/casey/',
-        'orange', '[]',
-        '["\\\\bcasey\\\\b"]', 'Casey: Contempire, trailer fleet, yard operations',
-        3850, 'casey', 'han', 1],
-    ['sevn', 'Session Agent Sevn', 'agent', 'remote',
-        '{}',
-        'sevn', null, null,
-        'teal', '[]',
-        '["\\\\bsevn\\\\b"]', 'Sevn: Mike\'s session agent work',
-        null, null, 'mikes-han', 0],
-    ['six', 'Chief of Staff Six', 'agent', 'remote',
-        '{}',
-        'six', null, null,
-        'indigo', '[]',
-        '["\\\\bsix\\\\b"]', 'Six: Mike\'s supervisor/strategic work',
-        null, null, 'mikes-han', 0],
-];
-
-for (const seed of personaSeeds) {
-    seedPersona.run(...seed);
+// Phase A Batch 7 (S155, 2026-05-10) — seed iterates the typed PERSONA_CONFIG
+// from `lib/persona-registry.ts` per DEC-081 + design conversation in
+// `moyyioli-ufyocu`. Hybrid Alt B+C: type contract in TypeScript, values
+// in-code today, source-swappable for future JSON-driven config (additive).
+//
+// Adding a new persona: edit `lib/persona-registry.ts:PERSONA_CONFIG`. The
+// seed below picks it up at next server boot. Phase B starter ships
+// `PERSONA_CONFIG = {}`; gardens populate their own personas.
+for (const persona of Object.values(PERSONA_CONFIG)) {
+    seedPersona.run(
+        persona.name,
+        persona.displayName,
+        persona.kind,
+        persona.delivery,
+        JSON.stringify(persona.deliveryConfig),
+        persona.roleName,
+        persona.memoryPath,
+        persona.fractalPath,
+        persona.color,
+        JSON.stringify(persona.workshopTabs),
+        JSON.stringify(persona.mentionPatterns),
+        persona.classificationHint,
+        persona.agentPort,
+        persona.sessionPrefix,
+        persona.instance,
+        persona.isLocal,
+    );
 }
 
 export const personaStmts = {
