@@ -32,9 +32,16 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
+import { gradientConfigForAgent, registeredAgentSlugs } from '../src/server/lib/agent-registry';
+
+// Phase A Batch 4 (S155, 2026-05-10): widened agent type to string;
+// path config rebased on AGENT_GRADIENT_CONFIG (sourceDir + sourceFileFilter
+// come from registry); script-specific acquisition-shape fields (content_type,
+// dedupe, preference) stay in ACQUISITION_SHAPE keyed by slug. Agents not
+// registered in ACQUISITION_SHAPE fall back to working-memory defaults.
 
 interface AgentConfig {
-    agent: 'jim' | 'leo';
+    agent: string;
     sourceDir: string;
     contentType: string;
     /** Returns true if this filename should be considered as a c0 candidate. */
@@ -100,46 +107,77 @@ function deriveDateChain(filename: string, filepath: string): { iso: string | nu
     return { iso: null, source: 'none' };
 }
 
-const CONFIGS: Record<string, AgentConfig> = {
+// Acquisition-shape fields per agent (script-specific; not in agent-registry
+// because contentType + dedupe semantics are particular to this script's
+// acquisition path). sourceDir + sourceFileFilter come from agent-registry
+// per DEC-081 — single-source-of-truth for paths.
+//
+// Agents not in ACQUISITION_SHAPE default to working-memory shape (no dedupe).
+// To add a new agent's acquisition shape, register the agent first
+// (agent-registry.ts) THEN add an entry here.
+interface AcquisitionShape {
+    contentType: string;
+    dedupeKey?: (filename: string) => string;
+    preferenceScore?: (filename: string) => number;
+}
+
+const ACQUISITION_SHAPE: Record<string, AcquisitionShape> = {
     jim: {
-        agent: 'jim',
-        sourceDir: path.join(process.env.HOME || '', '.han', 'memory', 'sessions'),
         contentType: 'session',
-        fileFilter: (f) => f.endsWith('.md') && !f.startsWith('.'),
-        deriveLabel: (f) => f.replace(/\.md$/, ''),
-        deriveCreatedAt: (f, fp) => deriveDateChain(f, fp).iso,
     },
     leo: {
-        agent: 'leo',
-        sourceDir: path.join(process.env.HOME || '', '.han', 'memory', 'leo', 'working-memories'),
         contentType: 'working-memory',
-        fileFilter: (f) => {
-            if (!f.endsWith('.md')) return false;             // exclude .bak/.tmp/etc.
-            if (f.startsWith('.')) return false;
-            if (f.startsWith('self-reflection-archive-')) return false; // different content-type
-            return true;
-        },
-        deriveLabel: (f) => f.replace(/\.md$/, ''),
-        deriveCreatedAt: (f, fp) => deriveDateChain(f, fp).iso,
         // session-NN-YYYY-MM-DD.md and session-NN-full-YYYY-MM-DD.md → same key
         dedupeKey: (f) => f.replace(/-full-/, '-').replace(/\.md$/, ''),
         preferenceScore: (f) => f.includes('-full-') ? 100 : 0,
     },
 };
 
+const DEFAULT_ACQUISITION_SHAPE: AcquisitionShape = {
+    contentType: 'working-memory',
+};
+
+function buildConfigForAgent(agent: string): AgentConfig {
+    const registry = gradientConfigForAgent(agent);
+    const shape = ACQUISITION_SHAPE[agent] ?? DEFAULT_ACQUISITION_SHAPE;
+    return {
+        agent,
+        sourceDir: registry.sourceDir,
+        contentType: shape.contentType,
+        fileFilter: registry.sourceFileFilter,
+        deriveLabel: (f) => registry.sourceFileBaseName(f),
+        deriveCreatedAt: (f, fp) => deriveDateChain(f, fp).iso,
+        dedupeKey: shape.dedupeKey,
+        preferenceScore: shape.preferenceScore,
+    };
+}
+
 function main() {
     const args = process.argv.slice(2);
     const agentArg = args.find(a => a.startsWith('--agent='))?.split('=')[1];
     const apply = args.includes('--apply');
 
-    if (!agentArg || !CONFIGS[agentArg]) {
-        console.error('Usage: tsx scripts/acquire-c0s.ts --agent=<jim|leo> [--apply]');
-        console.error('  Default mode: dry-run (no DB writes). Pass --apply to execute.');
+    // Phase A Batch 4 (S155, 2026-05-10): validate agent against registry
+    // per DEC-081 agent-agnostic discipline.
+    const validSlugs = registeredAgentSlugs();
+    if (!agentArg || !validSlugs.includes(agentArg)) {
+        if (validSlugs.length === 0) {
+            console.error(`Usage: tsx scripts/acquire-c0s.ts --agent=<slug> [--apply]`);
+            console.error(`No agents registered in agent-registry.ts. Cannot proceed.`);
+        } else {
+            console.error(`Usage: tsx scripts/acquire-c0s.ts --agent=<${validSlugs.join('|')}> [--apply]`);
+            console.error(`  Default mode: dry-run (no DB writes). Pass --apply to execute.`);
+            if (agentArg) console.error(`Unknown agent slug: '${agentArg}'. Registered: ${validSlugs.join(', ')}`);
+        }
         process.exit(1);
     }
 
-    const config = CONFIGS[agentArg];
-    const db = new Database(path.join(process.env.HOME || '', '.han', 'tasks.db'));
+    const config = buildConfigForAgent(agentArg);
+    // Phase A Batch 4 (S155, 2026-05-10): mirrors db.ts:37 pattern. Post-cutover
+    // (DEC-080 Phase 5, 2026-04-29) the canonical store is gradient.db; HAN_DB_PATH
+    // override supports diagnostics against checkpoint snapshots.
+    const dbPath = process.env.HAN_DB_PATH || path.join(process.env.HOME || '', '.han', 'gradient.db');
+    const db = new Database(dbPath);
 
     if (!fs.existsSync(config.sourceDir)) {
         console.error(`[acquire-c0s] Source directory not found: ${config.sourceDir}`);

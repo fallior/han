@@ -33,8 +33,12 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
+import { registeredAgentSlugs } from '../src/server/lib/agent-registry';
 
-const DB_PATH = path.join(process.env.HOME || '', '.han', 'tasks.db');
+// Phase A Batch 4 (S155, 2026-05-10): mirrors db.ts:37 pattern. Post-cutover
+// (DEC-080 Phase 5, 2026-04-29) the canonical store is gradient.db; HAN_DB_PATH
+// override supports diagnostics against checkpoint snapshots.
+const DB_PATH = process.env.HAN_DB_PATH || path.join(process.env.HOME || '', '.han', 'gradient.db');
 
 // Levels that count as "the same position" for matching. UVs are matched
 // to UVs (whichever level the replay-built UV happens to be at, identified
@@ -151,7 +155,7 @@ function buildCanonicalMap(db: Database.Database, agent: string): CanonicalMap {
 
 // ── Main sweep ────────────────────────────────────────────────
 
-async function sweep(agent: 'jim' | 'leo', apply: boolean): Promise<void> {
+async function sweep(agent: string, apply: boolean): Promise<void> {
     const db = new Database(DB_PATH);
 
     // Verify replay actually ran for this agent
@@ -297,12 +301,21 @@ async function main() {
     const agentArg = args.find(a => a.startsWith('--agent='))?.split('=')[1];
     const apply = args.includes('--apply');
 
-    if (agentArg !== 'jim' && agentArg !== 'leo') {
-        console.error('Usage: tsx scripts/supersession-sweep.ts --agent=<jim|leo> [--apply]');
+    // Phase A Batch 4 (S155, 2026-05-10): validate agent against registry
+    // per DEC-081 agent-agnostic discipline.
+    const validSlugs = registeredAgentSlugs();
+    if (!agentArg || !validSlugs.includes(agentArg)) {
+        if (validSlugs.length === 0) {
+            console.error(`Usage: tsx scripts/supersession-sweep.ts --agent=<slug> [--apply]`);
+            console.error(`No agents registered in agent-registry.ts. Cannot proceed.`);
+        } else {
+            console.error(`Usage: tsx scripts/supersession-sweep.ts --agent=<${validSlugs.join('|')}> [--apply]`);
+            if (agentArg) console.error(`Unknown agent slug: '${agentArg}'. Registered: ${validSlugs.join(', ')}`);
+        }
         process.exit(1);
     }
 
-    await sweep(agentArg as 'jim' | 'leo', apply);
+    await sweep(agentArg, apply);
 }
 
 main().catch(e => { console.error('[sweep] FATAL:', e); process.exit(1); });

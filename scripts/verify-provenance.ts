@@ -29,8 +29,12 @@
 
 import * as path from 'path';
 import Database from 'better-sqlite3';
+import { registeredAgentSlugs } from '../src/server/lib/agent-registry';
 
-const DB_PATH = path.join(process.env.HOME || '', '.han', 'tasks.db');
+// Phase A Batch 4 (S155, 2026-05-10): mirrors db.ts:37 pattern. Post-cutover
+// (DEC-080 Phase 5, 2026-04-29) the canonical store is gradient.db; HAN_DB_PATH
+// override supports diagnostics against checkpoint snapshots.
+const DB_PATH = process.env.HAN_DB_PATH || path.join(process.env.HOME || '', '.han', 'gradient.db');
 const MAX_CHAIN_DEPTH = 30;
 
 interface ChainResult {
@@ -239,15 +243,28 @@ function main() {
     const args = process.argv.slice(2);
     const agentArg = args.find(a => a.startsWith('--agent='))?.split('=')[1];
 
+    // Phase A Batch 4 (S155, 2026-05-10): default to all registered agents
+    // (was hardcoded ['jim','leo']); validate single-slug case against registry
+    // per DEC-081 agent-agnostic discipline.
+    const validSlugs = registeredAgentSlugs();
+    let agents: string[];
+    if (agentArg) {
+        if (!validSlugs.includes(agentArg)) {
+            console.error(`Unknown agent slug: '${agentArg}'. Registered: ${validSlugs.join(', ') || '(none)'}.`);
+            process.exit(1);
+        }
+        agents = [agentArg];
+    } else {
+        if (validSlugs.length === 0) {
+            console.error(`No agents registered in agent-registry.ts. Cannot proceed.`);
+            process.exit(1);
+        }
+        agents = validSlugs;
+    }
+
     const db = new Database(DB_PATH, { readonly: true });
 
-    const agents = agentArg ? [agentArg] : ['jim', 'leo'];
-
     for (const agent of agents) {
-        if (agent !== 'jim' && agent !== 'leo') {
-            console.error(`Unknown agent: ${agent}`);
-            continue;
-        }
         const report = auditAgent(db, agent);
         console.log(formatReport(report));
     }
