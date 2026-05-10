@@ -7,9 +7,12 @@
  *
  * Wraps `loadTraversableGradient` from `lib/memory-gradient.ts`. The library
  * function reads gradient_entries via prepared statements bound to whatever DB
- * the server's db.ts module is connected to — which is `~/.han/tasks.db` by
- * default. Setting HAN_DB_PATH before the import (which transitively imports
- * db.ts) routes the prepared statements at the rebuild gradient instead.
+ * the server's db.ts module is connected to — which is `~/.han/gradient.db` by
+ * default since the 2026-04-29 cutover (DEC-080 Phase 5; the variable name
+ * `TASKS_DB_PATH` in db.ts:37 is preserved pending Phase 12 rename). Setting
+ * HAN_DB_PATH before the import (which transitively imports db.ts) routes the
+ * prepared statements at a different DB (e.g. a checkpoint snapshot for
+ * diagnostics).
  *
  * Invocation (from src/server so node resolves better-sqlite3 etc.):
  *   cd /home/darron/Projects/han/src/server && \
