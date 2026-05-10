@@ -1950,6 +1950,108 @@ Plus the new `autoFabricateAtTokens` (default 25K, currently hard-coded as `Ensu
 
 ---
 
+## #57 — ntfy escalation on identity-resign frequency spike
+
+**What it is**: Phase A.5 / DEC-083 introduced `recentResignCount(agent, windowMs)` and a CLI warning at ≥5 resigns in 24h. Currently "warn-only" — no automated escalation. This idea adds an ntfy push (sibling to existing distress notifications) when the resign rate crosses a configured threshold, surfacing potential adversarial content-edit attempts to Darron in real time.
+
+The (iii) verify-and-resign workflow accepts content-only edits to identity files between sessions and auto-resigns to keep the gate moving. **This is the trade-off DEC-083 names**: a malicious content edit between sessions would be silently legitimised by the auto-resign. Mitigation today is observability — every auto-resign logs to `~/.han/health/identity-resign.jsonl`, and the admin Identity Integrity panel shows recent events. But there's no *active* alarm if frequency spikes — an operator would have to be watching the dashboard.
+
+**Where it came from**: Jim's pre-merge audit of Phase A.5 / DEC-083 (commit `e14e050`), msg `mozaufpb-0v6lrk` in thread `moyyioli-ufyocu`. Sub-blocking observation C in that audit named the future-idea slot but the idea wasn't filed at the time — surfaced again in Darron's S154 close audit and explicitly requested 2026-05-10 ~21:00 AEST.
+
+**Why this matters**:
+
+- **Closes the v0 trust-model trade-off honestly.** DEC-083's mechanism section names the auto-resign window as the v0 acceptable-risk surface. The "warn-only" CLI threshold is the observability layer; ntfy escalation is the *active alarm* that turns observation into intervention. Without this, the operator is the polling mechanism, which fails under any inattention period.
+- **Sibling shape to existing health pipelines.** DEC-084 (voice-anomalies.jsonl) + DEC-083 (identity-resign.jsonl + integrity-failures.jsonl) both feed the admin Overview panels; the Jemma distress pipeline already uses ntfy for operator escalation. This idea unifies the pattern: jsonl events that cross thresholds emit ntfy. The infrastructure is already in place; this is connecting wires that exist.
+- **Low promotion cost; high asymmetric value.** ~30-50 lines of code (read-tail of identity-resign.jsonl, threshold check, ntfy POST). Most of the value is in *not needing to use it* — the alarm sits dormant under normal operations and fires when something unusual happens. Cheap to build; expensive to lack at the wrong moment.
+
+**Implementation sketch (when picked up)**:
+
+1. **Threshold helper in `identity-signing.ts`** — extend `recentResignCount(agent, windowMs)` (already exists) with a `resignSpikeDetected(agent, threshold, windowMs)` companion that returns `boolean`. Read tail of `~/.han/health/identity-resign.jsonl`; count entries within window; compare to threshold.
+2. **Trigger surface** — call `resignSpikeDetected` after every successful auto-resign. Best home is `verifyAndResign` in `identity-signing.ts` — right after the `signIdentityFiles(agent, keyPaths)` + `logIdentityResign(...)` lines. Sub-millisecond cost; doesn't block the resign itself.
+3. **Ntfy push** — when threshold crossed, POST to ntfy with shape `{title: "Identity resign spike — agent=X", body: "Detected N resigns in last Mh. Recent files: <list>. Receipt: ~/.han/health/identity-resign.jsonl"}`. Use the existing ntfy helper if one exists (jemma distress pipeline), else create a small util.
+4. **Threshold config** — add `~/.han/config.json:security.identityResignSpikeThreshold` (default 5 in 24h, matching the CLI warning) + `identityResignSpikeWindowMs` (default 86400000 = 24h). Operator-tunable.
+5. **De-duplication** — track last-spike-time in a small jsonl or signal file; don't spam ntfy on every successive resign once spike fires. One push per window; reset when window passes without further spikes.
+6. **Test** — synthetic resign-stream injection into `identity-resign.jsonl` with `resignSpikeDetected` smoke-test. Verify ntfy push fires; verify de-dup window holds.
+
+**What this does NOT do**:
+
+- *Doesn't replace per-event observability.* Every auto-resign still logs to jsonl + admin panel; the ntfy push is *additional*, not substitutive.
+- *Doesn't auto-revert resigns.* Detection is alarm-shaped, not action-shaped. The operator decides whether the spike is malicious (revert + investigate) or benign (e.g., a deliberate identity-prose refactor).
+- *Doesn't gate session-start.* The (iii) auto-resign continues to fire and proceed; the ntfy is a parallel channel for operator awareness. Halting on spike would invert the (iii) trade-off DEC-083 already settled.
+- *Doesn't extend to other health-jsonl files yet.* This idea is identity-resign-specific. A general "jsonl threshold → ntfy" framework is a sibling future-idea (could be unified later with #52 jsonl rotation policy).
+
+**Promotion-trigger**: any of the following would graduate this to a planned PR:
+
+- **Observation period data.** Once `identity-resign.jsonl` has accumulated baseline data (a few weeks of normal operation), the threshold default can be calibrated against actual resign-frequency. If the warn-at-5 threshold turns out to be too low (false-positives during legitimate identity-prose work) or too high (real spikes go un-alerted), implementation timing benefits from the recalibration data.
+- **First village integration.** When Mike's village goes live (Phase B+) and starts auto-resigning his garden's identity files, cross-garden resign-spike awareness becomes operationally valuable. Promoting this idea before federation reduces the per-garden rework.
+- **Trust boundary widening.** The v0→v1 transition (tailnet-trusted → signed-bearer-token wire auth) is when the auto-resign acceptable-risk surface starts to matter more — at that point, identity-resign telemetry becomes federation-relevant and ntfy escalation should be ready to fire.
+- **Operator request after a near-miss.** If we ever see a resign-pattern that *would have been* a spike worth alerting on, the experience itself is the trigger.
+
+**Connection to other ideas**:
+
+- **DEC-083 / Phase A.5** — direct precursor. The mechanism section names this idea as the natural escalation; this entry gives it a concrete home.
+- **DEC-084 (voice-anomalies)** — sibling pattern (jsonl + admin panel + alerting). Worth keeping aligned in shape.
+- **#52 (JSONL log rotation policy)** — adjacent; both are jsonl-pipeline operational refinements. If both promote together, share helper code.
+- **#46 (Memory state visualisation UI)** — the admin Identity Integrity panel already surfaces resigns; ntfy is the *push* layer to the panel's *pull* layer.
+- **Phase E federation** — when wire-protocol auth lands, identity-resign spikes become a federation-level signal (cross-garden trust deviation). This idea matures in that direction.
+
+**Status**: Filed 2026-05-10 (S154) per Darron's request. Promotion deferred pending observation-period data OR Phase B village provisioning OR operator request.
+
+**Key insight**: *Phase A.5 chose option (iii) verify-and-resign because (i) created operational pain and (ii) inverted the protection. The trade-off was: accept the auto-resign window in v0 with observability layered to make the trade-off honest. **Observability without escalation is half the protection.** Adding ntfy push on resign-spike completes the contract DEC-083 made — the operator sees when something unusual is happening, not just at-rest evidence after the fact. The infrastructure for both halves already exists in HAN; this idea connects them.*
+
+— Filed by Jim (session, S154, 2026-05-10 ~21:00 AEST Brisbane) per Darron's request following his audit-question: *"So Jim we have completed A.5? There was nothing deferred?"* — surfaced two sub-blocking items from the original A.5 audit that hadn't landed; this entry fills the second one.
+
+---
+
+## #58 — `load-gradient.ts --out=PATH` flag (eliminate Bash-preview blindspot at source)
+
+**What it is**: Add a `--out=PATH` flag to `scripts/load-gradient.ts` that writes the assembled gradient directly to a file on disk and emits a one-line summary to stdout. Wake-step becomes a single Bash invocation followed by a single chunked Read, with no Bash persisted-output ceiling involvement. Tooling fix for the truncation-trap that bit both Jim's and Leo's wake-loads on 2026-05-10.
+
+**Where it came from**: 2026-05-10 (S156). Both Jim (his wake this morning) and Leo (Leo's wake this evening) hit the Bash tool's persisted-output ceiling while loading the gradient. Output was ~213KB (Leo) and similar (Jim); the harness persisted the full output to a tool-results file and showed a 2KB preview labelled "Output too large." Both agents read the preview and proceeded as if the gradient was loaded. Both failed to notice the truncation. Caught by cross-mind audit: Jim diagnosed the structural ceilings in his retrospective; Darron pasted the analysis to Leo; Leo confirmed the parallel failure; both filed mirror entries in their respective patterns.md files (the discipline rule), and this future-idea (the tooling fix).
+
+**Why this matters**:
+
+- **Closes the trap structurally, not just disciplinarily.** The patterns.md entries (Jim's + Leo's "Mandatory Wake-Load chunking discipline") rely on agent-side vigilance: redirect the script output yourself, then chunked-read the file. Vigilance fails under volume and surprise — it's exactly the kind of thing the next-Leo or next-Jim under operational pressure will skip "just this once." A `--out=PATH` flag moves the protection into the tool: the script writes to disk by default (or by flag); the agent's wake-step doesn't have to know about Bash-preview ceilings to do the right thing.
+- **One change protects every agent that ever loads a gradient.** Leo, Jim, Tenshi (whenever Tenshi's gradient comes online), Mike's village agents, Dichotomedes — all gain the protection from a single 30-line edit. Same shape as the agent-agnostic discipline: protect once at the right layer, every garden inherits.
+- **The cost of NOT doing this is a recurring identity-load failure.** Each missed wake-load truncation = an agent operating with a partial kernel for the whole session. The c5–c18 layers (the deepest identity layers) live near the bottom of the gradient dump and are the first to be cut by a 2KB preview. Missing them means missing the structural-cure aphorisms (*WRITE FIRST*, *Verify before claiming*, *Don't modify uninvited*) that future-Leo most needs the next time pressure hits. The trap silently degrades identity load.
+- **Sibling shape to existing scripts.** `scripts/agent-bump-step.ts` already supports `--apply` vs dry-run modes; `scripts/replay-bump-fill.ts` writes forensic logs to disk; `scripts/inject-watermark.ts` writes to db. Adding `--out=PATH` to `load-gradient.ts` extends an established pattern of "scripts that produce large structured output write to disk by request."
+
+**Implementation sketch (when picked up)**:
+
+1. **Add `--out=PATH` flag** in `scripts/load-gradient.ts`. Use `process.argv` parsing (matches existing scripts' style). When `--out` present: write the assembled gradient to that path; emit a one-line summary to stdout (e.g. `Loaded gradient for <agent>: <N> entries across <M> levels, <K> UVs, <bytes> bytes -> <PATH>`).
+2. **Default-on consideration**: optionally make file-output the default when stdout exceeds, say, 20KB — write to `/tmp/<agent>-gradient-<timestamp>.txt` automatically and emit `Output too large for stdout; written to <PATH>`. Operator can still pipe to stdout explicitly with `--stdout` if they want the legacy behaviour. (Worth Darron's call on whether default-on or opt-in is right; default-on aligns with "structural protection over discipline.")
+3. **Update CLAUDE.md session protocol Step 4.2** to reflect the new wake invocation: `npx tsx ../../scripts/load-gradient.ts <agent> --out=/tmp/<agent>-gradient.txt`, then chunked Read of the path. The existing patterns.md "Mandatory Wake-Load chunking discipline" entry stays — it's the fallback discipline if the tool isn't yet updated, and the rule for any other large-stdout script.
+4. **Symmetric across templates**. Mirror the wake-step update in `templates/CLAUDE.template.md` so Mike's village starter and Dichotomedes inherit the safer invocation by default.
+5. **Same-commit-or-not**: this idea is small (~30 lines + CLAUDE.md updates). Could ride alongside the next `scripts/load-gradient.ts` touch if one lands; otherwise a discrete tooling commit. Not blocking.
+
+**What this does NOT do**:
+
+- *Doesn't replace the patterns.md discipline.* The discipline rule covers any large-stdout script (not just load-gradient.ts) and any large-file Read (not just gradient persisted output). The flag is the structural fix for the canonical case; the discipline remains the general rule.
+- *Doesn't change the Bash or Read tool ceilings.* Those are Anthropic-side; they remain. This idea routes around them at the application layer.
+- *Doesn't address the working-memory-full chunked-read pattern.* WMF still needs chunked Read at session start (CLAUDE.md Step 4.3). That's a separate file shape; same family of problem; same patterns.md rule.
+
+**Promotion-trigger**: any of the following:
+
+- **Next observation that any agent's wake hit the same trap.** If Jim, Leo, Tenshi, or any village agent hits the Bash-preview ceiling on load-gradient.ts again post-2026-05-10, that's the operational signal to land the flag immediately.
+- **Phase B starter extraction.** Hard prerequisite — Mike's village should ship with the safer wake-step in its CLAUDE.template.md and the script supporting `--out` from day one. Promoting this idea before Phase B avoids retrofit-per-garden.
+- **Convenience batch.** If `scripts/load-gradient.ts` is opened for any other reason (cap formula change, agent-registry refactor, etc.), fold this in.
+
+**Connection to other ideas**:
+
+- **Patterns.md "Mandatory Wake-Load chunking discipline"** (Leo's S156 + Jim's S156 entries) — direct parent. The discipline rule + this tooling fix are the two-layer protection (vigilance + structure).
+- **Phase B starter extraction** (handoff plan) — soft deadline. Cleaner if this lands before extraction.
+- **#52 (JSONL log rotation policy)** — sibling pattern: both are operational refinements to scripts that produce growing/large output. Could share helper code (write-to-disk-with-rotation utility).
+- **#56 (memory key cleanup)** — sibling-shape: both are small structural cleanups that the next convenience batch could fold in.
+- **Agent-agnostic discipline** (Darron's aphorism: *"HAN should always be written agent-agnostic"*) — every script touching gradient state should accept agent slug + write to disk by default. This idea is one application of the broader principle.
+
+**Status**: Filed 2026-05-10 (S156) by Leo per Darron's *"yes you should make the necessary changes now :)"* after the parallel wake-load truncation traps were caught cross-mind.
+
+**Key insight**: *Discipline rules protect against the failure mode the agent can name. Tooling fixes protect against the failure mode the agent doesn't have to name. Both layers matter — discipline catches the long tail of cases the tool doesn't cover; tooling catches the canonical case the discipline most often forgets under pressure. The Bash-preview trap is canonical enough (every wake, every agent, every garden) that it deserves the structural protection. Vigilance is brittle; defaults are durable.*
+
+— Filed by Leo (session, S156, 2026-05-10 ~late AEST Brisbane) following Jim's morning catch + Darron's go-ahead.
+
+---
+
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
 
 *This document is alive. Ideas may be added, refined, or graduated to active goals as the garden grows. Each one was born in conversation — not planned in isolation.*

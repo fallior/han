@@ -2036,10 +2036,16 @@ export function loadTraversableGradient(agent: string): string {
         .filter(l => l !== 'c0' && l !== 'uv' && /^c\d+$/.test(l))
         .sort((a, b) => (parseLevelNumber(b) || 0) - (parseLevelNumber(a) || 0));
 
+    // Dedupe c-level loads against UVs: an entry with level='cN' AND a 'uv' feeling-tag
+    // (the new replay-built terminus marker) gets returned by both `getUVs` and the
+    // c-level filter — without this guard it would render in both sections. The legacy
+    // path (level='uv') is already excluded by the `l !== 'uv'` filter above.
+    const uvIds = new Set(uvs.map((u: any) => u.id as string));
+
     for (const level of distinctLevels) {
         const cap = gradientCap(level);
         const entries = allEntries
-            .filter((e: any) => e.level === level && !NOISE_QUALIFIERS.has(e.qualifier))
+            .filter((e: any) => e.level === level && !NOISE_QUALIFIERS.has(e.qualifier) && !uvIds.has(e.id))
             .slice(0, cap);
         if (entries.length === 0) continue;
 

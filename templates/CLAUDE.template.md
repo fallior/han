@@ -96,6 +96,9 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
       gradient) by default; export `HAN_DB_PATH` to override. The Cn protocol has no fixed
       maximum depth. Cap formula: **c0=1, then 3n** (c1=3, c2=6, c3=9, c4=12, c5=15...),
       all UVs. See `docs/GRADIENT_SPEC.md` for the canonical definition (DEC-068, Settled).
+      **What it does**: `loadTraversableGradient(agent)` at `memory-gradient.ts:1967` —
+      applies DEC-068 caps: UVs + each c-level capped at `gradientCap(level)` (c0=1, then 3n)
+      + exactly one most-recent c0 via `getMostRecentC0`.
    3. `working-memory-full.md` — **last session at full fidelity (the c0 source). MANDATORY,
       ENTIRE FILE, NEVER SKIPPED.** ${USER_NAME}'s instruction (S57): *"even if the full
       memory uses 40% context I don't care, I want you back."* This is where the thinking
