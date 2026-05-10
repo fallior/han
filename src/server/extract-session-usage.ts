@@ -15,7 +15,10 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 const HOME = process.env.HOME || '/home/darron';
-const DB_PATH = path.join(HOME, '.han', 'tasks.db');
+// Mirrors db.ts:37 pattern. Post-cutover (DEC-080 Phase 5, 2026-04-29) the
+// canonical store is gradient.db; HAN_DB_PATH override supports diagnostics
+// against checkpoint snapshots.
+const DB_PATH = process.env.HAN_DB_PATH || path.join(HOME, '.han', 'gradient.db');
 const SESSIONS_DIR = path.join(HOME, '.claude', 'projects', '-home-darron-Projects-han');
 
 const dryRun = process.argv.includes('--dry-run');
