@@ -1,5 +1,26 @@
 # Memory Gradient Compression Utility
 
+> **⚠️ HISTORICAL — RETIRED API (2026-05-10, Phase A Batch 6 + 7, S155).**
+>
+> This document describes the **legacy** memory-gradient API as it existed before DEC-082 (sdkCompress retirement, 2026-05-04) and DEC-085 + Amendment (working-memory in-situ as c1 source, 2026-05-08 → 2026-05-10). The functions described below — `compressToLevel`, `compressToUnitVector`, `processGradientForAgent`, `compressMemoryFileGradient`, `maintainMemoryFile` — are all **retired-by-throw** in current code; calling them throws clean errors with retire-attribution. Their bodies are dead code; reachability traces (S154 Clarification 3) confirmed zero live callers.
+>
+> **Current canonical surface** (where to look instead):
+>
+> | Concern | Current code path |
+> |---|---|
+> | Working-memory pair compression | `wm-sensor` (fs.watch) → `lib/memory-gradient.ts:rollingWindowRotatePaired` (DEC-085 Amendment: whole-file slice + marker-as-metadata) → atomic c0+c1 paired insert → `bumpOnInsert(c1)` cascades upward |
+> | Cascade c1→c2+ | `pending_compressions` queue + `scripts/process-pending-compression.ts` (full identity loaded; voice downstream of identity) |
+> | Felt-moments rotation (legacy single-file) | `lib/memory-gradient.ts:rollingWindowRotate` |
+> | Identity files (signed) | `lib/identity-signing.ts` + Step 0 verification gate at session-start (DEC-083) |
+> | Persona display/dispatch config | `lib/persona-registry.ts` (Phase A Batch 7, hybrid Alt B+C) |
+> | Agent gradient infra config | `lib/agent-registry.ts` |
+>
+> **Decision lineage**: `claude-context/DECISIONS.md:DEC-082` (stranger-Opus retirement), `:DEC-083` (identity signing), `:DEC-085 + Amendment 2026-05-10` (paired rotation + whole-file slice).
+>
+> **The body below is preserved for archaeology — it documents how the system used to work.** Do not extend it; do not write code against the API names it describes.
+
+---
+
 ## Overview
 
 `src/server/lib/memory-gradient.ts` implements the overlapping fractal memory model for Jim and Leo. This system compresses session memories across multiple fidelity levels (c0 through c4), enabling continuous memory gradient compression where sessions appear simultaneously at multiple compression depths.
