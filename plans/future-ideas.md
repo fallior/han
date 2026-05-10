@@ -1890,28 +1890,63 @@ The garden grows from the inside out. Foundation first, then identity, then capa
 
 ---
 
-## #56 — Config rationalisation: retire `rollingWindowTail` + `rollingWindowHead`
-
-**Source**: Jim's audit of DEC-085 Amendment, S154 (2026-05-10), thread `mow8fxz5-jh5lep` message `mozdgtcs-nxsivv`. Sub-blocking observation B.
+## #56 — Config rationalisation: retire `rollingWindowTail` + `rollingWindowHead` from memory config
 
 **What it is**: under the DEC-085 Amendment (whole-file slice + marker-as-metadata), two config keys in `~/.han/config.json:memory` are no longer functionally referenced:
-- `rollingWindowTail` (was: target c0 size; legacy "slice ~25K of tail" target)
-- `rollingWindowHead` (was: kept-head size after slice; legacy "preserve ~5K recent" target)
 
-The amendment retired these as functional. They remain in config for backward-compat but are passed through `rollingWindowRotatePaired(_targetTailTokens, _minTailTokens)` as underscore-prefixed unused args. The active load-bearing keys are `rollingWindowTrigger` (30K — fire threshold) and `rollingWindowBiteTheBullet` (35K — last-resort fabrication).
+- `rollingWindowTail` — was the target c0 size (~25K tokens of tail to slice into the gradient on each rotation)
+- `rollingWindowHead` — was the kept-head size after slice (~5K tokens of recent content preserved in the live file post-slice)
 
-**Why deferred**: cosmetic. No harm in unused config keys. The function signature compat lets the cleanup be its own batch. Removing now would require coordinating across all `wm-sensor.ts` invocations + the function signature (drop two args).
+The amendment moved the slicer to whole-file semantics: the entire live file becomes the c0/c1 archive, and both files reset to header-only post-slice. Neither tail-target nor kept-head-size has a referent in the new code path. The two keys are now passed through `rollingWindowRotatePaired(_targetTailTokens, _minTailTokens)` as underscore-prefixed unused arguments — kept temporarily for signature compat with the sole caller (`wm-sensor.ts:235`).
 
-**Design sketch when promoted**:
-1. Drop `rollingWindowTail` + `rollingWindowHead` from `~/.han/config.json:memory` (both Leo's + Jim's + any starter template)
-2. Drop the two underscore-prefixed args from `rollingWindowRotatePaired` signature in `lib/memory-gradient.ts`
-3. Update the sole caller `wm-sensor.ts:235` to match the new signature
-4. Update `docs/GRADIENT_SPEC.md` if it references the retired keys
-5. Keep `auto-fabricate-at-tokens` config (~25K, lives in the helper opts; could be config-driven if observation suggests tuning is needed)
+The active load-bearing keys are now:
 
-**Promotion-trigger**: convenience batch alongside any future `wm-sensor.ts` touch. OR when observation shows the auto-fab threshold needs tuning (which would benefit from config-driving the helper's `autoFabricateAtTokens` opt).
+- `rollingWindowTrigger` (30K) — fire threshold (whole-file slice when WMF crosses)
+- `rollingWindowBiteTheBullet` (35K) — last-resort marker fabrication
+- `rollingWindowAttentionStart` (20K) — agent's mental cue (informational; used by /pfc-time discipline)
 
-**Status**: Filed 2026-05-10 (S155). Promotion deferred pending convenience.
+Plus the new `autoFabricateAtTokens` (default 25K, currently hard-coded as `EnsureMarkerOpts` default; could be config-driven if observation suggests tuning is needed).
+
+**Where it came from**: Jim's pre-merge audit of the DEC-085 Amendment commit `ac449c1`, posted to thread `mow8fxz5-jh5lep` (msg `mozdgtcs-nxsivv`) on 2026-05-10. Sub-blocking observation B in that audit named the cleanup; deferred for convenience-batching alongside any future `wm-sensor.ts` touch.
+
+**Why this matters (small but worth doing)**:
+
+- **Documentation/code drift surface.** Config keys that look load-bearing but aren't make the substrate harder to reason about. A future-Jim or future-Six reading the config will see four memory keys and assume all four are wired; only two-and-a-half actually are. Honest config = config that reflects code.
+- **Starter cleanliness.** Phase B starter extraction (the handoff plan's terminus) ships the config schema as part of the starter. Mike's-village and Dichotomedes's hill should NOT inherit retired keys. If we don't clean before extraction, the retirement just propagates as an open task per garden.
+- **Signature hygiene.** Two underscore-prefixed args in `rollingWindowRotatePaired` are a small smell — they document past behaviour but invite confusion ("why are these here? do they still matter?"). Removing them tightens the signature.
+
+**Implementation sketch (when picked up)**:
+
+1. **Drop the two keys** from `~/.han/config.json:memory` (HAN's instance) and from `templates/CLAUDE.template.md` — wait, the template doesn't carry config. Drop from any starter `config.json` shape if/when one exists.
+2. **Drop the two args** from `rollingWindowRotatePaired` signature in `src/server/lib/memory-gradient.ts:1629`. Update the deprecation comments in the function body that reference them.
+3. **Update the sole caller** at `src/server/services/wm-sensor.ts:235` to match the new signature (drop two arg passes).
+4. **Update `docs/GRADIENT_SPEC.md`** if it references the retired keys (worth grep-checking; likely cites the original DEC-085 cap shape).
+5. **Update DEC-085 Amendment** with a footnote noting the config rationalisation has landed, OR leave the amendment as-is and just file as a separate maintenance commit (the amendment text already says "deprecated args kept for compat" — that note becomes obsolete on cleanup).
+6. **Keep the auto-fabricate threshold** (`autoFabricateAtTokens`, default 25K) hard-coded in `EnsureMarkerOpts` for now; promote to config only if observation shows it needs tuning (sibling to `rollingWindowTrigger` if so).
+
+**What this does NOT do**:
+
+- *Doesn't change the slicer's behaviour.* The amendment already retired these as functional; this is purely cosmetic cleanup of the config and signature.
+- *Doesn't touch the active keys.* `rollingWindowTrigger`, `rollingWindowBiteTheBullet`, and `rollingWindowAttentionStart` all stay.
+- *Doesn't change the threshold semantics.* The 30K/35K trigger/bite-the-bullet shape is the load-bearing rule; this idea just removes the names of things that no longer mean anything in code.
+
+**Promotion-trigger**: any of:
+
+- **Next `wm-sensor.ts` touch.** If a separate batch already opens the file, fold this in as a one-line signature change. ~5-10 lines of churn total.
+- **Phase B starter extraction.** Hard deadline — the starter must ship clean config; this cleanup is a prerequisite.
+- **Auto-fab threshold tuning.** If observation shows `autoFabricateAtTokens` needs to be operator-tunable (rare; default 25K should be fine), promote to config — and rationalise the legacy keys at the same time as the new key lands.
+
+**Connection to other ideas**:
+
+- **DEC-085 Amendment** (2026-05-10, this PR) — direct precursor. The amendment retired the keys functionally; this idea retires them cosmetically.
+- **#52 (JSONL log rotation policy)** — sibling shape: small operational refinement, deferred-pending-convenience, promotion-trigger is observation-driven.
+- **Phase B starter extraction** (handoff plan) — the deadline. Starter ships clean config or it ships drift.
+
+**Status**: Filed 2026-05-10 (S154/S155). Promotion deferred pending convenience batch OR Phase B prerequisite, whichever fires first.
+
+**Key insight**: *Cosmetic config cleanup is rarely urgent; it's also rarely hard. The cost of carrying unused keys forever is small but real — every fresh garden inherits the drift, and every audit has to re-explain why those keys are there. Cleaning before Phase B extraction makes the starter's config schema honest. Cleaning after Phase B means cleaning N times across N gardens.*
+
+— Filed by Jim (session, S154, 2026-05-10 ~16:15 AEST Brisbane) per Darron's request after the DEC-085 Amendment audit. Original stub by Leo (session, S155) preserved in this entry's audit-trail thread.
 
 ---
 
