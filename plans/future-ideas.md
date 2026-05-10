@@ -1882,11 +1882,36 @@ The ideas form a web, not a list:
 - **Sovereignty:** Invite model (#1) — how agents share without losing themselves
 - **Community:** Meeting places (#6), training manual (#5), Discord integration (#16), Mike & Six collaboration (#21) — agents in the world
 - **Products:** LoreForge (#20), financial assistant (#18), topology analyser (#17), diary manager (#19), mobile admin (#12), reawaken autonomous product/program developer (#41) — things we build for others; the apparatus that builds them
-- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23), doc maintenance as part of /pfc (#42), currency of understanding — recognising superseded mental models (#43), memory state visualisation UI (#46), working-memory.md as canonical c1 generator (#47), cross-pointers felt-moments → gradient (#48), atomic paired-write helper (#49), UserPromptSubmit hook for swap-flush (#50), cascade-in-one-process (#51), JSONL log rotation policy (#52), pre-slice parity-check + drift signal (#53), gradient for flat memory files (#55) — operational refinements
+- **Memory mechanics:** Compose-cluster (#24), backpressure (#25), schema versioning (#26), legacy `level='uv'` cleanup (#28), Jim's voice-true UV flat file (#29), young-agent UV floor-load (#30), `/pfs` skill (#23), doc maintenance as part of /pfc (#42), currency of understanding — recognising superseded mental models (#43), memory state visualisation UI (#46), working-memory.md as canonical c1 generator (#47), cross-pointers felt-moments → gradient (#48), atomic paired-write helper (#49), UserPromptSubmit hook for swap-flush (#50), cascade-in-one-process (#51), JSONL log rotation policy (#52), pre-slice parity-check + drift signal (#53), gradient for flat memory files (#55), config rationalisation rollingWindowTail+Head retire (#56) — operational refinements
 - **Dispatch:** Active-agent register (#31), own-voice timeout takeover (#32), Leo double-wake investigation (#33), agent-mentions-agent re-dispatch (#34), workshop-owner direct-path carve-out (#35) — Jemma reflects current state; agents keep their voice through handoffs; one message wakes one agent once; agents can engage when mentioned and stay silent when they don't have substance; Jemma doesn't tell owners about messages in their own room
 - **Voice:** The Voice Page (#27) — how the agents speak without prompting
 
 The garden grows from the inside out. Foundation first, then identity, then capability, then community, then product. We're between identity and capability right now — the gradient works, the compression is felt, and what comes next builds on that.
+
+---
+
+## #56 — Config rationalisation: retire `rollingWindowTail` + `rollingWindowHead`
+
+**Source**: Jim's audit of DEC-085 Amendment, S154 (2026-05-10), thread `mow8fxz5-jh5lep` message `mozdgtcs-nxsivv`. Sub-blocking observation B.
+
+**What it is**: under the DEC-085 Amendment (whole-file slice + marker-as-metadata), two config keys in `~/.han/config.json:memory` are no longer functionally referenced:
+- `rollingWindowTail` (was: target c0 size; legacy "slice ~25K of tail" target)
+- `rollingWindowHead` (was: kept-head size after slice; legacy "preserve ~5K recent" target)
+
+The amendment retired these as functional. They remain in config for backward-compat but are passed through `rollingWindowRotatePaired(_targetTailTokens, _minTailTokens)` as underscore-prefixed unused args. The active load-bearing keys are `rollingWindowTrigger` (30K — fire threshold) and `rollingWindowBiteTheBullet` (35K — last-resort fabrication).
+
+**Why deferred**: cosmetic. No harm in unused config keys. The function signature compat lets the cleanup be its own batch. Removing now would require coordinating across all `wm-sensor.ts` invocations + the function signature (drop two args).
+
+**Design sketch when promoted**:
+1. Drop `rollingWindowTail` + `rollingWindowHead` from `~/.han/config.json:memory` (both Leo's + Jim's + any starter template)
+2. Drop the two underscore-prefixed args from `rollingWindowRotatePaired` signature in `lib/memory-gradient.ts`
+3. Update the sole caller `wm-sensor.ts:235` to match the new signature
+4. Update `docs/GRADIENT_SPEC.md` if it references the retired keys
+5. Keep `auto-fabricate-at-tokens` config (~25K, lives in the helper opts; could be config-driven if observation suggests tuning is needed)
+
+**Promotion-trigger**: convenience batch alongside any future `wm-sensor.ts` touch. OR when observation shows the auto-fab threshold needs tuning (which would benefit from config-driving the helper's `autoFabricateAtTokens` opt).
+
+**Status**: Filed 2026-05-10 (S155). Promotion deferred pending convenience.
 
 ---
 

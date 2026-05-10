@@ -18,6 +18,7 @@ import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { db, gradientStmts, feelingTagStmts, feelingTagHistoryStmts } from '../db';
 import { countTokens } from './token-counter';
 import { gradientConfigForAgent, requireAgentEnv } from './agent-registry';
+import { stripMarkers } from './memory-paired-writer';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -1737,12 +1738,12 @@ export function rollingWindowRotatePaired(
         }
         const fullCutPos = fullEntries[smallerCount - 1].charEnd;
         const compCutPos = compEntries[smallerCount - 1].charEnd;
-        fullArchive = stripMarkersFromContent(fullToUse.substring(0, fullCutPos));
-        compArchive = stripMarkersFromContent(compToUse.substring(0, compCutPos));
+        fullArchive = stripMarkers(fullToUse.substring(0, fullCutPos));
+        compArchive = stripMarkers(compToUse.substring(0, compCutPos));
     } else {
         // Clean parity — whole-file slice
-        fullArchive = stripMarkersFromContent(fullToUse);
-        compArchive = stripMarkersFromContent(compToUse);
+        fullArchive = stripMarkers(fullToUse);
+        compArchive = stripMarkers(compToUse);
     }
 
     const fullArchivedTokens = countTokens(fullArchive);
@@ -1833,16 +1834,6 @@ export function rollingWindowRotatePaired(
         boundaryId: chosenMarker.id,
         drift,
     };
-}
-
-/**
- * Strip WM-BOUNDARY markers from a content string (and surrounding blank lines).
- * Used at slice time to keep marker text out of c0/c1 content per Darron's
- * "marker may persist into meaning" worry — markers are metadata in the
- * `qualifier` column, not content-bearing.
- */
-function stripMarkersFromContent(content: string): string {
-    return content.replace(/\n*<!--\s*WM-BOUNDARY:\s*id=[^\s]+\s+ts=[^\s]+(?:\s+fabricated=[^\s]+)?\s*-->\n*/g, '\n');
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
