@@ -34,7 +34,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { gradientStmts, feelingTagStmts } from '../db';
-import { gradientConfigForAgent } from './agent-registry';
+import { gradientConfigForAgent, registeredAgentSlugs } from './agent-registry';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -550,10 +550,14 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
         const taggedMessages = gradientStmts.getUnprocessedTaggedMessages.all() as any[];
         for (const msg of taggedMessages) {
             try {
-                // Determine agent from compression_tag prefix (e.g. "jim:warm" → jim, "leo:craft" → leo)
-                const tagAgent = msg.compression_tag.startsWith('jim:') ? 'jim' as const
-                    : msg.compression_tag.startsWith('leo:') ? 'leo' as const
-                    : agent; // Default to current agent
+                // Phase A Batch 6 (S155, 2026-05-10): registry-driven prefix
+                // detection per DEC-081 (was hardcoded `'jim:' / 'leo:'`).
+                // Iterate registered agents to find a matching `<slug>:` prefix.
+                // Default to the current agent if no prefix matches.
+                const detectedAgent = registeredAgentSlugs().find(slug =>
+                    msg.compression_tag.startsWith(`${slug}:`)
+                );
+                const tagAgent: string = detectedAgent ?? agent;
 
                 const sessionLabel = `conv-${msg.conversation_id}`;
                 const entryId = crypto.randomUUID();

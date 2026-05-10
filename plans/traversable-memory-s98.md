@@ -369,7 +369,7 @@ Same treatment for `memory-gradient.ts`. The `compressToLevel` function gets a
 compresses c0 → c1 → c2 → c3 → c4 → UV.
 
 The `compressMemoryFileGradient` function (felt-moments, working-memory) also
-writes to the database with provenance chains.
+wrote to the database with provenance chains. **Retired 2026-05-10 (Phase A Batch 6, S155).** The current pipeline writes to the database via `rollingWindowRotatePaired` (DEC-085 Amendment, working-memory pair) and `rollingWindowRotate` (legacy single-file, felt-moments) — same provenance chain shape, different invocation paths.
 
 ### Phase 4: Compression prompt modification (Step 2-3 combined)
 

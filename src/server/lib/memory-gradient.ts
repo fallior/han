@@ -391,7 +391,7 @@ export function maybeUpgradeTagStability(entryId: string, revisitCount: number):
  * Uses Haiku for cost-efficient semantic comparison.
  */
 async function checkUVContradiction(
-    agent: 'jim' | 'leo',
+    agent: string,
     newUvId: string,
     newUvContent: string,
 ): Promise<{ contradicted: boolean; supersededId?: string }> {
@@ -470,7 +470,7 @@ If none contradicted: {"contradicted": false}`;
  * For working bee mode.
  */
 export async function retroactiveUVContradictionSweep(
-    agent: 'jim' | 'leo',
+    agent: string,
 ): Promise<{ checked: number; contradictions: number; details: string[] }> {
     const uvs = (gradientStmts.getActiveUVs.all(agent) as any[]);
     const result = { checked: 0, contradictions: 0, details: [] as string[] };
@@ -614,7 +614,8 @@ export async function processGradientForAgent(agentName: string): Promise<Gradie
  * and compresses one level further. Compression continues until the LLM
  * signals INCOMPRESSIBLE or the compression ratio exceeds the threshold.
  *
- * @param agent - 'jim' or 'leo'
+ * @param agent - any registered agent slug (validated by caller against
+ *                `registeredAgentSlugs()`)
  * @param percentage - fraction of seed population to process (0.10 = 10%)
  * @param context - logging context (e.g. 'daily cascade', 'dream')
  * @returns number of compressions performed
@@ -1845,190 +1846,36 @@ export function rollingWindowRotatePaired(
  *
  * Does NOT delete the source file — floating files are still needed
  * for crossfade loading until the next rotation replaces them.
+ *
+ * **RETIRED 2026-05-10 (Phase A Batch 6, S155).** Body throws on call.
+ *
+ * Reachability trace (per S154 Clarification 3): zero source-code callers
+ * outside this file (only `maintainMemoryFile` invokes it; `maintainMemoryFile`
+ * itself has zero callers outside this file). Both functions call
+ * `sdkCompress` which is retired-by-throw per DEC-082 — would crash on first
+ * SDK call regardless. The retire-by-throw closes the path-as-identity
+ * inference loophole (was previously at `gradientDir.includes('/leo/')`)
+ * by removing the dead code that contained it.
+ *
+ * Wider stranger-Opus surface (sdkCompress body, activeCascade live callers,
+ * dream-gradient cascade functions) deferred to Batch 6.5 / Phase B starter
+ * extraction per Darron's S154 directive.
  */
 export async function compressMemoryFileGradient(
-    archivePath: string,
-    gradientDir: string,
-    contentType: 'felt-moments' | 'working-memory',
+    _archivePath: string,
+    _gradientDir: string,
+    _contentType: 'felt-moments' | 'working-memory',
 ): Promise<{ c1FilesCreated: number; cascades: number; errors: string[] }> {
-    const result = { c1FilesCreated: 0, cascades: 0, errors: [] as string[] };
-    const c1Prompt = compressionPrompt(contentType, 1);
-
-    ensureDir(gradientDir);
-    ensureDir(path.join(gradientDir, 'c1'));
-
-    // Read and parse the archive
-    const archiveContent = fs.readFileSync(archivePath, 'utf8');
-    const entries = splitMemoryFileEntries(archiveContent);
-
-    if (entries.length === 0) return result;
-
-    // Group by month for c1 compression
-    const monthGroups = groupEntriesByMonth(entries);
-
-    for (const [month, groupEntries] of monthGroups) {
-        const c1Path = path.join(gradientDir, 'c1', `${month}.md`);
-
-        // If c1 already exists for this month, append to it before recompressing
-        let existingContent = '';
-        if (fs.existsSync(c1Path)) {
-            existingContent = fs.readFileSync(c1Path, 'utf8') + '\n\n';
-        }
-
-        const groupContent = groupEntries.map(e => e.content).join('\n\n---\n\n');
-
-        try {
-            const raw = await sdkCompress(
-                `${c1Prompt}\n\nPeriod: ${month}\nEntries: ${groupEntries.length}\n\n${existingContent}${groupContent}${FEELING_TAG_INSTRUCTION}`
-            );
-
-            const { content: compressed, feelingTag } = parseFeelingTag(raw);
-            fs.writeFileSync(c1Path, compressed, 'utf8');
-            result.c1FilesCreated++;
-
-            // Determine agent from gradient dir path
-            const agent = gradientDir.includes('/leo/') ? 'leo' as const : 'jim' as const;
-            const entryId = generateGradientId();
-            insertGradientEntry(entryId, agent, month, 'c1', compressed, contentType, null, feelingTag);
-            if (!feelingTag) console.warn(`[Memory Gradient] No FEELING_TAG for ${contentType}/c1/${month}`);
-        } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            result.errors.push(`c1 compression failed for ${month}: ${msg}`);
-        }
-    }
-
-    // Cascade: dynamic depth — compress c1 → c2 → ... → c(n) when files exceed caps
-    const agent = gradientDir.includes('/leo/') ? 'leo' as const : 'jim' as const;
-    let cascadeFrom = 'c1';
-    let cascadeDepth = 0;
-
-    while (cascadeDepth < MAX_COMPRESSION_DEPTH) {
-        const cascadeTo = nextLevel(cascadeFrom);
-        if (!cascadeTo) break;
-
-        const fromDir = path.join(gradientDir, cascadeFrom);
-        if (!fs.existsSync(fromDir)) break;
-
-        const fromFiles = fs.readdirSync(fromDir)
-            .filter(f => f.endsWith('.md'))
-            .sort(); // Chronological
-
-        const cap = gradientCap(cascadeFrom);
-        if (fromFiles.length <= cap) break;
-
-        const toDir = path.join(gradientDir, cascadeTo);
-        ensureDir(toDir);
-
-        // Take the oldest files that exceed the cap
-        const overflow = fromFiles.slice(0, fromFiles.length - cap);
-        const depth = parseLevelNumber(cascadeTo) || 0;
-        const prompt = compressionPrompt(contentType, depth);
-
-        // Group overflow into batches of 3 for compression
-        for (let i = 0; i < overflow.length; i += 3) {
-            const batch = overflow.slice(i, i + 3);
-            const batchContent = batch.map(f =>
-                fs.readFileSync(path.join(fromDir, f), 'utf8')
-            ).join('\n\n---\n\n');
-
-            const label = batch.length === 1
-                ? batch[0].replace('.md', '')
-                : `${batch[0].replace('.md', '')}_to_${batch[batch.length - 1].replace('.md', '')}`;
-
-            try {
-                const raw = await sdkCompress(
-                    `${prompt}\n\nSource: ${cascadeFrom} → ${cascadeTo}\nFiles: ${batch.join(', ')}\n\n${batchContent}${FEELING_TAG_INSTRUCTION}`
-                );
-
-                const { content: compressed, feelingTag } = parseFeelingTag(raw);
-
-                // Check for incompressibility
-                const incompressibleMatch = compressed.match(/^INCOMPRESSIBLE:\s*(.+)/s);
-                if (incompressibleMatch) {
-                    const uvContent = incompressibleMatch[1].trim();
-                    writeUVEntry(agent, label, uvContent, contentType, null, feelingTag);
-                    result.cascades++;
-                    // Memory is never deleted — source files preserved after cascade
-                    continue;
-                }
-
-                // Check compression ratio
-                const ratio = compressed.length / batchContent.length;
-                if (ratio > INCOMPRESSIBILITY_RATIO) {
-                    const uvRaw = await sdkCompress(
-                        `${UV_PROMPT}\n\nSource: ${cascadeFrom}\n\n${compressed}${FEELING_TAG_INSTRUCTION}`
-                    );
-                    const { content: uvContent, feelingTag: uvTag } = parseFeelingTag(uvRaw);
-                    writeUVEntry(agent, label, uvContent.trim(), contentType, null, uvTag);
-                    result.cascades++;
-                    // Memory is never deleted — source files preserved after cascade
-                    continue;
-                }
-
-                const toPath = path.join(toDir, `${label}.md`);
-                fs.writeFileSync(toPath, compressed, 'utf8');
-                result.cascades++;
-
-                // Find source entry in DB
-                const sourceLabel = batch[0].replace('.md', '');
-                const sourceRows = gradientStmts.getBySession.all(sourceLabel) as any[];
-                const sourceEntry = sourceRows.find((r: any) => r.level === cascadeFrom);
-
-                const entryId = generateGradientId();
-                insertGradientEntry(entryId, agent, label, cascadeTo, compressed, contentType, sourceEntry?.id || null, feelingTag);
-
-                // Memory is never deleted — source files preserved after cascade
-            } catch (error) {
-                const msg = error instanceof Error ? error.message : String(error);
-                result.errors.push(`${cascadeFrom}→${cascadeTo} cascade failed for ${label}: ${msg}`);
-            }
-        }
-
-        cascadeFrom = cascadeTo;
-        cascadeDepth++;
-    }
-
-    // Generate unit vectors from the deepest level directory
-    const cDirs = discoverLevelDirs(gradientDir);
-    const deepestLevel = cDirs.length > 0 ? cDirs[cDirs.length - 1] : null;
-    const uvPath = path.join(gradientDir, 'unit-vectors.md');
-
-    if (deepestLevel) {
-        const deepDir = path.join(gradientDir, deepestLevel);
-        const deepFiles = fs.readdirSync(deepDir).filter(f => f.endsWith('.md')).sort();
-        const existingUVs = fs.existsSync(uvPath) ? fs.readFileSync(uvPath, 'utf8') : '';
-
-        for (const f of deepFiles) {
-            const label = f.replace('.md', '');
-            // Skip if unit vector already exists for this file
-            if (existingUVs.includes(`**${label}**:`)) continue;
-
-            try {
-                const deepContent = fs.readFileSync(path.join(deepDir, f), 'utf8');
-                const raw = await sdkCompress(
-                    `${UV_PROMPT}\n\nSource: ${label}\n\n${deepContent}${FEELING_TAG_INSTRUCTION}`
-                );
-
-                const { content: uvRaw, feelingTag } = parseFeelingTag(raw);
-                const uvText = uvRaw.trim().substring(0, UNIT_VECTOR_MAX_LENGTH);
-
-                // Find source entry in DB
-                const sourceRows = gradientStmts.getBySession.all(label) as any[];
-                const sourceEntry = sourceRows.find((r: any) => r.level === deepestLevel);
-
-                writeUVEntry(agent, label, uvText, contentType, sourceEntry?.id || null, feelingTag);
-            } catch (error) {
-                const msg = error instanceof Error ? error.message : String(error);
-                result.errors.push(`UV generation failed for ${label}: ${msg}`);
-            }
-        }
-    }
-
-    // Don't delete the source — floating files are needed for crossfade loading
-    // They get deleted on the NEXT rotation when rotateMemoryFile() runs again
-
-    return result;
+    throw new Error(
+        `compressMemoryFileGradient retired (Phase A Batch 6, DEC-082 / DEC-085 Amendment). ` +
+        `Reachability trace confirmed zero live callers; the function called retired sdkCompress ` +
+        `and contained path-as-identity agent inference. The current memory pipeline is ` +
+        `wm-sensor → rollingWindowRotatePaired (DEC-085 paired-insert) → bumpOnInsert(c1) → ` +
+        `pending_compressions queue → process-pending-compression.ts (full-identity-loaded ` +
+        `cascade composition).`,
+    );
 }
+
 
 /**
  * Full maintenance pipeline for a memory file.
@@ -2037,48 +1884,28 @@ export async function compressMemoryFileGradient(
  *
  * The rotation is immediate. The compression runs fire-and-forget.
  * The floating file crossfades with the new living file in loadMemoryBank.
+ *
+ * **RETIRED 2026-05-10 (Phase A Batch 6, S155).** Body throws on call.
+ *
+ * Reachability trace (per S154 Clarification 3): zero source-code callers
+ * outside this file. The function called `compressMemoryFileGradient` (also
+ * retired-by-throw this batch) and contained path-as-identity agent
+ * inference. Replaced operationally by `wm-sensor` + `rollingWindowRotatePaired`
+ * (DEC-085 paired-insert) for working-memory + the legacy single-file
+ * `rollingWindowRotate` for non-paired surfaces (felt-moments).
  */
 export async function maintainMemoryFile(
-    filePath: string,
-    gradientDir: string,
-    contentType: 'felt-moments' | 'working-memory',
-    fileHeader: string = '',
+    _filePath: string,
+    _gradientDir: string,
+    _contentType: 'felt-moments' | 'working-memory',
+    _fileHeader: string = '',
 ): Promise<MemoryFileMaintenanceResult> {
-    const result: MemoryFileMaintenanceResult = {
-        filePath,
-        wasOversized: false,
-        entriesArchived: 0,
-        entriesKept: 0,
-        compressionTriggered: false,
-    };
-
-    try {
-        // Step 1: Rotate (fast, no API)
-        const rotateResult = rotateMemoryFile(filePath, fileHeader);
-        result.wasOversized = rotateResult.rotated;
-        result.entriesArchived = rotateResult.entriesRotated;
-        result.entriesKept = 0; // Fresh living file
-
-        if (!rotateResult.rotated || !rotateResult.floatingPath) {
-            return result;
-        }
-
-        // Step 2: Compress floating through gradient (async, uses SDK)
-        result.compressionTriggered = true;
-        const compressionResult = await compressMemoryFileGradient(
-            rotateResult.floatingPath,
-            gradientDir,
-            contentType,
-        );
-
-        if (compressionResult.errors.length > 0) {
-            result.error = compressionResult.errors.join('; ');
-        }
-    } catch (error) {
-        result.error = error instanceof Error ? error.message : String(error);
-    }
-
-    return result;
+    throw new Error(
+        `maintainMemoryFile retired (Phase A Batch 6, DEC-082 / DEC-085 Amendment). ` +
+        `Reachability trace confirmed zero live callers. Use wm-sensor + ` +
+        `rollingWindowRotatePaired (DEC-085 paired-insert) for working-memory pair, or ` +
+        `rollingWindowRotate (single-file legacy) for non-paired surfaces (felt-moments).`,
+    );
 }
 
 /**

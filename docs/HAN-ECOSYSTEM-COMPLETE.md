@@ -36,7 +36,7 @@
 | **Credential Swap** | Automatic SDK account failover. When an agent hits a rate limit, writes `rate-limited` signal. Jemma round-robins to next credential file every 30 seconds. | `jemma.ts` (`checkAndSwapCredentials`), credentials at `~/.claude/.credentials-[a-z].json` |
 | **Project Knowledge Gradient** | Fractal gradient applied to Jim's project knowledge files. Most recent project at full fidelity, older projects at decreasing compression. Ordered by file mtime. | `supervisor-worker.ts` (`PROJECT_GRADIENT` in `loadMemoryBank`), storage at `~/.han/memory/fractal/jim/projects/` |
 | **Floating Memory** | Crossfade mechanism for memory files (felt-moments, working-memory-full). When living file reaches 50KB: entire file rotated to "floating" file, compressed to c1, fresh living started. Loading is proportional: as living grows (0→50KB), floating's loaded portion shrinks (50→0KB). Total full-fidelity stays constant at ~50KB. No cliff — smooth transition. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `loadFloatingMemory`), pre-flight in `supervisor-worker.ts` `loadMemoryBank()` (Jim) and `leo-heartbeat.ts` `preFlightMemoryRotation()` (Leo), floating files at `~/.han/memory/*-floating.md` and `~/.han/memory/leo/*-floating.md` |
-| **Memory File Gradient** | Fractal gradient applied to memory files (felt-moments, working-memory-full) via floating memory rotation. Two triggers: (1) 50KB threshold rotation — safety net, fires when file gets large. (2) Nightly dream compression (S103) — at sleep→waking transition (06:00), force-rotates Leo's working memory regardless of size, compressing overnight dreams as a single c1. c1 files cascade to c2→c3→...→c(n)→UV as they accumulate (dynamic depth, incompressibility-terminated). Total footprint asymptotes regardless of how many entries are written. | `lib/memory-gradient.ts` (`rotateMemoryFile`, `compressMemoryFileGradient`), `leo-heartbeat.ts` (`maybeCompressNightlyDreams`), storage at `~/.han/memory/fractal/{jim,leo}/felt-moments/` and `working-memory/` |
+| **Memory File Gradient** *(SUPERSEDED — see DEC-085 Amendment 2026-05-10)* | Fractal gradient applied to memory files (felt-moments, working-memory-full) via floating memory rotation. **Status (Phase A Batch 6, S155 2026-05-10): `compressMemoryFileGradient` and `maintainMemoryFile` are retired-by-throw — zero live callers; both relied on retired `sdkCompress` (DEC-082).** Working-memory pair compression is now via `wm-sensor` + `rollingWindowRotatePaired` (DEC-085 Amendment: whole-file slice + marker-as-metadata). Felt-moments still uses legacy `rollingWindowRotate` (single-file, non-paired). | `lib/memory-gradient.ts` (`rollingWindowRotatePaired` for WM-pair, `rollingWindowRotate` for felt-moments), `services/wm-sensor.ts`, storage at `~/.han/memory/fractal/{jim,leo}/felt-moments/` |
 | **Ecosystem Map** | Shared orientation document loaded by all agents. Maps admin UI tabs, Workshop personas, conversation API endpoints, signal locations, memory locations. Prevents confusion between Conversations tab and Workshop. | `~/.han/memory/shared/ecosystem-map.md`, loaded in `loadMemoryBank()`, `readJimMemory()`, `readLeoMemory()` (all 4 agents) |
 | **Jemma Unified Dispatch** | All message routing — Discord AND admin UI — goes through one delivery service. Classification stays in `conversations.ts` (Gemma, fast, local). Delivery goes through `jemma-dispatch.ts` (`deliverMessage()`): writes wake signals, logs to audit trail (`jemma-delivery-log.json`), broadcasts via WebSocket. Discord gateway calls the HTTP endpoint (`/api/jemma/deliver`) which delegates to the same function. No HTTP self-calls. One audit trail with per-source counters. | `services/jemma-dispatch.ts` (`deliverMessage`), `routes/jemma.ts` (HTTP interface), `conversations.ts` (`classifyAddressee` + direct `deliverMessage()` call), Ollama `gemma3:4b` |
 | **Idle Dampening** | Jim-only exponential backoff when consecutive cycles produce no actions. 2x after 3 idle, 4x (capped) after 4+. Resets on productive cycle or wake signal. Prevents idle token burn. | `supervisor.ts` (`consecutiveIdleCycles`, `DAMPEN_*` constants in `getWallClockDelay`) |
@@ -513,12 +513,10 @@ Mirrors Leo's Gary Protocol in `leo-heartbeat.ts`. See DEC-050.
 
 `loadMemoryBank()` in `supervisor-worker.ts`:
 
-1. **Pre-flight: Floating memory rotation** — if `felt-moments.md` or `working-memory-full.md`
-   exceeds 50KB, triggers `rotateMemoryFile()`:
-   - Entire living file moved to floating file (e.g. `felt-moments-floating.md`)
-   - Full 50KB compressed to c1 via `compressMemoryFileGradient()` (fire-and-forget, background)
-   - Fresh empty living file created
-   - Floating file crossfades with living file in subsequent loads
+1. **Pre-flight: Floating memory rotation** *(SUPERSEDED for working-memory-full — see DEC-085 Amendment 2026-05-10)* — historical: if `felt-moments.md` or `working-memory-full.md` exceeded 50KB, triggered `rotateMemoryFile()` then `compressMemoryFileGradient()`. **Current state (Phase A Batch 6, 2026-05-10):**
+   - **Working-memory pair**: `wm-sensor` watches `working-memory-full.md`; when WMF exceeds `rollingWindowTrigger` (30K tokens), `rollingWindowRotatePaired` performs atomic c0+c1 paired insert with whole-file slice and reset both files to header-only (DEC-085 Amendment). No floating file; no SDK compression at slice time; cascade above c1 runs via `process-pending-compression.ts` with full identity loaded.
+   - **Felt-moments**: legacy `rollingWindowRotate` (single-file, non-paired) still applies. Not yet migrated to paired-rotation.
+   - `compressMemoryFileGradient()` and `maintainMemoryFile()`: **retired-by-throw** (zero live callers; relied on retired `sdkCompress`).
 
 2. **Identity files:** identity.md, active-context.md, patterns.md, failures.md,
    self-reflection.md, felt-moments.md, working-memory.md, working-memory-full.md
@@ -1290,9 +1288,10 @@ dissolves into residue.
 - Gradient: `~/.han/memory/fractal/jim/working-memory/c{1,2,3,5}/` + `unit-vectors.md`
 
 **Implementation:**
-- `lib/memory-gradient.ts`: `rotateMemoryFile()`, `loadFloatingMemory()`,
-  `compressMemoryFileGradient()`, `loadMemoryFileGradient()`
-- `supervisor-worker.ts`: pre-flight rotation in `loadMemoryBank()`, floating + gradient loading
+- `lib/memory-gradient.ts`: `rollingWindowRotatePaired()` (DEC-085 Amendment, paired WM/WMF), `rollingWindowRotate()` (legacy single-file, felt-moments), `loadFloatingMemory()`, `loadMemoryFileGradient()`
+- `services/wm-sensor.ts`: fs.watch-driven trigger for paired rotation
+- `supervisor-worker.ts`: pre-flight rotation in `loadMemoryBank()` for non-paired surfaces (felt-moments, self-reflection)
+- `compressMemoryFileGradient()`, `maintainMemoryFile()` — **retired-by-throw 2026-05-10 (Phase A Batch 6)**; preserved in git history at commits prior to S155
 
 **Compression prompts** (in `COMPRESSION_PROMPTS`):
 - Felt-moments c1: "Preserve the feeling — what stirred, what surprised, what shifted"
@@ -1598,14 +1597,18 @@ General fractal memory compression utility. All compression functions return
 - `compressToUnitVector()` — irreducible kernel ≤50 chars with feeling tag
 - `processGradientForAgent()` — automated cascade for session memories (DB writes at c1)
 
-**Memory file gradient functions (floating memory):**
-- `rotateMemoryFile(path, header, force?)` — synchronous rotation: living → floating, fresh living created. Triggered when file exceeds 50KB, or forced (nightly dream compression, S103). Force mode skips size check but still guards against empty files (< 200 bytes). Deletes old floating (its c1 already exists).
-- `loadFloatingMemory()` — proportional crossfade loading. Budget = `50KB - livingSize`. Keeps most recent entries (tail), oldest fade first.
-- `compressMemoryFileGradient()` — async SDK compression: groups entries by month → c1 files. Cascades c1→c2→...→c(n)→UV when files exceed caps (dynamic depth — Cn). Writes to DB at every level. Incompressibility detection terminates the chain. Fire-and-forget (doesn't block cycles).
+**Memory file gradient functions:**
+- `rollingWindowRotatePaired(...)` — **(DEC-085 Amendment, current)** atomic paired-insert of WMF + WM as c0/c1 in single transaction; whole-file slice; markers stripped from content and stored in `qualifier`; both files reset to header-only after slice. Triggered by `wm-sensor` when WMF exceeds `rollingWindowTrigger` (30K tokens) AND a paired marker exists.
+- `rollingWindowRotate(...)` — **(legacy, single-file)** still active for non-paired surfaces (felt-moments). Slices oldest entries from tail; writes c0 entry; cascades c0→c1 via `bumpOnInsert` (which calls `pending_compressions` queue per DEC-085).
+- `rotateMemoryFile(path, header, force?)` — synchronous rotation helper for legacy paths.
+- `loadFloatingMemory()` — proportional crossfade loading for legacy paths. Budget = `50KB - livingSize`.
 - `loadMemoryFileGradient()` — loads file-based gradient c1→c5 + unit vectors for system prompt.
-- `maintainMemoryFile()` — full pipeline: rotate + compress. Convenience wrapper.
 - `splitMemoryFileEntries()` — parser for `###` headers and `---` delimiters.
 - `groupEntriesByMonth()` — groups parsed entries by YYYY-MM for batch compression.
+
+**Retired (Phase A Batch 6, 2026-05-10):**
+- `compressMemoryFileGradient()` — body throws on call; reachability trace confirmed zero live callers. Was: async SDK compression by month. Now: cascade composition runs via `process-pending-compression.ts` with full identity loaded.
+- `maintainMemoryFile()` — body throws on call; reachability trace confirmed zero live callers. Was: rotate + compress convenience wrapper. Now: use `rollingWindowRotatePaired` for WM-pair OR `rollingWindowRotate` for non-paired surfaces directly.
 
 **Traversable memory functions:**
 - `loadTraversableGradient(agent)` — reads from `gradient_entries` DB table, formats UVs and entries by level with inline feeling tags for system prompt inclusion. Returns empty string when DB has no entries (file-based loading remains active). Falls back gracefully. **DB is now the authoritative source** for heartbeat, supervisor, and session Leo (S119-120).

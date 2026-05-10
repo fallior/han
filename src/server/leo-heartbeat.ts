@@ -2205,7 +2205,11 @@ async function maybeRunMeditation(phase: string): Promise<void> {
  * the original compression felt like).
  */
 async function meditationPhaseA(
-    file: { filePath: string; agent: 'jim' | 'leo'; level: string; contentType: string; label: string },
+    // Phase A Batch 6 (S155, 2026-05-10): widened agent type to string per
+    // DEC-081 — was 'jim' | 'leo'. leo-heartbeat is scope-correct for Leo's
+    // own slug overall; this signature widening is unrelated debt cleanup
+    // flagged in the S152 deagentification audit.
+    file: { filePath: string; agent: string; level: string; contentType: string; label: string },
     today: string,
 ): Promise<void> {
     let content: string;
