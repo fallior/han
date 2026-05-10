@@ -47,6 +47,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { randomUUID, createHash } from 'crypto';
 import Database from 'better-sqlite3';
+import { registeredAgentSlugs } from '../src/server/lib/agent-registry';
 
 // ── Argument parsing ────────────────────────────────────────────
 
@@ -330,7 +331,22 @@ async function main() {
         targetDb = new Database(targetDbPath, { readonly: true });
     }
 
-    const agents = agentFilter === 'all' ? ['jim', 'leo'] : [agentFilter];
+    // Phase A Batch 3 (S155, 2026-05-10): 'all' iterates registry per DEC-081
+    // (was hardcoded ['jim','leo']); single-slug case validated against registry.
+    const validSlugs = registeredAgentSlugs();
+    let agents: string[];
+    if (agentFilter === 'all') {
+        if (validSlugs.length === 0) {
+            console.error(`[roll] No agents registered in agent-registry.ts. Cannot proceed with --agent=all.`);
+            process.exit(1);
+        }
+        agents = validSlugs;
+    } else if (!validSlugs.includes(agentFilter)) {
+        console.error(`[roll] Unknown agent slug: '${agentFilter}'. Registered: ${validSlugs.join(', ') || '(none)'}.`);
+        process.exit(1);
+    } else {
+        agents = [agentFilter];
+    }
     const fallbackLog: FallbackRecord[] = [];
     const dedupLog: DedupDiscardRecord[] = [];
     const allStats: Record<string, AgentStats> = {};

@@ -94,8 +94,13 @@ function formatConversationAsC0(conv: Conversation, messages: Message[]): string
     return lines.join('\n');
 }
 
-function detectParticipants(messages: Message[]): Set<'leo' | 'jim'> {
-    const participants = new Set<'leo' | 'jim'>();
+// Phase A Batch 3 (S155, 2026-05-10): widen agent type to string per DEC-081.
+// The role→slug mapping (role='supervisor' → 'jim', role='leo' → 'leo') is
+// HAN-specific. Future-idea: lift this mapping to a persona-registry table
+// (Phase A Batch 7's Alt B) so other gardens can configure their own role
+// vocabulary without code changes. For now, scope-correct as HAN-bootstrap.
+function detectParticipants(messages: Message[]): Set<string> {
+    const participants = new Set<string>();
     for (const msg of messages) {
         if (msg.role === 'leo') participants.add('leo');
         if (msg.role === 'supervisor') participants.add('jim');

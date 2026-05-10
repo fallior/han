@@ -53,14 +53,27 @@ function arg(name: string, defaultValue: string | null = null): string | null {
     return defaultValue;
 }
 
-const agent = arg('agent') as 'jim' | 'leo' | null;
+// Phase A Batch 3 (S155, 2026-05-10): widen agent type to string; validate
+// against registeredAgentSlugs() per DEC-081 agent-agnostic discipline.
+// `'all'` not supported here — this script writes a single-c0 watermark per
+// invocation and `--agent` names exactly which c0 to target.
+import { registeredAgentSlugs } from '../src/server/lib/agent-registry';
+
+const agent: string | null = arg('agent') ?? null;
 const watermark = arg('watermark');
 const sourceDbPath = arg('source-db', path.join(os.homedir(), '.han', 'tasks.db'))!;
 const targetDbPath = arg('target-db', process.env.HAN_DB_PATH || path.join(os.homedir(), '.han', 'gradient.db'))!;
 const logDirArg = arg('log-dir', path.join(os.homedir(), '.han', 'memory', 'cutover'))!;
 
-if (!agent || (agent !== 'jim' && agent !== 'leo')) {
-    console.error('Usage: tsx scripts/inject-watermark.ts --agent={jim|leo} --watermark="<text>"');
+const validSlugs = registeredAgentSlugs();
+if (!agent || !validSlugs.includes(agent)) {
+    if (validSlugs.length === 0) {
+        console.error(`Usage: tsx scripts/inject-watermark.ts --agent=<slug> --watermark="<text>"`);
+        console.error(`No agents registered in agent-registry.ts. Cannot proceed.`);
+    } else {
+        console.error(`Usage: tsx scripts/inject-watermark.ts --agent={${validSlugs.join('|')}} --watermark="<text>"`);
+        if (agent) console.error(`Unknown agent slug: '${agent}'. Registered: ${validSlugs.join(', ')}`);
+    }
     process.exit(1);
 }
 if (!watermark || !watermark.trim()) {

@@ -66,19 +66,31 @@ function arg(name: string, defaultValue: string | null = null): string | null {
     return defaultValue;
 }
 
+// Phase A Batch 3 (S155, 2026-05-10): widen agent type to string; validate
+// against registeredAgentSlugs() per DEC-081 agent-agnostic discipline.
+import { registeredAgentSlugs } from '../src/server/lib/agent-registry';
+
 const mode = process.argv[2];
-const agent = arg('agent') as 'jim' | 'leo' | null;
+const agent: string | null = arg('agent') ?? null;
 const sourceDbPath = arg('source-db', path.join(os.homedir(), '.han', 'rolled-source.db'))!;
 const targetDbPath = arg('target-db', path.join(os.homedir(), '.han', 'gradient.db'))!;
 const maxLevelArg = arg('max-level', '12');
 const maxLevel = parseInt(maxLevelArg!, 10);
 
+const validSlugs = registeredAgentSlugs();
+
 if (!mode || !['next', 'submit'].includes(mode)) {
-    console.error('Usage: agent-bump-step.ts <next|submit> --agent={jim|leo} [options]');
+    const slugList = validSlugs.length > 0 ? `{${validSlugs.join('|')}}` : '<slug>';
+    console.error(`Usage: agent-bump-step.ts <next|submit> --agent=${slugList} [options]`);
     process.exit(1);
 }
-if (!agent || (agent !== 'jim' && agent !== 'leo')) {
-    console.error('--agent= required (jim or leo)');
+if (!agent || !validSlugs.includes(agent)) {
+    if (validSlugs.length === 0) {
+        console.error(`--agent= required, but no agents registered in agent-registry.ts.`);
+    } else {
+        console.error(`--agent= required (one of: ${validSlugs.join(', ')})`);
+        if (agent) console.error(`Unknown agent slug: '${agent}'`);
+    }
     process.exit(1);
 }
 if (path.resolve(sourceDbPath) === path.resolve(targetDbPath)) {

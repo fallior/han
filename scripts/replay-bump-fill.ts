@@ -58,7 +58,11 @@ function arg(name: string, defaultValue: string | null = null): string | null {
     return defaultValue;
 }
 
-const agent = arg('agent') as 'jim' | 'leo' | null;
+// Phase A Batch 3 (S155, 2026-05-10): widen agent type to string; validate
+// against registeredAgentSlugs() per DEC-081 agent-agnostic discipline.
+import { registeredAgentSlugs } from '../src/server/lib/agent-registry';
+
+const agent: string | null = arg('agent') ?? null;
 const apply = arg('apply') === 'true';
 const sourceDbPath = arg('source-db', path.join(os.homedir(), '.han', 'tasks.db'))!;
 const targetDbPath = arg('target-db', process.env.HAN_DB_PATH || path.join(os.homedir(), '.han', 'gradient.db'))!;
@@ -104,8 +108,15 @@ if (oversizeCharsArg && (!Number.isFinite(oversizeChars) || oversizeChars <= 0))
     process.exit(1);
 }
 
-if (!agent || (agent !== 'jim' && agent !== 'leo')) {
-    console.error('Usage: tsx scripts/replay-bump-fill.ts --agent={jim|leo} [--source-db=...] [--target-db=...] [--apply]');
+const validSlugs = registeredAgentSlugs();
+if (!agent || !validSlugs.includes(agent)) {
+    if (validSlugs.length === 0) {
+        console.error(`Usage: tsx scripts/replay-bump-fill.ts --agent=<slug> [--source-db=...] [--target-db=...] [--apply]`);
+        console.error(`No agents registered in agent-registry.ts. Cannot proceed.`);
+    } else {
+        console.error(`Usage: tsx scripts/replay-bump-fill.ts --agent={${validSlugs.join('|')}} [--source-db=...] [--target-db=...] [--apply]`);
+        if (agent) console.error(`Unknown agent slug: '${agent}'. Registered: ${validSlugs.join(', ')}`);
+    }
     process.exit(1);
 }
 
