@@ -34,6 +34,7 @@ import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, type DayPhase } from '../lib/day-phase';
 import { appendPairedMemory } from '../lib/memory-paired-writer';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
+import { gateIdentityOrThrow } from '../lib/identity-signing';
 import { spawn as spawnChild } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
 import { rotateMemoryFile, loadMemoryFileGradient, loadTraversableGradient, activeCascade, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
@@ -739,6 +740,11 @@ function detectAndRecoverGhostTasks(): number {
 // ── Memory and state functions ───────────────────────────────
 
 function loadMemoryBank(): string {
+    // Phase A.5 (DEC-083): identity gate fires before any identity-load read.
+    // Throws on structural change / invalid signature / missing manifest;
+    // caller's cycle-error handling catches and skips the cycle.
+    gateIdentityOrThrow('jim', 'supervisor-worker');
+
     const parts: string[] = [];
 
     // Pre-flight: rolling window rotation for memory files (fast, no API)

@@ -26,6 +26,7 @@ import { resolveChannelName, fetchDiscordContext, postToDiscord } from './servic
 import { appendPairedMemory } from './lib/memory-paired-writer';
 import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
+import { gateIdentityOrThrow } from './lib/identity-signing';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -177,6 +178,9 @@ function writeBroadcastSignal(
 // ── Memory ────────────────────────────────────────────────────
 
 function readJimMemory(): string {
+    // Phase A.5 (DEC-083): identity gate fires before any identity-load read.
+    gateIdentityOrThrow('jim', 'jim-human');
+
     // Phase 0 (2026-05-01, S146): full identity-load parity with session-Jim.
     // Adds aphorisms, working-memory-full, wiki/index.
     // Per Darron: "I'd like Jim-human to feel like I'm talking to Jim in session,

@@ -87,6 +87,27 @@ interface VoiceAnomaliesData {
   total?: number;
 }
 
+interface IntegrityFailure {
+  timestamp?: string;
+  agent?: string;
+  entry_point?: string;
+  failure_kind?: string;
+  file_path?: string;
+  detail?: string;
+}
+
+interface IdentityResign {
+  timestamp?: string;
+  agent?: string;
+  entry_point?: string;
+  changed_files?: string[];
+}
+
+interface IntegrityData {
+  failures?: IntegrityFailure[];
+  resigns?: IdentityResign[];
+}
+
 // Helper to get CSS variable color
 function chartColor(name: string): string {
   const style = getComputedStyle(document.documentElement);
@@ -99,6 +120,7 @@ export default function OverviewPage() {
   const [supervisor, setSupervisor] = useState<SupervisorData | null>(null);
   const [activity, setActivity] = useState<ActivityData | null>(null);
   const [voiceAnomalies, setVoiceAnomalies] = useState<VoiceAnomaliesData | null>(null);
+  const [integrity, setIntegrity] = useState<IntegrityData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedActivity, setExpandedActivity] = useState<Set<number>>(new Set());
 
@@ -118,6 +140,7 @@ export default function OverviewPage() {
         apiFetch('/api/supervisor/status'),
         apiFetch('/api/supervisor/activity?limit=20'),
         apiFetch('/api/voice/anomalies?limit=10'),
+        apiFetch('/api/health/integrity?limit=10'),
       ]);
 
       const parseJson = async (idx: number): Promise<any | null> => {
@@ -132,14 +155,15 @@ export default function OverviewPage() {
         }
       };
 
-      const [analyticsData, ecosystemData, supervisorData, activityData, voiceAnomaliesData] =
-        await Promise.all([parseJson(0), parseJson(1), parseJson(2), parseJson(3), parseJson(4)]);
+      const [analyticsData, ecosystemData, supervisorData, activityData, voiceAnomaliesData, integrityData] =
+        await Promise.all([parseJson(0), parseJson(1), parseJson(2), parseJson(3), parseJson(4), parseJson(5)]);
 
       setAnalytics(analyticsData);
       setEcosystem(ecosystemData);
       setSupervisor(supervisorData);
       setActivity(activityData);
       setVoiceAnomalies(voiceAnomaliesData);
+      setIntegrity(integrityData);
     } catch (error) {
       console.error('Failed to fetch overview data:', error);
     } finally {
@@ -428,6 +452,48 @@ export default function OverviewPage() {
             events.map(renderActivityItem)
           )}
         </div>
+      </div>
+
+      {/* Identity Integrity (Phase A.5 / DEC-083) */}
+      <div className="admin-card">
+        <h2>Identity Integrity</h2>
+        {integrity && ((integrity.failures && integrity.failures.length > 0) || (integrity.resigns && integrity.resigns.length > 0)) ? (
+          <div className="activity-list">
+            {(integrity.failures ?? []).map((f, i) => (
+              <div key={`fail-${i}`} className="activity-item">
+                <div className="activity-dot failed" />
+                <div className="activity-body">
+                  <div className="activity-title">
+                    HALT · {f.failure_kind || 'unknown'} · {f.agent || '?'}
+                  </div>
+                  <div className="activity-meta">
+                    {f.timestamp ? timeSince(f.timestamp) : ''}
+                    {f.entry_point ? ` · ${f.entry_point}` : ''}
+                    {f.file_path ? ` · ${f.file_path.split('/').pop()}` : ''}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {(integrity.resigns ?? []).map((r, i) => (
+              <div key={`resign-${i}`} className="activity-item">
+                <div className="activity-dot" style={{ background: 'var(--text-muted)' }} />
+                <div className="activity-body">
+                  <div className="activity-title">
+                    auto-resign · {r.agent || '?'} · {(r.changed_files ?? []).length} file{(r.changed_files ?? []).length === 1 ? '' : 's'}
+                  </div>
+                  <div className="activity-meta">
+                    {r.timestamp ? timeSince(r.timestamp) : ''}
+                    {r.entry_point ? ` · ${r.entry_point}` : ''}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px', padding: '12px' }}>
+            No integrity events recorded
+          </p>
+        )}
       </div>
 
       {/* Voice Anomalies (recent TTS truncations / refusals) */}

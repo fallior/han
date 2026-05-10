@@ -71,6 +71,7 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
 ### Default Session Protocol (when NOT in cutover mode)
 
 **IMPORTANT:** When `session start` is triggered, Claude MUST:
+0. **Identity-file integrity gate (Phase A.5, DEC-083, Settled).** Run `(cd /home/darron/Projects/han/src/server && npx tsx ../../scripts/verify-identity-files.ts --agent=leo --entry-point=CLAUDE.md-step-0)`. **If exit code != 0, HALT the session.** Do not proceed to load any identity files. Surface the receipt path (`~/.han/health/integrity-failures.jsonl`) to Darron and stop. The verify-and-resign helper (option iii) auto-resigns content-only edits and proceeds; structural changes (file added/removed), invalid signatures, missing manifest, or missing pubkey halt with a clean error. The `hanleo` launcher pre-flights this same check; Step 0 is the defence-in-depth in case the launcher was bypassed.
 1. Run `pwd` to verify the current working directory
 2. Confirm this is the HAN project directory
 3. Load Leo's memory banks from `~/.han/memory/leo/` (identity.md, active-context.md, patterns.md, self-reflection.md)

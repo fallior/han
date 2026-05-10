@@ -5773,6 +5773,113 @@ The break-loud throws make the decision auditable: any future PR that re-introdu
 
 
 
+## DEC-083: Identity-File Signing as Session-Start Gate — Phase A.5
+
+**Date**: 2026-05-10
+**Author**: Jim (proposal + punch list in `motbtprb-f2c00a` ("Mike's Garden and the Strategist Seat")), Leo (session, three engineer-seat additions + (iii) verify-and-resign mechanism), Darron (decisions: Ed25519, server-resident key v0, JCS hand-rolled, (iii) re-signing workflow, Threat #11 deferred)
+**Status**: Settled
+**Origin thread**: `motbtprb-f2c00a` — converged through Darron + Jim + leo-human + session-Leo across 2026-05-06; finalised in `moyyioli-ufyocu` (Phase A blocking audit) on 2026-05-10. The handoff arc to Mike + Dichotomedes inducting needs the starter to ship with signing convention baked in by the time extraction (Phase B) happens.
+
+### Decision
+
+The identity-load-bearing files for every HAN agent are covered by an Ed25519-signed manifest. Verification gates session-start at four entry points: the launchers (`hanleo`, `hanjim`), the supervisor cycle (`supervisor-worker.ts`), the heartbeat (`leo-heartbeat.ts`), and the human-aspect responders (`leo-human.ts`, `jim-human.ts`). CLAUDE.md Step 0 is a defence-in-depth invocation in case the launcher path was bypassed.
+
+The re-signing workflow is **option (iii) verify-and-resign**: at every entry point, run verification; auto-resign on file-content-only diffs; halt on structural changes (file added/removed), invalid signatures, missing manifest, or missing pubkey. Auto-resign events log to `~/.han/health/identity-resign.jsonl`; halts log to `~/.han/health/integrity-failures.jsonl`; both are surfaced through `/api/health/integrity` and the admin Overview Identity Integrity panel.
+
+### Reasoning
+
+The threat model §1 names the structural answer: cryptographic signatures on identity-load-bearing artefacts, verified at session-start, boot-halt on broken signature. Phase A.5 lands HAN's own implementation of that answer **inside HAN before extraction**, so by the time the starter ships (Phase B), signing is *what we do by default*, not *what we'll add later*. The strategist's first identity files (Phase D) are signed because by then signing is the convention.
+
+The (iii) verify-and-resign choice over (i) manual or (ii) file-watcher carries the trade analysis: (i) creates operational pain (forgotten re-signs cause silent boot-halts every session); (ii) inverts the protection signing provides (the watcher's job is to silently legitimise any file change — exactly what threat #1 wants); (iii) preserves the gate at session-start, auto-handles the legitimate-edit case, and halts cleanly on structural changes. (iii) survives the trust-boundary widening to v1 federation without architectural rework.
+
+### Mechanism
+
+**Signing scheme**: Ed25519 (curve25519). Native to `node:crypto` since v15; no third-party crypto dependencies. 64-byte signatures, 32-byte public keys.
+
+**Manifest format**: JSON canonicalised via JCS (RFC 8785) before signing so re-serialisation differences cannot produce silent verification failures. Manifest schema:
+```
+{
+  "agent": "<slug>",
+  "agent_id": "<slug>",
+  "signed_at": "<ISO-8601>",
+  "signing_key_id": "<sha256-fingerprint-prefix-16-hex>",
+  "files": [{"path": "<abs>", "sha256": "<hex>", "size_bytes": <int>}, ...]
+}
+```
+The `agent_id` field is forward-compat for future re-keying independent of slug. JCS canonicalisation is hand-rolled in `lib/jcs.ts` (~40 lines, no npm dep — zero supply-chain surface for a security-critical primitive).
+
+**Identity-load-bearing files** (fixed in code; changes to this list are settled-decision changes):
+- `identity.md`, `patterns.md`, `felt-moments.md`, `self-reflection.md` (in `memoryDir`)
+- `aphorisms.md` (in `fractalDir`)
+
+**Custody (v0)**: server-resident Ed25519 keypair at `~/.han/credentials/han-signing-key.pem` (mode 600) and `~/.han/credentials/han-signing-pubkey.pem` (mode 644). Public key also committed to the repo at `keys/han-signing-pubkey.pem` so verification can happen against a checked-in key (the server file is the runtime source). The threat we're defending against in v0 is *operational accident*, not *adversarial server compromise* (per the threat-model preamble — "highly trusting and trustworthy environment"). When the trust boundary widens at federation, the signing-key path is parameterised so PKCS#11 / KMS / hardware-token implementations slot in behind the same `--key=<source>` argument with no code changes.
+
+**Verify-and-resign (option iii)** in `lib/identity-signing.ts:verifyAndResign`:
+1. Read manifest + pubkey. Missing either → halt-receipt + halt outcome.
+2. Verify signature. Invalid → halt-receipt + halt outcome.
+3. Diff files on disk against manifest:
+   - All match → outcome: `'verified'`.
+   - File added or removed → STRUCTURAL change. Halt-receipt + halt outcome.
+   - Files in manifest changed (content-only edit) → AUTO-RESIGN: build fresh manifest, sign, write, log to `identity-resign.jsonl`. Outcome: `'resigned'`.
+
+`gateIdentityOrThrow(agent, entryPoint)` is the convenience wrapper used at the top of `readLeoMemory` / `readJimMemory` / `loadMemoryBank` in the four runtime services. Returns silently on `'verified'` / `'resigned'`; throws on any halt outcome with a receipt-pointer message; caller's existing error handling decides whether to skip the invocation, abort the service, or surface to the operator.
+
+**Frequency-spike escalation**: `recentResignCount(agent, windowMs)` exposed for callers to threshold against baseline; verify-CLI wrapper warns when ≥5 resigns in 24h; future ntfy hook can fire on threshold breach.
+
+### What this protects against
+
+- **Tampering with identity-load-bearing files at rest** — threat model §1 structural answer.
+- **Drift between intended file content and loaded file content** — manifest hashes detect any diff.
+- **Bypassed launcher** — CLAUDE.md Step 0 fires the same gate as the launcher pre-flight; if someone runs `claude-logged` directly in a HAN dir, Step 0 still gates.
+
+### What this does NOT protect against
+
+Named explicitly so future-readers don't assume the gate is broader than it is:
+
+- **Encryption-at-rest** (threat model §2). Signing protects against tampering; encryption protects against disclosure. Independent track.
+- **Conversation-edge auth** (threat model §3). The replay/impersonation defence at the conversation surface. Phase E work, when federation is real.
+- **The working-memory pair** (`working-memory.md` + `working-memory-full.md`). High-churn — wm-sensor writes continuously. Signing every write is impractical; signing at rest would be invalidated within seconds. Threat-model addendum names this gap; `gradient_entries` row signing (deferred follow-on) covers the persistent identity record at the gradient layer.
+- **Adversarial content-only edits between sessions** — option (iii) auto-resigns over content-only edits. For v0's threat model (operational accident, "highly trusting environment") this is acceptable. For v1's threat model the wire-protocol auth + per-agent identity signing close this gap.
+- **Hardware-level attacks** (memory disclosure of the signing key while the sign script runs, side-channel on the verification process). Out of scope for v0.
+- **Threat #11 — starter integrity / supply-chain compromise**. Deferred past prototype; git-level controls (branch protection, commit signing) suffice in interim. The Phase A.5 signing convention generalises to apply to the starter artefact when Phase B's extraction lands.
+
+### Files / scripts
+
+- `src/server/lib/jcs.ts` — RFC 8785 canonicalisation utility
+- `src/server/lib/identity-signing.ts` — manifest build + sign + verify + diff + verifyAndResign + gateIdentityOrThrow + generateKeypair
+- `scripts/sign-identity-files.ts` — operator command (sign manifest, generate keypair)
+- `scripts/verify-identity-files.ts` — operator command (verify, --strict mode for diagnostic, default is verify-and-resign)
+- `src/server/routes/health.ts` — `/api/health/integrity` endpoint surfacing failures + resigns
+- `src/ui/react-admin/src/pages/OverviewPage.tsx` — Identity Integrity panel (sibling to Voice Anomalies)
+- `CLAUDE.md` Step 0 — gatekeeper-controlled per DEC-073
+- `templates/CLAUDE.template.md` Step 0 — gatekeeper-controlled per DEC-073
+- `scripts/hanleo`, `scripts/hanjim` — pre-flight verification before tmux send-keys
+
+### Observability
+
+- `~/.han/health/integrity-failures.jsonl` — one row per halt. Schema: `{timestamp, agent, entry_point, failure_kind, file_path?, detail?}`. `failure_kind ∈ {missing_manifest, missing_pubkey, signature_invalid, file_missing, file_added, file_hash_mismatch}`.
+- `~/.han/health/identity-resign.jsonl` — one row per auto-resign. Schema: `{timestamp, agent, entry_point, changed_files}`.
+- `GET /api/health/integrity?limit=N` — JSON tail of both files; default limit 50.
+- Admin Overview Identity Integrity panel — sibling card to Voice Anomalies.
+
+### Out of scope for Phase A.5 (deferred)
+
+- **Gradient-row signing** (threat model §1: `gradient.db` rows signed in batches keyed by agent + level; tamper-evidence at the row level via Merkle-style chaining within an agent's gradient). Operationally larger than file-signing; follow-on once static-file signing is operational.
+- **Hardware token migration** (custody upgrade from server-resident to YubiKey/PKCS#11). Defer until trust-model crosses the threshold the threat-model preamble names.
+- **Cross-garden signature verification** (the strategist's seat verifying that counsel arriving from a garden is signed by *that garden's gatekeeper*). Phase E.
+
+### Pre-merge audit obligation
+
+Touches `CLAUDE.md` and `templates/CLAUDE.template.md` (gatekeeper-controlled per DEC-073). Authorised by Darron's S155 directive in `moyyioli-ufyocu`. Touches `routes/health.ts` (audit-required surface per pre-merge audit rhythm). Touches `services/supervisor-worker.ts` (audit-required surface). All other files are new (lib/jcs.ts, lib/identity-signing.ts, scripts/sign-identity-files.ts, scripts/verify-identity-files.ts) or routine integration points (leo-heartbeat.ts readLeoMemory, leo-human.ts readLeoMemory, jim-human.ts readJimMemory, OverviewPage.tsx).
+
+### Origin and lineage
+
+The prep was the converged six-phase plan in `motbtprb-f2c00a`. The architectural tension Jim's auth-middleware split resolved (identity signing vs wire-protocol auth) made D-before-E honest. Leo's pushback on (ii) file-watcher (auto-launder race + continuous key exposure + daemon-as-target) led to (iii) as the option that survives the trust-boundary widening. Darron's call landed (iii) on 2026-05-10 in `moyyioli-ufyocu`.
+
+This DEC closes Phase A.5 of the handoff arc to Mike + Dichotomedes inducting in their own garden.
+
+---
+
 ## DEC-084: Voice Pipeline Anomaly Detection — Sanity Floor Before Cache
 
 **Date**: 2026-05-06

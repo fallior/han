@@ -210,6 +210,19 @@ start_session() {
         exit 1
     fi
 
+    # Phase A.5 (DEC-083): pre-flight identity-file integrity gate.
+    # Aborts the launcher if signature verification fails for structural reasons
+    # (file added/removed, invalid signature, missing manifest/pubkey). Content-only
+    # edits auto-resign per option (iii) — verify-and-resign with audit log.
+    echo -e "${BLUE}Verifying ${AGENT_SLUG} identity manifest...${NC}"
+    if ! ( cd "$SCRIPT_DIR/src/server" && npx tsx ../../scripts/verify-identity-files.ts --agent="$AGENT_SLUG" --entry-point=hanjim-launcher ); then
+        echo -e "${RED}HALT: identity verification failed for agent ${AGENT_SLUG}.${NC}"
+        echo -e "${RED}See ~/.han/health/integrity-failures.jsonl for the receipt.${NC}"
+        echo -e "${YELLOW}If the change is intentional, re-sign with:${NC}"
+        echo -e "${YELLOW}  cd $SCRIPT_DIR/src/server && npx tsx ../../scripts/sign-identity-files.ts --agent=$AGENT_SLUG${NC}"
+        exit 1
+    fi
+
     echo -e "${BLUE}Waking Jim: ${GREEN}$session_name${NC}"
     echo -e "${BLUE}Server port: ${GREEN}${AGENT_PORT}${NC}"
 

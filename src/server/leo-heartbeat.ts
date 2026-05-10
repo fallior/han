@@ -52,6 +52,7 @@ import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
 import { loadTraversableGradient, rotateMemoryFile, activeCascade, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
 import { appendPairedMemory } from './lib/memory-paired-writer.js';
+import { gateIdentityOrThrow } from './lib/identity-signing.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -1079,6 +1080,12 @@ function readJimContext(): string {
 }
 
 function readLeoMemory(): string {
+    // Phase A.5 (DEC-083): identity gate fires before any identity-load read.
+    // verifyAndResign — option (iii) verify-and-resign at session-start.
+    // Throws on structural change / invalid signature / missing manifest;
+    // caller's beat-error handling catches and skips the prompt for this beat.
+    gateIdentityOrThrow('leo', 'leo-heartbeat');
+
     // DEC-085 (S153, 2026-05-08): re-add compressed working-memory.md to the
     // load. The Phase 0 drop (S146, commit d50338d) was reversed because
     // working-memory.md is now the canonical c1 source — paired-rotated with

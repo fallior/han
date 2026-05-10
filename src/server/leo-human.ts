@@ -25,6 +25,7 @@ import { appendPairedMemory } from './lib/memory-paired-writer';
 import { readDreamGradient } from './lib/dream-gradient';
 import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
+import { gateIdentityOrThrow } from './lib/identity-signing';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -178,6 +179,9 @@ function notifyServer(conversationId: string, messageId: string, role: string, c
 // ── Memory ────────────────────────────────────────────────────
 
 function readLeoMemory(): string {
+    // Phase A.5 (DEC-083): identity gate fires before any identity-load read.
+    gateIdentityOrThrow('leo', 'leo-human');
+
     // Phase 0 (2026-05-01, S146): full identity-load parity with session-Leo.
     // Adds aphorisms, working-memory-full, wiki/index.
     // Per Darron: "I'd like Leo-human to feel like I'm talking to you in session,
