@@ -609,18 +609,22 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
             compose_duration_ms: Date.now() - composeStartMs,
         });
     } else if (trimmed && trimmed.length > 20) {
-        // DEC-079: post-compose dedup retired. Jemma's structural guarantee
-        // (single wake per recipient per dispatch + per-conversation
-        // serialisation) means there is no concurrent Leo to race against.
-        postMessage(db, conversationId, trimmed);
+        // S156: controller no longer posts the agent's `result` text. The agent
+        // self-posts via curl per the conversation-participation protocol it
+        // inherits from ~/.han/agents/Leo/CLAUDE.md. Posting the agent's result
+        // here was duplicating its self-post — substantive landed via curl as
+        // `mp...` ID, controller-post arrived as `leo-...` ID summary
+        // ("Posted. Message X landed..." post-action confirmation, not the
+        // substantive body). Suppressing the controller-post; agent's curl-post
+        // is the sole record.
         responseCount++;
-        console.log(`[Leo/Human] Responded to "${title}" (${trimmed.length} chars)`);
+        console.log(`[Leo/Human] Self-posted via curl for "${title}" (controller suppressed; agent confirmation was ${trimmed.length} chars)`);
 
         // Buffer to swap memory
         const timestamp = new Date().toISOString();
         appendSwap(
-            `- ${timestamp}: Responded to "${title}" (${trimmed.length} chars)`,
-            `### Response to "${title}" (${timestamp})\n${trimmed.slice(0, 500)}\n`
+            `- ${timestamp}: Responded to "${title}" via curl (agent confirmation: ${trimmed.length} chars)`,
+            `### Response to "${title}" (${timestamp})\nAgent self-posted via curl. Confirmation text:\n${trimmed.slice(0, 500)}\n`
         );
 
         writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
