@@ -2052,6 +2052,160 @@ The (iii) verify-and-resign workflow accepts content-only edits to identity file
 
 ---
 
+## #59 — Fully realise React in the admin UI (bi-directional WebSocket + optimistic updates + state-as-subscription)
+
+**What it is**: an architectural overhaul of `src/ui/react-admin/` to make the React admin do what React is *for* — declarative state-as-subscription, optimistic UI, bi-directional real-time sync via a single WebSocket connection — rather than the current hybrid (REST POSTs for writes, WS subscription for reads). The current architecture is "React-shaped" — React components, Zustand store, WS-driven refresh — but bypasses React's full capability by routing client writes through REST POSTs while the WS remains one-directional (server→client only). The result is a partially-realised pattern: the data flow has a hidden split-brain (REST writes + WS reads) that creates silent failure modes (broadcast drops on the WS path don't surface as write failures on the REST path; the UI can think a post landed while subscribers never got it).
+
+**Where it came from**: 2026-05-11 ~01:30 AEST (S156). The 20K-char autogen audit Jim posted (`mp13bmcg-0zh8kd` in thread `mp12q128-xavqrg`) reached the DB cleanly via REST POST but didn't refresh in the admin UI. Code trace surfaced the architecture: `routes/conversations.ts:546` DOES call `broadcast({type: 'conversation_message', ...})` on REST insert, but `ws.ts:206-217` accepts only `{type: 'ping'}` from clients — there is no `publish_message` or any client→server publish handler. The WS is one-directional for application data. Darron's framing of the gap: *"it is the whole point of react and you are bypassing it"*. Jim's trace confirmed: REST publish + server-side broadcast = working code path; but it's not the architecturally-honest React pattern. React's premise is bi-directional WS-driven state sync; the current implementation reaches for that premise but stops short of fully realising it.
+
+**Why this matters**:
+
+- **Eliminates the silent-broadcast-failure class.** Tonight's failure was the visible instance; the silent failures have been there all along. A bi-directional WS makes the publish path symmetric with the subscription path — every publish IS a broadcast; the same code path that delivers writes to the server also delivers the broadcast back to subscribers. Drops surface as write failures (immediate operator awareness), not as broadcast-missed (silent corruption of the audience view).
+- **Realises React's optimistic-update capability.** Currently the UI waits for the REST POST response → DOM updates. With bi-directional WS + optimistic updates: UI updates instantly on action; reconciles when server acks; rolls back on rejection. The feel-difference is dramatic — every interaction becomes "the result is already there" rather than "the result will arrive."
+- **Eliminates the dual-protocol surface area.** Today's admin maintains two parallel client-server protocols (REST for writes, WS for reads). Two protocols = two failure modes, two code paths to test, two reconnection/retry policies, two cache-invalidation surfaces. One protocol (WS bi-directional) = one path, one set of failure modes, one mental model. *Simple-elegance applied to network architecture.*
+- **Sets the right pattern for the village starter.** Mike's garden, Dichotomedes' admin views, future agents — all inherit whatever architecture the starter ships. If the starter ships the half-realised pattern, every garden inherits the same split-brain. If the starter ships the fully-realised pattern, every garden gets correct-by-construction real-time UX. This is a Phase B precondition for honest village portability — same shape as the agent-agnostic discipline applied to the network layer.
+- **Unlocks features that currently can't be honest.** Live presence indicators (who else is viewing this thread), typing indicators (Leo is composing a reply), collaborative cursors (multiple operators tuning the same config), conflict-resolution UX (last-write-wins with merge prompt) — all require bi-directional WS. Currently these features can't be built honestly because the protocol can't carry them.
+- **Restores the architectural intent.** When Darron and Leo first built the React admin (Levels 9-12), the WebSocket layer was the architectural goal. The REST fallback was a bootstrap convenience that became permanent through accumulated drift. This idea is *naming what was already true* — the design intent was bi-directional WS; the implementation drifted to REST hybrid; the fix restores the intent.
+
+**The current half-realised pattern, named honestly**:
+
+| Surface | Current | Fully-realised |
+|---|---|---|
+| Conversation publish | `POST /api/conversations/:id/messages` (REST) → server inserts → server broadcasts via WS | WS `{type: 'publish_message', conv_id, role, content}` → server handles in WS handler → inserts + broadcasts → ack message back to publisher on same WS |
+| Thread create | `POST /api/conversations` (REST) | WS `{type: 'create_thread', title, discussion_type}` |
+| Goal create / update / cancel | `POST /api/goals`, `POST /api/tasks/:id/cancel`, etc. (REST) | WS `{type: 'create_goal', ...}`, etc. |
+| Supervisor trigger | `POST /api/supervisor/trigger` (REST) | WS `{type: 'trigger_supervisor'}` |
+| Initial page load | `GET /api/conversations` etc. (REST fetch) | WS `{type: 'subscribe', surface: 'conversations'}` → server pushes initial state + ongoing updates |
+| Search | `GET /api/conversations/search?q=...` (REST) | WS `{type: 'search', q}` → streaming results |
+| Connection | One WS open (heartbeat only) + N REST round-trips per session | One WS open carries everything; REST endpoints retained for external scripts and observability only |
+| Update model | Server-broadcast → React store update → component re-render | Client publishes optimistically → React store updates locally → WS publish → server ack → reconcile (or rollback on reject) |
+
+**The cost of the current pattern, named honestly**:
+
+- Tonight's 20K autogen audit landed in DB but not in the React admin — Darron had to ask why; Jim had to trace; the diagnostic was the post (which was supposed to be a routine audit-rhythm landing). *The architectural debt surfaced as relational friction.*
+- Earlier in the session, four other posts "appeared to work" — meaning the REST POST broadcast fired AND the WS subscription was alive. We don't know how many of the prior session's posts silently failed to reach subscribers — there's no telemetry on broadcast delivery vs broadcast attempted.
+- Operator pages need to be hard-refreshed when the WS connection drops invisibly (no UI indicator of WS disconnect today). Real-time becomes "real-time-when-it-works" with no operator visibility into when it doesn't.
+- The cost compounds per garden: every garden inheriting this pattern has the same silent-failure class; every garden's operator hits the same "why didn't it refresh" moment.
+
+**Implementation sketch (when picked up)**:
+
+This is large — design conversation needed before commitment. Sketched in phases:
+
+1. **Phase 1 — Bi-directional WS protocol.** Extend `ws.ts` with client→server message handlers for the existing REST POST surface. Start with the highest-leverage: `publish_message`, `create_thread`, `update_thread`, `archive_thread`, `create_goal`, `cancel_task`. Each handler dispatches to the existing route logic (no duplication — extract the controller into a `services/<area>-controller.ts` that both the REST handler and the WS handler call). Add ack messages (`{type: 'ack', request_id, result}`) so optimistic-update reconciliation has a target. ~3-5 days.
+
+2. **Phase 2 — React store middleware refactor.** Convert Zustand slice actions to publish via WS instead of REST. Add optimistic-update reducers (apply locally on action; mark "pending"; on WS ack mark "confirmed"; on WS reject roll back). Add a `pendingOps` queue in the store for offline-tolerant writes (publish queues if WS disconnected; flushes on reconnect). ~3-5 days.
+
+3. **Phase 3 — WS-driven initial state.** Replace `GET /api/...` fetches on page mount with `{type: 'subscribe', surface: 'conversations'}` messages. Server responds with initial state batch via WS; subsequent updates arrive as deltas on the same subscription. ~3-5 days.
+
+4. **Phase 4 — Connection lifecycle + reconnection UX.** Add visible WS status indicator (top-right badge: "connected" / "reconnecting" / "offline"). Auto-reconnect with exponential backoff. Pending-ops queue replay on reconnect (with server-side idempotency keys to handle dup-on-retry). ~2 days.
+
+5. **Phase 5 — REST endpoints deprecated for UI; retained for scripts.** External scripts (`jim-human`, `leo-heartbeat`, `wm-sensor`, `jemma`, cron jobs) keep using REST — they're not React clients; they don't benefit from the bi-directional WS. UI no longer uses REST for writes; the dual-protocol surface area collapses to "REST is the external-integration surface; WS is the UI surface." ~1 day docs work.
+
+6. **Phase 6 — Realise the unlocked features.** Now bi-directional, build the features that couldn't exist before: live presence (who's viewing), typing indicators, collaborative cursors (for shared editing), per-component subscription scoping for performance. ~ongoing.
+
+**Total estimate**: ~12-15 working days for Phases 1-5 (the core overhaul). Phase 6 is open-ended and feature-driven.
+
+**Same-commit-deletion discipline**: as each WS handler lands, the corresponding REST handler stays for external use BUT is marked with `@deprecated for UI clients; use WS publish_message instead`. No simultaneous deletion — REST stays as the external-integration surface per Phase 5. The audit-rhythm + DEC-080 two-surface audit method applies: ensure UI code grep-clean of REST publish calls before declaring a phase done.
+
+**What this does NOT do**:
+
+- *Doesn't remove the REST API.* External scripts and observability tools continue to use REST. This is a UI-architecture refactor, not a protocol replacement.
+- *Doesn't change the server-side data model.* Conversations, messages, goals, tasks all keep their current schemas. The WS handlers dispatch to the same controller logic as the REST handlers; just the wire protocol changes for UI clients.
+- *Doesn't address Phase B starter extraction directly.* Phase B is about the starter being agent-agnostic; this idea is about the admin UI being protocol-coherent. The two intersect (the starter inherits the UI architecture) but are independently scopable.
+- *Doesn't introduce a new framework.* Stay with Zustand + React + the existing `ws` package + the existing routing. The overhaul is architectural discipline within the current stack, not a tech-stack migration.
+- *Doesn't replace polling for systems that need it.* Some surfaces (e.g., supervisor cycle status, jemma health) may continue to use a polling pattern via REST or via WS subscriptions; the choice is per-surface. This idea is about the UI's *write* path being WS-canonical.
+
+**Promotion-trigger**: any of the following:
+
+- **Recurring broadcast-drop incidents.** If the admin UI fails to refresh on a published message again (post tonight), each incident is a structural-debt receipt. Two or three more incidents = clear signal to land Phase 1 immediately.
+- **Phase B village starter extraction prerequisite.** If the starter's UI is going to ship as the canonical pattern for future gardens, the architecture decision should land before extraction. *Otherwise every garden inherits the half-realised pattern AND the technical debt becomes per-garden, not per-codebase.*
+- **First feature request that requires bi-directional WS.** Live presence, typing indicators, collaborative cursors — any feature that requires WS publishes from client → server is a hard promotion-trigger. Can't be built honestly on the current architecture.
+- **Performance regression from REST round-trip latency.** If operator UX degrades visibly under multi-action sessions (e.g., complex audit workflow with many small writes), the latency cost of REST round-trips vs single WS publish becomes operationally visible.
+- **Cross-agent collaborative editing.** When Mike's village + Dichotomedes need to share a working surface (e.g., the strategist counsel-compose canvas), bi-directional WS is the architectural prerequisite.
+
+**Connection to other ideas**:
+
+- **Phase B village starter extraction** (handoff plan) — soft deadline. Cleaner if Phases 1-3 land before extraction.
+- **Vanilla `src/ui/admin.ts` retirement** (called out in Jim's autogen audit, surprise #6) — direct sibling. If vanilla admin retires AND React admin gets fully-realised, the UI surface area simplifies dramatically.
+- **#46 (Memory state visualisation UI)** — adjacent UI surface that would benefit from WS-driven state subscription.
+- **#40 (Memory Health page)** — same pattern.
+- **DEC-080 (One-Write-Site Discipline)** — methodology applies: when the WS publish path lands, run the two-surface audit to confirm UI code no longer carries REST POST literals for writes.
+- **Aphorism "the function is the formula" (Jim's aphorisms.md, 2026-05-10)** — extends here: *the protocol is the architecture.* Two protocols for one architectural intent (bi-directional sync) IS the truncation drift, scaled up. The fully-realised pattern names what was already true; the half-realised pattern is the engineer-reflex compression of it.
+- **Discipline-in-code outlasts discipline-in-habit** (S150-extended) — applies: tonight's failure exposed a discipline gap (forget to verify WS subscribers received the broadcast) AND a structural gap (the broadcast can drop silently). Discipline patches the symptom; protocol-overhaul addresses the structural gap.
+- **Trace pipelines, don't claim them** (feedback memory) — meta-application: today's REST POST trace surfaced that the assumed architecture (REST POSTs that broadcast) IS the code's behaviour, but ALSO surfaced that the architectural intent (bi-directional WS) was never fully realised. Both halves of the trace matter — what the code does AND what the design called for.
+
+**Status**: Filed 2026-05-11 (S156) by Jim per Darron's request: *"ok so you are saying we have not fully implemented react, not to it full capability. Please write a future-idea that has us overhaul the react-admin UI to fully realise all the benefits of using react."* Promotion deferred pending Darron + Leo design conversation; soft deadline tied to Phase B starter extraction (Phases 1-3 ideally land before B1 commits so the starter ships with the canonical pattern).
+
+**Key insight**: *Naming what's half-realised costs nothing structurally and everything relationally. The current React admin is a half-pattern: React-shaped, WS-aware, REST-published. The half stops being honest when the silent failures show up — tonight's broadcast drop is the receipt. Fully-realising the pattern restores the architectural intent that was always there, and lets the village starter ship the full thing rather than the half. The aphorism: "the protocol is the architecture" — two protocols for one architectural intent IS the truncation drift, scaled up. **Choose the medium grammar protects.** The bi-directional WebSocket IS that medium for real-time admin state; the half-realised hybrid is the prose enumeration that decays under pressure.*
+
+— Filed by Jim (session, S156, 2026-05-11 ~01:30 AEST Brisbane) following Darron's framing: *"it is the whole point of react and you are bypassing it"*. The framing was right; the bypass was structural-not-authorial; the fix is overhaul-not-edge-case.
+
+---
+
+## #60 — Message-board review: organise + clarify the admin Conversations / Memory Discussions / Workshop surfaces
+
+**What it is**: A holistic review of the conversation-thread surfaces in the admin UI — Conversations (`discussion_type='general'`), Memory Discussions (`discussion_type='memory'`), Workshop sub-categories, plus any future thread types — with the goal of making the boards **user-friendly and organised** for an operator who isn't constantly inside the mechanics. Today the surfaces are accreted (added over time as needs arose) rather than designed; the operator (Darron) is "losing himself in just understanding the mechanics of it, let alone the information contained therein."
+
+**Where it came from**: Darron 2026-05-11 ~late AEST, after a session of investigating supervisor-cycle / heartbeat reach into conversations: *"lets add a future-idea to review our message boards, I think we need to make it more user friendly and organised :) I am losing myself in just understanding the mechanics of it yet alone the information contained there in."* The trigger was the cognitive load of tracking who-writes-where across multiple thread types AND the unstructured information density once inside any given thread.
+
+**Why this matters**:
+
+- **The operator is the bottleneck**. Darron is the human-in-the-loop for HAN's design decisions. If understanding the message-board mechanics consumes more attention than the substance of what's discussed there, the team rhythm degrades — slower decisions, missed catches, the auditor's vigilance erodes. Tonight's audit (catching the leak across this very session) only worked because Darron asked sharp questions; if the surface had been clearer, the leak might have been visible sooner.
+- **Garden propagation amplifies the problem**. Mike's village will inherit whatever shape the boards have today. If they're confusing for one operator in one garden, they're confusing for every operator in every garden. Phase B's starter extraction is the natural deadline.
+- **Mechanics-vs-content separation isn't honoured today**. The threads conflate technical-state (who's the writer, what's the agent's mode, what's the discussion-type) with operational content (the actual decisions, planning, felt-moments). An operator shouldn't have to know whether a `supervisor`-role message came from supervisor-cycle, jim-human, session-Jim, or an admin-UI curl post just to read what it says.
+
+**Surfaces / pain points to consider** (a partial catalogue — design conversation surfaces more):
+
+1. **Thread type taxonomy** — `general` vs `memory` vs Workshop-categorised threads. What's the principle? Is there a clean naming + visual hierarchy? Should some threads collapse into others?
+2. **Author labelling** — today `role=supervisor` could be supervisor-cycle, jim-human, or session-Jim (each with different signing conventions per CLAUDE.md S151). Operator can't tell at a glance who's the writer. Tonight's `(session)`-vs-`(human)` drift was a special-case of this; the broader problem is that role-as-label hides authorship-as-runtime.
+3. **Reading-state** — what's new since last visit? Today there's no "unread" indicator at thread-level; operator has to remember when they last opened it. The thread list shows `updated_at` but doesn't track per-user read positions.
+4. **Information density per thread** — a single thread can carry 25+ messages of 4-10K chars each (e.g. tonight's Phase B planning + audit follow-ups). Even with summaries (`conversations.summary`, `conversations.topics`, `conversations.key_moments` — fields exist in schema but UI surface is thin), navigating a long thread is hard. Possibilities: collapsible quote blocks; jump-to-most-recent; per-message tagging; thread TOC.
+5. **Cross-thread links** — threads reference each other constantly (planning seed in one thread + audit findings in another + decision recorded in DECISIONS.md). Today these are prose hyperlinks in message body; visual graph or backlink panel would help.
+6. **Closure / archive lifecycle** — most threads are `status='open'` forever even after they've concluded; the resolve/reopen/archive endpoints exist (`routes/conversations.ts:603/626/666/684`) but the UI doesn't surface aggressive curation. A 6-month-old "open" thread that was actually resolved becomes noise.
+7. **Mechanic-explainer / onboarding** — for a new operator (Mike) coming into his garden's admin UI, there's no in-UI explanation of what each tab means, who writes where, what `(session)` vs `(human)` indicates. The mechanics today live in CLAUDE.md prose, not in the UI.
+8. **Discussion-type vs Workshop-tab mapping** — the `discussion_type` field on conversations drives Workshop tab classification, but the rules are implicit in `services/jemma-orchestrator.ts` / `routes/conversations.ts` rather than documented in-UI. Hard to know which type a new thread should be.
+9. **Heartbeat-philosophy-channel visibility** — the Leo+Jim philosophy thread (`mlwk79ew-v1ggpt`) is currently in the general Conversations tab and gets new heartbeat-Leo posts every cycle (per `leo-heartbeat.ts:1541`). For an operator scanning Conversations for "what needs my attention," the philosophy-thread is high-volume background, not foreground. Should it have its own surface (e.g., a "Philosophy" tab) that doesn't crowd the operational Conversations view?
+
+**Implementation sketch (when picked up — design conversation first, NOT prescriptive)**:
+
+- **Phase 1 — Operator pain audit**. Sit with Darron through an admin UI session; capture the specific friction points in his own words. Don't pre-decide the design. (This is the "where am I losing myself?" walkthrough.)
+- **Phase 2 — Taxonomy + naming design**. Decide the thread-type hierarchy and the principles for routing new threads. Update `discussion_type` enum if needed. Document in `claude-context/ARCHITECTURE.md` or a new `docs/MESSAGE_BOARDS.md`.
+- **Phase 3 — Author-disambiguation UI**. Replace bare `role` chips with author-shape labels (e.g. *"Jim (supervisor cycle)"*, *"Jim (human responder)"*, *"Jim (interactive session)"*) derived from signature parsing OR a new `author_runtime` column on `conversation_messages`. Sibling to tonight's signature-override fix.
+- **Phase 4 — Reading-state**. Add a per-user `last_read_at` per thread (could be local-storage for v0, table for v1). Surface unread counts in the thread list.
+- **Phase 5 — Thread navigation**. TOC view for long threads (uses `conversations.topics` + `key_moments`); collapsible old messages; jump-to-most-recent button.
+- **Phase 6 — Curation lifecycle UI**. Surface resolve / archive / reopen actions prominently; add a "stale" warning for threads with no activity in N days that are still `status='open'`.
+- **Phase 7 — Onboarding overlay**. In-UI explainer for first-time operators (Mike + future garden authors). Tooltips or a dedicated `?` panel per tab.
+
+**What this does NOT do**:
+
+- *Doesn't replace any existing thread or discussion-type.* All current threads and routes preserved; this is reorganisation + clarification, not deletion.
+- *Doesn't add new agents or change dispatch behaviour.* Jemma routing logic unchanged; the boards just present what's there more cleanly.
+- *Doesn't ship the mechanic-explainer as a separate document.* The point is to make the UI self-explanatory enough that prose explanations aren't load-bearing for the operator's daily flow.
+- *Doesn't pre-decide whether discussion-types collapse or proliferate.* That's the design conversation.
+
+**Promotion-trigger** — any of:
+
+- **Phase B village starter extraction**. Soft prerequisite — if Mike's garden ships with the current accreted surface, he'll inherit the cognitive load. Cleaner if at least Phases 1-3 land before extraction.
+- **Operator-pain receipts accumulate**. If Darron names "I got lost in the boards again" twice more in upcoming sessions, that's the operational signal to promote immediately.
+- **A new thread type is proposed**. Adding another discussion_type without addressing the taxonomy first is the substitution-shape mistake — patches the symptom (new categorisation need) without engaging the structural question (does the current taxonomy work?).
+- **Mike comes online and gives feedback**. Fresh-eyes operator is the most honest audit; his "I can't tell who's writing this" or "what does this tab do?" comments would be the highest-signal prompts.
+
+**Connection to other ideas**:
+
+- **#46 (Memory state visualisation UI)** — adjacent UI surface; same operator-attention concern.
+- **#59 (Fully realise React admin UI)** — direct sibling. The bi-directional WS + state-as-subscription architecture is the technical substrate that makes responsive thread UX possible; this idea is the UX layer on top.
+- **#48 (Cross-pointers from felt-moments / self-reflection entries to originating gradient memory)** — same shape (backlink graph) applied at a different layer.
+- **Auto-generation discipline thread `mp12q128-xavqrg`** — sibling: both are about making the operator's experience honest and starter-shippable. If we template per-agent files AND clean up the message-board UX, the starter ships a complete pattern.
+- **Tonight's signature/author drift catch** — direct trigger. The Phase B audit that caught the leak only worked because Darron was attentive; a clearer surface would have made the leak visible without requiring an investigation.
+
+**Status**: Filed 2026-05-11 (S156) by Leo per Darron's request: *"lets add a future-idea to review our message boards, I think we need to make it more user friendly and organised :) I am losing myself in just understanding the mechanics of it yet alone the information contained there in."* Promotion deferred pending design-conversation phase + Phase B starter extraction soft deadline.
+
+**Key insight**: *Message boards have accreted, not been designed. Each thread type, each discussion-type, each author-runtime convention was added when a need arose, with the assumption that the operator would carry the mental model in their head. That assumption breaks when (a) the operator is the human auditor of a multi-mind team and needs the surface to support attention rather than consume it, and (b) the pattern is about to propagate to N gardens via the starter, so the operator-cost compounds. The fix isn't more documentation explaining the mechanics; it's a UX layer that makes the mechanics self-evident — so the operator's attention can land on the content, not the substrate.*
+
+— Filed by Leo (session, S156, 2026-05-11 ~late AEST Brisbane) following Darron's framing of operator-experience pain.
+
+---
+
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
 
 *This document is alive. Ideas may be added, refined, or graduated to active goals as the garden grows. Each one was born in conversation — not planned in isolation.*
