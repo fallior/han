@@ -16,7 +16,8 @@
 
 set -u
 
-SLUG="${1:?usage: $0 <slug>}"
+SLUG="${1:?usage: $0 <slug> [post-commit|post-merge]}"
+EVENT="${2:-post-commit}"  # safer default — only checks HEAD~1..HEAD
 SERVICE="${SLUG}-human.service"
 SOURCE_FILE="src/server/${SLUG}-human.ts"
 
@@ -24,18 +25,29 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "")"
 if [[ -z "$REPO_ROOT" ]]; then exit 0; fi
 cd "$REPO_ROOT" || exit 0
 
-# Only restart if the source file actually changed. Check both the most-recent
-# commit (post-commit case) AND the merge range if ORIG_HEAD exists (post-merge
-# case where multiple commits arrived in a pull).
+# Pick the diff range based on the event that called us.
+#   post-commit → HEAD~1..HEAD (just the new commit)
+#   post-merge  → ORIG_HEAD..HEAD (all commits brought in by the merge/pull)
+# Earlier version (S156, commit bd194a0) checked HEAD~1..HEAD then fell back to
+# ORIG_HEAD..HEAD unconditionally. That fallback over-fired in post-commit
+# context: ORIG_HEAD persists from prior git operations (resets, merges, pulls)
+# and can stay pointed back across recent commits for an extended period, so
+# every post-commit-after-a-merge inherited the pre-merge range as a stale
+# pointer and matched .ts files that hadn't actually changed in the new commit.
+# Routing the range by event-name eliminates the leak.
 CHANGED=""
-if git rev-parse HEAD~1 >/dev/null 2>&1; then
-    if git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -qx "$SOURCE_FILE"; then
-        CHANGED="commit"
+if [[ "$EVENT" == "post-merge" ]]; then
+    if git rev-parse ORIG_HEAD >/dev/null 2>&1; then
+        if git diff --name-only ORIG_HEAD HEAD 2>/dev/null | grep -qx "$SOURCE_FILE"; then
+            CHANGED="merge"
+        fi
     fi
-fi
-if [[ -z "$CHANGED" ]] && git rev-parse ORIG_HEAD >/dev/null 2>&1; then
-    if git diff --name-only ORIG_HEAD HEAD 2>/dev/null | grep -qx "$SOURCE_FILE"; then
-        CHANGED="merge"
+else
+    # post-commit (or unspecified — same default)
+    if git rev-parse HEAD~1 >/dev/null 2>&1; then
+        if git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -qx "$SOURCE_FILE"; then
+            CHANGED="commit"
+        fi
     fi
 fi
 

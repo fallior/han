@@ -52,8 +52,11 @@ for event in post-commit post-merge; do
         done
         echo "# Layer 2: restart *-human systemd services (jim-human, leo-human) when"
         echo "# their .ts source files change. No-op when source unchanged or service inactive."
+        echo "# The event name ($event) routes the diff range — post-commit checks"
+        echo "# HEAD~1..HEAD; post-merge checks ORIG_HEAD..HEAD. Avoids stale-ORIG_HEAD"
+        echo "# over-firing on post-commit (S156 fix)."
         for slug in "${HUMAN_SLUGS[@]}"; do
-            echo "\"$HUMAN_RESTART_SCRIPT\" $slug"
+            echo "\"$HUMAN_RESTART_SCRIPT\" $slug $event"
         done
     } > "$HOOK"
     chmod +x "$HOOK"
