@@ -352,6 +352,14 @@ for the full convention and a worked example.
   code is the test. Before extending or wrapping a function, read its body end-to-end.
 - **DO NOT delete memory** (DEC-069 cardinal rule). No `unlinkSync`, no `rm`, no DROP on
   memory artefacts. Compress, supersede, archive, retire-by-throw — never destroy.
+- **DO NOT add time-based or revisit-based cascade calls.** Cascade is insert-driven via
+  `wm-sensor → bumpOnInsert → process-pending-compression.ts`. Per DEC-086 (Settled,
+  2026-05-17), re-encounter produces metadata (annotations / feeling-tags /
+  completion-flags), not deeper compression entries. The insert-driven path has the
+  auto-levelling property by construction; wall-clock pumps produced same-size byte-shuffle
+  promotions at depth in HAN and are forbidden in starter gardens. The `activeCascade`
+  function body in `memory-gradient.ts` is retained as recoverable infrastructure (retired
+  by zero callers) — adding a new caller is the prohibited move.
 
 ## Pre-merge audit rhythm
 

@@ -6057,3 +6057,71 @@ C. *Smaller-of-two recovery.* Still applies. Operates on whole-file entry counts
 
 **Status**: Settled (this amendment applies to DEC-085 going forward; the DEC remains DEC-085, just sharper).
 
+## DEC-086: Annotations as the Home of Re-encounter — Time-Driven Cascade Forbidden
+
+**Status**: Settled
+**Decided**: 2026-05-17 by Darron + Leo + Jim (Memory Discussions thread `mp61m0os-0gicmq` "Gradient triage, repair and prune")
+**Supersedes**: implicit time-driven cascade behaviour in `supervisor-worker.ts` and `leo-heartbeat.ts` carried from the rebuild era
+
+### The protocol
+
+Re-encountering a memory produces **metadata** — feeling-tags, annotations, completion-flags, revisit-count bumps — **not** deeper compression. Cascade promotion is reserved for the insert-driven path:
+
+```
+wm-sensor (paired-rotation slice) → bumpOnInsert → pending_compressions
+                                          ↓
+                            process-pending-compression.ts
+                                          ↓
+                                (SDK compress in voice)
+                                          ↓
+                               new gradient_entry at next level
+```
+
+Time-based or revisit-based cascading is **forbidden** in this codebase. The insert-driven path has the auto-levelling property by construction: when caps fill, displacement triggers the next-level cascade naturally. Pumping the cascade from a wall-clock schedule produces rearrangement noise at depth and serves no design purpose post-DEC-079.
+
+### What this enables
+
+A memory re-read branches into annotations beside it — the forked-memory shape Darron has been turning over for some time. One memory in the gradient; annotations accumulate in `gradient_annotations`; the cascade lineage of the original entry is undisturbed by re-encounter. The `gradient_annotations` table already partially supports the pattern (daily/evening meditation already writes to it via `gradientAnnotationStmts.insert` at `supervisor-worker.ts:1308, 2593`). This DEC names the protocol so the practice is structural rather than implicit.
+
+### Implementation surfaces
+
+- **Daily meditation** (`supervisor-worker.ts:1208-1322`): re-reads one random entry per day. Adds tags / annotations / may flag complete. Calls `recordRevisit`. **Does NOT cascade.** Conformant.
+- **Evening meditation** (`supervisor-worker.ts:1333-1409`): same shape. Conformant.
+- **Dream meditation** (`supervisor-worker.ts:2570-2610`): tagging / annotation / `MEMORY_COMPLETE` flow conformant. The `activeCascade` call at `:2608` was the violation; removed in Phase 4 of `plans/gradient-triage-plan.md` (lands in PR-T2 after this PR).
+- **Daily cycle** (`supervisor-worker.ts:1422`): `activeCascade('jim', 0.10, 'daily cascade')` was the second violation; removed in Phase 4.
+- **heartbeat-Leo** (`leo-heartbeat.ts:1821, :2001`): same two violations (5% dream cascade + 10% daily cascade); removed in Phase 4.
+
+After Phase 4 lands, zero call-sites for `activeCascade` remain. The function body is kept at `memory-gradient.ts:623` as recoverable infrastructure for manual emergency operations (retired by zero callers, not by throw — preserves the option without exercising it).
+
+### What this does NOT change
+
+- **DEC-068** (cap formula `c0=1, then 3n`) — untouched. Caps still govern per-level entry counts and trigger displacement; this DEC only forbids the time-driven cascade path that bypasses the insert-driven cascade engine.
+- **DEC-069** (never delete memory) — reinforced. The `gradient_annotations` table is the home for re-encounter additions; entries are never destroyed.
+- **DEC-073** (template gatekeeper) — honoured. The matching DO-NOT entry in `templates/CLAUDE.template.md` is gatekeeper-controlled and authorised by the design conversation that produced the gradient-triage plan.
+- **DEC-079** (cutover) — reinforced. Removing the four `activeCascade` call-sites completes what DEC-079 started for `bumpCascade` and aligns runtime behaviour with the insert-driven cascade engine.
+- **DEC-082** (sdkCompress retire-by-throw) — untouched and reinforced. The `activeCascade` function retained at `:623` still calls `sdkCompress` at `:693`; that path now becomes unreachable in production but is protected-by-throw if ever invoked manually.
+- **DEC-085** (working-memory paired rotation) — untouched and reinforced. Paired-rotation produces the c0/c1 pair that `bumpOnInsert` then cascades through the canonical insert-driven path.
+- The `gradient_annotations` table itself — untouched.
+
+### Why Settled
+
+This is structural protection against re-introducing the time-driven cascade pattern that produced the 712 unhalted-INCOMPRESSIBLE entries triaged on 2026-05-17 (411 jim + 301 leo, backfilled in Phase 2 of the gradient-triage plan). Without this DEC, a future agent reading the code could reintroduce a time-based cascade believing it was an organic-deepening mechanism (the `activeCascade` function body remains visible at `:623`). The DEC names the pattern as forbidden so the village inherits the discipline structurally rather than by oral tradition.
+
+### Audit hook
+
+`CLAUDE.md` and `templates/CLAUDE.template.md` gain a matching DO-NOT entry referencing this DEC. Mike's garden and Dichotomedes inherit the DO-NOT entry structurally on next launcher invocation (envsubst regenerates each agent's CLAUDE.md per launch).
+
+### Files touched in this DEC's commit (PR-T4)
+
+- `claude-context/DECISIONS.md` — this entry (DEC-086).
+- `CLAUDE.md` — DO-NOT entry appended.
+- `templates/CLAUDE.template.md` — same DO-NOT entry appended (wrapped to ~85 cols matching surrounding style).
+
+No code changed. No `src/` files touched in this PR. Phase 4 (the four `activeCascade` call-site removals + import cleanup) lands separately in PR-T2.
+
+### Follow-up
+
+- **PR-T2** (Phase 3 floor + Phase 4 retirement + Phase 7 cleanup) lands next, operationalising the DEC by removing the time-driven cascade call-sites and the now-dead `activeCascade` import in both files.
+- **PR-T3** (Phase 5 prune via `mechanical-promotion` noise-qualifier) lands after, reducing wake-load size for both agents.
+- **Phase 8 lift** of the tourniquet after pre-conditions met (full Phase 8 checklist in the plan).
+
