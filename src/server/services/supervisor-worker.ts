@@ -37,7 +37,7 @@ import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 import { gateIdentityOrThrow } from '../lib/identity-signing';
 import { spawn as spawnChild } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
-import { rotateMemoryFile, loadMemoryFileGradient, loadTraversableGradient, activeCascade, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
+import { rotateMemoryFile, loadMemoryFileGradient, loadTraversableGradient, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 
 // ── Types ────────────────────────────────────────────────────
@@ -1411,24 +1411,11 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
 
 // ── Jim Active Cascade ────────────────────────────────────────
 
-let lastJimActiveCascadeDate = '';
-
-async function maybeRunJimActiveCascade(phase: string): Promise<void> {
-    if (phase === 'sleep') return;
-    const today = new Date().toISOString().split('T')[0];
-    if (lastJimActiveCascadeDate === today) return;
-
-    try {
-        const count = await activeCascade('jim', 0.10, 'daily cascade');
-        if (count > 0) {
-            log(`[Worker] Daily active cascade: ${count} memories deepened`);
-        }
-        lastJimActiveCascadeDate = today;
-    } catch (err: any) {
-        log(`[Worker] Active cascade failed: ${err.message}`);
-        lastJimActiveCascadeDate = today;
-    }
-}
+// (Daily active cascade wrapper `maybeRunJimActiveCascade` removed in the
+// 2026-05-17 gradient triage. Per DEC-086 (Settled): time-driven cascade is
+// forbidden; insert-driven via wm-sensor → bumpOnInsert →
+// process-pending-compression.ts is canonical. See
+// plans/gradient-triage-plan.md §Phase 4.)
 
 // Dream-seed counts — mirror Leo's heartbeat readDreamSeeds()
 const JIM_DREAM_SEED_COUNT = 8;     // dream fragments
@@ -2310,7 +2297,8 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         // (Daily session gradient processing call removed in Phase 3 of the
         // 2026-04-29 cutover — DEC-079. processGradientForAgent was a third
         // stranger-Opus surface; cascade is now event-driven via the queue.)
-        await maybeRunJimActiveCascade(phase);
+        // (Daily active cascade call removed in 2026-05-17 gradient triage
+        // per DEC-086. Insert-driven cascade is canonical.)
         await maybeRunJimMeditation(phase);
         await maybeRunJimEveningMeditation(phase);
 
@@ -2603,12 +2591,10 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                         log(`[Worker] Dream meditation — memory flagged as complete: ${meditationEntryId}`);
                     }
 
-                    // Dream cascade: deepen 5% of Jim's gradient while dreaming
-                    try {
-                        await activeCascade('jim', 0.05, 'dream cascade');
-                    } catch (cascadeErr: any) {
-                        log(`[Worker] Dream cascade failed (non-fatal): ${cascadeErr.message}`);
-                    }
+                    // (Dream cascade `activeCascade('jim', 0.05, 'dream cascade')`
+                    // removed in 2026-05-17 gradient triage per DEC-086. Dreams
+                    // are revisit-only; the tag/annotation/MEMORY_COMPLETE flow
+                    // above is the conformant re-encounter shape.)
                 }
             } catch (err: any) {
                 log(`[Worker] Dream meditation parsing failed (non-fatal): ${err.message}`);

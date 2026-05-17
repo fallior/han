@@ -50,7 +50,7 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
-import { loadTraversableGradient, rotateMemoryFile, activeCascade, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
+import { loadTraversableGradient, rotateMemoryFile, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
 import { appendPairedMemory } from './lib/memory-paired-writer.js';
 import { gateIdentityOrThrow } from './lib/identity-signing.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
@@ -1816,12 +1816,10 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
                     console.log(`[Leo] Dream meditation — memory flagged as complete: ${entryId}`);
                 }
 
-                // Dream cascade: deepen 5% of the gradient while dreaming
-                try {
-                    await activeCascade('leo', 0.05, 'dream cascade');
-                } catch (cascadeErr) {
-                    console.error('[Leo] Dream cascade failed (non-fatal):', (cascadeErr as Error).message);
-                }
+                // (Dream cascade `activeCascade('leo', 0.05, 'dream cascade')`
+                // removed in 2026-05-17 gradient triage per DEC-086. Dreams are
+                // revisit-only; the tag/annotation/MEMORY_COMPLETE flow above
+                // is the conformant re-encounter shape.)
             }
         } catch (err) {
             console.error('[Leo] Dream meditation parsing failed (non-fatal):', (err as Error).message);
@@ -1987,27 +1985,10 @@ async function maybeBackupQueueDrain(): Promise<void> {
 // processGradientForAgent is deprecated; cascade is now event-driven via the
 // pending_compressions queue.)
 
-// ── Active Cascade ──────────────────────────────────────────
-
-let lastActiveCascadeDate = '';
-
-async function maybeRunActiveCascade(phase: string): Promise<void> {
-    // Run once daily during waking hours — 10% of c1 population
-    if (phase === 'sleep') return;
-    const today = new Date().toISOString().split('T')[0];
-    if (lastActiveCascadeDate === today) return;
-
-    try {
-        const count = await activeCascade('leo', 0.10, 'daily cascade');
-        if (count > 0) {
-            console.log(`[Leo] Daily active cascade: ${count} memories deepened`);
-        }
-        lastActiveCascadeDate = today;
-    } catch (err) {
-        console.error(`[Leo] Active cascade failed:`, (err as Error).message);
-        lastActiveCascadeDate = today;
-    }
-}
+// (Active Cascade wrapper `maybeRunActiveCascade` removed in the 2026-05-17
+// gradient triage. Per DEC-086 (Settled): time-driven cascade is forbidden;
+// insert-driven via wm-sensor → bumpOnInsert → process-pending-compression.ts
+// is canonical. See plans/gradient-triage-plan.md §Phase 4.)
 
 // ── Meditation practice — Phase A (reincorporation) + Phase B (re-reading) ──
 //
@@ -2534,8 +2515,8 @@ async function heartbeat(): Promise<void> {
     // 2026-04-29 cutover — DEC-079. processGradientForAgent was a third
     // stranger-Opus surface; cascade is now event-driven via the queue.)
 
-    // Daily active cascade — deepen 10% of c1 population toward UV
-    await maybeRunActiveCascade(phase);
+    // (Daily active cascade call removed in 2026-05-17 gradient triage per
+    // DEC-086. Insert-driven cascade is canonical.)
 
     // Working-bee-leo branch removed in Phase 3 of the 2026-04-29 cutover (DEC-079).
     // The time-based working-bee trigger was the stranger-Opus dilution mechanism;

@@ -60,6 +60,60 @@ function countTokens(text: string | null | undefined): number {
     return Math.ceil(text.length / 4);
 }
 
+// ── Compression floor (S159 gradient triage, 2026-05-17) ──────
+// Size-adaptive ratio floor per DEC-044 (Settled, 2026-04-27) + the S159
+// gradient triage. Without this, the LLM can return same-size content that
+// gets written as a valid c(n+1), producing the cascade-rearrangement-noise
+// that triaged 712 unhalted-INCOMPRESSIBLE entries on 2026-05-17. See
+// plans/gradient-triage-plan.md §Phase 3.
+//
+// Returns -1 if source is at/below the absolute incompressibility floor
+// (50 chars; force UV, no LLM call). Otherwise returns the maximum acceptable
+// output/source ratio — composed content with ratio > this is treated as
+// INCOMPRESSIBLE.
+function compressionFloor(sourceLen: number): number {
+    if (sourceLen <= 50)   return -1;    // absolute floor — force UV
+    if (sourceLen <= 200)  return 0.75;
+    if (sourceLen <= 2000) return 0.55;  // Jim's S160 tightening from 0.60
+    return 0.50;
+}
+
+// Kill-switch: ~/.han/config.json → memory.compressionFloorEnabled (default true).
+// Remove after one week of stable observation per the plan.
+function floorEnabled(): boolean {
+    try {
+        const cfgPath = path.join(os.homedir(), '.han', 'config.json');
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        if (cfg?.memory?.compressionFloorEnabled === false) return false;
+    } catch { /* config missing or unreadable — default to enabled */ }
+    return true;
+}
+
+interface FloorEvent {
+    timestamp: string;
+    agent: string;
+    source_id: string;
+    from_level: string;
+    to_level: string;
+    source_chars: number;
+    composed_chars: number;
+    ratio: number;
+    floor_threshold: number;
+    action: 'absolute-floor' | 'ratio-floor';
+}
+
+function appendFloorEvent(event: FloorEvent): void {
+    try {
+        const dir = path.join(os.homedir(), '.han', 'health');
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, 'compression-floor-events.jsonl');
+        fs.appendFileSync(file, JSON.stringify(event) + '\n');
+    } catch (err: any) {
+        // Observability failure must not break compression. Log and continue.
+        process.stderr.write(`floor-event append failed (non-fatal): ${err.message}\n`);
+    }
+}
+
 // `gradientCap` was previously defined here for the now-deleted local
 // `enqueueCascadeIfNeeded`. It has been removed in S150 PR3 (the shared
 // helper in memory-gradient.ts owns the cap formula now). Same-commit-
@@ -365,6 +419,56 @@ async function main() {
 
     log(`claimed pending=${claimed.id} for source=${claimed.source_id} (${claimed.from_level}→${claimed.to_level}, ${countTokens(claimed.source_content || '')} tokens)`);
 
+    // ── Phase 3 pre-flight: 50-char absolute floor short-circuit (S159) ──
+    // Per DEC-086 + plans/gradient-triage-plan.md §Phase 3d. If the source is
+    // already at the incompressibility floor, skip the SDK call entirely —
+    // the source IS the kernel. Placed BEFORE the compose try-block so the
+    // SDK invocation is actually saved.
+    const floorActive = floorEnabled();
+    if (floorActive) {
+        const preSourceLen = (claimed.source_content || '').length;
+        if (preSourceLen > 0 && preSourceLen <= 50) {
+            const kernelSource = (claimed.source_content || '').trim();
+            const kernel = kernelSource.length > 50 ? kernelSource.slice(0, 50) : kernelSource;
+
+            db.prepare(`
+                INSERT INTO feeling_tags
+                    (gradient_entry_id, author, tag_type, content, change_reason, created_at)
+                VALUES (?, ?, 'uv', ?, 'compression-floor-absolute', ?)
+            `).run(claimed.source_id, agent, kernel, new Date().toISOString());
+            db.prepare(`
+                UPDATE gradient_entries SET cascade_halted_at = ?
+                WHERE id = ? AND agent = ?
+            `).run(claimed.from_level, claimed.source_id, agent);
+            completeClaim(db, claimed.id);
+
+            appendFloorEvent({
+                timestamp: new Date().toISOString(),
+                agent: agent!,
+                source_id: claimed.source_id,
+                from_level: claimed.from_level,
+                to_level: claimed.to_level,
+                source_chars: preSourceLen,
+                composed_chars: preSourceLen,
+                ratio: 1.0,
+                floor_threshold: -1,
+                action: 'absolute-floor',
+            });
+
+            console.log(JSON.stringify({
+                ok: true,
+                operation: 'incompressible-by-floor-preflight',
+                pending_id: claimed.id,
+                source_id: claimed.source_id,
+                kernel,
+                cascade_halted_at: claimed.from_level,
+                source_chars: preSourceLen,
+                floor: -1,
+            }));
+            process.exit(0);
+        }
+    }
+
     let mem: AgentMemory;
     let raw: string;
 
@@ -411,6 +515,65 @@ async function main() {
                 cascade_halted_at: claimed.from_level,
             }));
             process.exit(0);
+        }
+
+        // ── Phase 3 floor check (S159 gradient triage) ──
+        // Per DEC-086 + plans/gradient-triage-plan.md §Phase 3b. If the LLM
+        // returned content but failed to achieve the size-adaptive ratio
+        // floor, treat as INCOMPRESSIBLE: source IS the kernel. Catches the
+        // mechanical-promotion failure mode the LLM's voluntary INCOMPRESSIBLE
+        // tagging misses on already-incompressible input.
+        if (floorActive) {
+            const sourceLen = (claimed.source_content || '').length;
+            const composedLen = composed.length;
+            const ratio = sourceLen > 0 ? composedLen / sourceLen : 0;
+            const floor = compressionFloor(sourceLen);
+            const failedFloor = floor !== -1 && ratio > floor;
+            // Note: floor === -1 case is already handled by the pre-flight
+            // short-circuit above — sources ≤ 50 chars never reach this point.
+
+            if (failedFloor) {
+                const kernelSource = (claimed.source_content || '').trim();
+                const kernel = kernelSource.length > 50 ? kernelSource.slice(0, 50) : kernelSource;
+
+                db.prepare(`
+                    INSERT INTO feeling_tags
+                        (gradient_entry_id, author, tag_type, content, change_reason, created_at)
+                    VALUES (?, ?, 'uv', ?, 'compression-floor-ratio', ?)
+                `).run(claimed.source_id, agent, kernel, new Date().toISOString());
+                db.prepare(`
+                    UPDATE gradient_entries SET cascade_halted_at = ?
+                    WHERE id = ? AND agent = ?
+                `).run(claimed.from_level, claimed.source_id, agent);
+                completeClaim(db, claimed.id);
+
+                appendFloorEvent({
+                    timestamp: new Date().toISOString(),
+                    agent: agent!,
+                    source_id: claimed.source_id,
+                    from_level: claimed.from_level,
+                    to_level: claimed.to_level,
+                    source_chars: sourceLen,
+                    composed_chars: composedLen,
+                    ratio: Math.round(ratio * 100) / 100,
+                    floor_threshold: floor,
+                    action: 'ratio-floor',
+                });
+
+                console.log(JSON.stringify({
+                    ok: true,
+                    operation: 'incompressible-by-floor',
+                    pending_id: claimed.id,
+                    source_id: claimed.source_id,
+                    kernel,
+                    cascade_halted_at: claimed.from_level,
+                    source_chars: sourceLen,
+                    composed_chars: composedLen,
+                    ratio: Math.round(ratio * 100) / 100,
+                    floor,
+                }));
+                process.exit(0);
+            }
         }
 
         // Standard compress path: write the new gradient_entries row, complete pending.

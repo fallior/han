@@ -53,7 +53,11 @@ interface GradientProcessingResult {
 // ── Constants ──────────────────────────────────────────────────
 
 const UNIT_VECTOR_MAX_LENGTH = 50;
-const INCOMPRESSIBILITY_RATIO = 0.85; // If compression yields <15% reduction, content is near-incompressible
+// (INCOMPRESSIBILITY_RATIO = 0.85 constant removed in 2026-05-17 gradient
+// triage — it was the ghost of the floor removed in `ed8dfdc` (Plan v8 Step 3,
+// 2026-04-25) with zero references in the codebase. Its replacement is the
+// size-adaptive floor in `scripts/process-pending-compression.ts` per DEC-086
+// + plans/gradient-triage-plan.md §Phase 3.)
 const MAX_COMPRESSION_DEPTH = 20; // Safety ceiling — force UV generation beyond this
 
 // ── Cn Utilities — Dynamic compression depth ─────────────────

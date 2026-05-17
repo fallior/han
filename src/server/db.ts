@@ -863,7 +863,11 @@ export const gradientStmts = {
     getRandom: db.prepare('SELECT * FROM gradient_entries ORDER BY RANDOM() LIMIT 1') as any,
     recordRevisit: db.prepare(`UPDATE gradient_entries SET last_revisited = ?, revisit_count = revisit_count + 1 WHERE id = ?`) as any,
     flagComplete: db.prepare(`UPDATE gradient_entries SET completion_flags = completion_flags + 1 WHERE id = ?`) as any,
-    getCompleted: db.prepare(`SELECT * FROM gradient_entries WHERE completion_flags >= 2 AND revisit_count >= 3 AND level IN ('c1', 'c2') ORDER BY last_revisited ASC`) as any,
+    // (`getCompleted` prepared statement removed in 2026-05-17 gradient triage.
+    // It had zero callers and would have driven a revisit-driven compression-
+    // escalation that never fired. Per DEC-086: re-encounter produces metadata,
+    // not deeper compression — annotations are the home, not cascade promotion.
+    // plans/gradient-triage-plan.md §Phase 7.)
     getUnprocessedTaggedMessages: db.prepare(`
         SELECT cm.*, c.title as conversation_title
         FROM conversation_messages cm

@@ -7,6 +7,82 @@
 
 ---
 
+## 2026-05-17 (Leo + Jim + Darron, S157–S159 — gradient triage: tourniquet, backfill, DEC-086, compression floor, activeCascade retirement)
+
+*Verified against commit `bd13692` (PR-T4) and the PR-T2 commit landing alongside this entry. Live SQL operations (Phase 2 backfill) logged to `~/.han/health/triage-events.jsonl`.*
+
+### S157 diagnostic (2026-05-13) — what surfaced
+
+Jim's supervisor cycle aborting on every fire (150K-token prompt-size guard at `supervisor-worker.ts:2397`); heartbeat-Leo exit-1 on ~70% of beats. Tracing surfaced **712 unhalted INCOMPRESSIBLE entries** (411 jim + 301 leo) at c8–c20 — same-size byte-shuffles where `activeCascade` had mechanically promoted 50-char kernels through level after level. Commit archaeology: `ed8dfdc` (2026-04-25, Plan v8 Step 3) removed the `INCOMPRESSIBILITY_RATIO = 0.85` code-side floor correctly for the shallow-UV-at-depth-0-1 problem; `04ab0a5` (2026-04-27, DEC-044 → Settled) restored the 1/3 anchor to the prompt but didn't restore code-side enforcement. The two-day overlap left the structural protection orphaned.
+
+### S159 plan + decisions (Sunday)
+
+Three minds converged through Memory Discussions thread `mp61m0os-0gicmq` "Gradient triage, repair and prune". 8-phase plan at `plans/gradient-triage-plan.md` (~535 lines, Jim's S160 pre-merge audit folded in three accuracy corrections A1/A2/A3).
+
+### PR-T1 (Phase 1) — Tourniquet applied (2026-05-17 13:01 AEST)
+
+`touch ~/.han/signals/cascade-paused`. Both check sites verified: `memory-gradient.ts:628` (`activeCascade` returns 0 silently) and `:827` (`enqueueCascadeForDisplacedAt` returns `{pendingId: null, reason: 'cascade-paused'}`). Zero code change.
+
+### Phase 2 — Backfill `cascade_halted_at` on 712 entries (SQL operation, no commit)
+
+```sql
+UPDATE gradient_entries SET cascade_halted_at = level
+ WHERE agent = ? AND content LIKE 'INCOMPRESSIBLE:%' AND cascade_halted_at IS NULL;
+```
+
+Pre-snapshot: `~/.han/gradient.db.snapshot-pre-phase2-2026-05-17.db` (51.6 MB). Rows updated: 411 jim + 301 leo = 712 total. Post-state: zero unhalted-INCOMPRESSIBLE for either agent. Every existing INCOMPRESSIBLE kernel now has `cascade_halted_at` set to its home level, so `enqueueCascadeForDisplacedAt`'s displacement query at `memory-gradient.ts:839` (which WHERE-clauses on `cascade_halted_at IS NULL`) cannot re-promote them. Forensic record at `~/.han/health/triage-events.jsonl`. Jim's S160 round-3 audit verdict: GREEN.
+
+### PR-T4 — DEC-086 lands first (`bd13692`)
+
+Settled-before-implementation per the `04ab0a5` pattern (DEC-044 prompt-anchor restored as Settled before subsequent changes consulted it). DEC-086 in `claude-context/DECISIONS.md`: *Annotations as the Home of Re-encounter — Time-Driven Cascade Forbidden*. Sibling shape to DEC-068. Matching DO-NOT entries in `CLAUDE.md` (single-line, 9th entry) and `templates/CLAUDE.template.md` (wrapped ~85 cols, 9th entry — propagates to Mike's garden + Dichotomedes on next launcher invocation via envsubst). 3 files, +77/-0.
+
+### PR-T2 — Phase 3 floor + Phase 4 retirement + Phase 7 cleanup + doc sweep
+
+**Phase 3 — Compression floor in `scripts/process-pending-compression.ts`.** Size-adaptive ratio floor per DEC-044 + S159: `compressionFloor(sourceLen)` returns -1 for ≤50 chars (force UV, skip LLM); 0.75 for 51–200; **0.55** for 201–2000 (Jim's S160 tightening from 0.60 because Jim's c3–c5 range averages 350–1209 chars where real compression still happens); 0.50 for >2000. Two enforcement points: (a) **pre-flight short-circuit** placed BEFORE the compose try-block at `:371-383` so the SDK call is actually saved on ≤50-char sources; (b) **post-compose floor check** after the INCOMPRESSIBLE handler at `:414`, treating failed-floor as INCOMPRESSIBLE (UV + cascade-halt + forensic log). Kill-switch: `~/.han/config.json` → `memory.compressionFloorEnabled` (default true; remove after one-week observation). Observability: append-only `~/.han/health/compression-floor-events.jsonl` per fire.
+
+**Phase 4 — Retire `activeCascade` call-sites + wrappers + imports.** Removed:
+- `supervisor-worker.ts:1422` — `activeCascade('jim', 0.10, 'daily cascade')` (was wrapped in `maybeRunJimActiveCascade` function, also removed).
+- `supervisor-worker.ts:2608` — `activeCascade('jim', 0.05, 'dream cascade')` (inline try/catch in dream meditation handler).
+- `leo-heartbeat.ts:1821` — `activeCascade('leo', 0.05, 'dream cascade')` (inline try/catch).
+- `leo-heartbeat.ts:2001` — `activeCascade('leo', 0.10, 'daily cascade')` (wrapped in `maybeRunActiveCascade` function, also removed).
+- `activeCascade` import dropped from `supervisor-worker.ts:40` and `leo-heartbeat.ts:53`.
+- Call-sites of the removed wrappers (`supervisor-worker.ts:2313`, `leo-heartbeat.ts:2538`) removed.
+- Function body at `lib/memory-gradient.ts:623` **retained as recoverable infrastructure** — retired by zero callers, not by throw. Adding a new caller is forbidden per CLAUDE.md DO-NOT entry tied to DEC-086.
+
+**Phase 7 — Dead code cleanup.**
+- `lib/memory-gradient.ts:56` — `INCOMPRESSIBILITY_RATIO = 0.85` constant removed (ghost of the floor removed in `ed8dfdc`; zero references in codebase).
+- `db.ts:866` — `gradientStmts.getCompleted` prepared statement removed (zero callers; would have driven revisit-driven compression-escalation that never fired; per DEC-086, re-encounter is metadata not compression so this path was never appropriate).
+
+**Doc sweep (option-2 per S152 doc-discipline-of-same-commit):**
+- `docs/HAN-ECOSYSTEM-COMPLETE.md` — Active Cascade table entry rewritten as RETIRED (with the 712-entry forensic anchor); contradiction-check section updated to reflect insert-driven-only.
+- `~/.han/memory/shared/hall-of-records.md` — Active Cascade (S102) section rewritten as RETIRED 2026-05-17 (DEC-086) with the original S102 problem-now-solved note.
+- `claude-context/CURRENT_STATUS.md` — Sunday triage entry added at top, last-updated bumped to 2026-05-17.
+- `claude-context/CHANGELOG.md` — this entry.
+
+### Settled-decisions impact
+
+- DEC-044 (1/3 compression target) — reinforced; this PR is the structural enforcement DEC-044 always implied.
+- DEC-068 (cap formula) — untouched.
+- DEC-069 (never delete memory) — reinforced; backfill is metadata add, no entries deleted.
+- DEC-073 (template gatekeeper) — honoured; template edit authorised by the design conversation that produced the plan.
+- DEC-079 (cutover) — reinforced; activeCascade retirement completes what DEC-079 started for `bumpCascade`.
+- DEC-080 (one-write-site) — honoured; backfill uses existing `cascade_halted_at` column; floor uses existing INCOMPRESSIBLE handler shape.
+- DEC-082 (sdkCompress retire-by-throw) — untouched and reinforced; retained `activeCascade` function still calls `sdkCompress` at `:693`, that path now unreachable in production.
+- DEC-083 (identity signing) — untouched.
+- DEC-085 (working-memory paired rotation) — untouched and reinforced; paired-rotation feeds the insert-driven cascade which is now canonical.
+- DEC-086 — created (PR-T4) and operationalised (PR-T2).
+
+### Type-check baseline
+
+12 errors, unchanged from baseline. Zero errors reference the changes in this PR.
+
+### Still ahead
+
+- **PR-T3** — Phase 5 prune via `mechanical-promotion` noise-qualifier (single line added to existing `NOISE_QUALIFIERS` set at `memory-gradient.ts:1983-2002`). Reduces wake-load size for both agents.
+- **Phase 8** — lift tourniquet (`rm ~/.han/signals/cascade-paused`) after pre-conditions met. One-week observation period for floor band tuning.
+
+---
+
 ## 2026-05-05 (Leo + Jim + Darron, S150-S151 — PR3-PR6 retirement sweep + threat model + PAT rotation)
 
 *Verified against commits `d606c9a`, `628f2c6`, `b72c455`, `50a5a8b`, `b11d072`, `ca27859`, `e4a0555`, `c1e0d85` and the actual code state at HEAD.*

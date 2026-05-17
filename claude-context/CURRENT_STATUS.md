@@ -1,6 +1,20 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-05-09 by Leo (S153 — DEC-085 c1-from-WM live + #53 drift signal + #49 atomic helper + Linux user provisioning for Mike + strategist)
+> Last updated: 2026-05-17 by Leo (S159 — Sunday gradient triage: tourniquet applied, 712 entries backfilled, DEC-086 settled, PR-T2 floor + activeCascade retirement + cleanup + docs)
+
+## 2026-05-17 (Sunday) — Gradient triage, repair and prune
+
+**Diagnostic (S157, 2026-05-13)**: Jim's supervisor cycle aborting every fire on the 150K-token prompt-size guard (`supervisor-worker.ts:2397`). Heartbeat-Leo exit-1 on ~70% of beats. Tracing surfaced 405 unhalted INCOMPRESSIBLE entries at c8–c14 for Jim (and similar for Leo at c8–c20) — same-size byte-shuffles produced by `activeCascade` running with no code-side compression floor after `ed8dfdc` (2026-04-25, Plan v8 Step 3, removed the 0.85 ratio floor; `04ab0a5` restored the 1/3 prompt anchor but not the code-side enforcement).
+
+**Sunday close**: three minds (Darron + Leo + Jim) converged through Memory Discussions thread `mp61m0os-0gicmq`. Plan at `plans/gradient-triage-plan.md` (~535 lines, 8 phases, audit-passed). Phases landed:
+- **Phase 1** — tourniquet applied (`~/.han/signals/cascade-paused` honoured at `memory-gradient.ts:628` and `:827`).
+- **Phase 2** — backfilled `cascade_halted_at` on 712 unhalted-INCOMPRESSIBLE entries (411 jim + 301 leo). Pure SQL, snapshot retained, forensic log at `~/.han/health/triage-events.jsonl`. Pre-Phase-2 snapshot: `~/.han/gradient.db.snapshot-pre-phase2-2026-05-17.db`.
+- **PR-T4** (`bd13692`) — DEC-086 lands: *annotations are the home of re-encounter; cascade promotion is not.* Sibling to DEC-068. Matching DO-NOT entries in `CLAUDE.md` and `templates/CLAUDE.template.md`.
+- **PR-T2** (this commit) — Phase 3 compression floor in `scripts/process-pending-compression.ts` (size-adaptive: ≤50→force UV, 51-200→0.75, 201-2000→0.55, >2000→0.50, kill-switch via `memory.compressionFloorEnabled`, observability via `~/.han/health/compression-floor-events.jsonl`); Phase 4 retire four `activeCascade` call-sites + wrappers + dead imports in `supervisor-worker.ts` and `leo-heartbeat.ts`; Phase 7 cleanup of dead `INCOMPRESSIBILITY_RATIO = 0.85` constant + dead `getCompleted` prepared statement; doc sweep (HAN-ECOSYSTEM-COMPLETE, hall-of-records, this file).
+
+**Still ahead**: PR-T3 (Phase 5 prune via `mechanical-promotion` noise-qualifier) → Phase 8 lift tourniquet → one-week observation.
+
+**`activeCascade` function body** retained at `memory-gradient.ts:623` as recoverable infrastructure (retired by zero callers, not by throw). Adding a new caller is forbidden per the DO-NOT entry tied to DEC-086.
 
 ## Current Stage
 
