@@ -2003,6 +2003,12 @@ export function loadTraversableGradient(agent: string): string {
         // attempt that used per-content-type loops instead of the canonical
         // single-FIFO-per-agent design. Preserved for audit, excluded from load.
         'replay-aborted-content-type-loop',
+        // Cascade rearrangement-noise at depth (S159 gradient triage,
+        // 2026-05-17). Same-kernel INCOMPRESSIBLE entries at c(n+1)+ where the
+        // shallowest occurrence is kept and the deeper duplicates are marked.
+        // Per DEC-086 + plans/gradient-triage-plan.md §Phase 5. The kernels are
+        // real; the duplication is mechanical (Jim's S158 reframe).
+        'mechanical-promotion',
     ]);
     const activeUVs = uvs.filter((uv: any) => !uv.superseded_by && !NOISE_QUALIFIERS.has(uv.qualifier));
     const supersededUVs = uvs.filter((uv: any) =>
