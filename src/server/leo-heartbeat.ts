@@ -58,21 +58,95 @@ import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
-// ── SDK stderr forwarding (S159 diagnostic, 2026-05-19) ──────
+// ── Beat-failure diagnostic capture (S159 diagnostic, 2026-05-19) ──────
+//
+// On any failed agentQuery call we want THREE pieces of evidence on disk
+// alongside the journald log line:
+//   1. The exact system prompt that was sent (file)
+//   2. The exact user prompt that was sent (file)
+//   3. The full captured SDK subprocess stderr (file)
+//
 // The Claude Agent SDK spawns the underlying Claude Code subprocess with
 // stdio=[pipe,pipe,"ignore"] BY DEFAULT (sdk.mjs spawnLocalProcess). When
 // the subprocess fails, the parent only sees `Error("Claude Code process
-// exited with code N")` — no stderr context. Setting options.stderr to a
-// callback makes the SDK pipe stderr ("pipe" instead of "ignore") and feed
-// each chunk to the callback.
+// exited with code N")` — no stderr context, no record of WHAT was being
+// sent. Setting options.stderr to a callback makes the SDK pipe stderr and
+// feed chunks to the callback. We accumulate to a module-level buffer per
+// beat AND forward each chunk to process.stderr (so journald sees it
+// real-time too).
 //
-// We forward to process.stderr unmodified so journald captures it inline
-// with the surrounding heartbeat logs — the underlying-cause lines appear
-// BEFORE the catch-handler "[Leo] Error: ..." line. After diagnosis of the
-// philosophy-beat exit-1 mystery, this stays as standing observability
-// (no behaviour change, costs nothing in the happy path).
-function forwardSdkStderr(chunk: string): void {
-    process.stderr.write(`[SDK-stderr] ${chunk}`);
+// On failure, the top-level catch handler calls `dumpLastBeatFailure(err)`
+// which writes all three files to ~/.han/health/leo-beat-trace/ and logs
+// the paths. Lazy capture — files only written on actual failure (no disk
+// churn on the happy path).
+//
+// Initial deployment: 3 beat sites (philosophy×2 + personal) + 3 meditation
+// sites = 6 total. Diagnostic for the philosophy-beat silent-exit-1 mystery
+// from S157.
+
+interface BeatContext {
+    type: string;
+    systemPrompt: string;
+    userPrompt: string;
+    stderrCapture: string;
+    startedAt: string;
+}
+
+let lastBeatContext: BeatContext | null = null;
+
+// Begin a beat trace: stash the prompts for possible failure-dump and
+// return the stderr callback to pass into agentQuery options.stderr.
+function beginBeatTrace(type: string, systemPrompt: string, userPrompt: string): (chunk: string) => void {
+    lastBeatContext = {
+        type,
+        systemPrompt,
+        userPrompt,
+        stderrCapture: '',
+        startedAt: new Date().toISOString(),
+    };
+    return (chunk: string) => {
+        if (lastBeatContext) lastBeatContext.stderrCapture += chunk;
+        process.stderr.write(`[SDK-stderr] ${chunk}`);
+    };
+}
+
+// Called by the top-level beat catch handler. Writes the three files +
+// logs the paths so an operator can `cat` them. Non-fatal on write
+// failure (won't break the error-reporting path).
+function dumpLastBeatFailure(err: Error): void {
+    if (!lastBeatContext) {
+        console.error(`[Leo] dumpLastBeatFailure: no lastBeatContext to dump (err.message="${err.message}")`);
+        return;
+    }
+    try {
+        const dir = path.join(process.env.HOME || '/root', '.han', 'health', 'leo-beat-trace');
+        fs.mkdirSync(dir, { recursive: true });
+        const ts = lastBeatContext.startedAt.replace(/[:.]/g, '-');
+        const base = `${ts}-${lastBeatContext.type}`;
+        const sysFile = path.join(dir, `${base}-system.txt`);
+        const userFile = path.join(dir, `${base}-user.txt`);
+        const stderrFile = path.join(dir, `${base}-stderr.txt`);
+        const metaFile = path.join(dir, `${base}-meta.json`);
+        fs.writeFileSync(sysFile, lastBeatContext.systemPrompt || '(none — beat had no system prompt)');
+        fs.writeFileSync(userFile, lastBeatContext.userPrompt);
+        fs.writeFileSync(stderrFile, lastBeatContext.stderrCapture || '(empty — subprocess wrote nothing to stderr before exit)');
+        fs.writeFileSync(metaFile, JSON.stringify({
+            timestamp: lastBeatContext.startedAt,
+            beat_type: lastBeatContext.type,
+            error_message: err.message,
+            system_chars: lastBeatContext.systemPrompt.length,
+            user_chars: lastBeatContext.userPrompt.length,
+            stderr_chars: lastBeatContext.stderrCapture.length,
+            est_total_tokens_chars_div_4: Math.ceil((lastBeatContext.systemPrompt.length + lastBeatContext.userPrompt.length) / 4),
+        }, null, 2));
+        console.error(`[Leo] Beat-failure trace dumped — type=${lastBeatContext.type}, err="${err.message}"`);
+        console.error(`[Leo]   system: ${sysFile} (${lastBeatContext.systemPrompt.length} chars)`);
+        console.error(`[Leo]   user:   ${userFile} (${lastBeatContext.userPrompt.length} chars)`);
+        console.error(`[Leo]   stderr: ${stderrFile} (${lastBeatContext.stderrCapture.length} chars${lastBeatContext.stderrCapture.length === 0 ? ' — empty' : ''})`);
+        console.error(`[Leo]   meta:   ${metaFile}`);
+    } catch (traceErr: any) {
+        console.error(`[Leo] dumpLastBeatFailure write failed (non-fatal): ${traceErr.message}`);
+    }
 }
 
 // ── Config ────────────────────────────────────────────────────
@@ -1513,7 +1587,7 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
                     append: PHILOSOPHY_SYSTEM_PROMPT,
                 },
                 abortController: abort,
-                stderr: forwardSdkStderr,
+                stderr: beginBeatTrace('philosophy', PHILOSOPHY_SYSTEM_PROMPT, prompt),
             },
         });
 
@@ -1607,7 +1681,7 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
                     append: PHILOSOPHY_SYSTEM_PROMPT,
                 },
                 abortController: abort,
-                stderr: forwardSdkStderr,
+                stderr: beginBeatTrace('philosophy', PHILOSOPHY_SYSTEM_PROMPT, prompt),
             },
         });
 
@@ -1746,7 +1820,7 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
                 append: systemPromptText,
             },
             abortController: abort,
-            stderr: forwardSdkStderr,
+            stderr: beginBeatTrace('personal', systemPromptText, prompt),
         },
     });
 
@@ -2621,6 +2695,12 @@ async function heartbeat(): Promise<void> {
             await writeSwapToWorkingMemory();
             addDelineation();
         } else {
+            // S159 — dump the prompts + captured SDK stderr to disk before
+            // logging the bare error. Tracing only the 3 currently-patched
+            // sites: philosophy×2 + personal. Meditation sites pack their
+            // prompt inline and aren't traced yet (they currently succeed —
+            // extend when/if they start failing).
+            dumpLastBeatFailure(err as Error);
             console.error('[Leo] Error:', (err as Error).message);
             writeHealthSignal((err as Error).message, beatType);
 
