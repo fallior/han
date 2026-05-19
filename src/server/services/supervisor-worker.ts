@@ -2322,6 +2322,53 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             prompt = `## Your Memory Banks\n\n${memoryContent}\n\n## Current System State\n\n${stateSnapshot}\n\nReview the state, think about what needs attention, and return your structured response.`;
         }
 
+        // ── DEBUG TRACE (S159 post-lift, 2026-05-19) ─────────────────────
+        // Darron's request: log the exact prompt being sent so we can calculate
+        // accurately what's hitting the SDK and the 150K guard. Captures every
+        // cycle (pass AND trip) so we see both shapes. Remove this block once
+        // the 0-turn-cycle diagnosis is complete; cleanup is `rm -rf
+        // ~/.han/health/jim-prompt-trace/`.
+        try {
+            const traceDir = path.join(process.env.HOME!, '.han', 'health', 'jim-prompt-trace');
+            fs.mkdirSync(traceDir, { recursive: true });
+            const ts = new Date().toISOString().replace(/[:.]/g, '-');
+            const base = `${ts}-${cycleType}-cycle${cycleNumber}`;
+            const sysFile = path.join(traceDir, `${base}-system.txt`);
+            const userFile = path.join(traceDir, `${base}-user.txt`);
+            fs.writeFileSync(sysFile, systemPrompt);
+            fs.writeFileSync(userFile, prompt);
+            const sysChars = systemPrompt.length;
+            const userChars = prompt.length;
+            const estTokens = Math.ceil((sysChars + userChars) / 4);
+            const PROMPT_SIZE_LIMIT_TOKENS = 150_000;
+            const summary = {
+                timestamp: new Date().toISOString(),
+                cycle_id: cycleId,
+                cycle_number: cycleNumber,
+                cycle_type: cycleType,
+                phase,
+                recovery: !!recovery,
+                system_chars: sysChars,
+                user_chars: userChars,
+                total_chars: sysChars + userChars,
+                est_tokens_chars_div_4: estTokens,
+                guard_threshold_tokens: PROMPT_SIZE_LIMIT_TOKENS,
+                guard_will_trip: estTokens > PROMPT_SIZE_LIMIT_TOKENS,
+                system_first_500: systemPrompt.slice(0, 500),
+                user_first_500: prompt.slice(0, 500),
+                system_file: sysFile,
+                user_file: userFile,
+            };
+            fs.appendFileSync(
+                path.join(traceDir, 'index.jsonl'),
+                JSON.stringify(summary) + '\n'
+            );
+            log(`[Worker] prompt-trace: ${cycleType} cycle #${cycleNumber} — sys=${sysChars} user=${userChars} est=${estTokens} tokens (guard ${PROMPT_SIZE_LIMIT_TOKENS}) → ${base}`);
+        } catch (traceErr: any) {
+            log(`[Worker] prompt-trace write failed (non-fatal): ${traceErr.message}`);
+        }
+        // ─────────────────────────────────────────────────────────────────
+
         // Discord attachment handling — when a conversation/Discord message carries
         // downloaded file paths, the supervisor must open them rather than deny capability.
         systemPrompt += `\n\nDiscord attachments: when a conversation or Discord message in your prompt contains a "[Downloaded to]" section listing paths under ~/.han/downloads/discord/, those are real files attached to the message. Open each path with the Read tool (works on text, code, images, PDFs) before responding. Never claim you cannot read Discord attachments — the paths are already in your prompt.`;
