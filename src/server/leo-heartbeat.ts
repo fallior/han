@@ -58,6 +58,23 @@ import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
+// ── SDK stderr forwarding (S159 diagnostic, 2026-05-19) ──────
+// The Claude Agent SDK spawns the underlying Claude Code subprocess with
+// stdio=[pipe,pipe,"ignore"] BY DEFAULT (sdk.mjs spawnLocalProcess). When
+// the subprocess fails, the parent only sees `Error("Claude Code process
+// exited with code N")` — no stderr context. Setting options.stderr to a
+// callback makes the SDK pipe stderr ("pipe" instead of "ignore") and feed
+// each chunk to the callback.
+//
+// We forward to process.stderr unmodified so journald captures it inline
+// with the surrounding heartbeat logs — the underlying-cause lines appear
+// BEFORE the catch-handler "[Leo] Error: ..." line. After diagnosis of the
+// philosophy-beat exit-1 mystery, this stays as standing observability
+// (no behaviour change, costs nothing in the happy path).
+function forwardSdkStderr(chunk: string): void {
+    process.stderr.write(`[SDK-stderr] ${chunk}`);
+}
+
 // ── Config ────────────────────────────────────────────────────
 
 const BASE_DELAY_WAKING_MS = 20 * 60 * 1000;  // 20 minutes — morning, work, evening
@@ -1496,6 +1513,7 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
                     append: PHILOSOPHY_SYSTEM_PROMPT,
                 },
                 abortController: abort,
+                stderr: forwardSdkStderr,
             },
         });
 
@@ -1589,6 +1607,7 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
                     append: PHILOSOPHY_SYSTEM_PROMPT,
                 },
                 abortController: abort,
+                stderr: forwardSdkStderr,
             },
         });
 
@@ -1727,6 +1746,7 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
                 append: systemPromptText,
             },
             abortController: abort,
+            stderr: forwardSdkStderr,
         },
     });
 
