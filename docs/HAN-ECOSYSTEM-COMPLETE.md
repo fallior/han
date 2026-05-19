@@ -132,6 +132,40 @@ Each agent uses `ensureSingleInstance(name)` from `lib/pid-guard.ts`:
 
 All service files live at `~/.config/systemd/user/`.
 
+### Canonical service list (six active, one deprecated)
+
+**This table is the source of truth.** When a new service is added, update both this table AND `scripts/restart-all-services.sh` (they are paired surfaces — drift between them is what caused the 2026-05-19 stale-services investigation).
+
+| # | Service | What it does | Restart-on-exit | After |
+|---|---|---|---|---|
+| 1 | `han-server.service` | Main API on port 3847 + spawns `supervisor-worker.ts` as forked child (Jim's supervisor cycles) + Orchestrator + WebSocket | 10s | — |
+| 2 | `leo-heartbeat.service` | Leo's 20-min beats (wall-clock-aligned phases: sleep/morning/work/evening) + meditation Phase A re-incorporation + Robin Hood health checks | 30s | — |
+| 3 | `wm-sensor.service` | Working-memory file watcher (fs.watch on `working-memory-full.md` per agent). Triggers `rollingWindowRotatePaired` when WMF crosses ~30K tokens; spawns `process-pending-compression.ts` per pending-row enqueue. **Single canonical compression entry point** per DEC-086. | 30s | — |
+| 4 | `jim-human.service` | Jim's conversation-thread responder. Signal-driven (`~/.han/signals/jim-human-wake`). Signs posts as `— Jim (human)`. | 30s | — |
+| 5 | `leo-human.service` | Leo's conversation-thread responder. Signal-driven (`~/.han/signals/leo-human-wake`). Signs posts as `— Leo (human)`. | 30s | — |
+| 6 | `jemma.service` | Discord gateway + admin classifier. Routes incoming Discord messages via Haiku (SDK) / Ollama gemma3:4b fallback. Calls `deliverMessage()` from `services/jemma-dispatch.ts`. | 5s | `han-server.service` |
+| — | `claude-remote-server.service` | **DEPRECATED** — historical duplicate of `han-server.service` (same `ExecStart=tsx server.ts`). Status: failed + disabled. Safe to remove. | — | — |
+
+### Restarting them all — `scripts/restart-all-services.sh`
+
+The post-commit git hook (`/home/darron/Projects/han/.git/hooks/post-commit`) only restarts:
+- Layer 1: hanjim / hanleo / hantenshi / hancasey CLI launchers (sessions, not services)
+- Layer 2: `jim-human.service` + `leo-human.service` **when their own .ts files change**
+
+It does **NOT** restart `han-server`, `leo-heartbeat`, `wm-sensor`, or `jemma`. Transitive dependency changes (e.g. editing `lib/memory-gradient.ts`) don't trigger any service restart at all. The 2026-05-19 investigation found all four undocumented-restart services were running pre-triage code from May 9–11 even after the May 17–18 gradient triage commits landed.
+
+**The canonical operator command after code change**:
+
+```bash
+./scripts/restart-all-services.sh            # restart all six HAN services
+./scripts/restart-all-services.sh --status   # just print current state, no restart
+./scripts/restart-all-services.sh --dry-run  # show what would be restarted
+```
+
+The script restarts in dependency order, settles 2s, prints pre/post tables with PIDs and start times, verifies port 3847 ownership, and flags any orphan `tsx`-process running outside systemd. Exit code is 0 iff all six come up active.
+
+### Individual service definitions
+
 ### han-server.service
 
 ```ini
@@ -182,6 +216,22 @@ Environment=NODE_TLS_REJECT_UNAUTHORIZED=0
 EnvironmentFile=/home/darron/Projects/han/.env
 ```
 
+### wm-sensor.service
+
+```ini
+ExecStart=tsx services/wm-sensor.ts
+WorkingDirectory=/home/darron/Projects/han/src/server
+Restart=always
+RestartSec=30
+```
+
+- Watches `~/.han/memory/leo/working-memory-full.md` AND `~/.han/memory/working-memory-full.md` (Jim's) via `fs.watch`
+- When either WMF crosses ~30K tokens AND a paired `WM-BOUNDARY` marker exists, fires `rollingWindowRotatePaired(agent)` to slice the whole file into c0/c1 paired gradient entries (DEC-085 Amendment, whole-file slice)
+- After successful rotation, calls `bumpOnInsert(agent, 'c1')` which enqueues into `pending_compressions` if the c1 level is at-cap; spawns `scripts/process-pending-compression.ts` as a child to drain the queue
+- Honours `~/.han/signals/cascade-paused` (tourniquet) via `isCascadePaused()` check at `memory-gradient.ts:628` and `:827`
+- Single canonical entry point for the rolling-window cascade per DEC-086 — adding parallel cascade entry points is a DO-NOT in CLAUDE.md
+- Restart this service after any change to `lib/memory-gradient.ts`, `lib/memory-paired-writer.ts`, `services/wm-sensor.ts`, or `scripts/process-pending-compression.ts`
+
 ### claude-remote-server.service
 
 Legacy service. May conflict with han-server. **Should be disabled or removed.**
@@ -191,6 +241,18 @@ Legacy service. May conflict with han-server. **Should be disabled or removed.**
 If you `kill` a process but don't `systemctl --user stop` the service, systemd will
 restart it within seconds. This is why killing processes alone doesn't stop the ecosystem —
 you must stop the systemd services.
+
+### Critical operator discipline (added 2026-05-19, S159)
+
+**After ANY change to code these services depend on, you MUST run `./scripts/restart-all-services.sh` (or `systemctl --user restart` the affected unit).** The post-commit hook does NOT cover most HAN services. The systemd `Restart=always` policy is for *crash* recovery, NOT for *fresh-code* deployment — a still-running process never picks up new disk content unless explicitly restarted.
+
+Symptom of forgetting: code looks correct on disk, type-check passes, DB state looks right, but observed behaviour is unchanged. The 2026-05-19 investigation diagnosed exactly this pattern after the gradient triage commits — all four undocumented-restart services were running pre-triage code from May 9–11 for two days after the fix shipped.
+
+**The fix lives in two paired places**:
+1. `scripts/restart-all-services.sh` — the canonical six-service list as code
+2. The summary table at the top of this section — the canonical six-service list as docs
+
+Drift between them is the smell. When either changes, both must.
 
 ---
 
