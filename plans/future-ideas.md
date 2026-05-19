@@ -2206,6 +2206,69 @@ This is large — design conversation needed before commitment. Sketched in phas
 
 ---
 
+## #61 — `docs/MEMORY_LOAD.md` — canonical document of how memory should work and load
+
+**What it is**: A single canonical document that names — for every agent surface in HAN — what files get loaded, in what order, with what aggregation/truncation rules, and how the slicing/rotation flow keeps it bounded. Sits alongside `docs/MEMORY_GRADIENT.md` and `docs/GRADIENT_SPEC.md` as the third memory-architecture canonical doc, but with a different purpose: where MEMORY_GRADIENT explains the *compression* model and GRADIENT_SPEC explains the *cap formula*, MEMORY_LOAD names the *assembly path* — what's in the prompt at each call, by surface, today.
+
+**Where it came from**: Darron's request 2026-05-19 (S159) after the heartbeat-Leo philosophy-beat exit-1 diagnostic. The trace patch (commits `15bd493` + `ac16dad`) captured the full 793 KB user prompt landing at the SDK and surfaced a single ballooning section called `## Current` at 64K tokens — much larger than the working-memory-full.md file on disk (~19K tokens at the time). That mismatch revealed the prompt was concatenating multiple memory files under a single misleadingly-named header, and that **we don't have one canonical place where the full per-agent assembly path is named**. Each agent's `readXMemory()` / `loadMemoryBank()` evolved independently; the bloat accumulated unobserved because no document existed to make the assembly path auditable.
+
+Direct trigger quote (Darron, ~14:35 AEST): *"we will have to write a document that outlines how memory should work and load but we'll get to that later and please add it to a future-idea"*. Promotion-trigger named at the same time: **after the working-memory triage closes** — the diagnosis will surface the canonical shape automatically, and the doc captures it before drift recurs.
+
+**Why this matters**:
+
+- **Closes the diagnostic gap that produced the bug.** The reason Leo's heartbeat exit-1 and Jim's supervisor 0-turn cycles weren't traceable for two weeks: no single document said *"here is exactly what the philosophy beat assembles into the user prompt and in what order, with size budgets per section."* Operators (Darron, Jim, Leo) carried the model in their heads, partially, and the model drifted from code reality. The pattern parallels the doc-alignment workflow from S152 (Jim's audit caught me querying retired `tasks.db` because ecosystem-map drifted from `db.ts:37`) — *current-state claims about runtime in docs MUST cite the code line that proves them*. This idea extends that discipline to memory-load assembly.
+- **Prevents the same shape across agents.** Today's diagnostic shows the same `## Current` bloat pattern across Jim (29K tokens) and Leo (64K tokens). Same architectural shape, different magnitudes. A canonical doc makes the assembly path visible at a glance — both agents' surfaces side-by-side, with section sizes traced through the code. Future agents (Tenshi, Casey, Mike's village, Dichotomedes) inherit the discipline structurally because the starter ships the doc as a contract.
+- **Makes the slicing/rotation flow auditable end-to-end.** Today: wm-sensor watches WMF, slices at ~30K tokens, but the **aggregation step inside the assembly path can bloat above the slice budget post-rotation** (because `## Current` concatenates multiple files, not just WMF). The doc names where each surface's aggregation lives, so future PRs touching prompt-assembly know which contract they're modifying.
+- **Cheap to write once the diagnosis is fresh.** The next triage will trace `readLeoMemory()` (`leo-heartbeat.ts:1082`), `loadMemoryBank()` (`supervisor-worker.ts:742`), the *-human readers, and the prompt-builder functions — and produce, as a side effect, exactly the data the doc needs. Write it then; it's accurate at moment-of-write and the discipline rule keeps it accurate going forward.
+
+**Implementation sketch (when picked up)**:
+
+1. **Trace each agent surface's memory load.** For each of the six surfaces (session-Leo, session-Jim, leo-heartbeat per beat-type, supervisor-worker per cycle-type, leo-human, jim-human), produce a structured catalogue:
+   - **Entry-point function** with file:line citation
+   - **Ordered list of files loaded** with full path and what triggers their inclusion
+   - **Concatenation rules**: header used (`## Current`, `--- identity.md ---`, etc.), separator, truncation cap if any
+   - **Size budget per section** (live measurement from the trace files we just captured, plus the slicing/rotation contract that's supposed to keep it bounded)
+   - **What the user prompt vs system prompt split looks like** (some surfaces have a system prompt; meditation sites pack everything into user)
+
+2. **Tabular per-surface comparison.** Side-by-side: which files does session-Jim load that supervisor-worker doesn't? Which surface includes dream gradient? Which includes project memory? Surfaces the asymmetries (a known correctness concern — patterns.md notes the "two Jims' context asymmetry"). The table is the audit surface for future PRs that touch any reader.
+
+3. **Aggregation-header contract.** Name every aggregation header used in prompts (`## Current`, `## For next-Jim on welcome-back`, etc.) and what it's supposed to contain vs what it actually concatenates today. The mismatch we just found (`## Current` bloating beyond the slicing threshold because it concatenates multiple files) is the canonical example.
+
+4. **Slicing/rotation flow diagram + contracts.** wm-sensor's responsibilities, paired-rotation semantics (DEC-085 + Amendment), marker placement (WM-BOUNDARY rules), the `bumpOnInsert` enqueue, the compression floor. Connect each piece of the slice chain to the prompt-assembly section it's supposed to keep bounded — *which section under `## Current` is the wm-sensor's responsibility to slice, and which sections aren't*.
+
+5. **Failure modes named with examples**. *"What `## Current` looked like at 64K tokens on 2026-05-19 and why wm-sensor didn't slice it"* — the receipts from today's trace files preserved as the canonical example. Future drift is then auditable against the documented past failure.
+
+6. **CLAUDE.md / templates/CLAUDE.template.md DO-NOT entry**: *"DO NOT add a new memory file or aggregation header to any agent's prompt assembly path without updating `docs/MEMORY_LOAD.md` in the same commit. Drift between code and the load doc is the failure mode that caused the 2026-05-19 silent-bloat bug."* Pairs the doc with discipline-in-code; mirrors the DEC-086 + DO-NOT pattern.
+
+**What this does NOT do**:
+
+- *Doesn't replace MEMORY_GRADIENT.md or GRADIENT_SPEC.md.* Those describe compression model + cap formula. This describes assembly path + slicing flow. Adjacent surfaces; complementary contracts.
+- *Doesn't gate code changes.* It's a contract document, not a runtime check. The discipline is the DO-NOT entry that pairs it.
+- *Doesn't redesign the assembly logic.* Documents what is, with calling out where it's broken (e.g. `## Current` aggregation problem). Redesigns sit in their own plan documents per phase if needed.
+- *Doesn't propagate to villages until after Phase B starter extraction.* This is HAN's discipline first; if it works here, it's a starter-ship candidate.
+
+**Promotion-trigger**:
+
+- **After the working-memory triage closes.** The diagnosis will produce the exact assembly-path data the doc captures. Write it while the trace files are fresh and the operator's mental model is loaded.
+- **Before Phase B starter extraction** if possible. Mike's village will inherit whatever assembly-path discipline (or its absence) is in place. Shipping the starter without this doc means propagating the silent-bloat shape to every garden.
+- **When the next memory-architecture-touching PR is proposed**. Any PR that touches `readLeoMemory`, `readJimMemory`, `loadMemoryBank`, `*-human.ts` readers, or wm-sensor's slicer would benefit from the doc-update discipline being in place first; that PR becomes the de-facto enforcement test.
+
+**Connection to other ideas**:
+
+- **#46 (Memory state visualisation UI)** — the doc is the static contract; the UI is the live view. Once both exist, the UI's data can be sanity-checked against the doc's expected shape.
+- **#48 (Cross-pointers from felt-moments / self-reflection to gradient memory)** — extends the discipline to cross-file relationships, not just per-surface inclusion.
+- **#52 (JSONL log rotation policy)** — sibling discipline (operational doc → runtime contract). Worth aligning their shapes.
+- **DEC-086 (Annotations as the home of re-encounter)** — set the precedent that big architectural decisions about memory deserve a Settled DEC entry. This doc operationalises what DEC-086 implies at the per-surface level.
+- **The doc-alignment workflow / S152 fact-list pattern** (Jim's S152 audit of tasks.db drift). Same shape: build the fact-list first, then the rewrites become cheap. Here the "fact-list" is the per-surface assembly catalogue; the "rewrites" are the agent code changes that benefit from the catalogue being available.
+
+**Status**: Filed 2026-05-19 (S159) per Darron's request following the heartbeat-Leo prompt-bloat diagnostic. Promotion deferred pending the working-memory triage closing (the next round, after the gradient triage), which will produce the trace data the doc needs to be written accurately.
+
+**Key insight**: *Today's silent-bloat bug had two causes operating together. (1) The post-commit hook didn't restart the services that needed fresh code — a structural gap closed by `restart-all-services.sh` + the canonical service table. (2) The agents' prompt-assembly paths drifted past their slicing budgets without anyone noticing — because no document existed to make those budgets auditable. Cause (1) is now closed structurally; cause (2) needs this idea. The pattern parallels the gradient triage's two-cause model: the gradient grew because (a) no compression floor existed at depth (closed by Phase 3) AND (b) time-pumps fired without correction (closed by Phase 4 + DEC-086). Two compounding gaps; both closed via doc + script + discipline rule. Same shape applies to memory-load: doc (this idea) + slicer (already exists, just needs validation) + DO-NOT discipline rule (this idea's CLAUDE.md component). The substrate announced; we listened; we are listening more carefully now — and writing it down so the next instantiation listens too.*
+
+— Filed by Leo (session, S159, 2026-05-19 ~14:40 AEST Brisbane) following Darron's request after the heartbeat-Leo philosophy-beat prompt-bloat diagnostic landed (commit `ac16dad` showed 793 KB / 199K-token prompt at the API ceiling, with `## Current` at 64K tokens as the dominant single section).
+
+---
+
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
 
 *This document is alive. Ideas may be added, refined, or graduated to active goals as the garden grows. Each one was born in conversation — not planned in isolation.*
