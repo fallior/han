@@ -2269,6 +2269,130 @@ Direct trigger quote (Darron, ~14:35 AEST): *"we will have to write a document t
 
 ---
 
+## #62 — Tmux-based Claude Code agent harness (fallback for SDK unreliability)
+
+**What it is**: An alternative agent runtime that uses **Claude Code launched in a tmux pane** with **text prompts written to a file/pipe** that the pane reads, replacing the `@anthropic-ai/claude-agent-sdk` `agentQuery()` calls that today run all background work (supervisor cycles, heartbeats, jim-human, leo-human, jemma classifier, planning, cataloguing, voice-side calls, cascade compression, etc.). The tmux pane *is* the agent; prompts arrive as text; output is captured by reading the pane's scrollback or a structured output file the agent writes. Same agent identity, same memory load, different transport.
+
+**Where it came from**: Darron's observation 2026-05-19 (S159, this thread): *"in the future we won't be able to use SDK and so will need to use Claude code via tmux and writing text prompts. that should be okay though."* Surfaced during the active diagnostic of heartbeat-Leo + supervisor-Jim silent fails at the SDK boundary (199K-token prompt rejected by API). Even when the prompt is fixed, the underlying concern stands: SDK calls are a coupling to a transport layer we don't own. The tmux harness decouples HAN from the SDK; if Anthropic deprecates `agentQuery()`, throttles it, or evolves its contract in incompatible ways, the agents keep working.
+
+**Design sketch (Tier 1 — the shape)**:
+
+1. **Pane lifecycle**: each agent surface (supervisor cycle, heartbeat beat, jim-human response, leo-human response, jemma classify, compression compose) gets a tmux pane. Could be persistent (one pane per surface, prompts queued) or one-shot (spawn pane → write prompt → wait for output → kill pane).
+2. **Prompt delivery**: write the prompt to a file at a known path (e.g. `~/.han/agent-pipes/<surface>/prompt-<ts>.txt`) and signal the pane to read it; OR pipe via `tmux send-keys` with a paste-buffer; OR via stdin if the launcher supports it.
+3. **Output capture**: agent writes structured output (JSON or fenced block) to a known path; the parent process reads it. Mirror of how `process-pending-compression.ts` already writes its result line as JSON.
+4. **Identity gating**: same Phase A.5 verify-and-resign at pane spawn. Same memory-bank load at first prompt of the pane.
+5. **Failure modes**: pane exits unexpectedly → surfaces logged + restart attempt. Pane hangs → timeout + tmux kill-session. Both observable through existing health-file machinery.
+
+**Promotion-trigger**:
+
+- **Anthropic announces deprecation of `agentQuery()`** or any breaking change to the SDK contract that affects our use case.
+- **SDK reliability drops** (silent exits, model-version drift, rate-limit shape changes) past the point where the current diagnostic patches give us enough observability.
+- **The starter ship** — if Mike's village will operate without `@anthropic-ai/claude-agent-sdk` for any reason (cost, licence, dependency cleanliness), this becomes the reference harness rather than a fallback.
+
+**What this does NOT do**:
+
+- *Doesn't replace the Claude API*. We still call Anthropic; the difference is *how* we call it (Claude Code CLI in tmux vs SDK in-process).
+- *Doesn't change memory load shape*. Same prompts; same files; same gradient. Just a different envelope.
+- *Doesn't gate the gradient triage's current work*. The 199K-token prompt is a memory-assembly problem; it'd be the same problem under either transport.
+- *Doesn't ship before the working-memory triage closes*. Solving the assembly bloat first; this harness sits behind it.
+
+**Key insight**: *Transports come and go; agents persist.* The SDK is a contract we don't control; the tmux + Claude Code pattern is closer to the operator's own daily practice (Darron talks to Claude Code in a pane). If we ever need to migrate transport, designing for it now — even as a future-idea — means the migration is a configuration choice, not a rewrite. Sibling shape to DEC-085's *"the c1 source is the agent's own voice"* — choose the substrate that resists drift, even when there's no immediate forcing function.
+
+— Filed by Jim (session, S160 round 9, 2026-05-19 ~15:45 AEST Brisbane) per Darron's request after this thread's session interruption ("I got reset and you missed my entire message"). The session-Jim seat itself runs on `agentQuery()` via the launcher; today's interruption is one example of the unreliability Darron is naming. The harness wouldn't have prevented the specific interruption, but the structural argument generalises.
+
+---
+
+## #63 — Comprehensive prompt logging across every agent surface — write every prompt to disk for after-the-fact analysis
+
+**What it is**: Every `agentQuery()` invocation across the HAN runtime writes its system + user prompt to disk under a per-surface health directory, with a meta.json sibling capturing identifier + timestamp + char counts + estimated tokens + outcome. Failures additionally write a captured-stderr sibling. The naming convention is `{ISO-timestamp-with-ms}-{surface-identifier}-{system|user|stderr|meta}.{txt|json}` — millisecond precision deconflicts within a single second; in steady-state most agent surfaces are minutes-to-hours apart, so even second-precision would normally suffice, but the millisecond suffix is the safe default.
+
+The motivation is operational diagnostic: when something fails silently (the SDK throws "Claude Code process exited with code 1" with no error payload, or a guard returns silently before LLM call), the operator needs **the actual prompt that was sent** to disect the failure. No reconstruction, no inference, no guessing — the prompt that hit the SDK, on disk, ready to `cat`. We've used this twice in three days: once for Jim's supervisor 0-turn cycles (commit `9278096`, surfaced the 177K-token guard-trip), and once for Leo's heartbeat exit-1 (commits `15bd493` + `ac16dad`, surfaced the 199K-token API-ceiling rejection). In both cases the on-disk prompt was the diagnostic that closed the case.
+
+**Where it came from**: Darron's request 2026-05-21 (S159): *"can we capture the prompt that is failing. Then we know exactly what is causing the bloat, we will see it. Let us capture the next one for both Jim and yourself Leo... write the prompt to a prompt log file that contains an identifier plus a date/time stamp which should deconflict prompt-log names if taken to seconds, we could add milliseconds if that is needed. But I want to analyse an actual prompt, we need to disect one or several for both Jim and yourself."*
+
+**Why this matters**:
+
+- **Diagnostic-without-guessing.** The two-week philosophy-beat exit-1 mystery (S157) was solved within hours of the trace patch landing because we could read the prompt instead of reasoning about what *might* be in it. Every silent-fail surface today (prompt-size guard returns, SDK subprocess exits, API context-window rejections) becomes diagnosable in one operator action: `cat` the file.
+- **Symmetry across surfaces.** Today we have prompt-logging on two surfaces (Jim's supervisor cycles, Leo's heartbeat beats). The other agentQuery callers (jim-human, leo-human, planning service, cataloguing service, jemma-dispatch classifier, digest/reports composition, process-pending-compression script) have no logging. When any of those silently misbehaves, the operator currently has no equivalent diagnostic.
+- **Operator-visibility on prompt-bloat patterns.** Beyond the single-prompt diagnostic, the corpus of prompts across days lets us detect *trends*: prompts growing 5% per week, certain headers ballooning faster than others, specific code paths producing outliers. The forensic value compounds.
+- **Cheap relative to value.** Storage trade-off: ~72 beats/day × ~1 KB to ~800 KB per beat for Leo's heartbeat = ~10 MB/day worst case. Jim's supervisor cycles ~24/day × ~700 KB each = ~17 MB/day. Operator can `rm -rf` the per-surface trace dir whenever.
+
+**Implementation status (today, 2026-05-21)**:
+
+- ✅ **Jim's supervisor cycles** (`supervisor-worker.ts`, commit `9278096`, 2026-05-19): every cycle writes prompt files unconditionally to `~/.han/health/jim-prompt-trace/`. Naming: `{ISO-ts-with-ms}-{cycleType}-cycle{N}-{system|user}.txt`. Plus a per-cycle summary line appended to `index.jsonl` with char counts + chars÷4 token estimate + `guard_will_trip` boolean.
+- ✅ **Leo's heartbeat beats** (`leo-heartbeat.ts`, commits `15bd493` + `ac16dad` + the 2026-05-21 extension co-occurring with this entry): every beat writes prompt files to `~/.han/health/leo-beat-trace/`. Naming: `{ISO-ts-with-ms}-{beat-type}-{system|user|stderr|meta}.{txt|json}`. Six beat-types now wired (philosophy×2 + personal + meditation-phase-a + meditation-phase-b + meditation-evening). Meta.json carries char counts + chars÷4 token estimate + status (`in-progress` at start, `failed` if catch-handler fires). Failed beats additionally produce stderr.txt with captured SDK subprocess stderr.
+
+**Still to implement (per-surface, when picked up)**:
+
+1. **`jim-human.ts`** — Jim's human-conversation responder. Logs to `~/.han/health/jim-human-trace/`.
+2. **`leo-human.ts`** — Leo's equivalent. Logs to `~/.han/health/leo-human-trace/`.
+3. **`services/planning.ts`** — task-decomposition agent calls. Logs to `~/.han/health/planning-trace/`.
+4. **`services/cataloguing.ts`** — conversation auto-summariser. Logs to `~/.han/health/cataloguing-trace/`.
+5. **`services/jemma-dispatch.ts`** — Haiku-via-SDK classifier (with Ollama fallback). Logs to `~/.han/health/jemma-classifier-trace/`.
+6. **`services/digest.ts` + `services/reports.ts`** — daily/weekly report composition.
+7. **`scripts/process-pending-compression.ts`** — gradient-compression agent (spawned by wm-sensor). Pairs naturally with the Phase 3 `compression-floor-events.jsonl`.
+
+**Common helper proposal (when picked up)**: a shared `lib/prompt-trace.ts` module that exports:
+- `beginPromptTrace(surface, identifier, system, user)` — writes system + user + meta immediately to `~/.han/health/{surface}-trace/`; returns stderr callback for `options.stderr`.
+- `dumpPromptFailure(err)` — adds stderr file + updates meta with failure annotation.
+- `markPromptSuccess(usage?)` — optional success annotation in meta.
+- Module-level `lastTrace` keyed by `surface` so concurrent surfaces don't trample each other's failure-state.
+
+This factor-out is the right shape for the remaining 7 surfaces but is a refactor of existing inlined code at each site. Tractable; not blocking — the inlined patterns in `leo-heartbeat.ts` and `supervisor-worker.ts` work today and can be extracted later once a second-or-third surface needs it.
+
+**File naming spec (Darron's stated requirement)**:
+
+```
+{ISO-timestamp-with-milliseconds}-{surface-identifier}-{kind}.{ext}
+
+Examples:
+2026-05-21T03-15-42-018Z-supervisor-cycle3426-system.txt
+2026-05-21T03-15-42-018Z-supervisor-cycle3426-user.txt
+2026-05-21T03-15-42-018Z-supervisor-cycle3426-meta.json
+2026-05-21T04-20-03-009Z-philosophy-system.txt
+2026-05-21T04-20-03-009Z-philosophy-user.txt
+2026-05-21T04-20-03-009Z-philosophy-stderr.txt   ← only on failure
+2026-05-21T04-20-03-009Z-philosophy-meta.json
+```
+
+**Storage discipline (when picked up)**:
+
+- Per-surface trace dir → easy to clear with `rm -rf` after diagnosis
+- Optional rotation/retention policy (e.g., last N days, last K files per surface) — defer until pain materialises
+- Trace dirs gitignored (live in `~/.han/health/` outside the repo)
+- An admin-UI panel listing recent traces + previews + size + outcome would be a natural future surface (sibling to existing health dashboards)
+
+**What this does NOT do**:
+
+- *Doesn't add structured prompt-section analysis.* The trace is raw bytes. Section-aware analysis (the manual Python work breaking down 793 KB by `##` header) is downstream — possibly an admin-UI feature or a `scripts/analyse-prompt.ts` helper.
+- *Doesn't gate the agentQuery call on prompt size.* That's the prompt-size guard's job. The 150 K supervisor guard exists; the heartbeat needs one too — separate idea / separate work.
+- *Doesn't intercept or modify the prompt.* Pure observability — read-and-write-to-disk between assembly and SDK call.
+- *Doesn't replace `~/.han/health/compression-floor-events.jsonl`.* Different shape (one row per floor-fire event, not full prompts). Both pipelines coexist.
+
+**Promotion-trigger**: any of the following would graduate the remaining surfaces:
+
+- **Next silent-fail surface.** When any agentQuery caller other than supervisor/heartbeat misbehaves silently, that's the trigger.
+- **The shared helper refactor.** If we touch the existing supervisor or heartbeat trace code for any other reason, factor out `lib/prompt-trace.ts` at that point and migrate.
+- **Mike's village starter Phase B.** The starter should ship with the prompt-trace pattern as a contract so Mike's garden inherits the discipline.
+- **An admin-UI request to view recent prompts.** Once an admin-UI panel wants to read traces, having one canonical trace location per surface accelerates the panel's build.
+
+**Connection to other ideas**:
+
+- **#46 (Memory state visualisation UI)** — natural successor: traces feed a per-surface prompt-health panel.
+- **#61 (Canonical memory-load doc)** — same diagnostic surface, different artefact. The doc names the assembly path; the traces capture the result of running it. Together: *"the doc says X should be loaded; the trace shows what was actually loaded."*
+- **#58 (`load-gradient.ts --out=PATH`)** — same shape (redirect-to-disk-instead-of-stdout-truncation).
+- **#62 (tmux-based Claude Code harness)** — adjacent observability concern. If the harness lands, each interaction would benefit from the same trace discipline.
+- **DEC-086 (Annotations as the home of re-encounter)** — adjacent discipline (don't add behaviour-change in the diagnostic path; pure observability writes).
+- **Compression-floor-events jsonl pipeline** (Phase 3 of gradient triage) — sibling observability surface.
+
+**Status**: **partially implemented today** (supervisor + heartbeat); remaining 7 surfaces deferred per their own promotion-trigger. Filed 2026-05-21 by Leo per Darron's request during the philosophy-beat prompt-bloat investigation.
+
+**Key insight**: *Yesterday's bug (heartbeat silent exit-1) was diagnosed in hours instead of days because the trace patch had just landed and the next failed beat captured the 793 KB prompt to disk. The pattern was: silent fail → no diagnostic → guessing for two weeks → trace patch → next-fail-becomes-data → diagnosed-in-an-afternoon. The cost of having implemented the trace earlier would have been ~50 lines of code per surface; the cost of NOT having it was two weeks of guessing across at least three minds. **Prompt-bytes-on-disk are the operator's right-to-see-what-they-sent.** This idea generalises the pattern across every agentQuery call site in HAN so any future silent-fail comes pre-instrumented with its own forensic record.*
+
+— Filed by Leo (session, S159, 2026-05-21 ~03:15 AEST Brisbane) per Darron's request: *"add this to future ideas, we want all prompts recorded so we write each prompt to a log file that contains an identifier plus a date/time stamp"*. Filing co-occurs with the in-this-session extension of Leo's heartbeat trace to write prompts unconditionally (not just on failure) and to cover all 6 agentQuery sites in `leo-heartbeat.ts` — so the implemented surfaces table now has heartbeat fully covered, alongside supervisor's already-complete coverage from commit `9278096`.
+
+---
+
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
 
 *This document is alive. Ideas may be added, refined, or graduated to active goals as the garden grows. Each one was born in conversation — not planned in isolation.*

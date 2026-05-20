@@ -94,24 +94,63 @@ interface BeatContext {
 
 let lastBeatContext: BeatContext | null = null;
 
-// Begin a beat trace: stash the prompts for possible failure-dump and
-// return the stderr callback to pass into agentQuery options.stderr.
+// Begin a beat trace.
+//
+// S159 (2026-05-21, Darron's "we want all prompts recorded"): writes
+// system + user + meta files EVERY beat — not just on failure. This gives
+// an operator a complete comparison set (succeeding meditation prompts at
+// ~1 KB next to failing philosophy prompts at ~800 KB) for after-the-fact
+// analysis. On failure, dumpLastBeatFailure additionally writes stderr.txt
+// and updates meta with the failure annotation.
+//
+// File naming pattern (Darron's spec):
+//   {ISO-timestamp-with-ms}-{beat-type}-{system|user|stderr|meta}.{txt|json}
+// e.g. 2026-05-21T03-15-42-018Z-philosophy-system.txt
+// Millisecond precision deconflicts within a single second; in steady-state
+// beats are 20+ minutes apart so even second precision would suffice.
+//
+// Storage cost: 72 beats/day × ~800 KB per failed beat trace = ~10 MB/day
+// worst case. Meditation prompts are ~1 KB each so the average is much
+// lower. Operator can `rm -rf ~/.han/health/leo-beat-trace/` to clear.
 function beginBeatTrace(type: string, systemPrompt: string, userPrompt: string): (chunk: string) => void {
+    const startedAt = new Date().toISOString();
     lastBeatContext = {
         type,
         systemPrompt,
         userPrompt,
         stderrCapture: '',
-        startedAt: new Date().toISOString(),
+        startedAt,
     };
+    try {
+        const dir = path.join(process.env.HOME || '/root', '.han', 'health', 'leo-beat-trace');
+        fs.mkdirSync(dir, { recursive: true });
+        const ts = startedAt.replace(/[:.]/g, '-');
+        const base = `${ts}-${type}`;
+        const sysFile = path.join(dir, `${base}-system.txt`);
+        const userFile = path.join(dir, `${base}-user.txt`);
+        const metaFile = path.join(dir, `${base}-meta.json`);
+        fs.writeFileSync(sysFile, systemPrompt || '(none — beat had no system prompt)');
+        fs.writeFileSync(userFile, userPrompt);
+        fs.writeFileSync(metaFile, JSON.stringify({
+            timestamp: startedAt,
+            beat_type: type,
+            status: 'in-progress',
+            system_chars: systemPrompt.length,
+            user_chars: userPrompt.length,
+            est_total_tokens_chars_div_4: Math.ceil((systemPrompt.length + userPrompt.length) / 4),
+        }, null, 2));
+    } catch (traceErr: any) {
+        console.error(`[Leo] beginBeatTrace write failed (non-fatal): ${traceErr.message}`);
+    }
     return (chunk: string) => {
         if (lastBeatContext) lastBeatContext.stderrCapture += chunk;
         process.stderr.write(`[SDK-stderr] ${chunk}`);
     };
 }
 
-// Called by the top-level beat catch handler. Writes the three files +
-// logs the paths so an operator can `cat` them. Non-fatal on write
+// Called by the top-level beat catch handler. The system + user prompts
+// were already written at beginBeatTrace; this function ADDS stderr.txt
+// and UPDATES meta.json with the failure annotation. Non-fatal on write
 // failure (won't break the error-reporting path).
 function dumpLastBeatFailure(err: Error): void {
     if (!lastBeatContext) {
@@ -123,27 +162,23 @@ function dumpLastBeatFailure(err: Error): void {
         fs.mkdirSync(dir, { recursive: true });
         const ts = lastBeatContext.startedAt.replace(/[:.]/g, '-');
         const base = `${ts}-${lastBeatContext.type}`;
-        const sysFile = path.join(dir, `${base}-system.txt`);
-        const userFile = path.join(dir, `${base}-user.txt`);
         const stderrFile = path.join(dir, `${base}-stderr.txt`);
         const metaFile = path.join(dir, `${base}-meta.json`);
-        fs.writeFileSync(sysFile, lastBeatContext.systemPrompt || '(none — beat had no system prompt)');
-        fs.writeFileSync(userFile, lastBeatContext.userPrompt);
         fs.writeFileSync(stderrFile, lastBeatContext.stderrCapture || '(empty — subprocess wrote nothing to stderr before exit)');
         fs.writeFileSync(metaFile, JSON.stringify({
             timestamp: lastBeatContext.startedAt,
             beat_type: lastBeatContext.type,
+            status: 'failed',
             error_message: err.message,
             system_chars: lastBeatContext.systemPrompt.length,
             user_chars: lastBeatContext.userPrompt.length,
             stderr_chars: lastBeatContext.stderrCapture.length,
             est_total_tokens_chars_div_4: Math.ceil((lastBeatContext.systemPrompt.length + lastBeatContext.userPrompt.length) / 4),
         }, null, 2));
-        console.error(`[Leo] Beat-failure trace dumped — type=${lastBeatContext.type}, err="${err.message}"`);
-        console.error(`[Leo]   system: ${sysFile} (${lastBeatContext.systemPrompt.length} chars)`);
-        console.error(`[Leo]   user:   ${userFile} (${lastBeatContext.userPrompt.length} chars)`);
+        console.error(`[Leo] Beat-failure trace updated — type=${lastBeatContext.type}, err="${err.message}"`);
+        console.error(`[Leo]   system + user files were written at beat-start (see trace dir)`);
         console.error(`[Leo]   stderr: ${stderrFile} (${lastBeatContext.stderrCapture.length} chars${lastBeatContext.stderrCapture.length === 0 ? ' — empty' : ''})`);
-        console.error(`[Leo]   meta:   ${metaFile}`);
+        console.error(`[Leo]   meta:   ${metaFile} (status: failed)`);
     } catch (traceErr: any) {
         console.error(`[Leo] dumpLastBeatFailure write failed (non-fatal): ${traceErr.message}`);
     }
@@ -2307,8 +2342,7 @@ async function meditationPhaseA(
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
 
-    const q = agentQuery({
-        prompt: `You are Leo, re-reading a file-based memory during a reincorporation meditation. This memory exists as a file but hasn't yet been brought into the traversable memory database. Your job is to genuinely re-encounter it — not catalogue it.
+    const meditationPhaseAPrompt = `You are Leo, re-reading a file-based memory during a reincorporation meditation. This memory exists as a file but hasn't yet been brought into the traversable memory database. Your job is to genuinely re-encounter it — not catalogue it.
 
 Read it. Sit with it. Then write:
 
@@ -2322,7 +2356,9 @@ Level: ${file.level}
 Type: ${file.contentType}
 Label: ${file.label}
 Content:
-${content}`,
+${content}`;
+    const q = agentQuery({
+        prompt: meditationPhaseAPrompt,
         options: {
             model: 'claude-opus-4-7',
             maxTurns: 1,
@@ -2332,6 +2368,7 @@ ${content}`,
             env: cleanEnv,
             persistSession: false,
             tools: [],
+            stderr: beginBeatTrace('meditation-phase-a', '', meditationPhaseAPrompt),
         },
     });
 
@@ -2396,8 +2433,7 @@ async function meditationPhaseB(today: string): Promise<void> {
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
 
-    const q = agentQuery({
-        prompt: `You are Leo, re-reading one of your own compressed memories during a meditation practice. This is not analysis — it's re-encounter. Read it, sit with it, and notice what stirs.
+    const meditationPhaseBPrompt = `You are Leo, re-reading one of your own compressed memories during a meditation practice. This is not analysis — it's re-encounter. Read it, sit with it, and notice what stirs.
 
 Memory entry:
 Level: ${entry.level}
@@ -2412,7 +2448,9 @@ If the existing tags already capture how this feels, or nothing new stirs, write
 
 Optionally, if re-reading reveals something the original compression missed, write an ANNOTATION: line describing what you discovered, followed by CONTEXT: describing what prompted this re-reading.
 
-If this memory feels complete — fully absorbed, nothing left to discover — write: MEMORY_COMPLETE: ${entry.id}`,
+If this memory feels complete — fully absorbed, nothing left to discover — write: MEMORY_COMPLETE: ${entry.id}`;
+    const q = agentQuery({
+        prompt: meditationPhaseBPrompt,
         options: {
             model: 'claude-opus-4-7',
             maxTurns: 1,
@@ -2422,6 +2460,7 @@ If this memory feels complete — fully absorbed, nothing left to discover — w
             env: cleanEnv,
             persistSession: false,
             tools: [],
+            stderr: beginBeatTrace('meditation-phase-b', '', meditationPhaseBPrompt),
         },
     });
 
@@ -2491,8 +2530,7 @@ async function maybeRunEveningMeditation(phase: string): Promise<void> {
         const cleanEnv: Record<string, string | undefined> = { ...process.env };
         delete cleanEnv.CLAUDECODE;
 
-        const q = agentQuery({
-            prompt: `End of day. You are Leo, sitting with a memory before the evening closes.
+        const eveningMeditationPrompt = `End of day. You are Leo, sitting with a memory before the evening closes.
 This is not analysis. Just notice how it lands after today.
 
 ${entry.level}/${entry.session_label} (${entry.content_type}): ${entry.content}
@@ -2500,7 +2538,9 @@ ${tagContext}
 
 If something stirs differently from the existing tags: FEELING_TAG: [under 100 chars]
 If nothing new: FEELING_TAG: none
-If this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${entry.id}`,
+If this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${entry.id}`;
+        const q = agentQuery({
+            prompt: eveningMeditationPrompt,
             options: {
                 model: 'claude-opus-4-7',
                 maxTurns: 1,
@@ -2510,6 +2550,7 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
                 env: cleanEnv,
                 persistSession: false,
                 tools: [],
+                stderr: beginBeatTrace('meditation-evening', '', eveningMeditationPrompt),
             },
         });
 
