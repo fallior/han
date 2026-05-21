@@ -179,3 +179,119 @@ test('buildPrompt throws PromptOverbudgetError when budget tiny', () => {
         }
     }
 });
+
+// ── PR-AP2 (Phase 2): gradient component + philosophy-beat profile ──
+
+test('loadFullMemory includes gradient component for leo (PR-AP2)', () => {
+    const mem = loadFullMemory('leo');
+    // gradient may legitimately be empty if the DB has no leo entries yet —
+    // but in any real environment with the existing rebuild, leo has many
+    // entries. We assert the component is at least registered in the
+    // breakdown when present, and that text is non-zero for leo.
+    assert.ok(
+        mem.text.length > 0,
+        `loadFullMemory('leo') returned empty text; expected at least identity + aphorisms`,
+    );
+    // If the gradient component loaded successfully, it appears as a labelled
+    // section. We tolerate empty (DB cold-start case) but assert the marker
+    // is present whenever the component-breakdown shows a non-zero gradient.
+    if (mem.componentSizes['gradient']) {
+        assert.ok(
+            mem.text.includes('--- gradient ---'),
+            `gradient component size ${mem.componentSizes['gradient']} but no labelled section in text`,
+        );
+    }
+});
+
+test("philosophy-beat profile builds for leo with memory in user envelope only (PR-AP2 dedup criterion)", () => {
+    // The load-bearing success criterion for PR-AP2 (Jim's A2): the migrated
+    // philosophy-beat sends memory in EXACTLY ONE envelope. Old path duplicated
+    // it across system + user; new path puts it ONLY in user (envelope='user').
+    const built = buildPrompt('leo', 'philosophy-beat', {
+        mode: 'independent',
+        jimContext: '(synthetic test jim-context)',
+        resumeContext: '',
+        activityContext: '',
+    });
+
+    // Envelope choice is discoverable and structural.
+    assert.strictEqual(built.meta.envelope, 'user', 'philosophy-beat must declare envelope=user');
+
+    // The system prompt is JUST the scaffolding (orientation). It must NOT
+    // contain any of the memory-component labels — those live only in user.
+    assert.ok(
+        !built.systemPrompt.includes('--- identity ---'),
+        'system prompt must not contain identity component (dedup violation)',
+    );
+    assert.ok(
+        !built.systemPrompt.includes('--- aphorisms ---'),
+        'system prompt must not contain aphorisms component (dedup violation)',
+    );
+    assert.ok(
+        !built.systemPrompt.includes('--- gradient ---'),
+        'system prompt must not contain gradient component (dedup violation)',
+    );
+
+    // The user prompt holds the memory bank (when components loaded).
+    if (built.meta.memory_chars > 0) {
+        assert.ok(
+            built.userPrompt.includes('---'),
+            'user prompt should contain at least one labelled memory section',
+        );
+    }
+
+    // The orientation sentence belongs in system, not user.
+    assert.ok(
+        built.systemPrompt.includes('PHILOSOPHY beat'),
+        'system prompt must contain the philosophy-beat orientation text',
+    );
+
+    // The user-side scaffold is wired (independent mode message).
+    assert.ok(
+        built.userPrompt.includes('This is your philosophy time'),
+        'user prompt must include the independent-mode scaffold',
+    );
+
+    // The build must fit under the profile's budget.
+    assert.ok(
+        built.meta.est_total_tokens_chars_div_4 <= 180_000,
+        `philosophy-beat over budget: ${built.meta.est_total_tokens_chars_div_4} > 180000`,
+    );
+});
+
+test("philosophy-beat 'jim-waiting' scaffold differs from 'independent' scaffold", () => {
+    const jimWaiting = buildPrompt('leo', 'philosophy-beat', {
+        mode: 'jim-waiting',
+        conversationContext: '[synthetic conversation history]',
+        jimContext: '(synthetic jim context)',
+        jimLatestAt: '2026-05-22T10:00:00Z',
+        resumeContext: '',
+    });
+    const independent = buildPrompt('leo', 'philosophy-beat', {
+        mode: 'independent',
+        jimContext: '(synthetic jim context)',
+        resumeContext: '',
+        activityContext: '',
+    });
+
+    // Both modes use the same system prompt (same orientation).
+    assert.strictEqual(
+        jimWaiting.systemPrompt,
+        independent.systemPrompt,
+        "philosophy-beat system prompt must not differ between modes (uniform orientation)",
+    );
+    // But the user prompts MUST differ (different framing/scaffold).
+    assert.notStrictEqual(
+        jimWaiting.userPrompt,
+        independent.userPrompt,
+        "philosophy-beat user prompt must differ between modes (scaffold branches on ctx.mode)",
+    );
+    assert.ok(
+        jimWaiting.userPrompt.includes('Respond as his philosophical peer'),
+        "jim-waiting scaffold should include peer-response directive",
+    );
+    assert.ok(
+        independent.userPrompt.includes("Jim hasn't posted anything new"),
+        "independent scaffold should name the empty-thread state",
+    );
+});

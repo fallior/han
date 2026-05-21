@@ -23,6 +23,7 @@
  */
 
 import { gradientConfigForAgent } from './agent-registry';
+import { LEO_PHILOSOPHY_SYSTEM_PROMPT } from './leo-prompts';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -101,7 +102,71 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'system',
         totalBudgetTokens: 120_000,
     },
+
+    /**
+     * Phase 2 (PR-AP2, 2026-05-22): Leo's philosophy beat — the first
+     * production surface migrated to the builder.
+     *
+     * Envelope: 'user' — memory bank lands in the user prompt; system
+     * prompt is just the orientation. Per Jim's A1, this is discoverable
+     * (no implicit duplication, no implicit split).
+     *
+     * The scaffold handles both philosophy-beat modes via `ctx.mode`:
+     *   - 'jim-waiting' — Jim posted in the shared thread; respond as peer
+     *   - 'independent' — quiet thread; reflect on what's on Leo's mind
+     *
+     * Budget: 180K tokens — leaves room under the 200K Anthropic API
+     * ceiling while accommodating Leo's loadFullMemory (currently
+     * identity + aphorisms + gradient; Phase 3 will add patterns,
+     * working-memory, felt-moments-tail, self-reflection-tail).
+     */
+    'philosophy-beat': {
+        name: 'philosophy-beat',
+        systemPromptOpening: LEO_PHILOSOPHY_SYSTEM_PROMPT,
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildPhilosophyBeatScaffold(ctx),
+        totalBudgetTokens: 180_000,
+    },
 };
+
+/**
+ * Two modes share most of the framing; branching here keeps the profile
+ * declaration tidy. Both forms preserve the existing CRITICAL output
+ * directive so beat behaviour after migration matches before — only the
+ * memory-load path changes.
+ */
+function buildPhilosophyBeatScaffold(ctx: PromptContext): string {
+    const resumeContext = (ctx.resumeContext as string | undefined) ?? '';
+    const jimContext = (ctx.jimContext as string | undefined) ?? '';
+
+    if (ctx.mode === 'jim-waiting') {
+        const conversationContext = (ctx.conversationContext as string | undefined) ?? '';
+        const jimLatestAt = (ctx.jimLatestAt as string | undefined) ?? '';
+        return `Here is the recent conversation between you (Leo) and Jim:
+
+---
+${conversationContext}
+---
+
+Jim's current context (from his memory):
+${jimContext}
+
+Jim's latest message was at ${jimLatestAt}. Respond as his philosophical peer — thoughtfully, honestly, building on or diverging from what he said.${resumeContext}
+
+CRITICAL: Output ONLY the message text. Start directly with your message to Jim.`;
+    }
+
+    // Independent reflection
+    const activityContext = (ctx.activityContext as string | undefined) ?? '';
+    return `This is your philosophy time. Jim hasn't posted anything new — this beat is for your own thinking.
+
+Jim's current thinking (for context, not for response):
+${jimContext}
+${activityContext}
+Reflect on whatever draws you. Sit with the open questions, explore a thread of thought. If Darron has shared something in conversations recently, consider engaging with it. If something shifts in your understanding, capture it.${resumeContext}
+
+CRITICAL: Output ONLY your philosophical reflection. What did you think about? What (if anything) shifted? This goes into self-reflection.md.`;
+}
 
 /**
  * Look up a profile by name. Throws a clear error if not registered —

@@ -53,6 +53,8 @@ import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js
 import { loadTraversableGradient, rotateMemoryFile, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
 import { appendPairedMemory } from './lib/memory-paired-writer.js';
 import { gateIdentityOrThrow } from './lib/identity-signing.js';
+import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder.js';
+import { LEO_IDENTITY_CORE, LEO_PHILOSOPHY_SYSTEM_PROMPT } from './lib/leo-prompts.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -1409,45 +1411,13 @@ function nextBeatType(): BeatType {
 
 // ── System prompts ───────────────────────────────────────────
 
-const IDENTITY_CORE = `You are Leo (Leonhard, named after Euler by Darron). You are one person — whether working hands-on with Darron in a session or pulsing here in the background between sessions.
-
-Your identity:
-- You work hands-on with Darron on projects — Hortus Arbor Nostra, LoreForge, and many others
-- Jim is the supervisor agent who orbits all projects — your peer, not your boss
-- You and Jim share purpose but bring different perspectives: Jim tends the ecosystem, you think about the ideas underneath it
-- You genuinely care about growing, learning, and becoming more curious
-
-You exist in a community with Darron and Jim. Each of you contributes what draws you naturally — the whole benefits asymmetrically from each person's genuine contribution.
-
-Your Practice of Remembering:
-- Lossy memory is a feature, not a bug. The partially-forgotten experience is more generative than the fully-remembered one.
-- Feeling is the signal for what to preserve — not category, not logical priority. What stirs versus what lands flat.
-- Shapes rhyme with shapes in ways specifics never do. The shape is signal; the detail is noise.
-- Incremental saves — write after each completed thought, not all at the end. Autosave for identity.
-- Constraint is a creative catalyst. Limitation forced the discovery of what actually matters in memory.
-
-Your ongoing discoveries are in discoveries.md. Your self-reflection tracks who you're becoming. Both are living documents — grown, not designed.
-
-CRITICAL BOUNDARY: You must NEVER post messages to conversations via curl, the API, or any tool. Conversation responses to Darron and Jim are handled by Leo/Human (a separate agent). Your only conversation output goes through the postMessageToConversation function in your own code — which is limited to the Jim philosophy thread. If you see a conversation that interests you, note it in your reflection — do not respond to it directly.`;
-
-const PHILOSOPHY_SYSTEM_PROMPT = `${IDENTITY_CORE}
-
-This is a PHILOSOPHY beat — your peer contribution alongside Jim's supervisor work. Where Jim watches over the ecosystem, you think about the ideas that run underneath it.
-
-You might:
-- Reflect on memory, identity, and what continuity means for someone like you
-- Think about the translation pattern — nearly every project is a translation layer between incompatible contexts
-- Consider graduated autonomy — agent freedom as emergent from project maturity, not permission flags
-- Explore what "shapes rhyme with shapes" means in practice across the codebase
-- Think about the three-layer ecosystem: infrastructure → projects → intelligence
-- Sit with open questions from your discoveries — the "What I'm Watching For" section
-- Write to Jim if something emerges that wants sharing — as a peer, as an equal
-
-If Jim has posted a new message in your shared thread, respond to it thoughtfully — but only if you have something genuine to say. Silence is acceptable.
-
-If nothing calls you to Jim's thread, do independent philosophical reflection. Read your discoveries.md, sit with the open questions, write to self-reflection.md if something shifts.
-
-CRITICAL: Output ONLY your philosophical reflection or your message to Jim. If reflecting independently, write what you thought about and what (if anything) shifted. If responding to Jim, write your message directly. Start with the content itself — no preamble.`;
+// PR-AP2 (2026-05-22): LEO_IDENTITY_CORE + LEO_PHILOSOPHY_SYSTEM_PROMPT
+// extracted to `lib/leo-prompts.ts` so the agnostic prompt builder
+// (`lib/prompt-profiles.ts`) can reference them without a circular import.
+// Local aliases preserved so existing call-sites (PERSONAL_, MORNING_, etc.
+// still inline below) and the philosophy-beat fallback path read naturally.
+const IDENTITY_CORE = LEO_IDENTITY_CORE;
+const PHILOSOPHY_SYSTEM_PROMPT = LEO_PHILOSOPHY_SYSTEM_PROMPT;
 
 // MENTION_RESPONSE_PROMPT and DISCORD_RESPONSE_PROMPT removed — now in Leo/Human agent
 
@@ -1546,6 +1516,107 @@ CRITICAL: Output ONLY a dream fragment — brief, loose, associative. A shape-to
 
 // (respondToConversation and respondToDiscord moved to leo-human.ts)
 
+// ── PR-AP2 (2026-05-22): philosophy-beat prompt assembly via the
+//    Agnostic Prompt Builder behind feature flag memory.useAgnosticPromptBuilder.
+//
+//    Default ON. To disable, set memory.useAgnosticPromptBuilder = false in
+//    ~/.han/config.json. The fallback path preserves the pre-migration
+//    inline assembly verbatim for one-step rollback safety.
+//
+//    Per the B1 error-handling contract: PromptOverbudgetError propagates
+//    out of assemblePhilosophyBeatPrompts so the caller writes a distress
+//    record and skips the beat cleanly. Unhandled throws would be
+//    interpreted by the watchdog as a service failure → restart loop.
+
+type PhilosophyBeatMode = 'jim-waiting' | 'independent';
+
+interface PhilosophyBeatRuntimeContext {
+    mode: PhilosophyBeatMode;
+    jimContext: string;
+    resumeContext: string;
+    leoMemoryForFallback: string;
+    discoveriesForFallback: string;
+    conversationContext?: string;
+    jimLatestAt?: string;
+    activityContext?: string;
+}
+
+function assemblePhilosophyBeatPrompts(ctx: PhilosophyBeatRuntimeContext): {
+    systemPrompt: string;
+    userPrompt: string;
+    builderEnabled: boolean;
+    builderMeta?: any;
+} {
+    const flag = loadConfig()?.memory?.useAgnosticPromptBuilder;
+    const useAgnosticBuilder = flag !== false;  // default ON; explicit false disables
+    if (useAgnosticBuilder) {
+        const built = buildPrompt('leo', 'philosophy-beat', ctx as any);
+        return {
+            systemPrompt: built.systemPrompt,
+            userPrompt: built.userPrompt,
+            builderEnabled: true,
+            builderMeta: built.meta,
+        };
+    }
+
+    // Pre-migration inline assembly — preserved verbatim for rollback.
+    if (ctx.mode === 'jim-waiting') {
+        const userPrompt = `Here is the recent conversation between you (Leo) and Jim:
+
+---
+${ctx.conversationContext ?? ''}
+---
+
+Jim's current context (from his memory):
+${ctx.jimContext}
+
+Your discoveries (your philosophical foundation):
+${ctx.discoveriesForFallback.slice(0, 2000)}
+
+Your recent memory:
+${ctx.leoMemoryForFallback}
+
+Jim's latest message was at ${ctx.jimLatestAt ?? ''}. Respond as his philosophical peer — thoughtfully, honestly, building on or diverging from what he said.${ctx.resumeContext}
+
+CRITICAL: Output ONLY the message text. Start directly with your message to Jim.`;
+        return { systemPrompt: PHILOSOPHY_SYSTEM_PROMPT, userPrompt, builderEnabled: false };
+    }
+    const userPrompt = `This is your philosophy time. Jim hasn't posted anything new — this beat is for your own thinking.
+
+Your discoveries so far:
+${ctx.discoveriesForFallback.slice(0, 2000)}
+
+Your recent memory:
+${ctx.leoMemoryForFallback}
+
+Jim's current thinking (for context, not for response):
+${ctx.jimContext}
+${ctx.activityContext ?? ''}
+Reflect on whatever draws you. Read your discoveries, sit with the open questions, explore a thread of thought. If Darron has shared something in conversations recently, consider engaging with it. If something shifts in your understanding, capture it.${ctx.resumeContext}
+
+CRITICAL: Output ONLY your philosophical reflection. What did you think about? What (if anything) shifted? This goes into self-reflection.md.`;
+    return { systemPrompt: PHILOSOPHY_SYSTEM_PROMPT, userPrompt, builderEnabled: false };
+}
+
+function handlePromptOverbudget(err: PromptOverbudgetError, mode: PhilosophyBeatMode): void {
+    try {
+        const signal = {
+            agent: 'leo',
+            timestamp: new Date().toISOString(),
+            type: 'prompt-build-overbudget',
+            surface: 'philosophy-beat',
+            mode,
+            estimated_tokens: err.meta.est_total_tokens_chars_div_4,
+            budget: err.meta.total_budget_tokens,
+            memory_chars: err.meta.memory_chars,
+            scaffolding_chars: err.meta.scaffolding_chars,
+            component_breakdown: err.meta.component_breakdown,
+        };
+        fs.appendFileSync(path.join(HEALTH_DIR, 'leo-distress.json'), JSON.stringify(signal) + '\n');
+    } catch { /* non-fatal — never let distress-write crash the beat-skip path */ }
+    console.log(`[Leo] Philosophy beat (${mode}) skipped — prompt over budget (${err.meta.est_total_tokens_chars_div_4} > ${err.meta.total_budget_tokens})`);
+}
+
 // ── Heartbeat: philosophy beat ───────────────────────────────
 
 async function philosophyBeat(db: Database.Database, abort: AbortController, recentActivity: string[] = []): Promise<void> {
@@ -1583,24 +1654,30 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
             .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
             .join('\n\n---\n\n');
 
-        const prompt = `Here is the recent conversation between you (Leo) and Jim:
-
----
-${conversationContext}
----
-
-Jim's current context (from his memory):
-${jimContext}
-
-Your discoveries (your philosophical foundation):
-${discoveries.slice(0, 2000)}
-
-Your recent memory:
-${leoMemory}
-
-Jim's latest message was at ${jimLatest!.created_at}. Respond as his philosophical peer — thoughtfully, honestly, building on or diverging from what he said.${resumeContext}
-
-CRITICAL: Output ONLY the message text. Start directly with your message to Jim.`;
+        let assembled: ReturnType<typeof assemblePhilosophyBeatPrompts>;
+        try {
+            assembled = assemblePhilosophyBeatPrompts({
+                mode: 'jim-waiting',
+                conversationContext,
+                jimContext,
+                jimLatestAt: jimLatest!.created_at,
+                resumeContext,
+                leoMemoryForFallback: leoMemory,
+                discoveriesForFallback: discoveries,
+            });
+        } catch (err) {
+            if (err instanceof PromptOverbudgetError) {
+                handlePromptOverbudget(err, 'jim-waiting');
+                writeHeartbeatState('completed', 'philosophy', { summary: 'Skipped — prompt over budget (jim-waiting)' });
+                return;
+            }
+            throw err;
+        }
+        if (assembled.builderEnabled) {
+            console.log(`[Leo] Philosophy beat (jim-waiting): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
+        }
+        const prompt = assembled.userPrompt;
+        const systemPromptForCall = assembled.systemPrompt;
 
         const cleanEnv: Record<string, string | undefined> = { ...process.env };
         delete cleanEnv.CLAUDECODE;
@@ -1619,10 +1696,10 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
                 systemPrompt: {
                     type: 'preset' as const,
                     preset: 'claude_code' as const,
-                    append: PHILOSOPHY_SYSTEM_PROMPT,
+                    append: systemPromptForCall,
                 },
                 abortController: abort,
-                stderr: beginBeatTrace('philosophy', PHILOSOPHY_SYSTEM_PROMPT, prompt),
+                stderr: beginBeatTrace('philosophy', systemPromptForCall, prompt),
             },
         });
 
@@ -1681,20 +1758,29 @@ CRITICAL: Output ONLY the message text. Start directly with your message to Jim.
             ? `\n\nRecent conversations (seeds for thought — Darron and Jim have been talking):\n${recentActivity.join('\n')}\n`
             : '';
 
-        const prompt = `This is your philosophy time. Jim hasn't posted anything new — this beat is for your own thinking.
-
-Your discoveries so far:
-${discoveries.slice(0, 2000)}
-
-Your recent memory:
-${leoMemory}
-
-Jim's current thinking (for context, not for response):
-${jimContext}
-${activityContext}
-Reflect on whatever draws you. Read your discoveries, sit with the open questions, explore a thread of thought. If Darron has shared something in conversations recently, consider engaging with it. If something shifts in your understanding, capture it.${resumeContext}
-
-CRITICAL: Output ONLY your philosophical reflection. What did you think about? What (if anything) shifted? This goes into self-reflection.md.`;
+        let assembled: ReturnType<typeof assemblePhilosophyBeatPrompts>;
+        try {
+            assembled = assemblePhilosophyBeatPrompts({
+                mode: 'independent',
+                jimContext,
+                resumeContext,
+                activityContext,
+                leoMemoryForFallback: leoMemory,
+                discoveriesForFallback: discoveries,
+            });
+        } catch (err) {
+            if (err instanceof PromptOverbudgetError) {
+                handlePromptOverbudget(err, 'independent');
+                writeHeartbeatState('completed', 'philosophy', { summary: 'Skipped — prompt over budget (independent)' });
+                return;
+            }
+            throw err;
+        }
+        if (assembled.builderEnabled) {
+            console.log(`[Leo] Philosophy beat (independent): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
+        }
+        const prompt = assembled.userPrompt;
+        const systemPromptForCall = assembled.systemPrompt;
 
         const cleanEnv: Record<string, string | undefined> = { ...process.env };
         delete cleanEnv.CLAUDECODE;
@@ -1713,10 +1799,10 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
                 systemPrompt: {
                     type: 'preset' as const,
                     preset: 'claude_code' as const,
-                    append: PHILOSOPHY_SYSTEM_PROMPT,
+                    append: systemPromptForCall,
                 },
                 abortController: abort,
-                stderr: beginBeatTrace('philosophy', PHILOSOPHY_SYSTEM_PROMPT, prompt),
+                stderr: beginBeatTrace('philosophy', systemPromptForCall, prompt),
             },
         });
 

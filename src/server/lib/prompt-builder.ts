@@ -21,6 +21,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { gradientConfigForAgent } from './agent-registry';
+import { loadTraversableGradient } from './memory-gradient';
 import {
     PROFILES,
     PromptContext,
@@ -100,10 +101,10 @@ function readFileOrEmpty(filepath: string): string {
  * The uniform memory loader. Agent-agnostic via slug; same call shape for
  * every agent + every surface.
  *
- * Phase 1: identity + aphorisms components only. Future phases extend
- * this function with patterns, discoveries, gradient, working-memory pair,
- * felt-moments-tail, self-reflection-tail, dream-gradient, ecosystem-map,
- * wiki-index, project-memory (Jim-only), failures (Jim-only).
+ * Phase 2 (PR-AP2): identity + aphorisms + gradient. Future phases extend
+ * with patterns, discoveries, working-memory pair, felt-moments-tail,
+ * self-reflection-tail, dream-gradient, ecosystem-map, wiki-index,
+ * project-memory (Jim-only), failures (Jim-only).
  *
  * Returns the assembled memory bank as a single string with labelled
  * sections. Each section starts with `--- {component-name} ---` so the
@@ -129,6 +130,21 @@ export function loadFullMemory(slug: string): { text: string; componentSizes: Re
     if (aphorisms) {
         sections.push(`--- aphorisms ---\n${aphorisms}`);
         sizes['aphorisms'] = aphorisms.length;
+    }
+
+    // ── gradient ──
+    // DB-backed traversable gradient (DEC-068 caps applied internally; UVs +
+    // c5→c4→c3→c2→c1 tail by recency). Returns '' when no DB entries for the
+    // agent yet — silently skipped here, matching readFileOrEmpty semantics.
+    try {
+        const gradient = loadTraversableGradient(slug);
+        if (gradient) {
+            sections.push(`--- gradient ---\n${gradient}`);
+            sizes['gradient'] = gradient.length;
+        }
+    } catch {
+        // gradient load errors must not crash the build; surface via meta
+        // (empty component_breakdown for gradient signals the gap).
     }
 
     return {
