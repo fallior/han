@@ -393,6 +393,90 @@ test('tail-trim never exceeds per-component budget (chars÷4 estimate)', () => {
     }
 });
 
+// ── PR-AP4 (Phase 4): personal-beat + dream-beat profile assertions ──
+
+test("personal-beat profile builds for leo (morning/work/evening) with memory in user envelope only", () => {
+    // Phase 4 success criterion (mirror of philosophy-beat dedup criterion):
+    // each personal-beat phase sends memory in EXACTLY ONE envelope (user).
+    // The opening branches via ctx.phase but always emits the orientation
+    // text in the system prompt; memory never crosses into system.
+    for (const phase of ['morning', 'work', 'evening'] as const) {
+        const built = buildPrompt('leo', 'personal-beat', {
+            phase,
+            projects: '(synthetic projects list)',
+            activitySeed: '',
+            resumeContext: '',
+        });
+        assert.strictEqual(built.meta.envelope, 'user', `personal-beat[${phase}] must use envelope=user`);
+        // No memory labels in system
+        for (const label of ['--- identity ---', '--- aphorisms ---', '--- gradient ---', '--- patterns ---', '--- self-reflection-tail ---']) {
+            assert.ok(
+                !built.systemPrompt.includes(label),
+                `personal-beat[${phase}]: system prompt must not contain ${label} (dedup violation)`,
+            );
+        }
+        // System contains the phase-appropriate orientation
+        const phaseMarker = (
+            phase === 'morning' ? 'MORNING beat' :
+            phase === 'evening' ? 'EVENING beat' :
+            'PERSONAL beat'
+        );
+        assert.ok(
+            built.systemPrompt.includes(phaseMarker),
+            `personal-beat[${phase}]: system prompt must contain "${phaseMarker}" marker`,
+        );
+        // Under profile budget
+        assert.ok(
+            built.meta.est_total_tokens_chars_div_4 <= 180_000,
+            `personal-beat[${phase}] over budget: ${built.meta.est_total_tokens_chars_div_4} > 180000`,
+        );
+    }
+});
+
+test("dream-beat profile builds for leo with memory in user envelope only", () => {
+    const built = buildPrompt('leo', 'dream-beat', {
+        dreamSeeds: '(synthetic dream seeds)',
+        dreamMemorySection: '',
+        resumeContext: '',
+    });
+    assert.strictEqual(built.meta.envelope, 'user');
+    for (const label of ['--- identity ---', '--- aphorisms ---', '--- gradient ---', '--- patterns ---', '--- felt-moments-tail ---', '--- self-reflection-tail ---']) {
+        assert.ok(
+            !built.systemPrompt.includes(label),
+            `dream-beat: system prompt must not contain ${label} (dedup violation)`,
+        );
+    }
+    assert.ok(
+        built.systemPrompt.includes('DREAM beat'),
+        'dream-beat: system prompt must contain "DREAM beat" marker',
+    );
+    assert.ok(
+        built.systemPrompt.includes('(synthetic dream seeds)'),
+        'dream-beat: system prompt must include the dream-seeds substitution',
+    );
+    assert.ok(
+        built.meta.est_total_tokens_chars_div_4 <= 180_000,
+        `dream-beat over budget: ${built.meta.est_total_tokens_chars_div_4} > 180000`,
+    );
+});
+
+test("personal-beat morning/work/evening scaffolds differ (phase branches in scaffold + opening)", () => {
+    const morning = buildPrompt('leo', 'personal-beat', { phase: 'morning', projects: '(p)', activitySeed: '', resumeContext: '' });
+    const work = buildPrompt('leo', 'personal-beat', { phase: 'work', projects: '(p)', activitySeed: '', resumeContext: '' });
+    const evening = buildPrompt('leo', 'personal-beat', { phase: 'evening', projects: '(p)', activitySeed: '', resumeContext: '' });
+
+    // All three differ pairwise
+    assert.notStrictEqual(morning.systemPrompt, work.systemPrompt);
+    assert.notStrictEqual(work.systemPrompt, evening.systemPrompt);
+    assert.notStrictEqual(morning.systemPrompt, evening.systemPrompt);
+    assert.notStrictEqual(morning.userPrompt, work.userPrompt);
+    assert.notStrictEqual(work.userPrompt, evening.userPrompt);
+
+    // Memory bank is the same across phases (uniform load — only scaffolding differs)
+    assert.strictEqual(morning.meta.memory_chars, work.meta.memory_chars);
+    assert.strictEqual(work.meta.memory_chars, evening.meta.memory_chars);
+});
+
 test("philosophy-beat 'jim-waiting' scaffold differs from 'independent' scaffold", () => {
     const jimWaiting = buildPrompt('leo', 'philosophy-beat', {
         mode: 'jim-waiting',

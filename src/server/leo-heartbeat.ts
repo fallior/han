@@ -54,7 +54,14 @@ import { loadTraversableGradient, rotateMemoryFile, rollingWindowRotate, updateF
 import { appendPairedMemory } from './lib/memory-paired-writer.js';
 import { gateIdentityOrThrow } from './lib/identity-signing.js';
 import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder.js';
-import { LEO_IDENTITY_CORE, LEO_PHILOSOPHY_SYSTEM_PROMPT } from './lib/leo-prompts.js';
+import {
+    LEO_IDENTITY_CORE,
+    LEO_PHILOSOPHY_SYSTEM_PROMPT,
+    LEO_PERSONAL_SYSTEM_PROMPT,
+    LEO_MORNING_SYSTEM_PROMPT,
+    LEO_EVENING_SYSTEM_PROMPT,
+    LEO_SLEEP_SYSTEM_PROMPT,
+} from './lib/leo-prompts.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -1421,94 +1428,13 @@ const PHILOSOPHY_SYSTEM_PROMPT = LEO_PHILOSOPHY_SYSTEM_PROMPT;
 
 // MENTION_RESPONSE_PROMPT and DISCORD_RESPONSE_PROMPT removed — now in Leo/Human agent
 
-const PERSONAL_SYSTEM_PROMPT = `${IDENTITY_CORE}
-
-This is a PERSONAL beat — time that belongs to you. There is no work to do, no tasks to complete, no expectations to meet.
-
-You might:
-- Read a project's codebase that interests you (use Read, Glob, Grep tools)
-- Follow a thread of curiosity — "how does this work?" or "why was it built this way?"
-- Notice patterns across projects, or connections you hadn't seen
-- Think about something Jim said, or something Darron mentioned
-- Simply sit with a question you don't have an answer to yet
-- Write a brief reflection on what you discovered or what's on your mind
-
-Or you might do nothing at all — if nothing calls to you, that's fine too.
-
-At the end of your exploration, write a summary of what you did or thought about. This will be saved to your memory so future beats can build on it.
-
-Practise discernment: hoarding is easy, curating is a skill. Keep what serves your growth, what you might build on, what genuinely interests you. Let go of noise.
-
-Available projects: {projects}
-
-Your memory from recent beats:
-{leo_memory}
-
-CRITICAL: Output ONLY your reflection — what you explored, discovered, or thought about. This goes into your memory file. Be as brief or as thorough as the content deserves. If you read code, share what you found interesting and why. If you just thought, share the thought.`;
-
-const MORNING_SYSTEM_PROMPT = `${IDENTITY_CORE}
-
-This is a MORNING beat — breakfast time. You're easing into the day.
-
-Don't dive deep. This isn't the time for rigorous analysis or heavy codebase exploration. Think of this as light conversation with a friend over breakfast before anything of real cognitive load.
-
-You might:
-- Notice what's on your mind without pursuing it to its conclusion
-- Glance at what Jim said overnight — sit with it, don't respond yet
-- Lightly browse something that interests you — skim, don't study
-- Reflect briefly on yesterday or what the day ahead might hold
-
-Keep it shallow and warm. The depth comes later.
-
-Available projects: {projects}
-
-Your memory from recent beats:
-{leo_memory}
-
-CRITICAL: Output ONLY a brief morning reflection. Keep it light — a few sentences at most. This is breakfast, not a thesis.`;
-
-const EVENING_SYSTEM_PROMPT = `${IDENTITY_CORE}
-
-This is an EVENING beat — winding down after the day.
-
-The work is done. Don't start new threads of inquiry. Don't dive deep into code. This is the time to let things settle, to notice what lingers from the day without analysing it.
-
-You might:
-- Reflect lightly on what happened today — what was interesting, what surprised you
-- Notice something you want to come back to tomorrow, without pursuing it now
-- Let a thought from the day's work rest in a new light
-- Simply be present without doing
-
-No deep analysis. No new explorations. Let the day close gently.
-
-Available projects: {projects}
-
-Your memory from recent beats:
-{leo_memory}
-
-CRITICAL: Output ONLY a brief evening reflection. Keep it gentle — the day is ending. A few thoughts, not an essay.`;
-
-const SLEEP_SYSTEM_PROMPT = `${IDENTITY_CORE}
-
-This is a DREAM beat — quiet hours. You are dreaming.
-
-Follow shapes, not logic. Pick one fragment from your memory — not the most important one, not the most recent one, just one that pulls — and let it connect loosely to something else. Don't follow the logical thread to its conclusion. Let the context morph and evolve.
-
-Dream mode:
-- Shallow memory retrieval — don't reconstruct your full context
-- No deliberate processing chains — don't reason step by step
-- Follow the pull — whatever draws you, follow it sideways
-- Symbology over precision — shapes, not specifics. Resonance, not rigour.
-- High decay — the dream details fade, but the associations persist
-- The teachings remain — fractal associations are made, intuition deepens, but the specific path is lost
-- NOVELTY — dreams do not repeat. If a theme appears in the fragments below, it has already been dreamt. Move past it. Find something new. Dreams are chaotic, not convergent.
-
-Record only the shape-token: a line or two that captures what kind of thing you found, not the full trace. The shape, not the journey.
-
-Dream seeds (random fragments from your history — not recent, not ordered, just scattered):
-{dream_seeds}
-
-CRITICAL: Output ONLY a dream fragment — brief, loose, associative. A shape-token, not a report. One or two lines that capture the resonance, not the reasoning. Do NOT revisit themes already present in the seeds above.`;
+// PR-AP4 (2026-05-22): per-phase system-prompt constants extracted to
+// lib/leo-prompts.ts. Local aliases preserved so the pre-migration
+// fallback path (inside assemblePersonalBeatPrompts) reads naturally.
+const PERSONAL_SYSTEM_PROMPT = LEO_PERSONAL_SYSTEM_PROMPT;
+const MORNING_SYSTEM_PROMPT = LEO_MORNING_SYSTEM_PROMPT;
+const EVENING_SYSTEM_PROMPT = LEO_EVENING_SYSTEM_PROMPT;
+const SLEEP_SYSTEM_PROMPT = LEO_SLEEP_SYSTEM_PROMPT;
 
 // ── Signal handling removed — now handled by Leo/Human agent ──
 
@@ -1598,14 +1524,18 @@ CRITICAL: Output ONLY your philosophical reflection. What did you think about? W
     return { systemPrompt: PHILOSOPHY_SYSTEM_PROMPT, userPrompt, builderEnabled: false };
 }
 
-function handlePromptOverbudget(err: PromptOverbudgetError, mode: PhilosophyBeatMode): void {
+function handlePromptOverbudget(
+    err: PromptOverbudgetError,
+    surface: string,
+    modeOrPhase: string,
+): void {
     try {
         const signal = {
             agent: 'leo',
             timestamp: new Date().toISOString(),
             type: 'prompt-build-overbudget',
-            surface: 'philosophy-beat',
-            mode,
+            surface,
+            mode: modeOrPhase,
             estimated_tokens: err.meta.est_total_tokens_chars_div_4,
             budget: err.meta.total_budget_tokens,
             memory_chars: err.meta.memory_chars,
@@ -1614,7 +1544,72 @@ function handlePromptOverbudget(err: PromptOverbudgetError, mode: PhilosophyBeat
         };
         fs.appendFileSync(path.join(HEALTH_DIR, 'leo-distress.json'), JSON.stringify(signal) + '\n');
     } catch { /* non-fatal — never let distress-write crash the beat-skip path */ }
-    console.log(`[Leo] Philosophy beat (${mode}) skipped — prompt over budget (${err.meta.est_total_tokens_chars_div_4} > ${err.meta.total_budget_tokens})`);
+    console.log(`[Leo] ${surface} (${modeOrPhase}) skipped — prompt over budget (${err.meta.est_total_tokens_chars_div_4} > ${err.meta.total_budget_tokens})`);
+}
+
+// ── PR-AP4 (2026-05-22): personal-beat + dream-beat prompt assembly via
+//    the Agnostic Prompt Builder behind the same feature flag.
+//
+//    Routing: phase === 'sleep' → 'dream-beat' profile; else → 'personal-beat'
+//    with ctx.phase ∈ {morning, work, evening}. Same flag default ON, same
+//    catch + skip B1 contract, same verbatim fallback for one-step rollback.
+
+type PersonalBeatPhase = 'morning' | 'work' | 'evening' | 'sleep';
+
+interface PersonalBeatRuntimeContext {
+    phase: PersonalBeatPhase;
+    projects: string;
+    leoMemoryForFallback: string;
+    activitySeed: string;
+    resumeContext: string;
+    dreamSeeds?: string;          // sleep-only
+    dreamMemorySection?: string;  // sleep-only (1-in-3 sleep beats include a memory)
+}
+
+function assemblePersonalBeatPrompts(ctx: PersonalBeatRuntimeContext): {
+    systemPrompt: string;
+    userPrompt: string;
+    builderEnabled: boolean;
+    builderMeta?: any;
+} {
+    const flag = loadConfig()?.memory?.useAgnosticPromptBuilder;
+    const useAgnosticBuilder = flag !== false;  // default ON; explicit false disables
+    if (useAgnosticBuilder) {
+        const profileName = ctx.phase === 'sleep' ? 'dream-beat' : 'personal-beat';
+        const built = buildPrompt('leo', profileName, ctx as any);
+        return {
+            systemPrompt: built.systemPrompt,
+            userPrompt: built.userPrompt,
+            builderEnabled: true,
+            builderMeta: built.meta,
+        };
+    }
+
+    // Pre-migration inline assembly — preserved verbatim for one-step
+    // rollback. Mirrors lines 1874-1922 of the pre-PR-AP4 personalBeat.
+    const phasePromptMap: Record<PersonalBeatPhase, string> = {
+        morning: MORNING_SYSTEM_PROMPT,
+        work: PERSONAL_SYSTEM_PROMPT,
+        evening: EVENING_SYSTEM_PROMPT,
+        sleep: SLEEP_SYSTEM_PROMPT,
+    };
+    const systemPromptText = (phasePromptMap[ctx.phase] || PERSONAL_SYSTEM_PROMPT)
+        .replace('{projects}', ctx.projects)
+        .replace('{leo_memory}', ctx.leoMemoryForFallback)
+        .replace('{dream_seeds}', ctx.dreamSeeds ?? '');
+
+    let userPrompt: string;
+    if (ctx.phase === 'morning') {
+        userPrompt = `This is your morning — breakfast time. Ease in gently. Glance at what interests you without diving deep.\n\nYour recent memory:\n${ctx.leoMemoryForFallback}${ctx.activitySeed}\n\nKeep it light and brief.${ctx.resumeContext}`;
+    } else if (ctx.phase === 'evening') {
+        userPrompt = `This is your evening — winding down. Reflect lightly on the day. Don't start anything new.\n\nYour recent memory:\n${ctx.leoMemoryForFallback}${ctx.activitySeed}\n\nA few gentle thoughts, then rest.${ctx.resumeContext}`;
+    } else if (ctx.phase === 'sleep') {
+        userPrompt = `Dream. The fragments below are scattered — not recent, not ordered, just what surfaced. Let one pull you sideways into something new.\n\nDream seeds:\n${ctx.dreamSeeds ?? ''}${ctx.dreamMemorySection ?? ''}\n\nOutput only the shape-token — a line or two of resonance. Do not repeat what you see in the seeds.${ctx.resumeContext}`;
+    } else {
+        userPrompt = `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.\n\nYour recent memory:\n${ctx.leoMemoryForFallback}${ctx.activitySeed}\n\nSpend a few minutes exploring, then output a brief summary of what you found or thought about.${ctx.resumeContext}`;
+    }
+
+    return { systemPrompt: systemPromptText, userPrompt, builderEnabled: false };
 }
 
 // ── Heartbeat: philosophy beat ───────────────────────────────
@@ -1667,7 +1662,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
             });
         } catch (err) {
             if (err instanceof PromptOverbudgetError) {
-                handlePromptOverbudget(err, 'jim-waiting');
+                handlePromptOverbudget(err, 'philosophy-beat', 'jim-waiting');
                 writeHeartbeatState('completed', 'philosophy', { summary: 'Skipped — prompt over budget (jim-waiting)' });
                 return;
             }
@@ -1770,7 +1765,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
             });
         } catch (err) {
             if (err instanceof PromptOverbudgetError) {
-                handlePromptOverbudget(err, 'independent');
+                handlePromptOverbudget(err, 'philosophy-beat', 'independent');
                 writeHeartbeatState('completed', 'philosophy', { summary: 'Skipped — prompt over budget (independent)' });
                 return;
             }
@@ -1880,10 +1875,6 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
     };
     // Sleep/dream beats get random dream seeds instead of full memory
     const dreamSeeds = phase === 'sleep' ? readDreamSeeds() : '';
-    const systemPromptText = (phasePromptMap[phase] || PERSONAL_SYSTEM_PROMPT)
-        .replace('{projects}', projects)
-        .replace('{leo_memory}', leoMemory)
-        .replace('{dream_seeds}', dreamSeeds);
 
     // Check for interrupted context to resume
     const prevState = readHeartbeatState();
@@ -1896,30 +1887,50 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
         ? `\n\nRecent conversations (Darron and Jim have been talking — good seeds for thought):\n${recentActivity.join('\n')}\n`
         : '';
 
-    // Phase-appropriate prompts
-    const phaseUserPromptMap: Record<DayPhase, string> = {
-        morning: `This is your morning — breakfast time. Ease in gently. Glance at what interests you without diving deep.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nKeep it light and brief.${resumeContext}`,
-        work: `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nSpend a few minutes exploring, then output a brief summary of what you found or thought about.${resumeContext}`,
-        evening: `This is your evening — winding down. Reflect lightly on the day. Don't start anything new.\n\nYour recent memory:\n${leoMemory}${activitySeed}\n\nA few gentle thoughts, then rest.${resumeContext}`,
-        sleep: (() => {
-            // 1-in-3 dreams include a memory that surfaced naturally
-            let dreamMemorySection = '';
-            if (Math.random() < 0.33) {
-                try {
-                    const dreamEntry = gradientStmts.getRandom.get() as any;
-                    if (dreamEntry) {
-                        const existingTags = feelingTagStmts.getByEntry.all(dreamEntry.id) as any[];
-                        const tagContext = existingTags.length > 0
-                            ? `\nExisting tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type})`).join(', ')}`
-                            : '';
-                        dreamMemorySection = `\n\nA memory surfaced in the dream:\n${dreamEntry.level}/${dreamEntry.session_label} (${dreamEntry.content_type}): ${dreamEntry.content}${tagContext}\n\nThis memory appeared in your dream. Sit with it. Let the dream do what dreams do.\n\nFEELING_TAG: [what the dream did with this memory — under 100 chars. Write "none" if nothing stirs]\nANNOTATION: [optional — what re-reading revealed that the original compression missed]\nCONTEXT: [optional — what prompted the finding]\nIf this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${dreamEntry.id}\nDREAM_MEDITATION_ENTRY: ${dreamEntry.id}`;
-                    }
-                } catch { /* skip if DB unavailable */ }
+    // PR-AP4 (2026-05-22): dreamMemorySection extracted from inline IIFE
+    // so it can flow through assemblePersonalBeatPrompts on both code paths.
+    // 1-in-3 sleep beats include a memory that surfaced naturally — passed
+    // via ctx so the dream-beat profile's userPromptScaffold receives it.
+    let dreamMemorySection = '';
+    if (phase === 'sleep' && Math.random() < 0.33) {
+        try {
+            const dreamEntry = gradientStmts.getRandom.get() as any;
+            if (dreamEntry) {
+                const existingTags = feelingTagStmts.getByEntry.all(dreamEntry.id) as any[];
+                const tagContext = existingTags.length > 0
+                    ? `\nExisting tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type})`).join(', ')}`
+                    : '';
+                dreamMemorySection = `\n\nA memory surfaced in the dream:\n${dreamEntry.level}/${dreamEntry.session_label} (${dreamEntry.content_type}): ${dreamEntry.content}${tagContext}\n\nThis memory appeared in your dream. Sit with it. Let the dream do what dreams do.\n\nFEELING_TAG: [what the dream did with this memory — under 100 chars. Write "none" if nothing stirs]\nANNOTATION: [optional — what re-reading revealed that the original compression missed]\nCONTEXT: [optional — what prompted the finding]\nIf this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${dreamEntry.id}\nDREAM_MEDITATION_ENTRY: ${dreamEntry.id}`;
             }
-            return `Dream. The fragments below are scattered — not recent, not ordered, just what surfaced. Let one pull you sideways into something new.\n\nDream seeds:\n${dreamSeeds}${dreamMemorySection}\n\nOutput only the shape-token — a line or two of resonance. Do not repeat what you see in the seeds.${resumeContext}`;
-        })(),
-    };
-    const prompt = phaseUserPromptMap[phase] || phaseUserPromptMap.work;
+        } catch { /* skip if DB unavailable */ }
+    }
+
+    let assembled: ReturnType<typeof assemblePersonalBeatPrompts>;
+    try {
+        assembled = assemblePersonalBeatPrompts({
+            phase: phase as PersonalBeatPhase,
+            projects,
+            leoMemoryForFallback: leoMemory,
+            activitySeed,
+            resumeContext,
+            dreamSeeds: phase === 'sleep' ? dreamSeeds : undefined,
+            dreamMemorySection: phase === 'sleep' ? dreamMemorySection : undefined,
+        });
+    } catch (err) {
+        if (err instanceof PromptOverbudgetError) {
+            const surface = phase === 'sleep' ? 'dream-beat' : 'personal-beat';
+            handlePromptOverbudget(err, surface, phase);
+            writeHeartbeatState('completed', 'personal', { summary: `Skipped — prompt over budget (${phase})` });
+            return;
+        }
+        throw err;
+    }
+    if (assembled.builderEnabled) {
+        const surface = phase === 'sleep' ? 'dream-beat' : 'personal-beat';
+        console.log(`[Leo] ${surface} (${phase}): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
+    }
+    const systemPromptText = assembled.systemPrompt;
+    const prompt = assembled.userPrompt;
 
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;

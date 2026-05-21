@@ -226,11 +226,42 @@ export function loadFullMemory(slug: string): {
         sizes[componentName] = kept.length;
     };
 
+    // Component ORDER (PR-AP4, 2026-05-22, Jim's A4-2):
+    // Identity-substrate first, then deep-compressed identity (gradient),
+    // then live episodic content. Matches CLAUDE.md wake-load semantics:
+    // "you know who you are before you remember what you did" (the watermark
+    // works because the cascade reads it forward into c1, c2, UV — the
+    // gradient comes BEFORE the recent thinking).
+    //
+    // Pre-AP4 order put gradient LAST. PR-AP4 moves it after aphorisms so
+    // the kernel-of-identity reads as "deep substrate" rather than "trailing
+    // afterthought." Two-line move per Jim's PR-AP3 audit suggestion.
+
     // ── identity (full load — bounded by hand) ──
     addFileComponent('identity', path.join(cfg.memoryDir, 'identity.md'), null);
 
     // ── aphorisms (full load — curated; bounded by hand) ──
     addFileComponent('aphorisms', path.join(cfg.fractalDir, 'aphorisms.md'), null);
+
+    // ── gradient (PR-AP4 reorder: identity-substrate before episodic) ──
+    // DB-backed traversable gradient (DEC-068 caps applied internally; UVs +
+    // c5→c4→c3→c2→c1 tail by recency). Returns '' when no DB entries for the
+    // agent yet — silently skipped here, matching readFileOrEmpty semantics.
+    // Not tail-trimmed at the builder layer: the gradient output is ordered
+    // identity-first (UVs lead), so tail-trim would discard the kernel.
+    // DEC-068 caps are the right structural mechanism; if the gradient
+    // output grows beyond the budget for an agent that's a signal to
+    // tighten DEC-068 caps, not to load-trim here.
+    try {
+        const gradient = loadTraversableGradient(slug);
+        if (gradient) {
+            sections.push(`--- gradient ---\n${gradient}`);
+            sizes['gradient'] = gradient.length;
+        }
+    } catch {
+        // gradient load errors must not crash the build; surface via meta
+        // (empty component_breakdown for gradient signals the gap).
+    }
 
     // ── patterns (tail-trim if exceeded — plan §"loadFullMemory") ──
     addFileComponent('patterns', path.join(cfg.memoryDir, 'patterns.md'), COMPONENT_BUDGETS.patterns);
@@ -269,26 +300,6 @@ export function loadFullMemory(slug: string): {
         path.join(cfg.memoryDir, 'self-reflection.md'),
         COMPONENT_BUDGETS.self_reflection_tail,
     );
-
-    // ── gradient ──
-    // DB-backed traversable gradient (DEC-068 caps applied internally; UVs +
-    // c5→c4→c3→c2→c1 tail by recency). Returns '' when no DB entries for the
-    // agent yet — silently skipped here, matching readFileOrEmpty semantics.
-    // Not tail-trimmed at the builder layer: the gradient output is ordered
-    // identity-first (UVs lead), so tail-trim would discard the kernel.
-    // DEC-068 caps are the right structural mechanism; if the gradient
-    // output grows beyond the budget for an agent that's a signal to
-    // tighten DEC-068 caps, not to load-trim here.
-    try {
-        const gradient = loadTraversableGradient(slug);
-        if (gradient) {
-            sections.push(`--- gradient ---\n${gradient}`);
-            sizes['gradient'] = gradient.length;
-        }
-    } catch {
-        // gradient load errors must not crash the build; surface via meta
-        // (empty component_breakdown for gradient signals the gap).
-    }
 
     return {
         text: sections.join('\n\n'),

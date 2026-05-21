@@ -23,7 +23,12 @@
  */
 
 import { gradientConfigForAgent } from './agent-registry';
-import { LEO_PHILOSOPHY_SYSTEM_PROMPT } from './leo-prompts';
+import {
+    LEO_PHILOSOPHY_SYSTEM_PROMPT,
+    LeoNonDreamPhase,
+    leoPersonalBeatOpening,
+    leoDreamBeatOpening,
+} from './leo-prompts';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -127,6 +132,50 @@ export const PROFILES: Record<string, PromptProfile> = {
         userPromptScaffold: (ctx) => buildPhilosophyBeatScaffold(ctx),
         totalBudgetTokens: 180_000,
     },
+
+    /**
+     * Phase 4 (PR-AP4, 2026-05-22): Leo's personal beats — morning, work,
+     * evening. Three sub-phases that share scaffolding shape but differ in
+     * tone (light/exploratory/winding-down). The opening branches via
+     * `ctx.phase` per Jim's A5 function-form recommendation.
+     *
+     * Envelope: 'user' — same as philosophy-beat for envelope consistency
+     * (Jim's PR-AP4 watch-for #1). Memory bank lands in user, orientation
+     * in system. No cross-envelope duplication.
+     *
+     * Budget 180K matches philosophy-beat. The uniform memory load is the
+     * same across surfaces; only scaffolding differs.
+     */
+    'personal-beat': {
+        name: 'personal-beat',
+        systemPromptOpening: (ctx) => leoPersonalBeatOpening(
+            ((ctx.phase as LeoNonDreamPhase | undefined) ?? 'work'),
+            ((ctx.projects as string | undefined) ?? ''),
+        ),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildPersonalBeatScaffold(ctx),
+        totalBudgetTokens: 180_000,
+    },
+
+    /**
+     * Phase 4 (PR-AP4, 2026-05-22): Leo's dream beats (sleep phase only).
+     * Separate profile from personal-beat because:
+     *   1. The opening is qualitatively different (dream mode vs personal
+     *      reflection)
+     *   2. The scaffold includes dream-seeds and optional dream-meditation
+     *      memory section — distinct context shape
+     *   3. The profile registry stays readable when each profile names
+     *      exactly one beat-shape (no implicit branching across modes)
+     *
+     * Envelope: 'user' for envelope consistency.
+     */
+    'dream-beat': {
+        name: 'dream-beat',
+        systemPromptOpening: (ctx) => leoDreamBeatOpening(((ctx.dreamSeeds as string | undefined) ?? '')),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildDreamBeatScaffold(ctx),
+        totalBudgetTokens: 180_000,
+    },
 };
 
 /**
@@ -166,6 +215,53 @@ ${activityContext}
 Reflect on whatever draws you. Sit with the open questions, explore a thread of thought. If Darron has shared something in conversations recently, consider engaging with it. If something shifts in your understanding, capture it.${resumeContext}
 
 CRITICAL: Output ONLY your philosophical reflection. What did you think about? What (if anything) shifted? This goes into self-reflection.md.`;
+}
+
+/**
+ * PR-AP4: personal-beat user-side scaffold. Three branches by phase
+ * (morning/work/evening) — matches the pre-migration phaseUserPromptMap
+ * shape minus the `${leoMemory}` interpolation (memory now flows via the
+ * builder's uniform load above the scaffold).
+ */
+function buildPersonalBeatScaffold(ctx: PromptContext): string {
+    const phase = (ctx.phase as LeoNonDreamPhase | undefined) ?? 'work';
+    const resumeContext = (ctx.resumeContext as string | undefined) ?? '';
+    const activitySeed = (ctx.activitySeed as string | undefined) ?? '';
+
+    if (phase === 'morning') {
+        return `This is your morning — breakfast time. Ease in gently. Glance at what interests you without diving deep.${activitySeed}
+
+Keep it light and brief.${resumeContext}`;
+    }
+    if (phase === 'evening') {
+        return `This is your evening — winding down. Reflect lightly on the day. Don't start anything new.${activitySeed}
+
+A few gentle thoughts, then rest.${resumeContext}`;
+    }
+    // work (default)
+    return `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.${activitySeed}
+
+Spend a few minutes exploring, then output a brief summary of what you found or thought about.${resumeContext}`;
+}
+
+/**
+ * PR-AP4: dream-beat user-side scaffold. Includes dream-seeds (which also
+ * appear in the opening) for the dream-memory-section path (1-in-3 sleep
+ * beats include a memory encounter for meditation). The caller passes the
+ * optional `dreamMemorySection` when applicable; absent context produces
+ * a minimal dream scaffold.
+ */
+function buildDreamBeatScaffold(ctx: PromptContext): string {
+    const dreamSeeds = (ctx.dreamSeeds as string | undefined) ?? '';
+    const dreamMemorySection = (ctx.dreamMemorySection as string | undefined) ?? '';
+    const resumeContext = (ctx.resumeContext as string | undefined) ?? '';
+
+    return `Dream. The fragments below are scattered — not recent, not ordered, just what surfaced. Let one pull you sideways into something new.
+
+Dream seeds:
+${dreamSeeds}${dreamMemorySection}
+
+Output only the shape-token — a line or two of resonance. Do not repeat what you see in the seeds.${resumeContext}`;
 }
 
 /**
