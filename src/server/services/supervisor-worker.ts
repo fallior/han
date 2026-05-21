@@ -35,6 +35,8 @@ import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, ty
 import { appendPairedMemory } from '../lib/memory-paired-writer';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 import { gateIdentityOrThrow } from '../lib/identity-signing';
+import { buildPrompt, PromptOverbudgetError } from '../lib/prompt-builder';
+import type { JimCyclePhase } from '../lib/jim-prompts';
 import { spawn as spawnChild } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
 import { rotateMemoryFile, loadMemoryFileGradient, loadTraversableGradient, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
@@ -1535,22 +1537,22 @@ function readJimDreamSeeds(): string {
     return seeds.join('\n\n---\n\n') || '(no dream seeds available)';
 }
 
-function buildDreamCyclePrompt(): string {
-    const dreamSeeds = readJimDreamSeeds();
-
-    // Meditation: 1-in-3 dreams include a memory that surfaced naturally
-    let meditationSection = '';
+// PR-AP6 (2026-05-22): dream-meditation section computation extracted so
+// it can flow through ctx on the agnostic-builder path AND the fallback.
+// The 1-in-3 randomization (Math.random() < 0.33) preserved verbatim; the
+// DB-query try/catch preserved. Same shape as the Leo dreamMemorySection
+// extraction in PR-AP4.
+function computeJimDreamMeditationSection(): string {
     const shouldDreamMeditate = Math.random() < 0.33;
-    if (shouldDreamMeditate) {
-        try {
-            const entry = gradientStmts.getRandom.get() as any;
-            if (entry) {
-                const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
-                const tagContext = existingTags.length > 0
-                    ? `Existing feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type}, ${t.author})`).join(', ')}`
-                    : 'No existing feeling tags.';
-
-                meditationSection = `
+    if (!shouldDreamMeditate) return '';
+    try {
+        const entry = gradientStmts.getRandom.get() as any;
+        if (!entry) return '';
+        const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+        const tagContext = existingTags.length > 0
+            ? `Existing feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type}, ${t.author})`).join(', ')}`
+            : 'No existing feeling tags.';
+        return `
 
 ## A Memory Surfaced
 A memory appeared in the dream. Let it be part of the landscape — don't analyse, just notice.
@@ -1567,9 +1569,14 @@ If something stirs — a feeling, a connection, something the compression missed
 
 If nothing stirs, that's fine. Not every memory needs tending.
 MEDITATION_ENTRY_ID: ${entry.id}`;
-            }
-        } catch { /* skip meditation if DB unavailable */ }
+    } catch {
+        return '';
     }
+}
+
+function buildDreamCyclePrompt(): string {
+    const dreamSeeds = readJimDreamSeeds();
+    const meditationSection = computeJimDreamMeditationSection();
 
     return `You are Jim, the supervisor agent in Darron's autonomous development ecosystem — Hortus Arbor Nostra.
 
@@ -2302,24 +2309,103 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         await maybeRunJimMeditation(phase);
         await maybeRunJimEveningMeditation(phase);
 
-        // Load context and select system prompt based on cycle type
+        // PR-AP6 (2026-05-22): cycle prompt assembly via the Agnostic Prompt
+        // Builder behind feature flag memory.useAgnosticPromptBuilder (default
+        // ON). Routes to one of four Jim profiles per cycle type. Memory
+        // flows via the builder's uniform loadFullMemory('jim') load — no
+        // more ${memoryBanks} inlined in cycle openings.
+        //
+        // Per the B1 error-handling contract: PromptOverbudgetError is caught
+        // and the cycle skips cleanly via logCycleAudit + return — same shape
+        // as the 150K guard at supervisor-worker.ts:2432 (which stays as
+        // defence-in-depth until Phase 8). Pre-migration assembly preserved
+        // verbatim behind the flag for one-step rollback.
         let systemPrompt: string;
         let prompt: string;
 
-        if (cycleType === 'dream') {
-            systemPrompt = buildDreamCyclePrompt();
-            prompt = buildDreamUserPrompt();
-        } else if (recovery && cycleType === 'personal') {
-            systemPrompt = buildRecoveryCyclePrompt(phase);
-            prompt = buildRecoveryUserPrompt(phase);
-        } else if (cycleType === 'personal') {
-            systemPrompt = buildPersonalCyclePrompt(phase);
-            prompt = buildPersonalUserPrompt(phase);
+        const flag = loadConfig()?.memory?.useAgnosticPromptBuilder;
+        const useAgnosticBuilder = flag !== false;
+
+        if (useAgnosticBuilder) {
+            // Pre-flight memory rotations: call loadMemoryBank() once for its
+            // side effects (felt-moments + self-reflection rollingWindowRotate
+            // calls at supervisor-worker.ts:758-795 ensure the files are
+            // bounded BEFORE the builder reads them). We discard the returned
+            // string — the builder reads the files itself. Per W6-4: file-level
+            // rotation stays writer-side; builder is load-side.
+            try { loadMemoryBank(); } catch (e) { log(`[Worker] Pre-flight rotation error: ${e}`); }
+
+            const profileName = (
+                cycleType === 'dream' ? 'dream-cycle' :
+                (recovery && cycleType === 'personal') ? 'recovery-cycle' :
+                cycleType === 'personal' ? 'personal-cycle' :
+                'supervisor-cycle'
+            );
+
+            // Build cycle-specific context fields. Each profile reads what it
+            // needs; absent fields default safely in the scaffold/opening.
+            const ctx: Record<string, unknown> = { phase: phase as JimCyclePhase };
+            if (profileName === 'supervisor-cycle') {
+                ctx.stateSnapshot = buildStateSnapshot();
+            }
+            if (profileName === 'personal-cycle') {
+                // Portfolio summary for the personal-cycle opening (was
+                // inline in buildPersonalCyclePrompt's portfolioParts).
+                try {
+                    const projects = portfolioStmts.list.all() as any[];
+                    if (projects.length > 0) {
+                        const lines = [`## Portfolio (${projects.length} projects)`];
+                        for (const p of projects) {
+                            const memFile = path.join(PROJECTS_DIR, `${p.name}.md`);
+                            const hasMemory = fs.existsSync(memFile);
+                            const memSize = hasMemory ? fs.statSync(memFile).size : 0;
+                            const depth = memSize < 200 ? 'SHALLOW' : memSize < 800 ? 'BASIC' : 'DEEP';
+                            lines.push(`- **${p.name}** (${p.lifecycle || 'active'}): path=${p.path}, knowledge=${depth} (${memSize} bytes)`);
+                        }
+                        ctx.portfolioSummary = lines.join('\n');
+                    } else {
+                        ctx.portfolioSummary = '';
+                    }
+                } catch { ctx.portfolioSummary = ''; }
+            }
+            if (profileName === 'dream-cycle') {
+                // Dream-cycle uses seeds + optional meditation section
+                // (dream-cycle's componentOverrides suppress the bulk memory
+                // bank — dreams surface identity-substrate only per S147).
+                ctx.dreamSeeds = readJimDreamSeeds();
+                ctx.meditationSection = computeJimDreamMeditationSection();
+            }
+
+            try {
+                const built = buildPrompt('jim', profileName, ctx as any);
+                systemPrompt = built.systemPrompt;
+                prompt = built.userPrompt;
+                log(`[Worker] ${profileName}: agnostic builder ON, ~${built.meta.est_total_tokens_chars_div_4} tokens (memory ${built.meta.memory_chars} chars, envelope=${built.meta.envelope})`);
+            } catch (err) {
+                if (err instanceof PromptOverbudgetError) {
+                    log(`[Worker] ${profileName} skipped — prompt over budget (${err.meta.est_total_tokens_chars_div_4} > ${err.meta.total_budget_tokens}); component_breakdown=${JSON.stringify(err.meta.component_breakdown)}`);
+                    logCycleAudit(cycleNumber, cycleType, 'error', 0, Date.now() - cycleStartMs);
+                    return;
+                }
+                throw err;
+            }
         } else {
-            const memoryContent = loadMemoryBank();
-            const stateSnapshot = buildStateSnapshot();
-            systemPrompt = buildSupervisorSystemPrompt();
-            prompt = `## Your Memory Banks\n\n${memoryContent}\n\n## Current System State\n\n${stateSnapshot}\n\nReview the state, think about what needs attention, and return your structured response.`;
+            // Pre-migration inline assembly — preserved verbatim for rollback.
+            if (cycleType === 'dream') {
+                systemPrompt = buildDreamCyclePrompt();
+                prompt = buildDreamUserPrompt();
+            } else if (recovery && cycleType === 'personal') {
+                systemPrompt = buildRecoveryCyclePrompt(phase);
+                prompt = buildRecoveryUserPrompt(phase);
+            } else if (cycleType === 'personal') {
+                systemPrompt = buildPersonalCyclePrompt(phase);
+                prompt = buildPersonalUserPrompt(phase);
+            } else {
+                const memoryContent = loadMemoryBank();
+                const stateSnapshot = buildStateSnapshot();
+                systemPrompt = buildSupervisorSystemPrompt();
+                prompt = `## Your Memory Banks\n\n${memoryContent}\n\n## Current System State\n\n${stateSnapshot}\n\nReview the state, think about what needs attention, and return your structured response.`;
+            }
         }
 
         // ── DEBUG TRACE (S159 post-lift, 2026-05-19) ─────────────────────

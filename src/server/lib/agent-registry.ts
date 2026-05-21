@@ -92,6 +92,24 @@ export interface AgentGradientConfig {
      * idempotent.
      */
     sourceFileBaseName: (filename: string) => string;
+
+    /**
+     * PR-AP6 (2026-05-22): per-agent capability flags for the agnostic
+     * prompt builder's loadFullMemory. When true, the matching component
+     * is loaded for this agent; when absent/false, the component is
+     * skipped silently.
+     *
+     * Jim has project-memory (a fractal-loaded portfolio of project files)
+     * and failures.md (his failure-tracking surface). Leo, Tenshi, Casey
+     * have neither — their memory shape differs by design.
+     *
+     * Adding a new per-agent component: add the flag here, set per agent,
+     * then teach loadFullMemory to read the flag and add the labelled
+     * section conditionally. No slug literals — capability flows through
+     * the registry per DEC-081.
+     */
+    loadProjectMemory?: boolean;
+    loadFailures?: boolean;
 }
 
 /**
@@ -117,6 +135,8 @@ export const AGENT_GRADIENT_CONFIG: Record<string, AgentGradientConfig> = {
             return Boolean(m && (!m[2] || m[2] === '-c0'));
         },
         sourceFileBaseName: (f) => f.replace(/(-c0)?\.md$/, ''),
+        loadProjectMemory: true,
+        loadFailures: true,
     },
 
     /**

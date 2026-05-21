@@ -304,6 +304,7 @@ test('Phase 3 components register in componentSizes when files present', () => {
         'identity', 'aphorisms', 'gradient', 'patterns', 'discoveries',
         'working-memory-compressed', 'working-memory-full-tail',
         'felt-moments-tail', 'self-reflection-tail',
+        'failures', 'project-memory',  // PR-AP6 Jim-only via registry flag
     ]);
     for (const slug of registeredAgentSlugs()) {
         const mem = loadFullMemory(slug);
@@ -330,6 +331,7 @@ test('Phase 3 tail-trim emits TruncationEvent when a component exceeds its budge
     const tailComponents = new Set([
         'patterns', 'discoveries', 'working-memory-compressed',
         'working-memory-full-tail', 'felt-moments-tail', 'self-reflection-tail',
+        'failures', 'project-memory',  // PR-AP6 Jim-only via registry flag
     ]);
     for (const slug of registeredAgentSlugs()) {
         const mem = loadFullMemory(slug);
@@ -390,6 +392,8 @@ test('tail-trim never exceeds per-component budget (chars÷4 estimate)', () => {
         'felt-moments-tail': 10_000,
         'working-memory-full-tail': 8_000,
         'working-memory-compressed': 5_000,
+        'failures': 5_000,           // PR-AP6 Jim-only
+        'project-memory': 10_000,    // PR-AP6 Jim-only
     };
     for (const slug of registeredAgentSlugs()) {
         const mem = loadFullMemory(slug);
@@ -559,10 +563,11 @@ test("meditation-evening profile builds for leo with memory in user envelope onl
     );
 });
 
-test("all five Leo profiles + three meditation profiles share uniform memory load (PR-AP5 uniformity invariant)", () => {
+test("all six Leo profiles share uniform memory load (PR-AP5 uniformity invariant — no overrides)", () => {
     // The structural proof of Darron's reframe: "Leo is Leo wherever he is."
-    // memory_chars must be identical across all eight Leo profiles for any
-    // given moment-in-time (same loadFullMemory output across all surfaces).
+    // memory_chars must be identical across all six Leo profiles for any
+    // given moment-in-time. None of Leo's profiles declare componentOverrides,
+    // so the strict uniformity invariant holds.
     const profiles = [
         { name: 'philosophy-beat', ctx: { mode: 'independent', jimContext: '', resumeContext: '', activityContext: '' } },
         { name: 'personal-beat', ctx: { phase: 'work', projects: '', activitySeed: '', resumeContext: '' } },
@@ -578,6 +583,123 @@ test("all five Leo profiles + three meditation profiles share uniform memory loa
             builds[i].meta.memory_chars,
             memoryChars,
             `profile '${profiles[i].name}' has memory_chars=${builds[i].meta.memory_chars} but expected uniform ${memoryChars} (matches profile '${profiles[0].name}')`,
+        );
+    }
+});
+
+// ── PR-AP6 (Phase 6): four Jim profile assertions + componentOverrides ──
+
+test("Jim's three uniform cycle profiles share uniform memory load (supervisor + personal + recovery)", () => {
+    // PR-AP6 relaxed uniformity invariant: profiles WITHOUT componentOverrides
+    // share uniform memory load. Jim's supervisor-cycle, personal-cycle, and
+    // recovery-cycle do not declare overrides; their memory_chars must match.
+    const profiles = [
+        { name: 'supervisor-cycle', ctx: { phase: 'work', stateSnapshot: '(synthetic)' } },
+        { name: 'personal-cycle', ctx: { phase: 'work', portfolioSummary: '(synthetic portfolio)' } },
+        { name: 'recovery-cycle', ctx: { phase: 'work' } },
+    ];
+    const builds = profiles.map(p => buildPrompt('jim', p.name, p.ctx));
+    const memoryChars = builds[0].meta.memory_chars;
+    for (let i = 1; i < builds.length; i++) {
+        assert.strictEqual(
+            builds[i].meta.memory_chars,
+            memoryChars,
+            `Jim profile '${profiles[i].name}' has memory_chars=${builds[i].meta.memory_chars} but expected uniform ${memoryChars} (matches '${profiles[0].name}')`,
+        );
+    }
+});
+
+test("Jim's dream-cycle profile suppresses bulk memory via componentOverrides (S147 design intent)", () => {
+    // PR-AP6 W6-6: dream-cycle declares componentOverrides to suppress the
+    // waking memory bank. The dream-cycle's memory_chars must be STRICTLY
+    // LESS than the uniform Jim load (smaller because most components
+    // suppressed). What remains: identity + aphorisms + gradient (the
+    // identity-substrate per S147 "identity yes, fractal yes").
+    const supervisorBuild = buildPrompt('jim', 'supervisor-cycle', { phase: 'work', stateSnapshot: '' });
+    const dreamBuild = buildPrompt('jim', 'dream-cycle', { phase: 'sleep', dreamSeeds: '(synthetic seeds)', meditationSection: '' });
+
+    assert.ok(
+        dreamBuild.meta.memory_chars < supervisorBuild.meta.memory_chars,
+        `dream-cycle memory_chars (${dreamBuild.meta.memory_chars}) must be < supervisor-cycle (${supervisorBuild.meta.memory_chars}) due to componentOverrides suppressing bulk components`,
+    );
+
+    // The suppressed components must not appear in dream-cycle's
+    // component_breakdown
+    const suppressedComponents = [
+        'patterns', 'discoveries', 'working-memory-compressed',
+        'working-memory-full-tail', 'felt-moments-tail', 'self-reflection-tail',
+        'failures', 'project-memory',
+    ];
+    for (const comp of suppressedComponents) {
+        assert.ok(
+            !(comp in dreamBuild.meta.component_breakdown),
+            `dream-cycle: component '${comp}' must be suppressed (in component_breakdown but shouldn't be)`,
+        );
+    }
+
+    // The unsuppressed components SHOULD appear (when files exist)
+    assert.ok(
+        'identity' in dreamBuild.meta.component_breakdown,
+        'dream-cycle: identity should still be loaded (not suppressed)',
+    );
+    assert.ok(
+        dreamBuild.meta.envelope === 'user',
+        'dream-cycle: envelope must be user (consistent with all Jim profiles)',
+    );
+});
+
+test("supervisor-cycle builds for jim with memory in user envelope only (PR-AP6 dedup criterion)", () => {
+    const built = buildPrompt('jim', 'supervisor-cycle', { phase: 'work', stateSnapshot: '(synthetic state)' });
+    assert.strictEqual(built.meta.envelope, 'user');
+    assertNoMemoryLabelsInSystem(built.systemPrompt, 'supervisor-cycle');
+    assert.ok(
+        built.systemPrompt.includes('Persistent Opus Supervisor'),
+        'supervisor-cycle: system prompt must contain the supervisor identity marker',
+    );
+    assert.ok(
+        built.userPrompt.includes('Current System State'),
+        'supervisor-cycle: user prompt must include the state-snapshot scaffold',
+    );
+    assert.ok(
+        built.meta.est_total_tokens_chars_div_4 <= 180_000,
+        `supervisor-cycle over budget: ${built.meta.est_total_tokens_chars_div_4} > 180000`,
+    );
+});
+
+test("personal-cycle phase-branching opening works for Jim", () => {
+    const morning = buildPrompt('jim', 'personal-cycle', { phase: 'morning', portfolioSummary: '' });
+    const work = buildPrompt('jim', 'personal-cycle', { phase: 'work', portfolioSummary: '' });
+    const evening = buildPrompt('jim', 'personal-cycle', { phase: 'evening', portfolioSummary: '' });
+
+    // System prompts differ by phase intro
+    assert.notStrictEqual(morning.systemPrompt, work.systemPrompt);
+    assert.notStrictEqual(work.systemPrompt, evening.systemPrompt);
+    assert.ok(morning.systemPrompt.includes('morning'));
+    assert.ok(evening.systemPrompt.includes('evening'));
+
+    // Memory load uniform across phases
+    assert.strictEqual(morning.meta.memory_chars, work.meta.memory_chars);
+    assert.strictEqual(work.meta.memory_chars, evening.meta.memory_chars);
+});
+
+test("Jim's loadFullMemory loads project-memory + failures (registry flag); Leo's doesn't", () => {
+    // PR-AP6: registry-driven per-agent capability flags.
+    const jimMem = loadFullMemory('jim');
+    const leoMem = loadFullMemory('leo');
+
+    // Jim should have project-memory and/or failures (when files exist).
+    // We can't strictly require they're loaded (depends on file state) but
+    // we can assert: if they appear ANYWHERE, they appear ONLY for Jim.
+    if ('project-memory' in jimMem.componentSizes) {
+        assert.ok(
+            !('project-memory' in leoMem.componentSizes),
+            'project-memory should be Jim-only via registry flag',
+        );
+    }
+    if ('failures' in jimMem.componentSizes) {
+        assert.ok(
+            !('failures' in leoMem.componentSizes),
+            'failures should be Jim-only via registry flag',
         );
     }
 });

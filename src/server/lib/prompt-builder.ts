@@ -170,7 +170,30 @@ const COMPONENT_BUDGETS = {
     felt_moments_tail: 10_000,
     working_memory_full_tail: 8_000,
     working_memory_compressed: 5_000,
+    failures: 5_000,           // PR-AP6 (Jim-only via registry flag)
+    project_memory: 10_000,    // PR-AP6 (Jim-only via registry flag — fractal-loaded portfolio)
 } as const;
+
+/**
+ * PR-AP6 (2026-05-22): per-profile component suppression.
+ *
+ * A `PromptProfile` may declare `componentOverrides: { '<name>': false }`
+ * to skip specific components from `loadFullMemory(slug)` for that
+ * surface. Used by dream-cycle to suppress the bulk memory bank
+ * (preserving Jim's pre-migration "dreams are seeds, not full memory"
+ * design per S147 — *"identity yes, fractal yes, working-memory floating
+ * no, project knowledge no"*).
+ *
+ * Overrides are DELIBERATE per-surface deviations from the uniform
+ * memory load. Profiles without overrides continue to load the uniform
+ * shape. The relaxed uniformity invariant: *"memory_chars uniform
+ * across profiles WITHOUT overrides; profiles WITH overrides declare
+ * their deviation in the registry, visible at-a-glance."*
+ *
+ * See `plans/agnostic-prompt-builder-plan.md` §"What this does NOT do"
+ * + W6-6 design note (Memory Discussions thread mpepm3fn-mkye5j).
+ */
+export type ComponentOverrides = Partial<Record<string, false>>;
 
 /**
  * The uniform memory loader. Agent-agnostic via slug; same call shape for
@@ -188,7 +211,10 @@ const COMPONENT_BUDGETS = {
  *
  * Returns a struct of {text, componentSizes} so callers can build BuildMeta.
  */
-export function loadFullMemory(slug: string): {
+export function loadFullMemory(
+    slug: string,
+    overrides: ComponentOverrides = {},
+): {
     text: string;
     componentSizes: Record<string, number>;
     truncationEvents: TruncationEvent[];
@@ -198,13 +224,21 @@ export function loadFullMemory(slug: string): {
     const sizes: Record<string, number> = {};
     const truncationEvents: TruncationEvent[] = [];
 
+    // Per-component suppression — PR-AP6. A profile's componentOverrides
+    // can opt out of specific components for a surface (e.g. dream-cycle
+    // skipping the bulk memory bank). Suppression is silent (no
+    // truncation_event, no labelled section emitted at all).
+    const isSuppressed = (component: string): boolean => overrides[component] === false;
+
     // Helper: load a file, optionally tail-trim to per-component budget,
     // emit a TruncationEvent if trimmed, append the labelled section.
+    // Honours componentOverrides — skips the component entirely if suppressed.
     const addFileComponent = (
         componentName: string,
         filePath: string,
         maxTokens: number | null,  // null = no trim
     ) => {
+        if (isSuppressed(componentName)) return;
         const raw = readFileOrEmpty(filePath);
         if (!raw) return;
         let kept: string;
@@ -252,15 +286,17 @@ export function loadFullMemory(slug: string): {
     // DEC-068 caps are the right structural mechanism; if the gradient
     // output grows beyond the budget for an agent that's a signal to
     // tighten DEC-068 caps, not to load-trim here.
-    try {
-        const gradient = loadTraversableGradient(slug);
-        if (gradient) {
-            sections.push(`--- gradient ---\n${gradient}`);
-            sizes['gradient'] = gradient.length;
+    if (!isSuppressed('gradient')) {
+        try {
+            const gradient = loadTraversableGradient(slug);
+            if (gradient) {
+                sections.push(`--- gradient ---\n${gradient}`);
+                sizes['gradient'] = gradient.length;
+            }
+        } catch {
+            // gradient load errors must not crash the build; surface via meta
+            // (empty component_breakdown for gradient signals the gap).
         }
-    } catch {
-        // gradient load errors must not crash the build; surface via meta
-        // (empty component_breakdown for gradient signals the gap).
     }
 
     // ── patterns (tail-trim if exceeded — plan §"loadFullMemory") ──
@@ -300,6 +336,57 @@ export function loadFullMemory(slug: string): {
         path.join(cfg.memoryDir, 'self-reflection.md'),
         COMPONENT_BUDGETS.self_reflection_tail,
     );
+
+    // ── failures (Jim-only via registry flag — PR-AP6) ──
+    // Jim tracks failure modes in failures.md; other agents don't have
+    // this file. Registry flag drives the conditional load — no slug
+    // literals in the builder (DEC-081).
+    if (cfg.loadFailures) {
+        addFileComponent(
+            'failures',
+            path.join(cfg.memoryDir, 'failures.md'),
+            COMPONENT_BUDGETS.failures,
+        );
+    }
+
+    // ── project-memory (Jim-only via registry flag — PR-AP6) ──
+    // Jim's portfolio of project knowledge files at ~/.han/memory/projects/.
+    // Currently loaded as a fractal pattern by supervisor-worker.ts (c0×1 +
+    // c1×3 + c2×6 + c3×12 + c4×24 + c5×48). Per the S159 measurement, the
+    // whole tree is ~7,815 tokens — well under the per-component budget.
+    // This component loads the entire tree directly (simpler than the
+    // fractal selector); compose at the load-time budget.
+    if (cfg.loadProjectMemory && !isSuppressed('project-memory')) {
+        try {
+            const projectsDir = path.join(cfg.memoryDir, 'projects');
+            if (fs.existsSync(projectsDir)) {
+                const projectFiles = fs.readdirSync(projectsDir)
+                    .filter(f => f.endsWith('.md'))
+                    .sort();  // deterministic order
+                const projectSections: string[] = [];
+                for (const pf of projectFiles) {
+                    const content = readFileOrEmpty(path.join(projectsDir, pf));
+                    if (content) projectSections.push(`### ${pf}\n${content}`);
+                }
+                if (projectSections.length > 0) {
+                    const combined = projectSections.join('\n\n');
+                    const trimmed = tailTrim(combined, COMPONENT_BUDGETS.project_memory);
+                    sections.push(`--- project-memory ---\n${trimmed.kept}`);
+                    sizes['project-memory'] = trimmed.kept.length;
+                    if (trimmed.trimmed_chars > 0) {
+                        truncationEvents.push({
+                            component: 'project-memory',
+                            trimmed_chars: trimmed.trimmed_chars,
+                            original_chars: combined.length,
+                            kept_chars: trimmed.kept.length,
+                        });
+                    }
+                }
+            }
+        } catch {
+            // project-memory load errors must not crash the build
+        }
+    }
 
     return {
         text: sections.join('\n\n'),
@@ -346,8 +433,10 @@ export function buildPrompt(
     const opening = resolveScaffold(profile.systemPromptOpening, context);
     const userScaffold = resolveScaffold(profile.userPromptScaffold, context);
 
-    // Load the uniform memory bank (agent-specific via slug; same call for every surface)
-    const memory = loadFullMemory(slug);
+    // Load the uniform memory bank (agent-specific via slug; same call for every
+    // surface — except where the profile declares componentOverrides to suppress
+    // specific components, per PR-AP6).
+    const memory = loadFullMemory(slug, profile.componentOverrides ?? {});
 
     // Assemble into the chosen envelope
     let systemPrompt: string;

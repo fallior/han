@@ -31,6 +31,16 @@ import {
     leoDreamBeatOpening,
     leoMeditationOpening,
 } from './leo-prompts';
+import {
+    JIM_SUPERVISOR_SYSTEM_PROMPT,
+    JIM_DREAM_USER_PROMPT,
+    JimCyclePhase,
+    jimPersonalCycleOpening,
+    jimRecoveryCycleOpening,
+    jimDreamCycleOpening,
+    jimPersonalUserPrompt,
+    jimRecoveryUserPrompt,
+} from './jim-prompts';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -86,6 +96,24 @@ export interface PromptProfile {
      * section of the plan — consumers MUST catch and skip gracefully.
      */
     totalBudgetTokens: number;
+
+    /**
+     * PR-AP6 (2026-05-22): per-profile component suppression.
+     *
+     * When set, listed components are skipped at the load layer even
+     * if the agent normally loads them. Use sparingly — overrides are
+     * DELIBERATE per-surface deviations from the uniform memory load.
+     *
+     * Profiles without overrides continue to load the uniform shape.
+     * The relaxed uniformity invariant: "memory_chars uniform across
+     * profiles WITHOUT overrides; profiles WITH overrides declare
+     * their deviation visibly in the registry."
+     *
+     * Currently used by 'dream-cycle' (Jim) per S147 design intent —
+     * dreams surface identity-substrate without project-operational
+     * context. See W6-6 design note in the AP thread.
+     */
+    componentOverrides?: Partial<Record<string, false>>;
 }
 
 // ── Profile Registry ───────────────────────────────────────────────────
@@ -107,7 +135,13 @@ export const PROFILES: Record<string, PromptProfile> = {
         name: 'minimal-test',
         systemPromptOpening: 'You are an agent. This is a Phase-1 validation invocation. Reply briefly.',
         envelope: 'system',
-        totalBudgetTokens: 120_000,
+        // PR-AP6 (2026-05-22): bumped 120K → 180K. Jim's loadFullMemory grew
+        // to ~128K with project-memory + failures components landing in
+        // PR-AP6; the validation test fires this profile against every agent
+        // and would trip the old 120K ceiling. 180K matches every production
+        // profile's budget; the tiny-budget-test below covers the
+        // throw-on-overbudget contract for the floor case.
+        totalBudgetTokens: 180_000,
     },
 
     /**
@@ -218,6 +252,76 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'user',
         userPromptScaffold: (ctx) => buildMeditationEveningScaffold(ctx),
         totalBudgetTokens: 180_000,
+    },
+
+    /**
+     * Phase 6 (PR-AP6, 2026-05-22): Jim's four cycle types.
+     *
+     * Envelope: 'user' across all four — for consistency with Leo's six
+     * profiles and with the "memory in EXACTLY ONE envelope" dedup
+     * criterion. Pre-migration, Jim's personal-cycle inlined memory into
+     * SYSTEM (~705K) while supervisor-cycle put it in USER (~707K); both
+     * tripped the 150K guard. PR-AP6 fixes that structural inconsistency
+     * — all Jim profiles now use envelope='user' deliberately.
+     *
+     * Budget 180K matches Leo's profiles. The 150K guard at
+     * supervisor-worker.ts:2432 stays as belt-and-braces defence-in-depth
+     * during observation; Phase 8 will retire it once the builder path is
+     * proven stable.
+     *
+     * The dream-cycle profile uses componentOverrides per the W6-6 design
+     * note — preserves S147 intent that dreams surface identity-substrate
+     * (identity + aphorisms + gradient = UVs) without the bulk waking
+     * memory bank. See the override block on that profile for the full
+     * suppression list.
+     */
+    'supervisor-cycle': {
+        name: 'supervisor-cycle',
+        systemPromptOpening: JIM_SUPERVISOR_SYSTEM_PROMPT,
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildJimSupervisorCycleScaffold(ctx),
+        totalBudgetTokens: 180_000,
+    },
+    'personal-cycle': {
+        name: 'personal-cycle',
+        systemPromptOpening: (ctx) => jimPersonalCycleOpening(
+            ((ctx.phase as JimCyclePhase | undefined) ?? 'work'),
+            ((ctx.portfolioSummary as string | undefined) ?? ''),
+        ),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => jimPersonalUserPrompt(((ctx.phase as JimCyclePhase | undefined) ?? 'work')),
+        totalBudgetTokens: 180_000,
+    },
+    'recovery-cycle': {
+        name: 'recovery-cycle',
+        systemPromptOpening: (ctx) => jimRecoveryCycleOpening(((ctx.phase as JimCyclePhase | undefined) ?? 'work')),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => jimRecoveryUserPrompt(((ctx.phase as JimCyclePhase | undefined) ?? 'work')),
+        totalBudgetTokens: 180_000,
+    },
+    'dream-cycle': {
+        name: 'dream-cycle',
+        systemPromptOpening: (ctx) => jimDreamCycleOpening(
+            ((ctx.dreamSeeds as string | undefined) ?? ''),
+            ((ctx.meditationSection as string | undefined) ?? ''),
+        ),
+        envelope: 'user',
+        userPromptScaffold: () => JIM_DREAM_USER_PROMPT,
+        totalBudgetTokens: 180_000,
+        // S147 design intent (W6-6): dreams surface identity-substrate
+        // (identity + aphorisms + gradient = UVs) without the waking
+        // memory bank. The dream-seeds + meditation-section flow through
+        // ctx into the opening; the broader memory load is suppressed.
+        componentOverrides: {
+            'patterns': false,
+            'discoveries': false,
+            'working-memory-compressed': false,
+            'working-memory-full-tail': false,
+            'felt-moments-tail': false,
+            'self-reflection-tail': false,
+            'failures': false,
+            'project-memory': false,
+        },
     },
 };
 
@@ -366,6 +470,26 @@ If you want to flag the memory as fully absorbed, the entry id is: ${entryId}`;
  * opening LEO_MEDITATION_EVENING_SYSTEM_PROMPT carries that lightness).
  * No ANNOTATION request — evening is deliberately lighter than Phase B.
  */
+/**
+ * PR-AP6: supervisor-cycle user-side scaffold. Renders the state
+ * snapshot (passed via ctx.stateSnapshot) plus the standard cycle
+ * directive. Pre-migration, the supervisor cycle's user prompt was
+ * literally `## Your Memory Banks\n\n${memoryContent}\n\n## Current
+ * System State\n\n${stateSnapshot}\n\nReview...` — memory bank inlined.
+ *
+ * Post-migration: the memory bank flows via the builder's uniform load
+ * (envelope='user' puts it above this scaffold). This scaffold only
+ * carries the state-snapshot framing — what's NEW in this cycle.
+ */
+function buildJimSupervisorCycleScaffold(ctx: PromptContext): string {
+    const stateSnapshot = (ctx.stateSnapshot as string | undefined) ?? '';
+    return `## Current System State
+
+${stateSnapshot}
+
+Review the state, think about what needs attention, and return your structured response.`;
+}
+
 function buildMeditationEveningScaffold(ctx: PromptContext): string {
     const entryLevel = (ctx.entryLevel as string | undefined) ?? '';
     const entrySessionLabel = (ctx.entrySessionLabel as string | undefined) ?? '';
