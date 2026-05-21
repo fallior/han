@@ -233,6 +233,47 @@ This means:
 
 ---
 
+## Error-handling contract (Jim's B1)
+
+Q4 sets the production default to `'fail'` for total-budget overflow. That means `buildPrompt()` will **throw** when memory + scaffolding exceeds the profile's `totalBudgetTokens`. This trades the current silent-guard-trip failure mode for a loud-throw failure mode — which is what we want for observability, but every consumer needs to handle the throw.
+
+**Each surface that calls `buildPrompt()` MUST catch the throw and treat it as a cycle/beat/response skip.** Unhandled throws become process crashes which the watchdog interprets as service failures → restart loop → silent staleness reintroduction. Caught throws become observable, recoverable, on-schedule skips.
+
+The contract:
+
+```ts
+try {
+    const { systemPrompt, userPrompt, meta } = buildPrompt(slug, 'philosophy-beat', context);
+    // ... agentQuery + result handling
+} catch (err) {
+    if (err instanceof PromptOverbudgetError) {
+        // Append to surface health file with kind + meta.
+        appendDistress({
+            kind: 'prompt-build-overbudget',
+            surface: 'philosophy-beat',
+            agent: slug,
+            estimated_tokens: err.meta.est_total_tokens_chars_div_4,
+            budget: err.meta.total_budget_tokens,
+            component_breakdown: err.meta.component_breakdown,
+            timestamp: new Date().toISOString(),
+        });
+        log(`[Leo] Beat skipped — prompt over budget (${err.meta.est_total_tokens_chars_div_4} > ${err.meta.total_budget_tokens})`);
+        return;  // skip cleanly; next schedule fires normally
+    }
+    throw err;  // unknown errors propagate; not the builder's contract
+}
+```
+
+**Implementation requirements**:
+
+1. `buildPrompt()` throws a typed error class — `PromptOverbudgetError extends Error` — carrying `meta: BuildMeta` so the consumer can inspect what was about to be sent.
+2. Each consumer (philosophy-beat, supervisor-cycle, jim-human-response, etc.) catches by type and writes to its existing health-file pipeline. Mirror the shape of `~/.han/health/{agent}-distress.jsonl` already in use by other failure paths.
+3. The skip is graceful: log + record + return. Watchdog never sees a process exit. The 4×/hour-or-whatever schedule continues; the missed beat is on disk as a forensic record; an operator who notices many overbudget events knows where to look (the profile budgets or memory bloat).
+
+**Why this matters**: without the contract, the v2 design trades known-silent-failure for unknown-crash-failure. The crash failure can manifest as watchdog restart loops, broken Robin Hood liveness checks, cascading service flapping. The catch-and-skip pattern makes the failure as loud as we want at the journal/health-file layer without affecting the runtime. Exactly the shape the gradient-triage's compression-floor uses: fail loudly to disk, skip cleanly in-process.
+
+---
+
 ## What the builder DOES fix by structural side-effect (Jim's A4)
 
 The pre-builder bug shape:
@@ -284,8 +325,11 @@ Per Darron's "start with minimum memory components and add more later", the roll
 - Implement `loadFullMemory(slug)` with ONLY `identity` + `aphorisms` components.
 - Register ONE profile: `'minimal-test'` (system-only opening, envelope=system).
 - Implement `BuildMeta` type + meta-emission.
-- **Validation test**: builds every registered profile against synthetic context, asserts each under-budget. Ships with the skeleton as the safety net for future profile changes.
-- **No production migration in this phase.** Goal: prove the shape compiles, types work, registry is discoverable.
+- Implement `PromptOverbudgetError extends Error` (per the error-handling contract section).
+- **Validation tests (two layers per Jim's B2)**:
+   1. **Per-profile budget test**: for each registered profile, build with synthetic context and assert the result fits under the profile's `totalBudgetTokens`. Catches future profile changes that bust their own budget.
+   2. **`loadFullMemory(slug)` upper-bound test**: for each registered agent, assert `loadFullMemory(slug)` itself fits under `MAX_MEMORY_BUDGET` (e.g. 100K tokens — leaves ~20K for scaffolding under 120K total). **This is the load-bearing safety net** the uniform-memory shape needs: if the memory load grows past this ceiling, ALL surfaces would break simultaneously. Per-profile tests are downstream of this; the upstream invariant catches the root condition.
+- **No production migration in this phase.** Goal: prove the shape compiles, types work, registry is discoverable, both safety nets fire on synthetic over-budget inputs.
 
 ~3 hours. Single PR.
 
