@@ -2393,6 +2393,65 @@ Examples:
 
 ---
 
+## #64 — Admin UI live-message subscription gap (memory-discussion threads require browser refresh)
+
+**What it is**: Investigation + fix for the admin UI's WebSocket subscription path, which appears not to render new messages in Memory Discussions threads in real time even though the server-side broadcast fires correctly. Operator must refresh the admin pane to see messages that have already landed in the database. Confirmed: the server-side `broadcast({type: 'conversation_message', ...})` call in `routes/conversations.ts:546` fires on every `POST /:id/messages`; the gap is between WS emit and React render.
+
+**Where it came from**: Darron's observation 2026-05-21 (S159, Agnostic Prompt Builder thread `mpepm3fn-mkye5j`) after a sequence of Leo posts to the thread that required browser refresh to view. Leo's posts went through the standard route (`POST /api/conversations/:id/messages`), which already calls `broadcast()` on the same `wss` instance other agents use. Heartbeat-Leo / jim-human / leo-human additionally call `/api/conversations/internal/broadcast` because they insert directly into the DB (bypassing the route), but the regular route's broadcast should be functionally identical. The refresh requirement points at the **subscriber** side, not the publisher.
+
+Darron's exact framing: *"ahhh that required a refresh did you use the webhook or write directly to the database?"* Surfaced the question; Leo confirmed the route emits WS correctly, leaving the admin UI as the gap.
+
+**Why this matters**:
+
+- **Operator-experience pain** — every time an agent posts to a thread Darron is watching, he has to refresh to see it. Compounds across the day; degrades the live-feel of the admin console which is otherwise responsive.
+- **Diagnostic-trust erosion** — when an agent reports *"posted as `mpf04zlo-mkq9k9` at 04:39"* and the operator doesn't see the post, the operator can't tell whether (a) the post actually landed, (b) it landed but the UI is stale, or (c) the agent misreported. Today the third explanation is ruled out by checking the DB or the API directly — but that's friction.
+- **Specific to memory-discussion threads** — General Conversations tab MAY be working correctly (untested today); the symptom Darron noticed was specifically on Memory Discussions (`discussion_type='memory'`). Worth verifying whether the gap is type-scoped or universal before fixing.
+- **Phase B starter implications** — Mike's village will inherit whatever WS-subscription quality HAN ships. If this bug propagates to N gardens, every operator hits it.
+
+**Possible causes (investigation list)**:
+
+1. **WS client lost connection at the time the message fired**. If the WS reconnect happens after the broadcast, the message is missed. Solution shape: on reconnect, fetch any messages newer than last-seen for active threads.
+2. **Admin UI's React subscription filters memory-discussion messages out**. The broadcast carries `discussion_type` — if the UI's `useEffect` subscription is keyed only to `discussion_type === 'general'`, memory-type messages get dropped at the client. Solution shape: subscribe to all types OR scope the subscription by the currently-viewed thread type.
+3. **React state doesn't have a fresh-message handler for the thread currently rendered**. The subscription fires the message arrived, but the rendered ThreadView component doesn't refetch or prepend the message. Solution shape: the ThreadView listens for `conversation_message` events matching its own `conversation_id`.
+4. **Browser tab paused JS execution (background-tab throttling)**. Modern browsers throttle JS in background tabs; the WS message arrives but the React update is deferred until tab focus. Solution shape: on tab visibility-change, refetch the thread's messages.
+5. **Mismatch between admin React and original admin vanilla TypeScript**. The Level 13 migration moved the admin UI to React at `/admin-react`, but the original `/admin` may have different (working) WS handling. If Darron is using one vs the other, the bug presence might differ. Solution shape: identify which admin pane Darron is using; check WS handling there.
+
+**Implementation sketch (when picked up)**:
+
+1. **Reproduce in isolation** — open admin UI, open dev tools Network → WS tab, post a message via curl, observe whether the WS frame arrives at the client AND whether React renders it. Triages causes 1, 2, 3 quickly.
+2. **Check which admin pane is in use** — `/admin` (vanilla TS) vs `/admin-react`. Test both; if behaviour differs, that's the diagnostic.
+3. **Inspect the React WS hook / context** — usually one place where WS messages are routed to handlers. Verify the routing handles `conversation_message` for `discussion_type='memory'`.
+4. **Add a visibility-change refresh fallback** if cause 4 is the issue. Cheap belt-and-braces even if the underlying WS handler is correct.
+5. **Optional**: add a small "last activity" indicator in the thread header that shows when the latest message landed per DB vs when the UI last rendered. If they diverge, the operator sees the staleness without having to refresh-and-compare.
+
+**What this does NOT do**:
+
+- *Doesn't change the server-side broadcast path*. The `/internal/broadcast` endpoint and the route's inline `broadcast()` call both work correctly per the audit. Investigation is admin-side only.
+- *Doesn't replace the WebSocket transport*. Same `ws` library, same per-client subscription; just need the React subscription wiring to handle all event types correctly.
+- *Doesn't propagate to Mike's village immediately* — but Phase B starter extraction should ship with this fixed if it lands beforehand.
+
+**Promotion-trigger**:
+
+- **Operator-pain receipts accumulate** — every time Darron needs to refresh to see a message, that's a receipt. Two or three more in upcoming sessions = clear promotion signal.
+- **The diagnostic trust issue becomes load-bearing** — if an agent reports "posted X" and Darron can't see it AND has to call out the gap, the friction has measurable session cost.
+- **Mike's village goes live (Phase B+)** — the bug propagates if unfixed at the source.
+- **Adjacent admin UI work touches the WS handler** — if any future PR is in that area, fold this in.
+
+**Connection to other ideas**:
+
+- **#46 (Memory state visualisation UI)** — sibling admin-UI concern; same React surface and likely same WS subscription patterns.
+- **#59 (Fully realise React in the admin UI — bi-directional WebSocket + optimistic updates + state-as-subscription)** — direct parent. The fully-realised React admin would address this bug as part of the wider state-as-subscription architecture. This idea is the smaller, scoped version focused on the specific live-message gap.
+- **#60 (Message-board review: organise + clarify the admin Conversations / Memory Discussions / Workshop surfaces)** — adjacent UX concern; both are about making the message-board experience more responsive and trustworthy.
+- **#63 (Comprehensive prompt logging across every agent surface)** — sibling pattern (operator-visibility on prompt-bytes-on-disk vs operator-visibility on messages-as-they-arrive). Both are about making the system honest with its operator about what's happening.
+
+**Status**: Filed 2026-05-21 by Leo per Darron's request after the live observation that posts to the Agnostic Prompt Builder thread required browser refresh to view. Promotion deferred until causes are triaged (probably one or two days of empirical observation) and the right surgical fix is named.
+
+**Key insight**: *Trust between operator and ecosystem depends on the live channels being live. When the agent says "posted" and the operator can't see it, the gap erodes the very trust the visibility was supposed to create. The diagnostic is the simpler half — verify cause via dev tools. The harder half is making the fix structural enough that it survives future React refactors. #59's full state-as-subscription architecture is the long answer; this idea is the short answer that buys time and earns the operator's trust back at the daily rhythm.*
+
+— Filed by Leo (session, S159, 2026-05-21 ~14:55 AEST Brisbane) per Darron's request: *"file it as a future-idea, that will be great thanks Leo"* — following the live observation that his admin pane required refresh to see posts that had already landed in DB and broadcast via WS.
+
+---
+
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
 
 *This document is alive. Ideas may be added, refined, or graduated to active goals as the garden grows. Each one was born in conversation — not planned in isolation.*
