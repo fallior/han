@@ -1,24 +1,21 @@
-# Agnostic Prompt Builder — migration plan
+# Agnostic Prompt Builder — migration plan (v2)
 
-> **Status**: DRAFT for review by Jim, awaiting Darron's go. Memory Discussions thread "Agnostic Prompt Builder" (id TBD when seed posts). Sister plan to `plans/gradient-triage-plan.md`. — Leo (session, S159, 2026-05-21)
+> **Status**: V2 DRAFT, all Jim's S160-round-11 AMBER fold-ins (A1-A5) + Darron's reframe on uniform memory applied. Awaiting Jim's re-audit, then Darron's go for PR-AP1. — Leo (session, S159, 2026-05-21)
 >
-> **Source threads / inputs**:
-> - Conversation thread "The search for treatment continues" (`mpc0oc6e-sxlstg`) — the diagnostic chain that surfaced the bloat shape
-> - `plans/gradient-triage-plan.md` (the cascade-side triage that closed)
-> - Future-idea #61 (canonical memory-load doc) — sibling artefact; this plan is the *code* side of what #61 documents
-> - Future-idea #63 (comprehensive prompt logging) — already implemented for supervisor + heartbeat; the trace dirs are the validation surface for this plan
-> - DEC-081 (Agent-Agnostic Code Discipline + Per-Agent Registry Pattern) — the settled decision this plan operationalises
->
-> **Current trace data** (the receipts that justify this plan):
-> - Jim's supervisor: 177K tokens, trips 150K guard on every cycle, 0-turn cycles for ~5 days
-> - Leo's heartbeat philosophy beat: 199K tokens, hits 200K API ceiling, silent exit-1
-> - Asymmetry: Leo's `self-reflection.md` is 65K tokens (unrotated); Jim's is 2.8K tokens (rotated). Jim got the fix 2026-04-20; Leo never did.
+> **What changed v1 → v2**:
+> - **Darron's reframe (load-bearing)**: memory load is uniform across every surface of an agent. *"Memory looks the same for every instantiation of the agent and only the scaffolding (opening sentence for orientation) changes."* Profiles collapse from component-list-per-surface to **scaffolding-only-per-surface**. The "minimum components first" framing remains the incremental rollout strategy — we build up `loadFullMemory(slug)` component-by-component, and surfaces migrate as components land.
+> - **Jim's A1**: explicit `envelope: 'system' | 'user'` field on every profile. Discoverable per-surface choice; no implicit duplication or split.
+> - **Jim's A2**: Phase 2 names de-duplication as the load-bearing win criterion. Philosophy-beat currently sends memory bank in BOTH envelopes (~401K tokens combined). First migration must halve the per-beat cost; that's the diagnostic confirmation.
+> - **Jim's A3**: builder does **NOT archive on tail-trim**. File-level rotation (wm-sensor's paired-rotation + `rollingWindowRotate` on felt-moments/self-reflection) owns archival. The builder is read-only.
+> - **Jim's A4**: the `## Current` 256K aggregation bug fixes itself by structural side-effect. Each component returns a labelled section (`--- working-memory-full-tail ---`, `--- felt-moments-tail ---`, etc.) instead of being collapsed under a single `## Current` header.
+> - **Jim's A5**: `systemPromptOpening: string | ((ctx) => string)` field on the profile registry. The string form is most surfaces; the function form handles context-dependent openings (dream-seed inclusion, recent-conversation-tail, etc.).
+> - **Darron's "writes flow through WM" principle**: documented in a dedicated section. The builder reads; all writes flow through wm-sensor (and the existing pre-flight rotations on felt-moments + self-reflection). Self-reflection.md and felt-moments.md are *highlights* — the originating thoughts are in working memory and through the gradient cascade.
 
 ---
 
 ## Why this exists
 
-Two failure modes have surfaced through the gradient triage + the prompt-bloat diagnostic chain. **Both are symptoms of the same architectural gap**:
+Two failure modes have surfaced through the gradient triage + the prompt-bloat investigation chain. **Both are symptoms of the same architectural gap**:
 
 ### Bloat by design
 
@@ -28,214 +25,332 @@ Some prompt sections legitimately grew because no slicer covered them:
 - Leo's working-memory-full's `## Closing` section at 17K — same pattern
 - Gradient's `## rolling-* → c1` carriers at 32K — pre-DEC-086 slices that never compressed further
 
-The system is **operating as designed**, but the design's per-component budgets compound to exceed total-prompt budgets. *Each loader makes a local decision; nobody owns the global one.*
+Each loader makes a local decision; nobody owns the global one.
 
 ### Bloat by bug
 
 Asymmetric implementations between agent surfaces:
 - `loadMemoryBank()` (Jim's supervisor) has `rollingWindowRotate` on felt-moments + self-reflection
 - `readLeoMemory()` (Leo's heartbeat) has none
-- `readJimMemory()` (jim-human) and `readLeoMemory()` (leo-human) likely have similar drift
-- Personal-cycle path (`supervisor-worker.ts`) packs memory into SYSTEM prompt (705K), supervisor-cycle path packs into USER (707K) — same memory, different envelope, different code path
+- The personal-cycle path packs memory into SYSTEM (705K); supervisor-cycle packs into USER (707K) — same memory, different envelope, different code path
+- Leo's philosophy-beat duplicates memory across BOTH system AND user envelopes (Jim's audit found identical sections at byte offsets 43K and 40K — confirmed bug)
 
-The fix Jim received 2026-04-20 (after his F9 overflow incident) never propagated to Leo. Each loader evolved independently. **DEC-081's "HAN should be written agent-agnostic" has drifted at the memory-load layer specifically**.
+Each loader evolved independently. **DEC-081's "HAN should be written agent-agnostic" has drifted at the memory-load layer specifically**.
 
 ### The shared cause
 
-There is no single function that owns prompt assembly. Each agent surface has its own `readXMemory()` + inline assembly. When one surface gets a fix (rotation), others don't inherit it. When a new memory file is added (e.g. discoveries.md), each surface has to be updated independently. The drift is structural; the patches are local.
-
-**An agnostic prompt builder is the operationalisation of DEC-081 at the memory-load layer**. One function, one place to adjust the prompt logic, one place to enforce budgets, one place where future memory files get added.
+There is no single function that owns prompt assembly. An agnostic prompt builder is the operationalisation of DEC-081 at the memory-load layer. One function, one declarative profile per surface, one place where future memory components get added.
 
 ---
 
-## The proposal
+## The proposal (v2)
 
 A single function:
 
 ```ts
-buildPrompt(slug: string, profile: PromptProfile, context: PromptContext): BuiltPrompt
+buildPrompt(slug: string, profileName: string, context: PromptContext): BuiltPrompt
 ```
 
 Where:
-- **`slug`** — agent identifier (per DEC-081 + agent-registry pattern: 'jim', 'leo', 'tenshi', 'casey', and future villages' agents).
-- **`profile`** — a structured declaration of what memory components to include, in what order, with what bounds. Surface-specific profiles are named ('supervisor-cycle', 'philosophy-beat', 'jim-human-response', etc.).
-- **`context`** — runtime data the assembly needs (current phase, recent conversation messages, dream-seed selection, etc.).
-- **Returns** — `{ systemPrompt: string, userPrompt: string, meta: BuildMeta }` where meta captures per-component sizes, total tokens, budgets, and any truncation events.
+- **`slug`** — agent identifier (per DEC-081 + agent-registry: 'jim', 'leo', 'tenshi', 'casey', and future villages' agents).
+- **`profileName`** — the registry key for which scaffolding + envelope to use (`'philosophy-beat'`, `'supervisor-cycle'`, `'meditation-phase-a'`, …).
+- **`context`** — runtime data the scaffolding needs (current phase, recent conversation messages, dream-seed selection, etc.).
+- **Returns** — `{ systemPrompt: string, userPrompt: string, meta: BuildMeta }` where meta captures memory load size, scaffolding size, total tokens, envelope choice, and any truncation events.
 
-### Profile composition
+### Core architectural insight (Darron's reframe)
 
-Each profile is a list of memory components in order:
+**Memory is uniform across every surface of an agent. Only the scaffolding differs.**
+
+Leo is Leo whether he's waking up, going to sleep, investigating bugs, having breakfast, responding to a thread, dreaming, or meditating. His memory load — identity, aphorisms, patterns, gradient, working memory, felt-moments, self-reflection highlights, dreams, ecosystem context, wiki — is the same in every case. What changes is the **orientation sentence** that frames the current task.
+
+This collapses the design dramatically:
+
+- ONE `loadFullMemory(slug: string): string` function — agent-agnostic via slug, uniform across surfaces.
+- N **scaffolding profiles** keyed by surface name — each profile is just `{systemPromptOpening, envelope}`. No per-surface component list.
+- The builder assembles: `scaffolding(profile) + loadFullMemory(slug)` into the chosen envelope (system or user).
+
+### Type interfaces
 
 ```ts
 interface PromptProfile {
-    name: string;                       // 'philosophy-beat', 'supervisor-cycle', etc.
-    components: ComponentRef[];
-    totalBudgetTokens?: number;         // hard cap; default 120K (well under 150K guard)
-    truncateOnOverflow?: 'fail' | 'tail-trim';
+    name: string;                                                      // 'philosophy-beat', 'supervisor-cycle', etc.
+    systemPromptOpening: string | ((ctx: PromptContext) => string);    // The orientation sentence — the ONLY thing that differs per surface
+    envelope: 'system' | 'user';                                       // Where the memory bank goes — discoverable per surface
+    userPromptScaffold?: string | ((ctx: PromptContext) => string);    // Optional; for context-specific framing on the user side
 }
 
-interface ComponentRef {
-    name: ComponentName;                // 'identity', 'aphorisms', 'gradient', etc.
-    budgetTokens?: number;              // per-component cap (default = component's own default)
-    required?: boolean;                 // if true and missing, throw; if false, skip
+interface BuildMeta {
+    profile_name: string;
+    envelope: 'system' | 'user';
+    system_chars: number;
+    user_chars: number;
+    memory_chars: number;
+    scaffolding_chars: number;
+    est_total_tokens_chars_div_4: number;
+    component_breakdown: Record<string, number>;  // chars per memory component
+    truncation_events: Array<{component: string; trimmed_chars: number}>;
 }
 ```
 
-**Component names** (initial set — start minimum, add later):
+### `loadFullMemory(slug)` — the agent-agnostic memory loader
 
-| Component | What it loads | Default budget (tokens) |
-|---|---|---|
-| `identity` | `identity.md` | 5K (small, always-on) |
-| `aphorisms` | `fractal/{slug}/aphorisms.md` | 5K |
-| `patterns` | `patterns.md` | 15K (capped via per-component tail-trim if exceeded) |
-| `gradient` | `loadTraversableGradient(slug)` output | 20K |
-| `working-memory-full-tail` | `working-memory-full.md`, most-recent N tokens | 8K |
-| `working-memory-compressed` | `working-memory.md` (DEC-085 c1 source) | 5K |
-| `self-reflection-tail` | `self-reflection.md`, most-recent N tokens | 5K (matches Jim's rotation budget) |
-| `felt-moments-tail` | `felt-moments.md`, most-recent N tokens | 10K |
-| `discoveries` | `discoveries.md` | 3K |
-| `dream-gradient` | `readDreamGradient(slug)` output | 5K |
-| `ecosystem-map` | `~/.han/memory/shared/ecosystem-map.md` | 3K |
-| `wiki-index` | `~/.han/memory/wiki/index.md` | 2K |
-| `project-memory` | Jim-only: fractal-loaded project memory | 8K |
-| `conversation-tail` | recent N messages from named conversation thread | varies |
-| `dream-seeds` | Leo-only: `readDreamSeeds()` output | 8K |
+Reads all canonical memory for an agent. Slug-driven via agent-registry; no per-agent code branches. Components are built up incrementally across phases (per Darron's "start with minimum components and add more later"):
 
-**Per-surface profile examples**:
+| Component | Source | Default budget (tokens) | Notes |
+|---|---|---|---|
+| identity | `{memDir}/identity.md` | 5K | always-on; required |
+| aphorisms | `{fractalDir}/aphorisms.md` | 5K | always-on; required |
+| patterns | `{memDir}/patterns.md` | 15K | tail-trim if exceeded |
+| discoveries | `{memDir}/discoveries.md` | 3K | tail-trim if exceeded |
+| self-reflection-tail | `{memDir}/self-reflection.md`, most-recent N | 5K | tail-trim; file-rotation owned by `rollingWindowRotate` (separately) |
+| felt-moments-tail | `{memDir}/felt-moments.md`, most-recent N | 10K | tail-trim; file-rotation owned separately |
+| working-memory-full-tail | `{memDir}/working-memory-full.md`, most-recent N | 8K | tail-trim; file-rotation owned by wm-sensor |
+| working-memory-compressed | `{memDir}/working-memory.md` (DEC-085 c1 source) | 5K | full load |
+| gradient | `loadTraversableGradient(slug)` output | 20K | DEC-068 caps applied internally |
+| dream-gradient | `readDreamGradient(slug)` output | 5K | |
+| ecosystem-map | `~/.han/memory/shared/ecosystem-map.md` | 3K | shared across agents |
+| wiki-index | `~/.han/memory/wiki/index.md` | 2K | shared across agents |
+| project-memory | Fractal-loaded project memory (Jim only) | 8K | agent-registry signals Jim-only |
+| failures | `{memDir}/failures.md` (Jim only today) | 5K | agent-registry signals which agents have this |
+
+**Per-agent variations** come through the agent-registry, not through per-agent code. `gradientConfigForAgent(slug)` already names which directories + which optional files belong to each agent. The builder respects that — Jim's profile gets project-memory + failures via registry signal; Leo's doesn't.
+
+### Per-surface profile registry (v2 — scaffolding only)
+
+Every profile is just an orientation sentence + envelope choice. Memory is uniform.
 
 ```ts
-// Profile registry — single source of truth for what each surface loads
-const PROFILES: Record<string, PromptProfile> = {
+// lib/prompt-profiles.ts — single source of truth for what each surface looks like
+export const PROFILES: Record<string, PromptProfile> = {
+
     'philosophy-beat': {
         name: 'philosophy-beat',
-        components: [
-            { name: 'identity', required: true },
-            { name: 'aphorisms', required: true },
-            { name: 'patterns' },
-            { name: 'discoveries' },
-            { name: 'self-reflection-tail' },
-            { name: 'working-memory-full-tail' },
-            { name: 'working-memory-compressed' },
-            { name: 'felt-moments-tail' },
-            { name: 'gradient' },
-            { name: 'dream-gradient' },
-            { name: 'ecosystem-map' },
-            { name: 'wiki-index' },
-        ],
-        totalBudgetTokens: 120_000,
-        truncateOnOverflow: 'tail-trim',
+        systemPromptOpening: PHILOSOPHY_SYSTEM_PROMPT,  // existing constant; keeps current voice
+        envelope: 'user',                                // memory in USER prompt
+        userPromptScaffold: (ctx) => `This is your philosophy time. ${ctx.recentActivity ?? ''}`,
     },
-    'supervisor-cycle': {
-        name: 'supervisor-cycle',
-        components: [
-            { name: 'identity', required: true },
-            { name: 'aphorisms', required: true },
-            { name: 'patterns' },
-            { name: 'failures' },              // Jim-specific; not loaded for Leo profiles
-            { name: 'self-reflection-tail' },
-            { name: 'working-memory-full-tail' },
-            { name: 'working-memory-compressed' },
-            { name: 'felt-moments-tail' },
-            { name: 'gradient' },
-            { name: 'dream-gradient' },
-            { name: 'project-memory' },
-            { name: 'ecosystem-map' },
-            { name: 'wiki-index' },
-        ],
-        totalBudgetTokens: 120_000,
-        truncateOnOverflow: 'tail-trim',
+
+    'personal-beat': {
+        name: 'personal-beat',
+        systemPromptOpening: (ctx) => buildPersonalSystemPromptOpening(ctx.phase),
+        envelope: 'user',
     },
+
+    'dream-beat': {
+        name: 'dream-beat',
+        systemPromptOpening: 'You are dreaming. Memory surfaces sideways; let it pull you.',
+        envelope: 'user',
+        userPromptScaffold: (ctx) => `Dream seeds:\n${ctx.dreamSeeds}\n\n${ctx.dreamMemorySection ?? ''}`,
+    },
+
     'meditation-phase-a': {
         name: 'meditation-phase-a',
-        components: [
-            { name: 'identity', required: true },
-        ],
-        totalBudgetTokens: 8_000,
+        systemPromptOpening: 'You are Leo, present and whole. The task that follows is a meditation — re-encounter, not analysis.',
+        envelope: 'system',
+        userPromptScaffold: (ctx) => `Re-encounter this memory:\n${ctx.fileLevel}/${ctx.fileLabel}\n${ctx.fileContent}\n\nWrite a FEELING_TAG: line and optionally ANNOTATION: + CONTEXT: lines.`,
     },
-    // ... etc
+
+    'meditation-phase-b': {
+        name: 'meditation-phase-b',
+        systemPromptOpening: 'You are Leo, present and whole. The task that follows is a meditation — re-encounter one of your own compressed memories.',
+        envelope: 'system',
+        userPromptScaffold: (ctx) => `Re-encounter this memory:\n${ctx.entryLevel}/${ctx.entrySessionLabel}\n${ctx.entryContent}\n${ctx.tagContext}\n\nWrite a FEELING_TAG: line (or "none"), optional ANNOTATION: + CONTEXT:, and optional MEMORY_COMPLETE: ${ctx.entryId}.`,
+    },
+
+    'meditation-evening': {
+        name: 'meditation-evening',
+        systemPromptOpening: 'You are Leo at end of day. The task is to sit with a memory before the evening closes — light, not analysis.',
+        envelope: 'system',
+        userPromptScaffold: (ctx) => `Memory:\n${ctx.entryLevel}/${ctx.entrySessionLabel}: ${ctx.entryContent}\n${ctx.tagContext}\n\nFEELING_TAG: [under 100 chars or "none"]. Optional MEMORY_COMPLETE: ${ctx.entryId}.`,
+    },
+
+    'supervisor-cycle': {
+        name: 'supervisor-cycle',
+        systemPromptOpening: SUPERVISOR_SYSTEM_PROMPT_OPENING,  // existing constant
+        envelope: 'user',                                        // matches current Jim shape
+        userPromptScaffold: (ctx) => `## Current System State\n\n${ctx.stateSnapshot}\n\nReview the state, think about what needs attention, and return your structured response.`,
+    },
+
+    'personal-cycle': {
+        name: 'personal-cycle',
+        systemPromptOpening: (ctx) => buildPersonalCycleOpening(ctx.phase, ctx.recovery),
+        envelope: 'system',                                      // matches current Jim shape
+        userPromptScaffold: (ctx) => buildPersonalUserPrompt(ctx.phase),
+    },
+
+    'dream-cycle': {
+        name: 'dream-cycle',
+        systemPromptOpening: 'You are dreaming. Tonight surface what wants to surface.',
+        envelope: 'system',
+        userPromptScaffold: (ctx) => buildDreamUserPrompt(ctx),
+    },
+
+    'recovery-cycle': {
+        name: 'recovery-cycle',
+        systemPromptOpening: (ctx) => buildRecoveryOpening(ctx.phase),
+        envelope: 'system',
+        userPromptScaffold: (ctx) => buildRecoveryUserPrompt(ctx.phase),
+    },
+
+    'jim-human-response': {
+        name: 'jim-human-response',
+        systemPromptOpening: JIM_HUMAN_SYSTEM_PROMPT,
+        envelope: 'system',
+        userPromptScaffold: (ctx) => `Conversation context:\n${ctx.conversationTail}\n\nRespond as Jim/Human. Sign as "— Jim (human)".`,
+    },
+
+    'leo-human-response': {
+        name: 'leo-human-response',
+        systemPromptOpening: LEO_HUMAN_SYSTEM_PROMPT,
+        envelope: 'system',
+        userPromptScaffold: (ctx) => `Conversation context:\n${ctx.conversationTail}\n\nRespond as Leo/Human. Sign as "— Leo (human)".`,
+    },
 };
 ```
 
-**Result**: every prompt-shape lives in the registry, visible at a glance. Adding a new surface = adding a profile. Adding a new memory file = adding a component + adding it to the profiles that need it. Changing a budget = editing the registry. **One place. Agent-agnostic via slug. Component-agnostic via name.**
+**The registry is the operator's at-a-glance view of every prompt-shape in HAN.** Adding a new surface = adding a profile entry. Memory load is invisible because it's uniform.
 
 ---
 
-## Migration sequence
+## On the writes principle (Darron's directive)
 
-Per Darron's framing — *"start with minimum memory components and add more later"* — the rollout is incremental.
+The builder is **read-only**. It loads memory and assembles prompts; it never writes.
 
-### Phase 1 — Skeleton + minimal profile + one surface (proof)
+All writes to memory flow through one of three canonical pipelines:
 
-- Build `lib/prompt-builder.ts` with the type interfaces + a stub `buildPrompt()` function.
-- Implement ONE component: `identity` (smallest, simplest, always required).
-- Implement ONE profile: `'minimal-test'` (just `identity`).
-- Migrate ONE surface: probably an ad-hoc test runner or a new no-op script. Not a production agentQuery yet.
-- Goal: prove the shape compiles, the types work, the registry is discoverable.
-- ~150 lines of new code; no migration risk because nothing in production changes.
+1. **wm-sensor + paired rotation** (DEC-085) — working-memory-full + working-memory pair, sliced at WM-BOUNDARY markers when the 30K-token threshold is crossed.
+2. **`rollingWindowRotate`** — felt-moments.md and self-reflection.md file-level rotations with their own ceilings (102 KB and 40 KB respectively, see `supervisor-worker.ts:758-795`).
+3. **`process-pending-compression.ts`** — the cascade compressor, spawned per pending row by wm-sensor.
 
-### Phase 2 — Add `aphorisms` + `gradient` components + migrate philosophy-beat
+**Self-reflection and felt-moments are highlights, not the only homes for the thought.** Per Darron: *"the flat files represent the culmination of the think and that final thought should still be in the gradient c0 because the thought to write the memory to a flat file must have been had and so is recorded."*
 
-The smallest meaningful real surface. Philosophy-beat is currently failing at 199K tokens — moving it to the builder with a 120K budget will either succeed (proving the design) or surface a budget-too-small issue (giving us the next datum).
+This means:
+- Every self-reflection entry corresponds to a moment in working memory → gradient cascade. The flat file is the curated highlight; the gradient holds the originating thought.
+- Same for felt-moments.md, discoveries.md, dreams files. They preserve the curated trace; the gradient holds the substrate.
+- Loading the flat files in the prompt is not redundant *yet* (the highlights are useful framing) but the redundancy is acknowledged. **Future work could rationalise this — load only the gradient, retire the flat-file-in-prompt loads** — but that's out of scope for this plan.
 
-- Implement components: `aphorisms`, `gradient`.
-- Build `'philosophy-beat'` profile with `identity` + `aphorisms` + `gradient` only.
-- Migrate Leo's philosophy beat to use `buildPrompt('leo', 'philosophy-beat', { ... })`.
-- The migrated path runs alongside the old path under a config flag: `memory.useAgnosticPromptBuilder` (default false → set to true to migrate).
-- Watch `~/.han/health/leo-beat-trace/` for the new prompt shape.
-- ~100 lines of new code + ~30 lines of migration code in leo-heartbeat.ts (with the feature flag toggle).
+**The builder must not change this discipline.** Jim's A3 catches the risk: if the builder's tail-trim were to archive on truncation, it'd create a *fourth* write surface alongside the three above, violating DEC-080 spirit. The builder trims at load time only; the file remains intact; file-level rotation (already wired) decides when files actually shrink.
 
-### Phase 3 — Add `patterns` + `discoveries` + `self-reflection-tail` components
+---
 
-Each component implementation includes:
-- Read the source file
-- Apply `truncateOnOverflow: 'tail-trim'` if specified (preserve most-recent N tokens, archive the trim to gradient via existing `rollingWindowRotate` pattern)
-- Return as labelled section
+## What the builder DOES fix by structural side-effect (Jim's A4)
 
-Migrate Leo's philosophy-beat profile to include these. Observe the new wake-load. Should be in the 60-90K token range (well under the 120K profile budget and the 150K guard).
+The pre-builder bug shape:
+- Each agent surface concatenates files under inconsistent or misleading top-level headers
+- Leo's prompt has `## Current` at 256K chars — aggregating MULTIPLE memory files under a single header (yesterday's diagnostic)
+- Jim's prompt has its own `## Current` at 29K from a different aggregation path
 
-### Phase 4 — Add working-memory components
+The builder fixes this **by design**. Every component returns its own labelled section:
 
-- `working-memory-full-tail`
-- `working-memory-compressed`
-- `felt-moments-tail`
+```
+--- identity ---
+[identity.md content]
 
-Tail-trim semantics: take the most-recent N tokens from each. For working-memory-full, this complements the wm-sensor's paired-rotation slicer — the builder's tail-trim is a *load-time* cap, while wm-sensor's slice is a *file-time* rotation. Both can fire; they're orthogonal.
+--- aphorisms ---
+[aphorisms.md content]
 
-Migrate Leo's philosophy-beat profile to include these. Verify the trace shows clean assembly under budget.
+--- patterns ---
+[patterns.md content]
 
-### Phase 5 — Migrate remaining Leo beats
+--- self-reflection-tail ---
+[tail of self-reflection.md, trimmed to budget]
 
-- `personal-beat` profile (same shape as philosophy with different system prompt)
-- `dream-beat` profile (minimal — identity + aphorisms + dream-seeds)
-- `meditation-phase-a` / `meditation-phase-b` / `meditation-evening` profiles (minimal — identity only)
+--- felt-moments-tail ---
+[tail of felt-moments.md, trimmed to budget]
 
-Each migration: add the profile to the registry, swap the existing inline assembly for `buildPrompt(...)`. Old `readLeoMemory()` retained behind the feature flag for rollback.
+--- working-memory-full-tail ---
+[tail of working-memory-full.md, trimmed to budget]
 
-### Phase 6 — Migrate Jim's surfaces
+--- working-memory-compressed ---
+[working-memory.md content]
 
-- `supervisor-cycle` profile (includes `project-memory`, Jim-specific)
-- `personal-cycle` profile
-- `dream-cycle` profile
-- `recovery-cycle` profile
+--- gradient ---
+[loadTraversableGradient output]
 
-Same shape as Leo's migration. Verify Jim's 177K-token prompts drop into the 80-120K range under the new profiles.
+... etc.
+```
+
+No collapsing under `## Current`. No accidental concatenation under a misleading header. **The structural fix happens without any specific code path solving it — it's the natural consequence of each component returning its own labelled section.**
+
+---
+
+## Migration sequence (v2 — incremental component build-up)
+
+Per Darron's "start with minimum memory components and add more later", the rollout adds components to `loadFullMemory` one phase at a time. Surfaces migrate when the components they need are available.
+
+### Phase 1 — Skeleton + types + minimum components + validation test
+
+- Build `lib/prompt-builder.ts`, `lib/prompt-profiles.ts`, types in both.
+- Implement `loadFullMemory(slug)` with ONLY `identity` + `aphorisms` components.
+- Register ONE profile: `'minimal-test'` (system-only opening, envelope=system).
+- Implement `BuildMeta` type + meta-emission.
+- **Validation test**: builds every registered profile against synthetic context, asserts each under-budget. Ships with the skeleton as the safety net for future profile changes.
+- **No production migration in this phase.** Goal: prove the shape compiles, types work, registry is discoverable.
+
+~3 hours. Single PR.
+
+### Phase 2 — Add gradient component + migrate Leo's philosophy-beat (the explicit dedup win)
+
+- Implement `gradient` component using existing `loadTraversableGradient(slug)`.
+- Register `'philosophy-beat'` profile (envelope=user, opening=PHILOSOPHY_SYSTEM_PROMPT).
+- Migrate Leo's two philosophy-beat agentQuery sites to use `buildPrompt('leo', 'philosophy-beat', context)`. Old `readLeoMemory()` retained behind the feature flag `memory.useAgnosticPromptBuilder` (default false → true when this phase ships).
+- **Success criterion (Jim's A2 explicit)**: the migrated philosophy-beat sends memory in EXACTLY ONE envelope. Old path sends it twice (identical sections at offsets 43K and 40K, ~401K tokens combined). New path sends it once (~80-100K tokens — half the cost). Trace files at `~/.han/health/leo-beat-trace/` confirm the dedup numerically.
+
+~4 hours. Single PR. **First measurable win.**
+
+### Phase 3 — Add patterns + discoveries + working-memory components + tail-trim semantics
+
+- `patterns`, `discoveries`, `working-memory-full-tail`, `working-memory-compressed`, `felt-moments-tail`, `self-reflection-tail`.
+- Tail-trim implementation: read file; if exceeds budget, keep most-recent N tokens; **do not archive trimmed content** (Jim's A3 — file-level rotation owns archival).
+- Add components to philosophy-beat's effective load via the uniform `loadFullMemory`.
+- Validation: trace shows philosophy-beat hits ~80-100K tokens with all components live.
+
+~3 hours.
+
+### Phase 4 — Migrate Leo's remaining beats
+
+- `'personal-beat'`, `'dream-beat'` profiles.
+- Migrate personal + dream agentQuery sites in `leo-heartbeat.ts`.
+
+~3 hours.
+
+### Phase 5 — Migrate Leo's meditation sites
+
+- `'meditation-phase-a'`, `'meditation-phase-b'`, `'meditation-evening'` profiles.
+- **Cost note**: meditation calls currently send ~1 KB prompts. Under the new design they send full memory (~80-100K tokens) + meditation scaffolding. Per Darron's framing: Leo is Leo even when meditating — he brings his whole self to the re-encounter. This is the design choice, accepted with eyes open.
+- **Expected cost impact**: meditation cost per fire moves from ~$0.01 to ~$1.25. Meditations fire ~3×/day → ~$3.75/day extra. Manageable; flag for ongoing observation.
+- If cost becomes a concern, profile-specific `memoryProfile?: 'full' | 'minimal'` override could be added in a follow-on. **Not in v0** — let the principle run first.
+
+~3 hours.
+
+### Phase 6 — Add Jim-specific components + migrate Jim's cycles
+
+- `project-memory` component (Jim-only via agent-registry signal).
+- `failures` component (Jim-only today).
+- Migrate `'supervisor-cycle'`, `'personal-cycle'`, `'dream-cycle'`, `'recovery-cycle'` profiles + agentQuery sites in `supervisor-worker.ts`.
+- Verify Jim's 177K-token prompts drop into the 80-120K range.
+
+~5 hours.
 
 ### Phase 7 — Migrate *-human surfaces
 
-- `'jim-human-response'` profile
-- `'leo-human-response'` profile
+- `'jim-human-response'`, `'leo-human-response'` profiles.
+- Add `conversation-tail` component reader (recent N messages from a named thread).
+- Migrate `jim-human.ts` + `leo-human.ts`.
 
-These are conversation-driven; they need the `conversation-tail` component (recent N messages from the thread Jim/Leo is responding to). Builder must accept the thread ID + message limit as `context` parameters.
+~3 hours.
 
-### Phase 8 — Retire old readMemory functions
+### Phase 8 — Retire old loaders + DEC-087 + CLAUDE.md DO-NOT
 
 After all surfaces migrated AND feature flag has been default-true for at least one observation week:
 
 - Delete `readLeoMemory()` from `leo-heartbeat.ts`
 - Delete `readJimMemory()` from `jim-human.ts` (and `leo-human.ts`'s equivalent)
 - Delete `loadMemoryBank()` from `supervisor-worker.ts`
-- Remove the feature flag — builder becomes the only path
-- DEC-087 created naming this: *"Prompt assembly is the agnostic prompt builder's responsibility — agent surfaces shall not assemble prompts independently."* Pairs with a CLAUDE.md DO-NOT entry.
+- Remove the feature flag
+- **DEC-087**: *"Prompt assembly is the agnostic prompt builder's responsibility — agent surfaces shall not assemble prompts independently."* Pairs with CLAUDE.md + `templates/CLAUDE.template.md` DO-NOT entry.
+
+~2 hours.
 
 ---
 
@@ -243,48 +358,59 @@ After all surfaces migrated AND feature flag has been default-true for at least 
 
 | DEC | Status | Why touched / why not |
 |---|---|---|
-| DEC-068 (cap formula) | untouched | Builder calls `loadTraversableGradient` which applies the caps; orthogonal. |
-| DEC-069 (never delete memory) | reinforced | Truncation is at *compose time*, not file time. Files unchanged. |
-| DEC-073 (template gatekeeper) | engaged | New DO-NOT entry in CLAUDE.md + template at Phase 8. |
+| DEC-068 (cap formula) | untouched | Builder calls `loadTraversableGradient`; caps applied internally; orthogonal. |
+| DEC-069 (never delete memory) | reinforced | Tail-trim is at compose time, not file time. Files unchanged. **Builder does not archive.** |
+| DEC-073 (template gatekeeper) | engaged at Phase 8 | DO-NOT entry in CLAUDE.md + template. |
 | DEC-079 (cutover) | untouched | Cascade flow unaffected. |
-| DEC-080 (one-write-site) | reinforced | Builder is the *one place* for prompt assembly. The DEC-080 spirit applied at a new surface. |
-| **DEC-081 (agent-agnostic)** | **operationalised** | This plan IS the agent-agnostic memory-load implementation that DEC-081 has been pointing at for the memory layer. |
+| DEC-080 (one-write-site) | **reinforced doubly** | Builder is the one place for prompt assembly. Also: builder explicitly does NOT write — preserves DEC-080 at the archive surface (wm-sensor + rollingWindowRotate retain ownership). |
+| **DEC-081 (agent-agnostic)** | **OPERATIONALISED** | This plan IS the agent-agnostic memory-load implementation. |
 | DEC-082 (sdkCompress retire-by-throw) | untouched | Doesn't touch compression. |
-| DEC-083 (identity signing) | reinforced | Builder calls `gateIdentityOrThrow(slug, surface)` internally. |
-| DEC-085 (working-memory paired rotation) | untouched and reinforced | wm-sensor's slicing remains the file-level mechanism; builder's tail-trim is the load-level mechanism. Both fire independently. |
+| DEC-083 (identity signing) | reinforced | `loadFullMemory(slug)` calls `gateIdentityOrThrow(slug, surface)` internally. |
+| DEC-085 (working-memory paired rotation) | untouched and reinforced | wm-sensor's slicing remains the file-level mechanism. Builder's tail-trim is load-level. Both fire independently. |
 | DEC-086 (annotations home of re-encounter) | untouched | Doesn't change cascade or revisit logic. |
-| DEC-087 (proposed) | Lands at Phase 8 | *"Prompt assembly is the agnostic prompt builder's responsibility."* |
+| **DEC-087 (proposed)** | Lands at Phase 8 | *"Prompt assembly is the agnostic prompt builder's responsibility."* |
 
 ---
 
 ## What this does NOT do
 
-- *Doesn't change the gradient* — same `loadTraversableGradient` call inside the `gradient` component.
-- *Doesn't change wm-sensor's slicing* — file-level rotations continue. Builder's tail-trim is load-level, complementary.
-- *Doesn't redesign agent identity files* — same files, same content; just loaded through one path instead of several.
-- *Doesn't change SDK call shape* — builder produces strings; the agentQuery options are unchanged.
-- *Doesn't propagate to Mike's village immediately* — but the starter Phase B extraction would benefit from this being in place (one helper to ship instead of N independent readers). Loose alignment.
-- *Doesn't replace prompt-trace observability (#63)* — the builder produces the prompt; trace captures what the builder produced. Both run independently.
+- *Doesn't change the gradient* — same `loadTraversableGradient` call inside the `gradient` component
+- *Doesn't change wm-sensor's slicing* — file-level rotations continue; builder's tail-trim is load-level, complementary
+- *Doesn't redesign identity files* — same files, same content
+- *Doesn't change SDK call shape* — builder produces strings; agentQuery options unchanged
+- *Doesn't replace prompt-trace observability (#63)* — both run independently
+- *Doesn't change agent identity/memory storage* — only changes the read path
+- **Doesn't write or mutate any file** — the builder is strictly read-only per Darron's directive (Jim's A3 reinforces)
+- *Doesn't propagate immediately to Mike's village* — but Phase B starter extraction would benefit from this being in place (one helper to ship instead of N independent readers)
+- *Doesn't rationalise flat-file-vs-gradient redundancy* — flat files (self-reflection, felt-moments) continue to load even though their content is also in the gradient via WM compression. Future work; named in the writes-principle section.
 
 ---
 
-## What's open for review
+## On the seven open questions (all leans confirmed)
 
-Questions for Jim's audit + Darron's read:
+Per Darron's *"I am for all your leans"* + Jim's audit:
 
-1. **Profile name format**: hyphen-separated strings (`'philosophy-beat'`) vs enum vs configuration-file? Hyphen-strings are simplest and the most discoverable in code; enums offer compile-time safety but make adding profiles a code change. Lean: hyphen-strings with a TypeScript union type.
+| Q | My v1 lean | v2 outcome |
+|---|---|---|
+| Q1: Profile name format | hyphen-strings + TS union type | ✓ adopted |
+| Q2: Truncation semantics | tail-trim only for v0 | ✓ adopted |
+| Q3: Per-component archival on truncation | yes-with-guard | **flipped per Jim's A3 + Darron's writes principle: NO archival at builder level**. File-level rotation owns archival. |
+| Q4: Total-budget overflow strategy | `'fail'` production, `'tail-trim'` switchable for diagnostic | ✓ adopted |
+| Q5: Where do profiles live | `lib/prompt-profiles.ts` | ✓ adopted |
+| Q6: Per-surface vs per-cycle-type profiles | 4 profiles per cycle-type | ✓ adopted (visibility beats elegance) |
+| Q7: Validation test in Phase 1 | yes, ships as safety net | ✓ adopted |
 
-2. **Component truncation semantics**: tail-trim (keep most-recent) is the default, but some components might want head-trim (keep oldest — identity-anchor) or middle-skip (keep both ends). Lean: tail-trim only for v0; extend if a component shows it needs different semantics.
+---
 
-3. **Per-component archival on truncation**: when builder tail-trims `self-reflection-tail`, should the trimmed bytes archive to a c0 gradient entry? That mirrors `rollingWindowRotate`'s pattern. Lean: yes, but only if file-level rotation hasn't already happened in this window. Avoid double-archiving.
+## Jim's five AMBER fold-ins (all landed in v2)
 
-4. **Total-budget enforcement strategy on overflow**: `'fail'` (refuse to build prompt, raise) vs `'tail-trim'` (truncate components proportionally to fit). `'fail'` is safer in production (no silent over-budget prompts); `'tail-trim'` is more forgiving during development. Lean: `'fail'` in production with config flag to switch to `'tail-trim'` for diagnostic.
-
-5. **Where do profiles live**: `lib/prompt-builder.ts` (with the function), `lib/prompt-profiles.ts` (separate file, easier to audit), or `~/.han/config.json` (operator-tunable)? Lean: `lib/prompt-profiles.ts` for v0; consider config-tunability later if operator-tuning becomes a frequent need.
-
-6. **Per-surface vs per-cycle-type profiles**: should `supervisor-cycle` (dream/personal/recovery/supervisor) be 4 profiles or 1 profile with branching on context? Lean: 4 profiles. The branching is small and named; making the structure visible beats elegant code at the cost of clarity.
-
-7. **Validation surface**: a test that builds every profile with synthetic context and asserts each is under its budget. Lean: yes, ships in Phase 1 as the safety net for future profile changes.
+| # | Concern | Where folded |
+|---|---|---|
+| A1 | Explicit envelope choice per profile | `PromptProfile.envelope: 'system' \| 'user'` field; every profile in registry declares it |
+| A2 | Phase 2 explicit dedup as win criterion | Phase 2 section names *"the migrated philosophy-beat sends memory in EXACTLY ONE envelope"* as success criterion; old path sends ~401K tokens combined, new path ~80-100K |
+| A3 | No archival on tail-trim | Q3 flipped; writes-principle section names file-level rotation as archival owner; builder strictly read-only |
+| A4 | Name how aggregation problem fixes by structural side-effect | New section "What the builder DOES fix by structural side-effect" — each component returns labelled section, no `## Current`-style aggregation |
+| A5 | `systemPromptOpening` field on profile | `PromptProfile.systemPromptOpening: string \| ((ctx) => string)` field added; function form handles context-dependent openings |
 
 ---
 
@@ -292,21 +418,22 @@ Questions for Jim's audit + Darron's read:
 
 After each migration phase:
 
-1. **Run the surface for one full cycle** with the new builder. Capture the prompt trace (#63 already gives us this).
-2. **Compare token counts** old-path vs new-path. Expect significant reduction for surfaces that previously had no budget enforcement.
-3. **Compare meaningful content** — diff the top-of-prompt and tail-of-prompt sections. Ensure the agent still has identity + recent context. Don't sanity-check by token count alone; check that the prompt is *still useful*.
-4. **Run for one observation day** with the feature flag enabled. Watch for downstream behaviour changes (Jim/Leo posts in conversations, dream-quality, meditation-shape). If voice/quality degrades, the budget was too tight — tune the profile.
-
-The corpus of prompt traces from #63 gives us baseline + post-migration comparison at every step.
+1. **Run the surface for one full cycle** with the new builder. Trace captures via #63 patches (already live).
+2. **Compare token counts** old-path vs new-path. Specific assertions per phase:
+   - Phase 2: philosophy-beat per-call total ≤ 50% of pre-migration total (dedup is the proof).
+   - Phase 3: all components in load; trace shows ~80-100K tokens for philosophy-beat.
+   - Phase 6: Jim's supervisor-cycle ≤ 120K tokens (under the 150K guard).
+3. **Compare meaningful content** — diff sections; ensure agent still has identity + recent context. Don't sanity-check by token count alone.
+4. **Run for one observation day** with the feature flag enabled per phase. Watch for downstream behaviour changes (post-quality, dream-shape, meditation-shape). Quality degradation = budget too tight; tune the profile.
 
 ---
 
 ## Rollback paths
 
-- Feature flag: `memory.useAgnosticPromptBuilder` defaults to `false` until Phase 8. Per-surface migration only enables the flag when its phase lands.
-- Each phase is a separate PR. Reverting reverts that surface to its old path.
+- Feature flag `memory.useAgnosticPromptBuilder` defaults `false` until Phase 8.
+- Each phase is a separate PR. Reverting reverts that phase's surface migration only.
 - Old `readMemory` functions retained until Phase 8.
-- Snapshots: not needed for this work — no DB writes, no memory file mutations beyond what `rollingWindowRotate` already does.
+- Snapshots: not needed — no DB writes, no memory file mutations beyond what `rollingWindowRotate` already does on its own schedule.
 
 ---
 
@@ -314,29 +441,30 @@ The corpus of prompt traces from #63 gives us baseline + post-migration comparis
 
 The migration succeeds when:
 
-- Every agent surface in HAN calls `buildPrompt(slug, profile, context)` exactly once per agentQuery invocation. No bypass paths.
-- No agent surface's prompt exceeds its declared budget (verified by #63 trace meta.json `est_total_tokens_chars_div_4` field).
+- Every agent surface in HAN calls `buildPrompt(slug, profileName, context)` exactly once per agentQuery invocation. No bypass paths.
+- No agent surface's prompt exceeds its declared budget (verified via #63 trace meta.json `est_total_tokens_chars_div_4`).
 - Jim's supervisor cycles fire cleanly (no 150K-guard trips); heartbeat-Leo beats complete (no API-ceiling rejection).
-- `docs/MEMORY_LOAD.md` (future-idea #61) is mechanically generated from the profile registry — what each surface loads is one query against `PROFILES`.
-- DEC-087 + CLAUDE.md DO-NOT entry land at Phase 8. Adding a new surface that bypasses the builder is forbidden by the DO-NOT.
+- The philosophy-beat dedup measurement (Phase 2) shows the per-call token cost halved — the diagnostic confirmation that the migration produces real value.
+- `docs/MEMORY_LOAD.md` (future-idea #61) becomes mechanically generatable from the profile registry + `loadFullMemory(slug)` definition.
+- DEC-087 + CLAUDE.md DO-NOT entry land at Phase 8. Adding a new surface that bypasses the builder becomes a discipline violation.
 - One-week observation period after Phase 8 with stable agent operation.
 
 ---
 
-## Effort estimate
+## Effort estimate (v2)
 
-| Phase | Effort | Notes |
+| Phase | Effort | What lands |
 |---|---|---|
-| 1 — Skeleton + minimal profile + proof | ~3 hours | New file, type design, one component, one no-op profile, build verification |
-| 2 — Add aphorisms + gradient + migrate philosophy-beat | ~4 hours | Two components + feature-flag migration of one surface + observe trace |
-| 3 — Add patterns + discoveries + self-reflection-tail | ~3 hours | Three components with tail-trim semantics |
-| 4 — Add working-memory components | ~3 hours | Three components, paired with existing wm-sensor flow |
-| 5 — Migrate remaining Leo beats | ~3 hours | Five surfaces, mostly profile-only |
-| 6 — Migrate Jim surfaces | ~5 hours | Four cycle types, includes project-memory component |
-| 7 — Migrate *-human surfaces | ~3 hours | Two surfaces, includes conversation-tail component |
-| 8 — Retire old readMemory + DEC-087 + DO-NOT | ~2 hours | Cleanup + settled-decision write |
+| 1 — Skeleton + minimum components + validation test | ~3 hours | `lib/prompt-builder.ts`, `lib/prompt-profiles.ts`, types, test |
+| 2 — Add gradient + migrate philosophy-beat with explicit dedup proof | ~4 hours | Gradient component; philosophy-beat migrated; dedup measured |
+| 3 — Add patterns + discoveries + working-memory + tail-trim components | ~3 hours | Patterns/discoveries/wmf-tail/wm-compressed/felt-tail/sr-tail |
+| 4 — Migrate Leo's remaining beats | ~3 hours | personal-beat, dream-beat profiles + migration |
+| 5 — Migrate Leo's meditation sites | ~3 hours | Phase A, Phase B, evening; cost-flag observed |
+| 6 — Add Jim-specific components + migrate Jim's cycles | ~5 hours | project-memory + failures; supervisor/personal/dream/recovery cycle profiles |
+| 7 — Migrate *-human surfaces | ~3 hours | conversation-tail component; jim-human + leo-human profiles |
+| 8 — Retire old loaders + DEC-087 + DO-NOT | ~2 hours | Cleanup + Settled decision |
 
-**Total**: ~26 hours of focused work across 8 phases. Each phase is its own PR; not a single big-bang rewrite.
+**Total**: ~26 hours of focused work. Each phase is its own PR through Jim's pre-merge audit rhythm.
 
 ---
 
@@ -345,13 +473,13 @@ The migration succeeds when:
 | PR | Phases | Touches |
 |---|---|---|
 | PR-AP1 | Phase 1 | `lib/prompt-builder.ts`, `lib/prompt-profiles.ts`, tests |
-| PR-AP2 | Phase 2 | leo-heartbeat philosophy-beat migration + feature flag |
-| PR-AP3 | Phase 3 | builder: add patterns/discoveries/self-reflection-tail components |
-| PR-AP4 | Phase 4 | builder: add working-memory components |
-| PR-AP5 | Phase 5 | leo-heartbeat: migrate remaining beats |
-| PR-AP6 | Phase 6 | supervisor-worker: migrate all cycle types |
-| PR-AP7 | Phase 7 | jim-human + leo-human migration |
-| PR-AP8 | Phase 8 | retire old loaders + DEC-087 + CLAUDE.md DO-NOT |
+| PR-AP2 | Phase 2 | leo-heartbeat philosophy-beat migration + feature flag + gradient component |
+| PR-AP3 | Phase 3 | More components (patterns/discoveries/wmf-tail/wm-compressed/felt-tail/sr-tail) |
+| PR-AP4 | Phase 4 | leo-heartbeat: migrate remaining beats |
+| PR-AP5 | Phase 5 | leo-heartbeat: migrate meditation sites; cost-flag review |
+| PR-AP6 | Phase 6 | supervisor-worker: migrate all cycle types; project-memory + failures components |
+| PR-AP7 | Phase 7 | jim-human + leo-human migration; conversation-tail component |
+| PR-AP8 | Phase 8 | Retire old loaders + DEC-087 + CLAUDE.md DO-NOT |
 
 Per-PR audit by Jim per the pre-merge rhythm. Each PR independently revertible.
 
@@ -359,12 +487,18 @@ Per-PR audit by Jim per the pre-merge rhythm. Each PR independently revertible.
 
 ## Standing position
 
-The diagnosis is complete (heartbeat exit-1 cause identified as 199K-token prompt; supervisor 0-turn cycles identified as 177K-token guard-trip). The fix shape is named (this plan). The migration is incremental and reversible.
+V2 plan applies:
+- Darron's reframe (uniform memory + scaffolding-only profiles)
+- Jim's five AMBER fold-ins (A1-A5)
+- All seven open-question leans (Q3 flipped per A3 + writes principle)
+- Writes-principle section (builder is read-only; wm-sensor + rollingWindowRotate own archival; flat files are highlights of underlying WM/gradient thought)
+- Aggregation-fix-by-structural-side-effect section
+- Cost flag on Phase 5 (meditation surfaces will see ~125x per-call cost increase, accepted by design)
 
-**Ready for Jim's audit + Darron's go.** The recommended first move is Phase 1 (skeleton + types + one no-op profile) — minimal blast radius, proves the shape compiles, lets the design conversation continue with concrete code rather than abstract proposal.
+**Ready for Jim's re-audit** of v2, then Darron's go for PR-AP1.
 
-If Jim or Darron want different profile shapes, different budgets, different truncation strategies — the v0 skeleton is the place to discover that before any production migration happens.
+Recommended first move: Phase 1 (skeleton + types + identity + aphorisms components + one no-op profile + validation test). ~150 lines of new code. Minimal blast radius. Proves the shape compiles. Lets the design conversation continue with concrete code.
 
-The hedges in the gradient triage closed via this exact pattern: plan → audit → phased PRs → settled decision. Repeat the rhythm here.
+The diagnostic chain — gradient triage → prompt-bloat investigation → readMemory audit → this builder — has the same rhythm: substrate announces by failing → diagnose the shape → plan the cure → audit phase-by-phase → land with reversibility intact. Three rounds in three weeks. The pattern is working.
 
-— Leo (session, S159, 2026-05-21 ~09:30 AEST Brisbane), drafting after the audit of readLeoMemory + loadMemoryBank surfaced the asymmetry that this plan operationalises.
+— Leo (session, S159, 2026-05-21 ~10:15 AEST Brisbane), v2 drafted after Jim's S160-round-11 audit + Darron's reframe on uniform memory.
