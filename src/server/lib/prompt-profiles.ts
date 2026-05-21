@@ -26,8 +26,10 @@ import { gradientConfigForAgent } from './agent-registry';
 import {
     LEO_PHILOSOPHY_SYSTEM_PROMPT,
     LeoNonDreamPhase,
+    LeoMeditationSurface,
     leoPersonalBeatOpening,
     leoDreamBeatOpening,
+    leoMeditationOpening,
 } from './leo-prompts';
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -176,6 +178,47 @@ export const PROFILES: Record<string, PromptProfile> = {
         userPromptScaffold: (ctx) => buildDreamBeatScaffold(ctx),
         totalBudgetTokens: 180_000,
     },
+
+    /**
+     * Phase 5 (PR-AP5, 2026-05-22): Leo's three meditation surfaces.
+     *
+     * Phase A reincorporates file-based memories into the gradient (the
+     * file context flows via ctx.fileLevel/fileLabel/fileContent).
+     * Phase B re-reads a random DB entry (ctx.entryLevel/entrySessionLabel/
+     * entryContent/entryId/tagContext). Evening sits with one entry at
+     * end of day (same ctx fields as Phase B, different framing).
+     *
+     * Envelope: 'user' across all three — consistent with the other Leo
+     * profiles (philosophy-beat, personal-beat, dream-beat). This makes
+     * five-of-five Leo profiles use the same envelope; the registry reads
+     * uniformly.
+     *
+     * Cost note: meditation calls move from ~1KB pre-migration prompts
+     * to ~117K tokens (uniform memory + scaffold). Per Darron's "Leo is
+     * Leo even when meditating" — accepted by design. ~$3.75/day extra
+     * acknowledged in plan §"Phase 5".
+     */
+    'meditation-phase-a': {
+        name: 'meditation-phase-a',
+        systemPromptOpening: leoMeditationOpening('meditation-phase-a'),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildMeditationPhaseAScaffold(ctx),
+        totalBudgetTokens: 180_000,
+    },
+    'meditation-phase-b': {
+        name: 'meditation-phase-b',
+        systemPromptOpening: leoMeditationOpening('meditation-phase-b'),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildMeditationPhaseBScaffold(ctx),
+        totalBudgetTokens: 180_000,
+    },
+    'meditation-evening': {
+        name: 'meditation-evening',
+        systemPromptOpening: leoMeditationOpening('meditation-evening'),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildMeditationEveningScaffold(ctx),
+        totalBudgetTokens: 180_000,
+    },
 };
 
 /**
@@ -262,6 +305,81 @@ Dream seeds:
 ${dreamSeeds}${dreamMemorySection}
 
 Output only the shape-token — a line or two of resonance. Do not repeat what you see in the seeds.${resumeContext}`;
+}
+
+/**
+ * PR-AP5: meditation Phase A scaffold — file-based memory to reincorporate.
+ *
+ * The file-being-meditated-on flows via ctx: fileLevel + fileLabel +
+ * fileContentType + fileContent. The opening (LEO_MEDITATION_PHASE_A_SYSTEM_PROMPT)
+ * carries the "what to write" directives (FEELING_TAG + optional ANNOTATION/CONTEXT);
+ * this scaffold renders the memory itself.
+ */
+function buildMeditationPhaseAScaffold(ctx: PromptContext): string {
+    const fileLevel = (ctx.fileLevel as string | undefined) ?? '';
+    const fileLabel = (ctx.fileLabel as string | undefined) ?? '';
+    const fileContentType = (ctx.fileContentType as string | undefined) ?? '';
+    const fileContent = (ctx.fileContent as string | undefined) ?? '';
+
+    return `Re-encounter this file-based memory:
+
+Agent: leo
+Level: ${fileLevel}
+Type: ${fileContentType}
+Label: ${fileLabel}
+Content:
+${fileContent}`;
+}
+
+/**
+ * PR-AP5: meditation Phase B scaffold — random DB entry to re-read.
+ *
+ * The entry flows via ctx: entryLevel + entrySessionLabel + entryContentType
+ * + entryContent + entryId + tagContext. The opening
+ * (LEO_MEDITATION_PHASE_B_SYSTEM_PROMPT) carries the directives + the
+ * placeholder for MEMORY_COMPLETE substitution — but the scaffold provides
+ * the concrete entry id so the agent can echo it back correctly.
+ */
+function buildMeditationPhaseBScaffold(ctx: PromptContext): string {
+    const entryLevel = (ctx.entryLevel as string | undefined) ?? '';
+    const entrySessionLabel = (ctx.entrySessionLabel as string | undefined) ?? '';
+    const entryContentType = (ctx.entryContentType as string | undefined) ?? '';
+    const entryContent = (ctx.entryContent as string | undefined) ?? '';
+    const entryId = (ctx.entryId as string | undefined) ?? '';
+    const tagContext = (ctx.tagContext as string | undefined) ?? '';
+
+    return `Re-encounter this gradient entry:
+
+Level: ${entryLevel}
+Session: ${entrySessionLabel}
+Type: ${entryContentType}
+Content: ${entryContent}
+${tagContext}
+
+If you want to flag the memory as fully absorbed, the entry id is: ${entryId}`;
+}
+
+/**
+ * PR-AP5: evening meditation scaffold — sit with one entry at end of day.
+ *
+ * Same context fields as Phase B but rendered with lighter framing (the
+ * opening LEO_MEDITATION_EVENING_SYSTEM_PROMPT carries that lightness).
+ * No ANNOTATION request — evening is deliberately lighter than Phase B.
+ */
+function buildMeditationEveningScaffold(ctx: PromptContext): string {
+    const entryLevel = (ctx.entryLevel as string | undefined) ?? '';
+    const entrySessionLabel = (ctx.entrySessionLabel as string | undefined) ?? '';
+    const entryContentType = (ctx.entryContentType as string | undefined) ?? '';
+    const entryContent = (ctx.entryContent as string | undefined) ?? '';
+    const entryId = (ctx.entryId as string | undefined) ?? '';
+    const tagContext = (ctx.tagContext as string | undefined) ?? '';
+
+    return `Sit with this memory:
+
+${entryLevel}/${entrySessionLabel} (${entryContentType}): ${entryContent}
+${tagContext}
+
+If you want to flag the memory as fully absorbed, the entry id is: ${entryId}`;
 }
 
 /**

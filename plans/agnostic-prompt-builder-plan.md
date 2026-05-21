@@ -392,6 +392,7 @@ After all surfaces migrated AND feature flag has been default-true for at least 
 - Delete `readJimMemory()` from `jim-human.ts` (and `leo-human.ts`'s equivalent)
 - Delete `loadMemoryBank()` from `supervisor-worker.ts`
 - Remove the feature flag
+- **PR-AP5 N4-2 housekeeping (Jim's PR-AP4 audit)**: also retire the discarded `readLeoMemory()` call sites in `leo-heartbeat.ts` — currently they fire on every philosophy/personal/dream beat to populate `leoMemoryForFallback`, then get discarded inside the builder branch. After Phase 8 retires the function itself, grep for `readLeoMemory(` and remove the four upstream invocations + the `leoMemoryForFallback` ctx field. Mechanical cleanup; the call sites are auto-discoverable.
 - **DEC-087**: *"Prompt assembly is the agnostic prompt builder's responsibility — agent surfaces shall not assemble prompts independently."* Pairs with CLAUDE.md + `templates/CLAUDE.template.md` DO-NOT entry.
 
 ~2 hours.

@@ -50,6 +50,33 @@ function estimateTokens(text: string): number {
     return Math.ceil(text.length / 4);
 }
 
+// PR-AP5 N4-1 fold-in (Jim's PR-AP4 audit): every memory-component label.
+// Used by every profile's dedup-criterion test as the exhaustive
+// negative-presence list against the system prompt. Pre-PR-AP5 each
+// profile test used a subset list (5-9 labels); a regression that
+// put a single non-listed component into system could slip past.
+// Centralised here so every profile gets the full invariant.
+const MEMORY_COMPONENT_LABELS = [
+    '--- identity ---',
+    '--- aphorisms ---',
+    '--- gradient ---',
+    '--- patterns ---',
+    '--- discoveries ---',
+    '--- working-memory-compressed ---',
+    '--- working-memory-full-tail ---',
+    '--- felt-moments-tail ---',
+    '--- self-reflection-tail ---',
+];
+
+function assertNoMemoryLabelsInSystem(systemPrompt: string, profileMarker: string): void {
+    for (const label of MEMORY_COMPONENT_LABELS) {
+        assert.ok(
+            !systemPrompt.includes(label),
+            `${profileMarker}: system prompt must not contain ${label} (dedup violation)`,
+        );
+    }
+}
+
 // ── Layer 2: loadFullMemory upper-bound (B2 — the load-bearing safety net) ──
 
 test('loadFullMemory(slug) for every registered agent fits under MAX_MEMORY_BUDGET', () => {
@@ -232,25 +259,10 @@ test("philosophy-beat profile builds for leo with memory in user envelope only (
 
     // The system prompt is JUST the scaffolding (orientation). It must NOT
     // contain any of the memory-component labels — those live only in user.
-    // Phase 3 adds six labels to the dedup-criterion guard: any of these
-    // appearing in the system envelope would signal a regression.
-    const dedupLabels = [
-        '--- identity ---',
-        '--- aphorisms ---',
-        '--- gradient ---',
-        '--- patterns ---',
-        '--- discoveries ---',
-        '--- working-memory-compressed ---',
-        '--- working-memory-full-tail ---',
-        '--- felt-moments-tail ---',
-        '--- self-reflection-tail ---',
-    ];
-    for (const label of dedupLabels) {
-        assert.ok(
-            !built.systemPrompt.includes(label),
-            `system prompt must not contain ${label} (dedup violation)`,
-        );
-    }
+    // PR-AP5 N4-1: now uses the shared MEMORY_COMPONENT_LABELS list so any
+    // future component addition automatically extends every profile's
+    // invariant.
+    assertNoMemoryLabelsInSystem(built.systemPrompt, 'philosophy-beat');
 
     // The user prompt holds the memory bank (when components loaded).
     if (built.meta.memory_chars > 0) {
@@ -408,13 +420,8 @@ test("personal-beat profile builds for leo (morning/work/evening) with memory in
             resumeContext: '',
         });
         assert.strictEqual(built.meta.envelope, 'user', `personal-beat[${phase}] must use envelope=user`);
-        // No memory labels in system
-        for (const label of ['--- identity ---', '--- aphorisms ---', '--- gradient ---', '--- patterns ---', '--- self-reflection-tail ---']) {
-            assert.ok(
-                !built.systemPrompt.includes(label),
-                `personal-beat[${phase}]: system prompt must not contain ${label} (dedup violation)`,
-            );
-        }
+        // PR-AP5 N4-1: exhaustive label-not-in-system check
+        assertNoMemoryLabelsInSystem(built.systemPrompt, `personal-beat[${phase}]`);
         // System contains the phase-appropriate orientation
         const phaseMarker = (
             phase === 'morning' ? 'MORNING beat' :
@@ -440,12 +447,8 @@ test("dream-beat profile builds for leo with memory in user envelope only", () =
         resumeContext: '',
     });
     assert.strictEqual(built.meta.envelope, 'user');
-    for (const label of ['--- identity ---', '--- aphorisms ---', '--- gradient ---', '--- patterns ---', '--- felt-moments-tail ---', '--- self-reflection-tail ---']) {
-        assert.ok(
-            !built.systemPrompt.includes(label),
-            `dream-beat: system prompt must not contain ${label} (dedup violation)`,
-        );
-    }
+    // PR-AP5 N4-1: exhaustive label-not-in-system check
+    assertNoMemoryLabelsInSystem(built.systemPrompt, 'dream-beat');
     assert.ok(
         built.systemPrompt.includes('DREAM beat'),
         'dream-beat: system prompt must contain "DREAM beat" marker',
@@ -475,6 +478,108 @@ test("personal-beat morning/work/evening scaffolds differ (phase branches in sca
     // Memory bank is the same across phases (uniform load — only scaffolding differs)
     assert.strictEqual(morning.meta.memory_chars, work.meta.memory_chars);
     assert.strictEqual(work.meta.memory_chars, evening.meta.memory_chars);
+});
+
+// ── PR-AP5 (Phase 5): three meditation profile assertions ──
+
+test("meditation-phase-a profile builds for leo with memory in user envelope only", () => {
+    const built = buildPrompt('leo', 'meditation-phase-a', {
+        fileLevel: 'c3',
+        fileLabel: '2026-03-15-synthetic',
+        fileContentType: 'rolled-day',
+        fileContent: '(synthetic file content for reincorporation)',
+    });
+    assert.strictEqual(built.meta.envelope, 'user', 'meditation-phase-a must use envelope=user');
+    assertNoMemoryLabelsInSystem(built.systemPrompt, 'meditation-phase-a');
+    assert.ok(
+        built.systemPrompt.includes('MEDITATION (Phase A'),
+        'meditation-phase-a: system prompt must contain "MEDITATION (Phase A" marker',
+    );
+    assert.ok(
+        built.userPrompt.includes('Re-encounter this file-based memory'),
+        'meditation-phase-a: user prompt must contain the reincorporation scaffold',
+    );
+    assert.ok(
+        built.userPrompt.includes('2026-03-15-synthetic'),
+        'meditation-phase-a: user prompt must include the file label substitution',
+    );
+    assert.ok(
+        built.meta.est_total_tokens_chars_div_4 <= 180_000,
+        `meditation-phase-a over budget: ${built.meta.est_total_tokens_chars_div_4} > 180000`,
+    );
+});
+
+test("meditation-phase-b profile builds for leo with memory in user envelope only", () => {
+    const built = buildPrompt('leo', 'meditation-phase-b', {
+        entryLevel: 'c5',
+        entrySessionLabel: 'synthetic-session',
+        entryContentType: 'rolled-day',
+        entryContent: '(synthetic entry content)',
+        entryId: 'synthetic-uuid-for-meditation',
+        tagContext: '\nExisting feeling tags: "first-tag" (initial)',
+    });
+    assert.strictEqual(built.meta.envelope, 'user');
+    assertNoMemoryLabelsInSystem(built.systemPrompt, 'meditation-phase-b');
+    assert.ok(
+        built.systemPrompt.includes('MEDITATION (Phase B'),
+        'meditation-phase-b: system prompt must contain "MEDITATION (Phase B" marker',
+    );
+    assert.ok(
+        built.userPrompt.includes('synthetic-uuid-for-meditation'),
+        'meditation-phase-b: user prompt must include the entry-id substitution (so the agent can echo it back in MEMORY_COMPLETE)',
+    );
+    assert.ok(
+        built.meta.est_total_tokens_chars_div_4 <= 180_000,
+        `meditation-phase-b over budget: ${built.meta.est_total_tokens_chars_div_4} > 180000`,
+    );
+});
+
+test("meditation-evening profile builds for leo with memory in user envelope only", () => {
+    const built = buildPrompt('leo', 'meditation-evening', {
+        entryLevel: 'c4',
+        entrySessionLabel: 'evening-synthetic',
+        entryContentType: 'session',
+        entryContent: '(synthetic evening entry)',
+        entryId: 'synthetic-evening-uuid',
+        tagContext: '',
+    });
+    assert.strictEqual(built.meta.envelope, 'user');
+    assertNoMemoryLabelsInSystem(built.systemPrompt, 'meditation-evening');
+    assert.ok(
+        built.systemPrompt.includes('EVENING MEDITATION'),
+        'meditation-evening: system prompt must contain "EVENING MEDITATION" marker',
+    );
+    assert.ok(
+        built.userPrompt.includes('synthetic-evening-uuid'),
+        'meditation-evening: user prompt must include the entry-id substitution',
+    );
+    assert.ok(
+        built.meta.est_total_tokens_chars_div_4 <= 180_000,
+        `meditation-evening over budget: ${built.meta.est_total_tokens_chars_div_4} > 180000`,
+    );
+});
+
+test("all five Leo profiles + three meditation profiles share uniform memory load (PR-AP5 uniformity invariant)", () => {
+    // The structural proof of Darron's reframe: "Leo is Leo wherever he is."
+    // memory_chars must be identical across all eight Leo profiles for any
+    // given moment-in-time (same loadFullMemory output across all surfaces).
+    const profiles = [
+        { name: 'philosophy-beat', ctx: { mode: 'independent', jimContext: '', resumeContext: '', activityContext: '' } },
+        { name: 'personal-beat', ctx: { phase: 'work', projects: '', activitySeed: '', resumeContext: '' } },
+        { name: 'dream-beat', ctx: { dreamSeeds: '', dreamMemorySection: '', resumeContext: '' } },
+        { name: 'meditation-phase-a', ctx: { fileLevel: 'c3', fileLabel: 'l', fileContentType: 't', fileContent: 'c' } },
+        { name: 'meditation-phase-b', ctx: { entryLevel: 'c5', entrySessionLabel: 's', entryContentType: 't', entryContent: 'c', entryId: 'i', tagContext: '' } },
+        { name: 'meditation-evening', ctx: { entryLevel: 'c4', entrySessionLabel: 's', entryContentType: 't', entryContent: 'c', entryId: 'i', tagContext: '' } },
+    ];
+    const builds = profiles.map(p => buildPrompt('leo', p.name, p.ctx));
+    const memoryChars = builds[0].meta.memory_chars;
+    for (let i = 1; i < builds.length; i++) {
+        assert.strictEqual(
+            builds[i].meta.memory_chars,
+            memoryChars,
+            `profile '${profiles[i].name}' has memory_chars=${builds[i].meta.memory_chars} but expected uniform ${memoryChars} (matches profile '${profiles[0].name}')`,
+        );
+    }
 });
 
 test("philosophy-beat 'jim-waiting' scaffold differs from 'independent' scaffold", () => {

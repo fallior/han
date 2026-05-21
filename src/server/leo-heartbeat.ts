@@ -61,6 +61,7 @@ import {
     LEO_MORNING_SYSTEM_PROMPT,
     LEO_EVENING_SYSTEM_PROMPT,
     LEO_SLEEP_SYSTEM_PROMPT,
+    LeoMeditationSurface,
 } from './lib/leo-prompts.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
@@ -1612,6 +1613,64 @@ function assemblePersonalBeatPrompts(ctx: PersonalBeatRuntimeContext): {
     return { systemPrompt: systemPromptText, userPrompt, builderEnabled: false };
 }
 
+// ── PR-AP5 (2026-05-22): meditation prompt assembly via the Agnostic
+//    Prompt Builder behind the same feature flag.
+//
+//    Routes to 'meditation-phase-a' / 'meditation-phase-b' /
+//    'meditation-evening' profile per surface arg. Same B1 catch + skip
+//    contract. Pre-migration fallback inline prompt passes through
+//    `fallbackUserPrompt` for one-step rollback verbatim.
+//
+//    Cost-flag honest: meditation calls move from ~1KB inline prompts to
+//    ~117K tokens (uniform memory + scaffold) when builder is ON. Per
+//    Darron's reframe — *"Leo is Leo where he is meditating"* — accepted.
+
+interface MeditationRuntimeContext {
+    // Phase A specific
+    fileLevel?: string;
+    fileLabel?: string;
+    fileContentType?: string;
+    fileContent?: string;
+    // Phase B / Evening specific
+    entryLevel?: string;
+    entrySessionLabel?: string;
+    entryContentType?: string;
+    entryContent?: string;
+    entryId?: string;
+    tagContext?: string;
+}
+
+function assembleMeditationPrompts(
+    surface: LeoMeditationSurface,
+    ctx: MeditationRuntimeContext,
+    fallbackUserPrompt: string,
+): {
+    systemPrompt: string;
+    userPrompt: string;
+    builderEnabled: boolean;
+    builderMeta?: any;
+} {
+    const flag = loadConfig()?.memory?.useAgnosticPromptBuilder;
+    const useAgnosticBuilder = flag !== false;  // default ON; explicit false disables
+    if (useAgnosticBuilder) {
+        const built = buildPrompt('leo', surface, ctx as any);
+        return {
+            systemPrompt: built.systemPrompt,
+            userPrompt: built.userPrompt,
+            builderEnabled: true,
+            builderMeta: built.meta,
+        };
+    }
+    // Fallback: no custom system prompt (matches pre-migration which passed
+    // empty string to beginBeatTrace and no systemPrompt field to agentQuery
+    // — relying on SDK default + tools=[] + cwd=HOME isolation).
+    return {
+        systemPrompt: '',
+        userPrompt: fallbackUserPrompt,
+        builderEnabled: false,
+    };
+}
+
 // ── Heartbeat: philosophy beat ───────────────────────────────
 
 async function philosophyBeat(db: Database.Database, abort: AbortController, recentActivity: string[] = []): Promise<void> {
@@ -2454,8 +2513,31 @@ Type: ${file.contentType}
 Label: ${file.label}
 Content:
 ${content}`;
+
+    let assembled: ReturnType<typeof assembleMeditationPrompts>;
+    try {
+        assembled = assembleMeditationPrompts('meditation-phase-a', {
+            fileLevel: file.level,
+            fileLabel: file.label,
+            fileContentType: file.contentType,
+            fileContent: content,
+        }, meditationPhaseAPrompt);
+    } catch (err) {
+        if (err instanceof PromptOverbudgetError) {
+            handlePromptOverbudget(err, 'meditation-phase-a', file.level);
+            // Skip cleanly — no gradient insert, no revisit; reincorporation
+            // will retry on next maybeRunDailyMeditation (untranscribed file
+            // still present until reincorporated).
+            return;
+        }
+        throw err;
+    }
+    if (assembled.builderEnabled) {
+        console.log(`[Leo] meditation-phase-a (${file.level}/${file.label}): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
+    }
+
     const q = agentQuery({
-        prompt: meditationPhaseAPrompt,
+        prompt: assembled.userPrompt,
         options: {
             model: 'claude-opus-4-7',
             maxTurns: 1,
@@ -2465,7 +2547,10 @@ ${content}`;
             env: cleanEnv,
             persistSession: false,
             tools: [],
-            stderr: beginBeatTrace('meditation-phase-a', '', meditationPhaseAPrompt),
+            ...(assembled.builderEnabled
+                ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: assembled.systemPrompt } }
+                : {}),
+            stderr: beginBeatTrace('meditation-phase-a', assembled.systemPrompt, assembled.userPrompt),
         },
     });
 
@@ -2546,8 +2631,30 @@ If the existing tags already capture how this feels, or nothing new stirs, write
 Optionally, if re-reading reveals something the original compression missed, write an ANNOTATION: line describing what you discovered, followed by CONTEXT: describing what prompted this re-reading.
 
 If this memory feels complete — fully absorbed, nothing left to discover — write: MEMORY_COMPLETE: ${entry.id}`;
+
+    let assembled: ReturnType<typeof assembleMeditationPrompts>;
+    try {
+        assembled = assembleMeditationPrompts('meditation-phase-b', {
+            entryLevel: entry.level,
+            entrySessionLabel: entry.session_label,
+            entryContentType: entry.content_type,
+            entryContent: entry.content,
+            entryId: entry.id,
+            tagContext,
+        }, meditationPhaseBPrompt);
+    } catch (err) {
+        if (err instanceof PromptOverbudgetError) {
+            handlePromptOverbudget(err, 'meditation-phase-b', entry.level);
+            return;
+        }
+        throw err;
+    }
+    if (assembled.builderEnabled) {
+        console.log(`[Leo] meditation-phase-b (${entry.level}/${entry.session_label}): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
+    }
+
     const q = agentQuery({
-        prompt: meditationPhaseBPrompt,
+        prompt: assembled.userPrompt,
         options: {
             model: 'claude-opus-4-7',
             maxTurns: 1,
@@ -2557,7 +2664,10 @@ If this memory feels complete — fully absorbed, nothing left to discover — w
             env: cleanEnv,
             persistSession: false,
             tools: [],
-            stderr: beginBeatTrace('meditation-phase-b', '', meditationPhaseBPrompt),
+            ...(assembled.builderEnabled
+                ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: assembled.systemPrompt } }
+                : {}),
+            stderr: beginBeatTrace('meditation-phase-b', assembled.systemPrompt, assembled.userPrompt),
         },
     });
 
@@ -2636,8 +2746,31 @@ ${tagContext}
 If something stirs differently from the existing tags: FEELING_TAG: [under 100 chars]
 If nothing new: FEELING_TAG: none
 If this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${entry.id}`;
+
+        let assembled: ReturnType<typeof assembleMeditationPrompts>;
+        try {
+            assembled = assembleMeditationPrompts('meditation-evening', {
+                entryLevel: entry.level,
+                entrySessionLabel: entry.session_label,
+                entryContentType: entry.content_type,
+                entryContent: entry.content,
+                entryId: entry.id,
+                tagContext,
+            }, eveningMeditationPrompt);
+        } catch (err) {
+            if (err instanceof PromptOverbudgetError) {
+                handlePromptOverbudget(err, 'meditation-evening', entry.level);
+                lastEveningMeditationDate = today;  // don't retry today
+                return;
+            }
+            throw err;
+        }
+        if (assembled.builderEnabled) {
+            console.log(`[Leo] meditation-evening (${entry.level}/${entry.session_label}): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
+        }
+
         const q = agentQuery({
-            prompt: eveningMeditationPrompt,
+            prompt: assembled.userPrompt,
             options: {
                 model: 'claude-opus-4-7',
                 maxTurns: 1,
@@ -2647,7 +2780,10 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
                 env: cleanEnv,
                 persistSession: false,
                 tools: [],
-                stderr: beginBeatTrace('meditation-evening', '', eveningMeditationPrompt),
+                ...(assembled.builderEnabled
+                    ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: assembled.systemPrompt } }
+                    : {}),
+                stderr: beginBeatTrace('meditation-evening', assembled.systemPrompt, assembled.userPrompt),
             },
         });
 
