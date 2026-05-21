@@ -13,9 +13,20 @@
  *   - The builder is STRICTLY READ-ONLY — never writes; archival is owned
  *     by wm-sensor (paired rotation) and rollingWindowRotate (file-level)
  *
- * Phase 1 (this module): skeleton + types + identity + aphorisms components
- * only. Future phases extend `loadFullMemory(slug)` with gradient, working
- * memory, felt-moments-tail, etc. See `plans/agnostic-prompt-builder-plan.md`.
+ * Phase 3 (PR-AP3, 2026-05-22): identity + aphorisms + gradient + patterns
+ * + discoveries + working-memory pair + felt-moments-tail + self-reflection-tail.
+ * Future phases extend with dream-gradient, ecosystem-map, wiki-index,
+ * project-memory (Jim-only), failures (Jim-only). See
+ * `plans/agnostic-prompt-builder-plan.md`.
+ *
+ * Tail-trim semantics (Phase 3): per-component budgets are enforced at the
+ * load layer via tail-trim — keep the most-recent N tokens of file content.
+ * **The builder is strictly READ-ONLY (Jim's A3, Darron's writes-principle):
+ * trimming at load time NEVER mutates the underlying file or archives the
+ * trimmed content.** File-level archival is owned by wm-sensor (paired
+ * rotation, DEC-085) and `rollingWindowRotate` (felt-moments + self-reflection
+ * file-level ceilings). Truncations are recorded in BuildMeta.truncation_events
+ * for forensic observation, not for write-side action.
  */
 
 import * as fs from 'fs';
@@ -31,6 +42,17 @@ import {
 
 // ── Types ──────────────────────────────────────────────────────────────
 
+export interface TruncationEvent {
+    /** Component name whose load was capped (e.g. 'self-reflection-tail'). */
+    component: string;
+    /** Number of characters discarded by tail-trim. */
+    trimmed_chars: number;
+    /** Original file size before trim. */
+    original_chars: number;
+    /** Size kept (= original_chars - trimmed_chars). */
+    kept_chars: number;
+}
+
 export interface BuildMeta {
     profile_name: string;
     agent: string;
@@ -42,6 +64,11 @@ export interface BuildMeta {
     est_total_tokens_chars_div_4: number;
     total_budget_tokens: number;
     component_breakdown: Record<string, number>;
+    /** Forensic record of which components were tail-trimmed at load. Empty
+     *  when no component needed trimming. Useful for observing which files
+     *  are pressuring their per-component budgets (operator signal that a
+     *  file-level rotation may need tightening). */
+    truncation_events: TruncationEvent[];
 }
 
 export interface BuiltPrompt {
@@ -98,6 +125,54 @@ function readFileOrEmpty(filepath: string): string {
 }
 
 /**
+ * Tail-trim a string to at most `maxTokens` (chars÷4) tokens.
+ *
+ * When trimming is needed:
+ *   1. Slice the last `maxTokens * 4` characters.
+ *   2. Advance to the first newline within the first 400 chars of the slice
+ *      so the kept content starts on a clean line boundary (prevents
+ *      mid-paragraph cuts that produce confusing partial sentences). Falls
+ *      back to raw-slice if no newline is found in that window.
+ *
+ * Strictly read-only — never touches the underlying file. Per Jim's A3
+ * + Darron's writes-principle: file-level archival is owned elsewhere
+ * (wm-sensor + rollingWindowRotate). This is a load-time cap only.
+ *
+ * Returns {kept, trimmed_chars}. Caller decides whether to emit a
+ * TruncationEvent based on `trimmed_chars > 0`.
+ */
+function tailTrim(text: string, maxTokens: number): { kept: string; trimmed_chars: number } {
+    if (!text) return { kept: '', trimmed_chars: 0 };
+    const maxChars = maxTokens * 4;
+    if (text.length <= maxChars) return { kept: text, trimmed_chars: 0 };
+
+    const tail = text.slice(-maxChars);
+    const newlineIdx = tail.indexOf('\n', 0);
+    if (newlineIdx >= 0 && newlineIdx < 400) {
+        const kept = tail.slice(newlineIdx + 1);
+        return { kept, trimmed_chars: text.length - kept.length };
+    }
+    return { kept: tail, trimmed_chars: text.length - tail.length };
+}
+
+/**
+ * Per-component budgets (in tokens, chars÷4 heuristic). Matches the
+ * `loadFullMemory` component table in `plans/agnostic-prompt-builder-plan.md`
+ * (§"`loadFullMemory(slug)` — the agent-agnostic memory loader").
+ *
+ * Single source of truth. Bump cautiously — every increase pressures the
+ * loadFullMemory MAX_MEMORY_BUDGET ceiling.
+ */
+const COMPONENT_BUDGETS = {
+    patterns: 15_000,
+    discoveries: 3_000,
+    self_reflection_tail: 5_000,
+    felt_moments_tail: 10_000,
+    working_memory_full_tail: 8_000,
+    working_memory_compressed: 5_000,
+} as const;
+
+/**
  * The uniform memory loader. Agent-agnostic via slug; same call shape for
  * every agent + every surface.
  *
@@ -113,29 +188,97 @@ function readFileOrEmpty(filepath: string): string {
  *
  * Returns a struct of {text, componentSizes} so callers can build BuildMeta.
  */
-export function loadFullMemory(slug: string): { text: string; componentSizes: Record<string, number> } {
+export function loadFullMemory(slug: string): {
+    text: string;
+    componentSizes: Record<string, number>;
+    truncationEvents: TruncationEvent[];
+} {
     const cfg = gradientConfigForAgent(slug);
     const sections: string[] = [];
     const sizes: Record<string, number> = {};
+    const truncationEvents: TruncationEvent[] = [];
 
-    // ── identity ──
-    const identity = readFileOrEmpty(path.join(cfg.memoryDir, 'identity.md'));
-    if (identity) {
-        sections.push(`--- identity ---\n${identity}`);
-        sizes['identity'] = identity.length;
-    }
+    // Helper: load a file, optionally tail-trim to per-component budget,
+    // emit a TruncationEvent if trimmed, append the labelled section.
+    const addFileComponent = (
+        componentName: string,
+        filePath: string,
+        maxTokens: number | null,  // null = no trim
+    ) => {
+        const raw = readFileOrEmpty(filePath);
+        if (!raw) return;
+        let kept: string;
+        if (maxTokens === null) {
+            kept = raw;
+        } else {
+            const trimmed = tailTrim(raw, maxTokens);
+            kept = trimmed.kept;
+            if (trimmed.trimmed_chars > 0) {
+                truncationEvents.push({
+                    component: componentName,
+                    trimmed_chars: trimmed.trimmed_chars,
+                    original_chars: raw.length,
+                    kept_chars: kept.length,
+                });
+            }
+        }
+        sections.push(`--- ${componentName} ---\n${kept}`);
+        sizes[componentName] = kept.length;
+    };
 
-    // ── aphorisms ──
-    const aphorisms = readFileOrEmpty(path.join(cfg.fractalDir, 'aphorisms.md'));
-    if (aphorisms) {
-        sections.push(`--- aphorisms ---\n${aphorisms}`);
-        sizes['aphorisms'] = aphorisms.length;
-    }
+    // ── identity (full load — bounded by hand) ──
+    addFileComponent('identity', path.join(cfg.memoryDir, 'identity.md'), null);
+
+    // ── aphorisms (full load — curated; bounded by hand) ──
+    addFileComponent('aphorisms', path.join(cfg.fractalDir, 'aphorisms.md'), null);
+
+    // ── patterns (tail-trim if exceeded — plan §"loadFullMemory") ──
+    addFileComponent('patterns', path.join(cfg.memoryDir, 'patterns.md'), COMPONENT_BUDGETS.patterns);
+
+    // ── discoveries (tail-trim if exceeded) ──
+    addFileComponent('discoveries', path.join(cfg.memoryDir, 'discoveries.md'), COMPONENT_BUDGETS.discoveries);
+
+    // ── working-memory-compressed (DEC-085 c1 source — paired-rotated by
+    //    wm-sensor; full load up to its budget) ──
+    addFileComponent(
+        'working-memory-compressed',
+        path.join(cfg.memoryDir, 'working-memory.md'),
+        COMPONENT_BUDGETS.working_memory_compressed,
+    );
+
+    // ── working-memory-full-tail (DEC-085 c0 source — most-recent N tokens) ──
+    addFileComponent(
+        'working-memory-full-tail',
+        path.join(cfg.memoryDir, 'working-memory-full.md'),
+        COMPONENT_BUDGETS.working_memory_full_tail,
+    );
+
+    // ── felt-moments-tail (most-recent N tokens; file-level rotation owned
+    //    by `rollingWindowRotate` at the writer side) ──
+    addFileComponent(
+        'felt-moments-tail',
+        path.join(cfg.memoryDir, 'felt-moments.md'),
+        COMPONENT_BUDGETS.felt_moments_tail,
+    );
+
+    // ── self-reflection-tail (most-recent N tokens; carries the operational
+    //    weight of Leo's 65K-token unrotated self-reflection.md as of
+    //    2026-05-21 until PR-LSR lands the writer-side rotation parity fix) ──
+    addFileComponent(
+        'self-reflection-tail',
+        path.join(cfg.memoryDir, 'self-reflection.md'),
+        COMPONENT_BUDGETS.self_reflection_tail,
+    );
 
     // ── gradient ──
     // DB-backed traversable gradient (DEC-068 caps applied internally; UVs +
     // c5→c4→c3→c2→c1 tail by recency). Returns '' when no DB entries for the
     // agent yet — silently skipped here, matching readFileOrEmpty semantics.
+    // Not tail-trimmed at the builder layer: the gradient output is ordered
+    // identity-first (UVs lead), so tail-trim would discard the kernel.
+    // DEC-068 caps are the right structural mechanism; if the gradient
+    // output grows beyond the budget for an agent that's a signal to
+    // tighten DEC-068 caps, not to load-trim here.
     try {
         const gradient = loadTraversableGradient(slug);
         if (gradient) {
@@ -150,6 +293,7 @@ export function loadFullMemory(slug: string): { text: string; componentSizes: Re
     return {
         text: sections.join('\n\n'),
         componentSizes: sizes,
+        truncationEvents,
     };
 }
 
@@ -220,6 +364,7 @@ export function buildPrompt(
         est_total_tokens_chars_div_4: estimateTokens(systemPrompt) + estimateTokens(userPrompt),
         total_budget_tokens: profile.totalBudgetTokens,
         component_breakdown: memory.componentSizes,
+        truncation_events: memory.truncationEvents,
     };
 
     if (meta.est_total_tokens_chars_div_4 > profile.totalBudgetTokens) {

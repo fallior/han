@@ -474,7 +474,7 @@ After each migration phase:
 
 ## Rollback paths
 
-- Feature flag `memory.useAgnosticPromptBuilder` defaults `false` until Phase 8.
+- Feature flag `memory.useAgnosticPromptBuilder` is **ON by default since Phase 2** (PR-AP2, commit `4fb0100`, 2026-05-22). The plan's earlier text named a Phase 8 flip; Jim's PR-AP2 audit (N1) caught the doc-vs-code drift — the operational call landed at PR-AP2 so the dedup-win measurement would be live in production rather than gated behind a flag operators wouldn't set. To disable for one-step rollback per phase, set `memory.useAgnosticPromptBuilder: false` in `~/.han/config.json`; the migrated surface reverts to its pre-migration inline assembly which is preserved verbatim until Phase 8 retires the old loaders.
 - Each phase is a separate PR. Reverting reverts that phase's surface migration only.
 - Old `readMemory` functions retained until Phase 8.
 - Snapshots: not needed — no DB writes, no memory file mutations beyond what `rollingWindowRotate` already does on its own schedule.

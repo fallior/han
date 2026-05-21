@@ -29,9 +29,21 @@ import { PROFILES, profileByName } from '../lib/prompt-profiles';
 import { registeredAgentSlugs } from '../lib/agent-registry';
 
 // The upper-bound budget for `loadFullMemory(slug)` itself. Leaves room
-// for ~20K tokens of scaffolding under a typical 120K profile budget.
-// Bump cautiously as components are added in future phases.
-const MAX_MEMORY_BUDGET = 100_000;
+// for scaffolding under per-profile total budgets (philosophy-beat is
+// 180K; future Jim profiles target similar).
+//
+// Phase 3 (PR-AP3, 2026-05-22): bumped 100K → 150K to accommodate the
+// six new components (patterns + discoveries + working-memory-compressed
+// + working-memory-full-tail + felt-moments-tail + self-reflection-tail)
+// landing alongside the existing identity + aphorisms + gradient.
+//
+// Empirical Leo load post-PR-AP3: ~112K tokens (gradient dominates at
+// ~73K; the six new components add ~36K combined after tail-trim).
+// Empirical Jim load: ~121K tokens (aphorisms larger; otherwise similar).
+//
+// 150K leaves ~38K margin for component growth before the test fires.
+// Bump cautiously — every increase pressures profile budgets in turn.
+const MAX_MEMORY_BUDGET = 150_000;
 
 function estimateTokens(text: string): number {
     if (!text) return 0;
@@ -144,6 +156,7 @@ test('PromptOverbudgetError carries meta with all diagnostic fields', () => {
         est_total_tokens_chars_div_4: 50_013,
         total_budget_tokens: 1000,
         component_breakdown: { identity: 3080, aphorisms: 5000 },
+        truncation_events: [],
     };
     const err = new PromptOverbudgetError(meta);
     assert.strictEqual(err.name, 'PromptOverbudgetError');
@@ -219,18 +232,25 @@ test("philosophy-beat profile builds for leo with memory in user envelope only (
 
     // The system prompt is JUST the scaffolding (orientation). It must NOT
     // contain any of the memory-component labels — those live only in user.
-    assert.ok(
-        !built.systemPrompt.includes('--- identity ---'),
-        'system prompt must not contain identity component (dedup violation)',
-    );
-    assert.ok(
-        !built.systemPrompt.includes('--- aphorisms ---'),
-        'system prompt must not contain aphorisms component (dedup violation)',
-    );
-    assert.ok(
-        !built.systemPrompt.includes('--- gradient ---'),
-        'system prompt must not contain gradient component (dedup violation)',
-    );
+    // Phase 3 adds six labels to the dedup-criterion guard: any of these
+    // appearing in the system envelope would signal a regression.
+    const dedupLabels = [
+        '--- identity ---',
+        '--- aphorisms ---',
+        '--- gradient ---',
+        '--- patterns ---',
+        '--- discoveries ---',
+        '--- working-memory-compressed ---',
+        '--- working-memory-full-tail ---',
+        '--- felt-moments-tail ---',
+        '--- self-reflection-tail ---',
+    ];
+    for (const label of dedupLabels) {
+        assert.ok(
+            !built.systemPrompt.includes(label),
+            `system prompt must not contain ${label} (dedup violation)`,
+        );
+    }
 
     // The user prompt holds the memory bank (when components loaded).
     if (built.meta.memory_chars > 0) {
@@ -257,6 +277,120 @@ test("philosophy-beat profile builds for leo with memory in user envelope only (
         built.meta.est_total_tokens_chars_div_4 <= 180_000,
         `philosophy-beat over budget: ${built.meta.est_total_tokens_chars_div_4} > 180000`,
     );
+});
+
+// ── PR-AP3 (Phase 3): six new components + tail-trim + truncation_events ──
+
+test('Phase 3 components register in componentSizes when files present', () => {
+    // For each registered agent, loadFullMemory should expose at least the
+    // labelled components that have non-empty source files. We don't require
+    // all six to be present (some agents have empty discoveries.md, etc.)
+    // — but we require the labels in componentSizes to match the labels
+    // in the text. The structural invariant: every key in componentSizes
+    // must have a corresponding `--- {key} ---` section in text.
+    const allowedComponents = new Set([
+        'identity', 'aphorisms', 'gradient', 'patterns', 'discoveries',
+        'working-memory-compressed', 'working-memory-full-tail',
+        'felt-moments-tail', 'self-reflection-tail',
+    ]);
+    for (const slug of registeredAgentSlugs()) {
+        const mem = loadFullMemory(slug);
+        for (const key of Object.keys(mem.componentSizes)) {
+            assert.ok(
+                allowedComponents.has(key),
+                `${slug}: unexpected component '${key}' in componentSizes`,
+            );
+            assert.ok(
+                mem.text.includes(`--- ${key} ---`),
+                `${slug}: component '${key}' present in sizes but no '--- ${key} ---' section in text`,
+            );
+        }
+    }
+});
+
+test('Phase 3 tail-trim emits TruncationEvent when a component exceeds its budget', () => {
+    // Tail-trim is observable: when a file exceeds its per-component budget,
+    // loadFullMemory must include a TruncationEvent in truncationEvents.
+    // We don't assert which components specifically trim (depends on agent
+    // state at test time); we assert the STRUCTURE: every event has the
+    // expected shape and references a known component, kept_chars matches
+    // text-section length, and trimmed_chars + kept_chars == original_chars.
+    const tailComponents = new Set([
+        'patterns', 'discoveries', 'working-memory-compressed',
+        'working-memory-full-tail', 'felt-moments-tail', 'self-reflection-tail',
+    ]);
+    for (const slug of registeredAgentSlugs()) {
+        const mem = loadFullMemory(slug);
+        for (const event of mem.truncationEvents) {
+            assert.ok(
+                tailComponents.has(event.component),
+                `${slug}: truncation_event references unknown component '${event.component}'`,
+            );
+            assert.ok(
+                event.trimmed_chars > 0,
+                `${slug}: truncation_event for ${event.component} has trimmed_chars=${event.trimmed_chars} (should be > 0 when present)`,
+            );
+            assert.strictEqual(
+                event.trimmed_chars + event.kept_chars,
+                event.original_chars,
+                `${slug}: ${event.component} truncation arithmetic broken (${event.trimmed_chars} + ${event.kept_chars} ≠ ${event.original_chars})`,
+            );
+            // kept_chars should match the section size in componentSizes
+            // (within a small newline-anchor difference, since the trim
+            // advances past the first newline).
+            assert.ok(
+                Math.abs(mem.componentSizes[event.component] - event.kept_chars) < 5,
+                `${slug}: ${event.component} kept_chars=${event.kept_chars} doesn't match componentSizes[${event.component}]=${mem.componentSizes[event.component]}`,
+            );
+        }
+    }
+});
+
+test('BuildMeta carries truncation_events through buildPrompt', () => {
+    // Build philosophy-beat for leo and verify truncation_events appears
+    // on the meta. Cannot assert specific events without knowing Leo's
+    // current memory state, but the FIELD must always exist (empty array
+    // when nothing trimmed) and shapes must validate.
+    const built = buildPrompt('leo', 'philosophy-beat', {
+        mode: 'independent',
+        jimContext: '(test)',
+        resumeContext: '',
+        activityContext: '',
+    });
+    assert.ok(Array.isArray(built.meta.truncation_events), 'meta.truncation_events must always be an array');
+    for (const event of built.meta.truncation_events) {
+        assert.ok(typeof event.component === 'string' && event.component.length > 0);
+        assert.ok(typeof event.trimmed_chars === 'number');
+        assert.ok(typeof event.kept_chars === 'number');
+        assert.ok(typeof event.original_chars === 'number');
+    }
+});
+
+test('tail-trim never exceeds per-component budget (chars÷4 estimate)', () => {
+    // Hard structural property: for any component that emits a
+    // truncation_event, kept_chars ÷ 4 must be ≤ the component's budget.
+    // The budgets are private to prompt-builder.ts; we re-encode the
+    // expected ceilings here to provide an out-of-band sanity check.
+    const budgets: Record<string, number> = {
+        'patterns': 15_000,
+        'discoveries': 3_000,
+        'self-reflection-tail': 5_000,
+        'felt-moments-tail': 10_000,
+        'working-memory-full-tail': 8_000,
+        'working-memory-compressed': 5_000,
+    };
+    for (const slug of registeredAgentSlugs()) {
+        const mem = loadFullMemory(slug);
+        for (const event of mem.truncationEvents) {
+            const budget = budgets[event.component];
+            if (budget === undefined) continue;  // not a budget-trimmed component
+            const keptTokens = Math.ceil(event.kept_chars / 4);
+            assert.ok(
+                keptTokens <= budget,
+                `${slug}: ${event.component} kept ${keptTokens} tokens > budget ${budget}`,
+            );
+        }
+    }
 });
 
 test("philosophy-beat 'jim-waiting' scaffold differs from 'independent' scaffold", () => {
