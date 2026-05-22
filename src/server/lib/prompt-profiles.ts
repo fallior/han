@@ -41,6 +41,11 @@ import {
     jimPersonalUserPrompt,
     jimRecoveryUserPrompt,
 } from './jim-prompts';
+import {
+    JIM_HUMAN_RESPONSE_SYSTEM_PROMPT,
+    LEO_HUMAN_RESPONSE_SYSTEM_PROMPT,
+    buildHumanResponseScaffold,
+} from './human-prompts';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -299,6 +304,34 @@ export const PROFILES: Record<string, PromptProfile> = {
         userPromptScaffold: (ctx) => jimRecoveryUserPrompt(((ctx.phase as JimCyclePhase | undefined) ?? 'work')),
         totalBudgetTokens: 180_000,
     },
+    /**
+     * Phase 7 (PR-AP7, 2026-05-22): the *-human responder surfaces.
+     * Both envelope='user' for consistency. The conversation/Discord
+     * context flows via ctx (NOT as a memory component per W7-2) —
+     * each conversation is its own runtime data, not part of the
+     * agent's persistent memory. The agent's uniform memory bank
+     * loads above; the per-call scaffold renders below.
+     *
+     * The two-Jims asymmetry from patterns.md (Mar-7) dissolves at
+     * this PR: jim-human-response and supervisor-cycle now both load
+     * via loadFullMemory('jim') with identical components. Same Jim
+     * at every seat. Same Leo at every seat.
+     */
+    'jim-human-response': {
+        name: 'jim-human-response',
+        systemPromptOpening: JIM_HUMAN_RESPONSE_SYSTEM_PROMPT,
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildHumanResponseScaffold(ctx as any),
+        totalBudgetTokens: 180_000,
+    },
+    'leo-human-response': {
+        name: 'leo-human-response',
+        systemPromptOpening: LEO_HUMAN_RESPONSE_SYSTEM_PROMPT,
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildHumanResponseScaffold(ctx as any),
+        totalBudgetTokens: 180_000,
+    },
+
     'dream-cycle': {
         name: 'dream-cycle',
         systemPromptOpening: (ctx) => jimDreamCycleOpening(

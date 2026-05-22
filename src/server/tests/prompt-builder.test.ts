@@ -682,6 +682,86 @@ test("personal-cycle phase-branching opening works for Jim", () => {
     assert.strictEqual(work.meta.memory_chars, evening.meta.memory_chars);
 });
 
+// ── PR-AP7 (Phase 7): *-human responder profile assertions ──
+
+test("jim-human-response profile builds with memory in user envelope only (PR-AP7 dedup)", () => {
+    const conv = buildPrompt('jim', 'jim-human-response', {
+        source: 'conversation',
+        title: 'synthetic-thread',
+        conversationId: 'synth-123',
+        conversationContext: '[synthetic recent messages]',
+    });
+    assert.strictEqual(conv.meta.envelope, 'user');
+    assertNoMemoryLabelsInSystem(conv.systemPrompt, 'jim-human-response/conversation');
+    assert.ok(
+        conv.systemPrompt.includes('jim-human, the responder process'),
+        'jim-human-response: system prompt must contain jim-human identity marker',
+    );
+    assert.ok(
+        conv.systemPrompt.includes('— Jim (human)'),
+        'jim-human-response: system prompt must mandate "— Jim (human)" signature',
+    );
+    assert.ok(
+        conv.userPrompt.includes('synthetic-thread'),
+        'jim-human-response: user prompt must include conversation title substitution',
+    );
+    assert.ok(
+        conv.meta.est_total_tokens_chars_div_4 <= 180_000,
+        `jim-human-response over budget: ${conv.meta.est_total_tokens_chars_div_4} > 180000`,
+    );
+
+    // Discord mode
+    const disc = buildPrompt('jim', 'jim-human-response', {
+        source: 'discord',
+        channelName: 'synth-channel',
+        conversationContext: '[synthetic discord history]',
+    });
+    assert.ok(
+        disc.userPrompt.includes('#synth-channel'),
+        'jim-human-response/discord: scaffold must include channel name',
+    );
+});
+
+test("leo-human-response profile builds with memory in user envelope only (PR-AP7 dedup)", () => {
+    const conv = buildPrompt('leo', 'leo-human-response', {
+        source: 'conversation',
+        title: 'synthetic-leo-thread',
+        conversationId: 'synth-leo-456',
+        conversationContext: '[synthetic]',
+    });
+    assert.strictEqual(conv.meta.envelope, 'user');
+    assertNoMemoryLabelsInSystem(conv.systemPrompt, 'leo-human-response/conversation');
+    assert.ok(
+        conv.systemPrompt.includes('leo-human, the responder process'),
+        'leo-human-response: system prompt must contain leo-human identity marker',
+    );
+    assert.ok(
+        conv.systemPrompt.includes('— Leo (human)'),
+        'leo-human-response: system prompt must mandate "— Leo (human)" signature',
+    );
+    assert.ok(
+        conv.meta.est_total_tokens_chars_div_4 <= 180_000,
+        `leo-human-response over budget: ${conv.meta.est_total_tokens_chars_div_4} > 180000`,
+    );
+});
+
+test("the two-Jims asymmetry dissolves: supervisor-cycle and jim-human-response share uniform memory load", () => {
+    // PR-AP7 W7-3: pre-migration, jim-human loaded less than supervisor-Jim
+    // (no project memory, smaller gradient — documented in Leo's patterns.md
+    // from 2026-03-07 as "two Jims' context asymmetry"). Post-PR-AP7, both
+    // route through loadFullMemory('jim') with identical components. The
+    // asymmetry that's been documented for 11+ weeks dissolves structurally.
+    const supervisor = buildPrompt('jim', 'supervisor-cycle', { phase: 'work', stateSnapshot: '' });
+    const human = buildPrompt('jim', 'jim-human-response', {
+        source: 'conversation', title: 't', conversationId: 'c', conversationContext: '',
+    });
+    assert.strictEqual(
+        supervisor.meta.memory_chars,
+        human.meta.memory_chars,
+        `two-Jims asymmetry: supervisor-cycle has memory_chars=${supervisor.meta.memory_chars} but jim-human-response has ${human.meta.memory_chars} (should be identical post-PR-AP7)`,
+    );
+});
+
 test("Jim's loadFullMemory loads project-memory + failures (registry flag); Leo's doesn't", () => {
     // PR-AP6: registry-driven per-agent capability flags.
     const jimMem = loadFullMemory('jim');

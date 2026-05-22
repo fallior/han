@@ -27,6 +27,7 @@ import { appendPairedMemory } from './lib/memory-paired-writer';
 import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { gateIdentityOrThrow } from './lib/identity-signing';
+import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -490,7 +491,48 @@ PRIOR AGENT FAILED (acknowledge briefly in your own voice before responding):
 ${priorAgentFailed.agent} tried to respond but couldn't (${priorAgentFailed.reason}). One natural sentence at the top of your response: "${priorAgentFailed.agent} seems to have had trouble on this one — let me take it." Then respond normally. Do NOT repeat the distress details; do NOT apologise for them; do NOT use a system-notice tone.
 ` : '';
 
-        const prompt = `Conversation: "${title}" (id: ${conversationId})
+        // PR-AP7 (2026-05-22): respondToConversation prompt assembly via the
+        // Agnostic Prompt Builder behind feature flag
+        // memory.useAgnosticPromptBuilder (default ON). Conversation tail
+        // flows through ctx (W7-2: conversation-tail is per-call runtime
+        // data, NOT a memory component). Memory bank loads via the builder's
+        // uniform loadFullMemory('jim'). Per the B1 contract, an over-budget
+        // build is caught, distress written via writeJemmaAck, dispatch
+        // marked failed without crashing the worker.
+        const useAgnosticBuilder = (() => {
+            try {
+                const cfg = JSON.parse(fs.readFileSync(path.join(HAN_DIR, 'config.json'), 'utf-8'));
+                return cfg?.memory?.useAgnosticPromptBuilder !== false;
+            } catch { return true; }
+        })();
+        let agnosticSystemPrompt = '';
+        let agnosticUserPrompt = '';
+        if (useAgnosticBuilder) {
+            try {
+                const built = buildPrompt('jim', 'jim-human-response', {
+                    source: 'conversation',
+                    title,
+                    conversationId,
+                    conversationContext,
+                    priorAgentFailed,
+                });
+                agnosticSystemPrompt = built.systemPrompt;
+                agnosticUserPrompt = built.userPrompt;
+                console.log(`[Jim/Human] jim-human-response: agnostic builder ON, ~${built.meta.est_total_tokens_chars_div_4} tokens (memory ${built.meta.memory_chars} chars, envelope=${built.meta.envelope})`);
+            } catch (err) {
+                if (err instanceof PromptOverbudgetError) {
+                    console.log(`[Jim/Human] Prompt over budget for "${title}" (${err.meta.est_total_tokens_chars_div_4} > ${err.meta.total_budget_tokens}) — skipping`);
+                    writeJemmaAck(dispatchId, 'jim', 'failed', {
+                        reason: `prompt-build-overbudget: ${err.meta.est_total_tokens_chars_div_4}>${err.meta.total_budget_tokens}`,
+                        compose_duration_ms: Date.now() - composeStartMs,
+                    });
+                    return;
+                }
+                throw err;
+            }
+        }
+
+        const prompt = useAgnosticBuilder ? agnosticUserPrompt : `Conversation: "${title}" (id: ${conversationId})
 
 Recent messages:
 ---
@@ -542,7 +584,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
                     systemPrompt: {
                         type: 'preset' as const,
                         preset: 'claude_code' as const,
-                        append: DISCORD_ATTACHMENT_HINT,
+                        append: useAgnosticBuilder ? agnosticSystemPrompt : DISCORD_ATTACHMENT_HINT,
                     },
                 },
             });
@@ -620,7 +662,37 @@ async function respondToDiscord(signal: SignalData): Promise<void> {
 
     const jimMemory = readJimMemory();
 
-    const prompt = `Discord channel: #${channelName}
+    // PR-AP7: Discord path also routes through the agnostic builder via the
+    // 'jim-human-response' profile (source='discord' branches in the
+    // scaffold). Same B1 contract pattern.
+    const useAgnosticBuilderDiscord = (() => {
+        try {
+            const cfg = JSON.parse(fs.readFileSync(path.join(HAN_DIR, 'config.json'), 'utf-8'));
+            return cfg?.memory?.useAgnosticPromptBuilder !== false;
+        } catch { return true; }
+    })();
+    let agnosticDiscordSystem = '';
+    let agnosticDiscordUser = '';
+    if (useAgnosticBuilderDiscord) {
+        try {
+            const built = buildPrompt('jim', 'jim-human-response', {
+                source: 'discord',
+                channelName,
+                conversationContext: contextBlock,
+            });
+            agnosticDiscordSystem = built.systemPrompt;
+            agnosticDiscordUser = built.userPrompt;
+            console.log(`[Jim/Human] jim-human-response (discord): agnostic builder ON, ~${built.meta.est_total_tokens_chars_div_4} tokens (memory ${built.meta.memory_chars} chars)`);
+        } catch (err) {
+            if (err instanceof PromptOverbudgetError) {
+                console.log(`[Jim/Human] Discord prompt over budget for #${channelName} — skipping`);
+                return;
+            }
+            throw err;
+        }
+    }
+
+    const prompt = useAgnosticBuilderDiscord ? agnosticDiscordUser : `Discord channel: #${channelName}
 
 Recent messages:
 ---
@@ -657,7 +729,7 @@ CRITICAL: Output ONLY your Discord message. Keep it concise and conversational. 
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
-                append: DISCORD_ATTACHMENT_HINT,
+                append: useAgnosticBuilderDiscord ? agnosticDiscordSystem : DISCORD_ATTACHMENT_HINT,
             },
         },
     });
