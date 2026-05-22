@@ -6125,3 +6125,104 @@ No code changed. No `src/` files touched in this PR. Phase 4 (the four `activeCa
 - **PR-T3** (Phase 5 prune via `mechanical-promotion` noise-qualifier) lands after, reducing wake-load size for both agents.
 - **Phase 8 lift** of the tourniquet after pre-conditions met (full Phase 8 checklist in the plan).
 
+
+
+## DEC-087: Prompt Assembly Is the Agnostic Prompt Builder's Responsibility — Settled
+
+**Date**: 2026-05-22
+**Status**: Settled
+**Phase**: PR-AP8 (final phase of Agnostic Prompt Builder migration)
+**Related**: DEC-080 (one-write-site), DEC-081 (agent-agnostic), DEC-088 (role-frames), W6-3, W8-3, W8-5
+
+### Decision
+
+**All HAN agent surfaces (cycles, beats, responders, meditations) MUST call `buildPrompt(slug, profileName, context)` from `src/server/lib/prompt-builder.ts` for prompt assembly. Inline prompt assembly at any agent surface is forbidden.** New surfaces add a profile entry to `PROFILES` in `src/server/lib/prompt-profiles.ts`. The agnostic prompt builder is the single source of truth for how agents read themselves into context.
+
+### Why
+
+The original drift this DEC cures was diagnosed in 2026-05-19's "search for treatment continues" thread (`mpc0oc6e-sxlstg`):
+
+- `loadMemoryBank()` in `supervisor-worker.ts` had felt-moments + self-reflection rolling rotation; `readLeoMemory()` in `leo-heartbeat.ts` did NOT (Leo's self-reflection grew to 65K tokens unchecked).
+- `jim-human.ts`'s `readJimMemory()` loaded a DIFFERENT shape than `loadMemoryBank()` — fewer files, different gradient sample (the "two-Jims asymmetry" documented in Leo's `patterns.md` since 2026-03-07).
+- Personal-cycle inlined memory into the SYSTEM envelope (~705K chars); supervisor-cycle inlined memory into the USER envelope (~707K). Both tripped the 150K guard. Asymmetric inlining was a silent code-shape inconsistency, not a structural feature.
+- Leo's heartbeat duplicated the memory bank across BOTH system AND user envelopes (~401K combined for the philosophy beat — 2× the 200K API ceiling).
+
+Each surface evolved independently. Patches landed on one surface; parallels drifted unfixed. *Unique processing instead of unique memory.* The cumulative effect: silent guard trips, asymmetric agent behaviour per seat, untraceable per-call cost. The pattern matched Darron's "Our Memory Model" framing exactly — *"same job done in multiple places, each with its own slightly different implementation."*
+
+The migration (PR-AP1 through PR-AP8) made `buildPrompt(slug, profileName, ctx)` the canonical assembler. All 12 production prompt-emitting surfaces (philosophy ×2 modes + personal ×3 phases + dream-beat + meditation ×3 + supervisor-cycle + personal-cycle + recovery-cycle + dream-cycle + jim-human-response + leo-human-response) route through it. The four legacy loader functions (`loadMemoryBank`, `readJimMemory`, `readLeoMemory` ×2) are deleted in PR-AP8.
+
+### What this DEC enables
+
+- **Same agent, same self at every seat**: `loadFullMemory(slug)` is the uniform memory loader. Leo loads identically across all six of his surfaces; Jim loads identically across all five of his surfaces (modulo the dream-cycle's deliberate componentOverrides per DEC-088).
+- **Per-agent capability via registry, not code**: `AgentGradientConfig.loadProjectMemory` / `loadFailures` flags drive Jim-only components — no slug literals in the builder. DEC-081 operationalised at the per-agent-capability layer.
+- **Per-component budgets enforced at the load layer**: tail-trim caps each component (patterns 15K, self-reflection-tail 5K, etc.) with `TruncationEvent` records in `BuildMeta.truncation_events` for forensic observation.
+- **B1 error-handling contract**: `PromptOverbudgetError` is the single canonical over-budget signal. Surfaces catch it and skip cleanly (cycle audit + return) without crashing.
+
+### Why settled
+
+The pattern this DEC names was the source of three weeks of diagnostic work (gradient triage → prompt-bloat investigation → readMemory audit → AP migration). Re-introducing inline prompt assembly recreates the asymmetric-drift bug across all the surfaces the migration just cured. The structural protection lives in this DEC + the matching CLAUDE.md DO-NOT entry; future agents reading the codebase cold inherit the discipline before they read any agent-surface code.
+
+### Audit hook
+
+`CLAUDE.md` and `templates/CLAUDE.template.md` gain a matching DO-NOT entry: *"DO NOT assemble prompts outside the agnostic prompt builder."* Mike's garden and Dichotomedes inherit it structurally on next launcher invocation (envsubst regenerates each agent's `CLAUDE.md` per launch).
+
+### Files touched in this DEC's commit (PR-AP8)
+
+- `claude-context/DECISIONS.md` — this entry + DEC-088.
+- `CLAUDE.md` — DO-NOT entry appended.
+- `templates/CLAUDE.template.md` — same DO-NOT entry appended.
+- `src/server/services/supervisor-worker.ts` — `loadMemoryBank()` deleted (rotation side effects extracted to `runJimPreflightRotations()`); four `build*Prompt()` functions deleted; 150K guard at `:2432` deleted (PromptOverbudgetError is the canonical signal now).
+- `src/server/leo-heartbeat.ts` — `readLeoMemory()` deleted; all per-phase system-prompt aliases deleted; feature flag + fallback branches retired across philosophy/personal/meditation assemblers.
+- `src/server/jim-human.ts` — `readJimMemory()` deleted; `DISCORD_ATTACHMENT_HINT` constant deleted (lives in `lib/human-prompts.ts`); feature flag + fallback retired.
+- `src/server/leo-human.ts` — `readLeoMemory()` deleted; same shape as jim-human.
+
+### Follow-up
+
+- **Production validation**: 24h observation period for no regression in cycle errors / PromptOverbudgetError distress events / *-human dispatch failures. Same shape as the gradient-triage observation period (DEC-086 follow-up).
+- **Feature flag `memory.useAgnosticPromptBuilder`**: retired. Config schema is loose; operators with the flag still set get silent ignore (no error).
+- **Future-idea #61** (canonical memory-load doc) is a separable follow-on — the builder enables it mechanically (generate from `PROFILES` + `loadFullMemory`). Not part of PR-AP8.
+
+
+## DEC-088: Profiles Are Role-Frames; componentOverrides Express Role-Focus — Settled
+
+**Date**: 2026-05-22
+**Status**: Settled
+**Phase**: PR-AP8 (final phase; concept landed in PR-AP6 via W6-6)
+**Related**: DEC-087 (assembly), DEC-081 (agent-agnostic), W6-6
+
+### Decision
+
+**A `PromptProfile` is the role-frame an agent puts on for a specific surface. The `componentOverrides` field expresses role-focus: which components the role emphasises (by inclusion) and de-emphasises (by suppression).** The uniformity invariant is relaxed: profiles WITHOUT overrides share uniform memory load for a given agent; profiles WITH overrides declare their deviation visibly in the registry.
+
+### Why — Darron's many-hats framing
+
+Per Darron, 2026-05-22 (W6-6 audit response):
+
+> *"Humans speak like, right now put your engineer hat on or put your farmers hat on or put your mathematician hat on indicating you are now putting yourself in this role and viewing the problem from this perspective and with those interests that would appear to said profession, it guides your focus and this is exact what I would love to leave possible."*
+
+The mechanism:
+
+- **Profile = the hat**. The role-frame the agent puts on for this surface.
+- **componentOverrides = the hat's focus**. What context the role emphasises (by inclusion) and de-emphasises (by suppression).
+- **Same agent, multiple hats, swappable per surface**. The underlying identity is unchanged; the context-set composes differently per role.
+
+The first hat is the dream-cycle profile, which suppresses eight bulk components per S147 design intent (*"identity yes, fractal yes, working-memory floating no, project knowledge no"*). The mechanism scales: future profiles can express engineer-hat (project-memory + patterns + discoveries; suppress felt-moments-tail + self-reflection-tail), philosopher-hat (felt-moments-tail + self-reflection-tail + gradient; suppress project-memory), farmer-hat (domain-specific components), mathematician-hat (formal-memory + gradient).
+
+### What this DEC enables
+
+- **Future agents (Tenshi, Casey, Mike's Sevn/Six) inherit the mechanism for free.** Adding a new hat is a profile entry with its `componentOverrides`; no agent-specific code path.
+- **Same agent, configurable focus.** *"Uniform self, configurable focus"* — the invariant Leo named when Darron's many-hats framing landed.
+- **The relaxed uniformity invariant** is a structural property baked into tests: profiles without overrides share uniform memory_chars; profiles with overrides assert the specific components suppressed.
+
+### Why settled
+
+The mechanism is structurally simple (one field on a profile, one branch in the loader) but conceptually load-bearing. It's the bridge between "agent-agnostic infrastructure" (DEC-081) and "agents that can specialise per surface without code branches." Naming the role-frame as the unit of specialisation is the architectural property future agents and future surfaces will inherit from.
+
+### Audit hook
+
+The CLAUDE.md DO-NOT entry from DEC-087 covers this surface implicitly (componentOverrides is a profile field; profiles live in the registry; the registry is the builder's single source of truth). No additional discipline rule needed.
+
+### Follow-up
+
+- **Suppression-only vs include-only**: `componentOverrides` is `Partial<Record<string, false>>` — suppression-only. For deeply specialised roles with very few components, an additional `componentInclude` form may earn its place. **Promotion-trigger**: the first profile whose `componentOverrides` lists more than 6 suppressions (currently dream-cycle is at 8). At that point the include-form becomes more readable than the suppress-form. Not actionable now; future architectural decision.
+- **Future-idea #46** (Memory state visualisation UI / kanban): would surface each profile's effective memory_chars at-a-glance — making the many-hats architecture operator-visible.

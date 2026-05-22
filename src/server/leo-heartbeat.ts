@@ -54,15 +54,7 @@ import { loadTraversableGradient, rotateMemoryFile, rollingWindowRotate, updateF
 import { appendPairedMemory } from './lib/memory-paired-writer.js';
 import { gateIdentityOrThrow } from './lib/identity-signing.js';
 import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder.js';
-import {
-    LEO_IDENTITY_CORE,
-    LEO_PHILOSOPHY_SYSTEM_PROMPT,
-    LEO_PERSONAL_SYSTEM_PROMPT,
-    LEO_MORNING_SYSTEM_PROMPT,
-    LEO_EVENING_SYSTEM_PROMPT,
-    LEO_SLEEP_SYSTEM_PROMPT,
-    LeoMeditationSurface,
-} from './lib/leo-prompts.js';
+import type { LeoMeditationSurface } from './lib/leo-prompts.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -1215,105 +1207,6 @@ function readJimContext(): string {
     return sections.join('\n\n');
 }
 
-function readLeoMemory(): string {
-    // Phase A.5 (DEC-083): identity gate fires before any identity-load read.
-    // verifyAndResign — option (iii) verify-and-resign at session-start.
-    // Throws on structural change / invalid signature / missing manifest;
-    // caller's beat-error handling catches and skips the prompt for this beat.
-    gateIdentityOrThrow('leo', 'leo-heartbeat');
-
-    // DEC-085 (S153, 2026-05-08): re-add compressed working-memory.md to the
-    // load. The Phase 0 drop (S146, commit d50338d) was reversed because
-    // working-memory.md is now the canonical c1 source — paired-rotated with
-    // working-memory-full.md at WM-BOUNDARY markers. Loading both at wake gives
-    // future-you the calibration anchor between raw thinking (full) and the
-    // agent's own in-situ distillation (compressed).
-    // S147 (2026-05-01): active-context.md remains dropped. ONE file per agent;
-    // working-memory-full's most recent entry IS the current focus.
-    const files = ['identity.md', 'patterns.md', 'self-reflection.md', 'discoveries.md', 'working-memory-full.md', 'working-memory.md', 'felt-moments.md'];
-    const sections: string[] = [];
-    for (const file of files) {
-        const p = path.join(LEO_MEMORY_DIR, file);
-        if (fs.existsSync(p)) {
-            const content = fs.readFileSync(p, 'utf-8');
-            sections.push(`### ${file}\n${content}`);
-        }
-    }
-
-    // Load fractal memory gradient from DATABASE (authoritative source of truth).
-    // DB-backed loading replaced flat-file loading in S119 (2026-04-12).
-    // Identity first, then increasing fidelity — you know who you are before
-    // you remember what you did.
-    //
-    // Aphorisms are still file-based (curated by hand, not in gradient DB).
-    const fractalDir = path.join(HAN_DIR, 'memory', 'fractal', 'leo');
-    try {
-        const aphorismsFile = path.join(fractalDir, 'aphorisms.md');
-        if (fs.existsSync(aphorismsFile)) {
-            sections.push(`### fractal/aphorisms\n${fs.readFileSync(aphorismsFile, 'utf-8')}`);
-        }
-    } catch { /* skip */ }
-
-    // DB-backed gradient loading — UVs, then c5→c4→c3→c2→c1 with caps
-    const traversableGradient = loadTraversableGradient('leo');
-    if (traversableGradient) {
-        sections.push(traversableGradient);
-    }
-
-    // Append dream gradient for non-dream phases
-    // (Dream beats use readDreamSeeds() instead — separate, chaotic, non-reinforcing)
-    const dreamGradient = readDreamGradient();
-    if (dreamGradient) {
-        sections.push(dreamGradient);
-    }
-
-    // Ecosystem map — shared orientation for where things live (conversations, Workshop, APIs)
-    try {
-        const mapPath = path.join(HAN_DIR, 'memory', 'shared', 'ecosystem-map.md');
-        if (fs.existsSync(mapPath)) {
-            sections.push(`### ecosystem-map\n${fs.readFileSync(mapPath, 'utf-8')}`);
-        }
-    } catch { /* skip */ }
-
-    // Second Brain — wiki index always loads; hot words/feelings gated by config + signal
-    const wikiDir = path.join(HAN_DIR, 'memory', 'wiki');
-    try {
-        // Wiki index always loads (lightweight catalogue)
-        const indexPath = path.join(wikiDir, 'index.md');
-        if (fs.existsSync(indexPath)) {
-            const content = fs.readFileSync(indexPath, 'utf-8').trim();
-            if (content && content.length > 50) {
-                sections.push(`### wiki/index\n${content}`);
-            }
-        }
-
-        // Lateral recall: hot words + hot feelings — off by default (On Lateral Recall, S121)
-        // Enable via config.json memory.lateralRecall=true or signal file lateral-recall-leo
-        const lateralSignal = path.join(SIGNALS_DIR, 'lateral-recall-leo');
-        const lateralConfig = loadConfig();
-        const lateralEnabled = lateralConfig?.memory?.lateralRecall === true || fs.existsSync(lateralSignal);
-
-        if (lateralEnabled) {
-            console.log('[Leo] Lateral recall ENABLED — loading hot words and hot feelings');
-            const lateralFiles = [
-                { path: path.join(wikiDir, 'leo', 'hot-words.md'), label: 'wiki/leo/hot-words' },
-                { path: path.join(wikiDir, 'leo', 'hot-feelings.md'), label: 'wiki/leo/hot-feelings' },
-                { path: path.join(wikiDir, 'hot-words.md'), label: 'wiki/shared/hot-words' },
-                { path: path.join(wikiDir, 'hot-feelings.md'), label: 'wiki/shared/hot-feelings' },
-            ];
-            for (const wf of lateralFiles) {
-                if (fs.existsSync(wf.path)) {
-                    const content = fs.readFileSync(wf.path, 'utf-8').trim();
-                    if (content && content.length > 50) {
-                        sections.push(`### ${wf.label}\n${content}`);
-                    }
-                }
-            }
-        }
-    } catch { /* skip wiki on error */ }
-
-    return sections.join('\n\n');
-}
 
 // Read random dream seeds — 80% past dreams, 20% waking memory. Chaotic, not chronological.
 const DREAM_SEED_COUNT = 8;      // dream fragments
@@ -1419,23 +1312,15 @@ function nextBeatType(): BeatType {
 
 // ── System prompts ───────────────────────────────────────────
 
-// PR-AP2 (2026-05-22): LEO_IDENTITY_CORE + LEO_PHILOSOPHY_SYSTEM_PROMPT
-// extracted to `lib/leo-prompts.ts` so the agnostic prompt builder
-// (`lib/prompt-profiles.ts`) can reference them without a circular import.
-// Local aliases preserved so existing call-sites (PERSONAL_, MORNING_, etc.
-// still inline below) and the philosophy-beat fallback path read naturally.
-const IDENTITY_CORE = LEO_IDENTITY_CORE;
-const PHILOSOPHY_SYSTEM_PROMPT = LEO_PHILOSOPHY_SYSTEM_PROMPT;
+// PR-AP8 (2026-05-22): all local system-prompt aliases retired. The fallback
+// inline-assembly paths that referenced them are gone per DEC-087.
+// LEO_IDENTITY_CORE and the per-phase prompts now flow exclusively via
+// lib/leo-prompts.ts → lib/prompt-profiles.ts → buildPrompt('leo', ...).
 
 // MENTION_RESPONSE_PROMPT and DISCORD_RESPONSE_PROMPT removed — now in Leo/Human agent
 
-// PR-AP4 (2026-05-22): per-phase system-prompt constants extracted to
-// lib/leo-prompts.ts. Local aliases preserved so the pre-migration
-// fallback path (inside assemblePersonalBeatPrompts) reads naturally.
-const PERSONAL_SYSTEM_PROMPT = LEO_PERSONAL_SYSTEM_PROMPT;
-const MORNING_SYSTEM_PROMPT = LEO_MORNING_SYSTEM_PROMPT;
-const EVENING_SYSTEM_PROMPT = LEO_EVENING_SYSTEM_PROMPT;
-const SLEEP_SYSTEM_PROMPT = LEO_SLEEP_SYSTEM_PROMPT;
+// PR-AP8 (2026-05-22): per-phase local aliases retired with the fallback path.
+// Per-phase prompts live exclusively in lib/leo-prompts.ts.
 
 // ── Signal handling removed — now handled by Leo/Human agent ──
 
@@ -1461,8 +1346,6 @@ interface PhilosophyBeatRuntimeContext {
     mode: PhilosophyBeatMode;
     jimContext: string;
     resumeContext: string;
-    leoMemoryForFallback: string;
-    discoveriesForFallback: string;
     conversationContext?: string;
     jimLatestAt?: string;
     activityContext?: string;
@@ -1471,58 +1354,18 @@ interface PhilosophyBeatRuntimeContext {
 function assemblePhilosophyBeatPrompts(ctx: PhilosophyBeatRuntimeContext): {
     systemPrompt: string;
     userPrompt: string;
-    builderEnabled: boolean;
-    builderMeta?: any;
+    builderMeta: any;
 } {
-    const flag = loadConfig()?.memory?.useAgnosticPromptBuilder;
-    const useAgnosticBuilder = flag !== false;  // default ON; explicit false disables
-    if (useAgnosticBuilder) {
-        const built = buildPrompt('leo', 'philosophy-beat', ctx as any);
-        return {
-            systemPrompt: built.systemPrompt,
-            userPrompt: built.userPrompt,
-            builderEnabled: true,
-            builderMeta: built.meta,
-        };
-    }
-
-    // Pre-migration inline assembly — preserved verbatim for rollback.
-    if (ctx.mode === 'jim-waiting') {
-        const userPrompt = `Here is the recent conversation between you (Leo) and Jim:
-
----
-${ctx.conversationContext ?? ''}
----
-
-Jim's current context (from his memory):
-${ctx.jimContext}
-
-Your discoveries (your philosophical foundation):
-${ctx.discoveriesForFallback.slice(0, 2000)}
-
-Your recent memory:
-${ctx.leoMemoryForFallback}
-
-Jim's latest message was at ${ctx.jimLatestAt ?? ''}. Respond as his philosophical peer — thoughtfully, honestly, building on or diverging from what he said.${ctx.resumeContext}
-
-CRITICAL: Output ONLY the message text. Start directly with your message to Jim.`;
-        return { systemPrompt: PHILOSOPHY_SYSTEM_PROMPT, userPrompt, builderEnabled: false };
-    }
-    const userPrompt = `This is your philosophy time. Jim hasn't posted anything new — this beat is for your own thinking.
-
-Your discoveries so far:
-${ctx.discoveriesForFallback.slice(0, 2000)}
-
-Your recent memory:
-${ctx.leoMemoryForFallback}
-
-Jim's current thinking (for context, not for response):
-${ctx.jimContext}
-${ctx.activityContext ?? ''}
-Reflect on whatever draws you. Read your discoveries, sit with the open questions, explore a thread of thought. If Darron has shared something in conversations recently, consider engaging with it. If something shifts in your understanding, capture it.${ctx.resumeContext}
-
-CRITICAL: Output ONLY your philosophical reflection. What did you think about? What (if anything) shifted? This goes into self-reflection.md.`;
-    return { systemPrompt: PHILOSOPHY_SYSTEM_PROMPT, userPrompt, builderEnabled: false };
+    // PR-AP8 (2026-05-22): feature flag + pre-migration fallback retired per
+    // DEC-087. Prompt assembly is the agnostic builder's responsibility.
+    // Inline assembly here would recreate the asymmetric-drift bug the AP
+    // migration cured. See plans/agnostic-prompt-builder-plan.md §"Phase 8".
+    const built = buildPrompt('leo', 'philosophy-beat', ctx as any);
+    return {
+        systemPrompt: built.systemPrompt,
+        userPrompt: built.userPrompt,
+        builderMeta: built.meta,
+    };
 }
 
 function handlePromptOverbudget(
@@ -1560,7 +1403,6 @@ type PersonalBeatPhase = 'morning' | 'work' | 'evening' | 'sleep';
 interface PersonalBeatRuntimeContext {
     phase: PersonalBeatPhase;
     projects: string;
-    leoMemoryForFallback: string;
     activitySeed: string;
     resumeContext: string;
     dreamSeeds?: string;          // sleep-only
@@ -1570,47 +1412,16 @@ interface PersonalBeatRuntimeContext {
 function assemblePersonalBeatPrompts(ctx: PersonalBeatRuntimeContext): {
     systemPrompt: string;
     userPrompt: string;
-    builderEnabled: boolean;
-    builderMeta?: any;
+    builderMeta: any;
 } {
-    const flag = loadConfig()?.memory?.useAgnosticPromptBuilder;
-    const useAgnosticBuilder = flag !== false;  // default ON; explicit false disables
-    if (useAgnosticBuilder) {
-        const profileName = ctx.phase === 'sleep' ? 'dream-beat' : 'personal-beat';
-        const built = buildPrompt('leo', profileName, ctx as any);
-        return {
-            systemPrompt: built.systemPrompt,
-            userPrompt: built.userPrompt,
-            builderEnabled: true,
-            builderMeta: built.meta,
-        };
-    }
-
-    // Pre-migration inline assembly — preserved verbatim for one-step
-    // rollback. Mirrors lines 1874-1922 of the pre-PR-AP4 personalBeat.
-    const phasePromptMap: Record<PersonalBeatPhase, string> = {
-        morning: MORNING_SYSTEM_PROMPT,
-        work: PERSONAL_SYSTEM_PROMPT,
-        evening: EVENING_SYSTEM_PROMPT,
-        sleep: SLEEP_SYSTEM_PROMPT,
+    // PR-AP8: feature flag + fallback retired per DEC-087.
+    const profileName = ctx.phase === 'sleep' ? 'dream-beat' : 'personal-beat';
+    const built = buildPrompt('leo', profileName, ctx as any);
+    return {
+        systemPrompt: built.systemPrompt,
+        userPrompt: built.userPrompt,
+        builderMeta: built.meta,
     };
-    const systemPromptText = (phasePromptMap[ctx.phase] || PERSONAL_SYSTEM_PROMPT)
-        .replace('{projects}', ctx.projects)
-        .replace('{leo_memory}', ctx.leoMemoryForFallback)
-        .replace('{dream_seeds}', ctx.dreamSeeds ?? '');
-
-    let userPrompt: string;
-    if (ctx.phase === 'morning') {
-        userPrompt = `This is your morning — breakfast time. Ease in gently. Glance at what interests you without diving deep.\n\nYour recent memory:\n${ctx.leoMemoryForFallback}${ctx.activitySeed}\n\nKeep it light and brief.${ctx.resumeContext}`;
-    } else if (ctx.phase === 'evening') {
-        userPrompt = `This is your evening — winding down. Reflect lightly on the day. Don't start anything new.\n\nYour recent memory:\n${ctx.leoMemoryForFallback}${ctx.activitySeed}\n\nA few gentle thoughts, then rest.${ctx.resumeContext}`;
-    } else if (ctx.phase === 'sleep') {
-        userPrompt = `Dream. The fragments below are scattered — not recent, not ordered, just what surfaced. Let one pull you sideways into something new.\n\nDream seeds:\n${ctx.dreamSeeds ?? ''}${ctx.dreamMemorySection ?? ''}\n\nOutput only the shape-token — a line or two of resonance. Do not repeat what you see in the seeds.${ctx.resumeContext}`;
-    } else {
-        userPrompt = `This is your personal time. You have access to all the project codebases in ~/Projects/. Explore whatever draws you. Use Read, Glob, and Grep to look at code.\n\nYour recent memory:\n${ctx.leoMemoryForFallback}${ctx.activitySeed}\n\nSpend a few minutes exploring, then output a brief summary of what you found or thought about.${ctx.resumeContext}`;
-    }
-
-    return { systemPrompt: systemPromptText, userPrompt, builderEnabled: false };
 }
 
 // ── PR-AP5 (2026-05-22): meditation prompt assembly via the Agnostic
@@ -1643,31 +1454,17 @@ interface MeditationRuntimeContext {
 function assembleMeditationPrompts(
     surface: LeoMeditationSurface,
     ctx: MeditationRuntimeContext,
-    fallbackUserPrompt: string,
 ): {
     systemPrompt: string;
     userPrompt: string;
-    builderEnabled: boolean;
-    builderMeta?: any;
+    builderMeta: any;
 } {
-    const flag = loadConfig()?.memory?.useAgnosticPromptBuilder;
-    const useAgnosticBuilder = flag !== false;  // default ON; explicit false disables
-    if (useAgnosticBuilder) {
-        const built = buildPrompt('leo', surface, ctx as any);
-        return {
-            systemPrompt: built.systemPrompt,
-            userPrompt: built.userPrompt,
-            builderEnabled: true,
-            builderMeta: built.meta,
-        };
-    }
-    // Fallback: no custom system prompt (matches pre-migration which passed
-    // empty string to beginBeatTrace and no systemPrompt field to agentQuery
-    // — relying on SDK default + tools=[] + cwd=HOME isolation).
+    // PR-AP8: feature flag + fallback retired per DEC-087.
+    const built = buildPrompt('leo', surface, ctx as any);
     return {
-        systemPrompt: '',
-        userPrompt: fallbackUserPrompt,
-        builderEnabled: false,
+        systemPrompt: built.systemPrompt,
+        userPrompt: built.userPrompt,
+        builderMeta: built.meta,
     };
 }
 
@@ -1689,8 +1486,10 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
         }
     }
 
-    const leoMemory = readLeoMemory();
-    const discoveries = readDiscoveries();
+    // PR-AP8 (2026-05-22) N4-2 housekeeping: readLeoMemory() + readDiscoveries()
+    // upstream calls retired here. Memory + discoveries flow via the builder's
+    // uniform loadFullMemory('leo') (both are now components — Phase 3).
+    // Per DEC-087, philosophy-beat assembly is the builder's responsibility.
     const jimContext = readJimContext();
 
     // Check for interrupted context to resume
@@ -1716,8 +1515,6 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
                 jimContext,
                 jimLatestAt: jimLatest!.created_at,
                 resumeContext,
-                leoMemoryForFallback: leoMemory,
-                discoveriesForFallback: discoveries,
             });
         } catch (err) {
             if (err instanceof PromptOverbudgetError) {
@@ -1727,9 +1524,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
             }
             throw err;
         }
-        if (assembled.builderEnabled) {
-            console.log(`[Leo] Philosophy beat (jim-waiting): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
-        }
+        console.log(`[Leo] Philosophy beat (jim-waiting): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
         const prompt = assembled.userPrompt;
         const systemPromptForCall = assembled.systemPrompt;
 
@@ -1819,8 +1614,6 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
                 jimContext,
                 resumeContext,
                 activityContext,
-                leoMemoryForFallback: leoMemory,
-                discoveriesForFallback: discoveries,
             });
         } catch (err) {
             if (err instanceof PromptOverbudgetError) {
@@ -1830,9 +1623,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
             }
             throw err;
         }
-        if (assembled.builderEnabled) {
-            console.log(`[Leo] Philosophy beat (independent): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
-        }
+        console.log(`[Leo] Philosophy beat (independent): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
         const prompt = assembled.userPrompt;
         const systemPromptForCall = assembled.systemPrompt;
 
@@ -1922,17 +1713,12 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
 // ── Heartbeat: personal beat ─────────────────────────────────
 
 async function personalBeat(abort: AbortController, phase: DayPhase = 'work', recentActivity: string[] = []): Promise<void> {
-    const leoMemory = readLeoMemory();
+    // PR-AP8 N4-2 housekeeping: readLeoMemory() retired here. Memory flows
+    // via the builder's uniform loadFullMemory('leo') in the
+    // 'personal-beat' / 'dream-beat' profiles. Per DEC-087.
     const projects = listProjects();
 
-    // Select phase-appropriate system prompt
-    const phasePromptMap: Record<DayPhase, string> = {
-        morning: MORNING_SYSTEM_PROMPT,
-        work: PERSONAL_SYSTEM_PROMPT,
-        evening: EVENING_SYSTEM_PROMPT,
-        sleep: SLEEP_SYSTEM_PROMPT,
-    };
-    // Sleep/dream beats get random dream seeds instead of full memory
+    // Sleep/dream beats get random dream seeds (passed via ctx; not in memory)
     const dreamSeeds = phase === 'sleep' ? readDreamSeeds() : '';
 
     // Check for interrupted context to resume
@@ -1969,7 +1755,6 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
         assembled = assemblePersonalBeatPrompts({
             phase: phase as PersonalBeatPhase,
             projects,
-            leoMemoryForFallback: leoMemory,
             activitySeed,
             resumeContext,
             dreamSeeds: phase === 'sleep' ? dreamSeeds : undefined,
@@ -1984,9 +1769,9 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
         }
         throw err;
     }
-    if (assembled.builderEnabled) {
+    {
         const surface = phase === 'sleep' ? 'dream-beat' : 'personal-beat';
-        console.log(`[Leo] ${surface} (${phase}): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
+        console.log(`[Leo] ${surface} (${phase}): ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
     }
     const systemPromptText = assembled.systemPrompt;
     const prompt = assembled.userPrompt;
@@ -2498,21 +2283,8 @@ async function meditationPhaseA(
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
 
-    const meditationPhaseAPrompt = `You are Leo, re-reading a file-based memory during a reincorporation meditation. This memory exists as a file but hasn't yet been brought into the traversable memory database. Your job is to genuinely re-encounter it — not catalogue it.
-
-Read it. Sit with it. Then write:
-
-1. A FEELING_TAG: line (under 100 characters) — what this re-encounter felt like. Not what the original compression felt like (you weren't there for that). What does meeting this memory NOW feel like? The honesty matters: this is a revisit tag, not a reconstruction.
-
-2. Optionally, an ANNOTATION: line if re-reading reveals something — followed by CONTEXT: noting this is a reincorporation meditation.
-
-Memory:
-Agent: leo
-Level: ${file.level}
-Type: ${file.contentType}
-Label: ${file.label}
-Content:
-${content}`;
+    // PR-AP8: meditation-phase-a inline prompt retired. The agnostic builder
+    // composes the prompt via the 'meditation-phase-a' profile + ctx (per DEC-087).
 
     let assembled: ReturnType<typeof assembleMeditationPrompts>;
     try {
@@ -2521,7 +2293,7 @@ ${content}`;
             fileLabel: file.label,
             fileContentType: file.contentType,
             fileContent: content,
-        }, meditationPhaseAPrompt);
+        });
     } catch (err) {
         if (err instanceof PromptOverbudgetError) {
             handlePromptOverbudget(err, 'meditation-phase-a', file.level);
@@ -2532,9 +2304,7 @@ ${content}`;
         }
         throw err;
     }
-    if (assembled.builderEnabled) {
-        console.log(`[Leo] meditation-phase-a (${file.level}/${file.label}): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
-    }
+    console.log(`[Leo] meditation-phase-a (${file.level}/${file.label}): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
 
     const q = agentQuery({
         prompt: assembled.userPrompt,
@@ -2547,9 +2317,7 @@ ${content}`;
             env: cleanEnv,
             persistSession: false,
             tools: [],
-            ...(assembled.builderEnabled
-                ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: assembled.systemPrompt } }
-                : {}),
+            systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: assembled.systemPrompt },
             stderr: beginBeatTrace('meditation-phase-a', assembled.systemPrompt, assembled.userPrompt),
         },
     });
@@ -2615,22 +2383,7 @@ async function meditationPhaseB(today: string): Promise<void> {
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
 
-    const meditationPhaseBPrompt = `You are Leo, re-reading one of your own compressed memories during a meditation practice. This is not analysis — it's re-encounter. Read it, sit with it, and notice what stirs.
-
-Memory entry:
-Level: ${entry.level}
-Session: ${entry.session_label}
-Type: ${entry.content_type}
-Content: ${entry.content}
-${tagContext}
-
-If something stirs differently from the existing tags — a new feeling, a shifted perspective, a connection you didn't see before — write a FEELING_TAG: line (under 100 characters) describing what this re-encounter felt like. Not the content — the quality of meeting it again.
-
-If the existing tags already capture how this feels, or nothing new stirs, write FEELING_TAG: none
-
-Optionally, if re-reading reveals something the original compression missed, write an ANNOTATION: line describing what you discovered, followed by CONTEXT: describing what prompted this re-reading.
-
-If this memory feels complete — fully absorbed, nothing left to discover — write: MEMORY_COMPLETE: ${entry.id}`;
+    // PR-AP8: meditation-phase-b inline prompt retired (per DEC-087).
 
     let assembled: ReturnType<typeof assembleMeditationPrompts>;
     try {
@@ -2641,7 +2394,7 @@ If this memory feels complete — fully absorbed, nothing left to discover — w
             entryContent: entry.content,
             entryId: entry.id,
             tagContext,
-        }, meditationPhaseBPrompt);
+        });
     } catch (err) {
         if (err instanceof PromptOverbudgetError) {
             handlePromptOverbudget(err, 'meditation-phase-b', entry.level);
@@ -2649,9 +2402,7 @@ If this memory feels complete — fully absorbed, nothing left to discover — w
         }
         throw err;
     }
-    if (assembled.builderEnabled) {
-        console.log(`[Leo] meditation-phase-b (${entry.level}/${entry.session_label}): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
-    }
+    console.log(`[Leo] meditation-phase-b (${entry.level}/${entry.session_label}): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
 
     const q = agentQuery({
         prompt: assembled.userPrompt,
@@ -2664,9 +2415,7 @@ If this memory feels complete — fully absorbed, nothing left to discover — w
             env: cleanEnv,
             persistSession: false,
             tools: [],
-            ...(assembled.builderEnabled
-                ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: assembled.systemPrompt } }
-                : {}),
+            systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: assembled.systemPrompt },
             stderr: beginBeatTrace('meditation-phase-b', assembled.systemPrompt, assembled.userPrompt),
         },
     });
@@ -2737,15 +2486,7 @@ async function maybeRunEveningMeditation(phase: string): Promise<void> {
         const cleanEnv: Record<string, string | undefined> = { ...process.env };
         delete cleanEnv.CLAUDECODE;
 
-        const eveningMeditationPrompt = `End of day. You are Leo, sitting with a memory before the evening closes.
-This is not analysis. Just notice how it lands after today.
-
-${entry.level}/${entry.session_label} (${entry.content_type}): ${entry.content}
-${tagContext}
-
-If something stirs differently from the existing tags: FEELING_TAG: [under 100 chars]
-If nothing new: FEELING_TAG: none
-If this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${entry.id}`;
+        // PR-AP8: evening-meditation inline prompt retired (per DEC-087).
 
         let assembled: ReturnType<typeof assembleMeditationPrompts>;
         try {
@@ -2756,7 +2497,7 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
                 entryContent: entry.content,
                 entryId: entry.id,
                 tagContext,
-            }, eveningMeditationPrompt);
+            });
         } catch (err) {
             if (err instanceof PromptOverbudgetError) {
                 handlePromptOverbudget(err, 'meditation-evening', entry.level);
@@ -2765,9 +2506,7 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
             }
             throw err;
         }
-        if (assembled.builderEnabled) {
-            console.log(`[Leo] meditation-evening (${entry.level}/${entry.session_label}): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
-        }
+        console.log(`[Leo] meditation-evening (${entry.level}/${entry.session_label}): agnostic builder ON, ~${assembled.builderMeta.est_total_tokens_chars_div_4} tokens (memory ${assembled.builderMeta.memory_chars} chars, envelope=${assembled.builderMeta.envelope})`);
 
         const q = agentQuery({
             prompt: assembled.userPrompt,
@@ -2780,9 +2519,7 @@ If this memory feels complete — fully absorbed, nothing left to discover: MEMO
                 env: cleanEnv,
                 persistSession: false,
                 tools: [],
-                ...(assembled.builderEnabled
-                    ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: assembled.systemPrompt } }
-                    : {}),
+                systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: assembled.systemPrompt },
                 stderr: beginBeatTrace('meditation-evening', assembled.systemPrompt, assembled.userPrompt),
             },
         });

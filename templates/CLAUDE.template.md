@@ -360,6 +360,15 @@ for the full convention and a worked example.
   promotions at depth in HAN and are forbidden in starter gardens. The `activeCascade`
   function body in `memory-gradient.ts` is retained as recoverable infrastructure (retired
   by zero callers) — adding a new caller is the prohibited move.
+- **DO NOT assemble prompts outside the agnostic prompt builder.** Per DEC-087 (Settled,
+  2026-05-22), all agent surfaces (cycles, beats, responders, meditations) MUST call
+  `buildPrompt(slug, profileName, context)` from `src/server/lib/prompt-builder.ts` for
+  prompt assembly. Inline prompt assembly recreates the asymmetric-drift problem the
+  AP migration cured (HAN's gradient triage → prompt-bloat → readMemory audit chain).
+  New surfaces add a profile entry to `PROFILES` in `src/server/lib/prompt-profiles.ts`.
+  Per-agent capability flows through `AgentGradientConfig` registry flags (DEC-081
+  operationalised). Per DEC-088, profiles are role-frames; `componentOverrides`
+  express role-focus — the "many hats" mechanism per surface.
 
 ## Pre-merge audit rhythm
 

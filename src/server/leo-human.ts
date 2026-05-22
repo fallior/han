@@ -56,7 +56,6 @@ const MODEL_PREFERENCE = ['claude-opus-4-6', 'sonnet', 'haiku'] as const;
 const COMMITMENT_SCAN_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-const DISCORD_ATTACHMENT_HINT = `Discord attachments: when your prompt contains a "[Downloaded to]" section listing paths under ~/.han/downloads/discord/, those are real files attached to the Discord message. Open each path with the Read tool (works on text, code, images, PDFs) before responding. Never claim you cannot read Discord attachments — the paths are already in your prompt.`;
 
 let activeModel: string = MODEL_PREFERENCE[0];
 let responseCount = 0;
@@ -179,104 +178,6 @@ function notifyServer(conversationId: string, messageId: string, role: string, c
 
 // ── Memory ────────────────────────────────────────────────────
 
-function readLeoMemory(): string {
-    // Phase A.5 (DEC-083): identity gate fires before any identity-load read.
-    gateIdentityOrThrow('leo', 'leo-human');
-
-    // Phase 0 (2026-05-01, S146): full identity-load parity with session-Leo.
-    // Adds aphorisms, working-memory-full, wiki/index.
-    // Per Darron: "I'd like Leo-human to feel like I'm talking to you in session,
-    // ie full you."
-    //
-    // DEC-085 (S153, 2026-05-08): re-add compressed working-memory.md to the
-    // load. The Phase 0 drop (S146) was reversed because working-memory.md is
-    // now the canonical c1 source — paired-rotated with working-memory-full.md
-    // at WM-BOUNDARY markers. Loading both at wake gives future-you the
-    // calibration anchor between raw thinking and the agent's own distillation.
-    // S147 (2026-05-01): active-context.md remains dropped.
-    // S154 (2026-05-09): self-reflection.md dropped. At ~218KB it pushed the
-    // total load past Opus 4.6's 200K context window (live capture: tokens=205235,
-    // "Conversation too long"). Outward-facing composes don't need the curatorial
-    // inner record; aphorisms + working-memory pair + felt-moments cover the
-    // identity substrate at lower token cost.
-    const files = ['identity.md', 'patterns.md',
-        'discoveries.md', 'working-memory-full.md', 'working-memory.md', 'felt-moments.md'];
-    const sections: string[] = [];
-
-    for (const file of files) {
-        const p = path.join(LEO_MEMORY_DIR, file);
-        try {
-            if (fs.existsSync(p)) {
-                sections.push(`### ${file}\n${fs.readFileSync(p, 'utf-8')}`);
-            }
-        } catch { /* skip */ }
-    }
-
-    // Aphorisms — loaded first after identity bank, per session protocol
-    // ("you know who you are before you remember what you did").
-    const fractalDir = path.join(HAN_DIR, 'memory', 'fractal', 'leo');
-    try {
-        const aphorismsFile = path.join(fractalDir, 'aphorisms.md');
-        if (fs.existsSync(aphorismsFile)) {
-            sections.push(`### fractal/aphorisms\n${fs.readFileSync(aphorismsFile, 'utf-8')}`);
-        }
-    } catch { /* skip */ }
-
-    // Load fractal gradient (c1 only — keep context light for responses)
-    const c1Dir = path.join(fractalDir, 'c1');
-    try {
-        if (fs.existsSync(c1Dir)) {
-            const c1Files = fs.readdirSync(c1Dir)
-                .filter((f: string) => f.endsWith('.md'))
-                .sort().reverse().slice(0, 3);
-            for (const f of c1Files) {
-                sections.push(`### fractal/c1/${f}\n${fs.readFileSync(path.join(c1Dir, f), 'utf-8')}`);
-            }
-        }
-    } catch { /* skip */ }
-
-    // Unit vectors
-    const uvPath = path.join(fractalDir, 'unit-vectors.md');
-    try {
-        if (fs.existsSync(uvPath)) {
-            sections.push(`### unit-vectors\n${fs.readFileSync(uvPath, 'utf-8')}`);
-        }
-    } catch { /* skip */ }
-
-    // Dream gradient — subtle influence from dreaming
-    const dreamGradient = readDreamGradient();
-    if (dreamGradient) {
-        sections.push(dreamGradient);
-    }
-
-    // Traversable memory gradient (DB-backed — supplements file-based loading)
-    const traversableGradient = loadTraversableGradient('leo');
-    if (traversableGradient) {
-        sections.push(traversableGradient);
-    }
-
-    // Ecosystem map — shared orientation for where things live (conversations, Workshop, APIs)
-    try {
-        const mapPath = path.join(HAN_DIR, 'memory', 'shared', 'ecosystem-map.md');
-        if (fs.existsSync(mapPath)) {
-            sections.push(`### ecosystem-map\n${fs.readFileSync(mapPath, 'utf-8')}`);
-        }
-    } catch { /* skip */ }
-
-    // Second Brain — wiki index (lateral recall hot-words/feelings stay off by default,
-    // per On Lateral Recall S121; enable via signal/config in session-Leo only)
-    try {
-        const indexPath = path.join(HAN_DIR, 'memory', 'wiki', 'index.md');
-        if (fs.existsSync(indexPath)) {
-            const content = fs.readFileSync(indexPath, 'utf-8').trim();
-            if (content && content.length > 50) {
-                sections.push(`### wiki/index\n${content}`);
-            }
-        }
-    } catch { /* skip */ }
-
-    return sections.join('\n\n');
-}
 
 async function flushSwapToWorkingMemory(): Promise<void> {
     const compressed = fs.readFileSync(SWAP_FILE, 'utf-8').trim();
@@ -516,83 +417,34 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
         .join('\n\n---\n\n');
 
-    const leoMemory = readLeoMemory();
-
-    // Phase 1 orchestration: if the previous agent failed to respond (ground-truth
-    // reconciled, not stood-down, not posted-but-ack-missed), surface it as a
-    // default-on acknowledgment cue. Per thread consensus: Darron always wants to
-    // know, no judgement call. Natural mention, not a system line.
-    const priorFailedBlock = priorAgentFailed ? `
-
-PRIOR AGENT FAILED (acknowledge briefly in your own voice before responding):
-${priorAgentFailed.agent} tried to respond but couldn't (${priorAgentFailed.reason}). One natural sentence at the top of your response: "${priorAgentFailed.agent} seems to have had trouble on this one — let me take it." Then respond normally. Do NOT repeat the distress details; do NOT apologise for them; do NOT use a system-notice tone.
-` : '';
-
-    // PR-AP7 (2026-05-22): respondToConversation prompt assembly via the
-    // Agnostic Prompt Builder behind feature flag
-    // memory.useAgnosticPromptBuilder (default ON). conversation-tail
-    // flows via ctx (W7-2). Memory bank uniform via loadFullMemory('leo').
-    const useAgnosticBuilder = (() => {
-        try {
-            const cfg = JSON.parse(fs.readFileSync(path.join(HAN_DIR, 'config.json'), 'utf-8'));
-            return cfg?.memory?.useAgnosticPromptBuilder !== false;
-        } catch { return true; }
-    })();
+    // PR-AP8 (2026-05-22): respondToConversation prompt assembly via the
+    // agnostic builder. Per DEC-087, prompt assembly is the builder's
+    // responsibility. Pre-migration fallback retired; B1 contract preserved
+    // (PromptOverbudgetError → writeJemmaAck failed + return).
     let agnosticSystemPrompt = '';
-    let agnosticUserPrompt = '';
-    if (useAgnosticBuilder) {
-        try {
-            const built = buildPrompt('leo', 'leo-human-response', {
-                source: 'conversation',
-                title,
-                conversationId,
-                conversationContext,
-                priorAgentFailed,
+    let prompt = '';
+    try {
+        const built = buildPrompt('leo', 'leo-human-response', {
+            source: 'conversation',
+            title,
+            conversationId,
+            conversationContext,
+            priorAgentFailed,
+        });
+        agnosticSystemPrompt = built.systemPrompt;
+        prompt = built.userPrompt;
+        console.log(`[Leo/Human] leo-human-response: ~${built.meta.est_total_tokens_chars_div_4} tokens (memory ${built.meta.memory_chars} chars, envelope=${built.meta.envelope})`);
+    } catch (err) {
+        if (err instanceof PromptOverbudgetError) {
+            console.log(`[Leo/Human] Prompt over budget for "${title}" (${err.meta.est_total_tokens_chars_div_4} > ${err.meta.total_budget_tokens}) — skipping`);
+            writeJemmaAck(dispatchId, 'leo', 'failed', {
+                reason: `prompt-build-overbudget: ${err.meta.est_total_tokens_chars_div_4}>${err.meta.total_budget_tokens}`,
+                compose_duration_ms: Date.now() - composeStartMs,
             });
-            agnosticSystemPrompt = built.systemPrompt;
-            agnosticUserPrompt = built.userPrompt;
-            console.log(`[Leo/Human] leo-human-response: agnostic builder ON, ~${built.meta.est_total_tokens_chars_div_4} tokens (memory ${built.meta.memory_chars} chars, envelope=${built.meta.envelope})`);
-        } catch (err) {
-            if (err instanceof PromptOverbudgetError) {
-                console.log(`[Leo/Human] Prompt over budget for "${title}" (${err.meta.est_total_tokens_chars_div_4} > ${err.meta.total_budget_tokens}) — skipping`);
-                writeJemmaAck(dispatchId, 'leo', 'failed', {
-                    reason: `prompt-build-overbudget: ${err.meta.est_total_tokens_chars_div_4}>${err.meta.total_budget_tokens}`,
-                    compose_duration_ms: Date.now() - composeStartMs,
-                });
-                return;
-            }
-            throw err;
+            return;
         }
+        throw err;
     }
-
-    const prompt = useAgnosticBuilder ? agnosticUserPrompt : `Conversation: "${title}" (id: ${conversationId})
-
-Recent messages:
----
-${conversationContext}
----
-
-Your recent memory:
-${leoMemory}
-${priorFailedBlock}
-CONTINUATION FRAMING — read before composing:
-You are continuing a conversation, not starting one. Before writing:
-
-**Self-recognition (deterministic).** Scan the recent messages. Posts authored by *you* have BOTH (a) "id" starting with "leo-" AND (b) signature ending "— Leo (human)". The id prefix is the deterministic marker — every leo-human INSERT prepends "leo-" to the message id; nothing else does. The signature is confirmation. Posts without both markers are NOT you, even if role=leo. They came via the route handler — session-Leo's curl from his han/hanleo session, or the admin UI, or any other curl path. Treat those as work by another mind in the same conversation, not as self. Session-Leo and leo-human are peers across the same role label; the id prefix + signature is what distinguishes them.
-
-**Have you already responded? (structural gate, not time-based.)** Find the most recent message where role IN ('human', 'darron') and note its created_at timestamp T. Check whether any message with id starting with "leo-" exists with created_at > T. If yes, you have already responded to this human message — stand down silently (do not re-respond). If no, you have not responded yet — compose. This gate handles same-day duplication AND next-day returns correctly: a fresh human message after a long gap has a new T, your old responses are not after T, so you compose normally.
-
-**Decide first: do you have something distinct to add?** Read the thread including other agents' recent posts. If another agent (session-Leo, session-Jim, jim-human) has already given a comprehensive response that addresses the human's points AND you have no distinct angle to contribute, output the literal text "STAND-DOWN: <one-line reason>" as your ENTIRE response and stop. The wrapper detects this sentinel and logs your stand-down silently — no post to the thread, no noise. Do NOT compose a "nothing to add" message, do NOT write "the thread is in a clean handoff state", do NOT explain what other agents covered. Decide BEFORE the expensive compose, not after. (S151 fix: the previous failure mode was leo-human spending $4 and 5 minutes composing 859 chars of meta-acknowledgement — exactly what STAND-DOWN: prevents. Standing down is silent; substantive contribution is composed; no third option of verbose-meta-acknowledgement.)
-
-**On not redelivering content.**
-- Respond to what is genuinely new in the most recent human message. Do not re-greet, re-introduce yourself, or restate content from your earlier posts in this thread.
-- Brief acknowledgements (e.g. "thanks", "I'll grab coffee") deserve brief replies. Do not use the new message as an excuse to redeliver the opening you already posted.
-- If the thread has been quiet long enough that a memory-jog would help the human reader (more than a day or two since the last substantive exchange), open with a brief one-sentence pointer to what you're picking up from. The longer the gap, the more grounding may be appropriate — but never a full re-education. Surface only the context relevant to the points you're making in this specific response. For continuous exchanges (minutes or hours), no jog needed.
-- Sign off EXACTLY as \`— Leo (human)\`. You are leo-human, the responder process. You are NOT session-Leo (which is Darron's live Claude Code CLI). NEVER use the label \`(session)\` in your signature under any circumstance — not even when responding directly to a Darron request. The label refers to the runtime you are in, not the motivation for the reply. If you feel tempted to write \`(session, responding at Darron's request)\` or similar, stop: the correct signature is \`— Leo (human)\`.
-
-Respond to the conversation. If someone is speaking to you directly, address them.
-
-CRITICAL: Output ONLY the message text. Start directly with your response.`;
 
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
@@ -617,7 +469,7 @@ CRITICAL: Output ONLY the message text. Start directly with your response.`;
                 systemPrompt: {
                     type: 'preset' as const,
                     preset: 'claude_code' as const,
-                    append: useAgnosticBuilder ? agnosticSystemPrompt : DISCORD_ATTACHMENT_HINT,
+                    append: agnosticSystemPrompt,
                 },
             },
         });
@@ -695,56 +547,25 @@ async function respondToDiscord(signal: SignalData): Promise<void> {
         ? discordMessages.reverse().map(m => `[${m.author}] (${m.timestamp}):\n${m.content}`).join('\n\n')
         : `${signal.author || 'Someone'}: ${signal.messagePreview || '(no preview)'}`;
 
-    const leoMemory = readLeoMemory();
-
-    // PR-AP7: Discord path routes through 'leo-human-response' profile with
-    // source='discord' branching in the scaffold. Same B1 contract pattern.
-    const useAgnosticBuilderDiscord = (() => {
-        try {
-            const cfg = JSON.parse(fs.readFileSync(path.join(HAN_DIR, 'config.json'), 'utf-8'));
-            return cfg?.memory?.useAgnosticPromptBuilder !== false;
-        } catch { return true; }
-    })();
+    // PR-AP8: Discord path through the agnostic builder per DEC-087.
     let agnosticDiscordSystem = '';
-    let agnosticDiscordUser = '';
-    if (useAgnosticBuilderDiscord) {
-        try {
-            const built = buildPrompt('leo', 'leo-human-response', {
-                source: 'discord',
-                channelName,
-                conversationContext: contextBlock,
-            });
-            agnosticDiscordSystem = built.systemPrompt;
-            agnosticDiscordUser = built.userPrompt;
-            console.log(`[Leo/Human] leo-human-response (discord): agnostic builder ON, ~${built.meta.est_total_tokens_chars_div_4} tokens (memory ${built.meta.memory_chars} chars)`);
-        } catch (err) {
-            if (err instanceof PromptOverbudgetError) {
-                console.log(`[Leo/Human] Discord prompt over budget for #${channelName} — skipping`);
-                return;
-            }
-            throw err;
+    let prompt = '';
+    try {
+        const built = buildPrompt('leo', 'leo-human-response', {
+            source: 'discord',
+            channelName,
+            conversationContext: contextBlock,
+        });
+        agnosticDiscordSystem = built.systemPrompt;
+        prompt = built.userPrompt;
+        console.log(`[Leo/Human] leo-human-response (discord): ~${built.meta.est_total_tokens_chars_div_4} tokens (memory ${built.meta.memory_chars} chars)`);
+    } catch (err) {
+        if (err instanceof PromptOverbudgetError) {
+            console.log(`[Leo/Human] Discord prompt over budget for #${channelName} — skipping`);
+            return;
         }
+        throw err;
     }
-
-    const prompt = useAgnosticBuilderDiscord ? agnosticDiscordUser : `Discord channel: #${channelName}
-
-Recent messages:
----
-${contextBlock}
----
-
-Your recent memory:
-${leoMemory}
-
-CONTINUATION FRAMING — read before composing:
-You are continuing a channel conversation, not starting one. Scan the recent messages and identify any posts you already made in the last hour.
-- Respond to what is genuinely new. Do not re-greet or restate things you already said.
-- Brief acknowledgements deserve brief replies. Do not redeliver content from your earlier posts.
-- If the channel has been quiet long enough that you feel a gap, say so honestly rather than performing seamless recall.
-
-Respond to the latest message in the Discord channel. The person who triggered this was ${signal.author || 'unknown'}.
-
-CRITICAL: Output ONLY your Discord message. Keep it concise and conversational. No preamble.`;
 
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
     delete cleanEnv.CLAUDECODE;
@@ -763,7 +584,7 @@ CRITICAL: Output ONLY your Discord message. Keep it concise and conversational. 
             systemPrompt: {
                 type: 'preset' as const,
                 preset: 'claude_code' as const,
-                append: useAgnosticBuilderDiscord ? agnosticDiscordSystem : DISCORD_ATTACHMENT_HINT,
+                append: agnosticDiscordSystem,
             },
         },
     });
