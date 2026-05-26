@@ -228,9 +228,14 @@ function maskFencedCodeBlocks(text: string): string {
             // Inside a fence. Check whether this line closes the same fence type.
             // Closer must be the delimiter ALONE on a line (allowing leading
             // horizontal whitespace and optional trailing whitespace).
+            // A1 fix (Jim's audit, 2026-05-26): `\r?` allows the optional
+            // trailing `\r` left by `split('\n')` on CRLF input. Without it,
+            // CRLF-terminated input never closes a fence — masking continues
+            // to EOF, and a real `## C1` after the fence is missed. Symmetric
+            // with the heading regex's `(?:$|\r?\n)`.
             const closerRegex = fenceDelim === '```'
-                ? /^[ \t]*```[ \t]*$/
-                : /^[ \t]*~~~[ \t]*$/;
+                ? /^[ \t]*```[ \t]*\r?$/
+                : /^[ \t]*~~~[ \t]*\r?$/;
             const isClose = closerRegex.test(line);
             // Mask all lines while in-fence (including the closer) — the heading
             // regex never sees fence content.

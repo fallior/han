@@ -300,3 +300,48 @@ test('section: CRLF line endings handled', () => {
     assert.strictEqual(result.full, 'Body.');
     assert.strictEqual(result.compressed, 'Distilled.');
 });
+
+// A1 regression test (Jim's PR-C1-1 audit, 2026-05-26): the closer regex
+// for ``` and ~~~ fences must allow the optional trailing `\r` left by
+// `split('\n')` on CRLF input. Without `\r?` on the closer, CRLF-terminated
+// input with a fenced `## C1` example would mask everything through to EOF
+// — missing the real `## C1` heading after the fence.
+test('section: ## C1 inside ``` fence with CRLF line endings is ignored', () => {
+    const input = [
+        'Body about a markdown example.',
+        '',
+        '```markdown',
+        '## C1',
+        'fenced example',
+        '```',
+        '',
+        'After the fence.',
+        '',
+        '## C1',
+        '',
+        'Real distillation.',
+    ].join('\r\n');
+    const result = parsePairedMemorySection(input);
+    assert.strictEqual(result.parseError, undefined);
+    assert.strictEqual(result.compressed, 'Real distillation.');
+    assert.ok(result.full.includes('fenced example'),
+        'CRLF: fenced content must be preserved verbatim in full');
+});
+
+test('section: ## C1 inside ~~~ fence with CRLF line endings is ignored', () => {
+    const input = [
+        'Body.',
+        '',
+        '~~~',
+        '## C1',
+        'fenced example',
+        '~~~',
+        '',
+        '## C1',
+        '',
+        'Real one.',
+    ].join('\r\n');
+    const result = parsePairedMemorySection(input);
+    assert.strictEqual(result.parseError, undefined);
+    assert.strictEqual(result.compressed, 'Real one.');
+});
