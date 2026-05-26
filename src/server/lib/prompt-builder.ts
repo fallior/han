@@ -38,6 +38,8 @@ import {
     PromptContext,
     PromptProfile,
     profileByName,
+    DEFAULT_C1_INSTRUCTION_SECTION,
+    DEFAULT_C1_INSTRUCTION_STRUCTURED,
 } from './prompt-profiles';
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -430,8 +432,24 @@ export function buildPrompt(
     const profile = profileByName(profileName);
 
     // Resolve scaffolding (the orientation sentence + optional user-side framing)
-    const opening = resolveScaffold(profile.systemPromptOpening, context);
+    let opening = resolveScaffold(profile.systemPromptOpening, context);
     const userScaffold = resolveScaffold(profile.userPromptScaffold, context);
+
+    // C1-2 (PR-C1-2, 2026-05-26): append paired-memory output instruction to
+    // the system prompt when the profile has `pairedMemoryOutput.enabled`.
+    // Default instructions per mechanism live in prompt-profiles.ts; custom
+    // instructions on the config override. Disabled state per C1-N2: builder
+    // does nothing here — the handler treats the absent instruction as the
+    // surface being operator-controlled offline for paired-write (skip + log).
+    // No production surface has enabled=true at C1-2; per-surface enablement
+    // begins at C1-3 (philosophy-beat, smallest blast radius).
+    if (profile.pairedMemoryOutput?.enabled) {
+        const customInstruction = profile.pairedMemoryOutput.instruction;
+        const defaultInstruction = profile.pairedMemoryOutput.mechanism === 'structured'
+            ? DEFAULT_C1_INSTRUCTION_STRUCTURED
+            : DEFAULT_C1_INSTRUCTION_SECTION;
+        opening = opening + (customInstruction ?? defaultInstruction);
+    }
 
     // Load the uniform memory bank (agent-specific via slug; same call for every
     // surface — except where the profile declares componentOverrides to suppress

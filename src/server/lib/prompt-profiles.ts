@@ -119,7 +119,99 @@ export interface PromptProfile {
      * context. See W6-6 design note in the AP thread.
      */
     componentOverrides?: Partial<Record<string, false>>;
+
+    /**
+     * PR-C1-2 (2026-05-26): paired-memory output discipline.
+     *
+     * When set with `enabled: true`, the builder appends an instruction
+     * to the system prompt asking the agent to produce both halves of the
+     * paired-memory write in a single SDK call. Two mechanisms supported:
+     *
+     *   - 'structured' — agent returns SDK structured output with
+     *     `working_memory_full` + `working_memory_compressed` as named
+     *     fields. The schema enforcement lives at the SDK call site (the
+     *     handler's agentQuery options); the builder just describes the
+     *     expected shape in the system prompt.
+     *   - 'section' — agent appends a `## C1` section to the prose
+     *     response. The handler parses via `parsePairedMemorySection`
+     *     from `lib/result-handlers.ts`.
+     *
+     * Disabled on every profile by default. Per-profile enablement lands
+     * at C1-3 through C1-6 per the c1-distillation plan. The supervisor-
+     * cycle profile keeps the existing schema-enforced behaviour at C1-2
+     * (handler refactored to compose `parsePairedMemoryStructured` via
+     * the library; behaviour preserved).
+     *
+     * See `plans/c1-distillation.md` for the full rollout.
+     */
+    pairedMemoryOutput?: PairedMemoryOutputConfig;
 }
+
+// ── Paired-memory output (C1-2) ────────────────────────────────────────
+
+/**
+ * Two implementations of one principle: the agent produces both halves of
+ * the paired memory write in a single SDK call, in voice.
+ *
+ *   structured — surface returns SDK structured output with named fields.
+ *                Used today by supervisor-cycle; lands for *-human-response
+ *                at C1-6.
+ *
+ *   section    — surface returns prose with a closing `## C1` heading
+ *                separating raw content (above) from in-voice distillation
+ *                (below). Used by every prose surface from C1-3 onward.
+ */
+export type PairedMemoryMechanism = 'structured' | 'section';
+
+export interface PairedMemoryOutputConfig {
+    /**
+     * Whether the builder appends the c1 instruction to the system prompt.
+     * False by default; enabled per-profile during the C1-3 through C1-6
+     * rollout. Disabled state per C1-N2 means the surface is operator-
+     * controlled offline for paired-write — skip + log distress, no dormant
+     * truncation fallback.
+     */
+    enabled: boolean;
+
+    /**
+     * Which mechanism the surface uses to produce paired memory. The builder
+     * picks the right default instruction based on this value; the handler
+     * picks the right parser primitive based on the surface's response shape.
+     */
+    mechanism: PairedMemoryMechanism;
+
+    /**
+     * Optional custom instruction text overriding the default. Use when a
+     * surface needs per-register variation (e.g. dream-beat / dream-cycle
+     * with the shape-token register). Falls back to the corresponding
+     * `DEFAULT_C1_INSTRUCTION_*` constant when omitted.
+     */
+    instruction?: string;
+
+    /**
+     * Soft target range for the compressed field in tokens. Default
+     * {min: 50, max: 200} — sizes that won't fit a "shorter narration".
+     * The instruction can name this range to anchor the agent's intent;
+     * not enforced as a hard cap (agents may go slightly over or under).
+     */
+    targetTokens?: { min: number; max: number };
+}
+
+/**
+ * Default instruction for `mechanism: 'section'` surfaces. Appended to the
+ * system prompt when `pairedMemoryOutput.enabled` is true and no custom
+ * instruction is set. The voice is identity-aligned per the c1-distillation
+ * plan — *"write it like the message you'd want your tomorrow to receive"*.
+ */
+export const DEFAULT_C1_INSTRUCTION_SECTION = `\n\n---\n\nYour response must end with a \`## C1\` section: 3-5 sentences in your voice compressing the SHAPE of what you just wrote — not a shorter narration. This is what future-you will load at wake; write it like the message you'd want your tomorrow to receive. Place the heading at the start of a line (level-2 heading, exactly two hashes); content after the heading until end-of-response is the distillation.`;
+
+/**
+ * Default instruction for `mechanism: 'structured'` surfaces. Describes the
+ * required schema fields. Schema enforcement still happens at the SDK call
+ * site (the handler's agentQuery options); this text orients the agent to
+ * what the schema is asking for.
+ */
+export const DEFAULT_C1_INSTRUCTION_STRUCTURED = `\n\n---\n\nYour response must include two fields capturing paired memory:\n- \`working_memory_full\` — the raw c0 source: what happened, what you felt, exact quotes worth preserving verbatim, the texture under the work. Future-you's calibration anchor.\n- \`working_memory_compressed\` — the in-voice c1 distillation, 3-5 sentences compressing the SHAPE of what survived being said — not a shorter narration. This is what future-you loads at wake; write it like the message you'd want your tomorrow to receive.`;
 
 // ── Profile Registry ───────────────────────────────────────────────────
 
