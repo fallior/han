@@ -189,23 +189,58 @@ test('pairedMemoryOutput: custom instruction overrides default for structured', 
     });
 });
 
-// ── Tests: C1-2 contract — no production profile has enabled=true ─────
+// ── Tests: C1 migration tracker (updates per phase) ───────────────────
 
-test('PR-C1-2 contract: no PROFILES entry has pairedMemoryOutput.enabled=true', () => {
-    // C1-2 ships the field plumbing only. Per-surface enablement begins at
-    // C1-3 (philosophy-beat) onward. This test asserts the plan's success
-    // criterion — "disabled on every profile by default; no behaviour change"
-    // — and protects against accidental enablement during the C1-2 PR.
+/**
+ * Per-surface migration tracker. Started at C1-2 as "no enabled surfaces";
+ * updates each phase as surfaces enable. The test asserts which specific
+ * profiles are enabled at the CURRENT phase — drift detection in both
+ * directions (accidental enablement during a too-narrow phase; accidental
+ * disablement during the wider rollout).
+ *
+ * Update history:
+ *   - PR-C1-2 (2026-05-26): [] (no enabled surfaces — field plumbing only)
+ *   - PR-C1-3 (2026-05-27): ['philosophy-beat']  ← current
+ *   - PR-C1-4 (TBD): add 'personal-beat', 'dream-beat', 'meditation-phase-a',
+ *                    'meditation-phase-b', 'meditation-evening' (Leo's remaining
+ *                    heartbeat surfaces, all Mechanism B)
+ *   - PR-C1-5 (TBD): add 'personal-cycle', 'recovery-cycle', 'dream-cycle'
+ *                    (Jim's three prose cycles, Mechanism B)
+ *   - PR-C1-6 (TBD): add 'leo-human-response', 'jim-human-response'
+ *                    (both Mechanism A — schema-extended at the SDK call)
+ *   - (supervisor-cycle stays as the reference; not in this list because it
+ *     uses structured output via its existing schema, not the field-driven
+ *     instruction-append path — the field is for declaring at the registry
+ *     layer, not for routing the schema)
+ */
+const C1_ENABLED_SURFACES_CURRENT: ReadonlyArray<string> = [
+    'philosophy-beat',
+];
+
+test('C1 migration tracker: enabled surfaces match the expected per-phase set', () => {
     const enabled: string[] = [];
     for (const [name, profile] of Object.entries(PROFILES)) {
         if (profile.pairedMemoryOutput?.enabled === true) {
             enabled.push(name);
         }
     }
+    const sortedActual = [...enabled].sort();
+    const sortedExpected = [...C1_ENABLED_SURFACES_CURRENT].sort();
     assert.deepStrictEqual(
-        enabled,
-        [],
-        `PR-C1-2 should ship with no profiles having pairedMemoryOutput.enabled=true. ` +
-        `Found enabled on: ${enabled.join(', ')}. Per-surface enablement begins at C1-3.`,
+        sortedActual,
+        sortedExpected,
+        `Migration tracker drift: enabled surfaces ≠ expected. ` +
+        `Enabled: [${sortedActual.join(', ')}]. ` +
+        `Expected at this phase: [${sortedExpected.join(', ')}]. ` +
+        `If you enabled a new surface, update C1_ENABLED_SURFACES_CURRENT in this test.`,
     );
+});
+
+test('C1 migration tracker: philosophy-beat declares mechanism=section (PR-C1-3)', () => {
+    const profile = PROFILES['philosophy-beat'];
+    assert.ok(profile, 'philosophy-beat profile must exist');
+    assert.strictEqual(profile.pairedMemoryOutput?.enabled, true,
+        'philosophy-beat must have pairedMemoryOutput.enabled=true after PR-C1-3');
+    assert.strictEqual(profile.pairedMemoryOutput?.mechanism, 'section',
+        'philosophy-beat must use Mechanism B (section parsing)');
 });

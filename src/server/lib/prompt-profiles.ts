@@ -264,6 +264,14 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'user',
         userPromptScaffold: (ctx) => buildPhilosophyBeatScaffold(ctx),
         totalBudgetTokens: 180_000,
+        // PR-C1-3 (2026-05-27): first production surface enabled for paired-
+        // memory output. Mechanism B (section parsing) — the response is
+        // prose; appending the c1 instruction asks the agent to close with
+        // a `## C1` section. Both philosophy-beat modes (jim-waiting +
+        // independent) parse via `parsePairedMemorySection`; jim-waiting
+        // strips the section before posting so the heading never appears in
+        // the public-facing thread post visible to Jim/Darron.
+        pairedMemoryOutput: { enabled: true, mechanism: 'section' },
     },
 
     /**

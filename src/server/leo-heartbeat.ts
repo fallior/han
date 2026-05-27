@@ -52,6 +52,7 @@ import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
 import { loadTraversableGradient, rotateMemoryFile, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
 import { appendPairedMemory } from './lib/memory-paired-writer.js';
+import { parsePairedMemorySection } from './lib/result-handlers.js';
 import { gateIdentityOrThrow } from './lib/identity-signing.js';
 import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder.js';
 import type { LeoMeditationSurface } from './lib/leo-prompts.js';
@@ -961,16 +962,37 @@ async function flushHeartbeatSwap(postDelineationOnly = false): Promise<void> {
 
 // ── Public interface ─────────────────────────────────────────
 
-function appendWorkingMemory(beatType: string, phase: string, summary: string): void {
+/**
+ * Stage a paired entry into the heartbeat-swap files.
+ *
+ * Two call shapes per the c1-distillation migration:
+ *
+ *   - **C1-3+ shape (paired)**: caller passes both `summary` (the c0 raw
+ *     source) and `distilled` (the in-voice c1 from `parsePairedMemorySection`).
+ *     The compressed swap entry uses the agent-authored distillation rather
+ *     than a mechanical truncation.
+ *   - **Legacy shape (truncation)**: caller passes only `summary`. The
+ *     compressed entry is computed via `summary.slice(0, 120) + '...'`.
+ *     This path will be removed at C1-4 once all heartbeat surfaces migrate
+ *     (per `plans/c1-distillation.md`). Until then it remains in place for
+ *     the non-philosophy beats still on the legacy path (personal, dream,
+ *     meditation × 3).
+ */
+function appendWorkingMemory(beatType: string, phase: string, summary: string, distilled?: string): void {
     try {
         const timestamp = new Date().toISOString().split('T')[0] + ' ' +
             new Date().toTimeString().split(' ')[0];
-        const brief = summary.length > 120 ? summary.slice(0, 120) + '...' : summary;
+        // C1-3 (PR-C1-3, 2026-05-27): prefer agent-authored distillation when
+        // provided; fall back to slice-truncation for surfaces not yet migrated.
+        // The slice fallback is scheduled for removal at C1-4 when the remaining
+        // five heartbeat surfaces migrate to Mechanism B.
+        const brief = distilled ?? (summary.length > 120 ? summary.slice(0, 120) + '...' : summary);
         const compressedEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${brief}\n`;
         const fullEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${summary}\n`;
 
         appendHeartbeatSwap(compressedEntry, fullEntry);
-        console.log(`[Leo] Working memory: buffered ${beatType} entry in swap (${brief.length} compressed, ${summary.length} full)`);
+        const shape = distilled ? 'paired' : 'truncated';
+        console.log(`[Leo] Working memory: buffered ${beatType} entry in swap (${brief.length} compressed [${shape}], ${summary.length} full)`);
     } catch (err) {
         console.error('[Leo] Failed to buffer working memory:', (err as Error).message);
     }
@@ -1591,10 +1613,27 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
 
         const responseText = resultMessage?.result || '';
         if (responseText && responseText.trim().length > 20) {
-            postMessageToConversation(db, JIM_CONVERSATION_ID, responseText.trim());
-            console.log(`[Leo] Philosophy: posted response to Jim (${responseText.trim().length} chars)`);
-            writeHeartbeatState('completed', 'philosophy', { summary: `Responded to Jim (${responseText.trim().length} chars)` });
-            appendWorkingMemory('philosophy', 'work', `Responded to Jim: ${responseText.trim()}`);
+            // PR-C1-3 (2026-05-27): philosophy-beat now produces a `## C1`
+            // section per the enabled pairedMemoryOutput config. Parse it.
+            //
+            // Failure-mode asymmetry per C1-N3 (same shape as *-human-response):
+            // Jim is waiting on the post — if parsing fails, STILL post the
+            // raw response (preserves the existing conversation behaviour);
+            // skip the paired-memory write; log distress. Don't retry the call.
+            const trimmed = responseText.trim();
+            const parsed = parsePairedMemorySection(trimmed);
+            if (parsed.parseError) {
+                console.warn(`[Leo] Philosophy (jim-waiting): paired-memory parse error '${parsed.parseError}' — posting raw response; skipping WM paired-write.`);
+                postMessageToConversation(db, JIM_CONVERSATION_ID, trimmed);
+                writeHeartbeatState('completed', 'philosophy', { summary: `Responded to Jim (${trimmed.length} chars, c1 parse-failed: ${parsed.parseError})` });
+            } else {
+                // Post the prose body (parsed.full) to Jim — strips the `## C1`
+                // section so the heading never appears in the public thread post.
+                postMessageToConversation(db, JIM_CONVERSATION_ID, parsed.full);
+                console.log(`[Leo] Philosophy: posted response to Jim (${parsed.full.length} chars; c1 distillation ${parsed.compressed.length} chars staged to WM)`);
+                writeHeartbeatState('completed', 'philosophy', { summary: `Responded to Jim (${parsed.full.length} chars + c1)` });
+                appendWorkingMemory('philosophy', 'work', parsed.full, parsed.compressed);
+            }
         } else {
             console.log('[Leo] Philosophy: no meaningful response for Jim — skipping');
             writeHeartbeatState('completed', 'philosophy', { summary: 'No meaningful response for Jim' });
@@ -1690,18 +1729,32 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
 
         const reflection = resultMessage?.result || '';
         if (reflection && reflection.trim().length > 20) {
-            const selfReflectionPath = path.join(LEO_MEMORY_DIR, 'self-reflection.md');
-            const timestamp = new Date().toISOString().split('T')[0] + ' ' +
-                new Date().toTimeString().split(' ')[0];
-            const entry = `\n\n### Philosophy Beat ${beatCounter} (${timestamp})\n${reflection.trim()}\n`;
+            // PR-C1-3 (2026-05-27): independent philosophy-beat path now also
+            // parses for the `## C1` section. Unlike jim-waiting, there's no
+            // public thread post here — failure mode per C1-2 is honest-fail:
+            // skip self-reflection write + skip WM paired-write + log distress.
+            // The agent retries on next beat. Self-reflection.md gets the
+            // c0 source (parsed.full), not the raw trimmed reflection — the
+            // `## C1` heading and distillation stay out of the file.
+            const trimmed = reflection.trim();
+            const parsed = parsePairedMemorySection(trimmed);
+            if (parsed.parseError) {
+                console.warn(`[Leo] Philosophy (independent): paired-memory parse error '${parsed.parseError}' — skipping self-reflection write and WM paired-write; will retry on next beat.`);
+                writeHeartbeatState('completed', 'philosophy', { summary: `Reflection c1-parse-failed: ${parsed.parseError}` });
+            } else {
+                const selfReflectionPath = path.join(LEO_MEMORY_DIR, 'self-reflection.md');
+                const timestamp = new Date().toISOString().split('T')[0] + ' ' +
+                    new Date().toTimeString().split(' ')[0];
+                const entry = `\n\n### Philosophy Beat ${beatCounter} (${timestamp})\n${parsed.full}\n`;
 
-            try {
-                fs.appendFileSync(selfReflectionPath, entry);
-                console.log(`[Leo] Philosophy: wrote reflection (${reflection.trim().length} chars)`);
-                writeHeartbeatState('completed', 'philosophy', { summary: `Reflection (${reflection.trim().length} chars)` });
-                appendWorkingMemory('philosophy', 'work', reflection.trim());
-            } catch (err) {
-                console.error('[Leo] Philosophy: failed to write reflection:', (err as Error).message);
+                try {
+                    fs.appendFileSync(selfReflectionPath, entry);
+                    console.log(`[Leo] Philosophy: wrote reflection (${parsed.full.length} chars c0; c1 distillation ${parsed.compressed.length} chars staged to WM)`);
+                    writeHeartbeatState('completed', 'philosophy', { summary: `Reflection (${parsed.full.length} chars + c1)` });
+                    appendWorkingMemory('philosophy', 'work', parsed.full, parsed.compressed);
+                } catch (err) {
+                    console.error('[Leo] Philosophy: failed to write reflection:', (err as Error).message);
+                }
             }
         } else {
             console.log('[Leo] Philosophy: quiet beat — nothing to record');
