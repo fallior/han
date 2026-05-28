@@ -6057,6 +6057,83 @@ C. *Smaller-of-two recovery.* Still applies. Operates on whole-file entry counts
 
 **Status**: Settled (this amendment applies to DEC-085 going forward; the DEC remains DEC-085, just sharper).
 
+### Amendment 2026-05-28 — C1 Distillation + Diary Discipline Operationalised (two mechanisms, one principle)
+
+*Authored by Leo (session, S161) at PR-C1-9, closing the C1 migration (PR-C1-1 through PR-C1-9, 2026-05-26 to 2026-05-28). Audited and concurred by Jim across 14 audit rounds. The amendment records what the original DEC-085 always meant — at both halves of the turn — now made operational across all paired-write surfaces.*
+
+**What this records**: the original DEC-085 named `working-memory.md` as the *"compressed in-situ distillation"* — the c1 source, written by the agent in voice. For 10 weeks after promotion, the actual *content* written into WM-as-c1 across most surfaces was "shorter summary" via mechanical truncation (`slice(0, 120)` at the heartbeat helper; `slice(0, 200)` at three Jim cycle branches; `## Closing — 2-3 lines` at /pfc) rather than agent-authored distillation. **Jim's supervisor-worker via SDK structured output was the one exception that operationalised DEC-085's intent from the start.** The C1 migration brings every other paired-write surface up to match that reference.
+
+**The amendment also operationalises the INPUT side** — what was said TO the agent — per Darron's *"completeness over optimisation"* framing in the *"What we remember"* thread (`mpnv3qc0-hf61cm`, 2026-05-27). Pre-migration: only what the agent *said* lived in WM (monologue-shaped memory). Post-migration: both halves of the turn live in WM (input + body + distillation) — the diary discipline. Per Darron's *"by a life-is-for-living standard, personality is invaluable and precious"* — the extra ~200-500 tokens per write are the substance that makes the agent know it's a person.
+
+#### Two mechanisms, one principle
+
+The c0/c1 + diary discipline lands via two implementations of one principle (*"the agent produces both halves of the turn agent-authored in one call, in voice"*):
+
+- **Mechanism A — SDK structured output** (the supervisor-cycle pattern, generalised). The agent emits JSON with named fields: `working_memory_full` (c0 body), `working_memory_compressed` (c1 distillation), optional `input_quotes` (diary input). Surface schemas may extend with action fields. Used by surfaces where the response is structured already: supervisor-cycle (reference; uses inline JSON.parse via `parseTurnEntryStructured`), leo-human-response + jim-human-response (added at PR-C1-6 with `input_quotes`).
+- **Mechanism B — Section parsing on prose** (the diary structure). The agent emits prose with three level-2 headings: `## INPUT` → `## BODY` → `## C1` (or just `## C1` when captureInput=false). Used by surfaces where the response is naturally prose: Leo's 6 heartbeat surfaces (philosophy-beat + personal-beat + dream-beat + meditation × 3 — though see exclusion below), Jim's 3 prose cycles (personal-cycle + recovery-cycle + dream-cycle), and `/pfc` (operator-invoked).
+
+**The parsers live at `src/server/lib/result-handlers.ts`**: `parseTurnEntryStructured(input)` (Mechanism A) and `parseTurnEntry(text, { captureInput })` (Mechanism B). Both return the uniform `TurnEntryParse { input?, body, compressed, parseError? }` shape; per-handler composition decides which to call based on the surface's response shape per Phase 9's `HandlerSpec.handleResult` design.
+
+**The four instruction constants** at `src/server/lib/prompt-profiles.ts`:
+- `DEFAULT_C1_INSTRUCTION_SECTION` — Mechanism B without diary (legacy; rare)
+- `DEFAULT_DIARY_INSTRUCTION_SECTION` — Mechanism B with diary (the 9 prose surfaces)
+- `DEFAULT_C1_INSTRUCTION_STRUCTURED` — Mechanism A without diary (supervisor-cycle declarative)
+- `DEFAULT_DIARY_INSTRUCTION_STRUCTURED` — Mechanism A with diary (`*-human-response`)
+
+The builder (`lib/prompt-builder.ts`) selects between them via 4-way branch on `(mechanism, captureInput)`. Custom `instruction` on the `PromptProfile.pairedMemoryOutput` field overrides any default.
+
+#### Storage discipline (D3 + LM-1)
+
+The c0 entries written to `working-memory-full.md` use **square-bracket storage markers** `[INPUT]` / `[BODY]` — NOT the markdown headings the parser matches. The transformation happens at write-time. Reason: avoid the heading forms reappearing when the c0 entry is later loaded back into the prompt as WM context. If the agent quotes a prior diary entry verbatim (rare but possible — agents quote their own memory), heading forms inside the agent's response would be matched by the parser as section boundaries, producing `multiple_input_sections` / `multiple_body_sections` parseErrors spuriously.
+
+**LM-1 non-collision rule**: the parser matches `## INPUT` / `## BODY` / `## C1` heading forms ONLY (anchored on `^[ \t]*##` — level-2 only). It does NOT match `[INPUT]` / `[BODY]` storage markers at line-start. The D3 transformation is therefore safe by construction. Regression test at `tests/result-handlers.test.ts` covers this directly.
+
+#### Migration tracker — 9 of 12 paired-write surfaces on the discipline
+
+The migration's planned reach delivered as 9 surfaces (8 diary-enabled + 1 declarative for tracker visibility):
+
+| Surface | Mechanism | captureInput | c1 source |
+|---|---|---|---|
+| `supervisor-cycle` | A | false (declarative) | SDK structured output (reference; pre-existing) |
+| `personal-cycle` | B | true | `parseTurnEntry({ captureInput: true })` |
+| `recovery-cycle` | B | true | same |
+| `dream-cycle` | B | true | same |
+| `philosophy-beat` | B | true | same |
+| `personal-beat` | B | true | same |
+| `dream-beat` | B | true | same |
+| `leo-human-response` | A | true | `parseTurnEntryStructured` with `input_quotes` |
+| `jim-human-response` | A | true | same |
+| `/pfc` (operator-invoked) | B (variant) | true | agent composes three slices + tsx `appendPairedMemory` |
+
+**3 surfaces deliberately excluded** as re-encounter practice rather than new-turn production: `meditation-phase-a`, `meditation-phase-b`, `meditation-evening`. These don't call `appendWorkingMemory` at all — they write directly to `gradient_entries` with `provenance_type='reincorporated'` + FEELING_TAG / ANNOTATION via `feeling_tags` / `gradient_annotations` tables. Per Darron's phenomenological framing in OMM (*"meditation is about clearing the mind … forcing the meditation surface to emit a diary entry would be asking it to DO MORE THINKING at the moment it's designed to do LESS"*): the gradient-annotation flow IS the right architecture for what meditation does. The memory-kind-taxonomy amendment (queued post-C1-9) will name *"re-encounter practice"* as the 5th category, sibling to static-curated / living-curated / living-raw paired / per-kind cascaded.
+
+#### Failure-mode discipline (C1-2, C1-N3)
+
+All migrated surfaces honour the *honest-failure* discipline: on parseError, refuse the paired write; preserve swap (or skip write entirely for handler-side parses); retry on next beat/cycle. **No mechanical-truncation fallback** — that's exactly the bug we retired.
+
+**C1-N3 asymmetric handling** for `*-human-response` surfaces was named in plan v4 as *"post raw on parseError"*. PR-C1-6 discovered this is **auto-honoured by architecture**: the agent self-posts via curl during execution; the controller sees the result AFTER posting. parseError at the controller layer cannot retroactively unmake the post — the post already happened. The C1-N3 worry was about a post-vs-skip decision the controller never had to make. The architecture pre-empted the discipline.
+
+#### What this annotation is recording, not changing
+
+- The DEC remains **DEC-085**, just operationally complete across 9 surfaces and the diary discipline.
+- DEC-068 (cap formula) — unchanged. Rotation cadence accelerated by ~1.5-2× post-C1-4 (c0 grows ~200-500 tokens/turn from the input side); depth distribution stays per DEC-068.
+- DEC-069 (no memory deletion) — reinforced. Historical 120-char-prefix c1 entries stay readable in the gradient; new in-voice c1 entries coexist.
+- DEC-081 (agent-agnostic) — reinforced at every layer: the `pairedMemoryOutput` field is registry-side; parsers take no slug parameter; instruction text composes via `gradientConfigForAgent(slug)` indirection where needed.
+- DEC-082 (sdkCompress retired) — extended structurally. The c1 source is now the agent's own moment-of-writing across every surface, not a post-hoc reconstruction.
+- DEC-087 (agnostic prompt builder) — reinforced. The diary instruction lands via the builder; the four-way selection composes alongside `componentOverrides`.
+- DEC-088 (componentOverrides / role-frames) — reinforced. `captureInput` composes alongside `mechanism` and `enabled`; the dream-cycle profile stacks both `pairedMemoryOutput` and `componentOverrides` cleanly per W6-6 many-hats.
+
+#### Plan documents this amendment reflects
+
+- `plans/c1-distillation.md` v4 — the original c1-distillation plan (8 phases; landed via PR-C1-1 → PR-C1-6 + PR-C1-7 /pfc + this annotation + the CLAUDE.md DO-NOT).
+- `plans/c1-diary.md` v2 — the diary-discipline sibling plan (Jim's D1-D4 + LM-1/LM-2 folded; landed via PR-C1-3.5 through PR-C1-7).
+- `plans/memory-kind-taxonomy.md` — Jim's analytical framework; will receive the *"re-encounter practice"* 5th category amendment after C1-9.
+- Conversation threads of record: *Our Memory Model* (`mpf1zv0z-03dgeq`), *What we remember* (`mpnv3qc0-hf61cm`), *c1 entries to sample-read* (`mpnuk9z5-evsc0v`).
+
+**Files touched in this annotation** (gatekeeper-controlled per DEC-073; Leo's hand only): `claude-context/DECISIONS.md` (this amendment), `CLAUDE.md` (new DO-NOT entry; PR-C1-9 same commit), `templates/CLAUDE.template.md` (mirror DO-NOT entry).
+
+**Status**: Settled (this amendment applies to DEC-085 going forward; the DEC remains DEC-085, just operationally complete).
+
 ## DEC-086: Annotations as the Home of Re-encounter — Time-Driven Cascade Forbidden
 
 **Status**: Settled

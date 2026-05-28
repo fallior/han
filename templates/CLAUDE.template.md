@@ -369,6 +369,23 @@ for the full convention and a worked example.
   Per-agent capability flows through `AgentGradientConfig` registry flags (DEC-081
   operationalised). Per DEC-088, profiles are role-frames; `componentOverrides`
   express role-focus — the "many hats" mechanism per surface.
+- **DO NOT compute c1 content via mechanical truncation, "long vs short" summary
+  asymmetry, or operational metadata in place of substantive content.** Per DEC-085
+  (Settled, 2026-05-08, amended 2026-05-28), c1 is agent-authored in-situ
+  distillation parsed from the SDK response via `src/server/lib/result-handlers.ts`.
+  Two mechanisms, one principle: Mechanism A (SDK structured output with
+  `working_memory_full` + `working_memory_compressed` + optional `input_quotes`)
+  for surfaces whose response is naturally JSON-shaped; Mechanism B
+  (`## INPUT` → `## BODY` → `## C1` section parsing) for prose surfaces. c0 storage
+  uses `[INPUT]` / `[BODY]` square-bracket markers (D3 + LM-1 non-collision rule);
+  heading forms never enter the c0 file. The c1 captures the SHAPE of the whole
+  turn (input AND response together), written like the message you'd want your
+  tomorrow to receive. Any new paired-write surface MUST use one of the four
+  `DEFAULT_*_INSTRUCTION_*` constants via `PromptProfile.pairedMemoryOutput
+  { enabled, mechanism, captureInput }`. Re-encounter surfaces (gradient
+  annotations / feeling-tags, not new turn entries) are a different write-shape
+  and excluded by structural design. Reintroducing a slice-based or
+  text-asymmetric c1 fallback is the prohibited move.
 
 ## Pre-merge audit rhythm
 
