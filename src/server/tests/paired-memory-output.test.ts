@@ -206,26 +206,33 @@ test('pairedMemoryOutput: custom instruction overrides default for structured', 
  *                           personalBeat handler — single function, two
  *                           profiles via phase routing). slice fallback at
  *                           appendWorkingMemory retired (`distilled` now
- *                           required). ← current
- *   - PR-C1-5 (TBD): add 'personal-cycle', 'recovery-cycle', 'dream-cycle'
- *                    (Jim's three prose cycles, Mechanism B + diary)
+ *                           required).
+ *   - PR-C1-5 (2026-05-28): add 'personal-cycle', 'recovery-cycle',
+ *                           'dream-cycle' (Jim's three prose cycles,
+ *                           Mechanism B + diary). slice(0, 200) lines at
+ *                           supervisor-worker.ts:2222 (dream) and :2298
+ *                           (personal/recovery shared) retired. ← current
  *   - PR-C1-6 (TBD): add 'leo-human-response', 'jim-human-response',
  *                    'supervisor-cycle' (Mechanism A — schema-extended at
  *                    the SDK call; diary-equivalent via `input_quotes`
  *                    schema field). Per Jim's R4 + my supervisor-cycle
  *                    extension: declarative field for full registry
- *                    visibility in the tracker.
+ *                    visibility in the tracker. Total at C1-9: 9 surfaces.
  *   - **Meditation surfaces NOT in this list**: meditation-phase-a /
  *     meditation-phase-b / meditation-evening don't call appendWorkingMemory;
  *     they write directly to gradient_entries with FEELING_TAG / ANNOTATION
- *     markers. Different write-shape; separate plan needed (or no migration
- *     needed if the existing gradient-write flow is the right architecture
- *     for them). Surfaced for OMM discussion at PR-C1-4 close.
+ *     markers. Different write-shape (re-encounter practice, not new-turn
+ *     production). Per Jim's PR-C1-4 audit + Darron's phenomenological
+ *     framing: option (a) — leave as-is. Memory-kind-taxonomy will name
+ *     "re-encounter practice" as a 5th category after C1-9.
  */
 const C1_ENABLED_SURFACES_CURRENT: ReadonlyArray<string> = [
     'philosophy-beat',
     'personal-beat',
     'dream-beat',
+    'personal-cycle',
+    'recovery-cycle',
+    'dream-cycle',
 ];
 
 /**
@@ -238,6 +245,9 @@ const DIARY_ENABLED_SURFACES_CURRENT: ReadonlyArray<string> = [
     'philosophy-beat',
     'personal-beat',
     'dream-beat',
+    'personal-cycle',
+    'recovery-cycle',
+    'dream-cycle',
 ];
 
 test('C1 migration tracker: enabled surfaces match the expected per-phase set', () => {

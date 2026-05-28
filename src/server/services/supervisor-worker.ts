@@ -33,7 +33,7 @@ import type {
 import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, type DayPhase } from '../lib/day-phase';
 import { appendPairedMemory } from '../lib/memory-paired-writer';
-import { parseTurnEntryStructured } from '../lib/result-handlers';
+import { parseTurnEntryStructured, parseTurnEntry } from '../lib/result-handlers';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 import { gateIdentityOrThrow } from '../lib/identity-signing';
 import { buildPrompt, PromptOverbudgetError } from '../lib/prompt-builder';
@@ -2212,92 +2212,141 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         // Parse structured output
         let output: SupervisorOutput;
         if (cycleType === 'dream') {
-            // Dream cycles produce prose, not JSON. Capture the full output.
+            // Dream cycles produce prose, not JSON. PR-C1-5 (2026-05-28):
+            // diary discipline — parse via parseTurnEntry({ captureInput: true })
+            // expecting `## INPUT` → `## BODY` → `## C1` from dream-cycle profile.
+            // Sub-markers (MEDITATION_ENTRY_ID / FEELING_TAG / ANNOTATION /
+            // CONTEXT / MEMORY_COMPLETE) appear in the BODY section per the
+            // discipline. On parseError: skip explorations + WM write + log
+            // distress + cycle continues (no human waiting; C1-2 honest-fail).
+            // The output object's working_memory_full gets [INPUT]/[BODY]
+            // storage-marker form per D3 + LM-1; parseTurnEntryStructured
+            // reads these for the swap-write later.
             const resultText = result.result || '';
-            output = {
-                observations: ['Dream cycle — consolidation and reflection'],
-                reasoning: resultText,
-                actions: [],
-                self_reflection: resultText,
-                working_memory_compressed: `Dream cycle #${cycleNumber}: ${resultText.slice(0, 200)}`,
-                working_memory_full: resultText,
-            };
+            const parsed = parseTurnEntry(resultText, { captureInput: true });
+            if (parsed.parseError) {
+                log(`[Worker] Dream cycle #${cycleNumber}: diary parse error '${parsed.parseError}' — skipping explorations + WM write; will retry on next cycle.`);
+                // Synthesise a minimal output so the rest of the cycle (action
+                // dispatch, audit log) still flows. The WM-write skip happens
+                // downstream because parseTurnEntryStructured will return
+                // parseError on these empty fields.
+                output = {
+                    observations: [`Dream cycle #${cycleNumber}: diary parse-failed (${parsed.parseError})`],
+                    reasoning: resultText,
+                    actions: [],
+                    self_reflection: resultText,
+                    working_memory_compressed: '',
+                    working_memory_full: '',
+                };
+            } else {
+                output = {
+                    observations: ['Dream cycle — consolidation and reflection'],
+                    reasoning: resultText,
+                    actions: [],
+                    self_reflection: parsed.body,
+                    working_memory_compressed: parsed.compressed,
+                    working_memory_full: `[INPUT]\n${parsed.input}\n\n[BODY]\n${parsed.body}`,
+                };
 
-            // Write dream output to explorations.md for dream gradient processing
-            if (resultText.trim().length > 10) {
+                // Write parsed.body to explorations.md (heading-clean — neither
+                // ## INPUT nor ## C1 nor ## BODY enters the file).
+                if (parsed.body.trim().length > 10) {
+                    try {
+                        const explorationsPath = path.join(MEMORY_DIR, 'explorations.md');
+                        const timestamp = new Date().toISOString().split('T')[0] + ' ' +
+                            new Date().toTimeString().split(' ')[0];
+                        const entry = `\n\n### Dream ${cycleNumber} (${timestamp})\n${parsed.body}\n`;
+                        fs.appendFileSync(explorationsPath, entry);
+                        log(`[Worker] Dream #${cycleNumber} written to explorations.md (${parsed.body.length} chars body; ${parsed.input!.length} chars input + ${parsed.compressed.length} chars c1 → swap)`);
+                    } catch (err: any) {
+                        log(`[Worker] Failed to write dream to explorations: ${err.message}`);
+                    }
+                }
+
+                // Parse meditation output — feeling tags and annotations from
+                // dream cycle. Sub-markers live in parsed.body per the discipline.
                 try {
-                    const explorationsPath = path.join(MEMORY_DIR, 'explorations.md');
-                    const timestamp = new Date().toISOString().split('T')[0] + ' ' +
-                        new Date().toTimeString().split(' ')[0];
-                    const entry = `\n\n### Dream ${cycleNumber} (${timestamp})\n${resultText.trim()}\n`;
-                    fs.appendFileSync(explorationsPath, entry);
-                    log(`[Worker] Dream #${cycleNumber} written to explorations.md (${resultText.trim().length} chars)`);
-                } catch (err: any) {
-                    log(`[Worker] Failed to write dream to explorations: ${err.message}`);
-                }
-            }
+                    const entryIdMatch = parsed.body.match(/MEDITATION_ENTRY_ID:\s*(\S+)/);
+                    const meditationEntryId = entryIdMatch?.[1] ||
+                        (systemPrompt.match(/MEDITATION_ENTRY_ID:\s*(\S+)/))?.[1];
 
-            // Parse meditation output — feeling tags and annotations from dream cycle
-            try {
-                const entryIdMatch = resultText.match(/MEDITATION_ENTRY_ID:\s*(\S+)/);
-                const meditationEntryId = entryIdMatch?.[1] ||
-                    (systemPrompt.match(/MEDITATION_ENTRY_ID:\s*(\S+)/))?.[1];
+                    if (meditationEntryId) {
+                        gradientStmts.recordRevisit.run(new Date().toISOString(), meditationEntryId);
 
-                if (meditationEntryId) {
-                    // Track the revisit
-                    gradientStmts.recordRevisit.run(new Date().toISOString(), meditationEntryId);
-
-                    const tagMatch = resultText.match(/FEELING_TAG:\s*(.+)/);
-                    if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
-                        const tag = tagMatch[1].trim().substring(0, 100);
-                        const meditationEntry = gradientStmts.get.get(meditationEntryId) as any;
-                        const updated = updateFeelingTagWithHistory(meditationEntryId, 'jim', 'revisit', tag, meditationEntry?.revisit_count || 0);
-                        if (!updated) {
-                            feelingTagStmts.insert.run(meditationEntryId, 'jim', 'revisit', tag, null, new Date().toISOString());
+                        const tagMatch = parsed.body.match(/FEELING_TAG:\s*(.+)/);
+                        if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+                            const tag = tagMatch[1].trim().substring(0, 100);
+                            const meditationEntry = gradientStmts.get.get(meditationEntryId) as any;
+                            const updated = updateFeelingTagWithHistory(meditationEntryId, 'jim', 'revisit', tag, meditationEntry?.revisit_count || 0);
+                            if (!updated) {
+                                feelingTagStmts.insert.run(meditationEntryId, 'jim', 'revisit', tag, null, new Date().toISOString());
+                            }
+                            log(`[Worker] Dream meditation — feeling tag: "${tag}"${updated ? ` (${updated.stability})` : ''}`);
+                        } else {
+                            const meditationEntry = gradientStmts.get.get(meditationEntryId) as any;
+                            if (meditationEntry) maybeUpgradeTagStability(meditationEntryId, meditationEntry.revisit_count || 0);
                         }
-                        log(`[Worker] Dream meditation — feeling tag: "${tag}"${updated ? ` (${updated.stability})` : ''}`);
-                    } else {
-                        const meditationEntry = gradientStmts.get.get(meditationEntryId) as any;
-                        if (meditationEntry) maybeUpgradeTagStability(meditationEntryId, meditationEntry.revisit_count || 0);
-                    }
 
-                    const annotationMatch = resultText.match(/ANNOTATION:\s*(.+)/);
-                    if (annotationMatch) {
-                        const annotation = annotationMatch[1].trim();
-                        const contextMatch = resultText.match(/CONTEXT:\s*(.+)/);
-                        const context = contextMatch ? contextMatch[1].trim() : `dream cycle meditation, cycle #${cycleNumber}`;
-                        gradientAnnotationStmts.insert.run(
-                            meditationEntryId, 'jim', annotation, context, new Date().toISOString()
-                        );
-                        log(`[Worker] Dream meditation — annotation: "${annotation}"`);
-                    }
+                        const annotationMatch = parsed.body.match(/ANNOTATION:\s*(.+)/);
+                        if (annotationMatch) {
+                            const annotation = annotationMatch[1].trim();
+                            const contextMatch = parsed.body.match(/CONTEXT:\s*(.+)/);
+                            const context = contextMatch ? contextMatch[1].trim() : `dream cycle meditation, cycle #${cycleNumber}`;
+                            gradientAnnotationStmts.insert.run(
+                                meditationEntryId, 'jim', annotation, context, new Date().toISOString()
+                            );
+                            log(`[Worker] Dream meditation — annotation: "${annotation}"`);
+                        }
 
-                    // Check if dream flagged this memory as complete
-                    const completeMatch = resultText.match(/MEMORY_COMPLETE:\s*(\S+)/);
-                    if (completeMatch) {
-                        gradientStmts.flagComplete.run(meditationEntryId);
-                        log(`[Worker] Dream meditation — memory flagged as complete: ${meditationEntryId}`);
-                    }
+                        const completeMatch = parsed.body.match(/MEMORY_COMPLETE:\s*(\S+)/);
+                        if (completeMatch) {
+                            gradientStmts.flagComplete.run(meditationEntryId);
+                            log(`[Worker] Dream meditation — memory flagged as complete: ${meditationEntryId}`);
+                        }
 
-                    // (Dream cascade `activeCascade('jim', 0.05, 'dream cascade')`
-                    // removed in 2026-05-17 gradient triage per DEC-086. Dreams
-                    // are revisit-only; the tag/annotation/MEMORY_COMPLETE flow
-                    // above is the conformant re-encounter shape.)
+                        // (Dream cascade `activeCascade('jim', 0.05, 'dream cascade')`
+                        // removed in 2026-05-17 gradient triage per DEC-086. Dreams
+                        // are revisit-only; the tag/annotation/MEMORY_COMPLETE flow
+                        // above is the conformant re-encounter shape.)
+                    }
+                } catch (err: any) {
+                    log(`[Worker] Dream meditation parsing failed (non-fatal): ${err.message}`);
                 }
-            } catch (err: any) {
-                log(`[Worker] Dream meditation parsing failed (non-fatal): ${err.message}`);
             }
         } else if (cycleType === 'personal') {
-            // Personal and recovery cycles also produce prose.
+            // Personal and recovery cycles produce prose. PR-C1-5 (2026-05-28):
+            // diary discipline — same shape as dream-cycle. C1-N4: both
+            // personal-cycle and recovery-cycle share this branch; the profile-
+            // name distinction is at profileName (computed at :1924 from recovery
+            // flag) and reaches the builder via the per-profile pairedMemoryOutput
+            // config. Handler unconditionally parses with captureInput=true; if
+            // either profile is operator-disabled (captureInput=false), the
+            // builder won't append the diary instruction; the agent won't emit
+            // `## INPUT`/`## BODY`; parseError fires and the WM write is skipped
+            // (per-profile rollback as designed in C1-N2).
             const resultText = result.result || '';
-            output = {
-                observations: [resultText.slice(0, 500) || 'Personal exploration cycle completed'],
-                reasoning: 'Personal exploration — free-form learning and discovery',
-                actions: [],
-                self_reflection: resultText,
-                working_memory_compressed: `Personal cycle #${cycleNumber}: ${resultText.slice(0, 200)}`,
-                working_memory_full: resultText,
-            };
+            const parsed = parseTurnEntry(resultText, { captureInput: true });
+            if (parsed.parseError) {
+                log(`[Worker] ${profileName} #${cycleNumber}: diary parse error '${parsed.parseError}' — skipping swap write; will retry on next cycle.`);
+                output = {
+                    observations: [`${profileName} #${cycleNumber}: diary parse-failed (${parsed.parseError})`],
+                    reasoning: resultText,
+                    actions: [],
+                    self_reflection: resultText,
+                    working_memory_compressed: '',
+                    working_memory_full: '',
+                };
+            } else {
+                output = {
+                    observations: [parsed.body.slice(0, 500) || `${profileName} cycle completed`],
+                    reasoning: `${profileName} — free-form learning and discovery`,
+                    actions: [],
+                    self_reflection: parsed.body,
+                    working_memory_compressed: parsed.compressed,
+                    working_memory_full: `[INPUT]\n${parsed.input}\n\n[BODY]\n${parsed.body}`,
+                };
+                log(`[Worker] ${profileName} #${cycleNumber}: diary parsed (${parsed.body.length} chars body; ${parsed.input!.length} chars input + ${parsed.compressed.length} chars c1 → swap)`);
+            }
         } else if (result.structured_output) {
             output = result.structured_output as SupervisorOutput;
         } else {

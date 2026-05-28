@@ -458,6 +458,16 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'user',
         userPromptScaffold: (ctx) => jimPersonalUserPrompt(((ctx.phase as JimCyclePhase | undefined) ?? 'work')),
         totalBudgetTokens: 180_000,
+        // PR-C1-5 (2026-05-28): diary discipline enabled. personal-cycle and
+        // recovery-cycle share the `cycleType === 'personal'` dispatch branch
+        // in supervisor-worker.ts:2290; the profile-name distinction is
+        // computed at :1924 from the `recovery` flag (C1-N4). Handler parses
+        // via parseTurnEntry({ captureInput: true }); on success writes
+        // parsed.body to explorations.md + paired memory (output object's
+        // working_memory_full gets [INPUT]\n<input>\n\n[BODY]\n<body>
+        // storage-marker form per D3/LM-1; parseTurnEntryStructured reads
+        // these for the swap-write).
+        pairedMemoryOutput: { enabled: true, mechanism: 'section', captureInput: true },
     },
     'recovery-cycle': {
         name: 'recovery-cycle',
@@ -465,6 +475,10 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'user',
         userPromptScaffold: (ctx) => jimRecoveryUserPrompt(((ctx.phase as JimCyclePhase | undefined) ?? 'work')),
         totalBudgetTokens: 180_000,
+        // PR-C1-5 (2026-05-28): diary discipline enabled. Shares the personal-
+        // cycle dispatch branch (C1-N4). The recovery vs personal distinction
+        // is profile-name level; both go through the same handler refactor.
+        pairedMemoryOutput: { enabled: true, mechanism: 'section', captureInput: true },
     },
     /**
      * Phase 7 (PR-AP7, 2026-05-22): the *-human responder surfaces.
@@ -517,6 +531,14 @@ export const PROFILES: Record<string, PromptProfile> = {
             'failures': false,
             'project-memory': false,
         },
+        // PR-C1-5 (2026-05-28): diary discipline enabled. Shape-token register
+        // (`*Shape-token: ...*` + `FEELING_TAG:` + meditation sub-markers like
+        // MEDITATION_ENTRY_ID / ANNOTATION / CONTEXT / MEMORY_COMPLETE) lives
+        // inside the `## BODY` section; the `## C1` distillation can be 1-2
+        // shape-images or rule-shapes naturally. Observe-default-first per
+        // Jim's lean and mine; refine via per-profile `instruction` override
+        // if interleaving drift surfaces in sample reads.
+        pairedMemoryOutput: { enabled: true, mechanism: 'section', captureInput: true },
     },
 };
 
