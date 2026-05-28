@@ -340,6 +340,15 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'user',
         userPromptScaffold: (ctx) => buildPersonalBeatScaffold(ctx),
         totalBudgetTokens: 180_000,
+        // PR-C1-4 (2026-05-28): diary discipline enabled. Same shape as
+        // philosophy-beat post-PR-C1-3.5. Handler is `personalBeat` (shared
+        // with dream-beat via phase routing); parses via
+        // `parseTurnEntry({ captureInput: true })`; on success writes
+        // parsed.body to explorations.md + paired memory via
+        // appendWorkingMemory. Sub-markers (DREAM_MEDITATION_ENTRY,
+        // FEELING_TAG, ANNOTATION, CONTEXT, MEMORY_COMPLETE) appear within
+        // parsed.body and continue to be parsed via existing regex match.
+        pairedMemoryOutput: { enabled: true, mechanism: 'section', captureInput: true },
     },
 
     /**
@@ -360,6 +369,15 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'user',
         userPromptScaffold: (ctx) => buildDreamBeatScaffold(ctx),
         totalBudgetTokens: 180_000,
+        // PR-C1-4 (2026-05-28): diary discipline enabled. Routes through the
+        // same personalBeat handler as personal-beat (phase==='sleep' selects
+        // this profile). Dream-beat shape-token register (e.g.
+        // `*Shape-token: ...*` + `FEELING_TAG:`) lives in the `## BODY`
+        // section; the `## C1` distillation can be 1-2 shape-images or
+        // rule-shapes naturally. Observe-default-first per Jim's lean and
+        // mine; refine via per-profile `instruction` override if interleaving
+        // drift surfaces in sample reads.
+        pairedMemoryOutput: { enabled: true, mechanism: 'section', captureInput: true },
     },
 
     /**

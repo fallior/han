@@ -201,21 +201,31 @@ test('pairedMemoryOutput: custom instruction overrides default for structured', 
  * Update history:
  *   - PR-C1-2 (2026-05-26): [] (no enabled surfaces — field plumbing only)
  *   - PR-C1-3 (2026-05-27): ['philosophy-beat'] — c1 distillation only
- *   - PR-C1-3.5 (2026-05-28): ['philosophy-beat'] — diary added (sibling list); ← current
- *   - PR-C1-4 (TBD): add 'personal-beat', 'dream-beat', 'meditation-phase-a',
- *                    'meditation-phase-b', 'meditation-evening' (Leo's remaining
- *                    heartbeat surfaces, all Mechanism B + diary)
+ *   - PR-C1-3.5 (2026-05-28): ['philosophy-beat'] — diary added (sibling list)
+ *   - PR-C1-4 (2026-05-28): add 'personal-beat' + 'dream-beat' (Leo's
+ *                           personalBeat handler — single function, two
+ *                           profiles via phase routing). slice fallback at
+ *                           appendWorkingMemory retired (`distilled` now
+ *                           required). ← current
  *   - PR-C1-5 (TBD): add 'personal-cycle', 'recovery-cycle', 'dream-cycle'
  *                    (Jim's three prose cycles, Mechanism B + diary)
- *   - PR-C1-6 (TBD): add 'leo-human-response', 'jim-human-response'
- *                    (both Mechanism A — schema-extended at the SDK call;
- *                    diary-equivalent via `input_quotes` schema field)
- *   - (supervisor-cycle stays as the reference; not in C1_ENABLED_SURFACES
- *     because it uses structured output via its existing schema, not the
- *     field-driven instruction-append path)
+ *   - PR-C1-6 (TBD): add 'leo-human-response', 'jim-human-response',
+ *                    'supervisor-cycle' (Mechanism A — schema-extended at
+ *                    the SDK call; diary-equivalent via `input_quotes`
+ *                    schema field). Per Jim's R4 + my supervisor-cycle
+ *                    extension: declarative field for full registry
+ *                    visibility in the tracker.
+ *   - **Meditation surfaces NOT in this list**: meditation-phase-a /
+ *     meditation-phase-b / meditation-evening don't call appendWorkingMemory;
+ *     they write directly to gradient_entries with FEELING_TAG / ANNOTATION
+ *     markers. Different write-shape; separate plan needed (or no migration
+ *     needed if the existing gradient-write flow is the right architecture
+ *     for them). Surfaced for OMM discussion at PR-C1-4 close.
  */
 const C1_ENABLED_SURFACES_CURRENT: ReadonlyArray<string> = [
     'philosophy-beat',
+    'personal-beat',
+    'dream-beat',
 ];
 
 /**
@@ -226,6 +236,8 @@ const C1_ENABLED_SURFACES_CURRENT: ReadonlyArray<string> = [
  */
 const DIARY_ENABLED_SURFACES_CURRENT: ReadonlyArray<string> = [
     'philosophy-beat',
+    'personal-beat',
+    'dream-beat',
 ];
 
 test('C1 migration tracker: enabled surfaces match the expected per-phase set', () => {

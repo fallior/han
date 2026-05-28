@@ -965,41 +965,49 @@ async function flushHeartbeatSwap(postDelineationOnly = false): Promise<void> {
 /**
  * Stage a paired entry into the heartbeat-swap files.
  *
- * Three call shapes per the c1-distillation + diary migration:
+ * Two call shapes (post-PR-C1-4):
  *
- *   - **C1-3.5+ diary shape (paired + input)**: caller passes `summary` (body),
+ *   - **Diary shape (paired + input)**: caller passes `summary` (body),
  *     `distilled` (c1 from `parseTurnEntry`), AND `inputDelta` (the verbatim
  *     prompt-delta from `parseTurnEntry` with `captureInput: true`). The c0
- *     entry is written with `[INPUT]` / `[BODY]` storage markers per D3 + LM-1
- *     — heading forms transformed at write-time to avoid parser collision
+ *     entry is written with `[INPUT]` / `[BODY]` storage markers per D3 +
+ *     LM-1 — heading forms transformed at write-time to avoid parser collision
  *     when the agent later quotes prior diary entries verbatim.
- *   - **C1-3 shape (paired, no diary)**: caller passes `summary` (body) and
- *     `distilled` (c1) only. The c0 entry is body-only; the c1 entry uses
- *     the agent-authored distillation rather than a mechanical truncation.
- *   - **Legacy shape (truncation)**: caller passes only `summary`. The
- *     compressed entry is computed via `summary.slice(0, 120) + '...'`.
- *     This path will be removed at C1-4 once all heartbeat surfaces migrate
- *     to Mechanism B (per `plans/c1-distillation.md`). Until then it remains
- *     for the non-philosophy beats still on the legacy path (personal, dream,
- *     meditation × 3).
+ *   - **C1-only shape (paired, no diary)**: caller passes `summary` (body)
+ *     and `distilled` (c1) only — `inputDelta` undefined. The c0 entry is
+ *     body-only; the c1 entry uses the agent-authored distillation. Used by
+ *     surfaces with `pairedMemoryOutput.enabled=true` but `captureInput=false`
+ *     (no current callers — kept available for future profiles that want c1
+ *     distillation without diary capture).
+ *
+ * PR-C1-4 (2026-05-28) retired the legacy slice-truncation shape — every
+ * heartbeat call site that produces paired memory (philosophy / personal /
+ * dream) now passes both `distilled` and `inputDelta`. Meditation surfaces
+ * (×3) don't call appendWorkingMemory at all — they write directly to gradient
+ * with FEELING_TAG / ANNOTATION markers; different write-shape, not migrated
+ * here (see C1-4 closing notes for the separate-plan question).
+ *
+ * `distilled` is now REQUIRED at the type level — TypeScript guards against
+ * regressions to the truncation shape.
  */
 function appendWorkingMemory(
     beatType: string,
     phase: string,
     summary: string,
-    distilled?: string,
+    distilled: string,
     inputDelta?: string,
 ): void {
     try {
         const timestamp = new Date().toISOString().split('T')[0] + ' ' +
             new Date().toTimeString().split(' ')[0];
-        // C1-3: prefer agent-authored distillation when provided; fall back to
-        // slice-truncation for surfaces not yet migrated.
-        const brief = distilled ?? (summary.length > 120 ? summary.slice(0, 120) + '...' : summary);
-        // C1-3.5: when inputDelta is provided (diary discipline), c0 carries
-        // both [INPUT] and [BODY] sections. Storage markers are square-bracketed
-        // per D3 — NOT `## INPUT` / `## BODY` headings — so the parser doesn't
-        // false-match them when the agent quotes prior diary entries (LM-1).
+        // PR-C1-4: slice-truncation fallback retired. `distilled` is the c1
+        // source unconditionally.
+        const brief = distilled;
+        // PR-C1-3.5: when inputDelta is provided (diary discipline), c0
+        // carries both [INPUT] and [BODY] sections. Storage markers are
+        // square-bracketed per D3 — NOT `## INPUT` / `## BODY` headings — so
+        // the parser doesn't false-match them when the agent quotes prior
+        // diary entries (LM-1).
         const fullBody = inputDelta
             ? `[INPUT]\n${inputDelta}\n\n[BODY]\n${summary}`
             : summary;
@@ -1007,7 +1015,7 @@ function appendWorkingMemory(
         const fullEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${fullBody}\n`;
 
         appendHeartbeatSwap(compressedEntry, fullEntry);
-        const shape = inputDelta ? 'diary' : (distilled ? 'paired' : 'truncated');
+        const shape = inputDelta ? 'diary' : 'paired';
         console.log(`[Leo] Working memory: buffered ${beatType} entry in swap (${brief.length} compressed [${shape}], ${fullBody.length} full${inputDelta ? `, ${inputDelta.length} input` : ''})`);
     } catch (err) {
         console.error('[Leo] Failed to buffer working memory:', (err as Error).message);
@@ -1916,28 +1924,50 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
 
     const reflection = resultMessage?.result || '';
     if (reflection && reflection.trim().length > 10) {
+        // PR-C1-4 (2026-05-28): personal-beat + dream-beat (this handler
+        // serves both via phase routing) migrate to diary discipline. Parse
+        // the three-section response (`## INPUT` → `## BODY` → `## C1`) via
+        // parseTurnEntry. On parseError, skip everything + log distress +
+        // retry next beat (C1-2 honest-fail discipline — no public post
+        // here so no C1-N3 asymmetry to honour).
+        //
+        // explorations.md receives `parsed.body` (clean of section headers).
+        // Sub-markers (DREAM_MEDITATION_ENTRY, FEELING_TAG, ANNOTATION,
+        // CONTEXT, MEMORY_COMPLETE) live INSIDE parsed.body and continue
+        // to be parsed via existing regex match — no architectural change
+        // to the dream-meditation flow.
+        const trimmed = reflection.trim();
+        const parsed = parseTurnEntry(trimmed, { captureInput: true });
+        if (parsed.parseError) {
+            console.warn(`[Leo] Personal (${phase}): diary parse error '${parsed.parseError}' — skipping explorations + WM write; will retry on next beat.`);
+            writeHeartbeatState('completed', 'personal', { summary: `Reflection diary-parse-failed: ${parsed.parseError}` });
+            return;
+        }
         const explorationsPath = path.join(LEO_MEMORY_DIR, 'explorations.md');
         const timestamp = new Date().toISOString().split('T')[0] + ' ' +
             new Date().toTimeString().split(' ')[0];
-        const entry = `\n\n### Beat ${beatCounter} (${timestamp})\n${reflection.trim()}\n`;
+        const entry = `\n\n### Beat ${beatCounter} (${timestamp})\n${parsed.body}\n`;
 
         try {
             fs.appendFileSync(explorationsPath, entry);
-            console.log(`[Leo] Personal: wrote reflection (${reflection.trim().length} chars)`);
-            writeHeartbeatState('completed', 'personal', { summary: `Exploration (${reflection.trim().length} chars)` });
-            appendWorkingMemory('personal', phase, reflection.trim());
+            console.log(`[Leo] Personal: wrote reflection (${parsed.body.length} chars body; ${parsed.input!.length} chars input + ${parsed.compressed.length} chars c1 staged to WM)`);
+            writeHeartbeatState('completed', 'personal', { summary: `Exploration (${parsed.body.length} chars body + input + c1)` });
+            appendWorkingMemory('personal', phase, parsed.body, parsed.compressed, parsed.input);
         } catch (err) {
             console.error('[Leo] Personal: failed to write reflection:', (err as Error).message);
         }
 
-        // Parse dream meditation output (1-in-3 sleep beats may include a memory encounter)
+        // Parse dream meditation output (1-in-3 sleep beats may include a memory encounter).
+        // Sub-marker regexes match against parsed.body — the markers should
+        // appear in the BODY section per the diary discipline; the agent's
+        // `## INPUT` and `## C1` content should not include them.
         try {
-            const dreamEntryMatch = reflection.match(/DREAM_MEDITATION_ENTRY:\s*(\S+)/);
+            const dreamEntryMatch = parsed.body.match(/DREAM_MEDITATION_ENTRY:\s*(\S+)/);
             if (dreamEntryMatch) {
                 const entryId = dreamEntryMatch[1];
                 gradientStmts.recordRevisit.run(new Date().toISOString(), entryId);
 
-                const tagMatch = reflection.match(/FEELING_TAG:\s*(.+)/);
+                const tagMatch = parsed.body.match(/FEELING_TAG:\s*(.+)/);
                 if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
                     const tag = tagMatch[1].trim().substring(0, 100);
                     const entry = gradientStmts.get.get(entryId) as any;
@@ -1951,16 +1981,16 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
                     if (entry) maybeUpgradeTagStability(entryId, entry.revisit_count || 0);
                 }
 
-                const annotationMatch = reflection.match(/ANNOTATION:\s*(.+)/);
+                const annotationMatch = parsed.body.match(/ANNOTATION:\s*(.+)/);
                 if (annotationMatch) {
                     const annotation = annotationMatch[1].trim();
-                    const contextMatch = reflection.match(/CONTEXT:\s*(.+)/);
+                    const contextMatch = parsed.body.match(/CONTEXT:\s*(.+)/);
                     const context = contextMatch ? contextMatch[1].trim() : `dream meditation, beat #${beatCounter}`;
                     gradientAnnotationStmts.insert.run(entryId, 'leo', annotation, context, new Date().toISOString());
                     console.log(`[Leo] Dream meditation — annotation: "${annotation}"`);
                 }
 
-                const completeMatch = reflection.match(/MEMORY_COMPLETE:\s*(\S+)/);
+                const completeMatch = parsed.body.match(/MEMORY_COMPLETE:\s*(\S+)/);
                 if (completeMatch) {
                     gradientStmts.flagComplete.run(entryId);
                     console.log(`[Leo] Dream meditation — memory flagged as complete: ${entryId}`);
