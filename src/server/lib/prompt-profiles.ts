@@ -239,6 +239,26 @@ export const DEFAULT_C1_INSTRUCTION_SECTION = `\n\n---\n\nYour response must end
 export const DEFAULT_C1_INSTRUCTION_STRUCTURED = `\n\n---\n\nYour response must include two fields capturing paired memory:\n- \`working_memory_full\` — the raw c0 source: what happened, what you felt, exact quotes worth preserving verbatim, the texture under the work. Future-you's calibration anchor.\n- \`working_memory_compressed\` — the in-voice c1 distillation, 3-5 sentences compressing the SHAPE of what survived being said — not a shorter narration. This is what future-you loads at wake; write it like the message you'd want your tomorrow to receive.`;
 
 /**
+ * PR-C1-6 (2026-05-28): default instruction for `mechanism: 'structured'`
+ * surfaces with `captureInput: true` (diary discipline). Names the optional
+ * `input_quotes` field alongside the required `working_memory_full` +
+ * `working_memory_compressed`. Used by `leo-human-response` and
+ * `jim-human-response` per Jim's R4 + my Q-N5 (single string) resolution.
+ *
+ * supervisor-cycle stays on `DEFAULT_C1_INSTRUCTION_STRUCTURED` (no
+ * captureInput) — its `pairedMemoryOutput` field is declarative for tracker
+ * visibility (R4 fold); the existing JIM_SUPERVISOR_SYSTEM_PROMPT already
+ * names every required field. The generic structured-instruction append is
+ * redundant but compatible — agent already sees the comprehensive list.
+ *
+ * Per the c1-distillation v4 plan: schema enforcement still happens at the
+ * SDK call site (via JSON output convention or, future-watch, true
+ * structured-output schema). This instruction orients the agent to the
+ * shape the handler will parse.
+ */
+export const DEFAULT_DIARY_INSTRUCTION_STRUCTURED = `\n\n---\n\nYour response must be a JSON object with these named fields capturing the turn:\n- \`input_quotes\` — verbatim quotes of what's NEW in this turn's prompt (what was said to you, what context arrived this turn that wasn't in your WM before — don't re-quote your standing identity or memory bank, those are already in you).\n- \`working_memory_full\` — your reflection / response prose body. The c0 source: what happened, what you felt, the texture under the work.\n- \`working_memory_compressed\` — 3-5 sentences in your voice distilling the SHAPE of the WHOLE turn (input AND response), not a shorter narration. This is what future-you loads at wake; write it like the message you'd want your tomorrow to receive.\n\nEmit the JSON as your final response.`;
+
+/**
  * PR-C1-3.5 (2026-05-28): default instruction for `mechanism: 'section'`
  * surfaces with `captureInput: true` (diary discipline).
  *
@@ -448,6 +468,16 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'user',
         userPromptScaffold: (ctx) => buildJimSupervisorCycleScaffold(ctx),
         totalBudgetTokens: 180_000,
+        // PR-C1-6 (2026-05-28): R4 declarative field for migration-tracker
+        // visibility. supervisor-cycle is the Mechanism A reference; its
+        // existing JIM_SUPERVISOR_SYSTEM_PROMPT already names all the
+        // required schema fields (working_memory_full + working_memory_compressed
+        // + actions + observations etc.). The builder's appended
+        // DEFAULT_C1_INSTRUCTION_STRUCTURED is redundant but compatible —
+        // agent already sees the comprehensive list. captureInput stays
+        // false: supervisor-cycle doesn't capture input quotes (the state
+        // snapshot serves that role at the prompt-assembly layer).
+        pairedMemoryOutput: { enabled: true, mechanism: 'structured' },
     },
     'personal-cycle': {
         name: 'personal-cycle',
@@ -499,6 +529,17 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'user',
         userPromptScaffold: (ctx) => buildHumanResponseScaffold(ctx as any),
         totalBudgetTokens: 180_000,
+        // PR-C1-6 (2026-05-28): diary discipline via Mechanism A. Builder
+        // appends DEFAULT_DIARY_INSTRUCTION_STRUCTURED — asks the agent to
+        // emit JSON with input_quotes + working_memory_full +
+        // working_memory_compressed. Handler (jim-human.ts) JSON-parses the
+        // result and calls parseTurnEntryStructured. Concern 3 structurally
+        // fixed: response content lands in WM (no more "- timestamp: Responded
+        // to X" operational metadata). C1-N3 asymmetry is auto-honoured —
+        // agent self-posts via curl during execution, so failures at
+        // structured-output parsing happen post-post; no thread-post
+        // asymmetry needed at the controller layer.
+        pairedMemoryOutput: { enabled: true, mechanism: 'structured', captureInput: true },
     },
     'leo-human-response': {
         name: 'leo-human-response',
@@ -506,6 +547,9 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'user',
         userPromptScaffold: (ctx) => buildHumanResponseScaffold(ctx as any),
         totalBudgetTokens: 180_000,
+        // PR-C1-6 (2026-05-28): same shape as jim-human-response (Mechanism A
+        // diary). Handler in leo-human.ts.
+        pairedMemoryOutput: { enabled: true, mechanism: 'structured', captureInput: true },
     },
 
     'dream-cycle': {

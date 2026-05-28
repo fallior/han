@@ -211,13 +211,16 @@ test('pairedMemoryOutput: custom instruction overrides default for structured', 
  *                           'dream-cycle' (Jim's three prose cycles,
  *                           Mechanism B + diary). slice(0, 200) lines at
  *                           supervisor-worker.ts:2222 (dream) and :2298
- *                           (personal/recovery shared) retired. ← current
- *   - PR-C1-6 (TBD): add 'leo-human-response', 'jim-human-response',
- *                    'supervisor-cycle' (Mechanism A — schema-extended at
- *                    the SDK call; diary-equivalent via `input_quotes`
- *                    schema field). Per Jim's R4 + my supervisor-cycle
- *                    extension: declarative field for full registry
- *                    visibility in the tracker. Total at C1-9: 9 surfaces.
+ *                           (personal/recovery shared) retired.
+ *   - PR-C1-6 (2026-05-28): add 'leo-human-response' + 'jim-human-response'
+ *                           (Mechanism A + diary via input_quotes JSON
+ *                           field; Q-N5 single-string resolution) +
+ *                           'supervisor-cycle' (Mechanism A; declarative
+ *                           field for tracker visibility per R4 fold —
+ *                           captureInput=false; existing JIM_SUPERVISOR
+ *                           prompt names all schema fields; the appended
+ *                           DEFAULT_C1_INSTRUCTION_STRUCTURED is redundant
+ *                           but compatible). 9 surfaces total ← current.
  *   - **Meditation surfaces NOT in this list**: meditation-phase-a /
  *     meditation-phase-b / meditation-evening don't call appendWorkingMemory;
  *     they write directly to gradient_entries with FEELING_TAG / ANNOTATION
@@ -233,13 +236,20 @@ const C1_ENABLED_SURFACES_CURRENT: ReadonlyArray<string> = [
     'personal-cycle',
     'recovery-cycle',
     'dream-cycle',
+    'leo-human-response',
+    'jim-human-response',
+    'supervisor-cycle',
 ];
 
 /**
  * PR-C1-3.5 (2026-05-28): sibling list for diary-discipline tracking.
  * A surface is in this list when `pairedMemoryOutput.captureInput === true`.
  * Every diary-enabled surface should also be C1-enabled; both bits land
- * together per the migration plan.
+ * together per the migration plan. NOTE post-PR-C1-6: supervisor-cycle is
+ * C1-enabled (declarative for R4 tracker visibility) but NOT diary-enabled
+ * (captureInput=false; the state-snapshot serves the input-capture role at
+ * the prompt-assembly layer). So DIARY ⊆ C1 with one surface in C1 but not
+ * DIARY — supervisor-cycle. 8 diary-enabled; 9 C1-enabled.
  */
 const DIARY_ENABLED_SURFACES_CURRENT: ReadonlyArray<string> = [
     'philosophy-beat',
@@ -248,6 +258,8 @@ const DIARY_ENABLED_SURFACES_CURRENT: ReadonlyArray<string> = [
     'personal-cycle',
     'recovery-cycle',
     'dream-cycle',
+    'leo-human-response',
+    'jim-human-response',
 ];
 
 test('C1 migration tracker: enabled surfaces match the expected per-phase set', () => {
@@ -301,13 +313,16 @@ test('Diary migration tracker: every diary-enabled surface is also C1-enabled', 
     // The plan requires both bits land together. A surface with
     // captureInput=true but enabled=false would be incoherent (the builder
     // wouldn't append the diary instruction; the handler would still expect
-    // three sections). Catch this configuration error at test time.
+    // three sections OR the input_quotes field). PR-C1-6 extended diary
+    // discipline to Mechanism A (human-responders) — both mechanisms are
+    // valid for captureInput=true. Catch the coherence error at test time.
     for (const [name, profile] of Object.entries(PROFILES)) {
         if (profile.pairedMemoryOutput?.captureInput === true) {
             assert.strictEqual(profile.pairedMemoryOutput?.enabled, true,
                 `${name}: captureInput=true requires enabled=true (both bits land together)`);
-            assert.strictEqual(profile.pairedMemoryOutput?.mechanism, 'section',
-                `${name}: captureInput=true requires mechanism='section' (diary discipline is Mechanism B)`);
+            const mech = profile.pairedMemoryOutput?.mechanism;
+            assert.ok(mech === 'section' || mech === 'structured',
+                `${name}: captureInput=true requires mechanism='section' or 'structured' (got ${mech})`);
         }
     }
 });
@@ -362,28 +377,59 @@ test('builder: pairedMemoryOutput with mechanism=section + captureInput=false �
     });
 });
 
-test('builder: pairedMemoryOutput with mechanism=structured + captureInput=true → structured default still wins (captureInput is Mechanism B only)', () => {
-    // captureInput has no effect under mechanism='structured' — schema-enforced
-    // structured-output surfaces handle the diary discipline via schema fields,
-    // not via heading-based instruction. Builder should still pick the
-    // structured default.
+test('builder: pairedMemoryOutput with mechanism=structured + captureInput=true → DEFAULT_DIARY_INSTRUCTION_STRUCTURED appended (PR-C1-6)', () => {
+    // PR-C1-6: when captureInput=true on Mechanism A surfaces (the human-
+    // responders), the diary-structured instruction is appended naming the
+    // input_quotes field alongside working_memory_full + working_memory_compressed.
     const p: PromptProfile = {
-        name: 'c1d-test-structured-capture',
-        systemPromptOpening: 'You are dispatching actions.',
+        name: 'c1d-test-structured-diary',
+        systemPromptOpening: 'You are responding to a human.',
         envelope: 'user',
         totalBudgetTokens: 180_000,
         pairedMemoryOutput: {
             enabled: true,
             mechanism: 'structured',
-            captureInput: true,  // ignored under structured mechanism
+            captureInput: true,
         },
     };
     withSyntheticProfile(p, () => {
-        const { systemPrompt } = buildPrompt('jim', 'c1d-test-structured-capture', {});
+        const { systemPrompt } = buildPrompt('leo', 'c1d-test-structured-diary', {});
+        assert.ok(systemPrompt.includes('input_quotes'),
+            'diary-structured instruction must name input_quotes field');
         assert.ok(systemPrompt.includes('working_memory_full'),
-            'structured default names the schema fields');
+            'diary-structured instruction must name working_memory_full');
+        assert.ok(systemPrompt.includes('working_memory_compressed'),
+            'diary-structured instruction must name working_memory_compressed');
         assert.ok(!systemPrompt.includes('## INPUT'),
-            'structured surfaces never see the ## INPUT heading instruction');
+            'structured surfaces never see the ## INPUT markdown heading');
+    });
+});
+
+test('builder: pairedMemoryOutput with mechanism=structured + captureInput=false → DEFAULT_C1_INSTRUCTION_STRUCTURED appended (supervisor-cycle R4 declarative)', () => {
+    // PR-C1-6 R4 fold: supervisor-cycle keeps mechanism=structured WITHOUT
+    // captureInput (declarative for tracker visibility; existing prompt
+    // names all fields). The c1-only structured instruction is appended.
+    const p: PromptProfile = {
+        name: 'c1d-test-structured-c1only',
+        systemPromptOpening: 'You are running a supervisor cycle.',
+        envelope: 'user',
+        totalBudgetTokens: 180_000,
+        pairedMemoryOutput: {
+            enabled: true,
+            mechanism: 'structured',
+            // captureInput: false (default)
+        },
+    };
+    withSyntheticProfile(p, () => {
+        const { systemPrompt } = buildPrompt('jim', 'c1d-test-structured-c1only', {});
+        assert.ok(systemPrompt.includes('working_memory_full'),
+            'c1-only structured instruction names working_memory_full');
+        assert.ok(systemPrompt.includes('working_memory_compressed'),
+            'c1-only structured instruction names working_memory_compressed');
+        assert.ok(!systemPrompt.includes('input_quotes'),
+            'c1-only structured surfaces must NOT see input_quotes field instruction');
+        assert.ok(!systemPrompt.includes('## INPUT'),
+            'structured surfaces never see the ## INPUT markdown heading');
     });
 });
 

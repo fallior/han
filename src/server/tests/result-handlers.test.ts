@@ -102,6 +102,58 @@ test('structured: non-object input → invalid_input', () => {
     assert.strictEqual(result.parseError, 'invalid_input');
 });
 
+// PR-C1-6 (2026-05-28): diary discipline on Mechanism A via input_quotes field
+
+test('structured diary: input_quotes present + non-empty → input populated', () => {
+    const input = {
+        working_memory_full: 'My response body to Darron.',
+        working_memory_compressed: 'Compressed shape — what survived.',
+        input_quotes: 'Darron asked: "what do we do next?"',
+    };
+    const result = parseTurnEntryStructured(input);
+    assert.strictEqual(result.parseError, undefined);
+    assert.strictEqual(result.input, 'Darron asked: "what do we do next?"');
+    assert.strictEqual(result.body, 'My response body to Darron.');
+    assert.strictEqual(result.compressed, 'Compressed shape — what survived.');
+});
+
+test('structured diary: input_quotes absent → input stays undefined (v1 backward compat)', () => {
+    const input = {
+        working_memory_full: 'body',
+        working_memory_compressed: 'c1',
+    };
+    const result = parseTurnEntryStructured(input);
+    assert.strictEqual(result.parseError, undefined);
+    assert.strictEqual(result.input, undefined,
+        'Mechanism A surfaces without captureInput=true never populate input');
+});
+
+test('structured diary: input_quotes whitespace-only → empty_input parseError', () => {
+    const input = {
+        working_memory_full: 'body',
+        working_memory_compressed: 'c1',
+        input_quotes: '   \n  ',
+    };
+    const result = parseTurnEntryStructured(input);
+    assert.strictEqual(result.parseError, 'empty_input',
+        'agent emitted the field but didn\'t fill it — diary discipline broken; explicit parseError');
+});
+
+test('structured diary: input_quotes non-string type → input stays undefined (lenient)', () => {
+    // If the field is the wrong type (number, array, etc.) treat it as
+    // "not present" rather than parseError — lenient handling for malformed
+    // schema-emission. The caller can detect missing input by checking
+    // for input === undefined.
+    const input = {
+        working_memory_full: 'body',
+        working_memory_compressed: 'c1',
+        input_quotes: 42 as any,
+    };
+    const result = parseTurnEntryStructured(input);
+    assert.strictEqual(result.parseError, undefined);
+    assert.strictEqual(result.input, undefined);
+});
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Mechanism B — parseTurnEntry, V1 mode (captureInput=false / default)
 // All existing PR-C1-1 + PR-C1-1-amendment behaviours must continue passing.

@@ -22,6 +22,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
 import { appendPairedMemory } from './lib/memory-paired-writer';
+import { parseTurnEntryStructured } from './lib/result-handlers';
 import { readDreamGradient } from './lib/dream-gradient';
 import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
@@ -499,25 +500,62 @@ async function respondToConversation(db: Database.Database, conversationId: stri
             compose_duration_ms: Date.now() - composeStartMs,
         });
     } else if (trimmed && trimmed.length > 20) {
-        // S156: controller no longer posts the agent's `result` text. The agent
-        // self-posts via curl per the conversation-participation protocol it
-        // inherits from ~/.han/agents/Leo/CLAUDE.md. Posting the agent's result
-        // here was duplicating its self-post — substantive landed via curl as
-        // `mp...` ID, controller-post arrived as `leo-...` ID summary
-        // ("Posted. Message X landed..." post-action confirmation, not the
-        // substantive body). Suppressing the controller-post; agent's curl-post
-        // is the sole record.
+        // S156: controller no longer posts the agent's `result` text — the
+        // agent self-posts via curl during execution. The result text the
+        // controller receives is a post-action confirmation, not the
+        // substantive body.
+        //
+        // PR-C1-6 (2026-05-28): per the diary discipline (Mechanism A),
+        // the agent now emits JSON as its final response per
+        // DEFAULT_DIARY_INSTRUCTION_STRUCTURED. JSON-parse here; on success,
+        // write paired memory via appendSwap (compressed=parsed.compressed;
+        // full uses the [INPUT]/[BODY] storage-marker form per D3 + LM-1).
+        // Concern 3 structurally fixed: response content lands in WM in
+        // place of operational metadata.
+        //
+        // C1-N3 asymmetric failure-mode handling: the agent has already
+        // self-posted via curl by the time the controller sees the result;
+        // there's no "post on parseError" question here — the post already
+        // happened. parseError → skip WM write; log distress. Agent's curl
+        // post stays as the substantive record.
         responseCount++;
-        console.log(`[Leo/Human] Self-posted via curl for "${title}" (controller suppressed; agent confirmation was ${trimmed.length} chars)`);
 
-        // Buffer to swap memory
-        const timestamp = new Date().toISOString();
-        appendSwap(
-            `- ${timestamp}: Responded to "${title}" via curl (agent confirmation: ${trimmed.length} chars)`,
-            `### Response to "${title}" (${timestamp})\nAgent self-posted via curl. Confirmation text:\n${trimmed.slice(0, 500)}\n`
-        );
+        // Try JSON.parse (resilient to code-fence wrapping, mirrors
+        // supervisor-cycle's pattern). The agent's JSON might be wrapped in
+        // ```json ... ``` per markdown convention; strip that first.
+        let parsedJson: any = null;
+        let jsonParseError: string | null = null;
+        try {
+            parsedJson = JSON.parse(trimmed);
+        } catch {
+            const cleaned = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+            try {
+                parsedJson = JSON.parse(cleaned);
+            } catch (err: any) {
+                jsonParseError = err?.message ?? 'json_parse_failed';
+            }
+        }
 
-        writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
+        if (jsonParseError) {
+            console.warn(`[Leo/Human] JSON parse failed for "${title}": ${jsonParseError}. Skipping WM paired-write (agent's curl-post stands as the record).`);
+            writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
+        } else {
+            const parsed = parseTurnEntryStructured(parsedJson);
+            if (parsed.parseError) {
+                console.warn(`[Leo/Human] Diary parse error '${parsed.parseError}' for "${title}". Skipping WM paired-write (agent's curl-post stands as the record).`);
+                writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
+            } else {
+                const timestamp = new Date().toISOString();
+                const sectionHeader = `### Response to "${title}" (${timestamp})`;
+                const compressedSwap = `${sectionHeader}\n${parsed.compressed}`;
+                const fullSwap = parsed.input
+                    ? `${sectionHeader}\n[INPUT]\n${parsed.input}\n\n[BODY]\n${parsed.body}`
+                    : `${sectionHeader}\n${parsed.body}`;
+                appendSwap(compressedSwap, fullSwap);
+                console.log(`[Leo/Human] Self-posted via curl for "${title}" (paired memory: ${parsed.body.length}c body${parsed.input ? ` + ${parsed.input.length}c input` : ''} + ${parsed.compressed.length}c c1)`);
+                writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
+            }
+        }
     } else {
         console.log(`[Leo/Human] No meaningful response for "${title}" — skipping`);
         writeJemmaAck(dispatchId, 'leo', 'failed', { reason: 'empty_response', compose_duration_ms: Date.now() - composeStartMs });

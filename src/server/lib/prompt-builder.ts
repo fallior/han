@@ -41,6 +41,7 @@ import {
     DEFAULT_C1_INSTRUCTION_SECTION,
     DEFAULT_C1_INSTRUCTION_STRUCTURED,
     DEFAULT_DIARY_INSTRUCTION_SECTION,
+    DEFAULT_DIARY_INSTRUCTION_STRUCTURED,
 } from './prompt-profiles';
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -447,8 +448,16 @@ export function buildPrompt(
     if (profile.pairedMemoryOutput?.enabled) {
         const customInstruction = profile.pairedMemoryOutput.instruction;
         const { mechanism, captureInput } = profile.pairedMemoryOutput;
+        // PR-C1-6 (2026-05-28): four-way selection. captureInput now matters
+        // for BOTH mechanisms (Mechanism A's diary path names `input_quotes`
+        // in the JSON schema; Mechanism B's diary path uses three headings).
+        // supervisor-cycle (R4 declarative): structured + captureInput=false
+        // → DEFAULT_C1_INSTRUCTION_STRUCTURED (redundant with existing prompt;
+        // accepted for tracker visibility).
         let defaultInstruction: string;
-        if (mechanism === 'structured') {
+        if (mechanism === 'structured' && captureInput) {
+            defaultInstruction = DEFAULT_DIARY_INSTRUCTION_STRUCTURED;
+        } else if (mechanism === 'structured') {
             defaultInstruction = DEFAULT_C1_INSTRUCTION_STRUCTURED;
         } else if (captureInput) {
             defaultInstruction = DEFAULT_DIARY_INSTRUCTION_SECTION;

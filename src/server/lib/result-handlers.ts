@@ -99,25 +99,42 @@ export interface TurnEntryParse {
 
 /**
  * Shape the structured-output object must have, at minimum. Surface schemas
- * may extend it (SupervisorOutput adds `actions`; future HumanResponseOutput
- * will add `response_text` at C1-6; future schemas may add `input_quotes` at
- * C1-5/C1-6 per the diary discipline). The parser only reads the two
- * paired-memory fields.
+ * may extend it (SupervisorOutput adds `actions`; HumanResponseOutput adds
+ * `input_quotes` per the diary discipline at PR-C1-6). The parser reads
+ * `working_memory_full` + `working_memory_compressed` always; reads
+ * `input_quotes` opportunistically (populates TurnEntryParse.input when
+ * present and non-empty; leaves undefined otherwise — matches the v1
+ * non-diary Mechanism A behaviour by default).
  */
 export interface PairedMemoryStructured {
     working_memory_full?: string;
     working_memory_compressed?: string;
+    /** PR-C1-6 (2026-05-28): diary input field. Verbatim quotes of what's
+     *  new in this turn's prompt; the agent's salience filter chooses what
+     *  to preserve. Optional — surfaces with `captureInput: false` won't
+     *  emit it; surfaces with `captureInput: true` should. Parser reads
+     *  opportunistically; populates TurnEntryParse.input when present
+     *  and non-empty. */
+    input_quotes?: string;
 }
 
 /**
- * Mechanism A parser. Reads the two named fields from an SDK structured-output
- * object. Treats both fields as required and non-empty; either-missing or
- * either-empty produces an explicit parseError so the caller routes accordingly.
+ * Mechanism A parser. Reads the two required named fields from an SDK
+ * structured-output object plus the optional `input_quotes` field per
+ * the diary discipline.
+ *
+ * PR-C1-6 (2026-05-28): when `input_quotes` is present and non-empty,
+ * TurnEntryParse.input is populated from it. When absent or empty,
+ * `input` stays undefined (matches Mechanism A's v1 behaviour). No
+ * parseError for missing `input_quotes` — it's an opt-in field, not a
+ * required one. Diary-enabled surfaces enforce the requirement at the
+ * profile-config layer (captureInput=true → builder appends diary
+ * instruction → agent emits the field). If the agent emits it empty,
+ * that's `empty_input` parseError.
  *
  * @param input - The SDK structured output (usually `result.structured_output`)
- * @returns TurnEntryParse with body/compressed populated on success
- *          (input is left undefined under Mechanism A in v2; will be populated
- *          when schemas extend with `input_quotes` at C1-5/C1-6).
+ * @returns TurnEntryParse with body/compressed populated on success;
+ *          input populated when input_quotes is present and non-empty
  */
 export function parseTurnEntryStructured(
     input: PairedMemoryStructured | null | undefined,
@@ -139,6 +156,20 @@ export function parseTurnEntryStructured(
     }
     if (!compressed.trim()) {
         return { body: '', compressed: '', parseError: 'empty_compressed' };
+    }
+
+    // PR-C1-6: opportunistic input_quotes read.
+    // - Field absent or non-string: input stays undefined (Mechanism A v1
+    //   behaviour; surface is non-diary by config).
+    // - Field present but whitespace-only: empty_input parseError (the
+    //   agent emitted the field but didn't fill it; diary discipline broken).
+    // - Field present and non-empty: input populated.
+    const inputQuotesField = input.input_quotes;
+    if (typeof inputQuotesField === 'string') {
+        if (!inputQuotesField.trim()) {
+            return { body: '', compressed: '', parseError: 'empty_input' };
+        }
+        return { input: inputQuotesField, body: full, compressed };
     }
 
     return { body: full, compressed };
