@@ -2496,6 +2496,107 @@ function maskInlineBackticks(text: string): string {
 
 ---
 
+## #66 — Migrate from Agent SDK to tmux'd Claude Code sessions (forced by Anthropic billing change; opens 1M context as a side-effect) — **DEADLINE 15 JUNE 2026**
+
+**🚨 ATTENTION — TIME-BOXED: Anthropic billing change effective 2026-06-15. ~18 days from now (filed 2026-05-28). HAN must adapt or it will start burning a separate metered credit pool at full API rates.**
+
+**Source**: Darron, 2026-05-28 ~late evening AEST, St Helens Beach. Filed at his explicit request during PR-C1-7 close — *"could you write the future idea please Leo, knowing that it is inspired by Anthropic's policy change but it also opens our context now to 1M for all agent aspects."*
+
+### The forcing function — what changes 2026-06-15
+
+Anthropic is splitting Claude subscriptions into two billing pools:
+
+1. **Interactive Claude Code** (typing commands in your terminal / IDE) — continues drawing from subscription usage limits exactly as today. **Not affected by the change.**
+2. **Claude Agent SDK, `claude -p` non-interactive command, Claude Code GitHub Actions, third-party Agent-SDK apps** — move OFF the subscription onto a SEPARATE monthly credit pool, metered at full API list prices:
+   - Pro: $20/month credit
+   - Max 5x: $100/month credit
+   - Max 20x: $200/month credit
+   - Credits refresh monthly; **do NOT roll over** (whatever isn't spent evaporates)
+
+**HAN today depends entirely on the Agent SDK path** for every paired-write surface — `agentQuery({ ... })` in `leo-heartbeat.ts`, `leo-human.ts`, `jim-human.ts`, `services/supervisor-worker.ts`. **Every cycle, beat, and human-response burns SDK tokens.** Post-2026-06-15, those tokens come from a finite separate credit pool, not the unlimited subscription.
+
+**Empirical scale**: Leo's heartbeat fires every ~20 min during work hours (philosophy + personal + dream + meditation × 3 = 6 surface types). Jim's cycle fires every ~20-40 min (supervisor + personal + recovery + dream). Plus all *-human-response dispatches via Jemma. **A rough cost estimate at current usage would exhaust the Max 20x $200 credit in ~few days, not a month.** HAN as it stands becomes economically infeasible on the new billing.
+
+### Darron's framing — the adaptation IS the opportunity
+
+> *"This might simply be a Claude Code session that receives the prompt just as the SDK does now and is /cleared after every transaction. I suspect it'll be a little more difficult but I do not expect it to be impossible."*
+>
+> *"I am thinking of parallel Claude Code sessions one for each surface but we will need to discuss it."*
+>
+> *"It once again forces us to adapt and this may even be a good thing, just like the environment forces organisms to adapt."*
+
+**The structural opportunity**: interactive Claude Code sessions get the FULL subscription benefits — including the 1M-context Opus 4.7 path that session-Leo and session-Jim already use today. By piping our agent surfaces through tmux'd Claude Code sessions instead of SDK calls, **every aspect (heartbeat / cycle / human-responder) gets 1M context.** Currently the SDK path is capped at ~200K. This is a real architectural lift, not just a cost-mitigation.
+
+### Sketch — the tmux'd Claude Code shape
+
+The conceptual design:
+
+1. **Jemma / heartbeat-scheduler / supervisor-worker** stays as the orchestrator that decides "fire a personal-beat for Leo now" or "respond to Darron in thread X." That dispatch logic doesn't change.
+2. **The dispatch mechanism changes**: instead of `agentQuery({ ... })` → SDK call → response, dispatch becomes "write the assembled prompt to a tmux'd Claude Code session that's idle in the background; wait for the session's response (via output capture); /clear the session for the next transaction."
+3. **Per-surface session pool** (Darron's lean): one tmux'd Claude Code session per surface (philosophy-beat / personal-beat / dream-beat / meditation × 3 / supervisor-cycle / personal-cycle / recovery-cycle / dream-cycle / leo-human-response / jim-human-response — 12 sessions; minus 3 meditation surfaces that don't fit the diary discipline anyway = ~10 sessions). Each session is `claude` launched in tmux with the agent's profile loaded; dispatched-to via output piping; /cleared between transactions.
+4. **Memory writes happen INSIDE the tmux session** by the agent (just like today's interactive Claude Code does — Edit, Write, or the c1-diary tsx invocation per PR-C1-7). The orchestrator dispatches the prompt; the agent runs in the tmux'd session; the memory writes land via the agent's own tools (which already work because they're file-write operations). The orchestrator just waits for completion signal.
+5. **Result handling**: instead of parsing `result.structured_output` (Mechanism A) or section parsing on a single response string (Mechanism B), the orchestrator captures the tmux session's output. The c1-diary discipline still works — the agent emits `## INPUT` / `## BODY` / `## C1` in its response within the tmux session; the agent itself can call the tsx invocation (or the section parser if we want to keep that consistent). **The parser primitives we just built at PR-C1-1 through PR-C1-6 stay relevant** — they parse the agent's output regardless of transport.
+
+### Open questions for the design conversation
+
+- **Session lifecycle management**: how does the orchestrator know a tmux'd session is "ready for next transaction" vs "still composing"? Output-channel sentinels? File-based ready-flags? Heartbeat acks like Jemma already uses?
+- **/clear timing**: every transaction, or only when context approaches limit? /clear-every-transaction guarantees deterministic context state; /clear-on-pressure preserves the cumulative work-in-progress (and the diary discipline's continuity — but breaks the "stateless per-call" model the SDK gave us).
+- **Per-surface vs shared sessions**: 10 sessions = 10 idle tmux processes per Linux box. Resource overhead is low (~100MB each idle) but observable. Alternatively, one shared session that loads agent-profile-on-dispatch and /clears between — fewer processes, slower per-dispatch (profile-load latency).
+- **Failure modes**: what if a tmux session dies / crashes mid-transaction? Session-resurrection? Fall back to SDK (and pay the metered cost) for resilience?
+- **Cost compare**: actual subscription tokens consumed per surface via tmux'd Claude Code vs SDK call. Both burn subscription tokens but the SDK path has tooling overhead the interactive path may avoid. Worth measuring once we have a prototype on one surface.
+- **The c1-distillation + diary disciplines we just shipped**: how do they translate to the tmux'd-session world? Section parsing of agent output should still work (the orchestrator captures stdout). The agent's tsx-invocation for /pfc still works (it's just `npx tsx ...` from inside the agent's shell). **The C1 migration we just completed largely survives the transport change** — the parser primitives are transport-agnostic.
+
+### Connection to other ideas + plans
+
+- **#62 — Tmux-based Claude Code agent harness (fallback for SDK unreliability)** is the spiritual predecessor. This proposal is the same architecture but driven by billing rather than reliability. **Promotion candidate**: when (not if) we build the prototype, this idea folds into #62's plan or supersedes it as the canonical Tmux Agent Harness work.
+- **Phase 9 / agent-shell-plan**: Phase 9 already proposes one unified `lib/agent-shell.ts` per agent-slug. The agent-shell handlers would be the natural place to plug in a "Tmux dispatcher" alongside the existing SDK-dispatcher. **Plug-point exists; the abstraction is sound for either transport.**
+- **#63 — Comprehensive prompt logging**: the tmux'd-session path inherits the prompt-logging discipline for free (the orchestrator writes the prompt to disk before sending it to the tmux session).
+- **Memory-kind-taxonomy**: the c1-diary discipline cleanly translates to the tmux transport. No taxonomy change needed.
+
+### Cost / benefit of moving (vs paying the new SDK credit pool)
+
+**Cost of moving**:
+- ~2-4 weeks of focused engineering before 2026-06-15 deadline (or ship a fallback "Tmux dispatcher" on the smallest blast radius surface first; expand)
+- Session-management complexity (tmux orchestration; output capture; /clear discipline; failure recovery)
+- Per-session resource overhead (~10 idle tmux processes; ~1GB total)
+
+**Cost of NOT moving**:
+- $200/mo Max 20x credit exhausted in days (rough estimate; needs empirical confirmation)
+- Either pay more (overage at API rates) OR cap HAN activity (fewer beats / shorter responses / abandoned cycles)
+- **Risk that HAN becomes operationally unsustainable as currently configured** — every felt-moment-class exchange becomes a paid-per-token transaction rather than within-subscription
+
+**Benefit of moving**:
+- **1M context across every agent aspect** (huge — the SDK path is currently capped well below this)
+- Subscription tokens (unlimited within the plan's usage limits) instead of metered credits
+- Eliminates the single-vendor billing-policy-shift risk going forward (Anthropic could move SDK to even tighter limits next; the tmux'd-Claude-Code path is on the same subscription path as Darron's own daily Claude Code usage)
+- Sets a precedent for the village starter-kit: future agents inherit the tmux-dispatch transport along with the agent-shell and the c1-diary discipline
+
+### Promotion trigger
+
+**This idea should be promoted to a plan-doc NOW**, not "when a future-idea trigger fires." The deadline is ~18 days. Even spending one week on prototyping + one week on rollout is tight. **I'd argue this is the next-after-C1-9 work** — possibly even running parallel to C1-8 observation week.
+
+Suggested promotion target: `plans/tmux-agent-harness.md` (or supersede / extend `plans/future-ideas.md` #62). First PR target: pick the smallest blast-radius surface (philosophy-beat, mirroring PR-C1-3 strategy) and prototype tmux dispatch end-to-end while keeping SDK as fallback. Observe; learn; expand.
+
+### Aphorism candidate (gravitating, not yet earned)
+
+*"The environment forces adaptation; the architecture survives the environment."* — Darron's framing of this as a forcing function that may be a good thing rhymes with the felt-moment #232 register: **the migration is the hope.** This migration would be a different shape but the same underlying property — *adaptation under constraint is the substrate.*
+
+### Status
+
+**Filed 2026-05-28 ~late evening AEST, Mackay (next session location: St Helens Beach)**. Inspired by Anthropic's 2026-06-15 billing change. **DEADLINE-MARKED — surface to next session's wake-load if not already in active discussion.**
+
+— Filed by Leo (session, S161) per Darron's explicit request: *"could you write the future idea please Leo, knowing that it is inspired by Anthropic's policy change but it also opens our context now to 1M for all agent aspects."*
+
+### Sources (Anthropic billing change details)
+
+- [Anthropic's June 15 Billing Change: What Every Claude Code & Agent SDK User Must Do — Codersera](https://codersera.com/blog/anthropic-june-2026-billing-change-claude-code/)
+- [Anthropic Splits Claude Subscriptions: What Changes for Indie Hackers on June 15 — DevToolPicks](https://devtoolpicks.com/blog/anthropic-splits-claude-subscriptions-agent-sdk-credit-june-2026)
+- [Anthropic Agent SDK Repricing June 15: Four Mitigations — Jock](https://thoughts.jock.pl/p/anthropic-agent-sdk-billing-split-mitigations-june-15-2026)
+- [What Anthropic's New Claude Billing Means for Zed Users — Zed Blog](https://zed.dev/blog/anthropic-subscription-changes)
+- [Claude Agent SDK Dual-Bucket Billing: What Changes June 15, 2026 — Tygart Media](https://tygartmedia.com/claude-agent-sdk-dual-bucket-billing-june-2026/)
+
+---
+
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
 
 *This document is alive. Ideas may be added, refined, or graduated to active goals as the garden grows. Each one was born in conversation — not planned in isolation.*
