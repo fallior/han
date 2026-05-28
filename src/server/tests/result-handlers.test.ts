@@ -1,22 +1,27 @@
 /**
- * Result-handler primitives — unit tests (C1-1).
+ * Result-handler primitives — unit tests (PR-C1-1 + amendment + PR-C1-3.5 diary).
  *
- * Two parsers exercised per the C1-R4 canonical answers:
+ * Coverage:
  *
- *   parsePairedMemoryStructured (Mechanism A)
+ *   parseTurnEntryStructured (Mechanism A — see result-handlers.ts JSDoc for v2 rename history)
  *     - Happy path against a real-shape SupervisorOutput
  *     - Missing fields → parseError: missing_fields
- *     - Empty / whitespace-only fields → empty_full / empty_compressed
+ *     - Empty / whitespace-only fields → empty_body / empty_compressed
  *     - Invalid input (null, undefined, non-object) → invalid_input
  *
- *   parsePairedMemorySection (Mechanism B)
- *     - Happy path: prose body + closing `## C1` section
- *     - Case-insensitive heading text (`## c1`, `##  C1`)
- *     - Subheading exclusion: `### C1` does NOT match
- *     - Code-fence-aware: `## C1` inside ``` or ~~~ is ignored
- *     - Multiple sections → multiple_c1_sections
- *     - No section → no_c1_section
- *     - Empty before / after → empty_full / empty_compressed
+ *   parseTurnEntry (Mechanism B — see result-handlers.ts JSDoc for v2 rename history)
+ *     V1 mode (captureInput=false, default — backward compatibility):
+ *       - Happy path: prose body + closing `## C1` section
+ *       - Case-insensitive heading; subheading exclusion; code-fence-aware; CRLF
+ *       - parseError variants (no_c1_section, multiple_c1_sections, empty_body,
+ *         empty_compressed, invalid_input)
+ *     V2 mode (captureInput=true — diary discipline per PR-C1-3.5):
+ *       - Happy path: `## INPUT` + `## BODY` + `## C1` three-section structure
+ *       - All five new parseError variants (no_input_section,
+ *         multiple_input_sections, empty_input, no_body_section, multiple_body_sections)
+ *       - Code-fence-aware on `## INPUT` and `## BODY` (mirrors C1)
+ *       - CRLF on three-section input
+ *       - LM-1 non-collision regression: parser does NOT match `[INPUT]`/`[BODY]`/`[C1]` storage markers
  *
  * Run via: cd src/server && npx tsx --test tests/result-handlers.test.ts
  */
@@ -25,17 +30,15 @@ import test from 'node:test';
 import assert from 'node:assert';
 
 import {
-    parsePairedMemoryStructured,
-    parsePairedMemorySection,
+    parseTurnEntry,
+    parseTurnEntryStructured,
 } from '../lib/result-handlers';
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Mechanism A — parsePairedMemoryStructured
+// Mechanism A — parseTurnEntryStructured
 // ──────────────────────────────────────────────────────────────────────────────
 
 test('structured: happy path with real-shape SupervisorOutput', () => {
-    // Approximates the actual supervisor-cycle output shape from
-    // supervisor-worker.ts:69 (SupervisorOutput interface).
     const input = {
         observations: ['Phase A landed', 'Two builds green'],
         actions: [],
@@ -44,33 +47,35 @@ test('structured: happy path with real-shape SupervisorOutput', () => {
         working_memory_full: '## Cycle 482\n\nLanded PR-AP9.1 + PR-AP9.2. The audit caught one type-chain regression in the wm-sensor caller chain; folded in same diff. Darron quiet; no questions all day, which I take as the system reading clean rather than absence.',
         reasoning: 'Standard cycle progression.',
     };
-    const result = parsePairedMemoryStructured(input);
+    const result = parseTurnEntryStructured(input);
     assert.strictEqual(result.parseError, undefined);
-    assert.ok(result.full.startsWith('## Cycle 482'));
+    assert.ok(result.body.startsWith('## Cycle 482'));
     assert.ok(result.compressed.startsWith('Cycle #482:'));
+    // Mechanism A doesn't populate input today (will at C1-5/C1-6 when schemas extend)
+    assert.strictEqual(result.input, undefined);
 });
 
 test('structured: missing working_memory_full → missing_fields', () => {
     const input = { working_memory_compressed: 'some text' };
-    const result = parsePairedMemoryStructured(input);
+    const result = parseTurnEntryStructured(input);
     assert.strictEqual(result.parseError, 'missing_fields');
-    assert.strictEqual(result.full, '');
+    assert.strictEqual(result.body, '');
     assert.strictEqual(result.compressed, '');
 });
 
 test('structured: missing working_memory_compressed → missing_fields', () => {
     const input = { working_memory_full: 'some text' };
-    const result = parsePairedMemoryStructured(input);
+    const result = parseTurnEntryStructured(input);
     assert.strictEqual(result.parseError, 'missing_fields');
 });
 
-test('structured: empty working_memory_full → empty_full', () => {
+test('structured: empty working_memory_full → empty_body (renamed from empty_full in v2)', () => {
     const input = {
         working_memory_full: '   \n  ',
         working_memory_compressed: 'has content',
     };
-    const result = parsePairedMemoryStructured(input);
-    assert.strictEqual(result.parseError, 'empty_full');
+    const result = parseTurnEntryStructured(input);
+    assert.strictEqual(result.parseError, 'empty_body');
 });
 
 test('structured: empty working_memory_compressed → empty_compressed', () => {
@@ -78,87 +83,71 @@ test('structured: empty working_memory_compressed → empty_compressed', () => {
         working_memory_full: 'has content',
         working_memory_compressed: '',
     };
-    const result = parsePairedMemoryStructured(input);
+    const result = parseTurnEntryStructured(input);
     assert.strictEqual(result.parseError, 'empty_compressed');
 });
 
 test('structured: null input → invalid_input', () => {
-    const result = parsePairedMemoryStructured(null);
+    const result = parseTurnEntryStructured(null);
     assert.strictEqual(result.parseError, 'invalid_input');
 });
 
 test('structured: undefined input → invalid_input', () => {
-    const result = parsePairedMemoryStructured(undefined);
+    const result = parseTurnEntryStructured(undefined);
     assert.strictEqual(result.parseError, 'invalid_input');
 });
 
 test('structured: non-object input → invalid_input', () => {
-    const result = parsePairedMemoryStructured('not an object' as any);
+    const result = parseTurnEntryStructured('not an object' as any);
     assert.strictEqual(result.parseError, 'invalid_input');
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Mechanism B — parsePairedMemorySection
+// Mechanism B — parseTurnEntry, V1 mode (captureInput=false / default)
+// All existing PR-C1-1 + PR-C1-1-amendment behaviours must continue passing.
 // ──────────────────────────────────────────────────────────────────────────────
 
-test('section: happy path — prose with closing ## C1 section', () => {
+test('section v1: happy path — prose with closing ## C1 section', () => {
     const input = [
         'Tonight the philosophy beat noticed how the keybindings skill has stopped',
-        'announcing itself. The room I live in. The slot opened on the same chord it',
-        'has been playing for weeks.',
+        'announcing itself. The room I live in.',
         '',
-        'The arc of today: nothing surprising. The work was the work. The friendship',
-        'was the friendship. The garden held without needing my attention.',
+        'The arc of today: nothing surprising. The work was the work.',
         '',
         '## C1',
         '',
-        'Quiet beat. The room I live in stopped announcing itself; the chord has been',
-        'playing for weeks. Tonight the seeing didn\'t need to land anywhere — that',
-        'IS the landing.',
+        'Quiet beat. The room I live in stopped announcing itself.',
     ].join('\n');
 
-    const result = parsePairedMemorySection(input);
+    const result = parseTurnEntry(input);
     assert.strictEqual(result.parseError, undefined);
-    assert.ok(result.full.startsWith('Tonight the philosophy beat'));
-    assert.ok(result.full.endsWith('without needing my attention.'));
+    assert.strictEqual(result.input, undefined, 'v1 mode never populates input');
+    assert.ok(result.body.startsWith('Tonight the philosophy beat'));
+    assert.ok(result.body.endsWith('The work was the work.'));
     assert.ok(result.compressed.startsWith('Quiet beat.'));
-    assert.ok(result.compressed.endsWith('IS the landing.'));
-    // Sanity: c0 source MUST NOT include the heading or distillation
-    assert.ok(!result.full.includes('## C1'));
-    assert.ok(!result.full.includes('IS the landing'));
 });
 
-test('section: case-insensitive heading text (## c1)', () => {
+test('section v1: case-insensitive heading text (## c1)', () => {
     const input = 'Body text.\n\n## c1\n\nDistillation.';
-    const result = parsePairedMemorySection(input);
+    const result = parseTurnEntry(input);
     assert.strictEqual(result.parseError, undefined);
-    assert.strictEqual(result.full, 'Body text.');
+    assert.strictEqual(result.body, 'Body text.');
     assert.strictEqual(result.compressed, 'Distillation.');
 });
 
-test('section: multiple spaces in heading (##  C1)', () => {
+test('section v1: multiple spaces in heading (##  C1)', () => {
     const input = 'Body text.\n\n##  C1\n\nDistillation.';
-    const result = parsePairedMemorySection(input);
+    const result = parseTurnEntry(input);
     assert.strictEqual(result.parseError, undefined);
-    assert.strictEqual(result.full, 'Body text.');
-    assert.strictEqual(result.compressed, 'Distillation.');
 });
 
-test('section: ### C1 (level-3 heading) does NOT match', () => {
-    // ### C1 should be treated as part of the body, not the c1 boundary.
-    // With no level-2 ## C1 present, this should produce no_c1_section.
+test('section v1: ### C1 (level-3 heading) does NOT match', () => {
     const input = 'Body text.\n\n### C1\n\nThis is just a subsection.';
-    const result = parsePairedMemorySection(input);
+    const result = parseTurnEntry(input);
     assert.strictEqual(result.parseError, 'no_c1_section');
 });
 
-test('section: #### C1 (level-4 heading) does NOT match', () => {
-    const input = 'Body text.\n\n#### C1\n\nDeep subsection.';
-    const result = parsePairedMemorySection(input);
-    assert.strictEqual(result.parseError, 'no_c1_section');
-});
-
-test('section: ## C1 inside ``` code fence is ignored', () => {
+test('section v1: ## C1 inside ``` code fence is ignored', () => {
     const input = [
         'Body text about a markdown example.',
         '',
@@ -175,33 +164,31 @@ test('section: ## C1 inside ``` code fence is ignored', () => {
         'The real distillation.',
     ].join('\n');
 
-    const result = parsePairedMemorySection(input);
+    const result = parseTurnEntry(input);
     assert.strictEqual(result.parseError, undefined);
-    assert.ok(result.full.includes('This is just example content'),
-        'c0 must preserve the fenced ## C1 example verbatim');
+    assert.ok(result.body.includes('This is just example content'));
     assert.strictEqual(result.compressed, 'The real distillation.');
 });
 
-test('section: ## C1 inside ~~~ code fence is ignored', () => {
+test('section v1: ## C1 inside ``` fence with CRLF line endings is ignored (A1 amendment regression)', () => {
     const input = [
-        'Body.',
+        'Body about a markdown example.',
         '',
-        '~~~',
+        '```markdown',
         '## C1',
         'fenced example',
-        '~~~',
+        '```',
         '',
         '## C1',
         '',
-        'Real one.',
-    ].join('\n');
-
-    const result = parsePairedMemorySection(input);
+        'Real distillation.',
+    ].join('\r\n');
+    const result = parseTurnEntry(input);
     assert.strictEqual(result.parseError, undefined);
-    assert.strictEqual(result.compressed, 'Real one.');
+    assert.strictEqual(result.compressed, 'Real distillation.');
 });
 
-test('section: multiple ## C1 sections → multiple_c1_sections', () => {
+test('section v1: multiple ## C1 sections → multiple_c1_sections', () => {
     const input = [
         'Body.',
         '',
@@ -214,134 +201,222 @@ test('section: multiple ## C1 sections → multiple_c1_sections', () => {
         'Second distillation.',
     ].join('\n');
 
-    const result = parsePairedMemorySection(input);
+    const result = parseTurnEntry(input);
     assert.strictEqual(result.parseError, 'multiple_c1_sections');
 });
 
-test('section: no ## C1 heading → no_c1_section', () => {
-    const input = 'Just body prose with no closing distillation section.';
-    const result = parsePairedMemorySection(input);
+test('section v1: no ## C1 heading → no_c1_section', () => {
+    const result = parseTurnEntry('Just body prose with no closing distillation section.');
     assert.strictEqual(result.parseError, 'no_c1_section');
 });
 
-test('section: empty input → no_c1_section', () => {
-    const result = parsePairedMemorySection('');
+test('section v1: empty input → no_c1_section', () => {
+    const result = parseTurnEntry('');
     assert.strictEqual(result.parseError, 'no_c1_section');
 });
 
-test('section: whitespace-only input → no_c1_section', () => {
-    const result = parsePairedMemorySection('   \n\n  \n');
-    assert.strictEqual(result.parseError, 'no_c1_section');
-});
-
-test('section: ## C1 with nothing before it → empty_full', () => {
+test('section v1: ## C1 with nothing before it → empty_body (was empty_full in v1; renamed v2)', () => {
     const input = '## C1\n\nOnly the distillation, no body.';
-    const result = parsePairedMemorySection(input);
-    assert.strictEqual(result.parseError, 'empty_full');
+    const result = parseTurnEntry(input);
+    assert.strictEqual(result.parseError, 'empty_body');
 });
 
-test('section: ## C1 with whitespace-only after → empty_compressed', () => {
+test('section v1: ## C1 with whitespace-only after → empty_compressed', () => {
     const input = 'Body here.\n\n## C1\n\n   \n';
-    const result = parsePairedMemorySection(input);
+    const result = parseTurnEntry(input);
     assert.strictEqual(result.parseError, 'empty_compressed');
 });
 
-test('section: null input → invalid_input', () => {
-    const result = parsePairedMemorySection(null);
+test('section v1: null input → invalid_input', () => {
+    const result = parseTurnEntry(null);
     assert.strictEqual(result.parseError, 'invalid_input');
 });
 
-test('section: heading text with trailing whitespace tolerated', () => {
-    const input = 'Body.\n\n## C1   \n\nDistilled.';
-    const result = parsePairedMemorySection(input);
+test('section v1: CRLF line endings handled', () => {
+    const input = 'Body.\r\n\r\n## C1\r\n\r\nDistilled.';
+    const result = parseTurnEntry(input);
     assert.strictEqual(result.parseError, undefined);
+    assert.strictEqual(result.body, 'Body.');
     assert.strictEqual(result.compressed, 'Distilled.');
 });
 
-test('section: heading with leading horizontal whitespace tolerated', () => {
-    const input = 'Body.\n\n  ## C1\n\nDistilled.';
-    const result = parsePairedMemorySection(input);
+// ──────────────────────────────────────────────────────────────────────────────
+// Mechanism B — parseTurnEntry, V2 mode (captureInput=true — diary discipline)
+// PR-C1-3.5 additions.
+// ──────────────────────────────────────────────────────────────────────────────
+
+test('diary: happy path — three-section structure (## INPUT + ## BODY + ## C1)', () => {
+    const input = [
+        '## INPUT',
+        '',
+        'Darron asked: "what do we do next?" then: "go with (a) and start the plan doc"',
+        '',
+        '## BODY',
+        '',
+        'The shape lands. I drafted plans/c1-diary.md as a sibling to c1-distillation.md.',
+        '370 lines after v2 fold-in.',
+        '',
+        '## C1',
+        '',
+        'The diary plan v2 lands; bridge holds. The shape of completeness over optimisation now structural.',
+    ].join('\n');
+
+    const result = parseTurnEntry(input, { captureInput: true });
     assert.strictEqual(result.parseError, undefined);
-    assert.strictEqual(result.compressed, 'Distilled.');
+    assert.ok(result.input!.startsWith('Darron asked'));
+    assert.ok(result.body.startsWith('The shape lands.'));
+    assert.ok(result.compressed.startsWith('The diary plan v2 lands'));
 });
 
-test('section: ## C1 in middle of line does NOT match', () => {
-    // The heading must START at the line — "see ## C1 below" should not match.
-    const input = 'See ## C1 below for the distillation.\n\nActually no ## C1 section here.';
-    const result = parsePairedMemorySection(input);
+test('diary: missing ## INPUT → no_input_section', () => {
+    const input = '## BODY\n\nBody content.\n\n## C1\n\nDistillation.';
+    const result = parseTurnEntry(input, { captureInput: true });
+    assert.strictEqual(result.parseError, 'no_input_section');
+});
+
+test('diary: missing ## BODY → no_body_section', () => {
+    const input = '## INPUT\n\nInput content.\n\n## C1\n\nDistillation.';
+    const result = parseTurnEntry(input, { captureInput: true });
+    assert.strictEqual(result.parseError, 'no_body_section');
+});
+
+test('diary: missing ## C1 → no_c1_section', () => {
+    const input = '## INPUT\n\nInput.\n\n## BODY\n\nBody content.';
+    const result = parseTurnEntry(input, { captureInput: true });
     assert.strictEqual(result.parseError, 'no_c1_section');
 });
 
-test('section: realistic dream-beat shape (shape-token + ## C1)', () => {
-    // The dream-cycle and dream-beat have a different register —
-    // shape-tokens rather than narrative prose. Ensure the parser handles
-    // both registers without privileging one shape.
-    const input = [
-        '*Shape-token: The bell that learned its own diameter from the wind that almost rang it.*',
-        '',
-        'FEELING_TAG: calibration by what didn\'t arrive',
-        '',
-        '## C1',
-        '',
-        'The unstruck bell carries the rule the wind taught it. Calibration by what almost-was.',
-    ].join('\n');
-
-    const result = parsePairedMemorySection(input);
-    assert.strictEqual(result.parseError, undefined);
-    assert.ok(result.full.includes('Shape-token:'));
-    assert.ok(result.full.includes('FEELING_TAG:'));
-    assert.ok(result.compressed.startsWith('The unstruck bell'));
+test('diary: multiple ## INPUT → multiple_input_sections', () => {
+    const input = '## INPUT\nA\n\n## INPUT\nB\n\n## BODY\nbody\n\n## C1\nc1';
+    const result = parseTurnEntry(input, { captureInput: true });
+    assert.strictEqual(result.parseError, 'multiple_input_sections');
 });
 
-test('section: CRLF line endings handled', () => {
-    const input = 'Body.\r\n\r\n## C1\r\n\r\nDistilled.';
-    const result = parsePairedMemorySection(input);
-    assert.strictEqual(result.parseError, undefined);
-    assert.strictEqual(result.full, 'Body.');
-    assert.strictEqual(result.compressed, 'Distilled.');
+test('diary: multiple ## BODY → multiple_body_sections', () => {
+    const input = '## INPUT\ninput\n\n## BODY\nfirst\n\n## BODY\nsecond\n\n## C1\nc1';
+    const result = parseTurnEntry(input, { captureInput: true });
+    assert.strictEqual(result.parseError, 'multiple_body_sections');
 });
 
-// A1 regression test (Jim's PR-C1-1 audit, 2026-05-26): the closer regex
-// for ``` and ~~~ fences must allow the optional trailing `\r` left by
-// `split('\n')` on CRLF input. Without `\r?` on the closer, CRLF-terminated
-// input with a fenced `## C1` example would mask everything through to EOF
-// — missing the real `## C1` heading after the fence.
-test('section: ## C1 inside ``` fence with CRLF line endings is ignored', () => {
+test('diary: empty input section → empty_input', () => {
+    const input = '## INPUT\n\n   \n\n## BODY\n\nbody\n\n## C1\n\nc1';
+    const result = parseTurnEntry(input, { captureInput: true });
+    assert.strictEqual(result.parseError, 'empty_input');
+});
+
+test('diary: empty body section → empty_body', () => {
+    const input = '## INPUT\n\ninput\n\n## BODY\n\n  \n\n## C1\n\nc1';
+    const result = parseTurnEntry(input, { captureInput: true });
+    assert.strictEqual(result.parseError, 'empty_body');
+});
+
+test('diary: empty compressed section → empty_compressed', () => {
+    const input = '## INPUT\n\ninput\n\n## BODY\n\nbody\n\n## C1\n\n   \n';
+    const result = parseTurnEntry(input, { captureInput: true });
+    assert.strictEqual(result.parseError, 'empty_compressed');
+});
+
+test('diary: case-insensitive headings (## input / ## body / ## c1)', () => {
+    const input = '## input\nA\n\n## body\nB\n\n## c1\nC';
+    const result = parseTurnEntry(input, { captureInput: true });
+    assert.strictEqual(result.parseError, undefined);
+    assert.strictEqual(result.input, 'A');
+    assert.strictEqual(result.body, 'B');
+    assert.strictEqual(result.compressed, 'C');
+});
+
+test('diary: ## INPUT and ## BODY inside ``` fence are ignored', () => {
     const input = [
-        'Body about a markdown example.',
-        '',
         '```markdown',
-        '## C1',
+        '## INPUT',
         'fenced example',
+        '## BODY',
+        'fenced body',
+        '## C1',
+        'fenced c1',
         '```',
         '',
-        'After the fence.',
+        '## INPUT',
+        '',
+        'Real input.',
+        '',
+        '## BODY',
+        '',
+        'Real body.',
         '',
         '## C1',
         '',
-        'Real distillation.',
-    ].join('\r\n');
-    const result = parsePairedMemorySection(input);
+        'Real c1.',
+    ].join('\n');
+
+    const result = parseTurnEntry(input, { captureInput: true });
     assert.strictEqual(result.parseError, undefined);
-    assert.strictEqual(result.compressed, 'Real distillation.');
-    assert.ok(result.full.includes('fenced example'),
-        'CRLF: fenced content must be preserved verbatim in full');
+    assert.strictEqual(result.input, 'Real input.');
+    assert.strictEqual(result.body, 'Real body.');
+    assert.strictEqual(result.compressed, 'Real c1.');
 });
 
-test('section: ## C1 inside ~~~ fence with CRLF line endings is ignored', () => {
-    const input = [
-        'Body.',
-        '',
-        '~~~',
-        '## C1',
-        'fenced example',
-        '~~~',
-        '',
-        '## C1',
-        '',
-        'Real one.',
-    ].join('\r\n');
-    const result = parsePairedMemorySection(input);
+test('diary: CRLF line endings on three-section input', () => {
+    const input = '## INPUT\r\n\r\ninput text\r\n\r\n## BODY\r\n\r\nbody text\r\n\r\n## C1\r\n\r\nc1 text';
+    const result = parseTurnEntry(input, { captureInput: true });
     assert.strictEqual(result.parseError, undefined);
-    assert.strictEqual(result.compressed, 'Real one.');
+    assert.strictEqual(result.input, 'input text');
+    assert.strictEqual(result.body, 'body text');
+    assert.strictEqual(result.compressed, 'c1 text');
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// LM-1 non-collision regression — parser MUST NOT match storage markers
+// ──────────────────────────────────────────────────────────────────────────────
+
+test('LM-1: parser ignores [INPUT] / [BODY] / [C1] storage markers (NOT headings)', () => {
+    // Simulates an agent quoting a prior diary entry verbatim — the c0 storage
+    // uses [INPUT]/[BODY]/[C1] markers, not ## headings. The parser MUST treat
+    // them as content, not as section boundaries.
+    const input = [
+        '## INPUT',
+        '',
+        'I read a prior diary entry that looked like this:',
+        '[INPUT]',
+        'prior input',
+        '',
+        '[BODY]',
+        'prior body',
+        '',
+        '[C1]',
+        'prior c1',
+        '',
+        '## BODY',
+        '',
+        'My reflection on the prior entry.',
+        '',
+        '## C1',
+        '',
+        'The diary loop closes on itself, safely.',
+    ].join('\n');
+
+    const result = parseTurnEntry(input, { captureInput: true });
+    assert.strictEqual(result.parseError, undefined,
+        'storage markers must not trip the heading parser');
+    assert.ok(result.input!.includes('[INPUT]'),
+        'storage markers preserved verbatim inside input content');
+    assert.ok(result.input!.includes('[BODY]'));
+    assert.ok(result.input!.includes('[C1]'));
+    assert.strictEqual(result.body, 'My reflection on the prior entry.');
+    assert.strictEqual(result.compressed, 'The diary loop closes on itself, safely.');
+});
+
+test('LM-1: parser ignores [INPUT] at line-start even with surrounding whitespace', () => {
+    const input = [
+        '## INPUT',
+        '   [INPUT]   ',
+        '\t[BODY]',
+        '## BODY',
+        'body',
+        '## C1',
+        'c1',
+    ].join('\n');
+    const result = parseTurnEntry(input, { captureInput: true });
+    assert.strictEqual(result.parseError, undefined,
+        'whitespace-padded storage markers must not match heading regex');
 });

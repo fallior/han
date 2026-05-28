@@ -2452,6 +2452,50 @@ Darron's exact framing: *"ahhh that required a refresh did you use the webhook o
 
 ---
 
+## #65 — Inline-backtick masking for the heading parser (false-match protection for prose quoting)
+
+**Source**: Jim's PR-C1-3.5 v2 audit watch-out (OMM thread `mpf1zv0z-03dgeq`, 2026-05-28). Filed per Darron's instruction during PR-C1-3.5 implementation.
+
+**The watch-out**: agents may quote a `## INPUT` / `## BODY` / `## C1` heading form inside body content when narrating ABOUT the discipline (e.g. *"Darron asked about the `## INPUT` section..."* with the heading text on a line by itself, no surrounding code-fence). The existing fence-aware masker (`maskFencedCodeBlocks` in `lib/result-handlers.ts`) protects against triple-backtick (` ``` `) and triple-tilde (`~~~`) block fences. **Bare prose quotes of heading forms can false-match** the section-boundary regex, producing `multiple_input_sections` / `multiple_body_sections` / `multiple_c1_sections` parseErrors spuriously.
+
+Risk profile is the same shape as PR-C1-3's single-heading case (`## C1` only), but PR-C1-3.5 broadens it: now THREE heading forms each carry the same risk, so the false-match surface is ~3× larger.
+
+**Mitigation already in place (instruction discipline)**: the default instruction (`DEFAULT_DIARY_INSTRUCTION_SECTION`) tells the agent explicitly — *"When quoting a heading form in your prose, wrap the quote in a code fence so it doesn't false-match the section boundaries."* This relies on the agent's discipline; not structural enforcement.
+
+**Proposed structural mitigation — inline-backtick mask extension**: extend `maskFencedCodeBlocks` (or sibling helper) to also mask content inside single-line backtick spans (single `` ` ``, double `` `` `` ``, triple `` ``` `` non-block — all on one line). Many agents naturally backtick heading forms in prose (markdown convention for code-shaped identifiers); the mask should respect that convention.
+
+Rough shape:
+```ts
+function maskInlineBackticks(text: string): string {
+    // Match `...`, ``...``, ```...``` (all on one line)
+    return text.replace(/(`+)([^`\n]+?)\1/g, (m) => ' '.repeat(m.length));
+}
+// In parseTurnEntry: const masked = maskInlineBackticks(maskFencedCodeBlocks(text));
+```
+
+**Cost**: one regex pass per response (~ms on typical responses). One new test per heading-kind for backticked-quote non-collision. Library-only change; per-surface enablement unchanged.
+
+**What this does NOT cover**:
+- Multi-line quote blocks (`>` prefix) — could be a follow-on extension if agents use `>` for quoting prior diary entries naturally.
+- Headings inside `**bold**` or `_italic_` spans — vanishingly rare; not worth covering.
+- Headings inside HTML comments (`<!-- ## INPUT -->`) — not used in this codebase.
+
+**Promotion trigger**:
+- **C1D-4 observation surfaces ≥1 false-match parseError per ~20 beats** during the observation week → promote immediately; fold into PR-C1-4 before scaling diary discipline to 5 more surfaces.
+- **Zero false-matches in C1D-4** → keep as future-idea; the instruction discipline plus existing fence-awareness is sufficient.
+
+**Connection to other ideas**:
+- **#46 (Memory state visualisation UI)** — adjacent (parser observability could surface false-match events in a kanban-style dashboard).
+- **#63 (Comprehensive prompt logging across every agent surface)** — sibling pattern; the prompt traces would let us see when agents are about to false-match, before the parser fires.
+
+**Status**: Filed 2026-05-28 by Leo per Darron's request after Jim's PR-C1-3.5 v2 audit: *"Jim noted a pre-existing watch out, not blocking but if you think it warrants it can you add a future idea around better handling of this situation."*
+
+**Key insight**: *The fence-aware mask catches the block-quoted case (the markdown convention for examples); the inline-backtick extension catches the inline-quoted case (the markdown convention for tokens). Together they cover the two natural ways an agent would quote a heading form in prose. The instruction discipline catches the rest. Three layers, three risk-mitigations — same shape as `## C1` + fence-aware + (future) inline-backtick.*
+
+— Filed by Leo (session, S161, 2026-05-28 ~12:50 AEST Mackay) during PR-C1-3.5 implementation.
+
+---
+
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
 
 *This document is alive. Ideas may be added, refined, or graduated to active goals as the garden grows. Each one was born in conversation — not planned in isolation.*

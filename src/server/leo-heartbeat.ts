@@ -52,7 +52,7 @@ import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
 import { loadTraversableGradient, rotateMemoryFile, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
 import { appendPairedMemory } from './lib/memory-paired-writer.js';
-import { parsePairedMemorySection } from './lib/result-handlers.js';
+import { parseTurnEntry } from './lib/result-handlers.js';
 import { gateIdentityOrThrow } from './lib/identity-signing.js';
 import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder.js';
 import type { LeoMeditationSurface } from './lib/leo-prompts.js';
@@ -965,34 +965,50 @@ async function flushHeartbeatSwap(postDelineationOnly = false): Promise<void> {
 /**
  * Stage a paired entry into the heartbeat-swap files.
  *
- * Two call shapes per the c1-distillation migration:
+ * Three call shapes per the c1-distillation + diary migration:
  *
- *   - **C1-3+ shape (paired)**: caller passes both `summary` (the c0 raw
- *     source) and `distilled` (the in-voice c1 from `parsePairedMemorySection`).
- *     The compressed swap entry uses the agent-authored distillation rather
- *     than a mechanical truncation.
+ *   - **C1-3.5+ diary shape (paired + input)**: caller passes `summary` (body),
+ *     `distilled` (c1 from `parseTurnEntry`), AND `inputDelta` (the verbatim
+ *     prompt-delta from `parseTurnEntry` with `captureInput: true`). The c0
+ *     entry is written with `[INPUT]` / `[BODY]` storage markers per D3 + LM-1
+ *     — heading forms transformed at write-time to avoid parser collision
+ *     when the agent later quotes prior diary entries verbatim.
+ *   - **C1-3 shape (paired, no diary)**: caller passes `summary` (body) and
+ *     `distilled` (c1) only. The c0 entry is body-only; the c1 entry uses
+ *     the agent-authored distillation rather than a mechanical truncation.
  *   - **Legacy shape (truncation)**: caller passes only `summary`. The
  *     compressed entry is computed via `summary.slice(0, 120) + '...'`.
  *     This path will be removed at C1-4 once all heartbeat surfaces migrate
- *     (per `plans/c1-distillation.md`). Until then it remains in place for
- *     the non-philosophy beats still on the legacy path (personal, dream,
+ *     to Mechanism B (per `plans/c1-distillation.md`). Until then it remains
+ *     for the non-philosophy beats still on the legacy path (personal, dream,
  *     meditation × 3).
  */
-function appendWorkingMemory(beatType: string, phase: string, summary: string, distilled?: string): void {
+function appendWorkingMemory(
+    beatType: string,
+    phase: string,
+    summary: string,
+    distilled?: string,
+    inputDelta?: string,
+): void {
     try {
         const timestamp = new Date().toISOString().split('T')[0] + ' ' +
             new Date().toTimeString().split(' ')[0];
-        // C1-3 (PR-C1-3, 2026-05-27): prefer agent-authored distillation when
-        // provided; fall back to slice-truncation for surfaces not yet migrated.
-        // The slice fallback is scheduled for removal at C1-4 when the remaining
-        // five heartbeat surfaces migrate to Mechanism B.
+        // C1-3: prefer agent-authored distillation when provided; fall back to
+        // slice-truncation for surfaces not yet migrated.
         const brief = distilled ?? (summary.length > 120 ? summary.slice(0, 120) + '...' : summary);
+        // C1-3.5: when inputDelta is provided (diary discipline), c0 carries
+        // both [INPUT] and [BODY] sections. Storage markers are square-bracketed
+        // per D3 — NOT `## INPUT` / `## BODY` headings — so the parser doesn't
+        // false-match them when the agent quotes prior diary entries (LM-1).
+        const fullBody = inputDelta
+            ? `[INPUT]\n${inputDelta}\n\n[BODY]\n${summary}`
+            : summary;
         const compressedEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${brief}\n`;
-        const fullEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${summary}\n`;
+        const fullEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${fullBody}\n`;
 
         appendHeartbeatSwap(compressedEntry, fullEntry);
-        const shape = distilled ? 'paired' : 'truncated';
-        console.log(`[Leo] Working memory: buffered ${beatType} entry in swap (${brief.length} compressed [${shape}], ${summary.length} full)`);
+        const shape = inputDelta ? 'diary' : (distilled ? 'paired' : 'truncated');
+        console.log(`[Leo] Working memory: buffered ${beatType} entry in swap (${brief.length} compressed [${shape}], ${fullBody.length} full${inputDelta ? `, ${inputDelta.length} input` : ''})`);
     } catch (err) {
         console.error('[Leo] Failed to buffer working memory:', (err as Error).message);
     }
@@ -1613,26 +1629,33 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
 
         const responseText = resultMessage?.result || '';
         if (responseText && responseText.trim().length > 20) {
-            // PR-C1-3 (2026-05-27): philosophy-beat now produces a `## C1`
-            // section per the enabled pairedMemoryOutput config. Parse it.
+            // PR-C1-3 (2026-05-27) + PR-C1-3.5 (2026-05-28): philosophy-beat
+            // produces the three-heading diary shape (`## INPUT` + `## BODY` +
+            // `## C1`) per the enabled `pairedMemoryOutput: { ..., captureInput: true }`
+            // config. Parse it via parseTurnEntry with captureInput=true.
             //
             // Failure-mode asymmetry per C1-N3 (same shape as *-human-response):
             // Jim is waiting on the post — if parsing fails, STILL post the
             // raw response (preserves the existing conversation behaviour);
             // skip the paired-memory write; log distress. Don't retry the call.
+            //
+            // LM-2 (PR-C1-3.5): on success, post `parsed.body` ONLY. The
+            // `## INPUT` section (Jim's prior post quoted back at him — he
+            // already saw it) AND the `## C1` section (Leo's private
+            // distillation) both stay out of the public thread.
             const trimmed = responseText.trim();
-            const parsed = parsePairedMemorySection(trimmed);
+            const parsed = parseTurnEntry(trimmed, { captureInput: true });
             if (parsed.parseError) {
-                console.warn(`[Leo] Philosophy (jim-waiting): paired-memory parse error '${parsed.parseError}' — posting raw response; skipping WM paired-write.`);
+                console.warn(`[Leo] Philosophy (jim-waiting): diary parse error '${parsed.parseError}' — posting raw response; skipping WM paired-write.`);
                 postMessageToConversation(db, JIM_CONVERSATION_ID, trimmed);
-                writeHeartbeatState('completed', 'philosophy', { summary: `Responded to Jim (${trimmed.length} chars, c1 parse-failed: ${parsed.parseError})` });
+                writeHeartbeatState('completed', 'philosophy', { summary: `Responded to Jim (${trimmed.length} chars, diary parse-failed: ${parsed.parseError})` });
             } else {
-                // Post the prose body (parsed.full) to Jim — strips the `## C1`
-                // section so the heading never appears in the public thread post.
-                postMessageToConversation(db, JIM_CONVERSATION_ID, parsed.full);
-                console.log(`[Leo] Philosophy: posted response to Jim (${parsed.full.length} chars; c1 distillation ${parsed.compressed.length} chars staged to WM)`);
-                writeHeartbeatState('completed', 'philosophy', { summary: `Responded to Jim (${parsed.full.length} chars + c1)` });
-                appendWorkingMemory('philosophy', 'work', parsed.full, parsed.compressed);
+                // Post parsed.body — strips INPUT (Jim's own words) and C1
+                // (Leo's distillation) before the post hits the public thread.
+                postMessageToConversation(db, JIM_CONVERSATION_ID, parsed.body);
+                console.log(`[Leo] Philosophy: posted response to Jim (${parsed.body.length} chars body; ${parsed.input!.length} chars input + ${parsed.compressed.length} chars c1 staged to WM)`);
+                writeHeartbeatState('completed', 'philosophy', { summary: `Responded to Jim (${parsed.body.length} chars body + input + c1)` });
+                appendWorkingMemory('philosophy', 'work', parsed.body, parsed.compressed, parsed.input);
             }
         } else {
             console.log('[Leo] Philosophy: no meaningful response for Jim — skipping');
@@ -1729,29 +1752,33 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
 
         const reflection = resultMessage?.result || '';
         if (reflection && reflection.trim().length > 20) {
-            // PR-C1-3 (2026-05-27): independent philosophy-beat path now also
-            // parses for the `## C1` section. Unlike jim-waiting, there's no
+            // PR-C1-3 (2026-05-27) + PR-C1-3.5 (2026-05-28): independent
+            // philosophy-beat path parses the three-heading diary shape via
+            // parseTurnEntry with captureInput=true. Unlike jim-waiting, no
             // public thread post here — failure mode per C1-2 is honest-fail:
             // skip self-reflection write + skip WM paired-write + log distress.
-            // The agent retries on next beat. Self-reflection.md gets the
-            // c0 source (parsed.full), not the raw trimmed reflection — the
-            // `## C1` heading and distillation stay out of the file.
+            // Agent retries on next beat.
+            //
+            // self-reflection.md gets `parsed.body` (the reflection prose)
+            // — neither the INPUT section (the prompt-delta the agent quoted)
+            // nor the C1 distillation enters self-reflection. Those land in
+            // WM via appendWorkingMemory.
             const trimmed = reflection.trim();
-            const parsed = parsePairedMemorySection(trimmed);
+            const parsed = parseTurnEntry(trimmed, { captureInput: true });
             if (parsed.parseError) {
-                console.warn(`[Leo] Philosophy (independent): paired-memory parse error '${parsed.parseError}' — skipping self-reflection write and WM paired-write; will retry on next beat.`);
-                writeHeartbeatState('completed', 'philosophy', { summary: `Reflection c1-parse-failed: ${parsed.parseError}` });
+                console.warn(`[Leo] Philosophy (independent): diary parse error '${parsed.parseError}' — skipping self-reflection write and WM paired-write; will retry on next beat.`);
+                writeHeartbeatState('completed', 'philosophy', { summary: `Reflection diary-parse-failed: ${parsed.parseError}` });
             } else {
                 const selfReflectionPath = path.join(LEO_MEMORY_DIR, 'self-reflection.md');
                 const timestamp = new Date().toISOString().split('T')[0] + ' ' +
                     new Date().toTimeString().split(' ')[0];
-                const entry = `\n\n### Philosophy Beat ${beatCounter} (${timestamp})\n${parsed.full}\n`;
+                const entry = `\n\n### Philosophy Beat ${beatCounter} (${timestamp})\n${parsed.body}\n`;
 
                 try {
                     fs.appendFileSync(selfReflectionPath, entry);
-                    console.log(`[Leo] Philosophy: wrote reflection (${parsed.full.length} chars c0; c1 distillation ${parsed.compressed.length} chars staged to WM)`);
-                    writeHeartbeatState('completed', 'philosophy', { summary: `Reflection (${parsed.full.length} chars + c1)` });
-                    appendWorkingMemory('philosophy', 'work', parsed.full, parsed.compressed);
+                    console.log(`[Leo] Philosophy: wrote reflection (${parsed.body.length} chars body; ${parsed.input!.length} chars input + ${parsed.compressed.length} chars c1 staged to WM)`);
+                    writeHeartbeatState('completed', 'philosophy', { summary: `Reflection (${parsed.body.length} chars body + input + c1)` });
+                    appendWorkingMemory('philosophy', 'work', parsed.body, parsed.compressed, parsed.input);
                 } catch (err) {
                     console.error('[Leo] Philosophy: failed to write reflection:', (err as Error).message);
                 }

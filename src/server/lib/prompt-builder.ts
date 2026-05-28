@@ -40,6 +40,7 @@ import {
     profileByName,
     DEFAULT_C1_INSTRUCTION_SECTION,
     DEFAULT_C1_INSTRUCTION_STRUCTURED,
+    DEFAULT_DIARY_INSTRUCTION_SECTION,
 } from './prompt-profiles';
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -435,19 +436,25 @@ export function buildPrompt(
     let opening = resolveScaffold(profile.systemPromptOpening, context);
     const userScaffold = resolveScaffold(profile.userPromptScaffold, context);
 
-    // C1-2 (PR-C1-2, 2026-05-26): append paired-memory output instruction to
-    // the system prompt when the profile has `pairedMemoryOutput.enabled`.
-    // Default instructions per mechanism live in prompt-profiles.ts; custom
-    // instructions on the config override. Disabled state per C1-N2: builder
-    // does nothing here — the handler treats the absent instruction as the
-    // surface being operator-controlled offline for paired-write (skip + log).
-    // No production surface has enabled=true at C1-2; per-surface enablement
-    // begins at C1-3 (philosophy-beat, smallest blast radius).
+    // C1-2 (2026-05-26): append paired-memory output instruction to the system
+    // prompt when the profile has `pairedMemoryOutput.enabled`.
+    // C1-3.5 (2026-05-28): when `captureInput=true` AND `mechanism='section'`,
+    // append the three-heading diary instruction instead of the c1-only
+    // instruction. Custom `instruction` on the config still overrides either
+    // default. Disabled state (or absent field): builder does nothing here —
+    // the handler treats the absent instruction as the surface being operator-
+    // controlled offline for paired-write (skip + log per C1-N2).
     if (profile.pairedMemoryOutput?.enabled) {
         const customInstruction = profile.pairedMemoryOutput.instruction;
-        const defaultInstruction = profile.pairedMemoryOutput.mechanism === 'structured'
-            ? DEFAULT_C1_INSTRUCTION_STRUCTURED
-            : DEFAULT_C1_INSTRUCTION_SECTION;
+        const { mechanism, captureInput } = profile.pairedMemoryOutput;
+        let defaultInstruction: string;
+        if (mechanism === 'structured') {
+            defaultInstruction = DEFAULT_C1_INSTRUCTION_STRUCTURED;
+        } else if (captureInput) {
+            defaultInstruction = DEFAULT_DIARY_INSTRUCTION_SECTION;
+        } else {
+            defaultInstruction = DEFAULT_C1_INSTRUCTION_SECTION;
+        }
         opening = opening + (customInstruction ?? defaultInstruction);
     }
 

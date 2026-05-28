@@ -33,7 +33,7 @@ import type {
 import { postToDiscord, resolveChannelName } from './discord';
 import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, type DayPhase } from '../lib/day-phase';
 import { appendPairedMemory } from '../lib/memory-paired-writer';
-import { parsePairedMemoryStructured } from '../lib/result-handlers';
+import { parseTurnEntryStructured } from '../lib/result-handlers';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 import { gateIdentityOrThrow } from '../lib/identity-signing';
 import { buildPrompt, PromptOverbudgetError } from '../lib/prompt-builder';
@@ -2357,24 +2357,22 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
                 (output.actions || []).every(a => a.type === 'no_action');
 
             if (!isUnchangedSupervisorCycle) {
-                // PR-C1-2 (2026-05-26): cosmetic refactor through the
-                // result-handlers library. The supervisor-cycle's structured-
-                // output schema requires both paired-memory fields; in the
-                // normal case `parsePairedMemoryStructured` returns the same
-                // values the inline reads produced. The library makes
-                // asymmetric-content cases visible via parseError + log,
-                // which is a marginal improvement over the previous behaviour
-                // (silent single-side writes that would refuse at the later
-                // appendPairedMemory step anyway). Per the c1-distillation
-                // plan, supervisor-cycle stays on Mechanism A — schema
-                // enforcement at the SDK call; this handler just composes
-                // the library's parser to read what the schema produced.
-                const parsed = parsePairedMemoryStructured(output);
+                // PR-C1-2 (2026-05-26): refactor through the result-handlers
+                // library. The supervisor-cycle's structured-output schema
+                // requires both paired-memory fields. PR-C1-3.5 (2026-05-28):
+                // function and field renames per v2 (see result-handlers.ts
+                // JSDoc for the full rename map). Semantics unchanged.
+                // Mechanism A: schema enforcement at the SDK call; this handler
+                // just composes the library's parser to read what the schema
+                // produced. parseError → log + skip swap write (preserves swap
+                // state for next cycle); same shape as the asymmetric-content
+                // refusal pattern elsewhere.
+                const parsed = parseTurnEntryStructured(output);
                 if (parsed.parseError) {
                     log(`[Worker] Cycle #${cycleNumber} ${cycleType}: paired-memory parse error '${parsed.parseError}'; skipping swap write (preserves swap state for next cycle).`);
                 } else {
                     fs.appendFileSync(SUPERVISOR_SWAP_FILE, `${cycleHeader}\n${parsed.compressed}`);
-                    fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${cycleHeader}\n${parsed.full}`);
+                    fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${cycleHeader}\n${parsed.body}`);
                 }
             }
 

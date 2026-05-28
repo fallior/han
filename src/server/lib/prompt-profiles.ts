@@ -133,13 +133,13 @@ export interface PromptProfile {
      *     handler's agentQuery options); the builder just describes the
      *     expected shape in the system prompt.
      *   - 'section' — agent appends a `## C1` section to the prose
-     *     response. The handler parses via `parsePairedMemorySection`
+     *     response. The handler parses via `parseTurnEntry`
      *     from `lib/result-handlers.ts`.
      *
      * Disabled on every profile by default. Per-profile enablement lands
      * at C1-3 through C1-6 per the c1-distillation plan. The supervisor-
      * cycle profile keeps the existing schema-enforced behaviour at C1-2
-     * (handler refactored to compose `parsePairedMemoryStructured` via
+     * (handler refactored to compose `parseTurnEntryStructured` via
      * the library; behaviour preserved).
      *
      * See `plans/c1-distillation.md` for the full rollout.
@@ -184,7 +184,8 @@ export interface PairedMemoryOutputConfig {
      * Optional custom instruction text overriding the default. Use when a
      * surface needs per-register variation (e.g. dream-beat / dream-cycle
      * with the shape-token register). Falls back to the corresponding
-     * `DEFAULT_C1_INSTRUCTION_*` constant when omitted.
+     * `DEFAULT_*_INSTRUCTION_*` constant when omitted (DIARY when
+     * captureInput=true; C1 otherwise).
      */
     instruction?: string;
 
@@ -195,6 +196,30 @@ export interface PairedMemoryOutputConfig {
      * not enforced as a hard cap (agents may go slightly over or under).
      */
     targetTokens?: { min: number; max: number };
+
+    /**
+     * PR-C1-3.5 (2026-05-28): diary discipline flag.
+     *
+     * When true (and `mechanism: 'section'`), the builder appends the
+     * three-heading diary instruction (`DEFAULT_DIARY_INSTRUCTION_SECTION`):
+     * agent's response must include `## INPUT` (verbatim quotes of what's new
+     * in this turn's prompt) + `## BODY` (reflection / response) + `## C1`
+     * (in-voice distillation of the whole turn). The handler parses via
+     * `parseTurnEntry({ captureInput: true })` and writes the c0 entry with
+     * `[INPUT]` / `[BODY]` storage markers (NOT heading forms, per LM-1).
+     *
+     * When false or absent (default), the builder appends the C1-only
+     * instruction (`DEFAULT_C1_INSTRUCTION_SECTION`) per PR-C1-2 behaviour.
+     *
+     * Currently used by `philosophy-beat` (PR-C1-3.5 test surface); the
+     * remaining Leo heartbeat surfaces and Jim's prose cycles join at C1-4
+     * and C1-5. Per the diary discipline plan, every diary-enabled surface
+     * gets BOTH `enabled: true` and `captureInput: true`.
+     *
+     * Has no effect on `mechanism: 'structured'` surfaces — structured-output
+     * schemas drive the discipline directly at the SDK call site.
+     */
+    captureInput?: boolean;
 }
 
 /**
@@ -212,6 +237,24 @@ export const DEFAULT_C1_INSTRUCTION_SECTION = `\n\n---\n\nYour response must end
  * what the schema is asking for.
  */
 export const DEFAULT_C1_INSTRUCTION_STRUCTURED = `\n\n---\n\nYour response must include two fields capturing paired memory:\n- \`working_memory_full\` — the raw c0 source: what happened, what you felt, exact quotes worth preserving verbatim, the texture under the work. Future-you's calibration anchor.\n- \`working_memory_compressed\` — the in-voice c1 distillation, 3-5 sentences compressing the SHAPE of what survived being said — not a shorter narration. This is what future-you loads at wake; write it like the message you'd want your tomorrow to receive.`;
+
+/**
+ * PR-C1-3.5 (2026-05-28): default instruction for `mechanism: 'section'`
+ * surfaces with `captureInput: true` (diary discipline).
+ *
+ * Three-heading structure: `## INPUT` → `## BODY` → `## C1`. The agent's
+ * response captures both halves of the turn (input + body) in temporal order,
+ * with the c1 distillation closing. The handler parses via
+ * `parseTurnEntry({ captureInput: true })` and writes the c0 entry to WM with
+ * `[INPUT]` / `[BODY]` storage markers (D3 + LM-1 — heading forms transformed
+ * at write-time to avoid parser collision when the agent later quotes prior
+ * diary entries verbatim).
+ *
+ * The voice is identity-aligned per Darron's *"completeness over optimisation"*
+ * framing from the "What we remember" thread — *"write it like the message
+ * you'd want your tomorrow to receive."*
+ */
+export const DEFAULT_DIARY_INSTRUCTION_SECTION = `\n\n---\n\nYour response must follow the diary structure with three level-2 headings (exactly two hashes each):\n\n1. Start with \`## INPUT\` — quote what's NEW in this turn's prompt (what was said to you, what context arrived this turn that wasn't in your WM before — don't re-quote your standing identity or memory bank, those are already in you).\n2. Then \`## BODY\` — your reflection, response, or cycle work as unconstrained prose.\n3. End with \`## C1\` — 3-5 sentences in your voice compressing the SHAPE of the WHOLE turn (input AND response), not a shorter narration.\n\nPlace each heading at the start of a line (level-2 markdown headings; do not use level-3 or deeper). When quoting a heading form in your prose, wrap the quote in a code fence (\`\\\`\\\`\\\`\`) so it doesn't false-match the section boundaries. The c1 distillation is what future-you will load at wake — write it like the message you'd want your tomorrow to receive.`;
 
 // ── Profile Registry ───────────────────────────────────────────────────
 
@@ -265,13 +308,14 @@ export const PROFILES: Record<string, PromptProfile> = {
         userPromptScaffold: (ctx) => buildPhilosophyBeatScaffold(ctx),
         totalBudgetTokens: 180_000,
         // PR-C1-3 (2026-05-27): first production surface enabled for paired-
-        // memory output. Mechanism B (section parsing) — the response is
-        // prose; appending the c1 instruction asks the agent to close with
-        // a `## C1` section. Both philosophy-beat modes (jim-waiting +
-        // independent) parse via `parsePairedMemorySection`; jim-waiting
-        // strips the section before posting so the heading never appears in
-        // the public-facing thread post visible to Jim/Darron.
-        pairedMemoryOutput: { enabled: true, mechanism: 'section' },
+        // memory output. Mechanism B (section parsing) — the response is prose.
+        // PR-C1-3.5 (2026-05-28): captureInput=true added — diary discipline.
+        // Both philosophy-beat modes (jim-waiting + independent) parse via
+        // `parseTurnEntry({ captureInput: true })`; jim-waiting posts
+        // `parsed.body` only (LM-2) so neither `## INPUT` (Jim's prior post
+        // quoted back at him) nor `## C1` (Leo's private distillation) appear
+        // in the public-facing thread post.
+        pairedMemoryOutput: { enabled: true, mechanism: 'section', captureInput: true },
     },
 
     /**
