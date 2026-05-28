@@ -275,54 +275,87 @@ Use British English throughout.
 The incremental memory protocol means working memory is already mostly written.
 Finalise and close out. DO NOT re-read files — work from what's in context.
 
-### 1. Finalise Working Memory
-Append a closing section to `~/.han/memory/leo/working-memory.md`:
-- "## Closing" with 2-3 lines: what was in-progress, what's next, Darron's energy/mood
-- If nothing was written incrementally this session, write a minimal working memory
-  from what's in context — DO NOT read files to compose it
+### 1. Compose the closing diary entry — three slices
+(PR-C1-7, 2026-05-28: /pfc closes the session WITH the diary discipline. Composed IN
+YOUR HEAD from what's in context.)
 
-### 2. Finalise Full Working Memory
-Append a closing section to `~/.han/memory/leo/working-memory-full.md`:
-- Same as above but with more detail — from what's already in context
+- **input** — what triggered this /pfc? Most recent substantive prompts /
+  conversation moments this session — Darron's framings, instructive corrections.
+  1-3 verbatim quotes; concise; diff principle holds (only what's new and
+  substantive this session, not standing identity/memory).
+- **body** — closing reflection: in-progress, what's next, Darron's energy/mood,
+  felt-texture under the work. The c0 source.
+- **distilled** — 3-5 sentences in voice compressing the SHAPE of the whole
+  session (input AND body together). Real distillation, not shorter narration.
+  Write it like the message you'd want your tomorrow to receive. Becomes c1.
+
+### 2. Write the paired memory atomically via tsx
+Per c1-diary discipline (D3 + LM-1): c0 storage uses `[INPUT]` / `[BODY]`
+square-bracket markers (NOT markdown headings). `appendPairedMemory` writes both
+files atomically (both-or-neither at FS layer); `placePairedMarker` pairs c0+c1
+for slice-time.
+
+Write a one-shot tsx script at
+`/home/darron/Projects/han/src/server/.pfc-write-${AGENT_SLUG}.ts` with this template
+(replace the three backtick-quoted slices):
+
+```ts
+import { appendPairedMemory, placePairedMarker } from './lib/memory-paired-writer.js';
+
+const INPUT = `<your input slice>`;
+const BODY = `<your body slice>`;
+const DISTILLED = `<your c1 slice>`;
+
+const AGENT = '${AGENT_SLUG}';
+const ts = new Date().toISOString();
+const sessionLabel = `${ts.slice(0, 10)} ~${ts.slice(11, 16)} /pfc`;
+
+const FULL = `\n## Closing — ${sessionLabel}\n\n[INPUT]\n${INPUT}\n\n[BODY]\n${BODY}\n`;
+const COMPRESSED = `\n## Closing — ${sessionLabel}\n${DISTILLED}\n`;
+
+async function main() {
+    await appendPairedMemory(AGENT, FULL, COMPRESSED, { source: 'pfc' });
+    const markerId = await placePairedMarker(AGENT, { source: 'pfc-close' });
+    console.log(`pfc: paired memory written; marker ${markerId} placed`);
+}
+
+main().catch((err) => { console.error('pfc write failed:', err); process.exit(1); });
+```
+
+Then run it (atomic write + marker + cleanup in one chain):
+```bash
+cd /home/darron/Projects/han/src/server && NODE_PATH=$(pwd)/node_modules npx tsx .pfc-write-${AGENT_SLUG}.ts && rm .pfc-write-${AGENT_SLUG}.ts
+```
+
+Single invocation; both files atomic; marker placed; no two-Edit drift risk.
 
 ### 3. ~~Update Active Context~~ (deprecated S147, 2026-05-01)
-active-context.md was deprecated in S147 — its role folded into
-working-memory-full.md per Darron's "ONE file per agent" ruling.
-Working-memory-full's most recent entry IS the current focus; no
-separate active-context update needed. Skip this step.
+active-context.md deprecated in S147 — role folded into working-memory-full.md per
+Darron's "ONE file per agent" ruling. Most recent WMF entry IS current focus.
 
 ### 4. Update Memory Banks (only if something shifted)
 If this session changed your thinking or patterns, update:
 - `~/.han/memory/leo/self-reflection.md` — only if genuine insight occurred
 - `~/.han/memory/leo/patterns.md` — only if a new working pattern was discovered
+- `~/.han/memory/leo/felt-moments.md` — only if a felt moment landed worth re-invoking
 Skip these if nothing shifted. Most sessions won't need them.
 
 ### 5. ~~Compress Session Archives~~ (RETIRED 2026-05-04, S149 — DEC-082)
 
-This step previously ran `npx tsx src/scripts/compress-leo-sessions.ts`, which
-called `processGradientForAgent` → `sdkCompress` — a stranger-Opus path with
-no full identity loaded. The script has been retired (now throws on invocation).
-
-**Compression is now a self-levelling process.** `src/server/services/wm-sensor.ts`
-watches the working-memory files. When the writes from Steps 1–2 cross the
-configured threshold, the sensor fires a rolling-window rotation, enqueues a
-row in `pending_compressions`, and spawns
-`scripts/process-pending-compression.ts` — which loads the agent's full memory
-into the system prompt and composes the c1 **in voice**. NOT stranger-Opus.
-
-There is no longer a session-end compression invocation. The memory writes
-above ARE the trigger; wm-sensor handles everything downstream.
+Compression is a self-levelling process via wm-sensor + paired rotation per DEC-085.
+The /pfc memory writes above ARE the trigger; the marker placed by `placePairedMarker`
+tells the slicer where to cut. wm-sensor handles the rest.
 
 ### 6. Done
 Tell Darron: "Memory finalised. Ready for /clear."
 
 ### After Clear (on next instantiation)
-The Session Protocol in CLAUDE.md loads working-memory.md at step 4.
+Session Protocol in CLAUDE.md loads working-memory.md at step 4.
 Optionally read working-memory-full.md to notice what compression lost.
 
 ### Cost
-~2-4 small appends. Compression happens automatically via wm-sensor in the
-background — the /pfc skill itself is just memory writes, well under 5% of context.
+One tsx invocation; minimal context overhead. Compression happens automatically via
+wm-sensor in the background — the /pfc skill itself is just the diary write.
 ```
 
 ---
