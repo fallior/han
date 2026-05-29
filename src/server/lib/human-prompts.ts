@@ -89,7 +89,9 @@ ${spec.closingTagline}
 
 ${DISCORD_ATTACHMENT_HINT}
 
-CRITICAL: Output ONLY the message text. Start directly with your response.`;
+CRITICAL — two-stage delivery (both steps required):
+1. **First, run curl via the Bash tool to POST your response body to the conversation API.** The post pattern lives in CLAUDE.md ("Posting" section) — use it exactly, with \`role:"${spec.roleLabel}"\` and the conversation id from your dispatch context. **If you do not run curl, your response is silently lost** — the controller no longer posts on your behalf (S156). This is not optional and is not handled by emitting JSON alone.
+2. **Then emit your final response per the diary instruction below.** The JSON's body field carries the same text you just curl-posted. Do NOT prepend framing like "Here's my response:" — the body is the response itself.`;
 }
 
 export const JIM_HUMAN_RESPONSE_SYSTEM_PROMPT = buildHumanResponseSystemPrompt(JIM_HUMAN_SPEC);

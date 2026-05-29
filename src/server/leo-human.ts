@@ -520,6 +520,20 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         // post stays as the substantive record.
         responseCount++;
 
+        // Post-verification: confirm the agent actually curl-posted during this
+        // dispatch. The previous "Self-posted via curl" log was a false-positive
+        // assumption from diary-form parsing — it did not verify a DB write.
+        // Check for a new role='leo' message in this conversation since dispatch
+        // start; absent = silent-curl-skip (agent composed but skipped the post,
+        // the failure mode that bit S163 on the tmux-harness thread).
+        const composeStartIso = new Date(composeStartMs).toISOString();
+        const postLandedRow = db.prepare(`
+            SELECT id FROM conversation_messages
+            WHERE conversation_id = ? AND role = ? AND created_at >= ?
+            ORDER BY created_at DESC LIMIT 1
+        `).get(conversationId, 'leo', composeStartIso) as { id: string } | undefined;
+        const postRef = postLandedRow ? `verified post id=${postLandedRow.id}` : `NO CURL-POST DETECTED in DB`;
+
         // Try JSON.parse (resilient to code-fence wrapping, mirrors
         // supervisor-cycle's pattern). The agent's JSON might be wrapped in
         // ```json ... ``` per markdown convention; strip that first.
@@ -537,12 +551,12 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         }
 
         if (jsonParseError) {
-            console.warn(`[Leo/Human] JSON parse failed for "${title}": ${jsonParseError}. Skipping WM paired-write (agent's curl-post stands as the record).`);
+            console.warn(`[Leo/Human] JSON parse failed for "${title}": ${jsonParseError} (${postRef}). Skipping WM paired-write.`);
             writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
         } else {
             const parsed = parseTurnEntryStructured(parsedJson);
             if (parsed.parseError) {
-                console.warn(`[Leo/Human] Diary parse error '${parsed.parseError}' for "${title}". Skipping WM paired-write (agent's curl-post stands as the record).`);
+                console.warn(`[Leo/Human] Diary parse error '${parsed.parseError}' for "${title}" (${postRef}). Skipping WM paired-write.`);
                 writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
             } else {
                 const timestamp = new Date().toISOString();
@@ -552,7 +566,12 @@ async function respondToConversation(db: Database.Database, conversationId: stri
                     ? `${sectionHeader}\n[INPUT]\n${parsed.input}\n\n[BODY]\n${parsed.body}`
                     : `${sectionHeader}\n${parsed.body}`;
                 appendSwap(compressedSwap, fullSwap);
-                console.log(`[Leo/Human] Self-posted via curl for "${title}" (paired memory: ${parsed.body.length}c body${parsed.input ? ` + ${parsed.input.length}c input` : ''} + ${parsed.compressed.length}c c1)`);
+                const memText = `paired memory: ${parsed.body.length}c body${parsed.input ? ` + ${parsed.input.length}c input` : ''} + ${parsed.compressed.length}c c1`;
+                if (postLandedRow) {
+                    console.log(`[Leo/Human] Self-posted via curl for "${title}" — ${postRef} (${memText})`);
+                } else {
+                    console.warn(`[Leo/Human] SILENT POST FAILURE for "${title}" — agent composed and diary parsed cleanly, but ${postRef}. Thread will be silent. (${memText} written for forensic record)`);
+                }
                 writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
             }
         }

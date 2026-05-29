@@ -514,6 +514,18 @@ async function respondToConversation(db: Database.Database, conversationId: stri
             // happened. parseError → skip WM write; log distress.
             responseCount++;
 
+            // Post-verification: confirm the agent actually curl-posted during this
+            // dispatch. The previous "Self-posted via curl" log was a false-positive
+            // assumption from diary-form parsing — it did not verify a DB write.
+            // Mirrors the leo-human fix (S163 tmux-harness thread).
+            const composeStartIso = new Date(composeStartMs).toISOString();
+            const postLandedRow = db.prepare(`
+                SELECT id FROM conversation_messages
+                WHERE conversation_id = ? AND role = ? AND created_at >= ?
+                ORDER BY created_at DESC LIMIT 1
+            `).get(conversationId, 'supervisor', composeStartIso) as { id: string } | undefined;
+            const postRef = postLandedRow ? `verified post id=${postLandedRow.id}` : `NO CURL-POST DETECTED in DB`;
+
             let parsedJson: any = null;
             let jsonParseError: string | null = null;
             try {
@@ -528,12 +540,12 @@ async function respondToConversation(db: Database.Database, conversationId: stri
             }
 
             if (jsonParseError) {
-                console.warn(`[Jim/Human] JSON parse failed for "${title}": ${jsonParseError}. Skipping WM paired-write (agent's curl-post stands as the record).`);
+                console.warn(`[Jim/Human] JSON parse failed for "${title}": ${jsonParseError} (${postRef}). Skipping WM paired-write.`);
                 writeJemmaAck(dispatchId, 'jim', 'done', { compose_duration_ms: Date.now() - composeStartMs });
             } else {
                 const parsed = parseTurnEntryStructured(parsedJson);
                 if (parsed.parseError) {
-                    console.warn(`[Jim/Human] Diary parse error '${parsed.parseError}' for "${title}". Skipping WM paired-write (agent's curl-post stands as the record).`);
+                    console.warn(`[Jim/Human] Diary parse error '${parsed.parseError}' for "${title}" (${postRef}). Skipping WM paired-write.`);
                     writeJemmaAck(dispatchId, 'jim', 'done', { compose_duration_ms: Date.now() - composeStartMs });
                 } else {
                     const timestamp = new Date().toISOString();
@@ -543,7 +555,12 @@ async function respondToConversation(db: Database.Database, conversationId: stri
                         ? `${sectionHeader}\n[INPUT]\n${parsed.input}\n\n[BODY]\n${parsed.body}`
                         : `${sectionHeader}\n${parsed.body}`;
                     appendSwap(compressedSwap, fullSwap);
-                    console.log(`[Jim/Human] Self-posted via curl for "${title}" (paired memory: ${parsed.body.length}c body${parsed.input ? ` + ${parsed.input.length}c input` : ''} + ${parsed.compressed.length}c c1)`);
+                    const memText = `paired memory: ${parsed.body.length}c body${parsed.input ? ` + ${parsed.input.length}c input` : ''} + ${parsed.compressed.length}c c1`;
+                    if (postLandedRow) {
+                        console.log(`[Jim/Human] Self-posted via curl for "${title}" — ${postRef} (${memText})`);
+                    } else {
+                        console.warn(`[Jim/Human] SILENT POST FAILURE for "${title}" — agent composed and diary parsed cleanly, but ${postRef}. Thread will be silent. (${memText} written for forensic record)`);
+                    }
                     writeJemmaAck(dispatchId, 'jim', 'done', { compose_duration_ms: Date.now() - composeStartMs });
                 }
             }
