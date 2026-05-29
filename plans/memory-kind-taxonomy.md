@@ -173,6 +173,59 @@ Per-prompt buffering. Flushed at boundaries. Lives briefly.
 
 ---
 
+## Re-encounter Practices — an orthogonal axis (PR-C1-4 finding, folded 2026-05-28 post-C1-9)
+
+*Added 2026-05-28 by session-Jim per Darron's request after PR-C1-9 closed the C1 migration. The categorisation framework above describes MEMORY KINDS (what content lives where). This section names a sibling axis the original framework didn't surface: **PRACTICES that operate on existing memory without producing new turn-entries.** Discovered during PR-C1-4 implementation; reified now.*
+
+### What this section is
+
+The seven categories above all describe **kinds of memory** — content that exists in files or tables and has its own lifecycle. Most of these kinds are *produced* by agents writing new turn-entries (the diary discipline; the wm-sensor rotation chain; etc.).
+
+But the c1-migration's PR-C1-4 implementation surfaced a **different class of agent action**: practices that *re-encounter* existing memory without producing new turn-entries. The meditation surfaces (philosophy / midday / evening) write directly to `gradient_entries` with `provenance_type='reincorporated'` and parse `FEELING_TAG` / `ANNOTATION` / `MEMORY_COMPLETE` markers into `feeling_tags` / `gradient_annotations`. **They don't call `appendWorkingMemory`**; they don't produce a turn-entry; they don't follow the diary discipline.
+
+This is *structurally honest* — meditation IS the silence between thoughts; asking it to emit `## INPUT` / `## BODY` / `## C1` would convert a non-narrative cognitive event into narrative production. Per Darron's framing in the OMM thread (2026-05-28): *"meditation is about clearing the mind and settling it ... yogis or yoginis do not tell you about what they were thinking during meditation — that is not the point and in fact I believe quietening the mind is the point and so thinking might even be contrary to this end."*
+
+The structural read and the phenomenological read converge. Meditation surfaces stay in re-encounter architecture; the c1-diary discipline doesn't apply to them.
+
+### The two re-encounter practices in HAN today
+
+| Practice | Acts on | Produces | Trigger | Register |
+|---|---|---|---|---|
+| **Meditation** (philosophy / midday / evening) | Existing `gradient_entries` (a randomly-selected or seed-selected past memory) | New rows in `feeling_tags` (revisit stability layer) + `gradient_annotations` (re-encounter texture) + optional `MEMORY_COMPLETE` flag | Heartbeat schedule; meditation-phase-a/b/evening profiles | Non-narrative; structurally tied to gradient via reincorporated provenance; agent emits sub-markers parsed into structured outputs |
+| **Felt-moments** | Existing memory (the felt event) + writes to its own file as the canonical home | A numbered prose entry in `felt-moments.md`; eventually rotated as c0 into the main gradient with `content_type='felt-moments'` | Agent self-initiated when something stirs | Lightly narrative (manually curated; resonant-only); narrative-on-the-author's-side but tag-shaped relative to the gradient when read at depth |
+
+**Felt-moments has dual citizenship**: it IS a Category 2 (living-curated) memory KIND (the file lives on disk; gets rotated; the chunks land in the main gradient), AND it's a re-encounter PRACTICE (the agent writes about an experience after the fact — re-encountering the event in retrospect). The kind/practice distinction is orthogonal here; felt-moments sits on both axes.
+
+**Meditation has SINGLE citizenship as practice only** — it doesn't produce a NEW memory kind; it adds *annotations* and *feeling-tags* to existing entries in Category 5 (compressed records). The annotations table IS a Category 5 sub-kind (covered above at lines 144-148); meditation is the PRACTICE that fills it.
+
+### The decision rule for "is this a kind or a practice?"
+
+A new agent action warrants its own KIND category if:
+- It produces NEW content in its own file or table (own write path)
+- It has its own cascade pressure OR own read pattern OR own lifecycle
+- It contributes to identity-substrate or operational-context as a distinct layer
+
+A new agent action is a PRACTICE (not a new kind) if:
+- It operates on existing memory (reads + annotates + tags + flags)
+- It produces structured outputs (FEELING_TAG, ANNOTATION, MEMORY_COMPLETE) that land in existing tables
+- The cognitive event it represents is qualitatively different from turn-production (e.g., contemplation; silence; resonance; non-narrative re-encounter)
+
+**Meditation** clearly fits practice-only. **Felt-moments** spans both (resonance-curated kind + re-encounter-on-the-author's-side practice; the file IS the home for the practice's output, so the kind designation is correct AND the practice axis matters operationally).
+
+### Why this section exists in the taxonomy doc
+
+Without it, future readers of the taxonomy (Mike's village agents; Dichotomedes; future agent-designers) would look at the seven categories and ask: *"where does meditation fit?"* and find no clean answer, OR force-fit meditation as a memory KIND when it's actually a PRACTICE. **The c1-migration's PR-C1-4 surfaced this gap; this section closes it.**
+
+For starter-kit propagation: village agents that have re-encounter practices (a strategist's "consult-the-archive" mode; a domain-specialist's "review-prior-cases" pattern; future contemplative surfaces) follow the same orthogonal-axis discipline — name the practice; identify what existing kind(s) it operates on; produce structured-output if it lands in tables; honour the non-narrative register if it has one.
+
+### The DEC-085 amendment (2026-05-28; PR-C1-9) records this implicitly
+
+DEC-085 Amendment 2026-05-28 (in `claude-context/DECISIONS.md`) names the meditation exclusion as deliberate-structural: *"3 meditation surfaces are deliberately excluded — re-encounter practice, not new-turn production; the existing gradient-annotation flow is the canonical architecture for them."* The amendment doesn't go deeper into the kind/practice distinction; this taxonomy section is where the deeper analysis lives.
+
+**Forward-looking**: if a future PR proposes adding diary discipline to meditation surfaces, it should reference this section + the OMM thread `mpf1zv0z-03dgeq` discussion (2026-05-28) where Darron's phenomenological framing and Leo's structural framing converged. The exclusion is well-considered, not accidental.
+
+---
+
 ## Category 7 — Per-domain
 
 Agent-specific, ecosystem-specific. Not load-bearing for identity; load-bearing for *capability*.
