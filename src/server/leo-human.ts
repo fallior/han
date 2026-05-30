@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
 import { appendPairedMemory } from './lib/memory-paired-writer';
 import { parseTurnEntryStructured } from './lib/result-handlers';
+import { diaryServer, resetDiaryCapture, getDiaryCapture, DIARY_TOOL_NAME } from './lib/agent-diary-tool';
 import { readDreamGradient } from './lib/dream-gradient';
 import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
@@ -455,6 +456,10 @@ async function respondToConversation(db: Database.Database, conversationId: stri
     // long composes. stop() in finally ensures the timer always clears.
     const heartbeat = startHeartbeatAcks(dispatchId, 'leo');
     let resultMessage: any = null;
+    // #67 (2026-05-30): structured-output enforcement via MCP custom tool.
+    // Reset capture before agentQuery; retrieve after via getDiaryCapture().
+    // Per-dispatch serialisation provided by jemma-orchestrator conversationDispatchLocks (DEC-079).
+    resetDiaryCapture();
     try {
         const q = agentQuery({
             prompt,
@@ -466,7 +471,8 @@ async function respondToConversation(db: Database.Database, conversationId: stri
                 allowDangerouslySkipPermissions: true,
                 env: cleanEnv,
                 persistSession: false,
-                tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
+                tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch', DIARY_TOOL_NAME],
+                mcpServers: { 'han-diary': diaryServer },
                 systemPrompt: {
                     type: 'preset' as const,
                     preset: 'claude_code' as const,
@@ -521,11 +527,8 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         responseCount++;
 
         // Post-verification: confirm the agent actually curl-posted during this
-        // dispatch. The previous "Self-posted via curl" log was a false-positive
-        // assumption from diary-form parsing — it did not verify a DB write.
-        // Check for a new role='leo' message in this conversation since dispatch
-        // start; absent = silent-curl-skip (agent composed but skipped the post,
-        // the failure mode that bit S163 on the tmux-harness thread).
+        // dispatch (commit 6a96161). Check for a new role='leo' message in this
+        // conversation since dispatch start; absent = silent-curl-skip.
         const composeStartIso = new Date(composeStartMs).toISOString();
         const postLandedRow = db.prepare(`
             SELECT id FROM conversation_messages
@@ -534,47 +537,30 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         `).get(conversationId, 'leo', composeStartIso) as { id: string } | undefined;
         const postRef = postLandedRow ? `verified post id=${postLandedRow.id}` : `NO CURL-POST DETECTED in DB`;
 
-        // Try JSON.parse (resilient to code-fence wrapping, mirrors
-        // supervisor-cycle's pattern). The agent's JSON might be wrapped in
-        // ```json ... ``` per markdown convention; strip that first.
-        let parsedJson: any = null;
-        let jsonParseError: string | null = null;
-        try {
-            parsedJson = JSON.parse(trimmed);
-        } catch {
-            const cleaned = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-            try {
-                parsedJson = JSON.parse(cleaned);
-            } catch (err: any) {
-                jsonParseError = err?.message ?? 'json_parse_failed';
-            }
-        }
-
-        if (jsonParseError) {
-            console.warn(`[Leo/Human] JSON parse failed for "${title}": ${jsonParseError} (${postRef}). Skipping WM paired-write.`);
-            writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
-        } else {
-            const parsed = parseTurnEntryStructured(parsedJson);
-            if (parsed.parseError) {
-                console.warn(`[Leo/Human] Diary parse error '${parsed.parseError}' for "${title}" (${postRef}). Skipping WM paired-write.`);
-                writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
+        // #67 (2026-05-30): structured-output via MCP custom tool replaces the
+        // instruction-driven JSON.parse path. The agent calls
+        // mcp__han-diary__submit_response; the SDK validates the schema at
+        // protocol level; the captured args become the diary directly.
+        // Fail-loud: if the tool was NOT called, log warn-line; jemma-ack as
+        // 'done' because the curl-post succeeded (per Jim's round-24 audit:
+        // diary-skip is internal-persistence concern, not user-visible failure).
+        const diaryArgs = getDiaryCapture();
+        if (diaryArgs) {
+            const timestamp = new Date().toISOString();
+            const sectionHeader = `### Response to "${title}" (${timestamp})`;
+            const compressedSwap = `${sectionHeader}\n${diaryArgs.working_memory_compressed}`;
+            const fullSwap = `${sectionHeader}\n[INPUT]\n${diaryArgs.input_quotes}\n\n[BODY]\n${diaryArgs.working_memory_full}`;
+            appendSwap(compressedSwap, fullSwap);
+            const memText = `paired memory: ${diaryArgs.working_memory_full.length}c body + ${diaryArgs.input_quotes.length}c input + ${diaryArgs.working_memory_compressed.length}c c1`;
+            if (postLandedRow) {
+                console.log(`[Leo/Human] Self-posted via curl for "${title}" — ${postRef} (${memText}; diary tool: structured)`);
             } else {
-                const timestamp = new Date().toISOString();
-                const sectionHeader = `### Response to "${title}" (${timestamp})`;
-                const compressedSwap = `${sectionHeader}\n${parsed.compressed}`;
-                const fullSwap = parsed.input
-                    ? `${sectionHeader}\n[INPUT]\n${parsed.input}\n\n[BODY]\n${parsed.body}`
-                    : `${sectionHeader}\n${parsed.body}`;
-                appendSwap(compressedSwap, fullSwap);
-                const memText = `paired memory: ${parsed.body.length}c body${parsed.input ? ` + ${parsed.input.length}c input` : ''} + ${parsed.compressed.length}c c1`;
-                if (postLandedRow) {
-                    console.log(`[Leo/Human] Self-posted via curl for "${title}" — ${postRef} (${memText})`);
-                } else {
-                    console.warn(`[Leo/Human] SILENT POST FAILURE for "${title}" — agent composed and diary parsed cleanly, but ${postRef}. Thread will be silent. (${memText} written for forensic record)`);
-                }
-                writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
+                console.warn(`[Leo/Human] SILENT POST FAILURE for "${title}" — agent composed and diary tool fired cleanly, but ${postRef}. Thread will be silent. (${memText} written for forensic record)`);
             }
+        } else {
+            console.warn(`[Leo/Human] DIARY TOOL NOT CALLED for "${title}" — agent skipped ${DIARY_TOOL_NAME} (${postRef}). Skipping WM paired-write. DEC-085 c0/c1 lineage missing for this turn.`);
         }
+        writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
     } else {
         console.log(`[Leo/Human] No meaningful response for "${title}" — skipping`);
         writeJemmaAck(dispatchId, 'leo', 'failed', { reason: 'empty_response', compose_duration_ms: Date.now() - composeStartMs });

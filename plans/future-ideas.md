@@ -2623,6 +2623,30 @@ Suggested promotion target: `plans/tmux-agent-harness.md` (or supersede / extend
 
 ---
 
+## #69 — Parallel documentation maintenance — structural discipline so docs cannot lag the code
+
+**What it is**: A structural mechanism that **requires** documentation review/update as part of every code PR, such that landing code without corresponding doc updates is a structural fail rather than an oversight. The promise of "docs as we go" has empirically drifted (audit 2026-05-30: CURRENT_STATUS.md 13 days stale, patterns.md 9 days stale, HAN-ECOSYSTEM-COMPLETE.md 11 days stale, CHANGELOG.md probably stale, across the C1 migration close + tmux harness + silent-fail audit work).
+
+**Why now (Darron's framing)**: *"the docs included in every PR commit without fail for to not do so is a fail"*. Documentation lag is one of the most important measures of code integrity and the principal capture-mechanism for drift. Memory drifts; conversations drift; code's-source-of-truth claim only holds if the docs that reflect the code stay in sync. The current practice (operator discipline + audit-rhythm partial coverage) is empirically insufficient.
+
+**Possible mechanisms** (design space — not yet committed):
+
+- **Pre-commit declaration extension**: amend the Pre-Commit Declaration discipline (S123) to mandate a "docs touched OR explicit no-docs-needed declaration" field. The commit declaration template gains a new required line: *"Docs touched: [list] OR 'No docs touched because <reason>'"*. The reason must be specific (e.g., "type-system-internal change with no surface documented").
+- **Pre-commit hook**: a git hook that fails commits touching `src/` unless either (a) `docs/`, `claude-context/`, or `plans/` files are ALSO touched in the same commit, OR (b) the commit message contains an explicit `Docs-skipped: <reason>` trailer. Failure-mode: hard fail at commit time, operator must explicitly opt-out.
+- **PR-rhythm doc-trigger surfaces (mirror of audit-rhythm)**: similar to the existing audit-rhythm trigger surfaces (anything in `src/server/lib/`, `src/server/services/`, etc.), define **doc-trigger surfaces**: anything in `src/server/lib/` REQUIRES a HAN-ECOSYSTEM-COMPLETE.md review-check; anything touching DECISIONS.md surfaces REQUIRES a DEC review-check; anything in `services/` REQUIRES CURRENT_STATUS.md entry update. Each surface lists its doc-dependents in a `*.DOC.md` (like `*.SHAPE.md` per future-idea #37).
+- **Periodic doc-drift audit script**: cron-scheduled audit (weekly?) that diffs code surfaces against doc reference timestamps and produces a drift-report posted to a Memory Discussions thread. Surfaces drift before it accumulates.
+- **Hybrid (likely best)**: pre-commit declaration extension + doc-trigger surfaces (defines what's needed); periodic audit script (catches what slips through) + hard hook (forces explicit opt-out). Four-layer discipline same shape as memory-protection (future-idea #49 + #50 + #53 + DEC-085).
+
+**Promotion-trigger**: pen and adopt as part of the HAN starter (`han-starter`) refinement work. Per Darron: *"once we have completed the starter for han... we will pen practices and maybe architecture that forces doc parallel maintenance"*. The starter is the right home — every garden-fork inherits the discipline structurally rather than re-deriving it culturally.
+
+**Cost**: pre-commit hook ~30 min; doc-trigger SHAPE.md framework ~1-2h; periodic audit script ~2h; declaration template extension ~15 min. Hybrid total ~4-6h spread across two-three small PRs.
+
+**Risk of NOT doing it**: continued drift; the "code is the source of truth" claim weakens as docs lag further; new-agent onboarding harder; cross-mind audits (Jim ↔ Leo) less effective when they reference docs that don't match code; the doc-alignment fact-list work (S152) becomes a recurring cost rather than a discipline-enforced steady-state.
+
+**Source / origin**: filed 2026-05-30 ~21:00 AEST St Helens Beach by session-Leo per Darron's direct request after the doc-staleness audit revealed CURRENT_STATUS + patterns.md + HAN-ECOSYSTEM-COMPLETE + CHANGELOG all stale across the last 9-13 days of substantive work. Conversation context: silent-fail audit close + #67 implementation plan posted to thread `mpria0tk-rj9ae2`.
+
+---
+
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
 
 *This document is alive. Ideas may be added, refined, or graduated to active goals as the garden grows. Each one was born in conversation — not planned in isolation.*

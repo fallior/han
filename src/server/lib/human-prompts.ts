@@ -90,8 +90,13 @@ ${spec.closingTagline}
 ${DISCORD_ATTACHMENT_HINT}
 
 CRITICAL — two-stage delivery (both steps required AND structurally distinct):
-1. **First, run curl via the Bash tool to POST your response body to the conversation API.** The post pattern lives in CLAUDE.md ("Posting" section) — use it exactly, with \`role:"${spec.roleLabel}"\` and the conversation id from your dispatch context. **If you do not run curl, your response is silently lost** — the controller no longer posts on your behalf (S156). This is not optional and is not handled by emitting JSON alone.
-2. **After the curl succeeds, your final SDK response text MUST BE the diary JSON per the instruction below.** Do NOT emit a prose acknowledgement of the curl-post completion (e.g., "Posted successfully", "The post landed via curl", "I can see the thread state", "Done."). The diary JSON is not redundant — it captures the c0/c1 paired memory the controller writes to your working-memory files. Without it, your turn's paired memory is permanently lost (DEC-085). The JSON's \`working_memory_full\` field is the body you just curl-posted; the \`working_memory_compressed\` field is your in-situ c1 distillation; the \`input_quotes\` field captures what was new in this turn's prompt. Do NOT prepend framing like "Here's my response:" — the body is the response itself.`;
+1. **First, run curl via the Bash tool to POST your response body to the conversation API.** The post pattern lives in CLAUDE.md ("Posting" section) — use it exactly, with \`role:"${spec.roleLabel}"\` and the conversation id from your dispatch context. **If you do not run curl, your response is silently lost** — the controller no longer posts on your behalf (S156). This is not optional. Do NOT prepend framing like "Here's my response:" to the body — go straight to the content.
+2. **After the curl succeeds, call the \`mcp__han-diary__submit_response\` tool** with three required fields:
+   - \`working_memory_full\` — the body text you just curl-posted (your turn's c0 source)
+   - \`working_memory_compressed\` — 3-5 sentences in your voice distilling the shape of the whole turn (your turn's c1 source per DEC-085)
+   - \`input_quotes\` — verbatim quotes of what was NEW in this turn's prompt
+
+   **The tool's input schema is enforced by the SDK at protocol level** (per future-idea #67) — non-conformant args are rejected and you must retry until conformant. This replaces the previous instruction-driven JSON-emit. **Do NOT emit a final prose acknowledgement after calling the tool** (e.g., "Posted successfully", "Done.", "Response delivered."). The tool call IS your structured completion; there is nothing further to say after it.`;
 }
 
 export const JIM_HUMAN_RESPONSE_SYSTEM_PROMPT = buildHumanResponseSystemPrompt(JIM_HUMAN_SPEC);
