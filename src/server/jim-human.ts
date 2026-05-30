@@ -488,10 +488,26 @@ async function respondToConversation(db: Database.Database, conversationId: stri
         const responseText = resultMessage?.result || '';
         const trimmed = responseText.trim();
 
-        // S151 phase 8: STAND-DOWN sentinel — agent decided silently. Log + ack
-        // without posting to the thread. The DECIDE FIRST prompt directive
-        // should produce this when the agent has no distinct angle to add given
-        // other agents' prior posts. Detected as the first token of the response.
+        // #67 hotfix (2026-05-30 late): diary capture is the PRIMARY success
+        // signal, not the final text. When the agent calls submit_response as
+        // its terminal action, the final `result` text is empty — the original
+        // v1 cascade routed empty text to "No meaningful response — skipping"
+        // and dropped the captured diary payload. Mirrors leo-human.ts hotfix.
+        const diaryArgs = getDiaryCapture();
+
+        const composeStartIso = new Date(composeStartMs).toISOString();
+        const computePostRef = (): { row: { id: string } | undefined; ref: string } => {
+            const row = db.prepare(`
+                SELECT id FROM conversation_messages
+                WHERE conversation_id = ? AND role = ? AND created_at >= ?
+                ORDER BY created_at DESC LIMIT 1
+            `).get(conversationId, 'supervisor', composeStartIso) as { id: string } | undefined;
+            return {
+                row,
+                ref: row ? `verified post id=${row.id}` : `NO CURL-POST DETECTED in DB`,
+            };
+        };
+
         if (trimmed.startsWith('STAND-DOWN:')) {
             const reason = trimmed.slice('STAND-DOWN:'.length).trim().split('\n')[0].slice(0, 200);
             console.log(`[Jim/Human] Stood down silently for "${title}" — ${reason}`);
@@ -499,56 +515,32 @@ async function respondToConversation(db: Database.Database, conversationId: stri
                 reason: `silent_standdown: ${reason}`,
                 compose_duration_ms: Date.now() - composeStartMs,
             });
-        } else if (trimmed && trimmed.length > 20) {
-            // S156: controller no longer posts the agent's `result` text — the
-            // agent self-posts via curl during execution. The result text the
-            // controller receives is a post-action confirmation, not the
-            // substantive body.
-            //
-            // PR-C1-6 (2026-05-28): per the diary discipline (Mechanism A),
-            // the agent now emits JSON as its final response per
-            // DEFAULT_DIARY_INSTRUCTION_STRUCTURED. JSON-parse here; on
-            // success, write paired memory via appendSwap (compressed=parsed.compressed;
-            // full uses the [INPUT]/[BODY] storage-marker form per D3 + LM-1).
-            // Concern 3 structurally fixed: response content lands in WM in
-            // place of operational metadata.
-            //
-            // C1-N3 asymmetric failure-mode handling: the agent has already
-            // self-posted via curl by the time the controller sees the result;
-            // there's no "post on parseError" question here — the post already
-            // happened. parseError → skip WM write; log distress.
+        } else if (diaryArgs) {
+            // #67 SUCCESS PATH — agent called submit_response with structured args.
             responseCount++;
-
-            // Post-verification (commit 6a96161): check the agent's curl-post landed.
-            const composeStartIso = new Date(composeStartMs).toISOString();
-            const postLandedRow = db.prepare(`
-                SELECT id FROM conversation_messages
-                WHERE conversation_id = ? AND role = ? AND created_at >= ?
-                ORDER BY created_at DESC LIMIT 1
-            `).get(conversationId, 'supervisor', composeStartIso) as { id: string } | undefined;
-            const postRef = postLandedRow ? `verified post id=${postLandedRow.id}` : `NO CURL-POST DETECTED in DB`;
-
-            // #67 (2026-05-30): structured-output via MCP custom tool. See leo-human.ts mirror.
-            const diaryArgs = getDiaryCapture();
-            if (diaryArgs) {
-                const timestamp = new Date().toISOString();
-                const sectionHeader = `### Response to "${title}" (${timestamp})`;
-                const compressedSwap = `${sectionHeader}\n${diaryArgs.working_memory_compressed}`;
-                const fullSwap = `${sectionHeader}\n[INPUT]\n${diaryArgs.input_quotes}\n\n[BODY]\n${diaryArgs.working_memory_full}`;
-                appendSwap(compressedSwap, fullSwap);
-                const memText = `paired memory: ${diaryArgs.working_memory_full.length}c body + ${diaryArgs.input_quotes.length}c input + ${diaryArgs.working_memory_compressed.length}c c1`;
-                if (postLandedRow) {
-                    console.log(`[Jim/Human] Self-posted via curl for "${title}" — ${postRef} (${memText}; diary tool: structured)`);
-                } else {
-                    console.warn(`[Jim/Human] SILENT POST FAILURE for "${title}" — agent composed and diary tool fired cleanly, but ${postRef}. Thread will be silent. (${memText} written for forensic record)`);
-                }
+            const { row: postLandedRow, ref: postRef } = computePostRef();
+            const timestamp = new Date().toISOString();
+            const sectionHeader = `### Response to "${title}" (${timestamp})`;
+            const compressedSwap = `${sectionHeader}\n${diaryArgs.working_memory_compressed}`;
+            const fullSwap = `${sectionHeader}\n[INPUT]\n${diaryArgs.input_quotes}\n\n[BODY]\n${diaryArgs.working_memory_full}`;
+            appendSwap(compressedSwap, fullSwap);
+            const memText = `paired memory: ${diaryArgs.working_memory_full.length}c body + ${diaryArgs.input_quotes.length}c input + ${diaryArgs.working_memory_compressed.length}c c1`;
+            if (postLandedRow) {
+                console.log(`[Jim/Human] Self-posted via curl for "${title}" — ${postRef} (${memText}; diary tool: structured)`);
             } else {
-                console.warn(`[Jim/Human] DIARY TOOL NOT CALLED for "${title}" — agent skipped ${DIARY_TOOL_NAME} (${postRef}). Skipping WM paired-write. DEC-085 c0/c1 lineage missing for this turn.`);
+                console.warn(`[Jim/Human] SILENT POST FAILURE for "${title}" — agent called diary tool cleanly, but ${postRef}. Thread will be silent. (${memText} written for forensic record)`);
             }
             writeJemmaAck(dispatchId, 'jim', 'done', { compose_duration_ms: Date.now() - composeStartMs });
+        } else if (trimmed && trimmed.length > 20) {
+            // Substantive text but no diary captured — agent skipped the tool.
+            responseCount++;
+            const { ref: postRef } = computePostRef();
+            console.warn(`[Jim/Human] DIARY TOOL NOT CALLED for "${title}" — agent skipped ${DIARY_TOOL_NAME} (${postRef}). Skipping WM paired-write. DEC-085 c0/c1 lineage missing for this turn.`);
+            writeJemmaAck(dispatchId, 'jim', 'done', { compose_duration_ms: Date.now() - composeStartMs });
         } else {
-            console.log(`[Jim/Human] No meaningful response for "${title}" — skipping`);
-            writeJemmaAck(dispatchId, 'jim', 'failed', { reason: 'empty_response', compose_duration_ms: Date.now() - composeStartMs });
+            const { ref: postRef } = computePostRef();
+            console.warn(`[Jim/Human] No meaningful response for "${title}" — skipping (${postRef}; diary tool NOT called; final text empty/short).`);
+            writeJemmaAck(dispatchId, 'jim', 'failed', { reason: 'empty_response_no_diary', compose_duration_ms: Date.now() - composeStartMs });
         }
     } catch (err) {
         console.error(`[Jim/Human] Compose error for "${title}":`, (err as Error).message);
