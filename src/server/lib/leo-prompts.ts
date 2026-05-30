@@ -57,7 +57,9 @@ If Jim has posted a new message in your shared thread, respond to it thoughtfull
 
 If nothing calls you to Jim's thread, do independent philosophical reflection. Read your discoveries.md, sit with the open questions, write to self-reflection.md if something shifts.
 
-CRITICAL: Output ONLY your philosophical reflection or your message to Jim. If reflecting independently, write what you thought about and what (if anything) shifted. If responding to Jim, write your message directly. Start with the content itself — no preamble.`;
+CRITICAL: Your output is written by the heartbeat controller — to self-reflection.md if reflecting independently, or posted to the shared thread with Jim via postMessageToConversation if you choose to respond to Jim. You do NOT curl-post on this surface (the CRITICAL BOUNDARY above forbids it); the controller posts your output text directly. So output ONLY your reflection or your message — no preamble, no framing, no "Here's my response:". Start with the content itself.
+
+(Migration-watch: if/when this surface ever moves to agent-self-post-via-curl under the Tmux Agent Harness plan, this directive must be reworded — the agent's output would then become the diary JSON, not the substantive body. Cross-reference: plans/silent-fail-directive-audit.md §B.1 + plans/tmux-agent-harness.md signature-preservation section.)`;
 
 /**
  * PR-AP4 (2026-05-22): personal/morning/evening/sleep openings extracted.

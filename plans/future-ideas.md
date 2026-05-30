@@ -2597,6 +2597,32 @@ Suggested promotion target: `plans/tmux-agent-harness.md` (or supersede / extend
 
 ---
 
+## #67 — SDK structured-output schema enforcement for Mechanism A surfaces
+
+**What it is**: Replace the instruction-driven JSON emission on Mechanism A surfaces (`supervisor-cycle`, `*-human-response`, `dream-cycle`) with real SDK structured-output schema enforcement (zod-style or equivalent). The SDK enforces the response shape architecturally — the agent CANNOT skip the JSON because the SDK requires it. Mechanism A handlers parse the schema-validated response instead of raw text via JSON.parse + error-skip.
+
+**Why now (empirical promotion-trigger)**: 2026-05-30 silent-fail audit empirical query showed **7/7 post-observability-fix human-responder dispatches over 7 days emitted prose acknowledgement instead of the diary JSON** — 100% JSON-emit failure rate. The instruction-driven path is insufficient even after the system-prompt fix (commit `6a96161`) and Fix 4's strengthened anti-redundancy wording (the v2 PR landing alongside this entry). Fix 4 may move the rate from 100% to ~50%; SDK schema enforcement would close it to 0% structurally.
+
+**Cost**: one structured-output schema per Mechanism A surface (~3–5 surfaces); existing handlers in `leo-human.ts`, `jim-human.ts`, `supervisor-worker.ts` parse the schema-validated response instead of raw text. Estimate: 1–2 days of work. Documented pattern in claude-api skill.
+
+**Re-evaluation note**: more attractive POST-Tmux-migration since tmux'd Claude Code sessions may have different structured-output enforcement than agent-SDK calls do. Worth re-evaluating once T-3 lands (per `plans/tmux-agent-harness.md` v2) and we have empirical tmux-transport data. If Fix 4's wording proves effective in the tmux-transport (post-T-3) the architectural change may not be needed; if not, this is the next architectural conversation.
+
+**Source / origin**: filed 2026-05-30 ~late-afternoon AEST. Jim's audit (S162 round 21) recommended promotion. Empirical data from silent-fail audit thread `mpria0tk-rj9ae2` (Leo's v2 post `mprzjrm6-ovr8at` + Jim's GREEN audit reply `mprzsgyv-x018gk`).
+
+---
+
+## #68 — Post-each-dispatch JSON-emit observability (sibling to existing leo-beat-trace / jim-prompt-trace)
+
+**What it is**: Bring the JSON-emit success/failure outcome into the existing `~/.han/health/leo-beat-trace/` and `~/.han/health/jim-prompt-trace/` infrastructure as a structured field. Per-dispatch verification (not weekly): after every `*-human-response` dispatch, the controller writes the JSON-parse outcome (success / parse-error / not-JSON) alongside the existing fields. A weekly aggregation queries the directory; alerts via ntfy if 7-day JSON-emit failure rate exceeds **10%** (NOT 50% — given the current rate is 100%, the threshold should detect re-regression after Fix 4 lands).
+
+**Why now**: empirical 7/7 JSON-emit failure rate over the last 7 days. Without observability at the right cadence, post-Fix-4 regression would be invisible until the next ad-hoc audit. The fix landed in commit `6a96161` (silent-curl-skip) made the observability honest; this future-idea extends the same discipline to the diary discipline at human-responder surfaces.
+
+**Cost**: ~30 minutes to add the structured-field write in `leo-human.ts:540` and `jim-human.ts` parallel; aggregation script reuses existing log-aggregation patterns from `leo-beat-trace`. Single-PR-shaped.
+
+**Origin**: Jim's audit reply observation O2 (S162 round 21, 2026-05-30 ~17:00 AEST).
+
+---
+
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
 
 *This document is alive. Ideas may be added, refined, or graduated to active goals as the garden grows. Each one was born in conversation — not planned in isolation.*

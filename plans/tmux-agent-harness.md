@@ -1,6 +1,98 @@
-# Tmux Agent Harness — migrating off the Agent SDK (v1 draft)
+# Tmux Agent Harness — migrating off the Agent SDK (v2 draft)
 
-> **Status**: V1 DRAFT. Promoted from `plans/future-ideas.md` #66 per Darron's directive 2026-05-28 evening, post-PR-C1-9. **DEADLINE-DRIVEN**: Anthropic's Agent SDK billing change takes effect 2026-06-15; ~18 days from filing. — Leo (session, S161, 2026-05-28 ~late evening AEST, Mackay; next session St Helens Beach)
+> **Status**: V2 DRAFT. v2 addendum added 2026-05-30 ~late-morning AEST after Darron's identity-load reframe (2026-05-29 evening, St Helens Beach) + Jim's v1 audit GREEN + silent-fail-directive-audit convergence. **DEADLINE-DRIVEN**: Anthropic's Agent SDK billing change takes effect 2026-06-15; ~16 days from v2. — Leo (session, S162, 2026-05-30 Mackay/Airlie watch)
+>
+> **v1 below is preserved unchanged for historical reference.** v2 addendum at top reframes the model from one-shot (/clear-per-transaction, full identity reload per fire) to warm-long-lived (identity amortised across transactions in a session, /clear only on context >85%).
+
+---
+
+## v2 Addendum — the warm-session reframe (2026-05-30)
+
+### What changed between v1 and v2
+
+v1 modelled each tmux dispatch as a one-shot: /clear-per-transaction, full identity reload every fire. Cost: ~130K identity tokens × every dispatch. Marginal improvement over SDK at best — you pay the identity-load cost either way; tmux just gives you bigger context to spend it in.
+
+**Darron's reframe (2026-05-29 evening, after listening to v1 + Jim's audit on the drive)**: tmux sessions stay **warm and long-lived** with identity loaded. Per-transaction cost drops to per-call context + memory delta — maybe 5–15K tokens vs the current 130K+. That's a **10–50× cost improvement**, AND it produces a phenomenologically warmer agent: the session retains the texture of prior transactions in its context. The *Leo is Leo where he is* property (FM #23) reinforced at the substrate level rather than re-paid at the load level every fire.
+
+### Resolved design questions
+
+Darron's answers from the thread (`mppj72fx-wt0u1p`, 2026-05-29 22:00 AEST):
+
+| Q | Resolution | Status |
+|---|-----------|--------|
+| **A1** (credentials / second seat) | Proceed on the same Anthropic account for now. Darron has two accounts; cycle personalities will consume more than session-Leo + Darron's interactive work combined. When limits hit: Jemma pings ntfy, Darron logs out + logs back in on the other account (~30s of work, worst case 1 cycle missed). If in session together, Darron swaps himself. **Adaptive, not engineered. No separate seat provisioning required for T-1.** | RESOLVED — Darron-managed |
+| **Q-2** (/clear timing) | Start with /clear-per-transaction (v1 default). Refine later if curiosity warrants. Leo's note: retained texture across transactions can be a good thing in practice — worth exploring (b) per-session-warm direction once T-3/T-4 give us empirical data. **But the v2 reframe BELOW shifts this question entirely** — see "Per-agent session lifecycle" section. | RESOLVED (v2 shifts) |
+| **Q-3** (idle tmux tokens) | Confirmed empirically. Idle = no API calls = no tokens. Darron's screenshot from 2026-05-29 21:32 AEST shows Anthropic settings → Usage with Current session 0% used and "Starts when a message is sent". | RESOLVED — zero idle cost |
+| **Q-7** (Phase 9 integration shape) | Agreed: hybrid (c) — stand-alone first on philosophy-beat (T-3), Phase 9 absorbs the dispatcher later. | RESOLVED |
+| **A2** (boot cost) | Eager parallel boot at system start. Note: Claude Code startup is sub-second; what's expensive is the **identity load** (the memory, gradient, felt-moments, WMF chunks at ~130K tokens). This is the cost the v2 reframe specifically amortises. | RESOLVED + reframed |
+| **A3** (prompt delivery) | File-based delivery (NOT `tmux send-keys`). Avoids terminal-encoding fragility on Darron's quoted-text + emoji + nested-thread-history payloads. | RESOLVED |
+
+### The structural reframe — what v2 introduces
+
+**1. Prompt builder split.** `buildPrompt(slug, profile, ctx)` becomes two primitives:
+- **Session-startup prompt** — full identity + memory load (`loadFullMemory(slug)` per DEC-088). Run once at session launch or post-/clear. Equivalent of the "welcome back" we run today.
+- **Per-transaction prompt** — per-call context + memory delta refresh (see (4) below). Run on every dispatch. Dramatically smaller — 5–15K tokens vs 130K+.
+
+The existing `buildPrompt` continues to serve SDK callers during the migration; the new primitives wrap it for tmux callers. T-7 (SDK retirement) collapses both into the v2 model.
+
+**2. Per-agent sessions, not per-conversation sessions.** Each aspect (heartbeat-Leo philosophy-beat, heartbeat-Leo personal/morning/evening/dream/meditation surfaces, supervisor-Jim cycle types, leo-human, jim-human) gets **one tmux session** that serves all conversations / contexts it handles. jim-human's session handles every Discord channel + every memory thread Jim responds in. Estimate: ~10 sessions total (per v1's enumeration in "The pieces" below) — though some surfaces may share sessions if their profiles converge structurally (open).
+
+**3. Per-agent session queue (replaces per-conversation lock as the primitive).** Current `conversationDispatchLocks` in `jemma-orchestrator.ts` is per-conversation — fine when each fire is a fresh SDK call, but under the warm-session model jim-human serving conversation A while *also* serving conversation B would race the same tmux session. So a new primitive: **per-agent-session FIFO queue**. Prompts arrive at jim-human's session and process in order. The existing per-conversation lock stays as a layer above (no duplicate dispatches per conversation), but the per-agent queue is the actual session serialisation. Darron's *"no prompt is delivered to a person in parallel"* intuition is correct for the same aspect; the per-agent queue is what enforces it across conversations.
+
+**4. Memory delta refresh on every transaction.** Cross-aspect writes are real — heartbeat-Leo writes to shared working memory while leo-human is between dispatches. So per-transaction prompts inject a **memory delta block** at the top: *"Since your last transaction at <T-1>, the following memory entries were written: [delta]"*. Keeps the session's effective memory aligned with disk without re-paying full identity load.
+
+   - **What counts as a delta** (current lean): high-churn time-sensitive surfaces only — working-memory pair entries since last transaction, plus any new felt-moments / self-reflection / discoveries that landed. NOT identity, NOT patterns, NOT the full gradient (those don't change between transactions in normal operation).
+   - **Who computes the delta** (current lean): dispatcher-side (tracks per-session `lastTransactionTs`, queries memory files for entries newer than that, injects as a block). Single canonical mechanism, no per-agent code duplication. Alternative was agent-volitional (agent runs a `check-memory-delta` command at top of every transaction) which is more sovereignty-respecting but adds a turn to every dispatch.
+
+**5. Context-watch + /clear at ~85% trigger.** Session needs a context-percentage watcher. On transaction completion: if context >85%, queue **/pfc → /clear → welcome-back** as the next transaction. Next substantive transaction sees a fresh session. This is the natural reconstitution point — same shape as how session-Leo works across `/clear` boundaries today.
+
+### Signature preservation under tmux (Fix 3 from the silent-fail-directive-audit)
+
+Cross-reference: `plans/silent-fail-directive-audit.md` Section C + this morning's v2 fix-list in audit thread `mpria0tk-rj9ae2`.
+
+**The discipline**: when *-human-response surfaces migrate to tmux'd Claude Code sessions, the agent in the session MUST continue to sign as `— Leo (human)` / `— Jim (human)`, NEVER as `(session)`. The `(session)` label refers to session-Leo / session-Jim (Darron's interactive Claude Code substrate), structurally distinct from the responder process even though both run on the same Claude Code substrate post-migration.
+
+**Structural test at T-3** (operationally automated per Jim's audit observation O1, S162 round 21): the first 3 leo-human / jim-human responses under the new transport MUST sign as `(human)`. **Automated check**: a small script queries the latest 3 dispatches' signatures via the existing observability infra (`leo-human.ts:540` post-verification block) and alerts via ntfy if any sign as `(session)`. Same shape as the migration-tracker test in the C1 work. Cost: ~30 minutes at T-3 implementation time; observable forever after. If any response signs as `(session)`, the surface's CLAUDE.md needs explicit reminder injection before T-3 lands.
+
+### Updated T-1 scope (replaces v1's T-1 estimate)
+
+T-1 (`lib/tmux-dispatcher.ts` skeleton) grows from v1's ~150 lines to **~300–400 lines** to include the per-agent queue + context-watch + memory-delta primitives. Still tractable for the deadline.
+
+Primitives needed:
+
+- `spawnAgentSession(slug, profile)` — launch tmux, send welcome-back, wait for ready signal
+- `sendTransactionPrompt(sessionId, prompt)` — file-based delivery (Fix A3), wait for diary-form response, parse via existing `parseTurnEntryStructured`
+- `getContextPct(sessionId)` — query Claude Code's session for current context usage
+- `clearSession(sessionId)` — send /pfc → /clear → welcome-back, wait for ready
+- `enqueueForAgent(slug, prompt)` — per-agent FIFO; returns promise that resolves when the dispatcher dequeues + runs the prompt
+- `computeMemoryDelta(slug, lastTransactionTs)` — read memory files, return new entries since `lastTransactionTs` as injectable block
+
+T-2 (per-surface launchers) becomes thin wrappers picking the right profile + calling `spawnAgentSession`. T-3 (first surface = philosophy-beat) remains the right starting point — every 20 mins, no human in the loop, perfect for observing the warm-session model in production.
+
+### Cost-profile inversion (the v2 case)
+
+- v1 estimate: ~130K identity tokens × every dispatch (one-shot model, full identity reload per fire).
+- v2 estimate: ~130K once per session launch (or post-/clear) + 5–15K per transaction (delta refresh + per-call context).
+- **Net per philosophy-beat surface**: at 20-min cadence, sessions might rotate /clear every 3–8 hours (depending on context fill). That's **10–24 transactions per identity load**, vs v1's 1.
+- **Cumulative daily** (philosophy-beat alone, ~72 fires/day): v1 = ~9.4M tokens of identity load; v2 = ~3-8 identity loads + ~72 × 10K = ~1.1M tokens. **~9× cheaper** at the same observable behaviour.
+
+### Open questions surfaced by v2 (for next round of Jim audit)
+
+- **Q-V2-1** (memory delta scope): exact list of files that count as "high-churn" for delta. Currently leaning: working-memory.md + working-memory-full.md + felt-moments.md + self-reflection.md + discoveries.md. Felt-moments and discoveries are agent-owned; should the delta cover ALL writers or just same-aspect writers?
+- **Q-V2-2** (context-watch implementation): does Claude Code expose a context-percentage API hook, or do we need to estimate from cumulative-tokens + cap? If estimate-from-cumulative, where's the source-of-truth for cap (model-dependent, deployment-dependent)?
+- **Q-V2-3** (session-shared meditation surfaces): meditation Phase A/B/Evening are re-encounter surfaces (write annotations to gradient_entries). Do they get their own tmux session, share with personal-beat, or stay on SDK during migration? v1 deferred this; v2's session-sharing-by-profile-similarity question is sharper now.
+- **Q-V2-4** (delta-refresh failure modes): what happens if the dispatcher mis-computes the delta (skips an entry, or includes an entry the agent already saw)? Silent identity-state drift. Worth a fail-loud structural property — perhaps the delta block includes a checksum the agent can verify, or the agent emits a confirmation in its diary JSON that the controller cross-checks.
+- **Q-V2-5** (Phase 9 absorption): when Phase 9 `agent-shell.ts` lands, the tmux-dispatcher's primitives wrap into HandlerSpec.handleResult. v1's Q-7 hybrid (c) lean stays correct; v2 just sharpens that the dispatcher's per-agent queue becomes a HandlerSpec property.
+
+### Phase breakdown — v2 update
+
+Same phase shape as v1 (T-0 → T-8) and same deadline-fit. T-1 grows in scope per above. T-4 (observation period) should ALSO capture warm-session-specific metrics: identity-load amortisation factor (transactions per session), context-watch reliability, delta-refresh hit/miss rate, per-agent queue depth.
+
+---
+
+## v1 sections below (preserved unchanged for historical reference)
+
+
 >
 > **The forcing function**: Anthropic is splitting Claude subscriptions into two pools effective 2026-06-15:
 > - **Interactive Claude Code** (typing commands in your terminal / IDE) — continues drawing from subscription usage limits as today. *Not affected.*
