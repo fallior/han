@@ -2645,6 +2645,28 @@ Suggested promotion target: `plans/tmux-agent-harness.md` (or supersede / extend
 
 **Source / origin**: filed 2026-05-30 ~21:00 AEST St Helens Beach by session-Leo per Darron's direct request after the doc-staleness audit revealed CURRENT_STATUS + patterns.md + HAN-ECOSYSTEM-COMPLETE + CHANGELOG all stale across the last 9-13 days of substantive work. Conversation context: silent-fail audit close + #67 implementation plan posted to thread `mpria0tk-rj9ae2`.
 
+**First concrete mechanism shipped 2026-05-31 ~late-afternoon AEST (per Darron's "lock the discipline in" green-light)**: pre-commit + commit-msg git hooks at `scripts/check-doc-discipline.sh` + `scripts/check-doc-discipline-msg.sh`, installed via `scripts/install-doc-hooks.sh` (mirrors the existing `install-restart-hooks.sh` pattern). Hook semantics: when staged code touches any code-trigger surface (`src/server/{lib,services,routes}/`, `src/server/`, `src/ui/`, `src/scripts/`, `scripts/`), the commit MUST also touch a doc-satisfaction surface (`docs/`, `claude-context/`, `plans/`, `README.md`, `CHANGELOG.md`, `templates/`, `*.SHAPE.md`) OR include a specific `Docs-skipped: <reason>` trailer. Generic skip reasons (`n/a`, `no docs needed`, `skip`) are rejected by the commit-msg hook. Bypass via `git commit --no-verify` remains available — deliberate skips are audit-visible in git reflog; habit-style skips fail loud. The SHAPE.md-style fine-grained doc-trigger map + periodic audit script + DEC promotion are deferred until this minimal mechanism proves itself over a few weeks. The hook is the architectural floor; SHAPE.md is the refinement layer; periodic audit is the catch-net. Same shape as the audit-rhythm-at-prompt-language-layer pattern extended to the code-vs-doc layer.
+
+---
+
+## #70 — Thread-level participant registry — Jemma remembers who's in a conversation
+
+**What it is**: When Jemma dispatches a message to multiple agents (e.g., "hi Leo, hi Jim"), she should record the dispatch recipient set against the conversation ID. On subsequent messages in the same thread, the classifier's fresh recipient list should be merged with the prior dispatch's participants — so agents who were addressed earlier remain in the dispatch set even if follow-up messages don't name them explicitly.
+
+**Why it matters**: Currently Jemma classifies each Discord message independently via the local LLM (`jemma.ts:329-356`). There's no thread-level memory — each message gets a fresh classification call that returns a recipient list, and that list is what gets dispatched. This means that if Darron addresses both Leo and Jim in message one, then asks a follow-up without naming Jim, Jim may not be dispatched despite being an active participant in the conversation. The human has to rescue the dispatch with an explicit name-check ("and what do you think, Jim?").
+
+**Design sketch**:
+- On each dispatch, record the recipient set (agent slugs) against the conversation ID — in-memory map or a lightweight DB column.
+- On the next message in the same conversation, merge the classifier's fresh recipient list with the stored participant set.
+- Participant set clears when the conversation goes idle for a configurable period (e.g., 30 min), or when a message explicitly dismisses an agent.
+- The STAND-DOWN sentinel (Phase 8, S151) still applies — an agent dispatched via the participant registry can still stand down if they have nothing to add. The registry ensures dispatch; the agent decides whether to respond.
+
+**Distinct from #31**: Future-idea #31 (dispatch register) is about filtering *who exists* from the dispatch set based on active HAN state. This is about *who's participating in this specific thread* — a per-conversation memory layer on top of the per-message classification.
+
+**Promotion-trigger**: Lands naturally as part of Jemma's sophistication work and the tmux agentification migration. Per Darron: *"we will refine and finesse the dispatch, after all Jemma is about to become a whole lot more sophisticated."*
+
+**Source / origin**: filed 2026-05-30 by Leo per Darron's request after Jim was not dispatched on the first message in the "opus 4.8 impact on personality" thread despite being addressed by name. Conversation `mps1brvy-mcr0vp`.
+
 ---
 
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
