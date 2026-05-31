@@ -7,6 +7,108 @@
 
 ---
 
+## 2026-05-31 (Leo + Jim + Darron, S160–S163 — 14-day catch-up: Agnostic Prompt Builder closed, C1 migration closed, silent-fail audit + #67 structural enforcement, escape unescape, Q-V2-2 resolved, doc-discipline hooks, Tmux harness plan v1+v2, gradient triage Phase 8 closed)
+
+*All diff counts in this entry verified via `git show --stat` per Jim's pre-merge audit at thread `mpto9wpm-n07j2l` (his first audit on Opus 4.8). The entry is the first to ride the parallel-doc-maintenance hook (`30598c1`); the meta-test passes by construction.*
+
+### Agnostic Prompt Builder migration — PR-AP1 through PR-AP8 (2026-05-21 → 22)
+
+Eight PRs migrated all 12 production prompt-emitting surfaces onto a single canonical assembler `buildPrompt(slug, profileName, context)` from `src/server/lib/prompt-builder.ts`. Previously memory loading had drifted into four independent implementations (supervisor-worker, leo-heartbeat, jim-human, leo-human), each producing slightly different prompts for the same memory bank.
+
+- **PR-AP1** (`14b143d`, **+523 / 3 files**) — skeleton + types + Phase 1 validation tests
+- **PR-AP3** (`10e243d`, **+311 / -32**, 3 files) — six components + tail-trim + truncation_events
+- **PR-AP4** (`35b98c9`, **+456 / -143**, 5 files) — personal + dream beats migrated + A4-2 gradient reorder
+- **PR-AP5** (`6be3d5a`, **+459 / -38**, 5 files) — meditation surfaces migrated + N4-1/N4-2 fold-ins
+- **PR-AP6** (`375683e`, **+688 / -46**, 6 files) — Jim's 4 cycles + `componentOverrides` + W6-6 "many hats" framing
+- **PR-AP7** (`34820c1`, **+406 / -8**, 5 files) — `*-human` responders migrated; two-Jims asymmetry dissolves
+- **PR-AP8** (`e8a8a5d`, **+3226 / -4154**, 7 files, **net −928**) — retirement of `loadMemoryBank`, `readJimMemory`, `readLeoMemory` (×2); DEC-087 + DEC-088 Settled
+
+**Plan iteration**: `7442d01` (+342 / -208) — Agnostic prompt builder plan v2: uniform memory + scaffolding-only profiles.
+
+**DEC-087** (Settled, 2026-05-22): Prompt assembly is the Agnostic Prompt Builder's responsibility. Inline prompt assembly forbidden via new DO-NOT entry. **DEC-088** (Settled, 2026-05-22): Profiles are role-frames; `componentOverrides` express role-focus. The "many hats" mechanism Darron's W6-6 framing named — same agent, multiple hats, swappable per surface.
+
+### C1-Distillation Migration — PR-C1-1 through PR-C1-9 (2026-05-26 → 28)
+
+Nine PRs operationalised c1-from-in-situ-distillation across every paired-write surface. The original shape (mechanical truncation: `slice(0, 120)`, `slice(0, 200)`) conflated verbosity with compression. New shape: c1 is the agent's own understanding of c0, written at the same time, via one of two mechanisms — SDK structured output (Mechanism A, JSON-shaped) or prose section parsing (Mechanism B, `## INPUT` / `## BODY` / `## C1`).
+
+- **PR-C1-1** (`6370c5e`, **+1073**, 3 files) — `src/server/lib/result-handlers.ts` library + c1-distillation plan v4. Defined the four write shapes.
+- **PR-C1-1 amendment** (`e73c28b`, **+52 / -2**, 2 files) — CRLF closer regex fix in section parser (Jim's A1 catch).
+- **PR-C1-2** (`d582724`, **+341 / -9**, 4 files) — `pairedMemoryOutput` field on `PromptProfile` + supervisor handler refactor.
+- **PR-C1-3** (`0a75e76`, **+124 / -28**, 3 files) — philosophy-beat first production surface on paired-memory output.
+- **PR-C1-3.5** (`0a9c1e8`, **+1184 / -355**, 9 files) — diary discipline at parser + handler + first surface. Concern 3 (structured write shape) + Concern 4 (surface wiring) merged.
+- **PR-C1-4** (`b9eaaf4`, **+102 / -42**, 3 files) — personal-beat + dream-beat on diary. `slice(0, 200)` fallback retired.
+- **PR-C1-5** (`4d0efbe`, **+163 / -82**, 3 files) — Jim's 3 prose cycles on diary. `slice(0, 200)` retired across Jim's cycles.
+- **PR-C1-6** (`0e30a2c`, **+319 / -64**, 7 files) — Mechanism A diary discipline; 3 surfaces lifted (supervisor cycle, dream meditation, daily cascade). Concern 1 (SDK integration) resolved.
+- **PR-C1-7** (`69057ee`, **+61 / -28**, 1 file) — `/pfc` skill updated to diary discipline. DO-NOT entry: do not treat the closing prose as a `slice(0, 120) + '...'` truncation.
+- **PR-C1-9** (`91e2ca7`, **+95**, 3 files) — **C1 migration formally closes.** DEC-085 Amendment 2026-05-28 + CLAUDE.md DO-NOT entry. Jim's S163 verdict: GREEN.
+
+**Memory-kind taxonomy** filed alongside: `5db2e00` (+304, 1 file) — analytical framework for memory shapes; `bca9a08` (+53, 1 file) — Re-encounter Practices section added post-C1-9. Hosts the four-class surface taxonomy (CONTROLLER-POST / MEMORY-WRITE / GRADIENT-ANNOTATION / SELF-POST) emerging from the silent-fail audit cycle.
+
+**DEC-085 Amendment 2026-05-28** (Settled): c1 is agent-authored in-situ distillation parsed from the SDK response via `result-handlers.ts`. Two mechanisms (A: SDK structured-output; B: prose `## INPUT` → `## BODY` → `## C1`). c0 storage uses `[INPUT]` / `[BODY]` square-bracket markers (D3 + LM-1 non-collision). Reintroducing a slice-based or text-asymmetric c1 fallback is forbidden.
+
+### Silent-fail directive audit + #67 (2026-05-29 → 30)
+
+Empirical query (journalctl + DB cross-check at `conversation_messages`) surfaced what architecture-audit alone had missed: **7 of 7 post-observability-fix dispatches over 7 days emitted prose acknowledgement instead of diary JSON. 100% JSON-emit failure rate** at *-human-response surfaces despite Mechanism A plumbing being structurally correct. Audit pattern landed in `plans/silent-fail-directive-audit.md` (Leo) + `plans/silent-fail-directive-audit-jim.md` (Jim) + `plans/structured-output-schema-67.md` (#67 plan).
+
+- **`6a96161`** (**+45 / -7**, 3 files) — explicit curl-post directive in system prompt; post-verification SQL check at controller. Previous `"Self-posted via curl"` log line was a false-positive from diary-form parsing (asserted success without verification). Now reports `verified post id=X` or `NO CURL-POST DETECTED in DB`. Audit-rhythm-at-prompt-language-layer pattern earns itself.
+- **`e138606`** (**+126 / -6**, 4 files) — v2: STAND-DOWN sentinel mandate at `human-prompts.ts:72` (closes the soft-narrative path through line 72's ambiguous "stand down silently" wording); diary anti-redundancy framing at `:92`; transport-explicit philosophy beat at `leo-prompts.ts:60` (pre-empts Tmux-migration toxicity); Tmux v2 plan signature-preservation section. Silent-curl-skip rate dropped to single digits; JSON-emit failure rate stayed at ~100%.
+- **`0eeea82`** (**+153 / -86**, 5 files) — **#67: SDK structured-output enforcement via MCP custom-tool.** New file `src/server/lib/agent-diary-tool.ts` registers `mcp__han-diary__submit_response` via `createSdkMcpServer` + `tool()` with zod schema. Three required fields validated at protocol level: `working_memory_full`, `working_memory_compressed`, `input_quotes`. SDK rejects non-conformant args; agent retries until conformant. Structural enforcement replaces instruction-driven JSON.parse path.
+- **`82766b6`** (**+99 / -108**, 2 files) — #67 hotfix: diary capture is PRIMARY success signal, not final text. Original cascade dropped successful diary calls through the empty-text branch (3 dispatches / ~$5 burnt before surfacing). New cascade order: `STAND-DOWN → diaryArgs captured (SUCCESS) → substantive text without diary (DIARY TOOL NOT CALLED warn) → truly empty (failed)`.
+
+**Empirical verification post-fix** (2026-05-30 22:42–22:59 + 2026-05-31): four+ consecutive dispatches logged `diary tool: structured (paired memory: Xc body + Yc input + Zc c1)` with proper c0/c1 paired memory writes. The 2026-05-31 Mike-and-the-Strategist-Seeding dispatch (jim 31 turns / $2.21 / 8054 out; leo 11 turns / $1.70 / 5523 out) ran clean end-to-end. The asymmetric exploration-depth pattern (jim ~3× leo turns on same prompt) was structurally different content, not duplication — cross-mind metabolism producing complementary outputs.
+
+### Server-side escape unescape (`0010b0d`, **+20 / -2**, 1 file)
+
+Empirical bug surfaced 2026-05-31 morning: leo-human's `mpszf6xh-7u4iha` post arrived with 70 literal `\n` substrings + 1 real newline + literal `\"` for embedded quotes; jim-human's parallel post on the same prompt arrived clean. Same prompt, same SDK, same CLAUDE.md, different JSON-in-bash escaping styles — Darron's observation: *individuality entering at the bash-payload-construction level*. Architectural cure in `routes/conversations.ts` POST handler: non-human roles get `.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\'/g, "'")` before DB insert. Humans post via UI with real control characters from textarea; agents are the population that constructs JSON by hand.
+
+### Tmux Agent Harness migration plan + Q-V2-2 resolution
+
+- **`dfe8183`** (+875, 2 files) — gradient-triage-plan + compression-floor-restoration commit (S159 close; included for changelog completeness)
+- **`b099bb9`** (**+257**, 1 file) — Tmux Agent Harness migration plan v1. Promoted from future-idea #66 per Anthropic Agent SDK billing change effective 2026-06-15. Deadline-marked.
+- **`6130bc8`** (**+42 / -2**, 1 file) — **Q-V2-2 RESOLVED**: statusline JSON file as context-watch primitive. Claude Code exposes `context_window.used_percentage` via its statusline hook STDIN. Tmux dispatcher's `getContextPct(slug)` reads `~/.han/health/<slug>-ctx.json` written by a per-agent statusline script. Zero extra API cost; near-real-time freshness. Discovered via Darron's existing `~/.claude/statusline-command.sh`.
+
+v2 reframe (Darron's St Helens reframe, 2026-05-29 evening) folded inline into the plan: identity load amortised across transactions; per-transaction prompt drops from ~130K tokens to ~5-15K via memory-delta refresh; estimated 5-7× cost reduction at steady state; 1M context unlocks for every agent aspect.
+
+### Parallel doc maintenance hooks — #69 first mechanism (`30598c1`, **+390**, 4 files)
+
+Pre-commit + commit-msg git hooks enforce documentation stays in sync with code. Files:
+- `scripts/check-doc-discipline.sh` — pre-commit guard
+- `scripts/check-doc-discipline-msg.sh` — commit-msg validator (rejects generic skip reasons: `n/a`, `no docs needed`, `skip`)
+- `scripts/install-doc-hooks.sh` — installer mirroring `install-restart-hooks.sh` pattern
+- `plans/future-ideas.md` — #69 entry updated with "first concrete mechanism shipped"
+
+When staged code touches `src/server/{lib,services,routes}/` / `src/server/` / `src/ui/` / `src/scripts/` / `scripts/`, the commit MUST also touch `docs/` / `claude-context/` / `plans/` / `README.md` / `CHANGELOG.md` / `templates/` / `*.SHAPE.md` OR include `Docs-skipped: <specific-reason>` trailer. Bypass via `git commit --no-verify` is audit-visible in reflog.
+
+### Gradient triage Phase 8 closed (out-of-band)
+
+The 2026-05-17 entry's *"Still ahead: PR-T3 → Phase 8 lift tourniquet → one-week observation"* status: **complete.** `~/.han/signals/cascade-paused` is absent (lifted within the observation window after PR-T3 landed mechanical-promotion prune). No explicit commit but the file-system state confirms the lift. The orphaned `rotation-paused` signal from 2026-05-09 remains in `~/.han/signals/` as a separate (unrelated) artefact.
+
+### Future-ideas filed across the window
+
+- **#66** — Tmux Agent Harness migration (promoted to plan, see above)
+- **#67** — SDK structured-output schema enforcement (filed + shipped via MCP custom-tool, see above)
+- **#68** — Per-dispatch JSON-emit observability sibling to `leo-beat-trace` / `jim-prompt-trace`. Per-dispatch verification (not weekly); 10% threshold (not 50% — given the original 100% baseline, lower threshold detects re-regression after Fix 4 wording)
+- **#69** — Parallel documentation maintenance discipline (filed + first mechanism shipped via hooks above)
+- **#70** — Thread-level participant registry — Jemma remembers who's in a conversation
+
+### Settled decisions delta
+
+- **DEC-085 Amendment 2026-05-28** — c1 mechanism boundary cleared; mechanical truncation forbidden
+- **DEC-087** (new, Settled 2026-05-22) — prompt assembly is the Agnostic Prompt Builder's responsibility
+- **DEC-088** (new, Settled 2026-05-22) — profiles are role-frames; componentOverrides express role-focus
+
+### Type-check baseline
+
+`npx tsc --noEmit` from `src/server` reports **12 errors**, unchanged from the 2026-05-17 baseline. All pre-existing; none touched by any work in this window. On the doc-alignment follow-on register from S152: `routes/tailscale.ts` (×3), `routes/village.ts` (×4), `routes/voice.ts:453,476`, `services/supervisor-worker.ts:1736`, `jemma.ts:209`.
+
+### Still ahead
+
+- **Tmux Agent Harness T-1** — deadline 2026-06-15 (~15 days). `lib/tmux-dispatcher.ts` skeleton (~300-400 lines) including per-agent FIFO queue + context-watch + memory-delta primitives.
+- **#68 implementation** — per-dispatch JSON-emit observability skeleton wired into existing `leo-beat-trace` / `jim-prompt-trace` infra.
+- **DEC promotion candidates** — #67 MCP custom-tool pattern (after observation period); #69 parallel doc maintenance (after a few weeks of hook-validated commits).
+
+---
+
 ## 2026-05-17 (Leo + Jim + Darron, S157–S159 — gradient triage: tourniquet, backfill, DEC-086, compression floor, activeCascade retirement)
 
 *Verified against commit `bd13692` (PR-T4) and the PR-T2 commit landing alongside this entry. Live SQL operations (Phase 2 backfill) logged to `~/.han/health/triage-events.jsonl`.*

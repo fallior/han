@@ -497,7 +497,7 @@ Two files work together:
 **Purpose:** Runs the actual Agent SDK calls (blocking operations isolated from Express).
 
 **Lifecycle:**
-1. `initDatabase()` — connects to `~/.han/tasks.db` with WAL mode
+1. `initDatabase()` — connects to `~/.han/gradient.db` with WAL mode (canonical since 2026-04-29 cutover Phase 5 / DEC-080; resolves via `process.env.HAN_DB_PATH || gradient.db` at `db.ts:38`)
 2. Sends `{ type: 'ready' }` to parent via IPC
 3. Listens for `{ type: 'run_cycle' }` messages from parent
 4. On each cycle: determine type, load memory, run Agent SDK, execute actions, record cost
@@ -1382,7 +1382,7 @@ memory** adds explicit provenance chains so every compression knows where it cam
 A UV that stirs something can trace back through the entire chain to the raw conversation
 that started it.
 
-**Three tables in `tasks.db`:**
+**Three tables in `gradient.db`** *(canonical since 2026-04-29 cutover Phase 5 / DEC-080; tasks.db retired)*:
 
 1. **`gradient_entries`** — the compression chain. Each row has a `source_id` FK pointing
    to the parent entry (the row it was compressed from). C0 entries (raw sources) have
@@ -1685,7 +1685,7 @@ General fractal memory compression utility. All compression functions return
 
 ## 17. Database
 
-**File:** `~/.han/tasks.db` (SQLite with WAL mode)
+**File:** `~/.han/gradient.db` (SQLite with WAL mode) — *canonical since 2026-04-29 cutover Phase 5 / DEC-080. Resolves via `process.env.HAN_DB_PATH || gradient.db` at `db.ts:38`. `tasks.db` retired.*
 
 ### Key Tables
 
@@ -1703,8 +1703,9 @@ General fractal memory compression utility. All compression functions return
 
 ### Multiple DB Files
 
-- `~/.han/tasks.db` — primary (all tables above)
-- `~/.han/conversations.db` — may be legacy duplicate
+- `~/.han/gradient.db` — **primary** (canonical since 2026-04-29 cutover Phase 5 / DEC-080; all tables above)
+- `~/.han/tasks.db` — **retired** (pre-cutover canonical store; preserved on disk per DEC-069 cardinal rule "do not delete memory" but no longer the runtime target)
+- `~/.han/conversations.db` — legacy duplicate
 - `~/Projects/han/src/server/han.db` — empty
 - Various legacy `.db` files (supervisor.db, worker.db, etc.) — appear empty
 
@@ -1842,7 +1843,7 @@ cat ~/.han/health/jemma-health.json
 ls -la ~/.han/signals/
 
 # Recent cycles
-sqlite3 ~/.han/tasks.db "SELECT cycle_number, cycle_type, cost_usd, started_at, error FROM supervisor_cycles ORDER BY started_at DESC LIMIT 10;"
+sqlite3 ~/.han/gradient.db "SELECT cycle_number, cycle_type, cost_usd, started_at, error FROM supervisor_cycles ORDER BY started_at DESC LIMIT 10;"
 ```
 
 ---
@@ -3277,7 +3278,7 @@ If you see `[U_]` or `[_U]`, one disk has failed — replace it and rebuild.
 ## 31. Complete Database Schema
 
 **File:** `src/server/db.ts` (797 lines)
-**Database:** `~/.han/tasks.db` — SQLite with WAL mode, 5s busy timeout (`better-sqlite3`)
+**Database:** `~/.han/gradient.db` — SQLite with WAL mode, 5s busy timeout (`better-sqlite3`). Canonical since 2026-04-29 cutover Phase 5 / DEC-080. Resolves via `process.env.HAN_DB_PATH || gradient.db` at `db.ts:38`. `tasks.db` retired.
 
 ### All Tables
 
@@ -3535,3 +3536,94 @@ into the `projects` table. Called on server startup and via `POST /portfolio/syn
 `conversationStmts` (10), `conversationMessageStmts` (3), `conversationTagStmts` (4),
 `agentUsageStmts` (4), `gradientStmts` (9 — includes `getUnprocessedTaggedMessages` for C0 pipeline), `feelingTagStmts` (3),
 `gradientAnnotationStmts` (2).
+
+---
+
+## 32. C1-from-WM operational form (DEC-085 Amendment 2026-05-28)
+
+c1 is **agent-authored in-situ distillation** parsed from the SDK response via `src/server/lib/result-handlers.ts`. No mechanical truncation. No SDK reconstruction after c0 extraction. Both c0 and c1 captured atomically during the cycle / beat / response work.
+
+**Two mechanisms** for paired c1 emission:
+
+- **Mechanism A (SDK structured output)** — JSON-shaped responses with three required fields: `working_memory_full` (the c0 body), `working_memory_compressed` (the c1 distillation, 50-800 chars), `input_quotes` (verbatim quotes of what's new this turn). Parsed via `parseTurnEntryStructured()`. Used by *-human-response surfaces + supervisor cycles. Enforced architecturally at *-human-response surfaces via the MCP custom-tool pattern (see Section 33).
+
+- **Mechanism B (prose section parsing)** — `## INPUT` / `## BODY` / `## C1` heading sections. Parsed via `parseTurnEntry(content, { captureInput: true })`. c0 storage uses `[INPUT]` / `[BODY]` square-bracket markers (D3 + LM-1 non-collision rule); heading forms never enter the c0 file. Used by philosophy-beat, personal-beat, dream-beat (post-PR-C1-3 → PR-C1-4) and Jim's three prose cycles (post-PR-C1-5).
+
+**Surfaces and routing**:
+
+| Surface | Mechanism | Diary handler call-site |
+|---------|-----------|-------------------------|
+| `leo-human-response` (`leo-human.ts`) | A (MCP-enforced) | `appendSwap(diaryArgs.body, diaryArgs.compressed)` post-`getDiaryCapture()` |
+| `jim-human-response` (`jim-human.ts`) | A (MCP-enforced) | Same shape; mirror module |
+| `supervisor-cycle` (`supervisor-worker.ts`) | A (instruction-driven, SDK schema-driven response) | `parseTurnEntryStructured()` then paired write |
+| `philosophy-beat` (`leo-heartbeat.ts`) | B (instruction-driven prose) | `parseTurnEntry()` then paired write |
+| `personal-beat` / `dream-beat` (`leo-heartbeat.ts`) | B (instruction-driven prose) | Same shape |
+| Jim's 3 prose cycles (`supervisor-worker.ts`) | B (instruction-driven prose) | Same shape |
+| Meditation surfaces (×3) | **EXCLUDED** | Re-encounter practice — annotations/feeling-tags rather than new turn entries (DEC-086) |
+
+**Cascade behaviour**: after paired c0/c1 insert via `appendPairedMemory()`, `bumpOnInsert(agent, 'c0')` is called. The cascade engine handles cap displacement: when c0 hits cap (1), oldest c0 is promoted via `pending_compressions` queue + `scripts/process-pending-compression.ts` (with full agent identity loaded). c1→c2+ cascade continues unchanged.
+
+**Settled decisions**: DEC-085 (Settled 2026-05-08) + Amendment 2026-05-28. DO-NOT: do not compute c1 via mechanical truncation, long-vs-short summary asymmetry, or operational metadata. Re-encounter surfaces deliberately excluded by structural design.
+
+## 33. MCP custom-tool pattern at *-human-response (future-idea #67, 2026-05-30)
+
+Empirical case: between PR-C1-6 (Mechanism A landing) and the silent-fail audit cycle (2026-05-29 → 30), the `*-human-response` surfaces logged 100% JSON-emit failure rate over 7 days (7 of 7 dispatches emitted prose acknowledgement instead of diary JSON). Three rounds of wording fixes brought silent-curl-skip to ~0% but didn't move JSON-emit. Instruction-driven discipline insufficient at scale.
+
+**The fix** (commit `0eeea82` + hotfix `82766b6`): replace instruction-driven JSON-emit with structural enforcement at the SDK protocol layer via MCP custom-tool. Code at `src/server/lib/agent-diary-tool.ts`:
+
+```typescript
+import { tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
+
+const submitResponseTool = tool(
+    'submit_response',
+    'Submit your final response — the diary form per DEC-085. MUST be called exactly once.',
+    {
+        working_memory_full: z.string().min(1),
+        working_memory_compressed: z.string().min(50).max(800),
+        input_quotes: z.string().min(1),
+    },
+    async (args) => { /* capture args */ }
+);
+export const diaryServer = createSdkMcpServer({ name: 'han-diary', version: '1.0.0', tools: [submitResponseTool] });
+export const DIARY_TOOL_NAME = 'mcp__han-diary__submit_response';
+```
+
+Controllers pass `mcpServers: { 'han-diary': diaryServer }` to `agentQuery`. The agent calls `mcp__han-diary__submit_response` as its terminal turn action. The SDK validates the zod schema at protocol level — non-conformant args rejected, agent retries until conformant. Controller retrieves captured args via `getDiaryCapture()`; if absent, logs `DIARY TOOL NOT CALLED` warn (fail-loud per future-idea #68).
+
+**Post-verification observability** (commit `6a96161`): controllers run a `SELECT id FROM conversation_messages WHERE conversation_id = ? AND role = ? AND created_at >= ?` after agent return to verify the curl-post actually landed. Log line reports `verified post id=X` or `NO CURL-POST DETECTED in DB` (truthful, not asserted).
+
+**Hotfix nuance** (`82766b6`): controller cascade reorders to `STAND-DOWN → diary captured (SUCCESS regardless of text length) → substantive text but no diary (DIARY TOOL NOT CALLED warn) → truly empty (failed)`. Without this ordering, the SDK's structural enforcement is wasted by instruction-driven cascade logic in the controller.
+
+**Settled decisions reinforced**: DEC-080 (architectural form of two-surface discipline), DEC-081 (agent-agnostic — shared `agent-diary-tool.ts` module serves both jim- and leo-human), DEC-085 (c0/c1 paired-memory at architectural layer).
+
+**Asymmetric scope**: this pattern applies to `*-human-response` surfaces only. Philosophy-beat + personal-beat + dream-beat + Jim's prose cycles + meditation surfaces remain on Mechanism B (instruction-driven prose). Tightening other surfaces deferred until empirical observation justifies it.
+
+## 34. Server-side escape unescape for agent posts (`routes/conversations.ts`, 2026-05-31)
+
+Agent posts via curl from the Bash tool sometimes arrive with literal `\n` / `\t` / `\"` / `\'` instead of control characters — depends on how each agent constructs JSON-in-bash. Empirical: 2026-05-31 morning, leo-human's `mpszf6xh-7u4iha` had 70 literal `\n` + 1 real newline; jim-human's parallel post on the same prompt arrived clean. The Markdown renderer treats literal `\n` as two characters.
+
+**Architectural cure** (commit `0010b0d`): non-human role posts get `.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\'/g, "'")` before DB insert at the POST handler in `routes/conversations.ts`. Humans post via UI with real control characters from textarea; agents are the population that constructs JSON by hand. Single-line fix; cures the failure mode at the API entry point rather than relying on per-agent prompt discipline.
+
+## 35. Pre-commit doc-discipline hooks (future-idea #69 first mechanism, 2026-05-31)
+
+When staged code touches code-trigger surfaces, the commit MUST also touch a doc-satisfaction surface OR include `Docs-skipped: <specific-reason>` in the message. Generic skip reasons (`n/a`, `no docs needed`, `skip`) rejected by the commit-msg validator. Operator bypass via `git commit --no-verify` is audit-visible in reflog.
+
+**Files** (commit `30598c1`):
+- `scripts/check-doc-discipline.sh` — pre-commit guard
+- `scripts/check-doc-discipline-msg.sh` — commit-msg validator
+- `scripts/install-doc-hooks.sh` — installer mirroring `install-restart-hooks.sh`
+
+**Trigger surfaces**: `src/server/{lib,services,routes}/`, `src/server/`, `src/ui/`, `src/scripts/`, `scripts/`. **Satisfaction surfaces**: `docs/`, `claude-context/`, `plans/`, `README.md`, `CHANGELOG.md`, `templates/`, `*.SHAPE.md`. SHAPE.md-style fine-grained mapping + periodic audit script + DEC promotion deferred until the minimal mechanism proves itself.
+
+## 36. Tmux Agent Harness migration (future-idea #66, plan-stage 2026-05-28 → 31, T-1 deadline 2026-06-15)
+
+**Status**: PLAN ONLY. Implementation pending; T-1 deadline 2026-06-15 (~15 days from this entry). See `plans/tmux-agent-harness.md` for the canonical v2 plan including warm-session reframe, per-agent FIFO queue primitive, memory-delta refresh, signature preservation (Fix 3 from silent-fail audit). Single-source-of-truth lives in the plan doc; this section is a pointer, not a duplicate.
+
+**Why**: Anthropic Agent SDK billing change effective 2026-06-15 makes SDK-as-canonical-runtime cost-prohibitive. Migration to tmux'd Claude Code sessions (a) preserves subscription billing semantics, (b) unlocks 1M context per agent aspect (vs current ~200K SDK ceiling), (c) amortises identity load across transactions in a warm session (~5-7× cost reduction at steady state per the v2 cost-profile inversion).
+
+**Q-V2-2 resolution (2026-05-31, commit `6130bc8`)**: context-watch via Claude Code's statusline hook. The runtime pipes a JSON document containing `context_window.used_percentage` to a configured statusline script's stdin on every render. Tmux dispatcher reads `~/.han/health/<slug>-ctx.json` written by a per-agent statusline script. Zero extra API cost; near-real-time freshness.
+
+For full detail (architectural sketch, T-0 → T-8 phase plan, primitives, cost-profile inversion, open questions, signature preservation): **see `plans/tmux-agent-harness.md` v2**.
+
+---
