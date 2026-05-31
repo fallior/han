@@ -84,7 +84,9 @@ Pre-commit + commit-msg git hooks enforce documentation stays in sync with code.
 
 ### Gradient triage Phase 8 — tourniquet lifted (May-17 entry's "still ahead" closed)
 
-The May-17 entry below noted *"Still ahead: PR-T3 → Phase 8 lift tourniquet → one-week observation."* Status: **Phase 8 complete.** `~/.han/signals/cascade-paused` is absent (lifted within the observation window after PR-T3 landed mechanical-promotion prune). The orphaned `rotation-paused` signal from 2026-05-09 remains in `~/.han/signals/` as a separate (unrelated) artefact — flagged for future cleanup but not load-bearing.
+The May-17 entry below noted *"Still ahead: PR-T3 → Phase 8 lift tourniquet → one-week observation."* Status: **Phase 8 complete.** `~/.han/signals/cascade-paused` is absent (lifted within the observation window after PR-T3 landed mechanical-promotion prune).
+
+**Note on `~/.han/signals/rotation-paused`** (2026-05-09): this signal is **intentional, load-bearing state, not an orphan**. It enforces manual-only credential mode: DEC-077's scheduled-rotation cron lines are commented out (backup at `crontab-backup-2026-05-09-2155.txt`), and the signal holds off `jemma.checkAndSwapCredentials()` auto-swap on rate-limit events (honoured at `jemma.ts:1311`). **DO NOT remove without a deliberate decision to re-enable DEC-077 scheduled rotation** — removing it re-arms auto-swap on the next rate-limit event against Darron's manual-only intent. (Catch by Jim's post-merge audit S163, 2026-05-31; my original wording called it "orphaned, flag for cleanup" which would have led a future maintainer — possibly me at 2am — into silently re-enabling the rotation Darron deliberately switched off.)
 
 ### Future-ideas filed across the window
 
