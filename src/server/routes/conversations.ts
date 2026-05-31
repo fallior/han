@@ -525,7 +525,25 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         const now = new Date().toISOString();
         const finalRole = role || 'human';
 
-        conversationMessageStmts.insert.run(messageId, req.params.id, finalRole, content, now);
+        // 2026-05-31 (post-#67-hotfix): agent self-post via curl from Bash tool
+        // sometimes arrives with literal `\n` and `\"` escape sequences instead
+        // of the corresponding control characters — depends on how each agent
+        // constructs its JSON-in-bash payload. Observed empirically: leo-human
+        // post mpszf6xh-7u4iha had 70 literal `\n` substrings + 1 real newline;
+        // jim-human's parallel post arrived clean. Server-side unescape is the
+        // architectural cure (agent-side prompt-discipline alone proven partial
+        // by the silent-fail audit). Applied to non-human roles only — humans
+        // post via UI which sends real newlines from a textarea; agents are
+        // the population that constructs JSON by hand.
+        const sanitised = finalRole === 'human'
+            ? content
+            : (content as string)
+                .replace(/\\n/g, '\n')
+                .replace(/\\t/g, '\t')
+                .replace(/\\"/g, '"')
+                .replace(/\\'/g, "'");
+
+        conversationMessageStmts.insert.run(messageId, req.params.id, finalRole, sanitised, now);
         conversationStmts.updateTimestamp.run(now, req.params.id);
 
         // Auto-reactivate archived conversation on new message
@@ -537,7 +555,7 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
             id: messageId,
             conversation_id: req.params.id,
             role: finalRole,
-            content,
+            content: sanitised,
             created_at: now
         };
 
