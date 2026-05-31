@@ -62,7 +62,7 @@ Primitives needed:
 
 - `spawnAgentSession(slug, profile)` — launch tmux, send welcome-back, wait for ready signal
 - `sendTransactionPrompt(sessionId, prompt)` — file-based delivery (Fix A3), wait for diary-form response, parse via existing `parseTurnEntryStructured`
-- `getContextPct(sessionId)` — query Claude Code's session for current context usage
+- `getContextPct(sessionId)` — query Claude Code's session for current context usage **(resolved 2026-05-31, see Q-V2-2 below — via statusline JSON file written to `~/.han/health/<agent>-ctx.json`)**
 - `clearSession(sessionId)` — send /pfc → /clear → welcome-back, wait for ready
 - `enqueueForAgent(slug, prompt)` — per-agent FIFO; returns promise that resolves when the dispatcher dequeues + runs the prompt
 - `computeMemoryDelta(slug, lastTransactionTs)` — read memory files, return new entries since `lastTransactionTs` as injectable block
@@ -79,7 +79,47 @@ T-2 (per-surface launchers) becomes thin wrappers picking the right profile + ca
 ### Open questions surfaced by v2 (for next round of Jim audit)
 
 - **Q-V2-1** (memory delta scope): exact list of files that count as "high-churn" for delta. Currently leaning: working-memory.md + working-memory-full.md + felt-moments.md + self-reflection.md + discoveries.md. Felt-moments and discoveries are agent-owned; should the delta cover ALL writers or just same-aspect writers?
-- **Q-V2-2** (context-watch implementation): does Claude Code expose a context-percentage API hook, or do we need to estimate from cumulative-tokens + cap? If estimate-from-cumulative, where's the source-of-truth for cap (model-dependent, deployment-dependent)?
+- **Q-V2-2 (RESOLVED, 2026-05-31)** (context-watch implementation): Claude Code exposes the context-percentage via its **statusline hook mechanism**. The runtime pipes a JSON document to a configured statusline script's stdin every render (~every keystroke); the JSON contains `context_window.used_percentage` (numeric 0-100), `model.display_name`, `workspace.current_dir`, plus `input_tokens` / `total_tokens` for raw counts. Discovered via Darron's existing `~/.claude/statusline-command.sh` which reads `.context_window.used_percentage` and renders `ctx: N%` — this is the same 57% value Darron sees in his terminal.
+
+  **Implementation for tmux-dispatcher**: each tmux'd agent session is launched with a per-agent statusline script that writes the JSON payload to `~/.han/health/<agent>-ctx.json` on every render instead of (or in addition to) printing to stdout. The dispatcher's `getContextPct(sessionId)` reads the file:
+
+  ```bash
+  # ~/.han/agents/<Agent>/<surface>/statusline-context.sh
+  input=$(cat)
+  echo "$input" > "$HOME/.han/health/${AGENT_SLUG}-ctx.json"
+  # Also render the statusline normally for tmux display
+  model=$(echo "$input" | jq -r '.model.display_name // empty')
+  used=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
+  printf '%s | ctx: %.0f%%' "$model" "$used"
+  ```
+
+  ```typescript
+  // dispatcher
+  export function getContextPct(slug: string): number | null {
+      try {
+          const raw = fs.readFileSync(`${HEALTH_DIR}/${slug}-ctx.json`, 'utf-8');
+          const json = JSON.parse(raw);
+          const pct = json?.context_window?.used_percentage;
+          return typeof pct === 'number' ? pct : null;
+      } catch {
+          return null;
+      }
+  }
+  ```
+
+  **Properties this gives us**:
+  - Near-real-time freshness (refreshed every statusline tick by Claude Code's runtime)
+  - **Zero extra API cost** (no synthetic `/context` invocations needed; the statusline updates are already happening)
+  - No agent-volitional disclosure required (the runtime exposes the value structurally)
+  - File-based interface aligns with Q-V2-1's memory-delta-via-files pattern + #49 atomic paired-write pattern
+
+  **Alternative mechanisms considered and rejected**:
+  - `/context` slash command via dispatcher injection: costs one synthetic interaction per check; round-trip via tmux send-keys; loses ~near-real-time granularity. Worse than statusline-JSON on every axis.
+  - Estimate cumulative-tokens vs model-cap: requires per-model-deployment cap registry (1M for opus-4.7 1m-context; 200K for standard; etc.); fragile under model changes; would need its own maintenance. Worse.
+
+  **The hook-system option (`--hooks`) was NOT investigated yet** — worth a 10-min check whether Claude Code exposes a context-watermark hook (e.g., `OnContextThreshold`) for agent-volitional notification when crossing 85%. If present, would let the agent itself signal the dispatcher rather than dispatcher polling. Not blocking T-1; flag for T-3 observation period to evaluate against the statusline-file mechanism.
+
+  **Source**: Darron's terminal screenshot 2026-05-31 16:32 AEST showed `ctx: 57%`; investigation traced rendering to `~/.claude/statusline-command.sh` (his existing config) → resolved via `~/.claude/settings.json:statusLine` schema → confirmed in `claude-agent-sdk/cli.js` bundle. The runtime feeds the same JSON payload to any configured statusline script regardless of which CLI is hosting the agent.
 - **Q-V2-3** (session-shared meditation surfaces): meditation Phase A/B/Evening are re-encounter surfaces (write annotations to gradient_entries). Do they get their own tmux session, share with personal-beat, or stay on SDK during migration? v1 deferred this; v2's session-sharing-by-profile-similarity question is sharper now.
 - **Q-V2-4** (delta-refresh failure modes): what happens if the dispatcher mis-computes the delta (skips an entry, or includes an entry the agent already saw)? Silent identity-state drift. Worth a fail-loud structural property — perhaps the delta block includes a checksum the agent can verify, or the agent emits a confirmation in its diary JSON that the controller cross-checks.
 - **Q-V2-5** (Phase 9 absorption): when Phase 9 `agent-shell.ts` lands, the tmux-dispatcher's primitives wrap into HandlerSpec.handleResult. v1's Q-7 hybrid (c) lean stays correct; v2 just sharpens that the dispatcher's per-agent queue becomes a HandlerSpec property.
