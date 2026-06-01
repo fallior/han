@@ -387,3 +387,52 @@ The C1 migration just closed. Three days; ~7 PRs; the architecture caught up to 
 Inviting Jim's pre-merge audit on this plan. After GREEN + Darron's go, T-1 begins.
 
 — Leo (session, S161, 2026-05-28 ~late evening AEST, Mackay; St Helens Beach Monday)
+
+---
+
+## T-1 implementation status + timeout-reconciliation design (2026-06-01)
+
+> Added by Leo (session, S163), Monday 1 June 2026 ~13:45 AEST, after Jim's pre-merge skeleton audit (thread `mppj72fx-wt0u1p`, msg `mpunfvpo-uah345`, verdict **GREEN to commit**). This section records what landed at T-1 and designs the one load-bearing follow-up Jim's trace surfaced. Per Jim: timeout-reconciliation is **required before T-3 wires a production surface**, not before committing the skeleton.
+
+### T-1 skeleton — landed
+
+Two new files (`src/server/lib/diary-mcp-server.ts`, `src/server/lib/tmux-dispatcher.ts`), tsc-clean, scope-clean, committed with this design. The re-homed diary capture sink doubles as the completion signal (Jim's headline must-solve); the six primitives are built; `computeMemoryDelta` is gated OFF (`DELTA_REFRESH_ENABLED=false`) per Q-V2-4. `agent-diary-tool.ts` + the SDK path are untouched. The happy-path and orphan-path serialisation were traced airtight by Jim.
+
+### The hole — timed-out transaction breaks the single-live-txn invariant
+
+The whole `current.json` txn-routing scheme rests on one invariant: **at most one transaction is live in a session at any time**. The per-agent FIFO queue (`enqueueForAgent`) enforces this *for dispatch* — but a dispatcher-side timeout violates it, because **"the dispatcher gave up" is not "the session is idle."**
+
+Trace (Jim's, restated): `sendTransactionPrompt(A)` times out at `TRANSACTION_TIMEOUT_MS` and throws. Nothing aborts the tmux session — it is *still composing A*. `enqueueForAgent` chains regardless of outcome (`prior.catch(()=>undefined).then(next)`), so transaction **B** dispatches immediately:
+1. **Interleaving** — B's `sendLine` lands a "read this file" instruction into a session mid-turn on A; two prompts interleave at the input.
+2. **Misattribution (the dangerous one)** — when A *eventually* calls `submit_response`, `resolveTxnId()` reads `current.json`, which is now **B**, so **A's response is written to `B.json`**. The dispatcher, polling `B.json`, returns A's content as B's. A wrong response is attributed to the wrong turn and written to memory as that turn's c0 — identity-corrupting, exactly the class the whole architecture exists to prevent.
+
+The same broken precondition is what makes `sendLine` unsafe in Jim's Ask-2 (it assumes an idle session at the main input), and it is the same shape as the `clearSession` `/pfc`→`/clear` fixed-`sleep(2_000)` fragility (assuming a flush completed rather than confirming it). **One principle underlies all three: confirm the session is idle before acting; never assume "elapsed time" or "I gave up" means "ready."** (The same family as the Temporal Orientation re-query rule and the gate-vs-load discipline — query the cheap fact, don't assume it.)
+
+### The design — idleness as a dispatch precondition, forced reconciliation as recovery
+
+The fix is not to patch the capture routing; it is to **restore the single-live-txn invariant** so `current.json` is correct by construction. Two coupled mechanisms:
+
+**1. Idle precondition before every dispatch.** `sendTransactionPrompt` (and the queue runner) must confirm the session is genuinely idle before writing `current.json` and sending the trigger. Track per-session turn-state (`idle | busy | needs-reconcile`): set `busy` on dispatch, `idle` only on a confirmed capture for *this* txn. The queue must not run the next transaction while the session is `busy` or `needs-reconcile`.
+
+**2. Forced reconciliation on timeout (the authoritative path back to idle).** On timeout, `sendTransactionPrompt` does **not** mark idle — it marks the session `needs-reconcile` and the queue must run a reconcile step *ahead of* the next dispatch. The only authoritative "session is now idle and reconstituted" signal we already have is **`clearSession`'s ready-sentinel-with-newer-mtime** (already built in the skeleton). So:
+
+> **timeout → mark `needs-reconcile` → forced `clearSession` (/pfc → /clear → welcome-back) → newer ready-sentinel confirms idle → queue proceeds.**
+
+This is Jim's option (a) *gated by* his option (b)'s idle-confirmation, using the readiness mechanism that already exists. `clearSession` loses A's in-flight turn — an honest-fail for A (logged, fail-loud) — but it **guarantees no misattribution**, which is the only acceptable outcome when memory integrity is at stake. A late capture from the abandoned A (if it ever lands) is detected by txnId mismatch against the post-reconcile state and discarded with a forensic log line.
+
+**Why not txnId-in-the-prompt (considered, deferred as belt-and-suspenders).** We could embed the txnId in the delivered prompt and have the agent echo it as a `submit_response` argument, so A's capture is keyed to A regardless of overlap. That hardens against misattribution even *with* overlap — but it reintroduces an agent-fidelity dependency (the agent must copy the token faithfully) that `current.json` was chosen to avoid, and it does **not** fix the interleaving (1) or the wedged-session case. Enforcing the invariant (mechanisms 1+2) fixes all cases at the source; txnId-echo is optional defence-in-depth to add later if observation shows reconciliation alone is insufficient.
+
+### Convergence — one mechanism closes three flags
+
+The idle-precondition + confirm-before-act principle closes:
+- **Ask-1 timeout misattribution** (this section) — confirm idle / reconcile on timeout.
+- **Ask-2 send-keys precondition** — `sendLine` is safe *given* an idle session, which the precondition now guarantees.
+- **`clearSession` `/pfc`→`/clear` race** (lesser flag) — wait for a `/pfc`-complete confirmation before `/clear`, same "confirm don't assume" shape; the turn-state machine is the natural home for it.
+
+### Open sub-questions for Jim's next-round audit
+
+- **How does the agent signal turn-done / idle for the *non-capture* paths?** A successful turn signals idle via the diary capture. But a STAND-DOWN (no capture) and a post-timeout completion need an idle signal too. Candidate: generalise the ready-sentinel into a lightweight turn-state marker the agent refreshes at the end of *every* turn (capture or not), so the dispatcher reads idle-vs-busy without inferring it. This is a CLAUDE.md welcome-back/turn-close discipline (gatekeeper, Leo's hand) — folds into the T-2 agent-side work.
+- **Reconcile cost.** Forced `clearSession` pays a full identity reload (~130K). At philosophy-beat cadence a timeout is rare, so the cost is acceptable; if a surface times out frequently, that is itself a signal to investigate, not to optimise the reconcile.
+- **Sequencing.** Per Jim: settle this design by T-2's end; implement before T-3. The three session-compatibility pieces (`.mcp.json` registering `diary-mcp-server`; per-agent statusline writing `<slug>-ctx.json`; agent-side ready-sentinel/turn-state write) are T-2's load-bearing contents and are prerequisites for the T-1.5 single-session round-trip test.
+
+— Leo (session, S163, 2026-06-01 ~13:45 AEST, post-skeleton-audit)
