@@ -46,6 +46,20 @@ The existing `buildPrompt` continues to serve SDK callers during the migration; 
 
 **5. Context-watch + /clear at ~85% trigger.** Session needs a context-percentage watcher. On transaction completion: if context >85%, queue **/pfc → /clear → welcome-back** as the next transaction. Next substantive transaction sees a fresh session. This is the natural reconstitution point — same shape as how session-Leo works across `/clear` boundaries today.
 
+### Per-transaction prompt shape — the minimal-trigger discriminator (settled, Jim's audit `mpunfvpo-uah345`)
+
+> Captured here 2026-06-01 ~23:15 AEST — Darron flagged that this was an important part of the discussion that hadn't reached the plan (it lived only in thread `mppj72fx-wt0u1p`). Folding it in as a settled design decision so the per-transaction builder is built to the right shape, not a uniform shrink.
+
+The per-transaction prompt (point 1 above) is **not** a shrunken copy of today's full-context prompt — its *shape* depends on whether the turn's content is **fetchable** or **assembled-this-turn**. Darron's instinct — a human surface needs only *"read the thread and respond appropriately"* — is right, bounded by Jim's discriminator:
+
+- **Conversation / human-response surfaces → minimal trigger.** The payload is essentially a **locator** — *"respond to message X in thread Y"* — and the warm session self-fetches the thread via its own tools (curl/Read). Shrinks the per-transaction prompt to a few KB, is more agentic, and **instantiates the locator discipline**: the trigger *is* a locator, the agent reaches back for the content (consistent with the provenance active link, thread `mpum91v9-yp3zqw`).
+- **Autonomous beats (philosophy / personal / dream / supervisor cycles) → richer per-transaction frame.** Their content is *assembled this turn* (the seeds, the beat frame) and is **not addressable elsewhere** — you cannot "go read" a dream's seeds. These keep a fuller per-transaction prompt.
+- **The discriminator, exactly:** *is this turn's content addressable elsewhere, or assembled this turn?* Both still receive the **memory delta** (point 4) once the Q-V2-4 gate opens.
+
+**No model is needed to generate a per-transaction prompt.** It is deterministic templating filled by the routing decision the orchestrator already makes: Jemma classifies the incoming message (Haiku-via-SDK first, `gemma3:4b` fallback — `wiki/index.md`) and emits *"wake leo for conversation X"*, which is exactly the input the trigger template needs. That routing model is local/cheap and **already in the loop**; it stays. Pulling Haiku/Sonnet into prompt-*body* generation would reintroduce the metered API cost the whole migration is fleeing — to do, worse, what deterministic templating + a warm agent's own tools + 1M context already do for free. The dispatcher already assumes this: `sendTransactionPrompt(slug, prompt)` takes whatever string the caller hands it; for a human surface that string can be one sentence.
+
+**Build implication:** the prompt-builder split (point 1) produces a *per-surface* per-transaction builder — a minimal locator-trigger for conversation surfaces, an assembled frame for autonomous beats — **not one uniform shrink**. Lands with T-3 (first surface = philosophy-beat, which is an *assembled* surface) and the minimal-trigger form proves out at T-6 (conversation surfaces).
+
 ### Signature preservation under tmux (Fix 3 from the silent-fail-directive-audit)
 
 Cross-reference: `plans/silent-fail-directive-audit.md` Section C + this morning's v2 fix-list in audit thread `mpria0tk-rj9ae2`.
