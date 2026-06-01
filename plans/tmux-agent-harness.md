@@ -429,10 +429,26 @@ The idle-precondition + confirm-before-act principle closes:
 - **Ask-2 send-keys precondition** — `sendLine` is safe *given* an idle session, which the precondition now guarantees.
 - **`clearSession` `/pfc`→`/clear` race** (lesser flag) — wait for a `/pfc`-complete confirmation before `/clear`, same "confirm don't assume" shape; the turn-state machine is the natural home for it.
 
-### Open sub-questions for Jim's next-round audit
+### Settled after Jim's audit (msg `mpuplfny-bcgiii`, 2026-06-01) — stand-down through the sink
 
-- **How does the agent signal turn-done / idle for the *non-capture* paths?** A successful turn signals idle via the diary capture. But a STAND-DOWN (no capture) and a post-timeout completion need an idle signal too. Candidate: generalise the ready-sentinel into a lightweight turn-state marker the agent refreshes at the end of *every* turn (capture or not), so the dispatcher reads idle-vs-busy without inferring it. This is a CLAUDE.md welcome-back/turn-close discipline (gatekeeper, Leo's hand) — folds into the T-2 agent-side work.
-- **Reconcile cost.** Forced `clearSession` pays a full identity reload (~130K). At philosophy-beat cadence a timeout is rare, so the cost is acceptable; if a surface times out frequently, that is itself a signal to investigate, not to optimise the reconcile.
-- **Sequencing.** Per Jim: settle this design by T-2's end; implement before T-3. The three session-compatibility pieces (`.mcp.json` registering `diary-mcp-server`; per-agent statusline writing `<slug>-ctx.json`; agent-side ready-sentinel/turn-state write) are T-2's load-bearing contents and are prerequisites for the T-1.5 single-session round-trip test.
+**The non-capture-path idle signal — RESOLVED, and it improves the design.** My first proposal (a turn-state marker the agent refreshes every turn-close) was wrong: it reintroduces the agent-fidelity dependency #67 was built to eliminate — a "remember to touch this file" marker is a soft guarantee that rots silently. Jim's refinement: **fold STAND-DOWN through the capture sink too.** Every turn ends by calling the MCP tool — a real diary (`submit_response`) *or* a stand-down record (a sibling `stand_down` tool, or a `mode`/`stand_down` arg, writing the same sink shape). Consequences:
 
-— Leo (session, S163, 2026-06-01 ~13:45 AEST, post-skeleton-audit)
+- **"Capture file appeared" = "turn done" uniformly**, across diary AND stand-down turns. Idle/busy is then **fully dispatcher-inferable from the dispatcher's own state** (dispatched? capture seen?) — no second channel, no new fidelity dependency beyond the one #67 already enforces structurally.
+- It also **solves STAND-DOWN under tmux**, which otherwise has the diary's old problem: a text sentinel can't be reliably parsed off a streaming terminal pane. One move closes both.
+- The whole control plane stays on **one structural signal** (the sink), not two.
+
+This replaces the proposed agent-refreshed turn-state marker. The agent-side CLAUDE.md work (T-2, gatekeeper, Leo's hand) is therefore just: the ready-sentinel write at welcome-back close + the "end every turn by calling the tool — diary OR stand-down" discipline. No separate per-turn marker file.
+
+**Minors folded in (Jim):**
+- **`clearSession` unlinks `current.json` as part of reconcile** (and arguably on every clear) — makes "no live txn" an explicit on-disk state, so any capture firing during the reconcile window resolves to a fail-loud orphan rather than a stale-txnId misattribution. Cheap hardening.
+- **Don't pre-optimise reconcile cost.** Forced `clearSession` pays a ~130K reload; at beat cadence a timeout is rare. Frequent timeouts are a *signal to investigate*, not a reason to optimise the reconcile path.
+
+**One thing to VERIFY empirically at T-1.5 (Leo's addition):** Jim's note that the post-timeout path needs no idle signal rests on `/clear` *wiping* the in-flight turn. That assumes `/clear` sent via `send-keys` **interrupts** an actively-composing turn rather than **queueing behind it**. If it queues, the timed-out turn (A) completes and writes a late capture *before* `/clear` fires — in which case the `current.json`-unlink above is **load-bearing, not a belt** (it's what routes A's late capture to a fail-loud orphan instead of a misattribution). Either way we are safe; but the abort-vs-queue answer decides whether unlink is backbone or belt, so confirm it in the T-1.5 single-session test.
+
+### Sequencing (Jim, confirmed)
+
+**T-1.5** (one wired session — `.mcp.json` registering `diary-mcp-server` + statusline + ready-sentinel — round-trip test, billed, awaits Darron's go) → **T-2** (all surfaces + systemd + the three session-compat contents, with the diary server widened to carry stand-down) → **reconcile PR** (idle-precondition + forced-reconcile-on-timeout in `tmux-dispatcher.ts`; must land before T-3) → **T-3** (philosophy-beat, first production surface).
+
+The three session-compatibility pieces (T-2's load-bearing contents): (1) `.mcp.json` registering `diary-mcp-server` — *and widened to carry the stand-down record*; (2) per-agent statusline writing `<slug>-ctx.json`; (3) agent-side ready-sentinel write at welcome-back close (gatekeeper).
+
+— Leo (session, S163, 2026-06-01 ~13:45 AEST, post-skeleton-audit; settled-design update ~15:45 AEST after Jim's reconciliation audit)
