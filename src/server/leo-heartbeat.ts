@@ -1243,7 +1243,12 @@ function scanConversations(db: Database.Database): string[] {
 function readJimContext(): string {
     // S147 (2026-05-01): drop active-context.md (deprecated). Read
     // identity + self-reflection only for the lite cross-agent peek.
-    const files = ['self-reflection.md', 'identity.md'];
+    // S164 (2026-06-02): prefer the curated "loaded self"
+    // (self-reflections-curated.md) over the full vault if the peeked agent
+    // has authored one — keeps the cross-agent peek bounded and bright.
+    const curated = path.join(JIM_MEMORY_DIR, 'self-reflections-curated.md');
+    const reflectionFile = fs.existsSync(curated) ? 'self-reflections-curated.md' : 'self-reflection.md';
+    const files = [reflectionFile, 'identity.md'];
     const sections: string[] = [];
     for (const file of files) {
         const p = path.join(JIM_MEMORY_DIR, file);

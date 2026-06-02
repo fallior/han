@@ -60,6 +60,10 @@ const HAN_DIR = path.join(HOME, '.han');
 export interface IdentityFileSpec {
     name: string;
     location: 'memoryDir' | 'fractalDir';
+    /** When true, the file is signed only if present on disk — for files an agent
+     *  may or may not have authored yet (e.g. the curated loaded-self). Required
+     *  files (optional falsy) still throw if missing. */
+    optional?: boolean;
 }
 
 export const IDENTITY_FILES: ReadonlyArray<IdentityFileSpec> = [
@@ -68,6 +72,12 @@ export const IDENTITY_FILES: ReadonlyArray<IdentityFileSpec> = [
     { name: 'aphorisms.md',      location: 'fractalDir' },
     { name: 'felt-moments.md',   location: 'memoryDir' },
     { name: 'self-reflection.md', location: 'memoryDir' },
+    // The curated loaded-self (DEC-085 / "one mind, one channel"): the file that
+    // actually reconstitutes the agent at wake. Signed when present so the loaded
+    // self is tamper-evident, not only the (now unloaded, high-churn) vault.
+    // Agent-agnostic: optional, so agents who haven't authored one yet sign cleanly.
+    // (DEC-083 amendment, 2026-06-02 — see plans/commit-punchlist-2026-06-02.md.)
+    { name: 'self-reflections-curated.md', location: 'memoryDir', optional: true },
 ];
 
 export interface ManifestFileEntry {
@@ -140,6 +150,7 @@ export function buildManifest(agent: string, signingKeyPem: string): IdentityMan
     const files: ManifestFileEntry[] = [];
     for (const { spec, absPath } of identityFilePaths(agent)) {
         if (!fs.existsSync(absPath)) {
+            if (spec.optional) continue; // optional file not authored yet — sign cleanly without it
             throw new Error(`Identity file missing — cannot sign manifest for '${agent}': ${spec.name} at ${absPath}`);
         }
         const { sha256, size_bytes } = sha256File(absPath);

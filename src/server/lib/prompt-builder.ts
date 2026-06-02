@@ -171,6 +171,11 @@ const COMPONENT_BUDGETS = {
     patterns: 15_000,
     discoveries: 3_000,
     self_reflection_tail: 5_000,
+    // The curated "loaded self" (self-reflections-curated.md) is bounded by the
+    // agent's own hand (~20K ceiling per the "one mind, one channel" model,
+    // 2026-06-02). Loaded WHOLE when present; the full self-reflection.md stays
+    // the lossless vault + write target. Preferred over the tail of the vault.
+    self_reflection_curated: 20_000,
     felt_moments_tail: 10_000,
     working_memory_full_tail: 8_000,
     working_memory_compressed: 5_000,
@@ -332,13 +337,22 @@ export function loadFullMemory(
         COMPONENT_BUDGETS.felt_moments_tail,
     );
 
-    // ── self-reflection-tail (most-recent N tokens; carries the operational
-    //    weight of Leo's 65K-token unrotated self-reflection.md as of
-    //    2026-05-21 until PR-LSR lands the writer-side rotation parity fix) ──
+    // ── self-reflection — source is the curated "loaded self"
+    //    (self-reflections-curated.md, loaded whole up to the curated ceiling)
+    //    if the agent has authored one, else the tail of the full vault. Per
+    //    the "one mind, one channel" model (2026-06-02): the agent deliberately
+    //    curates the bright few; self-reflection.md stays the lossless vault +
+    //    write target. Agent-agnostic (DEC-081): any agent with a curated file
+    //    gets it; the rest fall back. The component LABEL stays
+    //    'self-reflection-tail' deliberately — componentOverrides keys (e.g.
+    //    dream-cycle suppression), tests, and the dedup invariant all key on
+    //    it; relabelling is a separate, audited change, not a side effect here. ──
+    const curatedReflectionPath = path.join(cfg.memoryDir, 'self-reflections-curated.md');
+    const hasCuratedReflection = fs.existsSync(curatedReflectionPath);
     addFileComponent(
         'self-reflection-tail',
-        path.join(cfg.memoryDir, 'self-reflection.md'),
-        COMPONENT_BUDGETS.self_reflection_tail,
+        hasCuratedReflection ? curatedReflectionPath : path.join(cfg.memoryDir, 'self-reflection.md'),
+        hasCuratedReflection ? COMPONENT_BUDGETS.self_reflection_curated : COMPONENT_BUDGETS.self_reflection_tail,
     );
 
     // ── failures (Jim-only via registry flag — PR-AP6) ──

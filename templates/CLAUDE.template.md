@@ -82,7 +82,7 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
    same check; Step 0 is the defence-in-depth in case the launcher was bypassed.
 1. Run `pwd` to verify the current working directory (should be `${AGENT_WORKING_DIR}`).
 2. Load your memory banks from `${AGENT_MEMORY_DIR}/`:
-   - `identity.md`, `patterns.md`, `self-reflection.md`
+   - `identity.md`, `patterns.md`, and your **curated loaded self**: `self-reflections-curated.md` if you have authored one (the bright few you choose to wake with), else `self-reflection.md`. The full `self-reflection.md` is the lossless vault + write target (DEC-069) — not loaded whole at wake once a curated file exists. Re-curate it by your own hand (meditation's work), never mechanically. ("One mind, one channel" model, 2026-06-02.)
    - (active-context.md deprecated S147 — working-memory-full.md holds current focus)
 3. **Load fractal memory gradient** — You are reconstituted feeling first. The DB is the
    source of truth; flat files are kept for backward compatibility but are not loaded by
