@@ -11,6 +11,7 @@ import {
     captureFullScrollback,
     stripAnsi
 } from '../services/terminal';
+import { searchTerminalLog } from '../lib/terminal-search';
 
 const { execFile } = require('child_process');
 
@@ -177,6 +178,38 @@ router.get('/api/terminal/history', (req: Request, res: Response) => {
         res.json({ success: true, content: tail, totalLines: allLines.length });
     } catch {
         res.json({ success: true, content: '', totalLines: 0 });
+    }
+});
+
+/**
+ * GET /api/terminal/search -- Search the permanent terminal log (provenance active link, P1)
+ *
+ * Read-only over ~/.han/terminal-log-v2.txt — the read layer of the c0↔log active link
+ * (plans/provenance-active-link.md §4). rg-backed for full scans; bounded in-memory tail
+ * for the default `recent` window. The read-only invariant (§4.3) lives in
+ * lib/terminal-search.ts and is the code-review gate for this route.
+ *
+ * Query: q (terms; space = AND, "quoted" = phrase) [required];
+ *        window (recent | all | ISO..ISO; default recent);
+ *        limit (default 10, max 100); context (default 3, max 20); i (1 = case-insensitive).
+ * → { success, matches: [{ timestamp, excerpt, lineNo, hasLocator }], scanned, truncated, window }
+ */
+router.get('/api/terminal/search', (req: Request, res: Response) => {
+    const TERMINAL_LOG = path.join(HAN_DIR, 'terminal-log-v2.txt');
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.status(400).json({ success: false, error: 'q (search terms) is required' });
+    try {
+        const result = searchTerminalLog(TERMINAL_LOG, {
+            q,
+            window: req.query.window ? String(req.query.window) : undefined,
+            limit: req.query.limit ? Number(req.query.limit) : undefined,
+            context: req.query.context ? Number(req.query.context) : undefined,
+            ignoreCase: req.query.i === '1' || req.query.i === 'true',
+        });
+        res.json({ success: true, ...result });
+    } catch (err: any) {
+        console.error('Error searching terminal log:', err);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
