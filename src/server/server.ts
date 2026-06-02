@@ -46,7 +46,7 @@ import proposalsRouter from './routes/proposals';
 import supervisorRouter from './routes/supervisor';
 import conversationsRouter from './routes/conversations';
 import jemmaRouter from './routes/jemma';
-import { startAckWatcher as startJemmaOrchestratorWatcher } from './services/jemma-orchestrator';
+import { startAckWatcher as startJemmaOrchestratorWatcher, stopAckWatcher } from './services/jemma-orchestrator';
 import gradientRouter from './routes/gradient';
 import tailscaleRouter from './routes/tailscale';
 import villageRouter from './routes/village';
@@ -368,6 +368,7 @@ process.on('SIGTERM', () => {
     serverPidGuard.cleanup();
     stopSupervisor();
     stopHeartbeat();
+    stopAckWatcher();
     clearInterval(terminalBroadcastInterval);
     clearInterval(orchestratorInterval);
     clearInterval(digestInterval);
@@ -375,11 +376,22 @@ process.on('SIGTERM', () => {
     clearInterval(ghostTaskInterval);
     clearInterval(broadcastSignalInterval);
     abortAllTasks();
-    try { db.close(); } catch {}
     wss.close();
-    server.close(() => {
-        // Exit with non-zero so systemd Restart=always knows this was a signal death,
-        // not a clean "I'm done" exit. 143 = 128 + 15 (SIGTERM).
+
+    // Clean-death floor (P0): exit even if server.close() hangs on lingering sockets,
+    // and close db AFTER the server stops (not before) so nothing polls a closed handle
+    // during the close window. The prior order (db.close before server.close) was the
+    // ghost-server cause: a hung server.close() never reached process.exit, orphaning a
+    // process with a closed db that the watchdog poll then spammed against.
+    let exited = false;
+    const die = () => {
+        if (exited) return;
+        exited = true;
+        try { db.close(); } catch { /* best effort */ }
+        // 143 = 128 + 15 (SIGTERM) so systemd Restart=always reads it as a signal death.
         process.exit(143);
-    });
+    };
+    server.close(die);
+    // Hard backstop: if sockets keep server.close() from calling back, force exit anyway.
+    setTimeout(die, 5000).unref();
 });

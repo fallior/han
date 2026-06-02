@@ -617,6 +617,11 @@ async function handleAllFailed(row: DispatchRow, states: RecipientState[]): Prom
 
 // ── Ack watcher ───────────────────────────────────────────────
 
+// Captured so it can be cleared on shutdown. An uncleared watchdog poll was the
+// ghost-server "[Orchestrator] Watchdog poll error: The database connection is not
+// open" spam: an orphaned server kept polling the closed db forever (P0 clean-death floor).
+let watchdogPollInterval: ReturnType<typeof setInterval> | null = null;
+
 export function startAckWatcher(): void {
     fs.mkdirSync(SIGNALS_DIR, { recursive: true });
 
@@ -655,7 +660,7 @@ export function startAckWatcher(): void {
     });
 
     // Watchdog poll
-    setInterval(() => {
+    watchdogPollInterval = setInterval(() => {
         checkWatchdogs().catch(err =>
             console.error('[Orchestrator] Watchdog poll error:', (err as Error).message)
         );
@@ -663,5 +668,14 @@ export function startAckWatcher(): void {
 
     // Startup sweep — reconcile any dispatches that completed while orchestrator was down
     checkWatchdogs().catch(err => console.error('[Orchestrator] Startup sweep error:', (err as Error).message));
+}
+
+// Clear the watchdog poll on shutdown so a server that orphans (server.close hangs on
+// lingering sockets) does not keep polling a closed db. Called from server.ts SIGTERM.
+export function stopAckWatcher(): void {
+    if (watchdogPollInterval) {
+        clearInterval(watchdogPollInterval);
+        watchdogPollInterval = null;
+    }
 }
 
