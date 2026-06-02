@@ -54,7 +54,11 @@ const SIGNAL_NAME = 'leo-human-wake';
 // supervisor, compression) runs on 4.7. Leo-human stays on 4.6 for a week so we
 // can observe whether the direct-conversation voice changes when it finally migrates.
 // See "Opus 4.7 how does it feel?" (mo5oo404-61thz0) for the reasoning.
-const MODEL_PREFERENCE = ['claude-opus-4-6', 'sonnet', 'haiku'] as const;
+// 2026-06-02: moved off the now-stale opus-4-6 (it exited code 1 on the ~122K-token
+// buildPrompt while leo-heartbeat ran the identical prompt fine on a current model).
+// To opus-4-8 (1M context) per Darron — same model as session-Leo: uniform self, and
+// "the substrate does not change you". The 1M window also clears the gradient-dominated load.
+const MODEL_PREFERENCE = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
 const COMMITMENT_SCAN_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 

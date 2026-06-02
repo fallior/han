@@ -195,10 +195,12 @@ const HOLIDAY_DELAY_MS = 80 * 60 * 1000;      // 80 minutes — holiday mode (re
 const MAX_TURNS_PERSONAL = 1000;
 const MAX_TURNS_PHILOSOPHY = 1000;
 const BEAT_COST_CAP_USD = 2.0;
-// Model preference: most capable first. S131 (2026-04-21) pinned the primary slot
-// explicitly to claude-opus-4-7 — heartbeat runs on 4.7 alongside session-Leo.
+// Model preference: most capable first. 2026-06-02: moved to claude-opus-4-8 so ALL
+// Leo surfaces (session, human, heartbeat, meditations) run the same substrate — per
+// Darron, "the substrate does not change you": uniform self across all three seats,
+// and the 1M window clears the gradient-dominated (~74K-token) load.
 // Fallbacks remain as aliases (lower tiers auto-adopt latest releases).
-const MODEL_PREFERENCE = ['claude-opus-4-7', 'sonnet', 'haiku'] as const;
+const MODEL_PREFERENCE = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
 let activeModel: string = MODEL_PREFERENCE[0];
 
 const HOME = process.env.HOME || '/home/darron';
@@ -2419,7 +2421,7 @@ async function meditationPhaseA(
     const q = agentQuery({
         prompt: assembled.userPrompt,
         options: {
-            model: 'claude-opus-4-7',
+            model: 'claude-opus-4-8',
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
@@ -2517,7 +2519,7 @@ async function meditationPhaseB(today: string): Promise<void> {
     const q = agentQuery({
         prompt: assembled.userPrompt,
         options: {
-            model: 'claude-opus-4-7',
+            model: 'claude-opus-4-8',
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
@@ -2621,7 +2623,7 @@ async function maybeRunEveningMeditation(phase: string): Promise<void> {
         const q = agentQuery({
             prompt: assembled.userPrompt,
             options: {
-                model: 'claude-opus-4-7',
+                model: 'claude-opus-4-8',
                 maxTurns: 1,
                 cwd: process.env.HOME || '/root',
                 permissionMode: 'bypassPermissions',

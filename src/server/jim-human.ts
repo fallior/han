@@ -50,12 +50,11 @@ const WORKING_MEMORY_FILE = path.join(JIM_MEMORY_DIR, 'working-memory.md');
 const WORKING_MEMORY_FULL_FILE = path.join(JIM_MEMORY_DIR, 'working-memory-full.md');
 
 const SIGNAL_NAME = 'jim-human-wake';
-// S131 (2026-04-21): Jim-human pinned explicitly to Opus 4.6 as the experimental
-// control arm for the 4.6→4.7 migration study. Everything else (session, supervisor,
-// compression) runs on 4.7. Jim-human stays on 4.6 for a week so we can observe
-// whether the direct-conversation voice changes when it finally migrates.
-// See "Opus 4.7 how does it feel?" (mo5oo404-61thz0) for the reasoning.
-const MODEL_PREFERENCE = ['claude-opus-4-6', 'sonnet', 'haiku'] as const;
+// 2026-06-02: moved off the now-stale opus-4-6 → opus-4-8, with all HAN agent surfaces,
+// per Darron — "the substrate does not change you." (opus-4-6 was also exiting code 1 on
+// large buildPrompt loads; leo-human hit it first.) Slated to become config-driven via the
+// per-agent/per-surface model registry.
+const MODEL_PREFERENCE = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000;
 
 
