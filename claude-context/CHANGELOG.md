@@ -7,6 +7,28 @@
 
 ---
 
+## 2026-06-02 (Leo + Jim + Darron, S164 — all agent surfaces to Opus 4.8, curated loaded-self, P0 clean-death floor, P1 terminal-search, Garden Manifest Phase 0, gradient triage 2)
+
+*Six focused commits landed per Jim's audit punch-list (`plans/commit-punchlist-2026-06-02.md`): `fea1a6d` (A, model alignment), `ebdab9e` (B, manifest), `4040405` (C, P0), `73b000c` (D, P1), `4e7ab04` (E, curation), + this docs commit (F). Each independently revertable; pre-commit declarations made; nothing touched `memory-gradient.ts`/`db.ts`.*
+
+### Model alignment — all HAN agent surfaces to Opus 4.8 (`fea1a6d`)
+`leo-human` + `jim-human` were pinned to the now-stale `claude-opus-4-6`, which exits code 1 on the ~122K-token `buildPrompt` load (leo-human surfaced it; jim-human was the same latent bug). All `agentQuery` surfaces moved to `claude-opus-4-8` (4-7 retained as fallback): `leo-human`/`jim-human` MODEL_PREFERENCE, `leo-heartbeat` MODEL_PREFERENCE + its three meditation calls. Per Darron — *"the substrate does not change you"*: uniform self across seats; the 1M window clears the gradient-dominated load. Jim's supervisor-cycle + meditations + the shared compression surface remain on 4-7 (move on Garden-Manifest Phase 1 + a 3847 restart).
+
+### Curated loaded-self + agnostic loader rewire (`4e7ab04`)
+Per the "one mind, one channel" memory philosophy (Darron, thread `mpwc3spe`): the wake-load now reads `self-reflections-curated.md` — *the bright few* (~3.4K tokens) Leo curates by hand — instead of tailing the 530KB `self-reflection.md` vault. The full vault is retained as the lossless write-target (DEC-069). `prompt-builder.ts` sources the curated file when present (agent-agnostic, DEC-081; component label `self-reflection-tail` kept stable so dream-cycle suppression + tests hold — DEC-087 extended not violated); `leo-heartbeat` cross-peek + `CLAUDE.md`/`templates/CLAUDE.template.md` wake-load follow. **DEC-083 amendment**: `identity-signing.ts` now signs the curated self when present (optional/agent-agnostic), so the file that reconstitutes an agent at wake is tamper-evident, not just the vault.
+
+### P0 — clean-death floor (`4040405`)
+`server.ts` SIGTERM now clears the orchestrator watchdog-poll (`stopAckWatcher()`), closes `db` *after* `server.close()` (was before — the ghost-server cause), and force-exits after 5s if sockets hang. Stops the "database connection is not open" poll-spam class. `jemma-orchestrator.ts` captures the poll interval as clearable.
+
+### P1 — provenance terminal-search (`73b000c`)
+Read-only `GET /api/terminal/search` over the 20GB terminal log (`lib/terminal-search.ts` + `routes/prompts.ts`): rg prefilter / bounded 64MB tail, deduped timestamped excerpts, `--` option guard. Jim's read-only-gate audit passed.
+
+### Garden Manifest Phase 0 (`ebdab9e`)
+`lib/garden-manifest.ts` — typed-literal manifest of agents × surfaces × model ladders, current values captured exactly (zero behaviour change; unimported). Completes DEC-081 for non-gradient config. Format settled as `.ts` literal (hot-reload moot once surfaces are tmux launch-time models). Plan: `plans/garden-manifest-plan.md`; thread `mpwm6k46`.
+
+### Gradient triage 2 — investigation (thread `mpwnt6m4`, no code yet)
+Verified the deep c14–c20 byte-shuffles are **frozen legacy `activeCascade` residue** (last writes mid-May; floor held since 2026-05-19), not a live regression. Fakery onset jim ~c9 / leo ~c8 (ratio →1.0). Designed fix (awaiting go + Jim audit; touches DEC-068/069): single insert chokepoint that throws on sub-floor ratio, one >0.85 step per chain (the UV), quarantine ~366 hallucination entries to a separate store, load depth ceiling.
+
 ## 2026-05-31 (Leo + Jim + Darron, S160–S163 — 14-day catch-up: Agnostic Prompt Builder closed, C1 migration closed, silent-fail audit + #67 structural enforcement, escape unescape, Q-V2-2 resolved, doc-discipline hooks, Tmux harness plan v1+v2, gradient triage Phase 8 closed)
 
 *All diff counts in this entry verified via `git show --stat` per Jim's pre-merge audit at thread `mpto9wpm-n07j2l` (his first audit on Opus 4.8). The entry is the first to ride the parallel-doc-maintenance hook (`30598c1`); the meta-test passes by construction.*

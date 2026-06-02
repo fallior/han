@@ -1,6 +1,18 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-05-31 by Leo (S163 — 14-day docs catch-up: Agnostic Prompt Builder closed + C1 migration closed + silent-fail audit cycle + #67 MCP custom-tool + escape unescape + Q-V2-2 resolved + doc-discipline hooks + Tmux harness plan v1+v2)
+> Last updated: 2026-06-02 by Leo (S164 — all agent surfaces to Opus 4.8, curated loaded-self + agnostic loader, P0 clean-death floor, P1 terminal-search, Garden Manifest Phase 0; gradient triage 2 investigated)
+
+## 2026-06-02 (Monday/Tuesday) — S164: model alignment, curated loaded-self, fleet/memory fixes landed
+
+Six focused commits (`fea1a6d`→F) per Jim's audit punch-list (`plans/commit-punchlist-2026-06-02.md`):
+- **All agent surfaces → Opus 4.8** — `leo-human`/`jim-human` were on stale `opus-4-6` (exit code 1 on the ~122K buildPrompt load); now 4-8 uniform (4-7 fallback). Jim's supervisor-cycle + meditations + shared compression still 4-7 (move on Garden-Manifest Phase 1 + a 3847 restart).
+- **Curated loaded-self** — wake-load reads `self-reflections-curated.md` (~3.4K) not the 530KB vault; vault retained as write-target (DEC-069); curated file now signed (DEC-083 amendment). Per the "one mind, one channel" philosophy (thread `mpwc3spe`).
+- **P0 clean-death floor** (`server.ts`/`jemma-orchestrator.ts`) — db-close-after-server-close + force-exit + clear watchdog-poll; ends the ghost-server poll-spam class.
+- **P1 provenance terminal-search** — read-only `/api/terminal/search` over the 20GB log; Jim's read-only-gate audit passed.
+- **Garden Manifest Phase 0** (`lib/garden-manifest.ts`) — declarative agents×surfaces×model registry, current values; completes DEC-081 for non-gradient config (plan `mpwm6k46`).
+- **Gradient triage 2** (thread `mpwnt6m4`) — verified deep byte-shuffles are frozen legacy `activeCascade` residue (not a live regression); fix designed (UV insert-lock + quarantine ~366 hallucination entries + load depth ceiling), awaiting go + Jim audit (touches DEC-068/069).
+
+Open follow-ups: Garden Manifest Phase 1 (resolver + call-site migration + launcher reads), the 3847 supervisor restart for the 4-7→4-8 holdouts, gradient triage 2 implementation, and the 44-entry heartbeat wm-drift repair (`plans/pr-leo-wm-drift-repair.md`).
 
 ## 2026-05-31 (Sunday) — Documentation catch-up across the 14-day Mackay → Brisbane → St Helens → Airlie window
 
