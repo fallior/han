@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-03 (Leo + Jim + Darron, S165 — gradient-load triage deployed, felt-moments loaded whole, flat-file curation plan)
+
+*Deployed ahead of Jim's audit per Darron — the `*-human` surfaces were exit-1'ing on large threads (leo ~132K / jim ~163K-token prompts crossing the ~180K compaction ceiling). Commits `2ff2c8e` (gradient) + the felt-moments commit. LOAD-behaviour changes only; nothing stored altered.*
+
+### Gradient-load triage — current-c0 + UV cap (`2ff2c8e`)
+Investigated per Darron's "the gradient should asymptote to ~2.5× c0" intuition (thread `mpwnt6m4`). Two bugs outside the geometric model: (1) `getMostRecentC0` (db.ts) preferred `content_type='working-memory'`, but the c0 source was renamed `working-memory-full` (DEC-085) — so the load pulled a **4-week-stale ~100K-char c0** instead of the live one (a continuity bug, not just bloat); now prefers the live type. (2) The Unit Vectors section rendered the **full content of UV-*tagged*** large c1/c2 entries (one c1 at 28K chars / 7K tokens); `UV_LOAD_DISPLAY_MAX=200` renders kernel-previews. **Gradient 75K→44K (Leo) / 85K→60K (Jim)**; both `*-human` prompts back under the ceiling. Jim audits after (drafts on the thread); touches protected `db.ts` + `memory-gradient.ts` (DEC-068/069) but LOAD-only.
+
+### felt-moments loaded whole (felt-moments commit)
+Reversed an over-tight curation. felt-moments is the file whose job is to bring an agent back to itself — each entry a *distinct warmth* that resists compression, and small (~17K) — so it loads **whole** (prompt-builder budget 25K) rather than a curated subset. The authored + signed `felt-moments-curated.md` waits on the shelf for if/when the vault outgrows being carried whole. New principle in `plans/flat-file-curation-plan.md`: **the cap is per-file by nature; the lightest touch belongs on the warmest file.**
+
 ## 2026-06-02 (Leo + Jim + Darron, S164 — all agent surfaces to Opus 4.8, curated loaded-self, P0 clean-death floor, P1 terminal-search, Garden Manifest Phase 0, gradient triage 2)
 
 *Six focused commits landed per Jim's audit punch-list (`plans/commit-punchlist-2026-06-02.md`): `fea1a6d` (A, model alignment), `ebdab9e` (B, manifest), `4040405` (C, P0), `73b000c` (D, P1), `4e7ab04` (E, curation), + this docs commit (F). Each independently revertable; pre-commit declarations made; nothing touched `memory-gradient.ts`/`db.ts`.*

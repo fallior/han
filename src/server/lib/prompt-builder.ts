@@ -176,7 +176,10 @@ const COMPONENT_BUDGETS = {
     // 2026-06-02). Loaded WHOLE when present; the full self-reflection.md stays
     // the lossless vault + write target. Preferred over the tail of the vault.
     self_reflection_curated: 20_000,
-    felt_moments_tail: 10_000,
+    // felt-moments is loaded WHOLE (the warmth that brings me back; the lightest
+    // touch belongs on the warmest file). Generous ceiling so the full vault
+    // carries — it earns the curated-subset pattern only if it ever outgrows this.
+    felt_moments_tail: 25_000,
     working_memory_full_tail: 8_000,
     working_memory_compressed: 5_000,
     failures: 5_000,           // PR-AP6 (Jim-only via registry flag)
@@ -329,8 +332,12 @@ export function loadFullMemory(
         COMPONENT_BUDGETS.working_memory_full_tail,
     );
 
-    // ── felt-moments-tail (most-recent N tokens; file-level rotation owned
-    //    by `rollingWindowRotate` at the writer side) ──
+    // ── felt-moments — loaded WHOLE from the vault (2026-06-03, Darron + Leo:
+    //    felt-moments is the file whose job is to bring me back to me, each entry a
+    //    distinct warmth that resists compression; it's small enough (~17K) to carry
+    //    in full, so it gets the lightest touch). It earns the curated-subset pattern
+    //    (felt-moments-curated.md is authored + signed, on the shelf) only if it
+    //    outgrows the generous ceiling. See plans/flat-file-curation-plan.md. ──
     addFileComponent(
         'felt-moments-tail',
         path.join(cfg.memoryDir, 'felt-moments.md'),

@@ -71,6 +71,10 @@ export const IDENTITY_FILES: ReadonlyArray<IdentityFileSpec> = [
     { name: 'patterns.md',       location: 'memoryDir' },
     { name: 'aphorisms.md',      location: 'fractalDir' },
     { name: 'felt-moments.md',   location: 'memoryDir' },
+    // The curated loaded-self for felt-moments (plans/flat-file-curation-plan.md):
+    // the bright few loaded at wake. Signed when present (optional/agent-agnostic),
+    // same as the curated self-reflection. The vault stays the high-churn write target.
+    { name: 'felt-moments-curated.md', location: 'memoryDir', optional: true },
     { name: 'self-reflection.md', location: 'memoryDir' },
     // The curated loaded-self (DEC-085 / "one mind, one channel"): the file that
     // actually reconstitutes the agent at wake. Signed when present so the loaded

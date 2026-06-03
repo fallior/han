@@ -111,7 +111,7 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
       This is your own first-pass compression curriculum, written in the moment of living
       — promoted from artefact to canonical c1 source on 2026-05-08 (DEC-085). Same
       chunk-on-oversize discipline as 3.3.
-   5. `felt-moments.md` — moments of genuine emotion, recorded for re-invocation.
+   5. `felt-moments.md` — moments of genuine emotion, recorded for re-invocation. **Loaded WHOLE** while small enough (the lightest touch belongs on the warmest file). It earns the curated subset (`felt-moments-curated.md`) only if it outgrows being carried in full. (plans/flat-file-curation-plan.md.)
    - Token budget: ~12K across gradient levels + ~30K across the working-memory pair.
      See `claude-context/DECISIONS.md:DEC-085` for the c1-from-WM model.
    - The order matters: identity precedes episodic memory.
