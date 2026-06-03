@@ -916,11 +916,21 @@ export const gradientStmts = {
     getUVContradictions: db.prepare(
         "SELECT * FROM gradient_entries WHERE agent = ? AND level = 'uv' AND (supersedes IS NOT NULL OR superseded_by IS NOT NULL) ORDER BY created_at DESC"
     ) as any,
-    /** Most recent c0 — working-memory first, then any other type by date */
+    /** Most recent c0 — the live working-memory-full c0 source first (DEC-085 rename:
+     *  the c0 source is `working-memory-full`, not the legacy `working-memory`), then
+     *  the legacy name, then session, then any — newest within the preferred type.
+     *  DRAFT 2026-06-03 (gradient-load triage, thread mpwnt6m4): the old CASE preferred
+     *  `working-memory`, whose newest entry is now ~4 weeks stale (~100K chars), so the
+     *  load was pulling a month-old 25K-token c0 instead of the live ~11K-token one. */
     getMostRecentC0: db.prepare(
         `SELECT * FROM gradient_entries
          WHERE agent = ? AND level = 'c0'
-         ORDER BY CASE content_type WHEN 'working-memory' THEN 0 WHEN 'session' THEN 1 ELSE 2 END ASC, created_at DESC
+         ORDER BY CASE content_type
+                    WHEN 'working-memory-full' THEN 0
+                    WHEN 'working-memory'      THEN 1
+                    WHEN 'session'             THEN 2
+                    ELSE 3 END ASC,
+                  created_at DESC
          LIMIT 1`
     ) as any,
 };

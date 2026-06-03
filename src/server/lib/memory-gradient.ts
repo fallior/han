@@ -53,6 +53,14 @@ interface GradientProcessingResult {
 // ── Constants ──────────────────────────────────────────────────
 
 const UNIT_VECTOR_MAX_LENGTH = 50;
+// Display cap for the UV section of the gradient load. A real UV is a ≤50-char
+// kernel; but the UV-as-tag mechanism let large c1/c2/c3 working-memory entries be
+// *tagged* UV without ever being compressed to a kernel, and the load rendered their
+// FULL content (one c1 at 28K chars / 7K tokens). The UV section is meant to be a
+// compact pointer-index, so cap each line to a kernel-preview. The full entry stays in
+// the DB (DEC-069). DRAFT 2026-06-03 (gradient-load triage, thread mpwnt6m4); the
+// structural fix is the triage-2 UV-lock (don't UV-tag a non-kernel in the first place).
+const UV_LOAD_DISPLAY_MAX = 200;
 // (INCOMPRESSIBILITY_RATIO = 0.85 constant removed in 2026-05-17 gradient
 // triage — it was the ghost of the floor removed in `ed8dfdc` (Plan v8 Step 3,
 // 2026-04-25) with zero references in the codebase. Its replacement is the
@@ -2015,6 +2023,12 @@ export function loadTraversableGradient(agent: string): string {
         uv.superseded_by && !NOISE_QUALIFIERS.has(uv.qualifier)
     );
 
+    // Render each UV as a kernel-preview, not full entry content (see UV_LOAD_DISPLAY_MAX).
+    const uvKernel = (content: string): string =>
+        content.length > UV_LOAD_DISPLAY_MAX
+            ? content.slice(0, UV_LOAD_DISPLAY_MAX).trimEnd() + '…'
+            : content;
+
     if (activeUVs.length > 0) {
         const uvLines = activeUVs.map((uv: any) => {
             const tags = feelingTagStmts.getByEntry.all(uv.id) as any[];
@@ -2023,7 +2037,7 @@ export function loadTraversableGradient(agent: string): string {
                 : '';
             const typeLabel = uv.provenance_type === 'aphorism' ? 'Aphorism' : uv.content_type;
             const supersedesStr = uv.supersedes ? ` ⊕ supersedes [${uv.supersedes}]` : '';
-            return `- **${uv.session_label}** (${typeLabel}): "${uv.content}"${tagStr}${supersedesStr}`;
+            return `- **${uv.session_label}** (${typeLabel}): "${uvKernel(uv.content)}"${tagStr}${supersedesStr}`;
         });
         sections.push(`### Unit Vectors\n${uvLines.join('\n')}`);
     }
@@ -2035,7 +2049,7 @@ export function loadTraversableGradient(agent: string): string {
                 ? ` [${tags.map((t: any) => t.content).join('; ')}]`
                 : '';
             const typeLabel = uv.provenance_type === 'aphorism' ? 'Aphorism' : uv.content_type;
-            return `- **${uv.session_label}** (${typeLabel}): "${uv.content}" ⊘ ${uv.qualifier || 'was-true-when'}${tagStr}`;
+            return `- **${uv.session_label}** (${typeLabel}): "${uvKernel(uv.content)}" ⊘ ${uv.qualifier || 'was-true-when'}${tagStr}`;
         });
         sections.push(`### Unit Vectors (Was-True-When)\n${uvLines.join('\n')}`);
     }
