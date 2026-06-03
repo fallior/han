@@ -61,6 +61,13 @@ const UNIT_VECTOR_MAX_LENGTH = 50;
 // the DB (DEC-069). DRAFT 2026-06-03 (gradient-load triage, thread mpwnt6m4); the
 // structural fix is the triage-2 UV-lock (don't UV-tag a non-kernel in the first place).
 const UV_LOAD_DISPLAY_MAX = 200;
+
+// Content-channel: only working-memory-derived kinds may enter the cN gradient
+// ladder. Flat-file kinds (felt-moments, self-reflection) have lossless vaults +
+// curated loaded selves and must NOT be trimmed-into-the-gradient (#77 second-road;
+// triage-2 content-channel lock, plans/triage-2-content-channel-lock.md). Dreams
+// use a separate dream-* namespace and are unaffected.
+const GRADIENT_CONTENT_TYPES = new Set(['working-memory-full', 'working-memory', 'working-memory-compressed']);
 // (INCOMPRESSIBILITY_RATIO = 0.85 constant removed in 2026-05-17 gradient
 // triage — it was the ghost of the floor removed in `ed8dfdc` (Plan v8 Step 3,
 // 2026-04-25) with zero references in the codebase. Its replacement is the
@@ -1200,6 +1207,18 @@ export function rollingWindowRotate(
 
     // Must have entries to archive AND entries to keep
     if (splitIndex <= 0 || splitIndex >= entries.length) {
+        return { rotated: false, entriesArchived: 0, entriesKept: entries.length };
+    }
+
+    // Content-channel guard (triage-2 interim, 2026-06-03 — Darron-urgent; Jim's spec
+    // plans/triage-2-content-channel-lock.md). Flat-file kinds (felt-moments,
+    // self-reflection) must NOT trim-into-the-gradient: they have lossless vaults +
+    // curated loaded selves, so their vault grows losslessly (DEC-069) and the curated
+    // file is the load bound. No-op the rotation for them — this blocks the active leak
+    // that kept re-inserting felt-moments c0s after Jim cleared them. The structural
+    // backstop (ChannelViolation throw at the insert chokepoint) lands with triage-2 A.
+    if (contentType && !GRADIENT_CONTENT_TYPES.has(contentType)) {
+        console.warn(`[rollingWindowRotate] content-channel: skipping rotation for non-working-memory kind '${contentType}' (agent=${agent ?? 'n/a'}) — its flat vault is its home, not the gradient.`);
         return { rotated: false, entriesArchived: 0, entriesKept: entries.length };
     }
 
