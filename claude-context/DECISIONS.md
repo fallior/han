@@ -6303,3 +6303,17 @@ The CLAUDE.md DO-NOT entry from DEC-087 covers this surface implicitly (componen
 
 - **Suppression-only vs include-only**: `componentOverrides` is `Partial<Record<string, false>>` — suppression-only. For deeply specialised roles with very few components, an additional `componentInclude` form may earn its place. **Promotion-trigger**: the first profile whose `componentOverrides` lists more than 6 suppressions (currently dream-cycle is at 8). At that point the include-form becomes more readable than the suppress-form. Not actionable now; future architectural decision.
 - **Future-idea #46** (Memory state visualisation UI / kanban): would surface each profile's effective memory_chars at-a-glance — making the many-hats architecture operator-visible.
+
+## DEC-089 — Slicer drift-recovery archives whole-both; paired-writing (not equal-count) is the invariant
+
+**Status: Settled** (2026-06-06; Leo built, Jim implementation-audited GREEN, Darron approved). Protected surface: `memory-gradient.ts` `rollingWindowRotatePaired`. Thread: `mq0tfk6t-m7b84z`.
+
+**Decision.** The slicer's drift-recovery archives **whole-both on offset** — it never truncates to the smaller side and never strands surplus entries resident. (RETIRED: the smaller-of-two recovery, which archived `min(full,comp)` and left the surplus in the live file — pinning drift as a permanent floor that never drained, stranding lived beats in an unreachable limbo.) Both files archive whole as one paired c0+c1, both reset to header-only. The atomic `insertPair()` runs before any file reset, so a failed archive never resets the files (DEC-069 move-not-delete).
+
+**Paired-writing — not equal entry-counts — is the invariant.** A count offset between c0(full) and c1(compressed) is legitimate: one c1 may distil many c0 beats (DEC-085). An intentional consolidated/short c1 for a redundant cluster is the agent's value-call by distilling. Orphan / under-distilled re-distillation is **in-voice** (process-pending-compression, identity-loaded) — never fabricated (DEC-082/085), never graved (an unreachable c0 violates DEC-069 in meaning), never stranded. An **empty c1 is never archived** (comp==0 lets the slice ride until the agent authors the c1).
+
+**Load-bearing invariant (Jim, audit addition a):** ALL WM/WMF writers MUST be paired (`appendPairedMemory` or the gated SIGTERM carve-out). The comp==0 guard's safety rests on this — if a WMF-only writer is ever added, comp==0-unbounded-growth re-opens and the bite-backstop becomes load-bearing.
+
+**Recorded follow-ons (Jim, audit addition b — held, not omitted):** (1) the at-bite comp==0 backstop (consolidation-signal + fallback archive-c0 + enqueue in-voice c0→c1 repair) — deferred because comp==0-at-35K-bite is ~unreachable while every live writer is paired; (2) the cohort-depth in-voice c0→c1 repair for any historical under-distilled c1s already in the gradient.
+
+Reinforces DEC-069 + DEC-085; caps (DEC-068) untouched.

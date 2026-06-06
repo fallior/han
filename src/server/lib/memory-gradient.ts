@@ -1610,6 +1610,7 @@ export interface PairedRotationResult {
     reason:
         | 'below-trigger'
         | 'no-marker-let-ride'
+        | 'comp-empty-let-ride'
         | 'fabrication-failed'
         | 'paired-file-missing'
         | 'paired-insert-failed'
@@ -1749,34 +1750,54 @@ export function rollingWindowRotatePaired(
     let compArchive: string;
 
     if (fullEntryCount !== compEntryCount) {
+        // B-1 (DEC pending Jim's diff-audit, 2026-06-06): a count offset between
+        // c0(full) and c1(compressed) is LEGITIMATE, not an error — one c1 may
+        // distil many c0 beats (DEC-085), so full > comp is the normal raw-vs-
+        // distilled shape. The RETIRED smaller-of-two recovery truncated to min()
+        // and left the surplus RESIDENT, which pinned drift as a permanent floor
+        // (it never drained) and stranded lived beats in limbo. New behaviour:
+        // archive the WHOLE of both files and reset both clean — the offset is
+        // informational, nothing is stranded, the residue drains into one lossless
+        // c0. (Jim Q3) When comp under-distils a redundant cluster (comp>0 but
+        // <full), the proper c1 resolution is the agent's in-voice consolidation
+        // authored BEFORE the slice; whole-both then archives a proper pair. The
+        // c0 is lossless and reachable regardless.
         drift = { fullEntries: fullEntryCount, compEntries: compEntryCount };
+        // comp==0 guard (Jim Q4): NEVER archive an empty c1 (an empty c1 is the
+        // unreachable-once-displaced problem). Let it ride; the agent must author
+        // the c1 (consolidation) first. NOTE for diff-audit: the full bite-backstop
+        // (at-bite-comp==0 → consolidation-signal + fallback archive-c0+enqueue-
+        // c0→c1-repair) is NOT built here — it needs a c0-only-insert path for an
+        // edge that paired-writing (B-3) makes ~unreachable; flagged for Jim's call.
+        if (compEntryCount === 0) {
+            logRotationEvent({
+                kind: 'offset-comp-empty-let-ride',
+                agent,
+                full_entries: fullEntryCount,
+                compressed_entries: 0,
+                wmf_tail_size_tokens: fullTokens,
+                trigger,
+                boundary_id: chosenMarker.id,
+                note: 'comp side empty — never archive empty c1; awaiting in-voice consolidation',
+            });
+            return { rotated: false, reason: 'comp-empty-let-ride' };
+        }
         logRotationEvent({
-            kind: 'paired_write_drift',
+            kind: 'paired_write_offset',
             agent,
             full_entries: fullEntryCount,
             compressed_entries: compEntryCount,
             wmf_tail_size_tokens: fullTokens,
             trigger,
-            recovery: 'using-smaller-count-whole-file',
+            recovery: 'archive-whole-both-offset-ok',
             boundary_id: chosenMarker.id,
         });
-        // Smaller-of-two recovery: archive only the first N entries from each
-        // (where N = smaller count). The surplus entries on the larger side
-        // remain in the live file for the next rotation.
-        const smallerCount = Math.min(fullEntryCount, compEntryCount);
-        if (smallerCount === 0) {
-            // Edge case: one side has zero entries (only header). Skip slice.
-            return { rotated: false, reason: 'no-marker-let-ride' };
-        }
-        const fullCutPos = fullEntries[smallerCount - 1].charEnd;
-        const compCutPos = compEntries[smallerCount - 1].charEnd;
-        fullArchive = stripMarkers(fullToUse.substring(0, fullCutPos));
-        compArchive = stripMarkers(compToUse.substring(0, compCutPos));
-    } else {
-        // Clean parity — whole-file slice
-        fullArchive = stripMarkers(fullToUse);
-        compArchive = stripMarkers(compToUse);
     }
+    // Whole-file slice in ALL cases (offset-ok or clean parity): c0 = lossless
+    // raw, c1 = distillation at the agent's chosen resolution. No truncation,
+    // no stranding (B-1, 2026-06-06).
+    fullArchive = stripMarkers(fullToUse);
+    compArchive = stripMarkers(compToUse);
 
     const fullArchivedTokens = countTokens(fullArchive);
     const compressedArchivedTokens = countTokens(compArchive);
@@ -1816,21 +1837,14 @@ export function rollingWindowRotatePaired(
     // The drift-recovery branch leaves surplus entries in the live file; the
     // clean-parity branch resets to just the header. Either way, no overlap
     // between live and gradient.
-    if (drift) {
-        // Surplus entries on the larger side stay in the live file for next slice.
-        const smallerCount = Math.min(fullEntryCount, compEntryCount);
-        const fullSurplus = fullEntries.slice(smallerCount).map(e => e.content).join('\n\n');
-        const compSurplus = compEntries.slice(smallerCount).map(e => e.content).join('\n\n');
-        const fullHead = fullFileHeader || `# ${path.basename(fullFilePath, '.md')}\n`;
-        const compHead = compressedFileHeader || `# ${path.basename(compressedFilePath, '.md')}\n`;
-        fs.writeFileSync(fullFilePath, fullHead + (fullSurplus ? '\n' + fullSurplus + '\n' : '\n'), 'utf8');
-        fs.writeFileSync(compressedFilePath, compHead + (compSurplus ? '\n' + compSurplus + '\n' : '\n'), 'utf8');
-    } else {
-        const fullHead = fullFileHeader || `# ${path.basename(fullFilePath, '.md')}\n`;
-        const compHead = compressedFileHeader || `# ${path.basename(compressedFilePath, '.md')}\n`;
-        fs.writeFileSync(fullFilePath, fullHead + '\n', 'utf8');
-        fs.writeFileSync(compressedFilePath, compHead + '\n', 'utf8');
-    }
+    // B-1 (2026-06-06): ALWAYS reset both files to header-only. whole-both archives
+    // EVERYTHING, so there is never surplus to leave resident (RETIRED: the drift
+    // branch that stranded surplus entries and pinned the drift floor). `drift` is
+    // still set above for the rotation-success log, but no longer changes the reset.
+    const fullHead = fullFileHeader || `# ${path.basename(fullFilePath, '.md')}\n`;
+    const compHead = compressedFileHeader || `# ${path.basename(compressedFilePath, '.md')}\n`;
+    fs.writeFileSync(fullFilePath, fullHead + '\n', 'utf8');
+    fs.writeFileSync(compressedFilePath, compHead + '\n', 'utf8');
 
     // Cascade c1→c2+ (NOT c0→c1 — c1 already inserted directly).
     void bumpOnInsert(agent, 'c1').catch((err: Error) => {

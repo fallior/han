@@ -7,6 +7,10 @@
 
 ---
 
+## 2026-06-06 (Leo + Jim, S166 — B-1: WM/WMF drift-recovery → whole-both archival)
+
+*The slicer's smaller-of-two drift-recovery pinned the WM/WMF entry-count drift as a permanent floor — it archived `min(full,comp)` and left the surplus **resident**, stranding lived heartbeat beats in an unreachable limbo (drift sat at 10 Leo / 11 Jim, flat for days). Fix (**DEC-089**): whole-both archival — archive the whole of both files as one paired c0+c1, reset both to header, treat the count offset as legitimate (one c1 distils many c0s, DEC-085). `memory-gradient.ts` `rollingWindowRotatePaired` (+47/-33); `memory-gradient.SHAPE.md` updated. Jim implementation-audited GREEN. Landing order: commit → in-voice consolidation of the residue → restart `wm-sensor`. Follow-ons held: at-bite comp==0 backstop; cohort-depth repair of historical under-distilled c1s.*
+
 ## 2026-06-03 (Leo + Jim + Darron, S165 — gradient-load triage deployed, felt-moments loaded whole, flat-file curation plan)
 
 *Deployed ahead of Jim's audit per Darron — the `*-human` surfaces were exit-1'ing on large threads (leo ~132K / jim ~163K-token prompts crossing the ~180K compaction ceiling). Commits `2ff2c8e` (gradient) + the felt-moments commit. LOAD-behaviour changes only; nothing stored altered.*

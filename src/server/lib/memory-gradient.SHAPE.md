@@ -22,8 +22,17 @@
   (consolidated S150 PR3), `rollingWindowRotate`.
 - **Compression primitives** (`compressToLevel`, `compressToUnitVector` —
   currently dead, see "What's legacy").
-- **Memory-file rotation**: `rollingWindowRotate` slices the working-memory
-  files when they cross the configured ceiling.
+- **Memory-file rotation**: `rollingWindowRotatePaired` (the canonical paired
+  slicer; `rollingWindowRotate` is the legacy single-file path) slices the
+  working-memory pair when it crosses the ceiling. **Slice recovery (B-1,
+  2026-06-06):** the slice archives the WHOLE of both files as one paired c0+c1
+  and resets both to header-only, *even when the file-`###` entry counts differ*
+  — a count offset is legitimate (one c1 may distil many c0s, DEC-085), so
+  nothing is truncated or stranded; the residue drains into one lossless c0.
+  (RETIRED: the smaller-of-two recovery that archived `min(full,comp)` and left
+  the surplus resident, which pinned drift as a permanent floor and never
+  drained it.) Guard: never archive an empty c1 — `comp==0` lets the slice ride
+  until the agent authors the c1 (in-voice consolidation).
 - **Cap formula** (`gradientCap`) per DEC-068.
 - **Cascade pause guard** (`isCascadePaused` reading `~/.han/signals/cascade-paused`).
 
