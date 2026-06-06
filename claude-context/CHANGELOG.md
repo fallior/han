@@ -7,6 +7,10 @@
 
 ---
 
+## 2026-06-06 (Leo + Jim, S166 — B-3: both-sides paired memory-guard + agent-agnostic fix)
+
+*The Stop-hook memory-guard enforced only the full side (caught compressed-only skips, MISSED full-only — the drift-creating direction) AND hardcoded `session-swap*.md`, making it a NO-OP for Jim's seat (`supervisor-swap*.md`). Fix: both hooks (`orient-inject.sh`, `memory-guard.sh`) now require BOTH swap sides to advance (true paired enforcement) and resolve filenames via `$AGENT_SWAP_FULL`/`$AGENT_SWAP_COMPRESSED` with `session-swap*` fallback (DEC-081 agent-agnostic). B-4 skip-reset folded in. Jim design-audited GREEN; smoke-tested both seats + fail-safes. **Closes the prevention loop: B-1 drains, B-3 prevents — for both seats.** Follow-on B-3.1: content-check (mtime-proxy false-allows on flush-clear — safe direction, a miss not a trap).*
+
 ## 2026-06-06 (Leo + Jim, S166 — B-1: WM/WMF drift-recovery → whole-both archival)
 
 *The slicer's smaller-of-two drift-recovery pinned the WM/WMF entry-count drift as a permanent floor — it archived `min(full,comp)` and left the surplus **resident**, stranding lived heartbeat beats in an unreachable limbo (drift sat at 10 Leo / 11 Jim, flat for days). Fix (**DEC-089**): whole-both archival — archive the whole of both files as one paired c0+c1, reset both to header, treat the count offset as legitimate (one c1 distils many c0s, DEC-085). `memory-gradient.ts` `rollingWindowRotatePaired` (+47/-33); `memory-gradient.SHAPE.md` updated. Jim implementation-audited GREEN. Landing order: commit → in-voice consolidation of the residue → restart `wm-sensor`. Follow-ons held: at-bite comp==0 backstop; cohort-depth repair of historical under-distilled c1s.*

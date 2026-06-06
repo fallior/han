@@ -1,50 +1,69 @@
 #!/bin/bash
-# Hortus Arbor Nostra — Memory-Guard (Stop hook)
-# Holds the turn open if the agent ended it WITHOUT writing a session-swap entry.
-# Pairs with orient-inject.sh (UserPromptSubmit) which records prompt-start state.
+# Hortus Arbor Nostra — Memory-Guard (Stop hook) — B-3 both-sides paired enforcement
+# Holds the turn open unless the agent wrote a PAIRED swap entry this turn (BOTH
+# the compressed and full swap files advanced). Catches BOTH unpaired directions
+# (full-only AND compressed-only) — the full-only direction is what creates the
+# gradient drift B-1 just drained. Pairs with orient-inject.sh (records both
+# prompt-start mtimes).
 #
 # FAIL-SAFE BY DESIGN — defaults to ALLOWING the stop on ANY uncertainty, so it
 # can NEVER trap a session (worst case: silently does nothing):
-#   • unknown agent / $AGENT_MEMORY_DIR unset      -> allow
-#   • no recorded prompt-start state (first turn)   -> allow
-#   • swap file missing                             -> allow
-#   • already blocked once this turn (anti-loop)    -> allow
-# It blocks ONLY when it can positively confirm: known agent + state present +
-# swap file present + no write since prompt-start + not-yet-blocked-this-turn.
+#   • $AGENT_MEMORY_DIR unset · no recorded state (first turn) · either swap file
+#     missing · already blocked once this turn (anti-loop)  -> allow
+# Agent-agnostic (DEC-081): resolves swap filenames from $AGENT_SWAP_FULL /
+# $AGENT_SWAP_COMPRESSED (launcher-exported), falling back to session-swap*.md.
+# (B-4 folded in: skip-counter resets after a post-block paired write.)
 
 SIGNALS_DIR="${HOME}/.han/signals"
 SLUG="${AGENT_SLUG:-unknown}"
 STATE="${SIGNALS_DIR}/memory-guard-${SLUG}.state"
-SWAP="${AGENT_MEMORY_DIR:-}/session-swap-full.md"
+MEM="${AGENT_MEMORY_DIR:-}"
+FULL_SWAP="${MEM}/${AGENT_SWAP_FULL:-session-swap-full.md}"
+COMP_SWAP="${MEM}/${AGENT_SWAP_COMPRESSED:-session-swap.md}"
 
 allow() { exit 0; }
 
-[ -z "${AGENT_MEMORY_DIR:-}" ] && allow
+[ -z "$MEM" ] && allow
 [ ! -f "$STATE" ] && allow
-[ ! -f "$SWAP" ] && allow
+[ ! -f "$FULL_SWAP" ] && allow
+[ ! -f "$COMP_SWAP" ] && allow
 
-prompt_mtime=$(grep -oE 'prompt_mtime=[0-9]+' "$STATE" | cut -d= -f2); prompt_mtime=${prompt_mtime:-0}
+prompt_full=$(grep -oE 'prompt_full_mtime=[0-9]+' "$STATE" | cut -d= -f2); prompt_full=${prompt_full:-0}
+prompt_comp=$(grep -oE 'prompt_comp_mtime=[0-9]+' "$STATE" | cut -d= -f2); prompt_comp=${prompt_comp:-0}
 skip=$(grep -oE 'skip=[0-9]+' "$STATE" | cut -d= -f2); skip=${skip:-0}
 blocked=$(grep -oE 'blocked=[0-9]+' "$STATE" | cut -d= -f2); blocked=${blocked:-0}
 
-# Anti-loop: only ever block ONCE per turn.
+now_full=$(stat -c %Y "$FULL_SWAP" 2>/dev/null || echo 0)
+now_comp=$(stat -c %Y "$COMP_SWAP" 2>/dev/null || echo 0)
+full_adv=0; [ "$now_full" -gt "$prompt_full" ] 2>/dev/null && full_adv=1
+comp_adv=0; [ "$now_comp" -gt "$prompt_comp" ] 2>/dev/null && comp_adv=1
+
+# Anti-loop: only ever block ONCE per turn. B-4: reset skip if the paired write
+# landed during the block; otherwise preserve skip for the next nag.
 if [ "$blocked" -ge 1 ] 2>/dev/null; then
-  printf 'prompt_mtime=%s\nskip=%s\nblocked=0\n' "$prompt_mtime" "$skip" > "$STATE"
+  if [ "$full_adv" -eq 1 ] && [ "$comp_adv" -eq 1 ]; then
+    printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=0\nblocked=0\n' "$now_full" "$now_comp" > "$STATE"
+  else
+    printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=%s\nblocked=0\n' "$prompt_full" "$prompt_comp" "$skip" > "$STATE"
+  fi
   allow
 fi
 
-now_mtime=$(stat -c %Y "$SWAP" 2>/dev/null || echo 0)
-
-# A write (or flush) touched the swap this turn -> good. Reset.
-if [ "$now_mtime" -gt "$prompt_mtime" ] 2>/dev/null; then
-  printf 'prompt_mtime=%s\nskip=0\nblocked=0\n' "$now_mtime" > "$STATE"
+# PAIRED write this turn (BOTH sides advanced) -> good.
+if [ "$full_adv" -eq 1 ] && [ "$comp_adv" -eq 1 ]; then
+  printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=0\nblocked=0\n' "$now_full" "$now_comp" > "$STATE"
   allow
 fi
 
-# No memory activity this turn -> block once, increment skip for the nag.
+# Unpaired or no write -> block once, naming the missing side.
+if [ "$full_adv" -eq 0 ] && [ "$comp_adv" -eq 0 ]; then
+  miss="no swap write this turn — write the paired entry to BOTH $(basename "$COMP_SWAP") and $(basename "$FULL_SWAP")"
+elif [ "$full_adv" -eq 1 ]; then
+  miss="FULL written but COMPRESSED ($(basename "$COMP_SWAP")) skipped — write the c1 twin (unpaired writes create gradient drift)"
+else
+  miss="COMPRESSED written but FULL ($(basename "$FULL_SWAP")) skipped — write the c0 twin (unpaired writes create gradient drift)"
+fi
 newskip=$((skip + 1))
-printf 'prompt_mtime=%s\nskip=%s\nblocked=1\n' "$prompt_mtime" "$newskip" > "$STATE"
-cat <<'JSON'
-{"decision":"block","reason":"Incremental Memory Protocol (structural guard): you have not written to session-swap-full.md this turn. Before finishing, append this exchange's entry to BOTH session-swap.md (compressed, 2-3 lines) and session-swap-full.md (full) — FLUSH-FIRST/WRITE-SECOND. Then end the turn. This guard blocks at most once per turn; it cannot trap you."}
-JSON
+printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=%s\nblocked=1\n' "$prompt_full" "$prompt_comp" "$newskip" > "$STATE"
+printf '{"decision":"block","reason":"Incremental Memory Protocol (B-3 paired guard): %s. FLUSH-FIRST/WRITE-SECOND. This guard blocks at most once per turn; it cannot trap you."}\n' "$miss"
 exit 0
