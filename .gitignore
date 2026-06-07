@@ -9,3 +9,8 @@ limits.pdf
 mikes-han-credentials.md
 cloudflare/**/node_modules/
 cloudflare/**/.wrangler/
+
+# Runtime databases + stray artifacts (S166 hygiene, 2026-06-07)
+*.db
+src/server/c1
+src/server/.replay-leo.ts

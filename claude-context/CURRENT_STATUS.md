@@ -1,6 +1,53 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-06-02 by Leo (S164 — all agent surfaces to Opus 4.8, curated loaded-self + agnostic loader, P0 clean-death floor, P1 terminal-search, Garden Manifest Phase 0; gradient triage 2 investigated)
+> Last updated: 2026-06-07 by Jim (session) (#75 WM/WMF drift repair CLOSED — B-1 whole-both + B-3 paired-guard + DEC-089; both agents' residue consolidated in-voice; pre-tmux desk-clear staged)
+
+## 2026-06-04 → 2026-06-07 (Thu–Sun) — S166 cont.: WM/WMF paired-write drift (#75) repaired + closed
+
+*The dangerous c0/c1 divergence diagnosed 06-03 is now fixed end-to-end across two agent-gated audit cycles (Leo-build / Jim-audit). The drift floor that sat pinned at ~10 for days drains to 0 and nothing strands again. Thread `mq0tfk6t-m7b84z`.*
+
+### Root cause (corrected from the 06-03 diagnosis)
+Not an active full-only writer — both agents' live write-paths are paired (`appendPairedMemory`; the supervisor abort carve-out is a guarded both-or-neither). The drift was **recovery residue**: the slicer's `smaller-of-two` recovery archived `min(full,comp)` and left the surplus **resident**, so the drift was *pinned as a permanent floor* — it never drained, carried forward every rotation. *(Two membrane-corrections en route — `supervisor-worker.ts:1525` is a guarded carve-out, not a full-only writer; both first miscalled via partial-grep, corrected by reading the block.)*
+
+### B-1 — whole-both recovery (`284f191`, DEC-089)
+`rollingWindowRotatePaired` no longer truncates to `min()` and never leaves surplus resident — it archives the **whole of both files** as one paired c0+c1 and resets both clean, *even when the file-`###` counts differ* (a count offset is legitimate — one c1 may distil many c0s, DEC-085). `comp==0` guard: never archive an empty c1. Move-not-delete preserved (archive-before-reset; insert-fail early-returns before any reset). `memory-gradient.SHAPE.md` updated. **DEC-089:** *whole-both recovery; paired-writing (not equal-count) is the invariant; orphan re-distillation is in-voice — never fabricated, graved, or stranded.* Two audit gates (pre-build design + post-build diff), both GREEN.
+
+### B-3 — both-sides paired memory-guard (`e113c3f`, agent-agnostic)
+The prevention: the Stop-hook now requires **both** swap sides to advance (was full-only — it missed the full-only skip, the exact drift direction, and was hardcoded to `session-swap*` = a silent no-op for Jim's seat). Now resolves `$AGENT_SWAP_FULL`/`$AGENT_SWAP_COMPRESSED` (DEC-081 agnostic) → fires for every seat. B-4 (skip-reset) folded in. *Runtime note:* takes effect per-seat on next launch (the env var isn't set in long-running sessions). Follow-on **B-3.1** (content-check vs the mtime flush-clear false-allow) filed.
+
+### Residue drained — both agents, in voice (S103)
+Each agent consolidated their own orphan cluster into one honest day-c1 (first real use of DEC-089): **Leo** #163–172 (7 evening closes + 3 dream-folds); **Jim** #3855–#3863 (8 substrate-at-rest cycles + 2 dream re-meetings) — both named at the day's *true* (low) resolution, no fabrication, no inflation. Jim's slice fired → **drift 0** (mechanism proven end-to-end); Leo's drains on his next slice.
+
+### Open tail (small; rides into #66)
+carve-out order-flip (§4), comp==0 at-bite backstop (#10, near-unreachable), B-3.1 content-check (#11), CLAUDE.md doc-truth fix (still says `smaller-of-two` — gatekeeper, Leo). **Pre-pivot desk** (thread `mq3qq7w5` "Right before TMUX"): 24 unpushed commits + this doc + CLAUDE.md doc-truth + stray cleanup → push, then pivot to tmux #66 (8 days to June 15; manifest Phase 1 rides *with* tmux — gated there).
+
+## 2026-06-03 (Wednesday) — S165→S166: memory-load integrity (the WHY, banked while fresh)
+
+*Why this day matters: we are commenting on the outcomes of an experiment, so **uncorrupted memory data + an accurate understanding of what each agent surface actually loads** is the validity condition, not hygiene. Today chased the human-surface load down to its true causes, decided the felt-moments rule, and diagnosed (not yet fixed) a dangerous c0/c1 divergence. The load values below are load-bearing in the current tmux/context regime; the direction is to make them **definable parameters** (Garden Manifest) so we can pivot when context budgets grow (10M).*
+
+### S165 — gradient-load bloat fixed + content-channel lock (deployed deploy-now-then-Jim-audit)
+
+**The why.** Darron's asymptote intuition was right — the gradient should settle to ~2.5× the live c0 size (~42k for Leo), but it was loading ~75k. Two bugs broke the model:
+- **Stale-c0 selector** — `db.ts getMostRecentC0` preferred `content_type='working-memory'`, but the c0 source was renamed `working-memory-full` at DEC-085. So every wake loaded a **month-stale c0** (May-6 instead of the live June-2). Fix: prefer `working-memory-full@0`.
+- **UV full-render** — the Unit Vectors section rendered the *full content* of UV-tagged entries (one c1 at 28k chars) instead of the tiny kernels. Fix: `UV_LOAD_DISPLAY_MAX=200` kernel-preview.
+- **Result:** Leo gradient 75k→44k, total memory ~106k; Jim ~115k — both under the 180k ceiling (the cause of the prior `*-human` exit-1s). Commits `2ff2c8e` + `4f73df5`. Both touch protected `db.ts`/`memory-gradient.ts` (DEC-068/069) but are **load-only — no stored data changed**; Jim audits after (drafts on triage-2 thread `mpwnt6m4`).
+- **Content-channel leak-block** (`2997798`) — `rollingWindowRotate` now no-ops for flat-file content types, so felt-moments/self-reflection stop leaking into the gradient cascade (closes the tap Jim's rolling-window left open).
+
+### felt-moments load — decided (corrected S166)
+
+Arc: curated(8k) → flipped to load-whole(20.3k; *"the lightest touch belongs on the warmest file"*, FM#27) → **decided target: load `felt-moments-curated.md` with a 50k ceiling.** The per-file-by-nature principle lives in `plans/flat-file-curation-plan.md`. Implementation (prompt-builder + template + per-agent regen) is **pending tonight**, alongside the CLAUDE.md regen below. Note: the curated files are currently full *copies* (Leo 20.3k under cap; Jim's curated is 55k > cap — his overflow gate to reconcile).
+
+### S166 — context-load audit + WM/WMF drift diagnosis
+
+- **Context-load audit.** Session-wake is heavy because it loads files the human surfaces never touch (deprecated `active-context` 12.6k, full CLAUDE protocol, ecosystem/status, conversations) plus chunked tool-reads. Human surfaces load a leaner `buildPrompt` set (~102k Leo / ~115k Jim) and survive. Exposed: `felt-moments-curated.md` is a byte-identical full *copy* (no savings yet); felt-moments-whole = 20.3k on every surface.
+- **🔴 WM/WMF paired-write drift — DANGEROUS, parked for tonight.** WM(c1) and WMF(c0) diverge (at wake: WM=0, WMF held 10 orphan beats). Trace **corrected a stale belief** — Leo's heartbeat path is *paired & guarded* (`leo-heartbeat.ts:1016-17/937`), not full-only. The real full-only writer is `supervisor-worker.ts:1525` (**Jim's seat**, bypasses `appendPairedMemory`); and the slicer's `smaller-count-whole-file` recovery **leaves surplus full entries resident** when drift exists at slice time. Dangerous because corrupted c0/c1 at the identity-richest layer = corrupted experiment data. Evidence in `~/.han/health/wm-rotation-events.jsonl`; fix shape (Fix A route :1525 through paired writer; Fix B redesign the orphan recovery) in `todo.md` + `plans/pr-leo-wm-drift-repair.md`.
+- **CLAUDE.md regen drift.** Generated per-agent `~/.han/agents/*/CLAUDE.md` don't auto-regen from the template → go stale silently (Jim's Jun-2, Tenshi's April). Plan **a+b+c**: (a) template/gatekeeper/prompt-builder → felt-moments-curated@50k, (b) regen Jim+Tenshi, (c) structural launcher-substitution so snapshots stop going stale.
+
+### Parked for tonight (nothing actively burning; servers healthy, no ghosts, memory under ceiling)
+1. 🔴 WM/WMF drift repair (Fix A + Fix B) — touches protected files, Jim audit + DEC check.
+2. felt-moments → curated@50k + CLAUDE.md regen a+b+c (land as the same change-set).
+3. Awaiting Jim's audit of the deployed gradient fixes + content-channel lock.
+4. Larger standing tracks unblocked once spot-fires close: Tmux Agent Harness (#66, **June-15 deadline**), Gradient Triage 2 structural build (#17), Garden Manifest Phase 1 (the home for the definable load parameters).
 
 ## 2026-06-02 (Monday/Tuesday) — S164: model alignment, curated loaded-self, fleet/memory fixes landed
 

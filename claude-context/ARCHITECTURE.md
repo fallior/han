@@ -37,7 +37,7 @@ Hortus Arbor Nostra (HAN) bridges your development machine and mobile device, en
 │                                       ▼                                    │
 │                                ┌──────────────┐                           │
 │                                │  SQLite DB   │                           │
-│                                │ (tasks.db)   │                           │
+│                                │ (gradient.db)   │                           │
 │                                └──────────────┘                           │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -108,7 +108,7 @@ Agents resolve the channel ID from Jemma's signal file against this map to deter
 - Server binds to 0.0.0.0 for Tailscale access
 
 ### Storage
-- **SQLite** (`better-sqlite3`): Database at `~/.han/tasks.db` with 15 tables:
+- **SQLite** (`better-sqlite3`): Database at `~/.han/gradient.db` with ~28 tables:
   - Task execution: `tasks`, `goals`, `project_memory`
   - Supervisor system: `supervisor_cycles`, `supervisor_proposals`, `task_proposals`
   - Conversations: `conversations`, `conversation_messages`
@@ -152,7 +152,7 @@ han/
     │   └── notify.sh             # Claude Code notification hook
     ├── server/
     │   ├── server.ts             # Express + WebSocket server (TypeScript)
-    │   ├── db.ts                 # SQLite schema + 15 tables + prepared statements
+    │   ├── db.ts                 # SQLite schema + ~28 tables + prepared statements
     │   ├── types.ts              # TypeScript type definitions
     │   ├── ws.ts                 # WebSocket management + real-time sync
     │   ├── orchestrator.ts       # Goal decomposition + task routing
@@ -561,7 +561,7 @@ tmux send-keys -t "$SESSION" "$RESPONSE" Enter
 
 ### Level 7: Autonomous Task Runner (Complete)
 
-- **SQLite task queue**: `~/.han/tasks.db` with `better-sqlite3` (WAL mode)
+- **SQLite store**: `~/.han/gradient.db` with `better-sqlite3` (WAL mode)
 - Task schema: id, title, description, project_path, status, priority, model, max_turns, cost, tokens, turns, checkpoint_ref, checkpoint_type, gate_mode, allowed_tools
 - Status workflow: `pending` → `running` → `done`/`failed`/`cancelled`
 - **Orchestrator loop**: 5-second interval picks next pending task (highest priority, oldest first)

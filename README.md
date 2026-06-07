@@ -32,7 +32,7 @@ han/
 │   │   └── notify.sh                # Claude Code notification hook
 │   ├── server/
 │   │   ├── server.ts                # Express + WebSocket server
-│   │   ├── db.ts                    # SQLite schema + 15 tables + prepared statements
+│   │   ├── db.ts                    # SQLite schema + ~28 tables + prepared statements
 │   │   ├── types.ts                 # TypeScript type definitions
 │   │   ├── ws.ts                    # WebSocket management + real-time sync
 │   │   ├── orchestrator.ts          # Goal decomposition + task routing
@@ -73,7 +73,7 @@ han/
 
 ### Database Schema
 
-15 tables across task execution, goal management, portfolio tracking, and conversation history:
+~28 tables across task execution, goal management, portfolio tracking, and conversation history:
 
 | Table | Purpose |
 |-------|---------|
@@ -361,7 +361,7 @@ git stash show -p "stash@{0}"
 **See task checkpoint details:**
 ```bash
 # From project database
-sqlite3 ~/.han/tasks.db \
+sqlite3 ~/.han/gradient.db \
   "SELECT id, title, checkpoint_ref, checkpoint_type, status FROM tasks WHERE project_path = '$(pwd)' ORDER BY created_at DESC LIMIT 5;"
 ```
 
