@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-08 (Leo + Darron, S168 — durable supervisor pause + background-cycle holiday)
+
+*__Holiday until TMUX (#66)__: background generative cycles are paused to stop the mega-day WMF bloat (#78 — heartbeat/supervisor still append every beat at full fidelity to working-memory-full; root cause unfixed, deferred to the TMUX migration). Leo's heartbeat stopped at the service level (`systemctl --user stop leo-heartbeat.service`); reactive seats (`leo-human`/`jim-human`/`jemma`/`wm-sensor`) stay up.*
+
+*__Durable supervisor pause__ (this commit, `services/supervisor.ts`): the supervisor pause was an in-memory flag (`supervisorPaused`) that silently reset to `false` on any agent-server restart — including the post-commit hook's bounce on every commit — so a paused supervisor would resume the moment we committed anything. Now `supervisorPaused` seeds from a persistent signal `~/.han/signals/supervisor-paused` at module load, and `setSupervisorPaused` writes/removes that signal, so an API-set pause survives restarts. Fail-safe: a FS error never breaks the in-memory pause (logged, just non-durable). Agent-agnostic — the supervisor is a single role, no `'jim'|'leo'` literal (DEC-081). Lift the holiday by removing the signal (or `POST /api/supervisor/pause {"paused":false}`).*
+
 ## 2026-06-08 (Leo + Jim + Darron, S167 — cN-uv terminus level + competing-server fix)
 
 *__cN-uv__ (DEC-090, commit `f714f58`): a gradient chain terminus is now recorded as `level='cN-uv'` — compression depth + unit-vector status in one self-describing field, superseding the level-stays-`cN` + `tag_type='uv'`-marker split (which read as a plain `cN` and caused recurring "real-or-hallucination?" confusion). `parseLevelNumber`/`nextLevel`(null on `-uv`)/`gradientCap`(uncapped `-uv`)/`getUVs` updated; the **A2 insert-lock** throws on an exact byte-shuffle child (physics backstop below the floor); the floor writers birth termini as `cN-uv`. Darron proposed the compound level; Jim plan- + diff-audited GREEN (4 refinements folded). Leo migrated 107 leaf-termini `cN`→`cN-uv` (leaf-only — 14 non-leaf "premature-INCOMPRESSIBLE" kept `cN`); Jim migrates his ~146 (sovereignty). DEC-068's 3n caps untouched.*

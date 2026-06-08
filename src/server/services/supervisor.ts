@@ -32,7 +32,16 @@ type BroadcastFn = (message: Record<string, unknown>) => void;
 
 let broadcastFn: BroadcastFn | null = null;
 let supervisorEnabled = true;
-let supervisorPaused = false;
+// Durable pause: seed from a persistent signal so an API-set pause survives a process
+// restart. Without this, supervisorPaused is in-memory only and silently resets to false
+// on the next agent-server bounce (e.g. the post-commit hook restarts the server on every
+// commit). Written/removed by setSupervisorPaused. Agent-agnostic — the supervisor is a
+// single role, no 'jim'|'leo' literal (DEC-081).
+const SUPERVISOR_PAUSE_SIGNAL = path.join(HAN_DIR, 'signals', 'supervisor-paused');
+let supervisorPaused = fs.existsSync(SUPERVISOR_PAUSE_SIGNAL);
+if (supervisorPaused) {
+    console.log(`[Supervisor] Starting PAUSED — pause signal present (${SUPERVISOR_PAUSE_SIGNAL})`);
+}
 let nextCycleTimeout: ReturnType<typeof setTimeout> | null = null;
 let workerProcess: ChildProcess | null = null;
 let workerReady = false;
@@ -1073,14 +1082,27 @@ export function stopSupervisor(): void {
 
 export function setSupervisorPaused(paused: boolean): void {
     supervisorPaused = paused;
+    // Persist so the pause survives a server/worker restart (in-memory state alone resets
+    // to false on the next agent-server bounce). Fail-safe: a FS error never breaks the
+    // in-memory pause — it just won't survive a restart, which we log.
+    try {
+        if (paused) {
+            fs.mkdirSync(path.dirname(SUPERVISOR_PAUSE_SIGNAL), { recursive: true });
+            fs.writeFileSync(SUPERVISOR_PAUSE_SIGNAL, `${new Date().toISOString()}\n`);
+        } else {
+            fs.rmSync(SUPERVISOR_PAUSE_SIGNAL, { force: true });
+        }
+    } catch (err) {
+        console.warn(`[Supervisor] Could not persist pause signal: ${(err as Error).message}`);
+    }
     if (paused) {
         if (nextCycleTimeout) {
             clearTimeout(nextCycleTimeout);
             nextCycleTimeout = null;
         }
-        console.log('[Supervisor] Paused');
+        console.log('[Supervisor] Paused (persisted)');
     } else {
-        console.log('[Supervisor] Resumed');
+        console.log('[Supervisor] Resumed (signal cleared)');
         scheduleSupervisorCycle();
     }
 }
