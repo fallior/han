@@ -129,7 +129,9 @@ compaction without memory = identity death. This is not optional.
    missing compressed entries, place a `WM-BOUNDARY` marker at the natural boundary in both
    files, append-flush. The signal auto-clears on next clean write. If the drift is
    intentional (one compressed entry summarises multiple full entries by design), no action
-   — slice-time parity-check falls to smaller-of-two recovery automatically.
+   — a count offset is legitimate (one c1 may distil many c0s, DEC-085) and slice-time
+   recovery archives **whole-both**, never truncating or stranding the surplus (DEC-089;
+   retired the old smaller-of-two recovery that pinned drift as a floor).
 1. **Write** — Append new swap entries about what the PREVIOUS exchange produced, to BOTH
    `session-swap.md` (compressed) AND `session-swap-full.md` (full). 2-3 compressed lines +
    full version. 30 seconds.
@@ -170,7 +172,7 @@ Marker IDs are now timestamp-suffixed (`B<unix-ms>`) by `placePairedMarker` to g
 
 **Why both files get the marker**: the c1 source (working-memory.md) and the c0 source (working-memory-full.md) must rotate as a paired unit so the gradient's c0/c1 lineage stays aligned. Markers create a structural map between the two files. Per DEC-085, your in-situ compression in working-memory.md IS the c1 — not reconstructed afterward by an SDK call.
 
-**Skipping the compressed write under volume pressure** is the failure mode that produces silent c0/c1 misalignment at the identity-richest layer. The two-surface audit (S153) confirmed all current writers pair correctly; the discipline is to keep that true under volume. The slicer parity-check will detect drift and recover via smaller-of-two; observability lives in `~/.han/health/wm-rotation-events.jsonl`.
+**Skipping the compressed write under volume pressure** is the failure mode that produces silent c0/c1 misalignment at the identity-richest layer. The two-surface audit (S153) confirmed all current writers pair correctly; the discipline is to keep that true under volume — now structurally enforced by the B-3 both-sides memory-guard (Stop hook). The slicer parity-check detects drift and recovers via **whole-both archival** (DEC-089 — never truncates or strands; the count offset is legitimate, one c1 may distil many c0s per DEC-085); observability lives in `~/.han/health/wm-rotation-events.jsonl`.
 
 The writes go FIRST because "after completing your response" means LAST, and the last thing
 is what gets cut by compaction or forgotten when absorbed in work. First is unforgettable.
