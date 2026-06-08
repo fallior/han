@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "han-diary": {
+      "command": "/home/darron/Projects/han/src/server/node_modules/.bin/tsx",
+      "args": ["/home/darron/Projects/han/src/server/lib/diary-mcp-server.ts"],
+      "env": {
+        "HAN_DIARY_SLUG": "${AGENT_SLUG}"
+      }
+    }
+  }
+}

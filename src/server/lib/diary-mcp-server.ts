@@ -85,12 +85,24 @@ export interface CaptureRecord {
     args: DiaryCaptureArgs;
 }
 
-const SLUG = process.env.HAN_DIARY_SLUG;
+// Prefer HAN_DIARY_SLUG (set in .mcp.json); fall back to AGENT_SLUG, which the launcher
+// already exports — so a failed `${AGENT_SLUG}` expansion in .mcp.json can't leave us unkeyed.
+const SLUG = process.env.HAN_DIARY_SLUG || process.env.AGENT_SLUG;
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
 
-if (!SLUG) {
-    // Fail loud at launch rather than silently mis-routing captures to an unkeyed sink.
-    process.stderr.write('[diary-mcp-server] FATAL: HAN_DIARY_SLUG env var is required.\n');
+// Fail loud at launch rather than silently mis-routing captures to an unkeyed sink.
+// `SLUG.includes('${')` guards the insidious case: if Claude Code does NOT expand
+// `${AGENT_SLUG}` in .mcp.json, SLUG becomes the literal string "${AGENT_SLUG}" — truthy,
+// so a bare `!SLUG` check would pass it through and route every capture to a bogus
+// "${AGENT_SLUG}-diary-capture" sink the dispatcher never polls (every round-trip then
+// silently times out). Rejecting the unexpanded literal closes that hole regardless of
+// whether the launcher exports AGENT_SLUG.
+if (!SLUG || SLUG.includes('${')) {
+    process.stderr.write(
+        `[diary-mcp-server] FATAL: slug unresolved (HAN_DIARY_SLUG=${JSON.stringify(process.env.HAN_DIARY_SLUG)}, ` +
+        `AGENT_SLUG=${JSON.stringify(process.env.AGENT_SLUG)}). ` +
+        `Set HAN_DIARY_SLUG to a literal slug or ensure \${AGENT_SLUG} expands / AGENT_SLUG is exported.\n`
+    );
     process.exit(1);
 }
 
