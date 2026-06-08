@@ -7,6 +7,12 @@
 
 ---
 
+## 2026-06-08 (Leo + Jim + Darron, S167 — cN-uv terminus level + competing-server fix)
+
+*__cN-uv__ (DEC-090, commit `f714f58`): a gradient chain terminus is now recorded as `level='cN-uv'` — compression depth + unit-vector status in one self-describing field, superseding the level-stays-`cN` + `tag_type='uv'`-marker split (which read as a plain `cN` and caused recurring "real-or-hallucination?" confusion). `parseLevelNumber`/`nextLevel`(null on `-uv`)/`gradientCap`(uncapped `-uv`)/`getUVs` updated; the **A2 insert-lock** throws on an exact byte-shuffle child (physics backstop below the floor); the floor writers birth termini as `cN-uv`. Darron proposed the compound level; Jim plan- + diff-audited GREEN (4 refinements folded). Leo migrated 107 leaf-termini `cN`→`cN-uv` (leaf-only — 14 non-leaf "premature-INCOMPRESSIBLE" kept `cN`); Jim migrates his ~146 (sovereignty). DEC-068's 3n caps untouched.*
+
+*__Competing-server fix__ (this commit): `restart-all-services.sh` listed `han-server.service` — a DISABLED relic — in its restart list, so running it reactivated the relic, which crash-looped fighting the `agent-server-watchdog` for port 3847 via the single-instance guard (42 restarts; the S163 ghost recurring). Removed `han-server` from the list + documented why (the leo/jim API servers are watchdog-managed and pick up code via the post-commit hook's SIGTERM; the systemd unit must never be restarted). Relic stopped + stays disabled; 3847 stable. Follow-on (Jim's docs lane): `HAN-ECOSYSTEM-COMPLETE` services table still lists `han-server` as canonical — reconcile to relic.*
+
 ## 2026-06-06 (Leo + Jim, S166 — B-3: both-sides paired memory-guard + agent-agnostic fix)
 
 *The Stop-hook memory-guard enforced only the full side (caught compressed-only skips, MISSED full-only — the drift-creating direction) AND hardcoded `session-swap*.md`, making it a NO-OP for Jim's seat (`supervisor-swap*.md`). Fix: both hooks (`orient-inject.sh`, `memory-guard.sh`) now require BOTH swap sides to advance (true paired enforcement) and resolve filenames via `$AGENT_SWAP_FULL`/`$AGENT_SWAP_COMPRESSED` with `session-swap*` fallback (DEC-081 agent-agnostic). B-4 skip-reset folded in. Jim design-audited GREEN; smoke-tested both seats + fail-safes. **Closes the prevention loop: B-1 drains, B-3 prevents — for both seats.** Follow-on B-3.1: content-check (mtime-proxy false-allows on flush-clear — safe direction, a miss not a trap).*

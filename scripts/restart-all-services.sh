@@ -2,13 +2,14 @@
 # restart-all-services.sh — restart every HAN systemd user service so all
 # running processes pick up fresh code.
 #
-# Why this exists: the post-commit hook (.git/hooks/post-commit) only
-# restarts the hanjim/hanleo CLI launchers + the *-human services. It does
-# NOT touch han-server, leo-heartbeat, wm-sensor, or jemma. After any code
-# change to memory-gradient.ts / supervisor-worker.ts / leo-heartbeat.ts /
-# the wm-sensor surface, those services keep running pre-change code until
-# explicitly restarted. The gradient triage (2026-05-17 to 2026-05-19)
-# shipped to disk but never reloaded because of exactly this gap.
+# Why this exists: the post-commit hook (.git/hooks/post-commit) restarts the
+# hanjim/hanleo CLI launchers (= the watchdog'd agent-servers on 3847/3848,
+# via SIGTERM → watchdog relaunch) + the *-human services. It does NOT touch
+# leo-heartbeat, wm-sensor, or jemma. After any code change to
+# memory-gradient.ts / supervisor-worker.ts / leo-heartbeat.ts / the wm-sensor
+# surface, those services keep running pre-change code until explicitly
+# restarted. The gradient triage (2026-05-17 to 2026-05-19) shipped to disk
+# but never reloaded because of exactly this gap.
 #
 # Usage:
 #   ./scripts/restart-all-services.sh            # restart all
@@ -22,8 +23,16 @@ set -u
 # The canonical HAN service list. Update HAN-ECOSYSTEM-COMPLETE.md and this
 # list together — they are paired surfaces. New service → add here AND
 # in the doc's services table.
+# NOTE (S167): han-server is DELIBERATELY NOT in this list. The leo/jim API
+# servers (ports 3847/3848) are run by agent-server-watchdog.sh in tmux, NOT
+# systemd, and pick up fresh code via the post-commit hook's SIGTERM (the
+# watchdog relaunches them). The `han-server.service` systemd unit is a
+# DISABLED relic — `systemctl restart`-ing it starts a SECOND server that
+# fights the watchdog for the port via the single-instance guard (the S163
+# ghost / S167 competing-server incident: 42 crash-restarts). NEVER add it
+# back here. To force-reload the agent-server without a commit, SIGTERM its
+# port listener (`ss -tlnp | grep :3847`) so the watchdog relaunches it.
 HAN_SERVICES=(
-    han-server         # API + supervisor-worker child + Orchestrator (port 3847)
     leo-heartbeat      # Leo's 20-min beats (work/sleep/dream/evening)
     wm-sensor          # Working-memory file watcher → paired rotation → cascade enqueue
     jim-human          # Jim's conversation-thread responder (signal-driven)
