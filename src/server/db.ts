@@ -856,6 +856,7 @@ export const gradientStmts = {
         WHERE agent = ?
           AND (
             level = 'uv'
+            OR level GLOB 'c*-uv'
             OR id IN (SELECT gradient_entry_id FROM feeling_tags WHERE tag_type = 'uv')
           )
         ORDER BY created_at DESC

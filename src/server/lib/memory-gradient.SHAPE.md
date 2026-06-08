@@ -6,7 +6,7 @@
 > adjacent to the code so an agent reading `memory-gradient.ts` finds this
 > without being told. Per future-idea #37.
 >
-> **Last verified against code: 2026-05-05 (S150 PR3, voice-first thread `mor4o3r3-jvdjv1`).**
+> **Last verified against code: 2026-06-08 (S167, DEC-090 `cN-uv` terminus form — Jim diff-audit GREEN).**
 > If you read this and the code disagrees, **the code wins** — update this
 > file in the same commit as your fix.
 
@@ -76,6 +76,25 @@ The single canonical entry point is **`enqueueCascadeForDisplacedAt(db, agent, l
 for that flow. The compression itself runs with the agent's full memory
 loaded into the system prompt (NOT stranger-Opus per DEC-082).
 
+## `cN-uv` terminus form (DEC-090, S167)
+
+A chain terminus — a level that reached INCOMPRESSIBLE / the compression floor — is recorded as **`level = 'cN-uv'`** (e.g. `c5-uv`): compression depth N *and* unit-vector status in one self-describing field. Supersedes the prior split (level stayed `cN` + a `tag_type='uv'` marker), which left a terminus reading as a plain `cN`.
+
+- `parseLevelNumber('c5-uv')` → 5 (regex `/^c(\d+)(?:-uv)?$/` — depth preserved for ordering).
+- `nextLevel('cN-uv')` → **null**: a terminus never cascades. (Without this it would emit `c{N+1}` from a terminal UV — Jim's S167 catch.)
+- `gradientCap('cN-uv')` → uncapped (`MAX_SAFE_INTEGER`): termini load with the "all UV" set, never displaced by the 3n cap. **DEC-068's 3n-for-cN is untouched** — only the `-uv` form is excepted (the explicitly-approved gradientCap change).
+- `getUVs` (`db.ts`) detects a UV via `level='uv' OR level GLOB 'c*-uv' OR tag_type='uv'`.
+- `loadTraversableGradient` excludes `cN-uv` from the per-level cN sections (the `/^c\d+$/` filter fails on the dash), so a `cN-uv` entry loads **only** via the UV section — no double-load. UV render appends the depth: `(type c5-uv)`.
+- `hasUVDescendant` counts `cN-uv` as a UV descendant.
+
+**Kernel store.** The `tag_type='uv'` feeling-tag is retained, repurposed: the *level* is the canonical UV detector now; the tag persists as the crisp ≤50-char kernel store (esp. voluntary-`INCOMPRESSIBLE` termini where kernel ≠ entry content), rendered in the `[...]` feeling-suffix → zero render loss.
+
+**A2 insert-lock.** `insertGradientEntry` throws `[insert-lock]` when a compressed child (`/^c\d+$/`, n≥1) is **byte-identical** to its `source_id` parent — a structural backstop against byte-shuffles even if a path bypasses the floor. *Exact byte-identity only* (not ratio≈1.0 — near-1.0 non-reduction stays the floor's ratio-check). Fail-safe: throws only on a clean positive match; parent-lookup failure falls through (cannot trap the pipeline).
+
+**Terminus writers.** Live path = `process-pending-compression.ts` — all 3 halt branches (absolute-floor, voluntary-`INCOMPRESSIBLE`, ratio-floor) set `level = CASE WHEN level LIKE '%-uv' THEN level ELSE level || '-uv' END` on the terminus (`source_id`), idempotently, alongside `cascade_halted_at`. Non-live writers still emitting bare `'uv'`: `writeUVEntry` (**dead**, zero callers — a reviver must emit `cN-uv`); `agent-bump-step.ts --incompressible` (manual rebuild CLI — parity follow-on); dreams (`dream-gradient.ts`, bare `'uv'` **by design** — dream levels are `dream-day/week/month`, not `cN`).
+
+**Migration:** in-place `cN`→`cN-uv` rename (keeps `id`/`source_id`), **leaf-only** (a uv-tagged non-leaf — a "premature INCOMPRESSIBLE" that compressed further — stays `cN`), snapshot-first, per agent by own hand (sovereignty).
+
 ## What's legacy and should not be extended
 
 - ~~`processGradientForAgent`~~ — **retired-by-throw in S150 PR6 Batch 3.**
@@ -130,6 +149,9 @@ loaded into the system prompt (NOT stranger-Opus per DEC-082).
 - **DEC-082** — `sdkCompress` retirement; `/pfc` simplified to memory-writes.
   Several functions in this file are downstream of that retirement (see
   "What's legacy").
+- **DEC-090** — `cN-uv` compound terminus level (see the "`cN-uv` terminus form"
+  section above). `parseLevelNumber`/`nextLevel`/`gradientCap`/`getUVs` +
+  the A2 insert-lock in `insertGradientEntry`.
 
 ## Tests
 

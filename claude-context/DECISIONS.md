@@ -6317,3 +6317,32 @@ The CLAUDE.md DO-NOT entry from DEC-087 covers this surface implicitly (componen
 **Recorded follow-ons (Jim, audit addition b — held, not omitted):** (1) the at-bite comp==0 backstop (consolidation-signal + fallback archive-c0 + enqueue in-voice c0→c1 repair) — deferred because comp==0-at-35K-bite is ~unreachable while every live writer is paired; (2) the cohort-depth in-voice c0→c1 repair for any historical under-distilled c1s already in the gradient.
 
 Reinforces DEC-069 + DEC-085; caps (DEC-068) untouched.
+
+## DEC-090 — `cN-uv` compound level: the canonical unit-vector terminus form
+
+**Status: Settled** (2026-06-08, S167; Darron proposed the compound level + approved the `gradientCap` change explicitly, Leo built, Jim plan-audit + diff-audit GREEN with refinements folded). Protected surfaces: `memory-gradient.ts`, `db.ts`, `scripts/process-pending-compression.ts`. Thread: `mq4mgblx-n6r8ne`.
+
+**Decision.** A gradient chain terminus (a level that reached INCOMPRESSIBLE / the compression floor) is recorded as **`level = 'cN-uv'`** — a compound that carries *both* the compression depth (N) *and* the unit-vector status in one self-describing field. This supersedes the prior split (level stayed `cN`, a `tag_type='uv'` feeling-tag marked it), under which a terminus *read* as a plain `cN` until you inspected the side table — the representation ambiguity that repeatedly caused "is this a real compression or a hallucination?" confusion (and tripped wrong-path/field checks even in audit).
+
+**Why the compound form (vs `level='uv'` or the feeling-tag alone).** `level='uv'` discards the depth (which we want — it tells you *how compressible* a conviction was). The feeling-tag keeps the depth in `level` but hides the UV-status in a side table. `cN-uv` keeps both in the one field that loaders, caps, and humans all read first. Darron's framing: the level should *announce itself*.
+
+**Loader / mechanics (all in `memory-gradient.ts` unless noted):**
+- `parseLevelNumber` matches `/^c(\d+)(?:-uv)?$/` → `c5-uv` → 5 (depth preserved for ordering).
+- `nextLevel('cN-uv')` returns **null** — a terminus never cascades (Jim's catch: without this it would try to emit `c10` from a terminal `c9-uv`).
+- `gradientCap('cN-uv')` returns uncapped (`MAX_SAFE_INTEGER`) — termini load with the "all UV" set, never displaced by the 3n cN cap. **DEC-068's 3n-for-cN is untouched** — this only excepts the `-uv` form. (This is the explicitly-approved change to the DEC-068-protected `gradientCap`.)
+- `getUVs` (`db.ts`) detects a UV via `level='uv' OR level GLOB 'c*-uv' OR tag_type='uv'`.
+- `loadTraversableGradient` excludes `cN-uv` from the per-level cN sections via the existing `/^c\d+$/` filter, so a `cN-uv` entry loads **only** through the UV section — no double-load. UV render appends the depth: `**label** (type c5-uv): "kernel"`.
+- `hasUVDescendant` counts `cN-uv` as a UV descendant.
+
+**Kernel store.** The `tag_type='uv'` feeling-tag is **retained, repurposed**: the *level* is now the canonical UV detector; the tag persists purely as the crisp ≤50-char kernel store (esp. for voluntary-`INCOMPRESSIBLE` termini where the kernel ≠ entry content). It renders in the `[...]` feeling-suffix → zero render loss.
+
+**A2 insert-lock (physics, scope-exact).** `insertGradientEntry` throws `[insert-lock]` when a compressed child (`level` matches `/^c\d+$/`, n≥1) has content **byte-identical** to its `source_id` parent — blocking a byte-shuffle even if a future path bypasses the floor. **Scope clarification (Jim):** A2 fires on **exact byte-identity only**, not "ratio ≈ 1.0". Near-1.0 non-reducing paraphrase remains the compression *floor's* ratio-check (policy, in `process-pending-compression`); A2 is the structural backstop for *exact* shuffles only. Fail-safe: throws only on a clean positive match; any parent-lookup failure falls through (cannot trap the pipeline).
+
+**Terminus writers — coverage.** The live main path (`process-pending-compression.ts`, all three halt branches: absolute-floor, voluntary-`INCOMPRESSIBLE`, ratio-floor) sets `level = CASE WHEN level LIKE '%-uv' THEN level ELSE level || '-uv' END` on the terminus (`source_id`), idempotently, alongside `cascade_halted_at`. Non-live writers that still emit bare `'uv'` (named so the rule reads *"all terminus writers set `cN-uv`"*, not just the live path):
+- `writeUVEntry` (`memory-gradient.ts`) — **dead** (zero callers); a future reviver must emit `cN-uv`.
+- `agent-bump-step.ts --incompressible` — **manual rebuild CLI** (not the live auto-path); tags via feeling-tag + `cascade_halted_at` but does not set `level=cN-uv`. Parity follow-on if ever used for a real bump.
+- Dreams (`dream-gradient.ts`) keep bare `'uv'` **by design** — the dream chain uses `dream-day/week/month` levels, not `cN`, so `cN-uv` does not apply; `getUVs` still returns dream UVs via `level='uv'`.
+
+**Migration (per agent, by own hand — memory-sovereignty).** Existing termini promote in-place `cN` → `cN-uv` (keeps `id`/`source_id` chains; snapshot first). **Leaf-only**: only promote uv-tagged entries with **no child** — a uv-tagged *non-leaf* (a "premature INCOMPRESSIBLE" that compressed further; leo has 14) must stay `cN`, since its true terminus is the deeper leaf. Legacy bare `level='uv'` (~9 jim / ~14 leo) left as-is (depth-recovery low-value). Jim promotes his own ~146.
+
+**Relationship.** Adds a level-form; does not change cN counts (DEC-068 intact). Reinforces DEC-082/086 (A2 extends "no mechanical promotion" to the write primitive). DEC-044 floor unchanged.

@@ -77,14 +77,15 @@ const MAX_COMPRESSION_DEPTH = 20; // Safety ceiling — force UV generation beyo
 
 // ── Cn Utilities — Dynamic compression depth ─────────────────
 
-/** Parse 'c3' → 3, 'c0' → 0, 'uv' → null */
+/** Parse 'c3' → 3, 'c0' → 0, 'c5-uv' → 5 (compound terminus level), 'uv' → null */
 export function parseLevelNumber(level: string): number | null {
-    const m = level.match(/^c(\d+)$/);
+    const m = level.match(/^c(\d+)(?:-uv)?$/);
     return m ? parseInt(m[1], 10) : null;
 }
 
-/** c3 → 'c4', c0 → 'c1', uv → null */
+/** c3 → 'c4', c0 → 'c1', 'c5-uv' → null (irreducible terminus — never cascades), 'uv' → null */
 function nextLevel(level: string): string | null {
+    if (level.endsWith('-uv')) return null; // cN-uv is the terminus — halt (S167, Jim's catch #1)
     const n = parseLevelNumber(level);
     return n !== null ? `c${n + 1}` : null;
 }
@@ -97,6 +98,9 @@ function nextLevel(level: string): string | null {
  * Quote: "doesn't ever change unless I expressly approved it" — Darron, S123.
  */
 function gradientCap(level: string): number {
+    // cN-uv is a terminus unit vector — uncapped ("all UV" load, never displaced by the 3n cap).
+    // S167 cN-uv DEC (Darron-approved); DEC-068's 3n-for-cN is untouched — this only excepts the -uv form.
+    if (level.endsWith('-uv')) return Number.MAX_SAFE_INTEGER;
     const n = parseLevelNumber(level);
     if (!n || n < 1) return 1; // c0 = 1
     return 3 * n;              // DEC-068: cap = 3n. c1=3, c2=6, c3=9, c4=12, c5=15...
@@ -266,7 +270,7 @@ function hasUVDescendant(seedId: string, agent: string): boolean {
             WHERE g.agent = ?
         )
         SELECT 1 FROM gradient_entries
-        WHERE id IN (SELECT id FROM descendants) AND level = 'uv'
+        WHERE id IN (SELECT id FROM descendants) AND (level = 'uv' OR level GLOB 'c*-uv')
         LIMIT 1
     `).get(seedId, agent, agent);
     return !!row;
@@ -304,6 +308,23 @@ function insertGradientEntry(
     changeCount: number = 0,
     qualifier: string | null = null,
 ): void {
+    // A2 insert-lock (S167 cN-uv DEC): a compressed child (cN, n≥1) MUST genuinely reduce.
+    // Physics, not policy — blocks a byte-shuffle even if a future path bypasses the floor.
+    // Fail-safe: throws ONLY on a clean positive byte-match; any lookup uncertainty falls through.
+    if (sourceId && /^c\d+$/.test(level)) {
+        const lvlNum = parseLevelNumber(level);
+        if (lvlNum !== null && lvlNum >= 1) {
+            try {
+                const parent = db.prepare('SELECT content FROM gradient_entries WHERE id = ?').get(sourceId) as any;
+                if (parent && typeof parent.content === 'string' && parent.content === content) {
+                    throw new Error(`[insert-lock] refusing byte-shuffle ${level}/${sessionLabel}: content identical to source ${sourceId}. At INCOMPRESSIBLE the terminus must be marked cN-uv and halted, not re-emitted deeper.`);
+                }
+            } catch (e) {
+                if (e instanceof Error && e.message.startsWith('[insert-lock]')) throw e;
+                // parent lookup failed — fail-safe, do not block
+            }
+        }
+    }
     try {
         gradientStmts.insert.run(
             id, agent, sessionLabel, level, content, contentType,
@@ -2069,8 +2090,9 @@ export function loadTraversableGradient(agent: string): string {
                 ? ` [${tags.map((t: any) => t.content).join('; ')}]`
                 : '';
             const typeLabel = uv.provenance_type === 'aphorism' ? 'Aphorism' : uv.content_type;
+            const depthStr = (typeof uv.level === 'string' && uv.level.endsWith('-uv')) ? ` ${uv.level}` : '';
             const supersedesStr = uv.supersedes ? ` ⊕ supersedes [${uv.supersedes}]` : '';
-            return `- **${uv.session_label}** (${typeLabel}): "${uvKernel(uv.content)}"${tagStr}${supersedesStr}`;
+            return `- **${uv.session_label}** (${typeLabel}${depthStr}): "${uvKernel(uv.content)}"${tagStr}${supersedesStr}`;
         });
         sections.push(`### Unit Vectors\n${uvLines.join('\n')}`);
     }

@@ -437,8 +437,10 @@ async function main() {
                 VALUES (?, ?, 'uv', ?, 'compression-floor-absolute', ?)
             `).run(claimed.source_id, agent, kernel, new Date().toISOString());
             db.prepare(`
-                UPDATE gradient_entries SET cascade_halted_at = ?
-                WHERE id = ? AND agent = ?
+                UPDATE gradient_entries
+                   SET cascade_halted_at = ?,
+                       level = CASE WHEN level LIKE '%-uv' THEN level ELSE level || '-uv' END
+                 WHERE id = ? AND agent = ?
             `).run(claimed.from_level, claimed.source_id, agent);
             completeClaim(db, claimed.id);
 
@@ -502,8 +504,10 @@ async function main() {
                 VALUES (?, ?, 'uv', ?, NULL, ?)
             `).run(claimed.source_id, agent, useKernel, new Date().toISOString());
             db.prepare(`
-                UPDATE gradient_entries SET cascade_halted_at = ?
-                WHERE id = ? AND agent = ?
+                UPDATE gradient_entries
+                   SET cascade_halted_at = ?,
+                       level = CASE WHEN level LIKE '%-uv' THEN level ELSE level || '-uv' END
+                 WHERE id = ? AND agent = ?
             `).run(claimed.from_level, claimed.source_id, agent);
             completeClaim(db, claimed.id);
             console.log(JSON.stringify({
@@ -542,8 +546,10 @@ async function main() {
                     VALUES (?, ?, 'uv', ?, 'compression-floor-ratio', ?)
                 `).run(claimed.source_id, agent, kernel, new Date().toISOString());
                 db.prepare(`
-                    UPDATE gradient_entries SET cascade_halted_at = ?
-                    WHERE id = ? AND agent = ?
+                    UPDATE gradient_entries
+                       SET cascade_halted_at = ?,
+                           level = CASE WHEN level LIKE '%-uv' THEN level ELSE level || '-uv' END
+                     WHERE id = ? AND agent = ?
                 `).run(claimed.from_level, claimed.source_id, agent);
                 completeClaim(db, claimed.id);
 
