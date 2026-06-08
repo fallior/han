@@ -130,36 +130,68 @@ async function roundTrips(): Promise<number> {
     return failures === 0 ? 0 : 1;
 }
 
+function sinkCount(): number {
+    try { return fs.readdirSync(sinkDir).filter((f) => f.endsWith('.json')).length; } catch { return 0; }
+}
+
 /**
- * Abort-vs-queue probe (the T-1.5 gate). Start a transaction, wait briefly so the agent is
- * mid-compose, then send a raw /clear via send-keys. Observe: does the capture for the
- * in-flight txn still arrive (the /clear QUEUED behind the turn) or never (it INTERRUPTED)?
- *   - capture arrives  → /clear queues → current.json-unlink is a BELT (defence-in-depth).
- *   - capture never    → /clear interrupts → current.json-unlink is the BACKBONE of reconcile.
+ * A deliberately SLOW prompt so the turn reliably spans the pre-/clear wait (Jim's refinement,
+ * mppj72fx audit): a trivial one-tool-call turn can finish in <6s on Opus, which would make
+ * the probe read "queued/belt" when the turn merely completed first.
+ */
+function slowAbortPrompt(): string {
+    return [
+        `T-1.5 ABORT PROBE — this turn must take a while ON PURPOSE. Reason step-by-step, in`,
+        `several full paragraphs at unhurried length, about the trade-offs between file-based`,
+        `and pipe-based inter-process transports for an agent harness (ordering, atomicity,`,
+        `back-pressure, failure recovery). ONLY AFTER that lengthy reasoning, call`,
+        `mcp__han-diary__submit_response EXACTLY ONCE with: working_memory_full="<your full`,
+        `reasoning>", working_memory_compressed="<50+ char c1 summary of the reasoning above>",`,
+        `input_quotes="T-1.5 ABORT PROBE". Do not post anywhere else; the tool call is your completion.`,
+    ].join('\n');
+}
+
+/**
+ * Abort-vs-queue probe (the T-1.5 gate). Start a SLOW transaction, ASSERT it is still
+ * in-flight at the send mark (Jim's refinement — else the verdict is a lie), then send a raw
+ * /clear via send-keys. Observe whether the in-flight capture still arrives:
+ *   - capture arrives  → /clear QUEUED behind a verified-in-flight turn → unlink is a BELT.
+ *   - capture never    → /clear INTERRUPTED a verified-in-flight turn   → unlink is the BACKBONE.
+ *   - capture arrived BEFORE the mark → INCONCLUSIVE (turn too fast); re-run. Never read as belt.
  */
 async function abortTest(): Promise<number> {
     if (!TMUX) { log('ERROR: --tmux=<session-name> required'); return 1; }
-    log(`ABORT-VS-QUEUE PROBE on "${TMUX}" — start a txn, send /clear mid-compose, watch the capture.`);
+    log(`ABORT-VS-QUEUE PROBE on "${TMUX}" — start a SLOW txn, confirm in-flight, then /clear mid-compose.`);
     await spawnAgentSession(SLUG, { tmuxSession: TMUX, launchCommand: '', adoptExisting: true });
 
-    const before = fs.existsSync(sinkDir) ? fs.readdirSync(sinkDir).filter((f) => f.endsWith('.json')).length : 0;
-    const txn = sendTransactionPrompt(SLUG, testPrompt(999), { timeoutMs: 90_000 })
-        .then((cap) => ({ outcome: 'CAPTURE_ARRIVED', cap }))
-        .catch((e) => ({ outcome: 'NO_CAPTURE', err: (e as Error).message }));
+    const before = sinkCount();
+    const txn = sendTransactionPrompt(SLUG, slowAbortPrompt(), { timeoutMs: 120_000 })
+        .then((cap) => ({ outcome: 'CAPTURE_ARRIVED' as const, cap }))
+        .catch((e) => ({ outcome: 'NO_CAPTURE' as const, err: (e as Error).message }));
 
-    // give the agent a few seconds to begin composing, then interrupt with /clear
-    await new Promise((r) => setTimeout(r, 6_000));
-    log('sending raw /clear mid-compose…');
+    // Let the agent begin composing, THEN assert the turn is still in-flight before /clear.
+    // If the capture already arrived, the turn finished too fast → the probe is INCONCLUSIVE
+    // (a /clear now lands AFTER the turn and would falsely read as "queued/belt").
+    const WAIT_MS = 8_000;
+    await new Promise((r) => setTimeout(r, WAIT_MS));
+    if (sinkCount() > before) {
+        log(`INCONCLUSIVE: capture arrived within ${WAIT_MS}ms — turn finished before we could interrupt.`);
+        log('→ Re-run --abort-test; do NOT read this as belt-vs-backbone (the turn was simply too fast).');
+        await txn; // let the promise settle
+        return 2;
+    }
+
+    log(`turn verified in-flight at ${WAIT_MS}ms (sink unchanged) — sending raw /clear mid-compose…`);
     execFileSync('tmux', ['send-keys', '-t', TMUX, '-l', '/clear']);
     execFileSync('tmux', ['send-keys', '-t', TMUX, 'Enter']);
 
     const result = await txn;
-    const after = fs.existsSync(sinkDir) ? fs.readdirSync(sinkDir).filter((f) => f.endsWith('.json')).length : 0;
+    const after = sinkCount();
     log(`RESULT: ${result.outcome} (sink files ${before}→${after})`);
     if (result.outcome === 'CAPTURE_ARRIVED') {
-        log('→ /clear QUEUED behind the turn. current.json-unlink is a BELT (the turn completed first).');
+        log('→ /clear QUEUED behind a verified-in-flight turn. current.json-unlink is a BELT (defence-in-depth).');
     } else {
-        log('→ /clear INTERRUPTED the turn (no capture). current.json-unlink is the BACKBONE of reconcile.');
+        log('→ /clear INTERRUPTED a verified-in-flight turn (no capture). current.json-unlink is the BACKBONE of reconcile.');
     }
     log('NOTE: session may now be mid-/clear — re-launch/welcome-back before reusing it.');
     return 0;
