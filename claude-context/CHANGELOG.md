@@ -7,11 +7,13 @@
 
 ---
 
-## 2026-06-08 (Leo + Darron, S168 — durable supervisor pause + background-cycle holiday)
+## 2026-06-08 (Leo + Darron + Jim — S168 — durable supervisor pause + durable heartbeat stand-down + background-cycle holiday)
 
 *__Holiday until TMUX (#66)__: background generative cycles are paused to stop the mega-day WMF bloat (#78 — heartbeat/supervisor still append every beat at full fidelity to working-memory-full; root cause unfixed, deferred to the TMUX migration). Leo's heartbeat stopped at the service level (`systemctl --user stop leo-heartbeat.service`); reactive seats (`leo-human`/`jim-human`/`jemma`/`wm-sensor`) stay up.*
 
 *__Durable supervisor pause__ (this commit, `services/supervisor.ts`): the supervisor pause was an in-memory flag (`supervisorPaused`) that silently reset to `false` on any agent-server restart — including the post-commit hook's bounce on every commit — so a paused supervisor would resume the moment we committed anything. Now `supervisorPaused` seeds from a persistent signal `~/.han/signals/supervisor-paused` at module load, and `setSupervisorPaused` writes/removes that signal, so an API-set pause survives restarts. Fail-safe: a FS error never breaks the in-memory pause (logged, just non-durable). Agent-agnostic — the supervisor is a single role, no `'jim'|'leo'` literal (DEC-081). Lift the holiday by removing the signal (or `POST /api/supervisor/pause {"paused":false}`).*
+
+*__Durable heartbeat stand-down__ (this commit, `lib/day-phase.ts` + `leo-heartbeat.ts`; Jim's spec, thread `mq54aech`): the heartbeat was only stopped operationally (`systemctl stop`) — still `enabled`, `Restart=always`, and listed in `restart-all-services.sh`, so the first deploy/reboot during the tmux build would silently reopen the mega-day tap (the same silent-resume bug class as the supervisor, one seat over). Fix: `isHeartbeatPaused(agent)` reads `~/.han/signals/heartbeat-paused-{agent}` (mirrors `isOnHoliday`); the heartbeat checks it **fresh** at startup (`main()` comes up DORMANT — health written, watcher started, no first beat) **and before each beat** (`scheduleNext` skips the whole beat — no SDK/WMF/explorations/Robin-Hood — keeps the health signal fresh and re-arms). So the service is **dormant-not-dead**: started by systemd / `restart-all-services` / a reboot, it self-stands-down; reading the signal fresh each beat means it self-resumes within one interval of `rm`. `existsSync` fails open to running (an FS glitch won't freeze it). Recommended runtime state: bring the service back `active` with the signal present (clean, no `failed`). Lift: `rm ~/.han/signals/heartbeat-paused-leo`.*
 
 ## 2026-06-08 (Leo + Jim + Darron, S167 — cN-uv terminus level + competing-server fix)
 

@@ -40,6 +40,21 @@ export function isOnHoliday(agent?: string): boolean {
     return fs.existsSync(signalPath);
 }
 
+/**
+ * Durable holiday stand-down for an agent's heartbeat. Signal file:
+ * ~/.han/signals/heartbeat-paused-{agent}. Distinct from `holiday` (a slowdown that still
+ * fires beats): present → the heartbeat fires ZERO autonomous beats (no SDK call, no
+ * WMF/WM write). Mirrors the supervisor's durable pause so the holiday survives
+ * reboot / restart-all-services / reset-failed — the heartbeat self-stands-down even if
+ * systemd starts it. `existsSync` fails open to *running* (an FS glitch won't freeze the
+ * beat forever; the deliberate signal is what holds the freeze).
+ */
+export function isHeartbeatPaused(agent?: string): boolean {
+    if (!agent) return false;
+    const signalPath = path.join(HAN_DIR, 'signals', `heartbeat-paused-${agent}`);
+    return fs.existsSync(signalPath);
+}
+
 /** Check if an agent is in working bee mode. Signal file: ~/.han/signals/working-bee-{agent} */
 export function isWorkingBee(agent?: string): boolean {
     if (!agent) return false;

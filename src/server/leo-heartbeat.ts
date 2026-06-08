@@ -58,7 +58,7 @@ import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder.js';
 import type { LeoMeditationSurface } from './lib/leo-prompts.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
-import { getDayPhase as getSharedDayPhase, isOnHoliday, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
+import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
 // ── Beat-failure diagnostic capture (S159 diagnostic, 2026-05-19) ──────
@@ -2951,6 +2951,16 @@ function startSignalWatcher(): void {
 function scheduleNext(): void {
     const delay = getWallClockDelay();
     setTimeout(async () => {
+        // Durable holiday stand-down (read FRESH each beat): if heartbeat-paused-leo is
+        // present, fire NO beat — no SDK call, no WMF/WM/explorations write, no Robin-Hood.
+        // Keep the health signal fresh (so nothing reads the beat as dead → no resurrection)
+        // and re-arm. Checking here, not only at module load, means it self-stops if the
+        // signal is set mid-run and self-resumes within one interval of its removal.
+        if (isHeartbeatPaused('leo')) {
+            writeHealthSignal(null);
+            scheduleNext();
+            return;
+        }
         // Optimistic concurrency: check if CLI is busy before running beat
         if (isCliBusy()) {
             console.log('[Leo] CLI busy at beat time — entering retry loop');
@@ -3049,8 +3059,16 @@ async function main() {
     // Start the signal file watcher for near-instant mention response
     startSignalWatcher();
 
-    // Run first beat immediately
-    await heartbeat();
+    // Run first beat immediately — UNLESS the durable holiday stand-down is active, in which
+    // case come up DORMANT: health already written above, watcher already started, fire no
+    // beat. This makes the service self-defending — systemd / restart-all-services / a reboot
+    // can start it and it stands itself down. scheduleNext() runs regardless; its per-beat
+    // gate keeps it dormant and lets it self-resume within one interval of the signal's removal.
+    if (isHeartbeatPaused('leo')) {
+        console.log('[Leo] Starting DORMANT — heartbeat-paused-leo signal present; no beats until it is removed');
+    } else {
+        await heartbeat();
+    }
 
     // Then schedule with variable delays
     scheduleNext();
