@@ -21,7 +21,7 @@ import * as orchestrator from './orchestrator';
 import { createWebSocketServer, broadcast, broadcastPrompts, broadcastTerminal as wsBroadcastTerminal, stopHeartbeat } from './ws';
 import {
     listActiveSessions, getActiveSession, captureTerminal, readPendingPrompts,
-    getLastBroadcastContent, setLastBroadcastContent, appendToLog
+    getLastBroadcastContent, setLastBroadcastContent, appendToLog, terminalSnapshotPath
 } from './services/terminal';
 import {
     generateId, loadConfig, sendDigestPush, createGoal, runNextTask,
@@ -218,7 +218,7 @@ function broadcastTerminal() {
 
     // Persist snapshot for UI startup
     try {
-        fs.writeFileSync(path.join(HAN_DIR, 'terminal.txt'), result.content);
+        fs.writeFileSync(terminalSnapshotPath(), result.content);
     } catch { /* best effort */ }
 
     // Always record to persistent log, regardless of WS clients

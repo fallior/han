@@ -9,7 +9,9 @@ import {
     getActiveSession,
     captureTerminal,
     captureFullScrollback,
-    stripAnsi
+    stripAnsi,
+    terminalSnapshotPath,
+    terminalLogReadPath
 } from '../services/terminal';
 import { searchTerminalLog } from '../lib/terminal-search';
 
@@ -154,7 +156,7 @@ router.get('/api/status', (req: Request, res: Response) => {
  * GET /api/terminal -- Get cached terminal content
  */
 router.get('/api/terminal', (req: Request, res: Response) => {
-    const TERMINAL_FILE = path.join(HAN_DIR, 'terminal.txt');
+    const TERMINAL_FILE = terminalSnapshotPath();
     try {
         const content = fs.readFileSync(TERMINAL_FILE, 'utf8');
         res.json({ success: true, content });
@@ -169,7 +171,7 @@ router.get('/api/terminal', (req: Request, res: Response) => {
  * Returns the last N lines of terminal-log-v2.txt — scrollback across /clear
  */
 router.get('/api/terminal/history', (req: Request, res: Response) => {
-    const TERMINAL_LOG = path.join(HAN_DIR, 'terminal-log-v2.txt');
+    const TERMINAL_LOG = terminalLogReadPath();
     const requestedLines = Math.min(Number(req.query.lines) || 200, 2000);
     try {
         const data = fs.readFileSync(TERMINAL_LOG, 'utf8');
@@ -182,12 +184,17 @@ router.get('/api/terminal/history', (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/terminal/search -- Search the permanent terminal log (provenance active link, P1)
+ * GET /api/terminal/search -- Search the provenance log (c0↔log active link, P1)
  *
- * Read-only over ~/.han/terminal-log-v2.txt — the read layer of the c0↔log active link
- * (plans/provenance-active-link.md §4). rg-backed for full scans; bounded in-memory tail
- * for the default `recent` window. The read-only invariant (§4.3) lives in
- * lib/terminal-search.ts and is the code-review gate for this route.
+ * ⚠ PROVENANCE RE-AIM PENDING (Fix #3 — thread mq6hw7tn, 2026-06-10). The CANONICAL provenance
+ * record is the per-agent claude-logged logs `~/.han/logs/<slug>/*.md` (`[HH:MM:SS]` per-line,
+ * per-identity by construction) — per plans/provenance-active-link.md's 2026-06-01 decision.
+ * This route currently reads the per-agent `terminal-log-v2` SCROLLBACK (a drift the spec's
+ * stale §2 propagated into the code, which Leo+Jim then reinforced — corrected here). The
+ * re-aim to the claude-logged logs (+ a `[HH:MM:SS]`/filename-date parser handling the
+ * multi-day session-file midnight-wrap, + multi-file glob) is a careful, Jim-audited build,
+ * deliberately NOT rushed. The read-only invariant (§4.3) in lib/terminal-search.ts is the
+ * code-review gate and is preserved either way.
  *
  * Query: q (terms; space = AND, "quoted" = phrase) [required];
  *        window (recent | all | ISO..ISO; default recent);
@@ -195,7 +202,7 @@ router.get('/api/terminal/history', (req: Request, res: Response) => {
  * → { success, matches: [{ timestamp, excerpt, lineNo, hasLocator }], scanned, truncated, window }
  */
 router.get('/api/terminal/search', (req: Request, res: Response) => {
-    const TERMINAL_LOG = path.join(HAN_DIR, 'terminal-log-v2.txt');
+    const TERMINAL_LOG = terminalLogReadPath();
     const q = String(req.query.q || '').trim();
     if (!q) return res.status(400).json({ success: false, error: 'q (search terms) is required' });
     try {

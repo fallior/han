@@ -4,6 +4,81 @@ import path from 'path';
 import { HAN_DIR, PENDING_DIR } from '../db';
 
 /**
+ * The agent slug this server process serves. AGENT_SLUG is the DEC-081 launcher contract
+ * (exported by hanleo/hanjim and forwarded into the tmux session); fall back to deriving it
+ * from HAN_SESSION ("leo-3847231" → "leo"); final fallback '' yields the legacy bare
+ * filenames (the systemd relic, being retired under T-G).
+ */
+export function agentSlug(): string {
+    const explicit = process.env.AGENT_SLUG;
+    if (explicit) return explicit;
+    const sess = process.env.HAN_SESSION;
+    const m = sess && sess.match(/^([A-Za-z][A-Za-z0-9]*)-/);
+    return m ? m[1] : '';
+}
+
+/**
+ * Per-agent file under HAN_DIR so leo's 3847 and jim's 3848 servers never overwrite a
+ * shared file (the cross-agent stomp behind the "Jim CLI on Leo's server" bug). Inserts the
+ * slug before the extension: terminal.txt → terminal-leo.txt; terminal-log-v2.txt →
+ * terminal-log-v2-leo.txt. No slug (legacy relic) → the bare name, unchanged.
+ */
+function agentFile(name: string): string {
+    const slug = agentSlug();
+    if (!slug) return path.join(HAN_DIR, name);
+    const dot = name.lastIndexOf('.');
+    const stem = dot === -1 ? name : name.slice(0, dot);
+    const ext = dot === -1 ? '' : name.slice(dot);
+    return path.join(HAN_DIR, `${stem}-${slug}${ext}`);
+}
+
+/** The per-agent live terminal snapshot the UI startup reads (written by broadcastTerminal). */
+export function terminalSnapshotPath(): string { return agentFile('terminal.txt'); }
+
+/** The per-agent persistent terminal log (write target for appendToLog). */
+export function terminalLogPath(): string { return agentFile('terminal-log-v2.txt'); }
+
+/**
+ * Boundary-tolerant READ path for the persistent log (Jim's Fix-#3 build-condition): prefer
+ * the per-agent log; if it doesn't exist yet, fall back to the legacy shared log (pre-split
+ * history — cross-agent, but it is what existed); else return the per-agent path so the
+ * caller's read degrades to empty. Never throws; tolerates the split boundary either side.
+ */
+export function terminalLogReadPath(): string {
+    const perAgent = terminalLogPath();
+    if (fs.existsSync(perAgent)) return perAgent;
+    const legacy = path.join(HAN_DIR, 'terminal-log-v2.txt');
+    if (perAgent !== legacy && fs.existsSync(legacy)) return legacy;
+    return perAgent;
+}
+
+/**
+ * Resolve the agent-CLI pane of a session, by POSITIVE command match (Jim's audit refinement:
+ * the watchdog pane shows as bare `bash`, so *excluding* it is brittle — other bash panes
+ * could appear; prefer the CLI command instead). claude-logged runs the CLI under `script`,
+ * so a pane whose current command is `script`/`claude` is the CLI. Returns "<session>.<idx>"
+ * for that pane; falls back to pane ".1" (launcher convention: pane 1 = CLI) then the bare
+ * "<session>" (active pane) — so a focus drift to the watchdog pane never gets mirrored.
+ */
+export function resolveCliPane(session: string): string {
+    try {
+        const out = execFileSync('tmux',
+            ['list-panes', '-t', session, '-F', '#{pane_index} #{pane_current_command}'],
+            { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+        const panes = out.trim().split('\n').filter(Boolean).map((l) => {
+            const sp = l.indexOf(' ');
+            return sp === -1
+                ? { index: l, cmd: '' }
+                : { index: l.slice(0, sp), cmd: l.slice(sp + 1).trim() };
+        });
+        const cli = panes.find((p) => /^(script|claude)$/i.test(p.cmd) || /claude/i.test(p.cmd));
+        if (cli) return `${session}.${cli.index}`;
+        if (panes.some((p) => p.index === '1')) return `${session}.1`;
+    } catch { /* fall through to active pane */ }
+    return session;
+}
+
+/**
  * List all active tmux sessions on the host.
  */
 export function listActiveSessions(): string[] {
@@ -42,7 +117,7 @@ export function getActiveSession(): string | null {
 export function captureTerminal(session: string): { content: string; session: string } | null {
     try {
         const content = execFileSync('tmux', [
-            'capture-pane', '-t', session, '-p', '-S', '-'
+            'capture-pane', '-t', resolveCliPane(session), '-p', '-S', '-'
         ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 50 * 1024 * 1024 });
         return { content, session };
     } catch {
@@ -65,7 +140,7 @@ export function stripAnsi(text: string): string {
 export function captureFullScrollback(session: string): string | null {
     try {
         const content = execFileSync('tmux', [
-            'capture-pane', '-t', session, '-p', '-S', '-'
+            'capture-pane', '-t', resolveCliPane(session), '-p', '-S', '-'
         ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 50 * 1024 * 1024 });
         return content;
     } catch {
@@ -89,7 +164,7 @@ export function formatExport(content: string, session: string): string {
 
 // Smart terminal log — uses tmux diff semantics to record only meaningful changes
 // Old file (terminal-log.txt) kept as archive. New file records cleanly.
-const TERMINAL_LOG = path.join(HAN_DIR, 'terminal-log-v2.txt');
+const TERMINAL_LOG = terminalLogPath();
 let prevCapture: string[] = [];
 let lastTimestamp = 0;
 const TIMESTAMP_INTERVAL = 5 * 60 * 1000; // 5 minutes
