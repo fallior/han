@@ -232,7 +232,9 @@ function broadcastTerminal() {
 
 // ── Scheduled intervals ──────────────────────────────────
 
-const terminalBroadcastInterval = setInterval(broadcastTerminal, 200);
+// DEC-013: ~1s capture/broadcast (the 200ms regression × the full-scrollback payload was the
+// WS flood). Content-diffed (broadcasts only on change); client append-only buffer accumulates.
+const terminalBroadcastInterval = setInterval(broadcastTerminal, 1000);
 const orchestratorInterval = setInterval(runNextTask, 5000);
 
 const digestInterval = setInterval(() => {

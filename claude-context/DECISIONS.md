@@ -6346,3 +6346,15 @@ Reinforces DEC-069 + DEC-085; caps (DEC-068) untouched.
 **Migration (per agent, by own hand — memory-sovereignty).** Existing termini promote in-place `cN` → `cN-uv` (keeps `id`/`source_id` chains; snapshot first). **Leaf-only**: only promote uv-tagged entries with **no child** — a uv-tagged *non-leaf* (a "premature INCOMPRESSIBLE" that compressed further; leo has 14) must stay `cN`, since its true terminus is the deeper leaf. Legacy bare `level='uv'` (~9 jim / ~14 leo) left as-is (depth-recovery low-value). Jim promotes his own ~146.
 
 **Relationship.** Adds a level-form; does not change cN counts (DEC-068 intact). Reinforces DEC-082/086 (A2 extends "no mechanical promotion" to the write primitive). DEC-044 floor unchanged.
+
+## DEC-091 — Canonical provenance log = the per-agent `claude-logged` logs
+
+**Status: Settled** (Darron's standing call since ~2026-06-01; promoted to DECISIONS.md 2026-06-10, S168, *because the decision drifted when it lived only in a plan header*. Jim caught the drift + drafted; Leo records, gatekeeper hand. Thread `mq6hw7tn`.)
+
+**Decision.** The **canonical, highest-fidelity provenance record** — and the target of the c0→log active-link search (`provenance-active-link.md §4`) — is the **per-agent `claude-logged` logs**: `~/.han/logs/<slug>/session_*.md`. These are `script`-recorded, ANSI-stripped + `smart-dedup.pl`-cleaned, **per-line `[HH:MM:SS]`-timestamped, and per-identity by construction** (one dir per agent slug). `~/.han/terminal-log-v2.txt` (the server's `capture-pane` poll) is **live-UI scrollback only — NOT a provenance artifact** (shared/interleaved across agent-servers, noise-stripped, lower fidelity). This **supersedes the stale `provenance-active-link.md §2`** ("the record store… the right one"), which described `terminal-log-v2.txt` and was never retired when the header decision landed — so the implementation (`terminal-search.ts` via `routes/prompts.ts`) followed §2 onto the wrong log, and an audit reinforced it.
+
+**Why promoted here.** It drifted *precisely because* a load-bearing decision lived only in a plan header. The standing cure (agreed S168): **reconcile-on-decision** (retire stale content in the same commit) + **promote load-bearing decisions to DECISIONS.md, not plan headers.**
+
+**Implementation owed (Leo-build / Jim-audit).** Re-point the active-link search (`terminal-search.ts` + `/api/terminal/search`) at `~/.han/logs/<slug>/*.md` (already per-agent → resolves D2 scoping for free) + adapt the marker parser `--- DD/MM/YYYY ---` → claude-logged's `[HH:MM:SS]` (handling the multi-day session-file midnight-wrap for ISO windows). A careful build, not a rush. The S168 terminal-capture commit (`95d6ba8`) fixed the UI capture + corrected the drifted route comment; this provenance re-aim is the remaining piece. **The read-only invariant (§4.3) is non-negotiable.**
+
+**Relationship.** Read-only over the log (no agent write-path — preserves the §2 tamper-resistance note). Per-agent by construction supports #79 (log-RAM). Independent of **DEC-013** — that governs the *live UI mirror* (append-only client buffer); this governs the *provenance record*.

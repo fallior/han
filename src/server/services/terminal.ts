@@ -4,6 +4,15 @@ import path from 'path';
 import { HAN_DIR, PENDING_DIR } from '../db';
 
 /**
+ * Live-mirror capture window (DEC-013). The broadcast/cache capture the last N lines, NOT the
+ * full scrollback — the mobile UI's append-only buffer diffs + accumulates history client-side
+ * (DEC-013), and the canonical *complete* log is the claude-logged log, not this. Bounding the
+ * window caps the per-broadcast WS payload that was flooding clients (full = ~1.19 MB/tick;
+ * bounded = ~36 KB). Full scrollback is still available via captureFullScrollback (export).
+ */
+const BROADCAST_SCROLLBACK_LINES = 500;
+
+/**
  * The agent slug this server process serves. AGENT_SLUG is the DEC-081 launcher contract
  * (exported by hanleo/hanjim and forwarded into the tmux session); fall back to deriving it
  * from HAN_SESSION ("leo-3847231" → "leo"); final fallback '' yields the legacy bare
@@ -117,7 +126,7 @@ export function getActiveSession(): string | null {
 export function captureTerminal(session: string): { content: string; session: string } | null {
     try {
         const content = execFileSync('tmux', [
-            'capture-pane', '-t', resolveCliPane(session), '-p', '-S', '-'
+            'capture-pane', '-t', resolveCliPane(session), '-p', '-S', `-${BROADCAST_SCROLLBACK_LINES}`
         ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 50 * 1024 * 1024 });
         return { content, session };
     } catch {
