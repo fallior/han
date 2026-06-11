@@ -137,3 +137,19 @@ export const GARDEN_MANIFEST: GardenManifest = {
 export const SHARED_SURFACES: Record<string, ModelLadder> = {
     compression: ['claude-opus-4-7'],
 };
+
+/**
+ * Interim head-read resolver (DEC-092, S169) — returns the HEAD (active / most-
+ * capable) model of a surface's ladder, for an agent surface or a shared surface
+ * (e.g. 'compression'). NULL if unknown. This is the configured model; callers
+ * that have the actually-served model (from an in-process agentQuery result)
+ * prefer it (it captures Fable 5's <5% safeguard fallback to Opus). Superseded
+ * by #6 Phase-1's full `surfaceModel(slug, surface)` resolver when it lands.
+ */
+export function manifestModelHead(slug: string, surface: string): string | null {
+    const shared = SHARED_SURFACES[surface];
+    if (shared && shared.length) return shared[0];
+    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
+    const s = agent?.surfaces.find(x => x.name === surface);
+    return s?.model?.[0] ?? null;
+}

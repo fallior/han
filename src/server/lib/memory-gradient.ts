@@ -19,6 +19,7 @@ import { db, gradientStmts, feelingTagStmts, feelingTagHistoryStmts } from '../d
 import { countTokens } from './token-counter';
 import { gradientConfigForAgent, requireAgentEnv } from './agent-registry';
 import { stripMarkers } from './memory-paired-writer';
+import { manifestModelHead } from './garden-manifest';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -1830,6 +1831,13 @@ export function rollingWindowRotatePaired(
     const qualifier = `boundary:${chosenMarker.id}:${chosenMarker.timestamp}` +
         (chosenMarker.fabricated ? ':fabricated' : '');
 
+    // Authoring-model provenance (DEC-092, S169): these c0/c1 are the lived
+    // interactive session's content (sliced here in the wm-sensor process, which
+    // has no agentQuery result to read a served model from), so stamp the
+    // configured session model — honest best-effort (an in-CLI safeguard fallback
+    // isn't visible at the slice site). NULL if the manifest doesn't know it.
+    const sessionModel = manifestModelHead(agent, 'session');
+
     // Atomic paired insert (DEC-085 must-fix per Jim's audit, S153 2026-05-08).
     // The transaction wrapper makes the inserts both-or-neither.
     const insertPair = db.transaction(() => {
@@ -1841,6 +1849,11 @@ export function rollingWindowRotatePaired(
             c1Id, agent, sessionLabel, 'c1', compArchive, 'working-memory-compressed',
             c0Id, null, null, 'original', new Date().toISOString(), null, 0, qualifier,
         );
+        // Non-breaking populate, inside the same transaction → atomic with the inserts.
+        if (sessionModel) {
+            gradientStmts.setAuthoredModel.run(sessionModel, c0Id);
+            gradientStmts.setAuthoredModel.run(sessionModel, c1Id);
+        }
     });
     try {
         insertPair();

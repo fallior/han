@@ -715,6 +715,14 @@ try {
     db.exec(`ALTER TABLE gradient_entries ADD COLUMN cascade_halted_at TEXT`);
 } catch { /* column already exists */ }
 
+// Migration: authoring-model provenance (DEC-092, S169). Records which model
+// composed this entry. NULL = pre-provenance / unknown (backfill-exempt;
+// DEC-069-safe — additive, nullable, no row rewrite). Populated non-breakingly
+// via gradientStmts.setAuthoredModel at each author site.
+try {
+    db.exec(`ALTER TABLE gradient_entries ADD COLUMN authored_model TEXT`);
+} catch { /* column already exists */ }
+
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_supersedes ON gradient_entries(supersedes)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_ge_superseded_by ON gradient_entries(superseded_by)`);
 
@@ -834,6 +842,12 @@ export const gradientStmts = {
          source_id, source_conversation_id, source_message_id,
          provenance_type, created_at, supersedes, change_count, qualifier)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`) as any,
+    // DEC-092 (S169): authoring-model provenance. Non-breaking populate — call
+    // AFTER the insert (inside the caller's transaction where one exists, e.g.
+    // the slicer's paired insert → atomic). Leaves NULL (honest pre-provenance)
+    // if never called or if a crash precedes it. Avoids widening the `as any`
+    // insert (whose 8 callers tsc cannot count-check).
+    setAuthoredModel: db.prepare(`UPDATE gradient_entries SET authored_model = ? WHERE id = ?`) as any,
     get: db.prepare('SELECT * FROM gradient_entries WHERE id = ?') as any,
     getByAgent: db.prepare('SELECT * FROM gradient_entries WHERE agent = ? ORDER BY created_at DESC') as any,
     getByAgentLevel: db.prepare('SELECT * FROM gradient_entries WHERE agent = ? AND level = ? ORDER BY created_at DESC') as any,

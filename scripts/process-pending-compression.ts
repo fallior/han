@@ -51,6 +51,15 @@ import Database from 'better-sqlite3';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
 import { enqueueCascadeForDisplacedAt } from '../src/server/lib/memory-gradient';
+import { manifestModelHead } from '../src/server/lib/garden-manifest';
+
+// Authoring-model provenance (DEC-092, S169). The compression worker runs its
+// own agentQuery, so it can read the ACTUALLY-SERVED model off the result stream
+// — which is the only way to capture Fable 5's <5% safeguard fallback to Opus
+// (compression's whole job is "distillation", the exact word the safeguard
+// routes). Set in runSDK's loop, read at the cN/UV insert. Single claim per
+// runSDK call, sequential → a module var is safe here.
+let lastServedModel: string | null = null;
 
 // Token counting — Phase A token refactor (S145, 2026-04-30). Mirrors the
 // canonical helper at src/server/lib/token-counter.ts; inlined for the same
@@ -387,7 +396,12 @@ async function runSDK(systemPrompt: string, userPrompt: string): Promise<string>
     });
 
     let result = '';
+    lastServedModel = null; // DEC-092: reset, then capture the served model below
     for await (const message of q) {
+        // The assistant message carries the actually-served model (captures a
+        // safeguard fallback, e.g. Fable→Opus on a distillation-classified turn).
+        const m: any = message;
+        if (m.type === 'assistant' && m.message?.model) lastServedModel = m.message.model;
         if (message.type === 'result' && message.subtype === 'success') {
             result = message.result || '';
         }
@@ -593,16 +607,20 @@ async function main() {
             `).get(agent, claimed.from_level) as any)?.created_at
             || new Date().toISOString();
 
+        // DEC-092: prefer the actually-served model (captures a Fable→Opus
+        // safeguard fallback); fall back to the configured compression model.
+        const authoredModel = lastServedModel ?? manifestModelHead(agent, 'compression');
         db.prepare(`
             INSERT INTO gradient_entries
                 (id, agent, session_label, level, content, content_type,
                  source_id, source_conversation_id, source_message_id,
-                 provenance_type, created_at, supersedes, change_count, qualifier)
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'original', ?, NULL, 0, NULL)
+                 provenance_type, created_at, supersedes, change_count, qualifier,
+                 authored_model)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'original', ?, NULL, 0, NULL, ?)
         `).run(
             newId, agent, newLabel, claimed.to_level, composed,
             claimed.source_content_type, claimed.source_id,
-            cascadeTimestamp,
+            cascadeTimestamp, authoredModel,
         );
 
         if (feelingTag) {
