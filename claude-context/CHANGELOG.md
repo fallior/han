@@ -42,6 +42,11 @@ no surface dispatches yet; manifest transport/model flips belong to the thaw PR 
 - Hygiene commit 854d7c8 preceded the stride (Jim's reconcile-sweep bundle). `fable.txt` stray
   flagged for Darron, untouched. The optional `claude-logged` filename amendment (HAN_LOG_SURFACE)
   is drafted for Darron's own hand (L013 — agents never modify .bashrc).
+- **Follow-up (Jim's diff-audit GREEN + 2 Jim-only catches):** `conversationRole` (jim =
+  'supervisor', not the slug) + per-seat `swapPrefix` added to the Garden Manifest as DATA;
+  `manifest-get env <slug> [surface]` emits AGENT_CONVERSATION_ROLE + AGENT_SWAP_COMPRESSED/FULL
+  from the manifest instead of deriving; launcher passes the surface through. Verified across all
+  seven seat combinations incl. both catch cases. Gates Jim's `--enable`, not Leo's thaw.
 
 ## 2026-06-11 (Leo + Darron — S169 — supervisor abort carve-out: c0-first ordering; authoring-model provenance)
 

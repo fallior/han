@@ -13,11 +13,14 @@
  *   npx tsx ../../scripts/manifest-get.ts model <slug> <surface>
  *       → head (active) model for the surface, falling back to the CLI launch
  *         default — the manifest CLI read-path, not a hardcoded literal.
- *   npx tsx ../../scripts/manifest-get.ts env <slug>
+ *   npx tsx ../../scripts/manifest-get.ts env <slug> [surface]
  *       → KEY=VALUE lines for the launcher's AGENT_* env contract, derived from
  *         the agent registry (memoryDir/fractalDir/sourceDir) + manifest
- *         (displayName). Counterpart name = the other active agent's displayName
- *         (the village's pairing convention).
+ *         (displayName, conversationRole, per-seat swapPrefix). Surface defaults
+ *         to 'session'. Counterpart name = the other active agent's displayName.
+ *         conversationRole + swap filenames are manifest DATA, never derived
+ *         from the slug (Jim's T-2 diff-audit catches #1/#2: jim's role is
+ *         'supervisor' and his seats use supervisor-swap* + jim-human-swap*).
  *   npx tsx ../../scripts/manifest-get.ts agents
  *       → one active agent slug per line.
  */
@@ -62,13 +65,23 @@ switch (cmd) {
         const a = agent(slugArg);
         const cfg = gradientConfigForAgent(slugArg);
         const counterpart = GARDEN_MANIFEST.agents.find((x) => x.active && x.slug !== slugArg);
+        const surface = surfaceArg || 'session';
+        // Per-seat swap prefix: this surface's, else the session seat's, else the
+        // agnostic default. Filenames relative to AGENT_MEMORY_DIR — the form the
+        // B-3 memory-guard and /pfc resolve (hanjim exports exactly this shape).
+        const swapPrefix =
+            a.surfaces.find((s) => s.name === surface)?.swapPrefix
+            ?? a.surfaces.find((s) => s.name === 'session')?.swapPrefix
+            ?? 'session-swap';
         console.log(`AGENT_SLUG=${a.slug}`);
         console.log(`AGENT_NAME=${a.displayName}`);
         console.log(`AGENT_MEMORY_DIR=${cfg.memoryDir}`);
         console.log(`AGENT_FRACTAL_DIR=${cfg.fractalDir}`);
         console.log(`AGENT_GRADIENT_SOURCE_DIR=${cfg.sourceDir}`);
-        console.log(`AGENT_CONVERSATION_ROLE=${a.slug}`);
+        console.log(`AGENT_CONVERSATION_ROLE=${a.conversationRole ?? a.slug}`);
         console.log(`AGENT_COUNTERPART_NAME=${counterpart?.displayName ?? ''}`);
+        console.log(`AGENT_SWAP_COMPRESSED=${swapPrefix}.md`);
+        console.log(`AGENT_SWAP_FULL=${swapPrefix}-full.md`);
         break;
     }
     default:

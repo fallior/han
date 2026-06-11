@@ -44,11 +44,21 @@ export interface SurfaceManifest {
     profile?: string;
     /** Session/interactive surfaces only (future-idea #76; fleet plan allocates). */
     port?: number;
+    /** Swap-buffer filename prefix for this seat (per the CLAUDE.md swap table) —
+     *  `<prefix>.md` (compressed) + `<prefix>-full.md` (full), relative to the
+     *  agent's memoryDir. Per-SEAT data, not derivable from the slug (Jim's T-2
+     *  diff-audit catch #2: jim's seats use supervisor-swap* + jim-human-swap*).
+     *  Unset on deferred surfaces; consumers fall back to 'session-swap'. */
+    swapPrefix?: string;
 }
 
 export interface AgentManifest {
     slug: string;
     displayName: string;
+    /** Conversation role for posts/templating. NOT derivable from the slug —
+     *  jim's role is 'supervisor' (Jim's T-2 diff-audit catch #1: slug-derivation
+     *  was right for every agent except exactly him). Defaults to the slug. */
+    conversationRole?: string;
     active: boolean;
     surfaces: SurfaceManifest[];
     // ── Folded in during later phases (declared now as the foundation) ──
@@ -98,11 +108,12 @@ export const GARDEN_MANIFEST: GardenManifest = {
         {
             slug: 'leo',
             displayName: 'Leo',
+            conversationRole: 'leo',
             active: true,
             surfaces: [
-                { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT },
-                { name: 'human-response',     enabled: true,  transport: 'sdk', model: FABLE_LADDER }, // ⚠ Fable window (S169) — revert to OPUS_LADDER after 22 Jun
-                { name: 'heartbeat',          enabled: true,  transport: 'sdk', model: OPUS_LADDER },
+                { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
+                { name: 'human-response',     enabled: true,  transport: 'sdk', model: FABLE_LADDER, swapPrefix: 'human-swap' }, // ⚠ Fable window (S169) — revert to OPUS_LADDER after 22 Jun
+                { name: 'heartbeat',          enabled: true,  transport: 'sdk', model: OPUS_LADDER, swapPrefix: 'heartbeat-swap' },
                 { name: 'meditation-phase-a', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
                 { name: 'meditation-phase-b', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
                 { name: 'meditation-evening', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
@@ -111,12 +122,13 @@ export const GARDEN_MANIFEST: GardenManifest = {
         {
             slug: 'jim',
             displayName: 'Jim',
+            conversationRole: 'supervisor', // NOT the slug — Jim's diff-audit catch #1
             active: true,
             surfaces: [
-                { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT },
-                { name: 'human-response',     enabled: true,  transport: 'sdk', model: FABLE_LADDER }, // ⚠ Fable window (S169) — revert to OPUS_LADDER after 22 Jun
+                { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'supervisor-swap' },
+                { name: 'human-response',     enabled: true,  transport: 'sdk', model: FABLE_LADDER, swapPrefix: 'jim-human-swap' }, // ⚠ Fable window (S169) — revert to OPUS_LADDER after 22 Jun
                 // ⚠ still 4-7 — supervisor-worker.ts:2075 (config.supervisor.model overrides)
-                { name: 'supervisor-cycle',   enabled: true,  transport: 'sdk', model: ['claude-opus-4-7'] },
+                { name: 'supervisor-cycle',   enabled: true,  transport: 'sdk', model: ['claude-opus-4-7'], swapPrefix: 'supervisor-swap' },
                 // ⚠ still 4-7 — supervisor-worker.ts:363/1036/1131
                 { name: 'meditation-phase-a', enabled: true,  transport: 'sdk', model: ['claude-opus-4-7'] },
                 { name: 'meditation-phase-b', enabled: true,  transport: 'sdk', model: ['claude-opus-4-7'] },
@@ -128,7 +140,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
             displayName: 'Tenshi',
             active: false, // dormant — has agent dir + CLAUDE.md, no running service
             surfaces: [
-                { name: 'session', enabled: true, transport: 'cli', model: CLI_LAUNCH_DEFAULT },
+                { name: 'session', enabled: true, transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
             ],
         },
     ],

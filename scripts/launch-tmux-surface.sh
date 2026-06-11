@@ -74,7 +74,7 @@ MODEL="${MODEL_OVERRIDE:-$(manifest_get model "$SLUG" "$SURFACE")}"
 ENV_ARGS=()
 while IFS= read -r kv; do
     ENV_ARGS+=(-e "$kv")
-done < <(manifest_get env "$SLUG")
+done < <(manifest_get env "$SLUG" "$SURFACE")
 
 tmux new-session -d -s "$SESSION_NAME" -c "$REPO_ROOT" \
     "${ENV_ARGS[@]}" \
