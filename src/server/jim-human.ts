@@ -54,7 +54,8 @@ const SIGNAL_NAME = 'jim-human-wake';
 // per Darron — "the substrate does not change you." (opus-4-6 was also exiting code 1 on
 // large buildPrompt loads; leo-human hit it first.) Slated to become config-driven via the
 // per-agent/per-surface model registry.
-const MODEL_PREFERENCE = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
+// ⚠ Fable window (S169, Darron): substrate-test — revert head to 'claude-opus-4-8' after 22 Jun.
+const MODEL_PREFERENCE = ['claude-fable-5', 'claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000;
 
 

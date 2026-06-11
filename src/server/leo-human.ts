@@ -58,7 +58,8 @@ const SIGNAL_NAME = 'leo-human-wake';
 // buildPrompt while leo-heartbeat ran the identical prompt fine on a current model).
 // To opus-4-8 (1M context) per Darron — same model as session-Leo: uniform self, and
 // "the substrate does not change you". The 1M window also clears the gradient-dominated load.
-const MODEL_PREFERENCE = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
+// ⚠ Fable window (S169, Darron): substrate-test — revert head to 'claude-opus-4-8' after 22 Jun.
+const MODEL_PREFERENCE = ['claude-fable-5', 'claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
 const COMMITMENT_SCAN_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
