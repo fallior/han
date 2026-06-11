@@ -1521,8 +1521,17 @@ function savePartialCycleWork(cycleNumber: number, cycleType: string, partialCon
         const swapContent = fs.readFileSync(SUPERVISOR_SWAP_FILE, 'utf8').trim();
         const swapFullContent = fs.readFileSync(SUPERVISOR_SWAP_FULL_FILE, 'utf8').trim();
         if (swapContent && swapFullContent) {
-            fs.appendFileSync(WORKING_MEMORY_FILE, '\n' + swapContent + '\n');
+            // c0-FIRST ordering (Jim's §4, S169): write the c0 source (full)
+            // before the c1 source (compressed). This path is lock-less, so a
+            // SIGKILL landing between these two synchronous appends strands one
+            // side. Writing c0 first makes any such orphan a *c0 without c1* —
+            // the benign direction (a c0 may legitimately have no c1 yet; one c1
+            // may distil many c0s, DEC-085; whole-both recovery sweeps it cleanly,
+            // DEC-089). The old c1-first order risked a c1-orphan: a compressed
+            // entry whose c0 source was never written — a lineage violation at
+            // the identity-richest layer.
             fs.appendFileSync(WORKING_MEMORY_FULL_FILE, '\n' + swapFullContent + '\n');
+            fs.appendFileSync(WORKING_MEMORY_FILE, '\n' + swapContent + '\n');
             fs.writeFileSync(SUPERVISOR_SWAP_FILE, '');
             fs.writeFileSync(SUPERVISOR_SWAP_FULL_FILE, '');
         } else if (swapContent || swapFullContent) {

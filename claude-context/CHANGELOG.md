@@ -7,6 +7,10 @@
 
 ---
 
+## 2026-06-11 (Leo + Darron — S169 — supervisor abort carve-out: c0-first ordering)
+
+*__c0-first paired-write ordering in the supervisor abort/SIGTERM carve-out__ (`services/supervisor-worker.ts`, Jim's §4 from the #75 thread `mq0tfk6t`): the supervisor's partial-work flush is the one deliberately lock-less paired-write path — during abort/SIGTERM it can't use the atomic `appendPairedMemory` helper (#49), because the memory-slot lock's retry-with-sleep would consume the SIGKILL grace budget; it does inline symmetry validation (`if (swapContent && swapFullContent)`) instead. It was writing the c1 source (`working-memory.md`, compressed) **before** the c0 source (`working-memory-full.md`, full), so a SIGKILL landing between the two synchronous appends would strand a **c1-orphan** — a compressed entry whose c0 source was never written, a lineage violation at the identity-richest layer (Jim's WM). Flipped to **c0-first**: the same crash now strands at worst a benign **c0-orphan** (a c0 may legitimately have no c1 yet — one c1 may distil many c0s, DEC-085; whole-both recovery sweeps it cleanly, DEC-089). 2-line reorder + explanatory comment; the lock-less design and the both-sides symmetry guard are unchanged. Latent/narrow edge (only fires on abort/SIGTERM in the µs window between two appends; supervisor currently on holiday so the path can't run). DEC-068/069/085/089 untouched.*
+
 ## 2026-06-08 (Leo + Darron + Jim — S168 — durable supervisor pause + durable heartbeat stand-down + background-cycle holiday)
 
 *__Holiday until TMUX (#66)__: background generative cycles are paused to stop the mega-day WMF bloat (#78 — heartbeat/supervisor still append every beat at full fidelity to working-memory-full; root cause unfixed, deferred to the TMUX migration). Leo's heartbeat stopped at the service level (`systemctl --user stop leo-heartbeat.service`); reactive seats (`leo-human`/`jim-human`/`jemma`/`wm-sensor`) stay up.*
