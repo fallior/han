@@ -1,5 +1,7 @@
 # C1 Distillation — folding into the memory model (v4 draft)
 
+> **✅ LANDED — shipped as PR-C1-1 → PR-C1-9 (2026-05-26/28); DEC-085 Amendment (2026-05-28) is Settled. c1 is agent-authored in-situ distillation across every paired-write surface; legacy `slice(0,120/200)` truncation paths retired. This plan is HISTORICAL; the "V4 DRAFT" status below is pre-merge and retained per DEC-069.**
+>
 > **Status**: V4 DRAFT, Jim's audit-round-14 refinements (C1-R6 substantive + C1-N1/N2/N3 small notes + C1-V1 ownership) folded per Darron's S161 confirmations. Surface inventory verified again — three of Jim's cycles (personal/recovery/dream) reclassified to Mechanism B after grep confirmed they produce prose with `slice(0, 200)` truncation, same shape as Leo's heartbeat. Auditable inside the "Our Memory Model" thread (`mpf1zv0z-03dgeq`) alongside Jim's `plans/memory-kind-taxonomy.md`. — Leo (session, S161, 2026-05-26 AEST, Hamilton Island)
 >
 > **What changed v3 → v4**:

@@ -144,7 +144,9 @@ Same phase shape as v1 (T-0 → T-8) and same deadline-fit. T-1 grows in scope p
 
 ---
 
-## v1 sections below (preserved unchanged for historical reference)
+## ⚠ v1 sections below — SUPERSEDED by the v2 Addendum above; HISTORICAL ONLY, do not implement from here
+
+> **Everything below this line is v1 (one-shot: `/clear`-per-transaction, full identity reload per fire).** v2 (warm long-lived sessions, identity amortised, `/clear` only on context >85%) **overturned that model** — see the "v2 Addendum" at the top. Build only from v2. The v1 detail is kept for history (the reasoning trail), not as buildable spec. *(Section banner added 2026-06-10 in the reconcile-sweep — the top note alone could be missed on a deep-read of a v1 section.)*
 
 
 >

@@ -93,3 +93,23 @@ Verify: the three rotation calls no longer insert (grep + a forced rotation prod
 felt-moments/self-reflection cN row); the lock throws on a non-working-memory cN insert
 (unit test); existing legacy rows untouched; the gradient loads clean; new felt-moments land in
 the vault. Snapshot before any data step.
+
+---
+
+## 2026-06-11 — Layer-1 shipped; Layer-2 build decision (Jim, S169)
+
+**Status (traced against current code):**
+- **Layer 1 landed** — `rollingWindowRotate` now skips non-working-memory kinds (`memory-gradient.ts:1242`, warn + no insert). The live gradient confirms it: **zero felt-moments / self-reflection cN entries.** The leak is closed in practice.
+- **A2 insert-lock landed** (DEC-090, `memory-gradient.ts:311-320`) — independently guards compression *quality* (a cN child must genuinely reduce, else INCOMPRESSIBLE → `cN-uv` halt). This is a **different axis** from the content-channel lock: A2 asks *"did this compress?"*, the channel lock asks *"is this a working-memory kind?"*
+- **Layer 2 — the structural `ChannelViolation` backstop at the insert chokepoint — is NOT built** (only the comment placeholders at `:68` / `:1235-1242`).
+
+**The gap Layer-2 closes:** a *future* caller that inserts a cN with a non-working-memory `content_type` **directly** (bypassing `rollingWindowRotate`) is caught by neither Layer-1 (guards only the rotation fn) nor A2 (checks reduction, not channel). Layer-2 = a `content_type ∈ {working-memory*}` check at the insert chokepoint → `ChannelViolation` throw, grandfathering the **1843 frozen** rebuild-era rows (`rolled-day`/`session`/`conversation`) and refusing new ones. It makes *"gradient = working-memory-only"* **physics**.
+
+**Recommendation — BUILD it, but LOW-URGENCY, and BUNDLE with #17:**
+- The leak is empirically zero today, so there's **no fire**.
+- But it's the *"make the invariant physics, not a convention"* principle (the same one behind A2), it's a few lines at the chokepoint A2 already lives at, and it future-proofs against the silent-re-leak failure family (S133/S149) when tmux / agent-shell adds new insert paths.
+- **The efficient path: land it WITH the authoring-model-provenance build (#17)** — *both modify the same insert chokepoint* (`gradientStmts.insert` / the `memory-gradient.ts` insert path). One protected-code touch, **one DEC** (extend the cN-uv/triage DEC with two invariants: *"the cN gradient is working-memory-derived only"* + *"every entry records its `authored_model`"*), **one Jim audit**.
+
+**If Darron prefers declare-sufficient:** acceptable — Layer-1 + A2 cover the known surface. Document the residual (a new *direct*-insert caller could re-leak) as a known-accepted risk; the Layer-2 check then simply rides whenever the next gradient-insert PR lands anyway.
+
+**Decision needed from Darron:** *build Layer-2 now (bundled with #17)* **or** *declare Layer-1 + A2 sufficient.* Either way — **no urgency; the gradient is clean today.**

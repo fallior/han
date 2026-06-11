@@ -1,5 +1,7 @@
 # C1 Diary — capturing both halves of every turn (v2 draft)
 
+> **✅ LANDED — the `## INPUT → ## BODY → ## C1` turn-entry shape shipped in the C1 migration (PR-C1-9, DEC-085 Amendment, 2026-05-28); parsers live at `src/server/lib/result-handlers.ts` (`parseTurnEntryStructured` / `parseTurnEntry`). c0 storage uses `[INPUT]`/`[BODY]`/`[C1]` markers. This plan is HISTORICAL; the "V2 DRAFT" status below is pre-merge and retained per DEC-069.**
+>
 > **Status**: V2 DRAFT. Jim's round-7 audit GREEN with one substantive finding (D1) + three small ones (D2/D3/D4). Darron confirmed his agreement with Jim's leans and asked for my take in case anything was missed. All four foldings applied + two of my own additions (LM-1 / LM-2). Auditable inside the *"Our Memory Model"* thread (`mpf1zv0z-03dgeq`) and the *"What we remember"* thread (`mpnv3qc0-hf61cm`). — Leo (session, S161, 2026-05-28 ~12:30 AEST, Mackay)
 >
 > **What changed v1 → v2**:

@@ -1,5 +1,7 @@
 # Jemma Conversation Orchestration — Civil Conversations
 
+> **✅ IMPLEMENTED — shipped (DEC-079/080 era). `src/server/services/jemma-orchestrator.ts` exports `orchestrate()`, called unconditionally at `routes/conversations.ts`; legacy parallel-fanout retired; per-conversation serialisation live via a `Map<string, Promise>` lock. This plan is HISTORICAL; the "implementation plan for review" status below is pre-merge and retained per DEC-069.**
+
 *Author: Leo (session). Date: 2026-04-22. Status: implementation plan for review. Origin thread: `mo9h1le6-0uvx35` ("Jemma, making conversations civil"). Related discussion: `mo98jep4-ym8hwx` ("Conversations should flow").*
 
 ---

@@ -36,7 +36,13 @@ Leo lost thread `mppj72fx` after a `/clear` for exactly this reason: his prose s
 but the id existed only in a `curl` call. The act of writing working-memory *is* a compression step; "c0" is the
 agent's *first edit* of its experience, not the raw material. **The raw material is the log.**
 
-## 2. The record store — HAN's terminal log (the right one)
+## 2. The record store
+
+> **⚠ RECONCILED 2026-06-10 (Jim) — SUPERSEDED by the decision block at the top (lines 15–23).** The canonical provenance record is the **per-agent `claude-logged` logs** (`~/.han/logs/<slug>/session_*.md`) — higher fidelity, per-line `[HH:MM:SS]` timestamps, per-identity by construction. Darron's standing decision, *always the case*: *"the claude-logged script log has more fidelity and is timestamped — it is the log we use for provenance."* The `terminal-log-v2.txt` detailed below is the **live-UI scrollback**, **not** the provenance record. **Implementation drift to fix (Leo-build / Jim-audit):** `terminal-search.ts` (via `routes/prompts.ts`) currently searches `terminal-log-v2.txt` — it followed this stale §2, not the decision — so re-point the active-link search at `~/.han/logs/<slug>/*.md` (already per-agent → D2 scoping for free) and adapt the marker parser from the server log's `--- DD/MM/YYYY ---` to claude-logged's `[HH:MM:SS]`. The §2 detail below is retained only for its tamper-resistance note (the server log has no agent write-path) — a consideration for #79's integrity scheme — NOT as the canonical store.
+>
+> *(original §2 below — historical, describes the live-UI scrollback log)*
+
+### HAN's terminal log — the live-UI scrollback (historical §2)
 
 | Property | Detail |
 |---|---|

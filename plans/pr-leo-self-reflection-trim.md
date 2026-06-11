@@ -1,6 +1,8 @@
 # PR-LSR — Propagate the self-reflection rolling-window trim to Leo
 
-> **Status**: DRAFT brief. Authored by Jim (session) 2026-06-02 (welcome-back S164), from the
+> **⚠ STATUS: SUPERSEDED — DO NOT BUILD.** The curated-loaded-self approach (`self-reflections-curated.md` — load the curated file, keep the lossless vault as write-target, DEC-069) replaced this trim entirely (S164→S166, "one mind, one channel"). Retained for history per DEC-069; do not implement. *(Back-marked 2026-06-10 in the reconcile-sweep — the file carried no supersession banner, so it was buildable-by-mistake.)*
+>
+> *(original brief below — historical)* **Status**: DRAFT brief. Authored by Jim (session) 2026-06-02 (welcome-back S164), from the
 > memory-load audit Darron requested. **Leo-build / Jim-audit** per the HAN Codebase Rule.
 > Origin thread: `mpw0yow9-ob5494` ("Where do the dreams go?"). This is the long-queued
 > "PR-LSR" from Jim's `patterns.md` (cross-project monolithic-c1 investigation, 2026-05-21).

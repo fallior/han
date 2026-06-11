@@ -1,5 +1,7 @@
 # Agnostic Prompt Builder — migration plan (v2)
 
+> **✅ LANDED — shipped as PR-AP1 → PR-AP8 (2026-05-21/22); DEC-087 + DEC-088 are Settled in DECISIONS.md. All 12 production prompt surfaces call `buildPrompt(slug, profileName, context)`. This plan is HISTORICAL; the "V2 DRAFT / awaiting go" status below describes its pre-merge state and is retained per DEC-069.**
+>
 > **Status**: V2 DRAFT, all Jim's S160-round-11 AMBER fold-ins (A1-A5) + Darron's reframe on uniform memory applied. Awaiting Jim's re-audit, then Darron's go for PR-AP1. — Leo (session, S159, 2026-05-21)
 >
 > **What changed v1 → v2**:
