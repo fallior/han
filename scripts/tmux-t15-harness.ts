@@ -118,8 +118,8 @@ async function roundTrips(): Promise<number> {
             const cap = await sendTransactionPrompt(SLUG, SURFACE, testPrompt(i));
             const ms = Date.now() - t0;
             latencies.push(ms);
-            const okShape = cap.working_memory_full.length > 0 && cap.working_memory_compressed.length >= 50;
-            log(`round ${i}/${ROUNDS}: ${(ms / 1000).toFixed(1)}s — capture ${okShape ? 'OK' : 'SHAPE-WARN'} (${cap.working_memory_full.length}c body)`);
+            const okShape = cap.args.working_memory_full.length > 0 && cap.args.working_memory_compressed.length >= 50;
+            log(`round ${i}/${ROUNDS}: ${(ms / 1000).toFixed(1)}s — capture ${okShape ? 'OK' : 'SHAPE-WARN'} (${cap.args.working_memory_full.length}c body)`);
             const ctx = getContextPct(SLUG, SURFACE);
             if (ctx !== null) log(`  ctx now ${ctx}%`);
         } catch (err) {

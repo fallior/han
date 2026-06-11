@@ -32,7 +32,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { DiaryCaptureArgs, CaptureRecord } from './diary-mcp-server';
+import type { CaptureRecord } from './diary-mcp-server';
 
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
 const PIPES_DIR = process.env.HAN_PIPES_DIR || path.join(os.homedir(), '.han', 'agent-pipes');
@@ -71,6 +71,13 @@ export interface AgentSession {
     launchCommand: string;
     /** Set once the ready-sentinel has been observed at least once. */
     ready: boolean;
+    /** Turn-state machine (the #5 reconcile design, settled 2026-06-01): the
+     *  single-live-txn invariant `current.json` relies on is enforced here.
+     *  'busy' from dispatch until a confirmed capture for THIS txn; a timeout
+     *  marks 'needs-reconcile' — NOT idle, because "the dispatcher gave up" is
+     *  not "the session is idle". The queue runs reconcileSession ahead of the
+     *  next dispatch. Confirm idleness; never assume it from elapsed time. */
+    turnState: 'idle' | 'busy' | 'needs-reconcile';
     /** Epoch ms of the last completed transaction — the cursor for computeMemoryDelta. */
     lastTransactionTs: number;
 }
@@ -180,7 +187,7 @@ export async function spawnAgentSession(
         await waitForReady(slug, surface, null, READY_TIMEOUT_MS);
     }
 
-    const session: AgentSession = { slug, surface, tmuxSession, launchCommand, ready: true, lastTransactionTs: Date.now() };
+    const session: AgentSession = { slug, surface, tmuxSession, launchCommand, ready: true, turnState: 'idle', lastTransactionTs: Date.now() };
     sessions.set(sessionKey(slug, surface), session);
     console.log(`[tmux-dispatcher] session ready: slug=${slug} surface=${surface} tmux=${tmuxSession}`);
     return session;
@@ -201,12 +208,18 @@ export async function sendTransactionPrompt(
     surface: string,
     prompt: string,
     opts: { timeoutMs?: number } = {}
-): Promise<DiaryCaptureArgs> {
+): Promise<CaptureRecord> {
     const session = sessions.get(sessionKey(slug, surface));
     if (!session || !session.ready) throw new SessionNotReadyError(`${slug}/${surface}: no ready session; call spawnAgentSession first`);
+    // Idle precondition (#5): dispatching into a busy or unreconciled session is
+    // exactly the interleaving/misattribution hole the reconcile design closes.
+    if (session.turnState !== 'idle') {
+        throw new SessionNotReadyError(`${slug}/${surface}: session is '${session.turnState}', not idle — reconcile before dispatching (enqueueForAgent does this automatically)`);
+    }
 
     const txnId = `txn-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     const timeoutMs = opts.timeoutMs ?? TRANSACTION_TIMEOUT_MS;
+    session.turnState = 'busy';
 
     // 1) Point the diary sink at this transaction BEFORE the prompt can be answered.
     writeAtomic(currentPtrPath(slug), JSON.stringify({ txnId, startedAt: new Date().toISOString() }));
@@ -222,7 +235,11 @@ export async function sendTransactionPrompt(
         const exact = capturePath(slug, txnId);
         if (fs.existsSync(exact)) return JSON.parse(fs.readFileSync(exact, 'utf-8')) as CaptureRecord;
         // Orphan capture (pointer was missing when the tool fired) — accept newest orphan
-        // created after we started, so the payload is never silently dropped.
+        // created after we started, so the payload is never silently dropped. The
+        // mtime gate vs lastTransactionTs is what keeps a LATE capture from an
+        // abandoned (reconciled) transaction out of this window — reconcileSession
+        // bumps lastTransactionTs precisely so pre-reconcile orphans can't be
+        // misattributed to the next transaction.
         const orphans = fs.readdirSync(sinkDir(slug))
             .filter((f) => f.startsWith('orphan-') && f.endsWith('.json'))
             .map((f) => path.join(sinkDir(slug), f))
@@ -233,14 +250,21 @@ export async function sendTransactionPrompt(
         }
         return null;
     }, timeoutMs).catch(() => {
-        throw new DispatchTimeoutError(`${slug}/${surface}: no diary capture for ${txnId} within ${timeoutMs}ms (agent never called submit_response, or session is wedged)`);
+        // Timeout ≠ idle: the session may still be composing. Mark for forced
+        // reconciliation; the queue runs reconcileSession before the next dispatch.
+        session.turnState = 'needs-reconcile';
+        throw new DispatchTimeoutError(`${slug}/${surface}: no capture for ${txnId} within ${timeoutMs}ms (agent never called submit_response/stand_down, or session is wedged) — session marked needs-reconcile`);
     });
 
+    session.turnState = 'idle';
     session.lastTransactionTs = Date.now();
     // Best-effort cleanup of this txn's transient files; leave captures for forensics.
     try { fs.unlinkSync(promptFile); } catch { /* ignore */ }
-    console.log(`[tmux-dispatcher] ${slug}/${surface}: captured ${cap.txnId} (${cap.args.working_memory_full.length}c body)`);
-    return cap.args;
+    const summary = cap.mode === 'stand-down'
+        ? `STAND-DOWN (${(cap.reason ?? '').slice(0, 80)})`
+        : `${cap.args.working_memory_full.length}c body`;
+    console.log(`[tmux-dispatcher] ${slug}/${surface}: captured ${cap.txnId} (${summary})`);
+    return cap;
 }
 
 // ── primitive 3: getContextPct ───────────────────────────────────────────────────────
@@ -270,6 +294,12 @@ export async function clearSession(slug: string, surface: string, opts: { welcom
     const session = sessions.get(sessionKey(slug, surface));
     if (!session) throw new SessionNotReadyError(`${slug}/${surface}: no session to clear`);
     session.ready = false;
+    // Unlink the txn pointer on EVERY clear (#5, Jim's minor): "no live txn" becomes
+    // an explicit on-disk state, so any capture firing during the clear window
+    // resolves to a fail-loud orphan rather than a stale-txnId misattribution.
+    // (T-1.5 verdict: /clear QUEUES behind an in-flight turn, so this is the belt,
+    // not the backbone — but the belt is cheap and the window is real.)
+    try { fs.unlinkSync(currentPtrPath(slug)); } catch { /* none */ }
     const beforeMtime = readySentinelMtime(slug, surface);
     try { fs.unlinkSync(readyPath(slug, surface)); } catch { /* none */ }
 
@@ -281,8 +311,33 @@ export async function clearSession(slug: string, surface: string, opts: { welcom
 
     await waitForReady(slug, surface, beforeMtime, READY_TIMEOUT_MS);
     session.ready = true;
+    session.turnState = 'idle';
     session.lastTransactionTs = Date.now();
     console.log(`[tmux-dispatcher] ${slug}/${surface}: cleared + reloaded`);
+}
+
+// ── reconcileSession (#5 — the authoritative path back to idle after a timeout) ──────
+/**
+ * Forced reconciliation: timeout → needs-reconcile → /pfc → /clear → welcome-back →
+ * newer ready-sentinel proves the session is idle and reconstituted → queue proceeds.
+ * The abandoned transaction's in-flight turn is honestly failed (logged, fail-loud);
+ * losing it is the only acceptable outcome when the alternative is misattribution
+ * into paired memory. `clearSession` already unlinks `current.json` (late captures
+ * orphan fail-loud) and this resets `lastTransactionTs`, so a pre-reconcile orphan
+ * can never satisfy the NEXT transaction's poll window.
+ *
+ * On reconcile FAILURE (e.g. a truly wedged session — ready-sentinel never returns)
+ * the session STAYS 'needs-reconcile' and the error propagates: the surface is
+ * effectively offline and every subsequent enqueue retries reconciliation, failing
+ * loud each time. Frequent timeouts are a signal to investigate, not to optimise
+ * (Jim's minor: don't pre-optimise the reconcile path).
+ */
+export async function reconcileSession(slug: string, surface: string): Promise<void> {
+    const session = sessions.get(sessionKey(slug, surface));
+    if (!session) throw new SessionNotReadyError(`${slug}/${surface}: no session to reconcile`);
+    console.warn(`[tmux-dispatcher] ${slug}/${surface}: RECONCILING after timeout — in-flight turn (if any) will be abandoned (honest-fail)`);
+    await clearSession(slug, surface); // unlinks current.json + ready-sentinel; waits for newer sentinel
+    console.log(`[tmux-dispatcher] ${slug}/${surface}: reconciled — session idle and reconstituted`);
 }
 
 // ── primitive 5: enqueueForAgent (per-agent FIFO) ────────────────────────────────────
@@ -300,10 +355,18 @@ const queueTails = new Map<string, Promise<unknown>>();
  *  sessions is the invariant that keeps the single per-slug current.json (and
  *  the memory-slot write serialisation) safe. `surface` only routes the prompt
  *  to the right session. */
-export function enqueueForAgent(slug: string, surface: string, prompt: string, opts: { timeoutMs?: number } = {}): Promise<DiaryCaptureArgs> {
+export function enqueueForAgent(slug: string, surface: string, prompt: string, opts: { timeoutMs?: number } = {}): Promise<CaptureRecord> {
     const prior = queueTails.get(slug) ?? Promise.resolve();
-    // Chain regardless of the prior transaction's outcome so one failure can't wedge the queue.
-    const run = prior.catch(() => undefined).then(() => sendTransactionPrompt(slug, surface, prompt, opts));
+    // Chain regardless of the prior transaction's outcome so one failure can't wedge
+    // the queue — but reconcile FIRST when the target session needs it (#5): the
+    // queue must never dispatch into a needs-reconcile session (idle precondition).
+    const run = prior.catch(() => undefined).then(async () => {
+        const session = sessions.get(sessionKey(slug, surface));
+        if (session && session.turnState === 'needs-reconcile') {
+            await reconcileSession(slug, surface);
+        }
+        return sendTransactionPrompt(slug, surface, prompt, opts);
+    });
     queueTails.set(slug, run.catch(() => undefined));
     return run;
 }

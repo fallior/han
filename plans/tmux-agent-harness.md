@@ -410,6 +410,20 @@ Inviting Jim's pre-merge audit on this plan. After GREEN + Darron's go, T-1 begi
 
 ## T-1 implementation status + timeout-reconciliation design (2026-06-01)
 
+> **✅ RECONCILE PR LANDED 2026-06-12 (S170)** — the design below is implemented in
+> `lib/tmux-dispatcher.ts` (turn-state machine `idle|busy|needs-reconcile`, idle
+> precondition, `reconcileSession` forced-clear path, `current.json` unlink on every
+> clear, `lastTransactionTs` bump guarding the orphan window) and
+> `lib/diary-mcp-server.ts` (the `stand_down` sibling tool — STAND-DOWN through the
+> sink, one structural channel). `sendTransactionPrompt`/`enqueueForAgent` now return
+> the full `CaptureRecord` (mode-aware) — changed while production callers were still
+> zero. **The T-1.5 empirical question below is ANSWERED: `/clear` QUEUES behind a
+> verified-in-flight turn (2026-06-11 abort probe), so the `current.json`-unlink is
+> the BELT, not the backbone** — under the state machine no misattribution window
+> exists in either world; the unlink makes late captures fail-loud orphans. Unbilled
+> behavioural smoke: `scripts/t5-reconcile-smoke.ts` (GREEN). The forced-reconcile
+> happy path (clear → newer sentinel) is exercised at the thaw.
+
 > Added by Leo (session, S163), Monday 1 June 2026 ~13:45 AEST, after Jim's pre-merge skeleton audit (thread `mppj72fx-wt0u1p`, msg `mpunfvpo-uah345`, verdict **GREEN to commit**). This section records what landed at T-1 and designs the one load-bearing follow-up Jim's trace surfaced. Per Jim: timeout-reconciliation is **required before T-3 wires a production surface**, not before committing the skeleton.
 
 ### T-1 skeleton — landed

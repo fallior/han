@@ -82,6 +82,15 @@ export interface DiaryCaptureArgs {
 export interface CaptureRecord {
     txnId: string;
     capturedAt: string;
+    /** 'diary' (default) = a real submit_response; 'stand-down' = the agent
+     *  deliberately declined to respond this turn. Both write the SAME sink shape
+     *  so capture-appearance = turn-done uniformly across diary and stand-down
+     *  turns — the settled reconcile design (#5, 2026-06-01): the whole control
+     *  plane stays on ONE structural signal, no agent-refreshed turn-state marker
+     *  (which would reintroduce the fidelity dependency #67 eliminated). */
+    mode?: 'diary' | 'stand-down';
+    /** stand-down only: the agent's stated reason. */
+    reason?: string;
     args: DiaryCaptureArgs;
 }
 
@@ -161,9 +170,39 @@ server.registerTool(
         writeCaptureAtomic(txnId, {
             txnId,
             capturedAt: new Date().toISOString(),
+            mode: 'diary',
             args: args as DiaryCaptureArgs,
         });
         return { content: [{ type: 'text' as const, text: 'Diary received. Your turn is complete.' }] };
+    }
+);
+
+// STAND-DOWN through the sink (settled reconcile design, 2026-06-01, Jim's
+// refinement): a turn that deliberately produces no response still ends by
+// calling an MCP tool, writing the same sink shape — so the dispatcher infers
+// idle/busy entirely from its own state + capture-appearance, with no second
+// signalling channel. Also solves STAND-DOWN under tmux (a text sentinel can't
+// be reliably parsed off a streaming terminal pane).
+server.registerTool(
+    'stand_down',
+    {
+        description: 'Deliberately decline to respond this turn (e.g. nothing warrants a reply, or the prompt asks you to stand down). Call EXACTLY ONCE instead of submit_response — never both. This tool call IS your completion for the turn.',
+        inputSchema: {
+            reason: z.string().min(1).describe(
+                'One or two sentences: why this turn warrants no response. Recorded for forensics; not written to paired memory.'
+            ),
+        },
+    },
+    async (args) => {
+        const txnId = resolveTxnId();
+        writeCaptureAtomic(txnId, {
+            txnId,
+            capturedAt: new Date().toISOString(),
+            mode: 'stand-down',
+            reason: (args as { reason: string }).reason,
+            args: { working_memory_full: '', working_memory_compressed: '', input_quotes: '' },
+        });
+        return { content: [{ type: 'text' as const, text: 'Stand-down recorded. Your turn is complete.' }] };
     }
 );
 

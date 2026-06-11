@@ -7,6 +7,26 @@
 
 ---
 
+## 2026-06-12 (S170) — #5 reconcile PR: turn-state machine + stand-down through the sink
+
+**The settled timeout-reconciliation design (5946651, 2026-06-01) implemented — required before
+T-3/thaw. Informed by the T-1.5 abort verdict (/clear QUEUES → unlink is BELT).**
+
+- `lib/tmux-dispatcher.ts`: `AgentSession.turnState` (`idle|busy|needs-reconcile`); idle
+  precondition on dispatch (refuses non-idle, fail-loud); timeout marks `needs-reconcile` —
+  never idle ("the dispatcher gave up" ≠ "the session is idle"); `reconcileSession()` =
+  forced clearSession with newer-sentinel proof; `current.json` unlinked on EVERY clear (late
+  captures → fail-loud orphans); `lastTransactionTs` bumped at reconcile so pre-reconcile
+  orphans can't satisfy the next transaction's poll window; `enqueueForAgent` reconciles
+  ahead of dispatch.
+- `lib/diary-mcp-server.ts`: sibling `stand_down` tool — a declined turn writes the same sink
+  shape (`mode: 'stand-down'` + reason), so capture-appearance = turn-done uniformly and the
+  control plane stays on ONE structural channel (no agent-refreshed marker; the #67 principle).
+- API: `sendTransactionPrompt`/`enqueueForAgent` return the full mode-aware `CaptureRecord`
+  (changed at the zero-production-callers moment; harness updated).
+- Evidence: `scripts/t5-reconcile-smoke.ts` (unbilled, in-repo, re-runnable) — GREEN on both
+  assertions; tsc at the 12-error baseline.
+
 ## 2026-06-11 (S170) — T-2 long stride: per-surface session infrastructure (one Fable session)
 
 **T-2 of the tmux migration (#66), built as the first long-horizon Fable stride per the agreed
