@@ -30,6 +30,7 @@ AGENT_SWAP_COMPRESSED="supervisor-swap.md"
 AGENT_SWAP_FULL="supervisor-swap-full.md"
 AGENT_CONVERSATION_ROLE="supervisor"
 AGENT_COUNTERPART_NAME="Leo"
+AGENT_SURFACE="session"   # interactive seat (T-2 per-surface sentinel/ctx keying)
 
 # Multi-line: Jim's identity prose substituted into ${AGENT_IDENTITY_SECTION}.
 read -r -d '' AGENT_IDENTITY_SECTION <<'IDENTITY_EOF' || true
@@ -246,6 +247,7 @@ start_session() {
         -e "AGENT_GRADIENT_SOURCE_DIR=$AGENT_GRADIENT_SOURCE_DIR" \
         -e "AGENT_CONVERSATION_ROLE=$AGENT_CONVERSATION_ROLE" \
         -e "AGENT_COUNTERPART_NAME=$AGENT_COUNTERPART_NAME" \
+        -e "AGENT_SURFACE=$AGENT_SURFACE" \
         -c "$AGENT_WORKING_DIR"
 
     # Start server in a bottom pane (20% height) under the auto-restart watchdog.

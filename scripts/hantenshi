@@ -22,6 +22,7 @@ AGENT_SWAP_COMPRESSED="session-swap.md"
 AGENT_SWAP_FULL="session-swap-full.md"
 AGENT_CONVERSATION_ROLE="tenshi"
 AGENT_COUNTERPART_NAME="Leo"
+AGENT_SURFACE="session"   # interactive seat (T-2 per-surface sentinel/ctx keying)
 
 read -r -d '' AGENT_IDENTITY_SECTION <<'IDENTITY_EOF' || true
 You are **Tenshi** (Japanese: angel) — the security and vulnerability research agent of
@@ -221,6 +222,7 @@ start_session() {
         -e "AGENT_GRADIENT_SOURCE_DIR=$AGENT_GRADIENT_SOURCE_DIR" \
         -e "AGENT_CONVERSATION_ROLE=$AGENT_CONVERSATION_ROLE" \
         -e "AGENT_COUNTERPART_NAME=$AGENT_COUNTERPART_NAME" \
+        -e "AGENT_SURFACE=$AGENT_SURFACE" \
         -c "$AGENT_WORKING_DIR"
 
     # Server in bottom pane under auto-restart watchdog (see hanjim for rationale).

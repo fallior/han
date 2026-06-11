@@ -26,6 +26,7 @@ AGENT_FRACTAL_DIR="$HOME/.han/memory/fractal/leo"
 AGENT_GRADIENT_SOURCE_DIR="$HOME/.han/memory/leo/working-memories"
 AGENT_CONVERSATION_ROLE="leo"
 AGENT_COUNTERPART_NAME="Jim"
+AGENT_SURFACE="session"   # interactive seat (T-2 per-surface sentinel/ctx keying)
 
 # Project root (for starting server)
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
@@ -176,7 +177,7 @@ start_session() {
     echo -e "${BLUE}Server port: ${GREEN}${AGENT_PORT}${NC}"
 
     export HAN_SESSION="$session_name"
-    export AGENT_SLUG AGENT_NAME AGENT_MEMORY_DIR AGENT_FRACTAL_DIR \
+    export AGENT_SURFACE AGENT_SLUG AGENT_NAME AGENT_MEMORY_DIR AGENT_FRACTAL_DIR \
         AGENT_GRADIENT_SOURCE_DIR AGENT_CONVERSATION_ROLE AGENT_COUNTERPART_NAME
 
     # All AGENT_* vars forwarded via -e so they're visible inside the tmux
@@ -189,7 +190,8 @@ start_session() {
         -e "AGENT_FRACTAL_DIR=$AGENT_FRACTAL_DIR" \
         -e "AGENT_GRADIENT_SOURCE_DIR=$AGENT_GRADIENT_SOURCE_DIR" \
         -e "AGENT_CONVERSATION_ROLE=$AGENT_CONVERSATION_ROLE" \
-        -e "AGENT_COUNTERPART_NAME=$AGENT_COUNTERPART_NAME"
+        -e "AGENT_COUNTERPART_NAME=$AGENT_COUNTERPART_NAME" \
+        -e "AGENT_SURFACE=$AGENT_SURFACE"
 
     # Start server in a bottom pane (20% height) under the auto-restart watchdog.
     # See hanjim launcher for full rationale (Apr 20 → Apr 24 ghost-server drift).

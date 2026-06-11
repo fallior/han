@@ -1,0 +1,77 @@
+/**
+ * manifest-get — tiny CLI bridge from the Garden Manifest (+ agent registry) to
+ * shell-land, so the T-2 surface launcher and unit generator derive their facts
+ * from the single declarative source instead of hand-writing parallel lists
+ * (Jim's T-2 build-note #2: "the enumeration source is the Garden Manifest").
+ *
+ * Usage (run from src/server so imports resolve):
+ *   npx tsx ../../scripts/manifest-get.ts surfaces <slug>
+ *       → one line per enabled non-interactive surface (the tmux session set).
+ *         Meditation surfaces are EXCLUDED here by an explicit deferral —
+ *         Q-V2-3: meditations are re-encounter surfaces and stay frozen-on-SDK
+ *         pending their own call (named decision, T-2 PR, 2026-06-11).
+ *   npx tsx ../../scripts/manifest-get.ts model <slug> <surface>
+ *       → head (active) model for the surface, falling back to the CLI launch
+ *         default — the manifest CLI read-path, not a hardcoded literal.
+ *   npx tsx ../../scripts/manifest-get.ts env <slug>
+ *       → KEY=VALUE lines for the launcher's AGENT_* env contract, derived from
+ *         the agent registry (memoryDir/fractalDir/sourceDir) + manifest
+ *         (displayName). Counterpart name = the other active agent's displayName
+ *         (the village's pairing convention).
+ *   npx tsx ../../scripts/manifest-get.ts agents
+ *       → one active agent slug per line.
+ */
+
+import { GARDEN_MANIFEST, manifestModelHead } from '../src/server/lib/garden-manifest';
+import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
+
+/** Q-V2-3 deferral (named decision, T-2 PR 2026-06-11): meditation surfaces are
+ *  re-encounter practice and stay frozen-on-SDK pending their own call. */
+const DEFERRED_SURFACE_PREFIXES = ['meditation-'];
+
+const [, , cmd, slugArg, surfaceArg] = process.argv;
+
+function agent(slug: string) {
+    const a = GARDEN_MANIFEST.agents.find((x) => x.slug === slug);
+    if (!a) { console.error(`manifest-get: unknown agent '${slug}'`); process.exit(1); }
+    return a;
+}
+
+switch (cmd) {
+    case 'agents': {
+        for (const a of GARDEN_MANIFEST.agents.filter((x) => x.active)) console.log(a.slug);
+        break;
+    }
+    case 'surfaces': {
+        const a = agent(slugArg);
+        for (const s of a.surfaces) {
+            if (!s.enabled) continue;
+            if (s.name === 'session') continue; // interactive seat — launched by han<agent>, not a unit
+            if (DEFERRED_SURFACE_PREFIXES.some((p) => s.name.startsWith(p))) continue; // Q-V2-3 deferral
+            console.log(s.name);
+        }
+        break;
+    }
+    case 'model': {
+        const head = manifestModelHead(slugArg, surfaceArg) ?? manifestModelHead(slugArg, 'session');
+        if (!head) { console.error(`manifest-get: no model for ${slugArg}/${surfaceArg}`); process.exit(1); }
+        console.log(head);
+        break;
+    }
+    case 'env': {
+        const a = agent(slugArg);
+        const cfg = gradientConfigForAgent(slugArg);
+        const counterpart = GARDEN_MANIFEST.agents.find((x) => x.active && x.slug !== slugArg);
+        console.log(`AGENT_SLUG=${a.slug}`);
+        console.log(`AGENT_NAME=${a.displayName}`);
+        console.log(`AGENT_MEMORY_DIR=${cfg.memoryDir}`);
+        console.log(`AGENT_FRACTAL_DIR=${cfg.fractalDir}`);
+        console.log(`AGENT_GRADIENT_SOURCE_DIR=${cfg.sourceDir}`);
+        console.log(`AGENT_CONVERSATION_ROLE=${a.slug}`);
+        console.log(`AGENT_COUNTERPART_NAME=${counterpart?.displayName ?? ''}`);
+        break;
+    }
+    default:
+        console.error('usage: manifest-get.ts agents | surfaces <slug> | model <slug> <surface> | env <slug>');
+        process.exit(1);
+}

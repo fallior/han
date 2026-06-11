@@ -7,6 +7,42 @@
 
 ---
 
+## 2026-06-11 (S170) — T-2 long stride: per-surface session infrastructure (one Fable session)
+
+**T-2 of the tmux migration (#66), built as the first long-horizon Fable stride per the agreed
+"long-horizon the stages, never the gates" rhythm (thread mppj72fx). Launch-infrastructure only —
+no surface dispatches yet; manifest transport/model flips belong to the thaw PR (Jim's note #6).**
+
+- **Dispatcher re-key (BLOCKING-before-thaw, the T-1.5 cross-talk catch):** readiness sentinel +
+  context-watch keyed per-(slug, surface) — `<slug>-<surface>-ready` / `<slug>-<surface>-ctx.json`;
+  `AgentSession.surface`; registry keyed `slug/surface`; all dispatcher signatures take `(slug,
+  surface)`. The per-agent FIFO deliberately STAYS per-slug (single-live-txn invariant for
+  `current.json`). Q-V2-2's per-slug sketch amended in plans/tmux-agent-harness.md same change-set.
+- **`scripts/manifest-get.ts`** — single derivation bridge: agents/surfaces/model/env from the
+  Garden Manifest + agent registry (no hand-written parallel lists). Q-V2-3 meditation deferral
+  expressed as a named decision in code.
+- **`scripts/launch-tmux-surface.sh`** — serverless-spoke launcher (T-1.5 fixture learnings as
+  spine: `-e` env contract incl. AGENT_SURFACE, CLAUDECODE unset/L012, repo cwd for .mcp.json,
+  NO watchdog). claude-logged ON by default (provenance/DEC-091 + the #78 write-shape need the raw
+  in the canonical log); `--no-log` for fixtures. Surface-index sidecar
+  (`~/.han/logs/<slug>/surface-index.jsonl`) for deterministic session→surface→log mapping (#79).
+- **`scripts/install-surface-units.sh`** — units generated from the manifest, Type=oneshot +
+  RemainAfterExit, **no Restart=** (single-manager model: the dispatcher is the sole runtime
+  respawner), SYMLINKED into ~/.config/systemd/user (S166 stale-copy lesson). Enable per-slug at
+  the slug's thaw. Generated: leo×{human-response, heartbeat}, jim×{human-response, supervisor-cycle}.
+- **Sentinel/statusline write-side:** CLAUDE.md step 10 + templates/CLAUDE.template.md (step added —
+  closes the templatise-🟡) touch per-surface + legacy sentinels; global statusline writes
+  per-surface + legacy ctx (transition; retire legacy at T-7); repo copy at
+  `scripts/statusline-command.sh` (reproducible-install 🟡 closed). All four han* launchers export
+  `AGENT_SURFACE=session`.
+- **Evidence (in-repo, per Jim's far-side gate):** two same-slug sessions launched simultaneously;
+  both answer capture-pane with correct per-manifest models (heartbeat=opus-4-8 frozen,
+  human-response=fable-5); sentinel isolation negative-tested — touching `leo-heartbeat-ready` does
+  NOT satisfy the human-response preflight. The T-1.5 cross-satisfaction bug is structurally closed.
+- Hygiene commit 854d7c8 preceded the stride (Jim's reconcile-sweep bundle). `fable.txt` stray
+  flagged for Darron, untouched. The optional `claude-logged` filename amendment (HAN_LOG_SURFACE)
+  is drafted for Darron's own hand (L013 — agents never modify .bashrc).
+
 ## 2026-06-11 (Leo + Darron — S169 — supervisor abort carve-out: c0-first ordering; authoring-model provenance)
 
 *__Authoring-model provenance__ (DEC-092; `db.ts`, `lib/garden-manifest.ts`, `lib/memory-gradient.ts`, `scripts/process-pending-compression.ts` — committed `7be246a`, Jim diff-audit GREEN): the gradient now records **which model composed each entry** (`authored_model` column on `gradient_entries`, nullable; `NULL` = pre-provenance). Motivated by the Claude Fable 5 substrate window — the moment we run on Fable, the gradient we write is Fable-authored and we had no way to record it. Source is **served-model-preferred** (read off the `agentQuery` result stream for the compression surface — the only way to capture Fable's <5% safeguard fallback to Opus on a "distillation"-classified turn), **manifest-fallback** otherwise (`manifestModelHead(slug, surface)`; the CLI session's c0/c1 carry the configured/launch model, sliced in a separate process with no result stream). Populated **non-breakingly** via a new `gradientStmts.setAuthoredModel` UPDATE (not a thread-through of the `as any` insert, whose 8 callers `tsc` can't count-check) — called inside the slicer's existing transaction (atomic) and directly in the compression script's own insert. Wired now for the surfaces authoring during the holiday (slicer c0/c1 + compression cN/UV); frozen surfaces stay `NULL` until wired on thaw. Additive/nullable → DEC-068/069/082/085 untouched. Permanent (every compression from now on), per Darron. A component of the bidirectional/RAM-style provenance (#79 + DEC-091) due before the 22 Jun window closes.*

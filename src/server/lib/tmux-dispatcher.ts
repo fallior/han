@@ -57,7 +57,15 @@ export class DispatchTimeoutError extends Error {}
 
 export interface AgentSession {
     slug: string;
-    /** tmux session name (e.g. "philosophy-beat-leo"). */
+    /** Surface name per the Garden Manifest (e.g. "heartbeat", "human-response").
+     *  Interactive sessions use "session". Readiness + context-watch are keyed
+     *  per (slug, surface) — T-2 re-key after the T-1.5 cross-talk catch: the
+     *  per-slug sentinel/ctx files were last-writer-wins across same-slug
+     *  sessions, so waitForReady could cross-satisfy off another session's wake.
+     *  The per-agent FIFO (enqueueForAgent) deliberately STAYS per-slug — that
+     *  is the single-live-transaction guarantee current.json relies on. */
+    surface: string;
+    /** tmux session name (e.g. "heartbeat-leo"). */
     tmuxSession: string;
     /** Command run inside the tmux session to launch + identity-load Claude Code. */
     launchCommand: string;
@@ -67,15 +75,20 @@ export interface AgentSession {
     lastTransactionTs: number;
 }
 
+/** Registry keyed per (slug, surface) — many sessions per agent under T-2+. */
 const sessions = new Map<string, AgentSession>();
+function sessionKey(slug: string, surface: string): string { return `${slug}/${surface}`; }
 
 // ── path helpers (mirror the diary-mcp-server runtime contract) ──────────────────────
+// Sink + pipes stay per-SLUG: the per-agent FIFO serialises to one live txn per
+// agent, which is what makes the single current.json pointer safe (plan §3).
 function sinkDir(slug: string): string { return path.join(HEALTH_DIR, `${slug}-diary-capture`); }
 function currentPtrPath(slug: string): string { return path.join(sinkDir(slug), 'current.json'); }
 function capturePath(slug: string, txnId: string): string { return path.join(sinkDir(slug), `${txnId}.json`); }
-function readyPath(slug: string): string { return path.join(HEALTH_DIR, `${slug}-ready`); }
-function ctxPath(slug: string): string { return path.join(HEALTH_DIR, `${slug}-ctx.json`); }
 function pipePath(slug: string, txnId: string): string { return path.join(PIPES_DIR, slug, `prompt-${txnId}.txt`); }
+// Readiness + context-watch are per-(slug, surface) — see AgentSession.surface.
+function readyPath(slug: string, surface: string): string { return path.join(HEALTH_DIR, `${slug}-${surface}-ready`); }
+function ctxPath(slug: string, surface: string): string { return path.join(HEALTH_DIR, `${slug}-${surface}-ctx.json`); }
 
 // ── small utilities ──────────────────────────────────────────────────────────────────
 function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
@@ -125,18 +138,18 @@ async function waitFor<T>(predicate: () => T | null, timeoutMs: number): Promise
  * waits for it to reappear with a NEWER mtime, proving the post-clear welcome-back ran
  * rather than re-reading the stale sentinel.
  */
-function readySentinelMtime(slug: string): number | null {
-    try { return fs.statSync(readyPath(slug)).mtimeMs; } catch { return null; }
+function readySentinelMtime(slug: string, surface: string): number | null {
+    try { return fs.statSync(readyPath(slug, surface)).mtimeMs; } catch { return null; }
 }
 
-async function waitForReady(slug: string, afterMtime: number | null, timeoutMs: number): Promise<void> {
+async function waitForReady(slug: string, surface: string, afterMtime: number | null, timeoutMs: number): Promise<void> {
     await waitFor(() => {
-        const m = readySentinelMtime(slug);
+        const m = readySentinelMtime(slug, surface);
         if (m === null) return null;
         if (afterMtime !== null && m <= afterMtime) return null; // stale sentinel; wait for refresh
         return true;
     }, timeoutMs).catch(() => {
-        throw new SessionNotReadyError(`${slug}: ready-sentinel did not appear within ${timeoutMs}ms`);
+        throw new SessionNotReadyError(`${slug}/${surface}: ready-sentinel did not appear within ${timeoutMs}ms`);
     });
 }
 
@@ -149,6 +162,7 @@ async function waitForReady(slug: string, afterMtime: number | null, timeoutMs: 
  */
 export async function spawnAgentSession(
     slug: string,
+    surface: string,
     opts: { tmuxSession: string; launchCommand: string; adoptExisting?: boolean }
 ): Promise<AgentSession> {
     const { tmuxSession, launchCommand, adoptExisting } = opts;
@@ -156,19 +170,19 @@ export async function spawnAgentSession(
     fs.mkdirSync(path.join(PIPES_DIR, slug), { recursive: true });
 
     if (!tmuxSessionExists(tmuxSession)) {
-        if (adoptExisting) throw new SessionNotReadyError(`${slug}: tmux session "${tmuxSession}" not found to adopt`);
+        if (adoptExisting) throw new SessionNotReadyError(`${slug}/${surface}: tmux session "${tmuxSession}" not found to adopt`);
         // Clear any stale sentinel so waitForReady proves a fresh load, not a leftover.
-        try { fs.unlinkSync(readyPath(slug)); } catch { /* none */ }
+        try { fs.unlinkSync(readyPath(slug, surface)); } catch { /* none */ }
         tmux(['new-session', '-d', '-s', tmuxSession, launchCommand]);
-        await waitForReady(slug, null, READY_TIMEOUT_MS);
-    } else if (readySentinelMtime(slug) === null) {
+        await waitForReady(slug, surface, null, READY_TIMEOUT_MS);
+    } else if (readySentinelMtime(slug, surface) === null) {
         // Session exists but never signalled ready (e.g. mid-load) — wait for it.
-        await waitForReady(slug, null, READY_TIMEOUT_MS);
+        await waitForReady(slug, surface, null, READY_TIMEOUT_MS);
     }
 
-    const session: AgentSession = { slug, tmuxSession, launchCommand, ready: true, lastTransactionTs: Date.now() };
-    sessions.set(slug, session);
-    console.log(`[tmux-dispatcher] session ready: slug=${slug} tmux=${tmuxSession}`);
+    const session: AgentSession = { slug, surface, tmuxSession, launchCommand, ready: true, lastTransactionTs: Date.now() };
+    sessions.set(sessionKey(slug, surface), session);
+    console.log(`[tmux-dispatcher] session ready: slug=${slug} surface=${surface} tmux=${tmuxSession}`);
     return session;
 }
 
@@ -184,11 +198,12 @@ export async function spawnAgentSession(
  */
 export async function sendTransactionPrompt(
     slug: string,
+    surface: string,
     prompt: string,
     opts: { timeoutMs?: number } = {}
 ): Promise<DiaryCaptureArgs> {
-    const session = sessions.get(slug);
-    if (!session || !session.ready) throw new SessionNotReadyError(`${slug}: no ready session; call spawnAgentSession first`);
+    const session = sessions.get(sessionKey(slug, surface));
+    if (!session || !session.ready) throw new SessionNotReadyError(`${slug}/${surface}: no ready session; call spawnAgentSession first`);
 
     const txnId = `txn-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     const timeoutMs = opts.timeoutMs ?? TRANSACTION_TIMEOUT_MS;
@@ -218,13 +233,13 @@ export async function sendTransactionPrompt(
         }
         return null;
     }, timeoutMs).catch(() => {
-        throw new DispatchTimeoutError(`${slug}: no diary capture for ${txnId} within ${timeoutMs}ms (agent never called submit_response, or session is wedged)`);
+        throw new DispatchTimeoutError(`${slug}/${surface}: no diary capture for ${txnId} within ${timeoutMs}ms (agent never called submit_response, or session is wedged)`);
     });
 
     session.lastTransactionTs = Date.now();
     // Best-effort cleanup of this txn's transient files; leave captures for forensics.
     try { fs.unlinkSync(promptFile); } catch { /* ignore */ }
-    console.log(`[tmux-dispatcher] ${slug}: captured ${cap.txnId} (${cap.args.working_memory_full.length}c body)`);
+    console.log(`[tmux-dispatcher] ${slug}/${surface}: captured ${cap.txnId} (${cap.args.working_memory_full.length}c body)`);
     return cap.args;
 }
 
@@ -234,9 +249,9 @@ export async function sendTransactionPrompt(
  * JSON the per-agent statusline script writes every render (Q-V2-2, resolved 2026-05-31).
  * Zero extra API cost — the statusline updates already happen. Returns null if unavailable.
  */
-export function getContextPct(slug: string): number | null {
+export function getContextPct(slug: string, surface: string): number | null {
     try {
-        const json = JSON.parse(fs.readFileSync(ctxPath(slug), 'utf-8'));
+        const json = JSON.parse(fs.readFileSync(ctxPath(slug, surface), 'utf-8'));
         const pct = json?.context_window?.used_percentage;
         return typeof pct === 'number' ? pct : null;
     } catch {
@@ -251,12 +266,12 @@ export function getContextPct(slug: string): number | null {
  * it to reappear with a newer mtime, proving the post-clear welcome-back actually ran.
  * Between /clear and the new welcome-back's ready, no transaction may be dispatched.
  */
-export async function clearSession(slug: string, opts: { welcomeBack?: string } = {}): Promise<void> {
-    const session = sessions.get(slug);
-    if (!session) throw new SessionNotReadyError(`${slug}: no session to clear`);
+export async function clearSession(slug: string, surface: string, opts: { welcomeBack?: string } = {}): Promise<void> {
+    const session = sessions.get(sessionKey(slug, surface));
+    if (!session) throw new SessionNotReadyError(`${slug}/${surface}: no session to clear`);
     session.ready = false;
-    const beforeMtime = readySentinelMtime(slug);
-    try { fs.unlinkSync(readyPath(slug)); } catch { /* none */ }
+    const beforeMtime = readySentinelMtime(slug, surface);
+    try { fs.unlinkSync(readyPath(slug, surface)); } catch { /* none */ }
 
     sendLine(session.tmuxSession, '/pfc');
     await sleep(2_000); // let /pfc flush before /clear wipes context
@@ -264,10 +279,10 @@ export async function clearSession(slug: string, opts: { welcomeBack?: string } 
     await sleep(2_000);
     sendLine(session.tmuxSession, opts.welcomeBack ?? 'welcome back');
 
-    await waitForReady(slug, beforeMtime, READY_TIMEOUT_MS);
+    await waitForReady(slug, surface, beforeMtime, READY_TIMEOUT_MS);
     session.ready = true;
     session.lastTransactionTs = Date.now();
-    console.log(`[tmux-dispatcher] ${slug}: cleared + reloaded`);
+    console.log(`[tmux-dispatcher] ${slug}/${surface}: cleared + reloaded`);
 }
 
 // ── primitive 5: enqueueForAgent (per-agent FIFO) ────────────────────────────────────
@@ -280,10 +295,15 @@ export async function clearSession(slug: string, opts: { welcomeBack?: string } 
  */
 const queueTails = new Map<string, Promise<unknown>>();
 
-export function enqueueForAgent(slug: string, prompt: string, opts: { timeoutMs?: number } = {}): Promise<DiaryCaptureArgs> {
+/** NOTE (T-2 re-key): the queue stays keyed per-SLUG even though readiness/ctx
+ *  went per-surface — one live transaction per AGENT across all its surface
+ *  sessions is the invariant that keeps the single per-slug current.json (and
+ *  the memory-slot write serialisation) safe. `surface` only routes the prompt
+ *  to the right session. */
+export function enqueueForAgent(slug: string, surface: string, prompt: string, opts: { timeoutMs?: number } = {}): Promise<DiaryCaptureArgs> {
     const prior = queueTails.get(slug) ?? Promise.resolve();
     // Chain regardless of the prior transaction's outcome so one failure can't wedge the queue.
-    const run = prior.catch(() => undefined).then(() => sendTransactionPrompt(slug, prompt, opts));
+    const run = prior.catch(() => undefined).then(() => sendTransactionPrompt(slug, surface, prompt, opts));
     queueTails.set(slug, run.catch(() => undefined));
     return run;
 }

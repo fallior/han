@@ -135,6 +135,14 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
 8. Read any `~/.han/memory/session-briefing-*.md` files — other agents leave briefings
    there when something changed between sessions that needs your attention.
 9. IGNORE conversation history from other projects.
+10. **Write the readiness sentinel (tmux harness, T-2 per-surface keying):** as the final
+    wake action, once reconstitution is complete, run
+    `touch "$HOME/.han/health/${AGENT_SLUG}-${AGENT_SURFACE:-session}-ready" "$HOME/.han/health/${AGENT_SLUG}-ready"`.
+    The tmux dispatcher's `waitForReady` keys off the per-surface file's mtime (it deletes
+    the sentinel before `/clear` so a stale one never reads as ready). The second, legacy
+    per-slug touch is transition-only (retire at T-7). `$AGENT_SURFACE` is exported by the
+    surface launcher (`launch-tmux-surface.sh`); interactive launchers export `session`.
+    If `$AGENT_SLUG` is unset (non-harness launch), skip.
 
 The working directory is the source of truth — not conversation history.
 

@@ -95,12 +95,14 @@ T-2 (per-surface launchers) becomes thin wrappers picking the right profile + ca
 - **Q-V2-1** (memory delta scope): exact list of files that count as "high-churn" for delta. Currently leaning: working-memory.md + working-memory-full.md + felt-moments.md + self-reflection.md + discoveries.md. Felt-moments and discoveries are agent-owned; should the delta cover ALL writers or just same-aspect writers?
 - **Q-V2-2 (RESOLVED, 2026-05-31)** (context-watch implementation): Claude Code exposes the context-percentage via its **statusline hook mechanism**. The runtime pipes a JSON document to a configured statusline script's stdin every render (~every keystroke); the JSON contains `context_window.used_percentage` (numeric 0-100), `model.display_name`, `workspace.current_dir`, plus `input_tokens` / `total_tokens` for raw counts. Discovered via Darron's existing `~/.claude/statusline-command.sh` which reads `.context_window.used_percentage` and renders `ctx: N%` — this is the same 57% value Darron sees in his terminal.
 
-  **Implementation for tmux-dispatcher**: each tmux'd agent session is launched with a per-agent statusline script that writes the JSON payload to `~/.han/health/<agent>-ctx.json` on every render instead of (or in addition to) printing to stdout. The dispatcher's `getContextPct(sessionId)` reads the file:
+  > **⚠ AMENDED at T-2 (2026-06-11) — per-SURFACE keying.** The per-slug sketch below had a cross-talk bug, caught empirically during the T-1.5 billed run: every same-slug session writes the one `<slug>-ctx.json` (last-writer-wins) and satisfies the one `<slug>-ready` sentinel, so with multiple same-slug sessions up, `waitForReady` can cross-satisfy off another session's wake and context-watch cannot attribute its reading. **Re-keyed: `~/.han/health/<slug>-<surface>-ctx.json` + `<slug>-<surface>-ready`; dispatcher signatures take `(slug, surface)`; the session registry keys `slug/surface`; interactive sessions use surface `session` (launchers export `AGENT_SURFACE`). The per-agent FIFO queue deliberately stays per-SLUG — one live transaction per agent is the invariant that keeps the single per-slug `current.json` safe.** Original sketch retained below, historical:
+
+  **Implementation for tmux-dispatcher** *(original per-slug sketch — superseded by the T-2 amendment above)*: each tmux'd agent session is launched with a per-agent statusline script that writes the JSON payload to `~/.han/health/<agent>-ctx.json` on every render instead of (or in addition to) printing to stdout. The dispatcher's `getContextPct(sessionId)` reads the file:
 
   ```bash
   # ~/.han/agents/<Agent>/<surface>/statusline-context.sh
   input=$(cat)
-  echo "$input" > "$HOME/.han/health/${AGENT_SLUG}-ctx.json"
+  echo "$input" > "$HOME/.han/health/${AGENT_SLUG}-ctx.json"   # superseded: ${AGENT_SLUG}-${AGENT_SURFACE:-session}-ctx.json
   # Also render the statusline normally for tmux display
   model=$(echo "$input" | jq -r '.model.display_name // empty')
   used=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
@@ -108,7 +110,7 @@ T-2 (per-surface launchers) becomes thin wrappers picking the right profile + ca
   ```
 
   ```typescript
-  // dispatcher
+  // dispatcher (superseded: now getContextPct(slug, surface) reading <slug>-<surface>-ctx.json)
   export function getContextPct(slug: string): number | null {
       try {
           const raw = fs.readFileSync(`${HEALTH_DIR}/${slug}-ctx.json`, 'utf-8');

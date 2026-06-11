@@ -48,10 +48,13 @@ function arg(name: string, def?: string): string | undefined {
 const has = (name: string) => process.argv.includes(`--${name}`);
 
 const SLUG = arg('slug', 'leo')!;
+/** Surface for readiness/ctx keying (T-2 re-key). Fixtures default to 'adhoc';
+ *  pass --surface=<name> to drive a named surface session. */
+const SURFACE = arg('surface', 'adhoc')!;
 const TMUX = arg('tmux');
 const ROUNDS = parseInt(arg('rounds', '10')!, 10);
 const sinkDir = path.join(HEALTH_DIR, `${SLUG}-diary-capture`);
-const readyPath = path.join(HEALTH_DIR, `${SLUG}-ready`);
+const readyPath = path.join(HEALTH_DIR, `${SLUG}-${SURFACE}-ready`);
 
 function log(msg: string) { console.log(`[t15] ${msg}`); }
 
@@ -69,7 +72,7 @@ function testPrompt(n: number): string {
 }
 
 function preflight(): number {
-    log(`PREFLIGHT (no billed turns) — slug=${SLUG} tmux=${TMUX ?? '<unset>'}`);
+    log(`PREFLIGHT (no billed turns) — slug=${SLUG} surface=${SURFACE} tmux=${TMUX ?? '<unset>'}`);
     let problems = 0;
     const ok = (label: string, cond: boolean, detail = '') => {
         log(`  ${cond ? '✓' : '✗'} ${label}${detail ? ` — ${detail}` : ''}`);
@@ -84,7 +87,7 @@ function preflight(): number {
     // 2. ready-sentinel present (welcome-back completed)?
     let readyMtime: number | null = null;
     try { readyMtime = fs.statSync(readyPath).mtimeMs; } catch { /* none */ }
-    ok('ready-sentinel present', readyMtime !== null, readyMtime ? `${readyPath} @ ${new Date(readyMtime).toISOString()}` : `${readyPath} MISSING (welcome-back not done / step 10 not run)`);
+    ok('ready-sentinel present (per-surface)', readyMtime !== null, readyMtime ? `${readyPath} @ ${new Date(readyMtime).toISOString()}` : `${readyPath} MISSING (welcome-back not done / step 10 not run for this surface)`);
 
     // 3. sink dir resolves to the RIGHT slug (the ${AGENT_SLUG} open question) — the diary
     //    server mkdirs it at launch. A literal "${AGENT_SLUG}-diary-capture" would mean
@@ -95,7 +98,7 @@ function preflight(): number {
     ok('no unexpanded-literal sink', !fs.existsSync(literalSink), fs.existsSync(literalSink) ? `FOUND ${literalSink} — \${AGENT_SLUG} did NOT expand and fallback failed` : 'clean');
 
     // 4. ctx-% readable (statusline ctx-writer working)?
-    const pct = getContextPct(SLUG);
+    const pct = getContextPct(SLUG, SURFACE);
     ok('statusline ctx-% readable', pct !== null, pct !== null ? `${pct}%` : `${SLUG}-ctx.json missing/unparseable — statusline writer not active`);
 
     log(problems === 0 ? 'PREFLIGHT GREEN — wiring looks good; safe to run billed round-trips.' : `PREFLIGHT: ${problems} problem(s) — fix before spending billed round-trips.`);
@@ -105,19 +108,19 @@ function preflight(): number {
 async function roundTrips(): Promise<number> {
     if (!TMUX) { log('ERROR: --tmux=<session-name> required'); return 1; }
     log(`Adopting session "${TMUX}" (slug=${SLUG})…`);
-    await spawnAgentSession(SLUG, { tmuxSession: TMUX, launchCommand: '', adoptExisting: true });
+    await spawnAgentSession(SLUG, SURFACE, { tmuxSession: TMUX, launchCommand: '', adoptExisting: true });
 
     const latencies: number[] = [];
     let failures = 0;
     for (let i = 1; i <= ROUNDS; i++) {
         const t0 = Date.now();
         try {
-            const cap = await sendTransactionPrompt(SLUG, testPrompt(i));
+            const cap = await sendTransactionPrompt(SLUG, SURFACE, testPrompt(i));
             const ms = Date.now() - t0;
             latencies.push(ms);
             const okShape = cap.working_memory_full.length > 0 && cap.working_memory_compressed.length >= 50;
             log(`round ${i}/${ROUNDS}: ${(ms / 1000).toFixed(1)}s — capture ${okShape ? 'OK' : 'SHAPE-WARN'} (${cap.working_memory_full.length}c body)`);
-            const ctx = getContextPct(SLUG);
+            const ctx = getContextPct(SLUG, SURFACE);
             if (ctx !== null) log(`  ctx now ${ctx}%`);
         } catch (err) {
             failures++;
@@ -162,10 +165,10 @@ function slowAbortPrompt(): string {
 async function abortTest(): Promise<number> {
     if (!TMUX) { log('ERROR: --tmux=<session-name> required'); return 1; }
     log(`ABORT-VS-QUEUE PROBE on "${TMUX}" — start a SLOW txn, confirm in-flight, then /clear mid-compose.`);
-    await spawnAgentSession(SLUG, { tmuxSession: TMUX, launchCommand: '', adoptExisting: true });
+    await spawnAgentSession(SLUG, SURFACE, { tmuxSession: TMUX, launchCommand: '', adoptExisting: true });
 
     const before = sinkCount();
-    const txn = sendTransactionPrompt(SLUG, slowAbortPrompt(), { timeoutMs: 120_000 })
+    const txn = sendTransactionPrompt(SLUG, SURFACE, slowAbortPrompt(), { timeoutMs: 120_000 })
         .then((cap) => ({ outcome: 'CAPTURE_ARRIVED' as const, cap }))
         .catch((e) => ({ outcome: 'NO_CAPTURE' as const, err: (e as Error).message }));
 
