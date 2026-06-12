@@ -40,6 +40,10 @@ Jim's diff-audit is BLOCKING before enable+lift. Heartbeat model → Fable per D
 - `lib/memory-gradient.ts` (PROTECTED, DEC-068/069 — stamp-resolution only):
   `resolveSliceAuthoredModel()` — slice stamp exact when uniform, honest `mixed:<list>`
   when a slice spans authors; per-entry precision lives in the c0 content permanently.
+- Follow-up (`resolveSliceAuthoredModel` hardening, Jim's thaw-audit obs #1+#2): tags count
+  only on `### ` entry-header lines (quoted `[model: X]` prose can't pollute the stamp);
+  session content present only as `## ` blocks (the /pfc Closing) registers as
+  session-authored. 7 smoke cases green.
 - NOT in this PR (named divergences): human-response transport stays 'sdk' (the humans
   flip is its own PR ≤15 with the (human)-signature check); meditations stay SDK
   (Q-V2-3); supervisor cycles thaw later on Leo's observation data.

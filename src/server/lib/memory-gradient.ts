@@ -1695,10 +1695,21 @@ export interface PairedRotationResult {
  * content itself.
  */
 export function resolveSliceAuthoredModel(fullArchive: string, sessionModel: string | null): string | null {
-    const tagged = [...fullArchive.matchAll(/\[model: ([^\]\s]+)\]/g)].map((m) => m[1]);
+    // Jim's thaw-audit hardening (2026-06-12, obs #1+#2): tags count ONLY on
+    // entry-HEADER lines (`### …`) so prose QUOTING a `[model: X]` form can't
+    // pollute the stamp; and session content present only as `## ` blocks
+    // (e.g. the /pfc `## Closing` prose, which carries no `### ` header) still
+    // registers as session-authored.
+    const headerLines = fullArchive.match(/^### .*$/gm) || [];
+    const tagged: string[] = [];
+    for (const line of headerLines) {
+        const m = line.match(/\[model: ([^\]\s]+)\]/);
+        if (m) tagged.push(m[1]);
+    }
     const models = new Set(tagged);
-    const entryCount = (fullArchive.match(/^### /gm) || []).length;
-    if (sessionModel && (entryCount > tagged.length || models.size === 0)) models.add(sessionModel);
+    const untaggedEntries = headerLines.length - tagged.length;
+    const sessionBlocks = (fullArchive.match(/^## /gm) || []).length; // `### ` never matches `^## ` (needs the space)
+    if (sessionModel && (untaggedEntries > 0 || sessionBlocks > 0 || models.size === 0)) models.add(sessionModel);
     if (models.size === 0) return sessionModel;
     if (models.size === 1) return [...models][0];
     return `mixed:${[...models].sort().join(',')}`;
