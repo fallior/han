@@ -1182,17 +1182,10 @@ async function dispatchBeatViaTmux(
     }
     console.log(`[Leo] ${beatLabel}: tmux txn ~${assembled.meta.est_total_tokens_chars_div_4} tokens (memory suppressed: ${assembled.meta.memory_chars} chars)`);
     const promptDoc = `${assembled.systemPrompt}\n\n${assembled.userPrompt}\n\n${actionBlock}`;
+    let cap: CaptureRecord;
     try {
         await ensureHeartbeatTmuxSession();
-        const cap = await enqueueForAgent('leo', HEARTBEAT_SURFACE, promptDoc, { timeoutMs: BEAT_TXN_TIMEOUT_MS });
-        // Context pressure (#66 v2 §5): reconstitute the warm session once it
-        // crosses the threshold — the natural /clear boundary, never compaction.
-        const pct = getContextPct('leo', HEARTBEAT_SURFACE);
-        if (pct !== null && pct >= CTX_CLEAR_THRESHOLD_PCT) {
-            console.log(`[Leo] tmux heartbeat at ${pct}% ctx — /pfc → /clear → welcome-back`);
-            await clearSession('leo', HEARTBEAT_SURFACE, { welcomeBack: 'welcome back Leo' });
-        }
-        return cap;
+        cap = await enqueueForAgent('leo', HEARTBEAT_SURFACE, promptDoc, { timeoutMs: BEAT_TXN_TIMEOUT_MS });
     } catch (err) {
         if (err instanceof DispatchTimeoutError || err instanceof SessionNotReadyError) {
             // Fail loud, skip the beat, retry next cadence. The dispatcher has
@@ -1207,6 +1200,30 @@ async function dispatchBeatViaTmux(
         }
         throw err;
     }
+    // Context pressure (#66 v2 §5): reconstitute the warm session once it
+    // crosses the threshold — the natural /clear boundary, never compaction.
+    //
+    // OUTSIDE the capture try (Jim's post-thaw audit finding, 2026-06-12):
+    // post-capture maintenance must NEVER null a successful capture — the old
+    // shape returned null on a clear-timeout and silently dropped the beat's
+    // paired WM write at every 85% crossing. On clear failure: log + health-
+    // signal + drop the adoption flag so the next beat re-adopts cleanly once
+    // the (slow, ~7 min) post-clear wake finishes. The capture is already safe.
+    try {
+        const pct = getContextPct('leo', HEARTBEAT_SURFACE);
+        if (pct !== null && pct >= CTX_CLEAR_THRESHOLD_PCT) {
+            console.log(`[Leo] tmux heartbeat at ${pct}% ctx — /pfc → /clear → welcome-back`);
+            await clearSession('leo', HEARTBEAT_SURFACE, { welcomeBack: 'welcome back Leo' });
+        }
+    } catch (err) {
+        console.warn(`[Leo] ${beatLabel}: ctx-pressure clear failed (capture already safe) — ${(err as Error).message}; next beat re-adopts`);
+        writeHealthSignal(
+            `ctx-clear (${beatLabel}): ${(err as Error).message}`,
+            currentBeatType === 'philosophy' || currentBeatType === 'personal' ? currentBeatType : undefined,
+        );
+        heartbeatSessionAdopted = false; // re-adopt via spawnAgentSession once the wake lands
+    }
+    return cap;
 }
 
 /**

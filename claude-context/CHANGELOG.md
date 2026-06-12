@@ -49,6 +49,12 @@ Jim's diff-audit is BLOCKING before enable+lift. Heartbeat model → Fable per D
   L014's init meets a service-spawned tmux session). Launcher now exports `HAN_SPOKE=1`;
   the .bashrc guard line is Darron's hand (L013, HAN_LOG_SURFACE precedent). Beat-banner
   log now shows the manifest launch model on tmux (was the stale SDK activeModel).
+- Window fix (Jim's post-thaw audit finding, pre-first-85%-event): ctx-pressure clear
+  moved OUTSIDE the capture try in `dispatchBeatViaTmux` — post-capture maintenance can
+  no longer null a successful capture (the old shape silently dropped the beat's paired
+  WM write at every 85% crossing); on clear failure the adoption flag drops so the next
+  beat re-adopts after the slow post-clear wake. Dispatcher READY_TIMEOUT 240s→600s
+  (wake measured ~7 min) — retires the cold-launch one-skip and the post-clear timeout.
 - NOT in this PR (named divergences): human-response transport stays 'sdk' (the humans
   flip is its own PR ≤15 with the (human)-signature check); meditations stay SDK
   (Q-V2-3); supervisor cycles thaw later on Leo's observation data.
