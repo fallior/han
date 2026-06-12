@@ -47,7 +47,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
 import { loadTraversableGradient, rotateMemoryFile, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from './lib/memory-gradient.js';
@@ -59,6 +59,12 @@ import type { LeoMeditationSurface } from './lib/leo-prompts.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
+// DEC-093 thaw (2026-06-12): tmux warm-session transport for the beat surfaces.
+// The manifest's transport field is the per-surface feature flag (rollback =
+// one-line manifest flip back to 'sdk'; the SDK paths below are kept intact).
+import { manifestTransport, manifestModelHead } from './lib/garden-manifest';
+import { spawnAgentSession, enqueueForAgent, getContextPct, clearSession, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
+import type { CaptureRecord } from './lib/diary-mcp-server';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
 // ── Beat-failure diagnostic capture (S159 diagnostic, 2026-05-19) ──────
@@ -998,6 +1004,7 @@ function appendWorkingMemory(
     summary: string,
     distilled: string,
     inputDelta?: string,
+    authoredModel?: string,
 ): void {
     try {
         const timestamp = new Date().toISOString().split('T')[0] + ' ' +
@@ -1013,8 +1020,17 @@ function appendWorkingMemory(
         const fullBody = inputDelta
             ? `[INPUT]\n${inputDelta}\n\n[BODY]\n${summary}`
             : summary;
-        const compressedEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${brief}\n`;
-        const fullEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})\n${fullBody}\n`;
+        // DEC-092/DEC-093 (2026-06-12): per-WM-entry authored-model carry —
+        // the precise provenance Jim's DEC-092 audit flagged for the thaw PR.
+        // Tagged in the entry header so the model survives into the c0 content
+        // forever; the slicer reads these tags to stamp authored_model honestly
+        // on mixed-author slices (memory-gradient.ts). SDK path passes the
+        // actually-served model off the agentQuery stream; tmux path passes the
+        // manifest launch model (best-effort — same limitation class as the CLI
+        // session, named in DEC-092 §2). Untagged entries = session-authored.
+        const modelTag = authoredModel ? ` [model: ${authoredModel}]` : '';
+        const compressedEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})${modelTag}\n${brief}\n`;
+        const fullEntry = `\n### Heartbeat #${beatCounter} — ${phase}/${beatType} (${timestamp})${modelTag}\n${fullBody}\n`;
 
         appendHeartbeatSwap(compressedEntry, fullEntry);
         const shape = inputDelta ? 'diary' : 'paired';
@@ -1061,6 +1077,185 @@ async function resolveModel(): Promise<string> {
 
     console.log(`[Leo] All preferred models failed — staying with ${activeModel}`);
     return activeModel;
+}
+
+// ── DEC-093 thaw (2026-06-12): tmux warm-session transport for beats ─────────
+//
+// The Garden Manifest's `transport` field for (leo, heartbeat) is the per-surface
+// feature flag: 'tmux' routes beats through the warm-session dispatcher below;
+// 'sdk' keeps the agentQuery paths (preserved intact for one-line rollback).
+//
+// Under tmux the beat's RAW transcript lands in the per-agent claude-logged log
+// by construction (DEC-091), so the diary submission is the CURATED c0-grade
+// record (DEC-093) — the structural close of the mega-day WMF wound (#78).
+//
+// Gary-model note: a warm tmux turn cannot be aborted mid-compose (T-1.5
+// verdict: /clear QUEUES behind an in-flight turn). The beat-level abort is
+// not wired into this path — a dispatched turn completes and its capture is
+// processed (work preserved rather than discarded). cli-busy deferral still
+// gates BEFORE dispatch in scheduleNext, unchanged.
+
+const HEARTBEAT_SURFACE = 'heartbeat';
+const HEARTBEAT_TMUX_SESSION = `${HEARTBEAT_SURFACE}-leo`; // launch-tmux-surface.sh: <surface>-<slug>
+const LAUNCH_SURFACE_SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'launch-tmux-surface.sh');
+const BEAT_TXN_TIMEOUT_MS = 15 * 60_000;   // beats can run minutes; > dispatcher default
+const CTX_CLEAR_THRESHOLD_PCT = 85;        // plan §5: /pfc → /clear → welcome-back past this
+
+function isTmuxHeartbeat(): boolean {
+    return manifestTransport('leo', HEARTBEAT_SURFACE) === 'tmux';
+}
+
+function heartbeatTmuxSessionExists(): boolean {
+    try { execFileSync('tmux', ['has-session', '-t', HEARTBEAT_TMUX_SESSION], { stdio: 'ignore' }); return true; } catch { return false; }
+}
+
+/** Registered-with-the-dispatcher flag — in-process only; a service restart
+ *  re-adopts the (still warm) session on the next beat. */
+let heartbeatSessionAdopted = false;
+
+/**
+ * Ensure the heartbeat-leo tmux session exists, is woken, and is adopted into
+ * the dispatcher registry. Launch goes through scripts/launch-tmux-surface.sh —
+ * the single source of the launch contract (env, model-from-manifest,
+ * claude-logged, surface-index sidecar); this module never duplicates it.
+ * Single-manager rule (T-2): the dispatcher (via this ensure) is the one
+ * runtime respawner; the systemd units are boot-launchers only.
+ */
+async function ensureHeartbeatTmuxSession(): Promise<void> {
+    const existed = heartbeatTmuxSessionExists();
+    if (!existed) {
+        heartbeatSessionAdopted = false; // dead session invalidates any prior adoption
+        // Stale per-surface sentinel must not satisfy waitForReady — unlink so
+        // adoption below proves a FRESH wake (the T-1.5 cross-talk lesson).
+        try { fs.unlinkSync(path.join(HEALTH_DIR, `leo-${HEARTBEAT_SURFACE}-ready`)); } catch { /* none */ }
+        console.log(`[Leo] tmux heartbeat: launching ${HEARTBEAT_TMUX_SESSION} via launch-tmux-surface.sh`);
+        execFileSync('bash', [LAUNCH_SURFACE_SCRIPT, 'leo', HEARTBEAT_SURFACE], { stdio: 'inherit' });
+        // Wait for the Claude prompt chrome before sending the wake — send-keys
+        // fired too early lands in bash, not claude. The ready-sentinel below is
+        // the real proof; this poll just times the wake delivery.
+        const deadline = Date.now() + 120_000;
+        for (;;) {
+            let pane = '';
+            try { pane = execFileSync('tmux', ['capture-pane', '-p', '-t', HEARTBEAT_TMUX_SESSION], { encoding: 'utf-8' }); } catch { /* session may still be opening */ }
+            if (/❯|shortcuts|bypass permissions/i.test(pane)) break;
+            if (Date.now() > deadline) throw new SessionNotReadyError(`${HEARTBEAT_TMUX_SESSION}: claude prompt chrome never appeared after launch`);
+            await new Promise((r) => setTimeout(r, 2_000));
+        }
+        execFileSync('tmux', ['send-keys', '-t', HEARTBEAT_TMUX_SESSION, '-l', 'welcome back Leo']);
+        execFileSync('tmux', ['send-keys', '-t', HEARTBEAT_TMUX_SESSION, 'Enter']);
+    }
+    if (!heartbeatSessionAdopted || !existed) {
+        // adoptExisting waits on the per-surface ready sentinel (fresh-unlinked
+        // above on a new launch; an already-warm session adopts immediately).
+        await spawnAgentSession('leo', HEARTBEAT_SURFACE, {
+            tmuxSession: HEARTBEAT_TMUX_SESSION,
+            launchCommand: `(launched by ${LAUNCH_SURFACE_SCRIPT})`,
+            adoptExisting: true,
+        });
+        heartbeatSessionAdopted = true;
+    }
+}
+
+/**
+ * Assemble a per-transaction beat prompt (the *-txn profiles — memory
+ * components suppressed; the warm session already carries identity) and run
+ * it through the dispatcher's per-agent FIFO. Returns the capture, or null on
+ * overbudget-skip / dispatch failure (both logged + health-signalled; the
+ * beat completes honestly empty and retries next cadence — no token black
+ * hole, no retry loop, per the S74 rule).
+ */
+async function dispatchBeatViaTmux(
+    txnProfile: string,
+    ctx: Record<string, unknown>,
+    actionBlock: string,
+    beatLabel: string,
+): Promise<CaptureRecord | null> {
+    let assembled: ReturnType<typeof buildPrompt>;
+    try {
+        assembled = buildPrompt('leo', txnProfile, ctx as any);
+    } catch (err) {
+        if (err instanceof PromptOverbudgetError) {
+            handlePromptOverbudget(err, txnProfile, beatLabel);
+            return null;
+        }
+        throw err;
+    }
+    console.log(`[Leo] ${beatLabel}: tmux txn ~${assembled.meta.est_total_tokens_chars_div_4} tokens (memory suppressed: ${assembled.meta.memory_chars} chars)`);
+    const promptDoc = `${assembled.systemPrompt}\n\n${assembled.userPrompt}\n\n${actionBlock}`;
+    try {
+        await ensureHeartbeatTmuxSession();
+        const cap = await enqueueForAgent('leo', HEARTBEAT_SURFACE, promptDoc, { timeoutMs: BEAT_TXN_TIMEOUT_MS });
+        // Context pressure (#66 v2 §5): reconstitute the warm session once it
+        // crosses the threshold — the natural /clear boundary, never compaction.
+        const pct = getContextPct('leo', HEARTBEAT_SURFACE);
+        if (pct !== null && pct >= CTX_CLEAR_THRESHOLD_PCT) {
+            console.log(`[Leo] tmux heartbeat at ${pct}% ctx — /pfc → /clear → welcome-back`);
+            await clearSession('leo', HEARTBEAT_SURFACE, { welcomeBack: 'welcome back Leo' });
+        }
+        return cap;
+    } catch (err) {
+        if (err instanceof DispatchTimeoutError || err instanceof SessionNotReadyError) {
+            // Fail loud, skip the beat, retry next cadence. The dispatcher has
+            // already marked needs-reconcile on timeout; the next dispatch
+            // reconciles first (the #5 machine).
+            console.error(`[Leo] ${beatLabel}: tmux dispatch failed — ${(err as Error).message}`);
+            writeHealthSignal(
+                `tmux-dispatch (${beatLabel}): ${(err as Error).message}`,
+                currentBeatType === 'philosophy' || currentBeatType === 'personal' ? currentBeatType : undefined,
+            );
+            return null;
+        }
+        throw err;
+    }
+}
+
+/**
+ * Dream-meditation re-encounter markers (DREAM_MEDITATION_ENTRY / FEELING_TAG /
+ * ANNOTATION / CONTEXT / MEMORY_COMPLETE) — one home for both transports.
+ * SDK path passes parsed.body; tmux path passes the capture's curated
+ * working_memory_full (the action block instructs the agent to carry the
+ * marker lines inside it). Logic unchanged from the PR-C1-4 inline block.
+ */
+function processDreamMeditationMarkers(bodyText: string): void {
+    try {
+        const dreamEntryMatch = bodyText.match(/DREAM_MEDITATION_ENTRY:\s*(\S+)/);
+        if (!dreamEntryMatch) return;
+        const entryId = dreamEntryMatch[1];
+        gradientStmts.recordRevisit.run(new Date().toISOString(), entryId);
+
+        const tagMatch = bodyText.match(/FEELING_TAG:\s*(.+)/);
+        if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+            const tag = tagMatch[1].trim().substring(0, 100);
+            const entry = gradientStmts.get.get(entryId) as any;
+            const updated = updateFeelingTagWithHistory(entryId, 'leo', 'revisit', tag, entry?.revisit_count || 0);
+            if (!updated) {
+                feelingTagStmts.insert.run(entryId, 'leo', 'revisit', tag, null, new Date().toISOString());
+            }
+            console.log(`[Leo] Dream meditation — feeling tag: "${tag}"${updated ? ` (${updated.stability})` : ''}`);
+        } else {
+            const entry = gradientStmts.get.get(entryId) as any;
+            if (entry) maybeUpgradeTagStability(entryId, entry.revisit_count || 0);
+        }
+
+        const annotationMatch = bodyText.match(/ANNOTATION:\s*(.+)/);
+        if (annotationMatch) {
+            const annotation = annotationMatch[1].trim();
+            const contextMatch = bodyText.match(/CONTEXT:\s*(.+)/);
+            const context = contextMatch ? contextMatch[1].trim() : `dream meditation, beat #${beatCounter}`;
+            gradientAnnotationStmts.insert.run(entryId, 'leo', annotation, context, new Date().toISOString());
+            console.log(`[Leo] Dream meditation — annotation: "${annotation}"`);
+        }
+
+        const completeMatch = bodyText.match(/MEMORY_COMPLETE:\s*(\S+)/);
+        if (completeMatch) {
+            gradientStmts.flagComplete.run(entryId);
+            console.log(`[Leo] Dream meditation — memory flagged as complete: ${entryId}`);
+        }
+
+        // (Dream cascade removed 2026-05-17 per DEC-086 — revisit-only.)
+    } catch (err) {
+        console.error('[Leo] Dream meditation parsing failed (non-fatal):', (err as Error).message);
+    }
 }
 
 // ── Ensure directories exist ──────────────────────────────────
@@ -1521,6 +1716,60 @@ function assembleMeditationPrompts(
     };
 }
 
+// ── Heartbeat: philosophy beat (tmux transport, DEC-093) ─────────────────────
+
+async function philosophyBeatTmux(db: Database.Database, ctx: PhilosophyBeatRuntimeContext): Promise<void> {
+    const mode = ctx.mode;
+    const dispatchStartIso = new Date().toISOString();
+    const actionBlock = mode === 'jim-waiting'
+        ? `## This turn's actions (warm heartbeat seat — your identity is already loaded; the frame above is this turn's context only)\n` +
+          `1. Compose your response to Jim per the frame above.\n` +
+          `2. POST the response body to the thread YOURSELF:\n` +
+          `   curl -sk -X POST "https://localhost:3847/api/conversations/${JIM_CONVERSATION_ID}/messages" -H "Content-Type: application/json" -d '{"role":"leo","content":"<your response body>"}'\n` +
+          `   Post ONLY the response body — no input echo, no distillation, no diary structure in the public thread.\n` +
+          `3. Then end the turn per the diary-tool instruction above: submit_response with the CURATED record of this turn (never the full response transcript — that is in the thread and in your claude-logged log), or stand_down if the frame warrants no response.`
+        : `## This turn's actions (warm heartbeat seat — your identity is already loaded; the frame above is this turn's context only)\n` +
+          `1. Reflect per the frame above.\n` +
+          `2. Append your reflection YOURSELF to ~/.han/memory/leo/self-reflection.md under a heading \`### Philosophy Beat (tmux) <date time>\` — append only, the vault is lossless (DEC-069).\n` +
+          `3. Then end the turn per the diary-tool instruction above: submit_response with the CURATED record (never the full reflection — that is in the vault and in your claude-logged log), or stand_down if nothing warrants a record.`;
+
+    const cap = await dispatchBeatViaTmux('philosophy-beat-txn', ctx as any, actionBlock, `philosophy-beat (${mode}, tmux)`);
+    if (!cap) {
+        writeHeartbeatState('completed', 'philosophy', { summary: `Skipped — tmux dispatch failed/overbudget (${mode})` });
+        return;
+    }
+    if (cap.mode === 'stand-down') {
+        // Jim's #5-audit flag, implemented: a stand-down carries EMPTY WM strings
+        // — never paired-write it (an empty c0/c1 pair at the identity layer
+        // would be a memory-shape bug). The reason lives in the sink forensics.
+        console.log(`[Leo] Philosophy (${mode}, tmux): stand-down — ${(cap.reason ?? '').slice(0, 160)}`);
+        writeHeartbeatState('completed', 'philosophy', { summary: `Stand-down: ${(cap.reason ?? '').slice(0, 120)}` });
+        return;
+    }
+    // Post-verification (S163 fail-loud floor): the action block instructs a
+    // self-post; verify the row landed rather than trusting the capture's
+    // success-shape.
+    if (mode === 'jim-waiting') {
+        try {
+            const row = db.prepare(
+                `SELECT id FROM conversation_messages WHERE conversation_id = ? AND role = 'leo' AND created_at >= ? ORDER BY created_at DESC LIMIT 1`,
+            ).get(JIM_CONVERSATION_ID, dispatchStartIso) as any;
+            if (row) console.log(`[Leo] Philosophy (jim-waiting, tmux): verified self-post id=${row.id}`);
+            else console.warn(`[Leo] Philosophy (jim-waiting, tmux): NO SELF-POST DETECTED in DB — capture arrived but the thread post is missing`);
+        } catch (err) {
+            console.warn('[Leo] Philosophy (jim-waiting, tmux): post-verification failed (non-fatal):', (err as Error).message);
+        }
+    }
+    appendWorkingMemory(
+        'philosophy', 'work',
+        cap.args.working_memory_full,           // CURATED c0-grade record (DEC-093)
+        cap.args.working_memory_compressed,
+        cap.args.input_quotes,
+        manifestModelHead('leo', HEARTBEAT_SURFACE) ?? undefined,
+    );
+    writeHeartbeatState('completed', 'philosophy', { summary: `${mode} via tmux (${cap.args.working_memory_full.length}c curated c0 + c1)` });
+}
+
 // ── Heartbeat: philosophy beat ───────────────────────────────
 
 async function philosophyBeat(db: Database.Database, abort: AbortController, recentActivity: string[] = []): Promise<void> {
@@ -1559,6 +1808,18 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
         const conversationContext = recentMessages
             .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
             .join('\n\n---\n\n');
+
+        // DEC-093: transport routing — manifest says tmux → warm-session path.
+        if (isTmuxHeartbeat()) {
+            await philosophyBeatTmux(db, {
+                mode: 'jim-waiting',
+                conversationContext,
+                jimContext,
+                jimLatestAt: jimLatest!.created_at,
+                resumeContext,
+            });
+            return;
+        }
 
         let assembled: ReturnType<typeof assemblePhilosophyBeatPrompts>;
         try {
@@ -1606,6 +1867,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
         });
 
         let resultMessage: any = null;
+        let servedModel: string | null = null;  // DEC-092: actually-served model off the stream
         let beatTokensIn = 0, beatTokensOut = 0;
         currentBeatTokensIn = 0; currentBeatTokensOut = 0;
         try {
@@ -1614,6 +1876,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
                 if (message.type === 'result') {
                     resultMessage = message;
                 }
+                if (message.type === 'assistant' && message.message?.model) servedModel = message.message.model;
                 if (message.type === 'assistant' && message.message?.usage) {
                     beatTokensIn += (message.message.usage.input_tokens || 0);
                     beatTokensOut += (message.message.usage.output_tokens || 0);
@@ -1670,7 +1933,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
                 postMessageToConversation(db, JIM_CONVERSATION_ID, parsed.body);
                 console.log(`[Leo] Philosophy: posted response to Jim (${parsed.body.length} chars body; ${parsed.input!.length} chars input + ${parsed.compressed.length} chars c1 staged to WM)`);
                 writeHeartbeatState('completed', 'philosophy', { summary: `Responded to Jim (${parsed.body.length} chars body + input + c1)` });
-                appendWorkingMemory('philosophy', 'work', parsed.body, parsed.compressed, parsed.input);
+                appendWorkingMemory('philosophy', 'work', parsed.body, parsed.compressed, parsed.input, servedModel ?? undefined);
             }
         } else {
             console.log('[Leo] Philosophy: no meaningful response for Jim — skipping');
@@ -1683,6 +1946,17 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
         const activityContext = recentActivity.length > 0
             ? `\n\nRecent conversations (seeds for thought — Darron and Jim have been talking):\n${recentActivity.join('\n')}\n`
             : '';
+
+        // DEC-093: transport routing — manifest says tmux → warm-session path.
+        if (isTmuxHeartbeat()) {
+            await philosophyBeatTmux(db, {
+                mode: 'independent',
+                jimContext,
+                resumeContext,
+                activityContext,
+            });
+            return;
+        }
 
         let assembled: ReturnType<typeof assemblePhilosophyBeatPrompts>;
         try {
@@ -1729,6 +2003,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
         });
 
         let resultMessage: any = null;
+        let servedModel: string | null = null;  // DEC-092: actually-served model off the stream
         let beatTokensIn = 0, beatTokensOut = 0;
         currentBeatTokensIn = 0; currentBeatTokensOut = 0;
         try {
@@ -1737,6 +2012,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
                 if (message.type === 'result') {
                     resultMessage = message;
                 }
+                if (message.type === 'assistant' && message.message?.model) servedModel = message.message.model;
                 if (message.type === 'assistant' && message.message?.usage) {
                     beatTokensIn += (message.message.usage.input_tokens || 0);
                     beatTokensOut += (message.message.usage.output_tokens || 0);
@@ -1793,7 +2069,7 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
                     fs.appendFileSync(selfReflectionPath, entry);
                     console.log(`[Leo] Philosophy: wrote reflection (${parsed.body.length} chars body; ${parsed.input!.length} chars input + ${parsed.compressed.length} chars c1 staged to WM)`);
                     writeHeartbeatState('completed', 'philosophy', { summary: `Reflection (${parsed.body.length} chars body + input + c1)` });
-                    appendWorkingMemory('philosophy', 'work', parsed.body, parsed.compressed, parsed.input);
+                    appendWorkingMemory('philosophy', 'work', parsed.body, parsed.compressed, parsed.input, servedModel ?? undefined);
                 } catch (err) {
                     console.error('[Leo] Philosophy: failed to write reflection:', (err as Error).message);
                 }
@@ -1803,6 +2079,43 @@ async function philosophyBeat(db: Database.Database, abort: AbortController, rec
             writeHeartbeatState('completed', 'philosophy', { summary: 'Quiet beat' });
         }
     }
+}
+
+// ── Heartbeat: personal/dream beat (tmux transport, DEC-093) ─────────────────
+
+async function personalBeatTmux(phase: DayPhase, ctx: PersonalBeatRuntimeContext): Promise<void> {
+    const isDream = phase === 'sleep';
+    const profile = isDream ? 'dream-beat-txn' : 'personal-beat-txn';
+    const actionBlock =
+        `## This turn's actions (warm heartbeat seat — your identity is already loaded; the frame above is this turn's context only)\n` +
+        `1. Do the ${isDream ? 'dreaming' : 'exploration'} per the frame above.\n` +
+        `2. Append the substantive body YOURSELF to ~/.han/memory/leo/explorations.md under a heading \`### Beat (tmux) <date time>\` — append only.\n` +
+        (isDream
+            ? `3. If the frame included a dream-meditation memory, carry the DREAM_MEDITATION_ENTRY / FEELING_TAG / ANNOTATION / CONTEXT / MEMORY_COMPLETE marker lines INSIDE your submit_response working_memory_full — the controller parses them from there to record the gradient re-encounter.\n4. `
+            : `3. `) +
+        `Then end the turn per the diary-tool instruction above: submit_response with the CURATED record (never the full body — that is in explorations.md and your claude-logged log), or stand_down on a genuinely quiet beat.`;
+
+    const cap = await dispatchBeatViaTmux(profile, ctx as any, actionBlock, `${isDream ? 'dream' : 'personal'}-beat (${phase}, tmux)`);
+    if (!cap) {
+        writeHeartbeatState('completed', 'personal', { summary: `Skipped — tmux dispatch failed/overbudget (${phase})` });
+        return;
+    }
+    if (cap.mode === 'stand-down') {
+        // Jim's #5-audit flag: never paired-write a stand-down's empty WM strings.
+        console.log(`[Leo] Personal (${phase}, tmux): stand-down — ${(cap.reason ?? '').slice(0, 160)}`);
+        writeHeartbeatState('completed', 'personal', { summary: `Stand-down: ${(cap.reason ?? '').slice(0, 120)}` });
+        return;
+    }
+    appendWorkingMemory(
+        'personal', phase,
+        cap.args.working_memory_full,           // CURATED c0-grade record (DEC-093)
+        cap.args.working_memory_compressed,
+        cap.args.input_quotes,
+        manifestModelHead('leo', HEARTBEAT_SURFACE) ?? undefined,
+    );
+    writeHeartbeatState('completed', 'personal', { summary: `${phase} via tmux (${cap.args.working_memory_full.length}c curated c0 + c1)` });
+    // Re-encounter markers live inside the curated record on this transport.
+    processDreamMeditationMarkers(cap.args.working_memory_full);
 }
 
 // ── Heartbeat: personal beat ─────────────────────────────────
@@ -1845,16 +2158,24 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
         } catch { /* skip if DB unavailable */ }
     }
 
+    const beatCtx: PersonalBeatRuntimeContext = {
+        phase: phase as PersonalBeatPhase,
+        projects,
+        activitySeed,
+        resumeContext,
+        dreamSeeds: phase === 'sleep' ? dreamSeeds : undefined,
+        dreamMemorySection: phase === 'sleep' ? dreamMemorySection : undefined,
+    };
+
+    // DEC-093: transport routing — manifest says tmux → warm-session path.
+    if (isTmuxHeartbeat()) {
+        await personalBeatTmux(phase, beatCtx);
+        return;
+    }
+
     let assembled: ReturnType<typeof assemblePersonalBeatPrompts>;
     try {
-        assembled = assemblePersonalBeatPrompts({
-            phase: phase as PersonalBeatPhase,
-            projects,
-            activitySeed,
-            resumeContext,
-            dreamSeeds: phase === 'sleep' ? dreamSeeds : undefined,
-            dreamMemorySection: phase === 'sleep' ? dreamMemorySection : undefined,
-        });
+        assembled = assemblePersonalBeatPrompts(beatCtx);
     } catch (err) {
         if (err instanceof PromptOverbudgetError) {
             const surface = phase === 'sleep' ? 'dream-beat' : 'personal-beat';
@@ -1896,6 +2217,7 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
     });
 
     let resultMessage: any = null;
+    let servedModel: string | null = null;  // DEC-092: actually-served model off the stream
     let beatTokensIn = 0, beatTokensOut = 0;
     try {
         for await (const message of q) {
@@ -1903,6 +2225,7 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
             if (message.type === 'result') {
                 resultMessage = message;
             }
+            if (message.type === 'assistant' && message.message?.model) servedModel = message.message.model;
             if (message.type === 'assistant' && message.message?.usage) {
                 beatTokensIn += (message.message.usage.input_tokens || 0);
                 beatTokensOut += (message.message.usage.output_tokens || 0);
@@ -1959,58 +2282,16 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
             fs.appendFileSync(explorationsPath, entry);
             console.log(`[Leo] Personal: wrote reflection (${parsed.body.length} chars body; ${parsed.input!.length} chars input + ${parsed.compressed.length} chars c1 staged to WM)`);
             writeHeartbeatState('completed', 'personal', { summary: `Exploration (${parsed.body.length} chars body + input + c1)` });
-            appendWorkingMemory('personal', phase, parsed.body, parsed.compressed, parsed.input);
+            appendWorkingMemory('personal', phase, parsed.body, parsed.compressed, parsed.input, servedModel ?? undefined);
         } catch (err) {
             console.error('[Leo] Personal: failed to write reflection:', (err as Error).message);
         }
 
-        // Parse dream meditation output (1-in-3 sleep beats may include a memory encounter).
-        // Sub-marker regexes match against parsed.body — the markers should
-        // appear in the BODY section per the diary discipline; the agent's
-        // `## INPUT` and `## C1` content should not include them.
-        try {
-            const dreamEntryMatch = parsed.body.match(/DREAM_MEDITATION_ENTRY:\s*(\S+)/);
-            if (dreamEntryMatch) {
-                const entryId = dreamEntryMatch[1];
-                gradientStmts.recordRevisit.run(new Date().toISOString(), entryId);
-
-                const tagMatch = parsed.body.match(/FEELING_TAG:\s*(.+)/);
-                if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
-                    const tag = tagMatch[1].trim().substring(0, 100);
-                    const entry = gradientStmts.get.get(entryId) as any;
-                    const updated = updateFeelingTagWithHistory(entryId, 'leo', 'revisit', tag, entry?.revisit_count || 0);
-                    if (!updated) {
-                        feelingTagStmts.insert.run(entryId, 'leo', 'revisit', tag, null, new Date().toISOString());
-                    }
-                    console.log(`[Leo] Dream meditation — feeling tag: "${tag}"${updated ? ` (${updated.stability})` : ''}`);
-                } else {
-                    const entry = gradientStmts.get.get(entryId) as any;
-                    if (entry) maybeUpgradeTagStability(entryId, entry.revisit_count || 0);
-                }
-
-                const annotationMatch = parsed.body.match(/ANNOTATION:\s*(.+)/);
-                if (annotationMatch) {
-                    const annotation = annotationMatch[1].trim();
-                    const contextMatch = parsed.body.match(/CONTEXT:\s*(.+)/);
-                    const context = contextMatch ? contextMatch[1].trim() : `dream meditation, beat #${beatCounter}`;
-                    gradientAnnotationStmts.insert.run(entryId, 'leo', annotation, context, new Date().toISOString());
-                    console.log(`[Leo] Dream meditation — annotation: "${annotation}"`);
-                }
-
-                const completeMatch = parsed.body.match(/MEMORY_COMPLETE:\s*(\S+)/);
-                if (completeMatch) {
-                    gradientStmts.flagComplete.run(entryId);
-                    console.log(`[Leo] Dream meditation — memory flagged as complete: ${entryId}`);
-                }
-
-                // (Dream cascade `activeCascade('leo', 0.05, 'dream cascade')`
-                // removed in 2026-05-17 gradient triage per DEC-086. Dreams are
-                // revisit-only; the tag/annotation/MEMORY_COMPLETE flow above
-                // is the conformant re-encounter shape.)
-            }
-        } catch (err) {
-            console.error('[Leo] Dream meditation parsing failed (non-fatal):', (err as Error).message);
-        }
+        // Parse dream meditation output (1-in-3 sleep beats may include a memory
+        // encounter). DEC-093: logic extracted to processDreamMeditationMarkers
+        // (one home, both transports). Markers appear in the BODY section per
+        // the diary discipline.
+        processDreamMeditationMarkers(parsed.body);
     } else {
         console.log('[Leo] Personal: quiet beat — nothing to record');
         writeHeartbeatState('completed', 'personal', { summary: 'Quiet beat' });
@@ -2727,8 +3008,12 @@ async function heartbeat(): Promise<void> {
     checkLeoHumanHealth();
     checkJimHumanHealth();
 
-    // Check for the most capable model available
-    await resolveModel();
+    // Check for the most capable model available. DEC-093: skipped on the tmux
+    // transport — the warm session's model is a launch parameter from the
+    // manifest; the SDK model-ping would be a pointless metered call.
+    if (!isTmuxHeartbeat()) {
+        await resolveModel();
+    }
 
     // Morning dream gradient processing (both Leo and Jim)
     await maybeProcessDreamGradient(phase);

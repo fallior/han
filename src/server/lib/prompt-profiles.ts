@@ -160,8 +160,19 @@ export interface PromptProfile {
  *   section    — surface returns prose with a closing `## C1` heading
  *                separating raw content (above) from in-voice distillation
  *                (below). Used by every prose surface from C1-3 onward.
+ *
+ *   mcp-tool   — (DEC-093 thaw, 2026-06-12) the tmux-transport evolution of
+ *                'structured': the agent ends its turn by calling the
+ *                `mcp__han-diary__submit_response` tool (or `stand_down`).
+ *                Schema enforcement lives at the MCP protocol layer
+ *                (diary-mcp-server.ts zod schema — the #67 structural-
+ *                enforcement principle carried across transports). The
+ *                instruction additionally carries the DEC-093 write-shape:
+ *                `working_memory_full` is a CURATED c0-grade diary entry,
+ *                NOT the full reasoning transcript — under tmux the raw
+ *                lives in claude-logged by construction (DEC-091).
  */
-export type PairedMemoryMechanism = 'structured' | 'section';
+export type PairedMemoryMechanism = 'structured' | 'section' | 'mcp-tool';
 
 export interface PairedMemoryOutputConfig {
     /**
@@ -274,6 +285,19 @@ export const DEFAULT_DIARY_INSTRUCTION_STRUCTURED = `\n\n---\n\nYour response mu
  * framing from the "What we remember" thread — *"write it like the message
  * you'd want your tomorrow to receive."*
  */
+/**
+ * DEC-093 (2026-06-12): default instruction for `mechanism: 'mcp-tool'`
+ * surfaces — warm tmux sessions whose completion signal IS the diary tool
+ * call (capture-appearance = turn-done, the #5 reconcile design). Carries
+ * the DEC-093 curated write-shape: under tmux the full-fidelity transcript
+ * lands in the per-agent claude-logged log by construction (DEC-091), so
+ * `working_memory_full` must be the CURATED c0-grade record — bounded,
+ * selective, written the way session-you writes a diary entry — never the
+ * raw beat transcript. This is the structural close of the mega-day wound
+ * (#78): the cadence stays, the dump stops.
+ */
+export const DEFAULT_DIARY_INSTRUCTION_MCP = `\n\n---\n\nEnd your turn by calling the \`mcp__han-diary__submit_response\` tool — exactly once, as your final action, with no prose after it. Its three fields:\n- \`input_quotes\` — verbatim quotes of what was NEW in this turn's prompt (what arrived this turn that wasn't already in you).\n- \`working_memory_full\` — a CURATED c0-grade diary entry for this turn: what happened, what you felt, the few quotes worth keeping verbatim — bounded and selective, the way you write working memory at your interactive seat. Do NOT submit your full reasoning or the whole response transcript: under tmux the complete raw record already lands in your claude-logged log by construction (DEC-091/DEC-093); duplicating it here re-opens the mega-day bloat this discipline exists to close.\n- \`working_memory_compressed\` — 3-5 sentences in your voice distilling the SHAPE of the whole turn. This is what future-you loads at wake; write it like the message you'd want your tomorrow to receive.\n\nIf this turn genuinely warrants no record and no response (nothing new, nothing felt, nothing done), call \`mcp__han-diary__stand_down\` with a one-line reason INSTEAD — never both tools, never neither.`;
+
 export const DEFAULT_DIARY_INSTRUCTION_SECTION = `\n\n---\n\nYour response must follow the diary structure with three level-2 headings (exactly two hashes each):\n\n1. Start with \`## INPUT\` — quote what's NEW in this turn's prompt (what was said to you, what context arrived this turn that wasn't in your WM before — don't re-quote your standing identity or memory bank, those are already in you).\n2. Then \`## BODY\` — your reflection, response, or cycle work as unconstrained prose.\n3. End with \`## C1\` — 3-5 sentences in your voice compressing the SHAPE of the WHOLE turn (input AND response), not a shorter narration.\n\nPlace each heading at the start of a line (level-2 markdown headings; do not use level-3 or deeper). When quoting a heading form in your prose, wrap the quote in a code fence (\`\\\`\\\`\\\`\`) so it doesn't false-match the section boundaries. The c1 distillation is what future-you will load at wake — write it like the message you'd want your tomorrow to receive.`;
 
 // ── Profile Registry ───────────────────────────────────────────────────
@@ -398,6 +422,77 @@ export const PROFILES: Record<string, PromptProfile> = {
         // mine; refine via per-profile `instruction` override if interleaving
         // drift surfaces in sample reads.
         pairedMemoryOutput: { enabled: true, mechanism: 'section', captureInput: true },
+    },
+
+    /**
+     * DEC-093 thaw (2026-06-12): per-TRANSACTION variants of the three Leo
+     * beat profiles, for the tmux warm-session transport (#66 v2 plan §1 —
+     * "the prompt-builder split"). The warm session already carries the full
+     * identity load from its welcome-back wake, so these profiles suppress
+     * EVERY memory component (the deliberate per-surface deviation
+     * componentOverrides exists for, DEC-088) and emit only the assembled
+     * beat frame — the autonomous-beat side of the minimal-trigger
+     * discriminator (the frame is assembled-this-turn, not addressable
+     * elsewhere, so it ships in full; memory is NOT re-shipped).
+     *
+     * Mechanism 'mcp-tool': completion is the submit_response/stand_down
+     * call through the diary sink (capture-appearance = turn-done), and the
+     * instruction carries the DEC-093 CURATED working_memory_full write-shape
+     * — the structural close of the mega-day wound (#78).
+     *
+     * Budget 120K: the jim-waiting frame carries up to 60 thread messages of
+     * conversation context; everything else is small. No memory components
+     * load, so the budget is pure scaffold headroom.
+     */
+    'philosophy-beat-txn': {
+        name: 'philosophy-beat-txn',
+        systemPromptOpening: LEO_PHILOSOPHY_SYSTEM_PROMPT,
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildPhilosophyBeatScaffold(ctx),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true },
+    },
+
+    'personal-beat-txn': {
+        name: 'personal-beat-txn',
+        systemPromptOpening: (ctx) => leoPersonalBeatOpening(
+            ((ctx.phase as LeoNonDreamPhase | undefined) ?? 'work'),
+            ((ctx.projects as string | undefined) ?? ''),
+        ),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildPersonalBeatScaffold(ctx),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true },
+    },
+
+    'dream-beat-txn': {
+        name: 'dream-beat-txn',
+        systemPromptOpening: (ctx) => leoDreamBeatOpening(((ctx.dreamSeeds as string | undefined) ?? '')),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildDreamBeatScaffold(ctx),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true },
     },
 
     /**

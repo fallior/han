@@ -1682,6 +1682,28 @@ export interface PairedRotationResult {
  *
  * @returns PairedRotationResult — rotation state and observable details
  */
+
+/**
+ * DEC-093 (2026-06-12) — slice-level authored-model resolution for the DEC-092
+ * stamp. Non-session surfaces tag their WM entries `[model: X]` in the entry
+ * header at write time (the per-WM-entry served-model carry Jim's DEC-092
+ * audit flagged for the thaw PR); session entries are untagged. Heuristic:
+ * untagged `### ` entries are session-authored, so the session model joins the
+ * set whenever untagged entries exist (or nothing is tagged at all). Uniform
+ * set → the single model (exact). Mixed set → `mixed:<sorted,comma-list>` —
+ * honest at the slice grain, with per-entry precision preserved in the c0
+ * content itself.
+ */
+export function resolveSliceAuthoredModel(fullArchive: string, sessionModel: string | null): string | null {
+    const tagged = [...fullArchive.matchAll(/\[model: ([^\]\s]+)\]/g)].map((m) => m[1]);
+    const models = new Set(tagged);
+    const entryCount = (fullArchive.match(/^### /gm) || []).length;
+    if (sessionModel && (entryCount > tagged.length || models.size === 0)) models.add(sessionModel);
+    if (models.size === 0) return sessionModel;
+    if (models.size === 1) return [...models][0];
+    return `mixed:${[...models].sort().join(',')}`;
+}
+
 export function rollingWindowRotatePaired(
     fullFilePath: string,
     compressedFilePath: string,
@@ -1836,7 +1858,16 @@ export function rollingWindowRotatePaired(
     // has no agentQuery result to read a served model from), so stamp the
     // configured session model — honest best-effort (an in-CLI safeguard fallback
     // isn't visible at the slice site). NULL if the manifest doesn't know it.
+    //
+    // DEC-093 thaw amendment (2026-06-12, Jim's DEC-092 audit flag — the named
+    // per-WM-entry served-model carry): post-thaw a slice can mix authors. Non-
+    // session surfaces tag their entries `[model: X]` in the entry header (the
+    // heartbeat's appendWorkingMemory carries its served/launch model); session
+    // entries are untagged. The slice-level stamp stays exact when uniform and
+    // becomes an honest `mixed:` set otherwise; per-entry precision lives in
+    // the c0 content itself, permanently.
     const sessionModel = manifestModelHead(agent, 'session');
+    const authoredModelStamp = resolveSliceAuthoredModel(fullArchive, sessionModel);
 
     // Atomic paired insert (DEC-085 must-fix per Jim's audit, S153 2026-05-08).
     // The transaction wrapper makes the inserts both-or-neither.
@@ -1850,9 +1881,9 @@ export function rollingWindowRotatePaired(
             c0Id, null, null, 'original', new Date().toISOString(), null, 0, qualifier,
         );
         // Non-breaking populate, inside the same transaction → atomic with the inserts.
-        if (sessionModel) {
-            gradientStmts.setAuthoredModel.run(sessionModel, c0Id);
-            gradientStmts.setAuthoredModel.run(sessionModel, c1Id);
+        if (authoredModelStamp) {
+            gradientStmts.setAuthoredModel.run(authoredModelStamp, c0Id);
+            gradientStmts.setAuthoredModel.run(authoredModelStamp, c1Id);
         }
     });
     try {

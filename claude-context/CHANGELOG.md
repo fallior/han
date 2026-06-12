@@ -7,6 +7,43 @@
 
 ---
 
+## 2026-06-12 (S171) — THE THAW PR: DEC-093 curated write-shape + heartbeat → tmux/Fable (landed flag-off, freeze intact)
+
+**The #78 write-shape decided (DEC-093) + Leo's heartbeat wired to the tmux warm-session
+transport. Lands with the freeze INTACT (heartbeat-paused-leo holds; units not enabled) —
+Jim's diff-audit is BLOCKING before enable+lift. Heartbeat model → Fable per Darron's
+"all in" for the trial window (revert model after 22 Jun; transport stays).**
+
+- `claude-context/DECISIONS.md`: **DEC-093** — tmux beats submit a CURATED c0-grade
+  `working_memory_full` (the raw lives in claude-logged by construction, DEC-091); quiet
+  beats `stand_down` and are NEVER paired-written (Jim's #5-audit flag); side-effects move
+  to the agent's own hands with controller post-verification (S163 floor). Closes the
+  mega-day WMF wound structurally — the freeze's reason.
+- `lib/garden-manifest.ts`: leo.heartbeat → `transport: 'tmux'`, model `FABLE_LADDER`
+  (freeze signal = the live gate; rollback = one-line flip to 'sdk'); `manifestTransport()`
+  read-path helper (the per-surface feature flag).
+- `lib/prompt-profiles.ts`: `PairedMemoryMechanism` + `'mcp-tool'`;
+  `DEFAULT_DIARY_INSTRUCTION_MCP` (carries the DEC-093 curated discipline + stand_down);
+  three per-transaction profiles (`philosophy-beat-txn` / `personal-beat-txn` /
+  `dream-beat-txn`) suppressing ALL memory components (warm session carries identity).
+- `lib/prompt-builder.ts`: instruction branch for `mechanism: 'mcp-tool'`.
+- `leo-heartbeat.ts`: transport routing in both beat handlers (SDK paths intact for
+  rollback); `ensureHeartbeatTmuxSession()` (launch via launch-tmux-surface.sh — single
+  launch contract — wake, adopt, fresh-sentinel proof); `dispatchBeatViaTmux()` (txn
+  prompt + per-agent FIFO + ctx-pressure /pfc→/clear→welcome-back at 85%);
+  `philosophyBeatTmux`/`personalBeatTmux` (stand-down branch, self-post verification
+  against the DB, curated paired-write); dream-meditation marker parsing extracted to
+  one home (`processDreamMeditationMarkers`) serving both transports; SDK paths now read
+  the actually-served model off the agentQuery stream; `appendWorkingMemory` carries a
+  per-entry `[model: X]` header tag (the DEC-092 thaw flag); `resolveModel()` skipped on
+  tmux (no pointless metered ping).
+- `lib/memory-gradient.ts` (PROTECTED, DEC-068/069 — stamp-resolution only):
+  `resolveSliceAuthoredModel()` — slice stamp exact when uniform, honest `mixed:<list>`
+  when a slice spans authors; per-entry precision lives in the c0 content permanently.
+- NOT in this PR (named divergences): human-response transport stays 'sdk' (the humans
+  flip is its own PR ≤15 with the (human)-signature check); meditations stay SDK
+  (Q-V2-3); supervisor cycles thaw later on Leo's observation data.
+
 ## 2026-06-12 (S170) — #5 reconcile PR: turn-state machine + stand-down through the sink
 
 **The settled timeout-reconciliation design (5946651, 2026-06-01) implemented — required before

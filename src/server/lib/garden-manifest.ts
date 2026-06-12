@@ -113,7 +113,13 @@ export const GARDEN_MANIFEST: GardenManifest = {
             surfaces: [
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
                 { name: 'human-response',     enabled: true,  transport: 'sdk', model: FABLE_LADDER, swapPrefix: 'human-swap' }, // ⚠ Fable window (S169) — revert to OPUS_LADDER after 22 Jun
-                { name: 'heartbeat',          enabled: true,  transport: 'sdk', model: OPUS_LADDER, swapPrefix: 'heartbeat-swap' },
+                // ⚠ THAW (DEC-093, 2026-06-12): heartbeat → tmux transport + Fable
+                // (Darron: "all in" for the trial window — revert model to
+                // OPUS_LADDER after 22 Jun; transport stays tmux post-window).
+                // The freeze signal (heartbeat-paused-leo) is the live gate: while
+                // it exists no beat fires regardless of this row. Rollback = flip
+                // transport back to 'sdk' (the SDK path is kept in leo-heartbeat.ts).
+                { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'heartbeat-swap' },
                 { name: 'meditation-phase-a', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
                 { name: 'meditation-phase-b', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
                 { name: 'meditation-evening', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
@@ -170,4 +176,18 @@ export function manifestModelHead(slug: string, surface: string): string | null 
     const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
     const s = agent?.surfaces.find(x => x.name === surface);
     return s?.model?.[0] ?? null;
+}
+
+/**
+ * Transport read-path (DEC-093 thaw, 2026-06-12) — the per-surface feature flag.
+ * A surface's handler routes its dispatch on this value: 'tmux' → the warm-session
+ * tmux dispatcher; 'sdk' → the in-process agentQuery path (kept for rollback).
+ * Rollback for a thawed surface is a one-line manifest flip back to 'sdk'.
+ * NULL if the surface is unknown — callers treat null as 'sdk' (fail-safe to the
+ * established path, never to an unlaunched tmux session).
+ */
+export function manifestTransport(slug: string, surface: string): SurfaceTransport | null {
+    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
+    const s = agent?.surfaces.find(x => x.name === surface);
+    return s?.transport ?? null;
 }

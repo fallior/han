@@ -40,6 +40,7 @@ import {
     profileByName,
     DEFAULT_C1_INSTRUCTION_SECTION,
     DEFAULT_C1_INSTRUCTION_STRUCTURED,
+    DEFAULT_DIARY_INSTRUCTION_MCP,
     DEFAULT_DIARY_INSTRUCTION_SECTION,
     DEFAULT_DIARY_INSTRUCTION_STRUCTURED,
 } from './prompt-profiles';
@@ -476,7 +477,13 @@ export function buildPrompt(
         // → DEFAULT_C1_INSTRUCTION_STRUCTURED (redundant with existing prompt;
         // accepted for tracker visibility).
         let defaultInstruction: string;
-        if (mechanism === 'structured' && captureInput) {
+        if (mechanism === 'mcp-tool') {
+            // DEC-093 (2026-06-12): tmux warm-session surfaces complete via the
+            // han-diary MCP tool; the instruction carries the curated c0
+            // write-shape. captureInput is implicit (input_quotes is a schema
+            // field), so no four-way split here.
+            defaultInstruction = DEFAULT_DIARY_INSTRUCTION_MCP;
+        } else if (mechanism === 'structured' && captureInput) {
             defaultInstruction = DEFAULT_DIARY_INSTRUCTION_STRUCTURED;
         } else if (mechanism === 'structured') {
             defaultInstruction = DEFAULT_C1_INSTRUCTION_STRUCTURED;
