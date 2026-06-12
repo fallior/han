@@ -3068,7 +3068,12 @@ async function heartbeat(): Promise<void> {
     // Evening meditation — lighter, feeling-tag only
     await maybeRunEveningMeditation(phase);
 
-    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${activeModel})`);
+    // Log truth (first-warm-beat finding, 2026-06-12): on the tmux transport the
+    // banner must show the manifest launch model, not the stale SDK activeModel.
+    const beatModelLabel = isTmuxHeartbeat()
+        ? `${manifestModelHead('leo', HEARTBEAT_SURFACE) ?? 'unknown'} via tmux`
+        : activeModel;
+    console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${beatModelLabel})`);
 
     // Create AbortController for this beat (Gary model: mid-beat abort)
     const abort = new AbortController();

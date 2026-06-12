@@ -76,11 +76,17 @@ while IFS= read -r kv; do
     ENV_ARGS+=(-e "$kv")
 done < <(manifest_get env "$SLUG" "$SURFACE")
 
+# HAN_SPOKE=1 marks the pane as a detached serverless spoke: ~/.bashrc's
+# ssh-agent init must skip under it (the ssh-add passphrase prompt blocks a
+# detached pane BEFORE claude launches — first-warm-beat finding, 2026-06-12).
+# Spokes need no SSH (file transport + curl to localhost). The .bashrc guard
+# itself is Darron's hand (L013), same precedent as HAN_LOG_SURFACE.
 tmux new-session -d -s "$SESSION_NAME" -c "$REPO_ROOT" \
     "${ENV_ARGS[@]}" \
     -e "AGENT_SURFACE=$SURFACE" \
     -e "HAN_SESSION=$SESSION_NAME" \
-    -e "HAN_LOG_SURFACE=$SURFACE"
+    -e "HAN_LOG_SURFACE=$SURFACE" \
+    -e "HAN_SPOKE=1"
 
 # Launch Claude in the pane. claude-logged is a ~/.bashrc function (canonical
 # per-agent transcript, DEC-091); CLAUDECODE is unset first (L012). HAN_LOG_SURFACE

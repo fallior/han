@@ -44,6 +44,11 @@ Jim's diff-audit is BLOCKING before enable+lift. Heartbeat model → Fable per D
   only on `### ` entry-header lines (quoted `[model: X]` prose can't pollute the stamp);
   session content present only as `## ` blocks (the /pfc Closing) registers as
   session-authored. 7 smoke cases green.
+- First-warm-beat finding (12:41 lift): the spoke pane blocked at ~/.bashrc's ssh-agent
+  init (`ssh-add` passphrase prompt fires before claude launches in a detached pane —
+  L014's init meets a service-spawned tmux session). Launcher now exports `HAN_SPOKE=1`;
+  the .bashrc guard line is Darron's hand (L013, HAN_LOG_SURFACE precedent). Beat-banner
+  log now shows the manifest launch model on tmux (was the stale SDK activeModel).
 - NOT in this PR (named divergences): human-response transport stays 'sdk' (the humans
   flip is its own PR ≤15 with the (human)-signature check); meditations stay SDK
   (Q-V2-3); supervisor cycles thaw later on Leo's observation data.
