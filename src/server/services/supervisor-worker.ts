@@ -360,7 +360,7 @@ Label: ${file.label}
 Content:
 ${content}`,
         options: {
-            model: 'claude-opus-4-7',
+            model: 'claude-opus-4-8', // S173: aligned to highest Opus (was 4-7)
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
@@ -1033,7 +1033,7 @@ Optionally, if re-reading reveals something the original compression missed, wri
 
 If this memory feels complete — fully absorbed, nothing left to discover — write: MEMORY_COMPLETE: ${entry.id}`,
             options: {
-                model: 'claude-opus-4-7',
+                model: 'claude-opus-4-8', // S173: aligned to highest Opus (was 4-7)
                 maxTurns: 1,
                 cwd: process.env.HOME || '/root',
                 permissionMode: 'bypassPermissions',
@@ -1128,7 +1128,7 @@ If something stirs differently from the existing tags: FEELING_TAG: [under 100 c
 If nothing new: FEELING_TAG: none
 If this memory feels complete — fully absorbed, nothing left to discover: MEMORY_COMPLETE: ${entry.id}`,
             options: {
-                model: 'claude-opus-4-7',
+                model: 'claude-opus-4-8', // S173: aligned to highest Opus (was 4-7)
                 maxTurns: 1,
                 cwd: process.env.HOME || '/root',
                 permissionMode: 'bypassPermissions',
@@ -2081,7 +2081,7 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         // memory discussion (mo5oo404-61thz0) for the full reasoning.
         //
         // Config override still takes precedence if set.
-        const model = supervisorConfig.model || 'claude-opus-4-7';
+        const model = supervisorConfig.model || 'claude-opus-4-8'; // S173: default aligned to highest Opus (was 4-7)
         const maxTurns = supervisorConfig.max_turns_per_cycle || 1000;
 
         // The 150K prompt-size guard (Strand E, S147) RETIRED per W6-3 + PR-AP8.

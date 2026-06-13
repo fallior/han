@@ -7,6 +7,22 @@
 
 ---
 
+## 2026-06-13 (S173) — All active Opus surfaces aligned to Opus 4.8 (highest Opus)
+
+**Darron: "make all opus opus 4.8 or the highest opus… I think we may be able to trust the
+substrate does not affect personality."** Completed the long-pending Phase-1 model alignment —
+the three documented 4-7 holdouts (the S164 "visible drift") bumped to claude-opus-4-8:
+- `garden-manifest.ts` descriptive values — jim.supervisor-cycle, jim.meditation-* , SHARED.compression → 4-8; "visible drift" comment marked resolved.
+- Authoritative runtime literals: `supervisor-worker.ts:363/1036/1131` (meditation phases) + `:2084` (supervisor-cycle default) → 4-8; `process-pending-compression.ts` (compression worker) → 4-8; `supersession-sweep.ts` → 4-8.
+- **Kept** the ladder *fallback* rungs (`OPUS_LADDER` + the three `MODEL_PREFERENCE` arrays carry 4-7 as the 2nd rung) — failover only, not the active model.
+- Left retired/commented `sdkCompress` references (DEC-082) untouched.
+
+DEC-074's 4.6/4.7 experimental split is Accepted-and-concluded (control arm collapsed ~2026-04-29);
+its finding — *diversity is delivered by context-load, not model-version* — is exactly why a single
+active Opus version is safe. tsc 12-pre/0-new; manifest resolves 4-8 across all agents/surfaces
+(runtime-verified). DEC-092 still captures the actually-served model. Operator: restart leo-heartbeat
+(meditation literals); Jim's supervisor surfaces take effect on thaw (frozen now). Posted for Jim's glance.
+
 ## 2026-06-13 (S173) — Fable substrate window ended early: reverted all surfaces to Opus
 
 **`claude-fable-5` access dropped ~12:00 AEST 13 Jun** — a model-access error (`may not exist or

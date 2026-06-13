@@ -66,7 +66,7 @@ async function sdkBriefRead(prompt: string): Promise<string> {
     const q = agentQuery({
         prompt,
         options: {
-            model: 'claude-opus-4-7',
+            model: 'claude-opus-4-8', // S173: aligned to highest Opus (was 4-7)
             maxTurns: 1,
             permissionMode: 'bypassPermissions',
             allowDangerouslySkipPermissions: true,

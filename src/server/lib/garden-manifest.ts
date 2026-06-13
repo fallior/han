@@ -93,14 +93,14 @@ const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-opus-4-8']; // ⏪ Reverted to 
 /**
  * Current values as of 2026-06-02 (S164), captured exactly.
  *
- * ⚠ VISIBLE DRIFT (the by-product Phase 0 exists to surface) — three surfaces
- * are still on claude-opus-4-7 while everything else is on 4-8:
- *   • jim.supervisor-cycle        — supervisor-worker.ts:2075 (config-overridable)
- *   • jim.meditation-*            — supervisor-worker.ts:363/1036/1131
- *   • <shared>.compression        — scripts/process-pending-compression.ts:377
- * These move to 4-8 on the Phase-1 migration + the 3847 server restart (coupled
- * with the P0 clean-death deploy). Leo's surfaces + jim-human were aligned to 4-8
- * earlier today.
+ * ✅ DRIFT RESOLVED (S173, 2026-06-13): the three remaining 4-7 holdouts
+ * (jim.supervisor-cycle, jim.meditation-*, <shared>.compression) were aligned to
+ * claude-opus-4-8 on Darron's "all Opus → highest Opus" directive. Authoritative
+ * literals bumped in supervisor-worker.ts:363/1036/1131/2084 +
+ * process-pending-compression.ts + supersession-sweep.ts. Ladder FALLBACK rungs
+ * keep 4-7 (failover only, not the active model). DEC-074's 4.6/4.7 control split
+ * concluded ~2026-04-29; its finding (diversity = context-load, not model-version)
+ * means a single active Opus version is safe.
  */
 export const GARDEN_MANIFEST: GardenManifest = {
     manifestVersion: 1,
@@ -133,12 +133,12 @@ export const GARDEN_MANIFEST: GardenManifest = {
             surfaces: [
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'supervisor-swap' },
                 { name: 'human-response',     enabled: true,  transport: 'sdk', model: OPUS_LADDER, swapPrefix: 'jim-human-swap' }, // ⏪ Reverted to Opus 2026-06-13 — Fable access dropped
-                // ⚠ still 4-7 — supervisor-worker.ts:2075 (config.supervisor.model overrides)
-                { name: 'supervisor-cycle',   enabled: true,  transport: 'sdk', model: ['claude-opus-4-7'], swapPrefix: 'supervisor-swap' },
-                // ⚠ still 4-7 — supervisor-worker.ts:363/1036/1131
-                { name: 'meditation-phase-a', enabled: true,  transport: 'sdk', model: ['claude-opus-4-7'] },
-                { name: 'meditation-phase-b', enabled: true,  transport: 'sdk', model: ['claude-opus-4-7'] },
-                { name: 'meditation-evening', enabled: true,  transport: 'sdk', model: ['claude-opus-4-7'] },
+                // S173: aligned to 4-8 — authoritative source supervisor-worker.ts:2084 (config.supervisor.model overrides)
+                { name: 'supervisor-cycle',   enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'], swapPrefix: 'supervisor-swap' },
+                // S173: aligned to 4-8 — authoritative literals supervisor-worker.ts:363/1036/1131
+                { name: 'meditation-phase-a', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
+                { name: 'meditation-phase-b', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
+                { name: 'meditation-evening', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
             ],
         },
         {
@@ -155,11 +155,10 @@ export const GARDEN_MANIFEST: GardenManifest = {
 /**
  * Shared (non-agent-scoped) surface: the wm-sensor → pending-compression cascade
  * (scripts/process-pending-compression.ts:377). Identity-loaded SDK Opus, runs
- * for whichever agent's entry is being compressed. ⚠ still 4-7. Captured here so
- * Phase 1 has one home to migrate it from.
+ * for whichever agent's entry is being compressed. S173: aligned to 4-8.
  */
 export const SHARED_SURFACES: Record<string, ModelLadder> = {
-    compression: ['claude-opus-4-7'], // ⏪ Reverted to Opus 2026-06-13 — Fable access dropped
+    compression: ['claude-opus-4-8'], // S173: aligned to highest Opus (was 4-7 holdout; reverted from Fable 2026-06-13)
 };
 
 /**

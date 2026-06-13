@@ -383,7 +383,7 @@ async function runSDK(systemPrompt: string, userPrompt: string): Promise<string>
     const q = agentQuery({
         prompt: userPrompt,
         options: {
-            model: 'claude-opus-4-7', // ⏪ Reverted to Opus 2026-06-13 (S173) — claude-fable-5 access dropped. DEC-092 still captures the actually-served model.
+            model: 'claude-opus-4-8', // S173: aligned to highest Opus (was 4-7; reverted from Fable 2026-06-13). DEC-092 still captures the actually-served model.
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
