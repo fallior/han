@@ -178,8 +178,9 @@ export const MODEL_UNAVAILABLE_RE = /issue with the selected model|Run \/model/i
  *  + a status line, so MODEL_UNAVAILABLE_RE is ALWAYS checked first. */
 const READY_CHROME_RE = /❯|shortcuts|bypass permissions/i;
 
-const CHROME_TIMEOUT_MS = 3 * 60_000; // chrome appears in seconds; margin for ladder descents
-const DESCEND_COOLDOWN_MS = 6_000;    // let /model re-render before re-reading (avoid stale-error false-match)
+const CHROME_TIMEOUT_MS = 3 * 60_000; // overall budget: chrome appears in seconds; margin for probes + descents
+const DESCEND_COOLDOWN_MS = 6_000;    // let /model re-render before re-probing
+const PROBE_REPLY_WINDOW_MS = 20_000; // a dead model errors in ~0s; no error within this window = the model works
 
 /** Ladder fully walked and every rung was unavailable. Extends SessionNotReadyError so the
  *  existing surface handlers (which catch SessionNotReadyError → fail-loud + health-signal +
@@ -196,43 +197,61 @@ export function capturePaneTail(tmuxSession: string, lines = 14): string {
 }
 
 /**
- * Poll a freshly-launched session's pane until it shows ready chrome, AUTO-DESCENDING the
- * model ladder via in-session `/model <next rung>` on a model-unavailable prompt, and failing
- * LOUD with a pane snapshot on any other stuck prompt (login / unknown — the survey is
- * suppressed at the launcher via CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY). The MODEL axis is the
- * first instance of the general "detect TUI-state → respond" pattern (Jim's design-for-failure
- * scope note mqbxbsnw): model-error auto-recovers; everything else escalates to a human — an
- * autonomous seat never auto-answers consent/login (a permanent human-gated boundary).
+ * Ensure a freshly-launched session is on a WORKING model — auto-descending the ladder via
+ * in-session `/model <next rung>` — BEFORE the (expensive) welcome-back wake.
  *
- * Call BEFORE the welcome-back wake (a working model must be selected first). `ladder[0]` is
- * the model the launcher already used, so descent starts at rung 1; one `/model` per rung with
- * a cooldown (never a tight loop, S74); ladder exhausted → throw. Returns once ready chrome
- * appears on whatever rung succeeded.
+ * VERIFIED S173 (throwaway-session test): the model-unavailable error is MESSAGE-TRIGGERED, not
+ * launch-triggered. A bogus `--model` shows perfectly healthy idle chrome (`❯`, banner, bypass-
+ * permissions) and only errors AFTER the first prompt is sent. So scanning the idle launch
+ * chrome cannot detect it — we send a cheap "Hi" PROBE (Darron's idea) and read the result: a
+ * dead model errors in ~0s, a working one simply replies. One probe per rung; on error, descend
+ * `/model <next rung>` and re-probe; ladder exhausted → throw (fail safe → existing handler skips
+ * the beat, no billing). Any non-error stuck state → timeout with a pane snapshot → human
+ * escalation (Jim's "detect TUI-state → respond"; survey suppressed at the launcher; consent /
+ * login never auto-answered — a permanent human-gated boundary). The probe runs per-LAUNCH
+ * (rare — a spoke stays warm across beats), near-zero cost, and isolates the model check from
+ * the costly identity wake. `ladder[0]` is the rung the launcher already used; descent starts
+ * at rung 1; one `/model` per rung with a cooldown (never a tight loop, S74). The MODEL axis is
+ * the first instance of the reusable failover pattern (sibling: the account/token axis, S173).
  */
 export async function awaitChromeOrDescend(
     slug: string, surface: string, tmuxSession: string, ladder: string[], timeoutMs = CHROME_TIMEOUT_MS,
 ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
-    let rung = 0; // launcher already used ladder[0]
-    for (;;) {
-        const tail = capturePaneTail(tmuxSession);
-        if (MODEL_UNAVAILABLE_RE.test(tail)) {
-            rung += 1;
-            if (rung >= ladder.length) {
-                throw new ModelLadderExhaustedError(
-                    `${slug}/${surface}: every model rung unavailable (${ladder.join(' → ') || '<empty ladder>'}). Pane tail:\n${tail}`);
-            }
-            console.warn(`[tmux-dispatcher] ${slug}/${surface}: model rung "${ladder[rung - 1]}" unavailable — descending to "${ladder[rung]}" via in-session /model`);
-            sendLine(tmuxSession, `/model ${ladder[rung]}`);
-            await sleep(DESCEND_COOLDOWN_MS);
-            continue;
-        }
-        if (READY_CHROME_RE.test(tail)) return;
+    // Phase 1: wait for the launch chrome (claude is UP at the prompt — NOT a model check).
+    while (!READY_CHROME_RE.test(capturePaneTail(tmuxSession))) {
         if (Date.now() > deadline) {
-            throw new SessionNotReadyError(
-                `${slug}/${surface}: chrome never became ready within ${timeoutMs}ms (not a model error — likely login/unknown prompt; human needed). Pane tail:\n${tail}`);
+            throw new SessionNotReadyError(`${slug}/${surface}: claude prompt chrome never appeared after launch. Pane tail:\n${capturePaneTail(tmuxSession)}`);
         }
         await sleep(2_000);
+    }
+    // Phase 2: probe the model (the only way to surface a message-triggered error) and descend.
+    let rung = 0; // launcher already used ladder[0]
+    for (;;) {
+        sendLine(tmuxSession, 'Hi'); // cheap probe — a dead model errors in ~0s; a live one replies
+        const probeDeadline = Date.now() + PROBE_REPLY_WINDOW_MS;
+        let errored = false;
+        for (;;) {
+            // Isolate THIS probe's output (text after our last "Hi") so a prior rung's error
+            // sitting in scrollback can't false-match.
+            const tail = capturePaneTail(tmuxSession, 30);
+            const afterProbe = tail.includes('Hi') ? tail.slice(tail.lastIndexOf('Hi')) : tail;
+            if (MODEL_UNAVAILABLE_RE.test(afterProbe)) { errored = true; break; }
+            if (Date.now() > probeDeadline) break; // no error within the window → model works
+            await sleep(1_500);
+        }
+        if (!errored) return; // model confirmed working on the current rung
+        rung += 1;
+        if (rung >= ladder.length) {
+            throw new ModelLadderExhaustedError(
+                `${slug}/${surface}: every model rung unavailable (${ladder.join(' → ') || '<empty ladder>'}). Pane tail:\n${capturePaneTail(tmuxSession)}`);
+        }
+        console.warn(`[tmux-dispatcher] ${slug}/${surface}: model rung "${ladder[rung - 1]}" unavailable — descending to "${ladder[rung]}" via in-session /model`);
+        sendLine(tmuxSession, `/model ${ladder[rung]}`);
+        await sleep(DESCEND_COOLDOWN_MS);
+        if (Date.now() > deadline) {
+            throw new SessionNotReadyError(`${slug}/${surface}: model failover did not settle within ${timeoutMs}ms. Pane tail:\n${capturePaneTail(tmuxSession)}`);
+        }
     }
 }
 

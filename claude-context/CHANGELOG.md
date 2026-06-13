@@ -30,7 +30,16 @@ Scope: COLD-LAUNCH model-error only (the confirmed case). **Coupled follow-on fl
 session runs a *different* model than the launched rung, so the DEC-092 `[model:]` stamp (currently the
 manifest head) would be stale — Jim's "stamp from the observed live banner" is the tightly-coupled fix and
 should land before descents are relied on in production. Also deferred: warm-session mid-life model-drop.
-tsc 12-pre/0-new; 8/8 smoke green (ladder + regexes + live detect→/model→descend→exhaust against real tmux).
+**Correction (same day, Darron's catch + a throwaway-session test):** the model error is
+**message-triggered, not launch-triggered** — a bogus `--model` shows perfectly healthy idle
+chrome (`❯`, banner, bypass-permissions) and only errors *after* the first prompt is sent.
+The first cut scanned the idle launch chrome → would have seen "ready", returned, sent the wake,
+and the error would have surfaced too late (descent never fires). Fixed: `awaitChromeOrDescend`
+now (Phase 1) waits for the launch chrome, then (Phase 2) sends a cheap **"Hi" probe** (Darron's
+idea) and reads the result — a dead model errors in ~0s, a live one replies; on error it descends
+`/model <next rung>` and re-probes; the probe is per-launch (rare) and isolates the model check
+from the costly identity wake. Re-smoked (live→returns, dead→descend→re-probe→exhaust).
+tsc 12-pre/0-new; smoke green (ladder + regexes + the probe path against real tmux).
 **On disk, NOT yet live** — leo-heartbeat not restarted; Jim's blocking diff-audit is the gate, restart-to-activate after GREEN.
 
 ## 2026-06-13 (S173) — Suppress the feedback survey in autonomous spokes
