@@ -346,8 +346,24 @@ Compression is a self-levelling process via wm-sensor + paired rotation per DEC-
 The /pfc memory writes above ARE the trigger; the marker placed by `placePairedMarker`
 tells the slicer where to cut. wm-sensor handles the rest.
 
-### 6. Done
-Tell Darron: "Memory finalised. Ready for /clear."
+### 6. Arm the welcome-back handover (the soft seam) — added S173, 2026-06-13
+Write the next-wake handover pointer so the `welcome-back-handover.sh` hook (UserPromptSubmit,
+src/hooks/) surfaces it at the next wake — softening the /clear seam by carrying the next-action
+intent *across*, landing alongside the user's "welcome back" so next-you arrives oriented to the
+work AND received in the same moment. Agent-agnostic (DEC-081): keyed to `${AGENT_SLUG}`, so it
+works for Jim, Tenshi, Casey, and any future agent whose launcher exports `AGENT_SLUG`.
+
+```bash
+printf '%s\t%s\n' "<thread-id>" "<crisp ▶ START HERE next-action>" > "$HOME/.han/signals/handover-${AGENT_SLUG}"
+```
+
+One-shot — next-you reads the thread then clears the pointer (`rm`); staleness bounded to one
+wake. **SKIP only** at a genuinely clean stopping point (nothing pending) — never arm a stale or
+empty pointer. *Guardrail:* the handover is the bright breadcrumb **on top of** the full wake-load
++ `todo.md` — a complement, not a replacement (load everything; it only orients the first step).
+
+### 7. Done
+Tell Darron: "Memory finalised, handover armed. Ready for /clear."
 
 ### After Clear (on next instantiation)
 Session Protocol in CLAUDE.md loads working-memory.md at step 4.
