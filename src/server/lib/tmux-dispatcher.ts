@@ -288,6 +288,85 @@ export async function spawnAgentSession(
     return session;
 }
 
+// ── ensureSurfaceSession (promoted from leo-heartbeat's ensureHeartbeatTmuxSession,
+//     humans PR 2026-06-13) — the ONE runtime respawn+adopt path for ANY surface ──
+/** scripts/launch-tmux-surface.sh — the single launch contract (env, model-from-
+ *  manifest, claude-logged, surface-index sidecar). From lib/: ../../../scripts. */
+const LAUNCH_SURFACE_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'launch-tmux-surface.sh');
+
+/** Per-(slug,surface) adoption flag — in-process only; a service restart re-adopts the
+ *  (still warm) session on the next ensure. Generalises the heartbeat's prior module-
+ *  level `heartbeatSessionAdopted`. */
+const adopted = new Map<string, boolean>();
+
+/**
+ * Ensure the surface's tmux session exists, is on a WORKING model, is woken, and is
+ * adopted into the dispatcher registry. The single-manager runtime respawner (T-2):
+ * systemd units are boot-launchers only; this is what relaunches a dead spoke and what
+ * every surface handler (heartbeat, human-response) calls BEFORE enqueueForAgent.
+ *
+ * The caller passes the model `ladder` (manifestModelLadder) so the dispatcher stays
+ * manifest-free (transport infra ≠ config). Launch goes through launch-tmux-surface.sh.
+ *
+ * WARM-DEATH HANDOFF (humans PR fold-in — Jim's failover enable-gate, 2026-06-13):
+ * a model that dies mid-life of a RUNNING spoke surfaces at the NEXT dispatch as a
+ * capture-timeout → the session is marked 'needs-reconcile'. The default reconcile
+ * (clearSession: /pfc→/clear→welcome-back) would re-run the SAME dead model, and the
+ * probe-ladder (awaitChromeOrDescend, launch-only) would never fire — the spoke can
+ * never self-heal off a dead model. So here, BEFORE adopting, if a registered session
+ * is 'needs-reconcile' AND its pane shows the model-unavailable chrome, we KILL it +
+ * drop adoption → fall through to a COLD launch, where awaitChromeOrDescend descends
+ * the ladder. A genuinely-wedged (non-model) needs-reconcile session is LEFT for
+ * enqueueForAgent's reconcileSession (#5 machine) — the two recovery modes are
+ * distinguished by the pane scan, so neither steals the other's case.
+ */
+export async function ensureSurfaceSession(
+    slug: string, surface: string,
+    opts: { ladder: string[]; welcomeBack?: string },
+): Promise<void> {
+    const tmuxSession = `${surface}-${slug}`;
+    const key = sessionKey(slug, surface);
+    const welcomeBack = opts.welcomeBack ?? 'welcome back';
+
+    // Warm-death handoff: a dead-model spoke can't be clear-reconciled (the welcome-back
+    // would re-run the dead model). Kill it so the cold-launch below descends the ladder.
+    const existing = sessions.get(key);
+    if (existing && existing.turnState === 'needs-reconcile'
+        && tmuxSessionExists(tmuxSession)
+        && MODEL_UNAVAILABLE_RE.test(capturePaneTail(tmuxSession))) {
+        console.warn(`[tmux-dispatcher] ${slug}/${surface}: model died mid-life (needs-reconcile + model-unavailable chrome) — killing wedged session for ladder cold-relaunch`);
+        try { tmux(['kill-session', '-t', tmuxSession]); } catch { /* already gone */ }
+        sessions.delete(key);
+        adopted.set(key, false);
+    }
+
+    if (!tmuxSessionExists(tmuxSession)) {
+        adopted.set(key, false); // dead session invalidates any prior adoption
+        // Stale per-surface sentinel must not satisfy waitForReady — unlink so the
+        // adoption below proves a FRESH wake (the T-1.5 cross-talk lesson).
+        try { fs.unlinkSync(readyPath(slug, surface)); } catch { /* none */ }
+        console.log(`[tmux-dispatcher] ${slug}/${surface}: launching ${tmuxSession} via launch-tmux-surface.sh`);
+        execFileSync('bash', [LAUNCH_SURFACE_SCRIPT, slug, surface], { stdio: 'inherit' });
+        // Wait for the claude prompt chrome before the wake (send-keys fired too early
+        // lands in bash, not claude). awaitChromeOrDescend also auto-descends the model-
+        // failover ladder if the launch model is unavailable (S173); any OTHER stuck
+        // prompt fails loud with a pane snapshot → the caller's catch health-signals it.
+        await awaitChromeOrDescend(slug, surface, tmuxSession, opts.ladder);
+        sendLine(tmuxSession, welcomeBack);
+    }
+    // Adopt when not yet adopted OR the registered session is not ready (e.g. a failed
+    // ctx-pressure clearSession left ready=false — re-adopt once the slow post-clear
+    // wake re-touches the sentinel). spawnAgentSession(adoptExisting) waits on it.
+    if (!adopted.get(key) || !sessions.get(key)?.ready) {
+        await spawnAgentSession(slug, surface, {
+            tmuxSession,
+            launchCommand: `(launched by ${LAUNCH_SURFACE_SCRIPT})`,
+            adoptExisting: true,
+        });
+        adopted.set(key, true);
+    }
+}
+
 // ── primitive 2: sendTransactionPrompt ───────────────────────────────────────────────
 /**
  * Deliver one assembled per-transaction prompt to the agent's session and return the

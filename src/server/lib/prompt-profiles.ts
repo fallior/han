@@ -44,7 +44,10 @@ import {
 import {
     JIM_HUMAN_RESPONSE_SYSTEM_PROMPT,
     LEO_HUMAN_RESPONSE_SYSTEM_PROMPT,
+    JIM_HUMAN_RESPONSE_TXN_SYSTEM_PROMPT,
+    LEO_HUMAN_RESPONSE_TXN_SYSTEM_PROMPT,
     buildHumanResponseScaffold,
+    buildHumanResponseTxnScaffold,
 } from './human-prompts';
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -645,6 +648,60 @@ export const PROFILES: Record<string, PromptProfile> = {
         // PR-C1-6 (2026-05-28): same shape as jim-human-response (Mechanism A
         // diary). Handler in leo-human.ts.
         pairedMemoryOutput: { enabled: true, mechanism: 'structured', captureInput: true },
+    },
+
+    /**
+     * DEC-093 thaw (humans PR, 2026-06-13): per-TRANSACTION variants of the two
+     * *-human-response surfaces, for the tmux warm-session transport. The warm
+     * session already carries the full identity load from its welcome-back wake,
+     * so these profiles suppress EVERY memory component (DEC-088 deliberate
+     * deviation) and emit only the assembled human-response frame.
+     *
+     * The system opening is the TMUX variant (stand-down via the han-diary MCP
+     * tool, not the text sentinel the dispatcher can't parse off a terminal pane;
+     * the tmux delivery directive — locator-fetched conversation / controller-
+     * posted Discord). The scaffold is the LOCATOR/override txn scaffold.
+     *
+     * pairedMemoryOutput is DECLARATIVE here (instruction: '' = append nothing):
+     * the human system prompt ALREADY carries the full submit_response/stand_down
+     * directive (TMUX_DELIVERY), so the generic DEFAULT_DIARY_INSTRUCTION_MCP must
+     * NOT be appended on top (it would duplicate + use the heartbeat-flavoured
+     * curated-c0 wording, wrong for a response body). Declared enabled+mcp-tool
+     * for migration-tracker visibility, matching supervisor-cycle's R4 pattern.
+     *
+     * Budget 120K: no memory loads; pure scaffold headroom (Discord embeds up to
+     * 60 messages of channel context; conversation is a tiny locator).
+     */
+    'leo-human-response-txn': {
+        name: 'leo-human-response-txn',
+        systemPromptOpening: LEO_HUMAN_RESPONSE_TXN_SYSTEM_PROMPT,
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildHumanResponseTxnScaffold(ctx as any),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true, instruction: '' },
+    },
+
+    'jim-human-response-txn': {
+        name: 'jim-human-response-txn',
+        systemPromptOpening: JIM_HUMAN_RESPONSE_TXN_SYSTEM_PROMPT,
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildHumanResponseTxnScaffold(ctx as any),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true, instruction: '' },
     },
 
     'dream-cycle': {

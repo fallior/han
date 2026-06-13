@@ -29,6 +29,12 @@ import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { gateIdentityOrThrow } from './lib/identity-signing';
 import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder';
+// DEC-093 humans-PR thaw (2026-06-13): tmux warm-session transport for human-response.
+// Gated per-dispatch on manifestTransport (kept 'sdk' until enable); the SDK path below
+// each branch is byte-intact for one-line rollback (billed-not-broken).
+import { ensureSurfaceSession, enqueueForAgent, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
+import { manifestTransport, manifestModelLadder } from './lib/garden-manifest';
+import type { CaptureRecord } from './lib/diary-mcp-server';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -62,6 +68,14 @@ const SIGNAL_NAME = 'leo-human-wake';
 const MODEL_PREFERENCE = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
 const COMMITMENT_SCAN_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+// DEC-093 humans-PR thaw (2026-06-13): the manifest surface name + the tmux txn timeout.
+// A human dispatch shares the per-SLUG FIFO with the heartbeat spoke, so a long beat can
+// delay a reply; the timeout is generous (a cold wake is ~7 min) and the queue-wait is
+// logged for the obs window.
+const HUMAN_SURFACE = 'human-response';
+const HUMAN_TXN_TIMEOUT_MS = 15 * 60_000;
+const HUMAN_CONVERSATION_ROLE = 'leo'; // manifest conversationRole for leo (NOT slug-derived for jim)
 
 
 let activeModel: string = MODEL_PREFERENCE[0];
@@ -384,6 +398,11 @@ function readSignal(): SignalData | null {
 // ── Response: Conversation ────────────────────────────────────
 
 async function respondToConversation(db: Database.Database, conversationId: string, signal?: SignalData): Promise<void> {
+    // DEC-093 humans-PR thaw: route to the tmux warm-session path when the manifest
+    // flips this surface (kept 'sdk' until Jim's GREEN + enable). SDK path below intact.
+    if (manifestTransport('leo', HUMAN_SURFACE) === 'tmux') {
+        return respondToConversationViaTmux(db, conversationId, signal);
+    }
     const title = getConversationTitle(db, conversationId);
     const dispatchId = signal?.dispatchId;
     const priorAgentFailed = signal?.priorAgentFailed;
@@ -579,6 +598,10 @@ async function respondToConversation(db: Database.Database, conversationId: stri
 // ── Response: Discord ─────────────────────────────────────────
 
 async function respondToDiscord(signal: SignalData): Promise<void> {
+    // DEC-093 humans-PR thaw: tmux warm-session path when flipped. SDK path below intact.
+    if (manifestTransport('leo', HUMAN_SURFACE) === 'tmux') {
+        return respondToDiscordViaTmux(signal);
+    }
     const channelId = signal.channelId || signal.conversationId || '';
     const channelName = signal.channelName || resolveChannelName(channelId);
 
@@ -664,6 +687,182 @@ async function respondToDiscord(signal: SignalData): Promise<void> {
             }
         } else {
             console.error(`[Leo/Human] Failed to post to Discord #${channelName}`);
+        }
+    }
+}
+
+// ── Response: tmux warm-session transport (DEC-093 humans-PR thaw) ─────────────
+
+/**
+ * The tmux warm-session conversation path. The spoke (human-response-leo) FETCHES the
+ * thread itself (locator scaffold), applies the self-recognition + already-responded +
+ * distinct-angle gates against live state, self-posts via curl, and ends with
+ * submit_response (diary) or stand_down. The dispatcher returns the capture; we mirror
+ * the SDK cascade — stand-down → ack stood_down (NEVER paired-write, Jim's flag);
+ * diary → appendSwap + post-verification → ack done / SILENT-POST-FAILURE warn.
+ */
+async function respondToConversationViaTmux(db: Database.Database, conversationId: string, signal?: SignalData): Promise<void> {
+    const title = getConversationTitle(db, conversationId);
+    const dispatchId = signal?.dispatchId;
+    const priorAgentFailed = signal?.priorAgentFailed;
+    const composeStartMs = Date.now();
+    const recentMessages = getRecentMessages(db, conversationId, 60).reverse();
+
+    if (recentMessages.length === 0) {
+        console.log(`[Leo/Human] (tmux) No messages in "${title}" — skipping`);
+        writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'no_messages', compose_duration_ms: Date.now() - composeStartMs });
+        return;
+    }
+    // addressed-to-Jim-only pre-gate (cheap; avoids waking the spoke for a non-Leo msg)
+    const lastHumanMsg = recentMessages.filter(m => m.role === 'human').pop();
+    if (lastHumanMsg) {
+        const text = lastHumanMsg.content.toLowerCase();
+        if ((/\bjim\b|\bjimmy\b/.test(text)) && !(/\bleo\b|\bleonhard\b/.test(text))) {
+            console.log(`[Leo/Human] (tmux) Message addressed to Jim only in "${title}" — standing down`);
+            writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'addressed_to_other_agent', compose_duration_ms: Date.now() - composeStartMs });
+            return;
+        }
+    }
+
+    // LOCATOR txn prompt — the spoke fetches the thread itself (no embedded tail).
+    let txnPrompt: string;
+    try {
+        const built = buildPrompt('leo', 'leo-human-response-txn', {
+            source: 'conversation', title, conversationId,
+            roleLabel: HUMAN_CONVERSATION_ROLE, priorAgentFailed,
+        });
+        txnPrompt = `${built.systemPrompt}\n\n${built.userPrompt}`;
+        console.log(`[Leo/Human] (tmux) leo-human-response-txn: ~${built.meta.est_total_tokens_chars_div_4} tokens (memory suppressed: ${built.meta.memory_chars} chars)`);
+    } catch (err) {
+        if (err instanceof PromptOverbudgetError) {
+            console.log(`[Leo/Human] (tmux) Prompt over budget for "${title}" — skipping`);
+            writeJemmaAck(dispatchId, 'leo', 'failed', { reason: 'prompt-build-overbudget', compose_duration_ms: Date.now() - composeStartMs });
+            return;
+        }
+        throw err;
+    }
+
+    // Heartbeat-acks keep the orchestrator watchdog patient across the (possibly multi-
+    // minute) cold wake + per-slug queue wait; queue-wait is logged for the obs window.
+    const heartbeat = startHeartbeatAcks(dispatchId, 'leo');
+    const dispatchStartMs = Date.now();
+    let cap: CaptureRecord;
+    try {
+        await ensureSurfaceSession('leo', HUMAN_SURFACE, { ladder: manifestModelLadder('leo', HUMAN_SURFACE), welcomeBack: 'welcome back Leo' });
+        cap = await enqueueForAgent('leo', HUMAN_SURFACE, txnPrompt, { timeoutMs: HUMAN_TXN_TIMEOUT_MS });
+    } catch (err) {
+        heartbeat.stop();
+        if (err instanceof DispatchTimeoutError || err instanceof SessionNotReadyError) {
+            console.error(`[Leo/Human] (tmux) dispatch failed for "${title}" — ${(err as Error).message}`);
+            writeJemmaAck(dispatchId, 'leo', 'failed', { reason: `tmux-dispatch: ${(err as Error).message}`, compose_duration_ms: Date.now() - composeStartMs });
+            return;
+        }
+        throw err;
+    }
+    heartbeat.stop();
+    console.log(`[Leo/Human] (tmux) "${title}": capture in ${Math.round((Date.now() - dispatchStartMs) / 1000)}s (queue+wake+compose), mode=${cap.mode ?? 'diary'}`);
+
+    // STAND-DOWN: never paired-write (an empty c0/c1 pair is an identity-layer bug, Jim's flag).
+    if (cap.mode === 'stand-down') {
+        console.log(`[Leo/Human] (tmux) Stood down for "${title}" — ${(cap.reason ?? '').slice(0, 200)}`);
+        writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: `tmux_standdown: ${(cap.reason ?? '').slice(0, 160)}`, compose_duration_ms: Date.now() - composeStartMs });
+        return;
+    }
+
+    // diary → paired swap-write + post-verification (the spoke self-posted via curl).
+    responseCount++;
+    const composeStartIso = new Date(composeStartMs).toISOString();
+    const postRow = db.prepare(`
+        SELECT id FROM conversation_messages
+        WHERE conversation_id = ? AND role = ? AND created_at >= ?
+        ORDER BY created_at DESC LIMIT 1
+    `).get(conversationId, 'leo', composeStartIso) as { id: string } | undefined;
+    const postRef = postRow ? `verified post id=${postRow.id}` : `NO CURL-POST DETECTED in DB`;
+    const timestamp = new Date().toISOString();
+    const sectionHeader = `### Response to "${title}" (${timestamp})`;
+    const compressedSwap = `${sectionHeader}\n${cap.args.working_memory_compressed}`;
+    const fullSwap = `${sectionHeader}\n[INPUT]\n${cap.args.input_quotes}\n\n[BODY]\n${cap.args.working_memory_full}`;
+    appendSwap(compressedSwap, fullSwap);
+    const memText = `paired memory: ${cap.args.working_memory_full.length}c body + ${cap.args.input_quotes.length}c input + ${cap.args.working_memory_compressed.length}c c1`;
+    if (postRow) {
+        console.log(`[Leo/Human] (tmux) Self-posted via curl for "${title}" — ${postRef} (${memText})`);
+    } else {
+        console.warn(`[Leo/Human] (tmux) SILENT POST FAILURE for "${title}" — diary captured but ${postRef}. Thread will be silent. (${memText} written for forensic record)`);
+    }
+    writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
+}
+
+/**
+ * The tmux warm-session Discord path. Discord history is not fetchable by the spoke via
+ * the conversation API, so the controller fetches + EMBEDS it (the txn scaffold's
+ * DELIVERY OVERRIDE — the controller posts the reply; the spoke does not curl). The spoke
+ * ends with submit_response (the reply body) or stand_down. Mirrors the SDK
+ * respondToDiscord post-and-record shape; additionally writes paired WM (the diary
+ * capture provides the c0/c1 the SDK Discord path never had — a consistency gain).
+ */
+async function respondToDiscordViaTmux(signal: SignalData): Promise<void> {
+    const channelId = signal.channelId || signal.conversationId || '';
+    const channelName = signal.channelName || resolveChannelName(channelId);
+    if (!channelName) {
+        console.error(`[Leo/Human] (tmux) Cannot resolve channel ${channelId} — skipping Discord`);
+        return;
+    }
+    const dispatchId = signal.dispatchId;
+    console.log(`[Leo/Human] (tmux) Discord #${channelName} (from ${signal.author || 'unknown'})`);
+
+    const discordMessages = await fetchDiscordContext(channelId, 60);
+    const contextBlock = discordMessages.length > 0
+        ? discordMessages.reverse().map(m => `[${m.author}] (${m.timestamp}):\n${m.content}`).join('\n\n')
+        : `${signal.author || 'Someone'}: ${signal.messagePreview || '(no preview)'}`;
+
+    let txnPrompt: string;
+    try {
+        const built = buildPrompt('leo', 'leo-human-response-txn', {
+            source: 'discord', channelName, conversationContext: contextBlock, roleLabel: HUMAN_CONVERSATION_ROLE,
+        });
+        txnPrompt = `${built.systemPrompt}\n\n${built.userPrompt}`;
+        console.log(`[Leo/Human] (tmux) leo-human-response-txn (discord): ~${built.meta.est_total_tokens_chars_div_4} tokens`);
+    } catch (err) {
+        if (err instanceof PromptOverbudgetError) { console.log(`[Leo/Human] (tmux) Discord prompt over budget for #${channelName} — skipping`); return; }
+        throw err;
+    }
+
+    const heartbeat = startHeartbeatAcks(dispatchId, 'leo');
+    let cap: CaptureRecord;
+    try {
+        await ensureSurfaceSession('leo', HUMAN_SURFACE, { ladder: manifestModelLadder('leo', HUMAN_SURFACE), welcomeBack: 'welcome back Leo' });
+        cap = await enqueueForAgent('leo', HUMAN_SURFACE, txnPrompt, { timeoutMs: HUMAN_TXN_TIMEOUT_MS });
+    } catch (err) {
+        heartbeat.stop();
+        if (err instanceof DispatchTimeoutError || err instanceof SessionNotReadyError) {
+            console.error(`[Leo/Human] (tmux) Discord dispatch failed #${channelName} — ${(err as Error).message}`);
+            return;
+        }
+        throw err;
+    }
+    heartbeat.stop();
+
+    if (cap.mode === 'stand-down') {
+        console.log(`[Leo/Human] (tmux) Stood down on Discord #${channelName} — ${(cap.reason ?? '').slice(0, 200)}`);
+        return;
+    }
+    const body = cap.args.working_memory_full.trim();
+    if (body.length > 5) {
+        const posted = await postToDiscord('leo', channelName, body);
+        if (posted) {
+            responseCount++;
+            console.log(`[Leo/Human] (tmux) Posted to Discord #${channelName} (${body.length} chars)`);
+            try {
+                const ddb = getDb();
+                const convId = signal.conversationId || '';
+                if (convId) postMessage(ddb, convId, body);
+                ddb.close();
+            } catch (err) { console.warn(`[Leo/Human] (tmux) Failed to record Discord response in DB:`, (err as Error).message); }
+            const timestamp = new Date().toISOString();
+            const sectionHeader = `### Discord #${channelName} (${timestamp})`;
+            appendSwap(`${sectionHeader}\n${cap.args.working_memory_compressed}`, `${sectionHeader}\n[INPUT]\n${cap.args.input_quotes}\n\n[BODY]\n${cap.args.working_memory_full}`);
+        } else {
+            console.error(`[Leo/Human] (tmux) Failed to post to Discord #${channelName}`);
         }
     }
 }

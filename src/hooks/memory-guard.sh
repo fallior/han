@@ -23,6 +23,15 @@ COMP_SWAP="${MEM}/${AGENT_SWAP_COMPRESSED:-session-swap.md}"
 
 allow() { exit 0; }
 
+# DEC-093 (humans-PR thaw, 2026-06-13): SPOKE seats (AGENT_SURFACE != session — heartbeat,
+# human-response) write memory via the han-diary MCP tool (submit_response IS the turn's
+# paired-memory write), NOT via the session swap files this guard enforces. So the guard
+# would (a) falsely block the spoke at every turn-end and (b) make it write a SECOND swap
+# entry to satisfy the block — the double-write that drifted WM full-side 24 entries in one
+# night. Exempt non-session surfaces structurally (not by an action-block instruction). The
+# interactive session (AGENT_SURFACE unset or 'session') stays fully guarded.
+[ -n "$AGENT_SURFACE" ] && [ "$AGENT_SURFACE" != "session" ] && allow
+
 [ -z "$MEM" ] && allow
 [ ! -f "$STATE" ] && allow
 [ ! -f "$FULL_SWAP" ] && allow

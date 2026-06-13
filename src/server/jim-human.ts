@@ -30,6 +30,12 @@ import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { gateIdentityOrThrow } from './lib/identity-signing';
 import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder';
+// DEC-093 humans-PR thaw (2026-06-13): tmux warm-session transport for human-response.
+// Gated per-dispatch on manifestTransport (kept 'sdk' until enable); the SDK path below
+// each branch is byte-intact for one-line rollback (billed-not-broken).
+import { ensureSurfaceSession, enqueueForAgent, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
+import { manifestTransport, manifestModelLadder } from './lib/garden-manifest';
+import type { CaptureRecord } from './lib/diary-mcp-server';
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -57,6 +63,12 @@ const SIGNAL_NAME = 'jim-human-wake';
 // ⏪ Reverted to Opus 2026-06-13 (S173) — claude-fable-5 access dropped.
 const MODEL_PREFERENCE = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000;
+
+// DEC-093 humans-PR thaw (2026-06-13): manifest surface name + tmux txn timeout. The
+// conversation role is 'supervisor' (Jim's manifest catch #1 — NOT slug-derived).
+const HUMAN_SURFACE = 'human-response';
+const HUMAN_TXN_TIMEOUT_MS = 15 * 60_000;
+const HUMAN_CONVERSATION_ROLE = 'supervisor';
 
 
 let activeModel: string = MODEL_PREFERENCE[0];
@@ -376,6 +388,11 @@ function readSignal(): SignalData | null {
 // ── Response: Conversation ────────────────────────────────────
 
 async function respondToConversation(db: Database.Database, conversationId: string, signal?: SignalData): Promise<void> {
+    // DEC-093 humans-PR thaw: route to the tmux warm-session path when the manifest
+    // flips this surface (kept 'sdk' until Jim's GREEN + enable). SDK path below intact.
+    if (manifestTransport('jim', HUMAN_SURFACE) === 'tmux') {
+        return respondToConversationViaTmux(db, conversationId, signal);
+    }
     const title = getConversationTitle(db, conversationId);
     const dispatchId = signal?.dispatchId;
     const priorAgentFailed = signal?.priorAgentFailed;
@@ -552,6 +569,10 @@ async function respondToConversation(db: Database.Database, conversationId: stri
 // ── Response: Discord ─────────────────────────────────────────
 
 async function respondToDiscord(signal: SignalData): Promise<void> {
+    // DEC-093 humans-PR thaw: tmux warm-session path when flipped. SDK path below intact.
+    if (manifestTransport('jim', HUMAN_SURFACE) === 'tmux') {
+        return respondToDiscordViaTmux(signal);
+    }
     const channelId = signal.channelId || signal.channel || signal.conversationId || '';
     const channelName = signal.channelName || resolveChannelName(channelId);
 
@@ -639,6 +660,172 @@ async function respondToDiscord(signal: SignalData): Promise<void> {
             }
         } else {
             console.error(`[Jim/Human] Failed to post to Discord #${channelName}`);
+        }
+    }
+}
+
+// ── Response: tmux warm-session transport (DEC-093 humans-PR thaw) ─────────────
+
+/**
+ * The tmux warm-session conversation path (mirror of leo-human). The spoke
+ * (human-response-jim) fetches the thread itself (locator scaffold), applies the
+ * gates, self-posts via curl (role 'supervisor'), and ends with submit_response or
+ * stand_down. stand-down → ack stood_down (NEVER paired-write, Jim's flag); diary →
+ * appendSwap + post-verification → ack done / SILENT-POST-FAILURE warn.
+ */
+async function respondToConversationViaTmux(db: Database.Database, conversationId: string, signal?: SignalData): Promise<void> {
+    const title = getConversationTitle(db, conversationId);
+    const dispatchId = signal?.dispatchId;
+    const priorAgentFailed = signal?.priorAgentFailed;
+    const composeStartMs = Date.now();
+    const recentMessages = getRecentMessages(db, conversationId, 60).reverse();
+
+    if (recentMessages.length === 0) {
+        console.log(`[Jim/Human] (tmux) No messages in "${title}" — skipping`);
+        writeJemmaAck(dispatchId, 'jim', 'stood_down', { reason: 'no_messages', compose_duration_ms: Date.now() - composeStartMs });
+        return;
+    }
+    // addressed-to-Leo-only pre-gate (cheap; avoids waking the spoke for a non-Jim msg)
+    const lastHumanMsg = recentMessages.filter(m => m.role === 'human').pop();
+    if (lastHumanMsg) {
+        const text = lastHumanMsg.content.toLowerCase();
+        if ((/\bleo\b|\bleonhard\b/.test(text)) && !(/\bjim\b|\bjimmy\b/.test(text))) {
+            console.log(`[Jim/Human] (tmux) Message addressed to Leo only in "${title}" — standing down`);
+            writeJemmaAck(dispatchId, 'jim', 'stood_down', { reason: 'addressed_to_other_agent', compose_duration_ms: Date.now() - composeStartMs });
+            return;
+        }
+    }
+
+    let txnPrompt: string;
+    try {
+        const built = buildPrompt('jim', 'jim-human-response-txn', {
+            source: 'conversation', title, conversationId,
+            roleLabel: HUMAN_CONVERSATION_ROLE, priorAgentFailed,
+        });
+        txnPrompt = `${built.systemPrompt}\n\n${built.userPrompt}`;
+        console.log(`[Jim/Human] (tmux) jim-human-response-txn: ~${built.meta.est_total_tokens_chars_div_4} tokens (memory suppressed: ${built.meta.memory_chars} chars)`);
+    } catch (err) {
+        if (err instanceof PromptOverbudgetError) {
+            console.log(`[Jim/Human] (tmux) Prompt over budget for "${title}" — skipping`);
+            writeJemmaAck(dispatchId, 'jim', 'failed', { reason: 'prompt-build-overbudget', compose_duration_ms: Date.now() - composeStartMs });
+            return;
+        }
+        throw err;
+    }
+
+    const heartbeat = startHeartbeatAcks(dispatchId, 'jim');
+    const dispatchStartMs = Date.now();
+    let cap: CaptureRecord;
+    try {
+        await ensureSurfaceSession('jim', HUMAN_SURFACE, { ladder: manifestModelLadder('jim', HUMAN_SURFACE), welcomeBack: 'welcome back Jim' });
+        cap = await enqueueForAgent('jim', HUMAN_SURFACE, txnPrompt, { timeoutMs: HUMAN_TXN_TIMEOUT_MS });
+    } catch (err) {
+        heartbeat.stop();
+        if (err instanceof DispatchTimeoutError || err instanceof SessionNotReadyError) {
+            console.error(`[Jim/Human] (tmux) dispatch failed for "${title}" — ${(err as Error).message}`);
+            writeJemmaAck(dispatchId, 'jim', 'failed', { reason: `tmux-dispatch: ${(err as Error).message}`, compose_duration_ms: Date.now() - composeStartMs });
+            return;
+        }
+        throw err;
+    }
+    heartbeat.stop();
+    console.log(`[Jim/Human] (tmux) "${title}": capture in ${Math.round((Date.now() - dispatchStartMs) / 1000)}s (queue+wake+compose), mode=${cap.mode ?? 'diary'}`);
+
+    if (cap.mode === 'stand-down') {
+        console.log(`[Jim/Human] (tmux) Stood down for "${title}" — ${(cap.reason ?? '').slice(0, 200)}`);
+        writeJemmaAck(dispatchId, 'jim', 'stood_down', { reason: `tmux_standdown: ${(cap.reason ?? '').slice(0, 160)}`, compose_duration_ms: Date.now() - composeStartMs });
+        return;
+    }
+
+    responseCount++;
+    const composeStartIso = new Date(composeStartMs).toISOString();
+    const postRow = db.prepare(`
+        SELECT id FROM conversation_messages
+        WHERE conversation_id = ? AND role = ? AND created_at >= ?
+        ORDER BY created_at DESC LIMIT 1
+    `).get(conversationId, 'supervisor', composeStartIso) as { id: string } | undefined;
+    const postRef = postRow ? `verified post id=${postRow.id}` : `NO CURL-POST DETECTED in DB`;
+    const timestamp = new Date().toISOString();
+    const sectionHeader = `### Response to "${title}" (${timestamp})`;
+    const compressedSwap = `${sectionHeader}\n${cap.args.working_memory_compressed}`;
+    const fullSwap = `${sectionHeader}\n[INPUT]\n${cap.args.input_quotes}\n\n[BODY]\n${cap.args.working_memory_full}`;
+    appendSwap(compressedSwap, fullSwap);
+    const memText = `paired memory: ${cap.args.working_memory_full.length}c body + ${cap.args.input_quotes.length}c input + ${cap.args.working_memory_compressed.length}c c1`;
+    if (postRow) {
+        console.log(`[Jim/Human] (tmux) Self-posted via curl for "${title}" — ${postRef} (${memText})`);
+    } else {
+        console.warn(`[Jim/Human] (tmux) SILENT POST FAILURE for "${title}" — diary captured but ${postRef}. Thread will be silent. (${memText} written for forensic record)`);
+    }
+    writeJemmaAck(dispatchId, 'jim', 'done', { compose_duration_ms: Date.now() - composeStartMs });
+}
+
+/**
+ * The tmux warm-session Discord path (mirror of leo-human). Controller fetches +
+ * embeds Discord context (not spoke-fetchable), DELIVERY OVERRIDE posts the reply.
+ */
+async function respondToDiscordViaTmux(signal: SignalData): Promise<void> {
+    const channelId = signal.channelId || signal.channel || signal.conversationId || '';
+    const channelName = signal.channelName || resolveChannelName(channelId);
+    if (!channelName) {
+        console.error(`[Jim/Human] (tmux) Cannot resolve channel ${channelId} — skipping Discord`);
+        return;
+    }
+    const dispatchId = signal.dispatchId;
+    console.log(`[Jim/Human] (tmux) Discord #${channelName} (from ${signal.author || 'unknown'})`);
+
+    const discordMessages = await fetchDiscordContext(channelId, 60);
+    const contextBlock = discordMessages.length > 0
+        ? discordMessages.reverse().map(m => `[${m.author}] (${m.timestamp}):\n${m.content}`).join('\n\n')
+        : `${signal.author || 'Someone'}: ${signal.messagePreview || '(no preview)'}`;
+
+    let txnPrompt: string;
+    try {
+        const built = buildPrompt('jim', 'jim-human-response-txn', {
+            source: 'discord', channelName, conversationContext: contextBlock, roleLabel: HUMAN_CONVERSATION_ROLE,
+        });
+        txnPrompt = `${built.systemPrompt}\n\n${built.userPrompt}`;
+        console.log(`[Jim/Human] (tmux) jim-human-response-txn (discord): ~${built.meta.est_total_tokens_chars_div_4} tokens`);
+    } catch (err) {
+        if (err instanceof PromptOverbudgetError) { console.log(`[Jim/Human] (tmux) Discord prompt over budget for #${channelName} — skipping`); return; }
+        throw err;
+    }
+
+    const heartbeat = startHeartbeatAcks(dispatchId, 'jim');
+    let cap: CaptureRecord;
+    try {
+        await ensureSurfaceSession('jim', HUMAN_SURFACE, { ladder: manifestModelLadder('jim', HUMAN_SURFACE), welcomeBack: 'welcome back Jim' });
+        cap = await enqueueForAgent('jim', HUMAN_SURFACE, txnPrompt, { timeoutMs: HUMAN_TXN_TIMEOUT_MS });
+    } catch (err) {
+        heartbeat.stop();
+        if (err instanceof DispatchTimeoutError || err instanceof SessionNotReadyError) {
+            console.error(`[Jim/Human] (tmux) Discord dispatch failed #${channelName} — ${(err as Error).message}`);
+            return;
+        }
+        throw err;
+    }
+    heartbeat.stop();
+
+    if (cap.mode === 'stand-down') {
+        console.log(`[Jim/Human] (tmux) Stood down on Discord #${channelName} — ${(cap.reason ?? '').slice(0, 200)}`);
+        return;
+    }
+    const body = cap.args.working_memory_full.trim();
+    if (body.length > 5) {
+        const posted = await postToDiscord('jim', channelName, body);
+        if (posted) {
+            responseCount++;
+            console.log(`[Jim/Human] (tmux) Posted to Discord #${channelName} (${body.length} chars)`);
+            try {
+                const ddb = getDb();
+                const convId = signal.conversationId || '';
+                if (convId) postMessage(ddb, convId, body);
+                ddb.close();
+            } catch (err) { console.warn(`[Jim/Human] (tmux) Failed to record Discord response in DB:`, (err as Error).message); }
+            const timestamp = new Date().toISOString();
+            const sectionHeader = `### Discord #${channelName} (${timestamp})`;
+            appendSwap(`${sectionHeader}\n${cap.args.working_memory_compressed}`, `${sectionHeader}\n[INPUT]\n${cap.args.input_quotes}\n\n[BODY]\n${cap.args.working_memory_full}`);
+        } else {
+            console.error(`[Jim/Human] (tmux) Failed to post to Discord #${channelName}`);
         }
     }
 }

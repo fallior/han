@@ -63,7 +63,7 @@ import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRes
 // The manifest's transport field is the per-surface feature flag (rollback =
 // one-line manifest flip back to 'sdk'; the SDK paths below are kept intact).
 import { manifestTransport, manifestModelHead, manifestModelLadder } from './lib/garden-manifest';
-import { spawnAgentSession, enqueueForAgent, getContextPct, clearSession, awaitChromeOrDescend, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
+import { ensureSurfaceSession, enqueueForAgent, getContextPct, clearSession, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
 import type { CaptureRecord } from './lib/diary-mcp-server';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
@@ -1096,8 +1096,9 @@ async function resolveModel(): Promise<string> {
 // gates BEFORE dispatch in scheduleNext, unchanged.
 
 const HEARTBEAT_SURFACE = 'heartbeat';
-const HEARTBEAT_TMUX_SESSION = `${HEARTBEAT_SURFACE}-leo`; // launch-tmux-surface.sh: <surface>-<slug>
-const LAUNCH_SURFACE_SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'launch-tmux-surface.sh');
+// The heartbeat tmux session name + launch-script path + adoption flag now live in
+// the dispatcher's ensureSurfaceSession (humans PR 2026-06-13) — ONE runtime
+// respawn+adopt home, shared with the human-response surfaces.
 const BEAT_TXN_TIMEOUT_MS = 15 * 60_000;   // beats can run minutes; > dispatcher default
 const CTX_CLEAR_THRESHOLD_PCT = 85;        // plan §5: /pfc → /clear → welcome-back past this
 
@@ -1105,51 +1106,21 @@ function isTmuxHeartbeat(): boolean {
     return manifestTransport('leo', HEARTBEAT_SURFACE) === 'tmux';
 }
 
-function heartbeatTmuxSessionExists(): boolean {
-    try { execFileSync('tmux', ['has-session', '-t', HEARTBEAT_TMUX_SESSION], { stdio: 'ignore' }); return true; } catch { return false; }
-}
-
-/** Registered-with-the-dispatcher flag — in-process only; a service restart
- *  re-adopts the (still warm) session on the next beat. */
-let heartbeatSessionAdopted = false;
-
 /**
- * Ensure the heartbeat-leo tmux session exists, is woken, and is adopted into
- * the dispatcher registry. Launch goes through scripts/launch-tmux-surface.sh —
- * the single source of the launch contract (env, model-from-manifest,
- * claude-logged, surface-index sidecar); this module never duplicates it.
- * Single-manager rule (T-2): the dispatcher (via this ensure) is the one
- * runtime respawner; the systemd units are boot-launchers only.
+ * Ensure the heartbeat-leo tmux session exists, is on a working model, is woken, and
+ * is adopted — now a thin wrapper over the dispatcher's ensureSurfaceSession (promoted
+ * from this function in the humans PR so heartbeat + human-response inherit ONE
+ * launch/adopt path + the model-failover descent + the warm-death handoff). The model
+ * ladder comes from the manifest (manifestModelLadder) so the dispatcher stays config-
+ * free; the launch contract (launch-tmux-surface.sh, claude-logged, surface-index) is
+ * the dispatcher's single source. Single-manager rule (T-2) preserved: the dispatcher
+ * is the one runtime respawner; the systemd units are boot-launchers only.
  */
 async function ensureHeartbeatTmuxSession(): Promise<void> {
-    const existed = heartbeatTmuxSessionExists();
-    if (!existed) {
-        heartbeatSessionAdopted = false; // dead session invalidates any prior adoption
-        // Stale per-surface sentinel must not satisfy waitForReady — unlink so
-        // adoption below proves a FRESH wake (the T-1.5 cross-talk lesson).
-        try { fs.unlinkSync(path.join(HEALTH_DIR, `leo-${HEARTBEAT_SURFACE}-ready`)); } catch { /* none */ }
-        console.log(`[Leo] tmux heartbeat: launching ${HEARTBEAT_TMUX_SESSION} via launch-tmux-surface.sh`);
-        execFileSync('bash', [LAUNCH_SURFACE_SCRIPT, 'leo', HEARTBEAT_SURFACE], { stdio: 'inherit' });
-        // Wait for the Claude prompt chrome before sending the wake — send-keys fired too
-        // early lands in bash, not claude. awaitChromeOrDescend (S173) also auto-recovers
-        // the model-failover ladder: if the launch model is unavailable (Fable-drop class),
-        // it descends via in-session /model before we wake; any other stuck prompt fails
-        // loud with a pane snapshot (→ the catch in dispatchBeatViaTmux health-signals it).
-        // The ready-sentinel (spawnAgentSession below) is still the real readiness proof.
-        await awaitChromeOrDescend('leo', HEARTBEAT_SURFACE, HEARTBEAT_TMUX_SESSION, manifestModelLadder('leo', HEARTBEAT_SURFACE));
-        execFileSync('tmux', ['send-keys', '-t', HEARTBEAT_TMUX_SESSION, '-l', 'welcome back Leo']);
-        execFileSync('tmux', ['send-keys', '-t', HEARTBEAT_TMUX_SESSION, 'Enter']);
-    }
-    if (!heartbeatSessionAdopted || !existed) {
-        // adoptExisting waits on the per-surface ready sentinel (fresh-unlinked
-        // above on a new launch; an already-warm session adopts immediately).
-        await spawnAgentSession('leo', HEARTBEAT_SURFACE, {
-            tmuxSession: HEARTBEAT_TMUX_SESSION,
-            launchCommand: `(launched by ${LAUNCH_SURFACE_SCRIPT})`,
-            adoptExisting: true,
-        });
-        heartbeatSessionAdopted = true;
-    }
+    await ensureSurfaceSession('leo', HEARTBEAT_SURFACE, {
+        ladder: manifestModelLadder('leo', HEARTBEAT_SURFACE),
+        welcomeBack: 'welcome back Leo',
+    });
 }
 
 /**
@@ -1217,7 +1188,9 @@ async function dispatchBeatViaTmux(
             `ctx-clear (${beatLabel}): ${(err as Error).message}`,
             currentBeatType === 'philosophy' || currentBeatType === 'personal' ? currentBeatType : undefined,
         );
-        heartbeatSessionAdopted = false; // re-adopt via spawnAgentSession once the wake lands
+        // A failed clearSession leaves the dispatcher session ready=false, so the next
+        // ensureSurfaceSession re-adopts once the slow post-clear wake re-touches the
+        // sentinel (the adoption flag now lives in the dispatcher, not here).
     }
     return cap;
 }

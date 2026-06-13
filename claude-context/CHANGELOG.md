@@ -7,6 +7,55 @@
 
 ---
 
+## 2026-06-13 (S175) — The Humans PR: human-response → tmux warm-session transport (flag-off)
+
+Migrates `leo-human` + `jim-human` conversation/Discord responses from the in-process Agent SDK
+(`agentQuery`) to the tmux warm-session transport (#66), gated per-dispatch on `manifestTransport`.
+**Landed FLAG-OFF**: the manifest `human-response` rows stay `transport: 'sdk'`, so the controllers run
+the (byte-intact) SDK path — nothing changes at runtime until the enable flip. Jim's diff-audit is the
+BLOCKING gate before enable. Deadline Mon 15 Jun.
+
+- **`human-prompts.ts`** — `buildHumanResponseSystemPrompt`/`continuationFraming` parameterized by
+  `standDown: 'sentinel' | 'tool'` (default `'sentinel'` keeps the SDK exports byte-for-byte identical).
+  New `*_TXN_SYSTEM_PROMPT` exports route stand-down through `mcp__han-diary__stand_down` (a tmux spoke
+  can't signal a text sentinel — the dispatcher polls the diary sink) + a tmux delivery directive. New
+  `buildHumanResponseTxnScaffold`: conversation = a LOCATOR (the spoke curl-fetches the thread itself so the
+  self-recognition/already-responded gates read live state), Discord = controller-fetched context embedded +
+  a DELIVERY OVERRIDE (the controller posts the reply; the spoke doesn't curl).
+- **`prompt-profiles.ts`** — `leo-human-response-txn` + `jim-human-response-txn`: all memory components
+  suppressed (the warm spoke carries identity from its wake; DEC-088 deliberate deviation), `mcp-tool`
+  mechanism, `instruction: ''` (the human system prompt already carries the submit_response/stand_down
+  directive — the generic `DEFAULT_DIARY_INSTRUCTION_MCP` must not double-append). ~1.4K-token frames.
+- **`tmux-dispatcher.ts`** *(protected)* — `ensureSurfaceSession(slug, surface, {ladder, welcomeBack})`
+  promoted from the heartbeat's `ensureHeartbeatTmuxSession` (one runtime launch/adopt home both surfaces
+  inherit; per-(slug,surface) adoption map). **Warm-death handoff** (the failover enable-gate): a model that
+  dies mid-life surfaces as a capture-timeout → `needs-reconcile`; if the pane shows the model-unavailable
+  chrome, the session is killed + adoption dropped → the next ensure COLD-launches → `awaitChromeOrDescend`
+  descends the ladder (the default reconcile would re-run the dead model). A non-model wedge is left for
+  `reconcileSession` — distinguished by the pane scan.
+- **`leo-heartbeat.ts`** — `ensureHeartbeatTmuxSession` is now a thin wrapper over `ensureSurfaceSession`
+  (behaviour-preserving; it *gains* the failover descent + warm-death it didn't have inline). Removed the
+  now-redundant `HEARTBEAT_TMUX_SESSION`/`LAUNCH_SURFACE_SCRIPT`/`heartbeatTmuxSessionExists`/
+  `heartbeatSessionAdopted` (the dispatcher owns them); the ctx-clear-failure re-adopt now flows from the
+  dispatcher's `!ready` check.
+- **`leo-human.ts` + `jim-human.ts`** — a `manifestTransport === 'tmux'` branch at the top of
+  `respondToConversation`/`respondToDiscord` routes to new `*ViaTmux` functions; the SDK path below is
+  byte-intact (billed-not-broken rollback = the manifest flip back). The tmux functions mirror the SDK
+  cascade: stand-down → ack `stood_down` (NEVER paired-written — an empty c0/c1 pair is an identity-layer
+  bug); diary → `appendSwap` + `computePostRef` post-verification → ack `done` / `SILENT POST FAILURE` warn.
+  Queue-wait logged (heartbeat + human share the per-slug FIFO). Jim uses role `'supervisor'` (manifest
+  catch #1).
+- **`memory-guard.sh`** — exempts spoke seats (`AGENT_SURFACE != session`): a spoke's memory write IS the
+  diary-tool capture (DEC-093), not a session swap write, so the guard must not force a SECOND swap entry
+  (the double-write that drifted WMF +24 entries in one night).
+- **`scripts/check-human-signatures.ts`** *(new)* — scans the latest-N human-seat posts per agent (id-prefix
+  self-marker); flags any signing `(session)` or omitting `(human)` (the S151 false-match risk); exit 2 +
+  ntfy. Run with `--since=<flip>` during the obs window.
+
+Verified: `tsc --noEmit` 12 pre-existing errors / 0 new; both txn profiles assemble at 0 memory chars;
+SDK exports confirmed byte-intact; `bash -n` clean. Settled decisions checked — DEC-093/085/087/088/081
+honoured/extended, none altered; DEC-068/069/074/077 untouched.
+
 ## 2026-06-13 (S173) — Model-failover ladder: autonomous spokes descend `/model` on a dead launch model
 
 The Fable drop (12:00) was exhibit A: the heartbeat spoke launched on a now-unavailable model, sat
