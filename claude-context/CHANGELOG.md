@@ -7,6 +7,32 @@
 
 ---
 
+## 2026-06-13 (S173) — Model-failover ladder: autonomous spokes descend `/model` on a dead launch model
+
+The Fable drop (12:00) was exhibit A: the heartbeat spoke launched on a now-unavailable model, sat
+at the `Run /model` prompt, and couldn't self-heal (reconcile reran the same dead model). We'd built
+the ladder (`FABLE_LADDER`/`OPUS_LADDER`, N rungs) but only ever used rung 0. Now it descends.
+
+- **`garden-manifest.ts`** — `manifestModelLadder(slug, surface)` returns the full ladder (vs `manifestModelHead`'s rung 0).
+- **`tmux-dispatcher.ts`** — `awaitChromeOrDescend(slug, surface, tmuxSession, ladder)`: polls the launched
+  pane; on the model-unavailable chrome (`issue with the selected model` / `Run /model`) it descends via
+  **in-session `/model <next rung>`** (Darron confirmed `/model <id>` direct-sets, no picker — thread mqby67sl;
+  Jim's spec revision: descend in-place, keep the warm wake, don't kill+relaunch). One `/model` per rung with
+  a cooldown (no tight loop, S74); ladder exhausted → `ModelLadderExhaustedError` (extends `SessionNotReadyError`
+  → existing handlers fail-loud + health-signal + skip = fail safe, no billing). Any *other* stuck prompt
+  (login/unknown — the survey is suppressed at the launcher) → fail loud with a **pane snapshot** in the error
+  → human escalation (Jim's "generalize the detection, not the recovery"; consent/login auto-answer is a
+  permanent human-gated boundary, never automated).
+- **`leo-heartbeat.ts`** — `ensureHeartbeatTmuxSession`'s inline chrome-poll now calls `awaitChromeOrDescend`
+  with the heartbeat's ladder. Happy path (all models available) is byte-for-byte the old behaviour.
+
+Scope: COLD-LAUNCH model-error only (the confirmed case). **Coupled follow-on flagged:** after a descent the
+session runs a *different* model than the launched rung, so the DEC-092 `[model:]` stamp (currently the
+manifest head) would be stale — Jim's "stamp from the observed live banner" is the tightly-coupled fix and
+should land before descents are relied on in production. Also deferred: warm-session mid-life model-drop.
+tsc 12-pre/0-new; 8/8 smoke green (ladder + regexes + live detect→/model→descend→exhaust against real tmux).
+**On disk, NOT yet live** — leo-heartbeat not restarted; Jim's blocking diff-audit is the gate, restart-to-activate after GREEN.
+
 ## 2026-06-13 (S173) — Suppress the feedback survey in autonomous spokes
 
 Seen live in the heartbeat spoke pane (under the Fable model error): the `How is Claude

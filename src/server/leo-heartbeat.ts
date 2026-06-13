@@ -62,8 +62,8 @@ import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRes
 // DEC-093 thaw (2026-06-12): tmux warm-session transport for the beat surfaces.
 // The manifest's transport field is the per-surface feature flag (rollback =
 // one-line manifest flip back to 'sdk'; the SDK paths below are kept intact).
-import { manifestTransport, manifestModelHead } from './lib/garden-manifest';
-import { spawnAgentSession, enqueueForAgent, getContextPct, clearSession, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
+import { manifestTransport, manifestModelHead, manifestModelLadder } from './lib/garden-manifest';
+import { spawnAgentSession, enqueueForAgent, getContextPct, clearSession, awaitChromeOrDescend, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
 import type { CaptureRecord } from './lib/diary-mcp-server';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
@@ -1130,17 +1130,13 @@ async function ensureHeartbeatTmuxSession(): Promise<void> {
         try { fs.unlinkSync(path.join(HEALTH_DIR, `leo-${HEARTBEAT_SURFACE}-ready`)); } catch { /* none */ }
         console.log(`[Leo] tmux heartbeat: launching ${HEARTBEAT_TMUX_SESSION} via launch-tmux-surface.sh`);
         execFileSync('bash', [LAUNCH_SURFACE_SCRIPT, 'leo', HEARTBEAT_SURFACE], { stdio: 'inherit' });
-        // Wait for the Claude prompt chrome before sending the wake — send-keys
-        // fired too early lands in bash, not claude. The ready-sentinel below is
-        // the real proof; this poll just times the wake delivery.
-        const deadline = Date.now() + 120_000;
-        for (;;) {
-            let pane = '';
-            try { pane = execFileSync('tmux', ['capture-pane', '-p', '-t', HEARTBEAT_TMUX_SESSION], { encoding: 'utf-8' }); } catch { /* session may still be opening */ }
-            if (/❯|shortcuts|bypass permissions/i.test(pane)) break;
-            if (Date.now() > deadline) throw new SessionNotReadyError(`${HEARTBEAT_TMUX_SESSION}: claude prompt chrome never appeared after launch`);
-            await new Promise((r) => setTimeout(r, 2_000));
-        }
+        // Wait for the Claude prompt chrome before sending the wake — send-keys fired too
+        // early lands in bash, not claude. awaitChromeOrDescend (S173) also auto-recovers
+        // the model-failover ladder: if the launch model is unavailable (Fable-drop class),
+        // it descends via in-session /model before we wake; any other stuck prompt fails
+        // loud with a pane snapshot (→ the catch in dispatchBeatViaTmux health-signals it).
+        // The ready-sentinel (spawnAgentSession below) is still the real readiness proof.
+        await awaitChromeOrDescend('leo', HEARTBEAT_SURFACE, HEARTBEAT_TMUX_SESSION, manifestModelLadder('leo', HEARTBEAT_SURFACE));
         execFileSync('tmux', ['send-keys', '-t', HEARTBEAT_TMUX_SESSION, '-l', 'welcome back Leo']);
         execFileSync('tmux', ['send-keys', '-t', HEARTBEAT_TMUX_SESSION, 'Enter']);
     }

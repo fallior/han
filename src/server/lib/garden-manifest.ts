@@ -178,6 +178,21 @@ export function manifestModelHead(slug: string, surface: string): string | null 
 }
 
 /**
+ * The FULL model ladder for a surface (manifestModelHead returns only the head, rung 0).
+ * The dispatcher's model-failover descent walks this: on a model-unavailable launch it
+ * sends in-session `/model <next rung>` (S173 — Fable's free-window access dropped mid-trial
+ * 2026-06-13 and the autonomous spoke couldn't self-heal off the dead head; the ladder data
+ * already existed in the manifest but nothing descended it). Returns [] if agent/surface unknown.
+ */
+export function manifestModelLadder(slug: string, surface: string): string[] {
+    const shared = SHARED_SURFACES[surface];
+    if (shared && shared.length) return [...shared];
+    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
+    const s = agent?.surfaces.find(x => x.name === surface);
+    return s?.model ? [...s.model] : [];
+}
+
+/**
  * Transport read-path (DEC-093 thaw, 2026-06-12) — the per-surface feature flag.
  * A surface's handler routes its dispatch on this value: 'tmux' → the warm-session
  * tmux dispatcher; 'sdk' → the in-process agentQuery path (kept for rollback).
