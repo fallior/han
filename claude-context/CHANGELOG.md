@@ -7,6 +7,27 @@
 
 ---
 
+## 2026-06-13 (S173) — Fable substrate window ended early: reverted all surfaces to Opus
+
+**`claude-fable-5` access dropped ~12:00 AEST 13 Jun** — a model-access error (`may not exist or
+you may not have access`) on both the interactive CLI and the heartbeat spoke (confirmed at the
+spoke's own pane; not a rate-limit). Spoke beat #26 @12:00 was the first dispatch failure of the
+30/30 window. Did the documented "revert after 22 Jun" early, on Darron's go:
+
+- `garden-manifest.ts` — `CLI_LAUNCH_DEFAULT` → `['claude-opus-4-8']`; `compression` →
+  `['claude-opus-4-7']`; heartbeat + both `human-response` surfaces `FABLE_LADDER` → `OPUS_LADDER`
+  (heartbeat **transport stays `tmux`** — the migration is intact; only the model reverts). The
+  `FABLE_LADDER` const was removed; the re-flip recipe is recorded in the file comment + git.
+- `process-pending-compression.ts` — compression literal → `'claude-opus-4-7'`.
+- `leo-human.ts` / `jim-human.ts` — `MODEL_PREFERENCE` head Fable removed (head now opus-4-8).
+
+The migration is unharmed (transport is model-agnostic); the humans PR proceeds on Opus. DEC-092
+still captures the actually-served model regardless of config. tsc 12-pre/0-new; manifest resolves
+opus across all surfaces (verified at runtime). Operator follow-up: restart leo-heartbeat +
+leo-human + jim-human (lib change, transitive — post-commit hook doesn't cover them); kill the
+wedged fable spoke so the next beat relaunches on Opus. `rotation-paused` re-seeded (Mike's shared
+window Sat→Sun 18:00; no rate-limit pressure, accounts stay pinned).
+
 ## 2026-06-12 (S171) — THE THAW PR: DEC-093 curated write-shape + heartbeat → tmux/Fable (landed flag-off, freeze intact)
 
 **The #78 write-shape decided (DEC-093) + Leo's heartbeat wired to the tmux warm-session

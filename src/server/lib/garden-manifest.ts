@@ -78,17 +78,17 @@ export interface GardenManifest {
 
 // Common Opus ladder for the migrated agentQuery surfaces.
 const OPUS_LADDER: ModelLadder = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'];
-// ⚠ FABLE 5 SUBSTRATE WINDOW (free 9–22 Jun 2026, S169). For the substrate-test
-// (DEC-092), the interactive sessions + human seats + the compression worker run
-// on claude-fable-5. This manifest is the source the DEC-092 provenance stamp
-// reads, so it MUST match the live launch model. ⏪ REVERT after 22 Jun: FABLE_LADDER
-// → OPUS_LADDER, CLI_LAUNCH_DEFAULT → ['claude-opus-4-8'], compression → 4-7/4-8.
-const FABLE_LADDER: ModelLadder = ['claude-fable-5', 'claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'];
+// ⏪ FABLE 5 SUBSTRATE WINDOW ENDED EARLY — reverted to Opus 2026-06-13 (S173).
+// claude-fable-5 access dropped ~12:00 AEST 13 Jun (model-access error on both the
+// interactive CLI and the heartbeat spoke; not a rate-limit). All surfaces moved back
+// to the Opus ladder. If access returns before 22 Jun, re-flip is a known change:
+// re-add FABLE_LADDER = ['claude-fable-5', ...OPUS_LADDER], CLI_LAUNCH_DEFAULT →
+// ['claude-fable-5'], compression → ['claude-fable-5'], human/heartbeat model → that
+// ladder. DEC-092 captures the actually-served model regardless of config.
 
 // Interactive CLI sessions take their model from the launcher at spawn (the
-// launchers don't pin one today, so Darron launches with `-- --model claude-fable-5`
-// or `/model` in-session). Recorded here so the DEC-092 slicer stamp matches reality.
-const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-fable-5']; // ⚠ Fable window — revert to ['claude-opus-4-8'] after 22 Jun
+// launchers don't pin one today). Recorded here so the DEC-092 slicer stamp matches reality.
+const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-opus-4-8']; // ⏪ Reverted to Opus 2026-06-13 — Fable access dropped
 
 /**
  * Current values as of 2026-06-02 (S164), captured exactly.
@@ -112,14 +112,14 @@ export const GARDEN_MANIFEST: GardenManifest = {
             active: true,
             surfaces: [
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
-                { name: 'human-response',     enabled: true,  transport: 'sdk', model: FABLE_LADDER, swapPrefix: 'human-swap' }, // ⚠ Fable window (S169) — revert to OPUS_LADDER after 22 Jun
+                { name: 'human-response',     enabled: true,  transport: 'sdk', model: OPUS_LADDER, swapPrefix: 'human-swap' }, // ⏪ Reverted to Opus 2026-06-13 — Fable access dropped
                 // ⚠ THAW (DEC-093, 2026-06-12): heartbeat → tmux transport + Fable
                 // (Darron: "all in" for the trial window — revert model to
                 // OPUS_LADDER after 22 Jun; transport stays tmux post-window).
                 // The freeze signal (heartbeat-paused-leo) is the live gate: while
                 // it exists no beat fires regardless of this row. Rollback = flip
                 // transport back to 'sdk' (the SDK path is kept in leo-heartbeat.ts).
-                { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'heartbeat-swap' },
+                { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'heartbeat-swap' }, // ⏪ model reverted to Opus 2026-06-13 (Fable access dropped); transport stays tmux
                 { name: 'meditation-phase-a', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
                 { name: 'meditation-phase-b', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
                 { name: 'meditation-evening', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
@@ -132,7 +132,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
             active: true,
             surfaces: [
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'supervisor-swap' },
-                { name: 'human-response',     enabled: true,  transport: 'sdk', model: FABLE_LADDER, swapPrefix: 'jim-human-swap' }, // ⚠ Fable window (S169) — revert to OPUS_LADDER after 22 Jun
+                { name: 'human-response',     enabled: true,  transport: 'sdk', model: OPUS_LADDER, swapPrefix: 'jim-human-swap' }, // ⏪ Reverted to Opus 2026-06-13 — Fable access dropped
                 // ⚠ still 4-7 — supervisor-worker.ts:2075 (config.supervisor.model overrides)
                 { name: 'supervisor-cycle',   enabled: true,  transport: 'sdk', model: ['claude-opus-4-7'], swapPrefix: 'supervisor-swap' },
                 // ⚠ still 4-7 — supervisor-worker.ts:363/1036/1131
@@ -159,7 +159,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
  * Phase 1 has one home to migrate it from.
  */
 export const SHARED_SURFACES: Record<string, ModelLadder> = {
-    compression: ['claude-fable-5'], // ⚠ Fable window (S169, Darron) — revert to ['claude-opus-4-7'] (or 4-8) after 22 Jun
+    compression: ['claude-opus-4-7'], // ⏪ Reverted to Opus 2026-06-13 — Fable access dropped
 };
 
 /**

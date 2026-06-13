@@ -383,7 +383,7 @@ async function runSDK(systemPrompt: string, userPrompt: string): Promise<string>
     const q = agentQuery({
         prompt: userPrompt,
         options: {
-            model: 'claude-fable-5', // ⚠ Fable window (S169, Darron) — revert to 'claude-opus-4-7' (or 4-8) after 22 Jun. DEC-092 captures the actually-served model regardless (catches a distillation-safeguard fallback to Opus).
+            model: 'claude-opus-4-7', // ⏪ Reverted to Opus 2026-06-13 (S173) — claude-fable-5 access dropped. DEC-092 still captures the actually-served model.
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
