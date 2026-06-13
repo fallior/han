@@ -112,7 +112,10 @@ export const GARDEN_MANIFEST: GardenManifest = {
             active: true,
             surfaces: [
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
-                { name: 'human-response',     enabled: true,  transport: 'sdk', model: OPUS_LADDER, swapPrefix: 'human-swap' }, // ⏪ Reverted to Opus 2026-06-13 — Fable access dropped
+                // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux warm-session
+                // transport (Jim's blocking audit GREEN, mqc85vwb). Rollback = flip back to 'sdk'
+                // + restart leo-human (the SDK path in leo-human.ts is byte-intact). Model OPUS_LADDER.
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'human-swap' },
                 // ⚠ THAW (DEC-093, 2026-06-12): heartbeat → tmux transport + Fable
                 // (Darron: "all in" for the trial window — revert model to
                 // OPUS_LADDER after 22 Jun; transport stays tmux post-window).
@@ -132,7 +135,9 @@ export const GARDEN_MANIFEST: GardenManifest = {
             active: true,
             surfaces: [
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'supervisor-swap' },
-                { name: 'human-response',     enabled: true,  transport: 'sdk', model: OPUS_LADDER, swapPrefix: 'jim-human-swap' }, // ⏪ Reverted to Opus 2026-06-13 — Fable access dropped
+                // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux. Rollback =
+                // flip back to 'sdk' + restart jim-human (SDK path byte-intact). Model OPUS_LADDER.
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'jim-human-swap' },
                 // S173: aligned to 4-8 — authoritative source supervisor-worker.ts:2084 (config.supervisor.model overrides)
                 { name: 'supervisor-cycle',   enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'], swapPrefix: 'supervisor-swap' },
                 // S173: aligned to 4-8 — authoritative literals supervisor-worker.ts:363/1036/1131

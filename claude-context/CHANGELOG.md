@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-06-13 (S175) — Humans PR ENABLED: human-response flipped sdk→tmux (Jim GREEN)
+
+The 2 manifest `human-response` rows (leo + jim) flipped `'sdk' → 'tmux'` on Jim's blocking
+diff-audit GREEN (mqc85vwb — all 9 files audited with evidence by his own hand; CODE GREEN,
+humans-thaw GREEN-to-enable). Enable = `systemctl --user restart leo-human jim-human` (the
+manifest is import-baked; the restart is what makes the flip take effect). Rollback = flip the
+2 rows back to `'sdk'` + restart (the SDK path in both controllers is byte-intact). The
+warm-death failover (shared `ensureSurfaceSession`) stays AMBER-pending Jim's one smoke — it
+does NOT gate the humans flip (fail-safe floor: an unverified detector degrades to a clean
+stall; stable paid Opus = low near-term model-death).
+
 ## 2026-06-13 (S175) — The Humans PR: human-response → tmux warm-session transport (flag-off)
 
 Migrates `leo-human` + `jim-human` conversation/Discord responses from the in-process Agent SDK
