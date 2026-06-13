@@ -81,12 +81,19 @@ done < <(manifest_get env "$SLUG" "$SURFACE")
 # detached pane BEFORE claude launches — first-warm-beat finding, 2026-06-12).
 # Spokes need no SSH (file transport + curl to localhost). The .bashrc guard
 # itself is Darron's hand (L013), same precedent as HAN_LOG_SURFACE.
+# CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: suppress the "How is Claude doing?" survey
+# (+ its data-use y/n follow-up) in autonomous spokes (S173, 2026-06-13). Seen live
+# in the heartbeat pane under a model error. Two reasons: (1) the survey modal
+# pollutes the pane and could wedge an autonomous seat that can't answer TUI chrome;
+# (2) PRIVACY — we do not want autonomous spokes auto-consenting to data-use on the
+# experiment's content; suppressed = no per-session consent, posture stays account-default.
 tmux new-session -d -s "$SESSION_NAME" -c "$REPO_ROOT" \
     "${ENV_ARGS[@]}" \
     -e "AGENT_SURFACE=$SURFACE" \
     -e "HAN_SESSION=$SESSION_NAME" \
     -e "HAN_LOG_SURFACE=$SURFACE" \
-    -e "HAN_SPOKE=1"
+    -e "HAN_SPOKE=1" \
+    -e "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1"
 
 # Launch Claude in the pane. claude-logged is a ~/.bashrc function (canonical
 # per-agent transcript, DEC-091); CLAUDECODE is unset first (L012). HAN_LOG_SURFACE

@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-06-13 (S173) — Suppress the feedback survey in autonomous spokes
+
+Seen live in the heartbeat spoke pane (under the Fable model error): the `How is Claude
+doing this session? 1:Bad 2:Fine 3:Good 0:Dismiss` survey + its data-use y/n follow-up. Set
+`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1` in `launch-tmux-surface.sh`'s spoke env. Two reasons:
+(1) the survey modal pollutes the pane and could wedge an autonomous seat that can't answer
+TUI chrome (and keeps the failover pane-scan unambiguous); (2) **privacy** — we don't want
+autonomous spokes auto-consenting to data-use on the experiment's content; suppressed = no
+per-session consent prompt, posture stays at the account default. Tiny launcher hardening,
+no protected files. Applies to all future spoke launches; recycled the live heartbeat spoke so
+it's active now. (Distinct from the deferred model-failover ladder — that's the fresh-window build.)
+
 ## 2026-06-13 (S173) — All active Opus surfaces aligned to Opus 4.8 (highest Opus)
 
 **Darron: "make all opus opus 4.8 or the highest opus… I think we may be able to trust the
