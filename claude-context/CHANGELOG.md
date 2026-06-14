@@ -7,6 +7,26 @@
 
 ---
 
+## 2026-06-14 (S175) — Failover hardening: re-probe fix (A1) + observed-banner stamp (A2) → failover trusted
+
+The two failover enable-gates from Jim's audit (mqcxfemh/mqd1hnpn — `--detect` GREEN, `--descend` RED).
+
+- **A1 — `awaitChromeOrDescend` re-probe fix** (`tmux-dispatcher.ts`). The Phase-2 re-probe used a
+  shared `"Hi"` and read the pane *before the new probe rendered*, so `lastIndexOf("Hi")` landed on the
+  PRIOR rung's probe — whose error was still in scrollback → false-match → the working rung got descended
+  *past* → false `every rung unavailable`. Now each rung uses a **unique probe marker** and the error is
+  judged **only once that marker has rendered** (text after it). Shared by cold-launch + warm-death.
+  Verified: `warm-death-smoke.ts --descend` now GREEN (bogus→opus descends + lands the working rung).
+- **A2 — observed-banner DEC-092 stamp** (`tmux-dispatcher.ts` `observeActiveModel` + `leo-heartbeat.ts`
+  ×2 stamp sites + the beat banner). A DESCENDED beat lands on a ladder rung ≠ the configured manifest
+  head, so stamping `manifestModelHead` recorded the wrong model. `observeActiveModel(slug, surface)`
+  reads the live model from the pane chrome (display-name→api-id map, best-effort, falls back to the
+  manifest head). Verified against the live heartbeat spoke (reads `claude-opus-4-8`).
+- `warm-death-smoke.ts` `--descend` post-check scoped after a fresh marker (same stale-scrollback class).
+
+tsc 12 pre-existing / 0 new. Both `--detect` and `--descend` GREEN. Failover descent now correct on both
+surfaces; Jim re-smokes `--descend` + audits A2 to declare trusted.
+
 ## 2026-06-13 (S175) — Humans PR ENABLED: human-response flipped sdk→tmux (Jim GREEN)
 
 The 2 manifest `human-response` rows (leo + jim) flipped `'sdk' → 'tmux'` on Jim's blocking

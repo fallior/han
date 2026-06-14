@@ -63,7 +63,7 @@ import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRes
 // The manifest's transport field is the per-surface feature flag (rollback =
 // one-line manifest flip back to 'sdk'; the SDK paths below are kept intact).
 import { manifestTransport, manifestModelHead, manifestModelLadder } from './lib/garden-manifest';
-import { ensureSurfaceSession, enqueueForAgent, getContextPct, clearSession, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
+import { ensureSurfaceSession, enqueueForAgent, getContextPct, clearSession, observeActiveModel, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
 import type { CaptureRecord } from './lib/diary-mcp-server';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
@@ -1751,7 +1751,9 @@ async function philosophyBeatTmux(db: Database.Database, ctx: PhilosophyBeatRunt
         cap.args.working_memory_full,           // CURATED c0-grade record (DEC-093)
         cap.args.working_memory_compressed,
         cap.args.input_quotes,
-        manifestModelHead('leo', HEARTBEAT_SURFACE) ?? undefined,
+        // DEC-092 observed-banner stamp (S175): a DESCENDED beat is on a ladder rung ≠ the
+        // configured head, so read the live model from the pane; manifest head is the fallback.
+        (observeActiveModel('leo', HEARTBEAT_SURFACE) ?? manifestModelHead('leo', HEARTBEAT_SURFACE)) ?? undefined,
     );
     writeHeartbeatState('completed', 'philosophy', { summary: `${mode} via tmux (${cap.args.working_memory_full.length}c curated c0 + c1)` });
 }
@@ -2097,7 +2099,9 @@ async function personalBeatTmux(phase: DayPhase, ctx: PersonalBeatRuntimeContext
         cap.args.working_memory_full,           // CURATED c0-grade record (DEC-093)
         cap.args.working_memory_compressed,
         cap.args.input_quotes,
-        manifestModelHead('leo', HEARTBEAT_SURFACE) ?? undefined,
+        // DEC-092 observed-banner stamp (S175): a DESCENDED beat is on a ladder rung ≠ the
+        // configured head, so read the live model from the pane; manifest head is the fallback.
+        (observeActiveModel('leo', HEARTBEAT_SURFACE) ?? manifestModelHead('leo', HEARTBEAT_SURFACE)) ?? undefined,
     );
     writeHeartbeatState('completed', 'personal', { summary: `${phase} via tmux (${cap.args.working_memory_full.length}c curated c0 + c1)` });
     // Re-encounter markers live inside the curated record on this transport.
@@ -3057,7 +3061,7 @@ async function heartbeat(): Promise<void> {
     // Log truth (first-warm-beat finding, 2026-06-12): on the tmux transport the
     // banner must show the manifest launch model, not the stale SDK activeModel.
     const beatModelLabel = isTmuxHeartbeat()
-        ? `${manifestModelHead('leo', HEARTBEAT_SURFACE) ?? 'unknown'} via tmux`
+        ? `${(observeActiveModel('leo', HEARTBEAT_SURFACE) ?? manifestModelHead('leo', HEARTBEAT_SURFACE)) ?? 'unknown'} via tmux`
         : activeModel;
     console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${beatModelLabel})`);
 

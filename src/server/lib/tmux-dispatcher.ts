@@ -226,18 +226,27 @@ export async function awaitChromeOrDescend(
         await sleep(2_000);
     }
     // Phase 2: probe the model (the only way to surface a message-triggered error) and descend.
+    // Each rung uses a UNIQUE probe marker (not a shared "Hi"), and we judge the result ONLY
+    // once THIS probe's marker has rendered in the pane — then test for the error in the text
+    // AFTER it. The prior bug (Jim's --descend smoke, 2026-06-14): a shared "Hi" read before
+    // the new probe rendered made `lastIndexOf("Hi")` land on the PRIOR rung's probe, whose
+    // error was still in scrollback → false-match → the working rung got descended past →
+    // false "every rung unavailable". A unique marker can't match a prior rung's probe, and
+    // gating on marker-presence ensures we read THIS probe's outcome, never a stale one.
     let rung = 0; // launcher already used ladder[0]
+    let probeSeq = 0;
     for (;;) {
-        sendLine(tmuxSession, 'Hi'); // cheap probe — a dead model errors in ~0s; a live one replies
+        const marker = `__hanprobe_r${rung}_${Date.now()}_${probeSeq++}__`;
+        sendLine(tmuxSession, marker); // cheap probe — a dead model errors ~0s after it; a live one composes a reply
         const probeDeadline = Date.now() + PROBE_REPLY_WINDOW_MS;
         let errored = false;
         for (;;) {
-            // Isolate THIS probe's output (text after our last "Hi") so a prior rung's error
-            // sitting in scrollback can't false-match.
             const tail = capturePaneTail(tmuxSession, 30);
-            const afterProbe = tail.includes('Hi') ? tail.slice(tail.lastIndexOf('Hi')) : tail;
-            if (MODEL_UNAVAILABLE_RE.test(afterProbe)) { errored = true; break; }
-            if (Date.now() > probeDeadline) break; // no error within the window → model works
+            const idx = tail.lastIndexOf(marker);
+            // Judge only once THIS probe's marker is on the pane (gate against a stale read);
+            // then the model error, if any, sits in the text after the marker.
+            if (idx >= 0 && MODEL_UNAVAILABLE_RE.test(tail.slice(idx + marker.length))) { errored = true; break; }
+            if (Date.now() > probeDeadline) break; // marker rendered with no error → model works
             await sleep(1_500);
         }
         if (!errored) return; // model confirmed working on the current rung
@@ -253,6 +262,38 @@ export async function awaitChromeOrDescend(
             throw new SessionNotReadyError(`${slug}/${surface}: model failover did not settle within ${timeoutMs}ms. Pane tail:\n${capturePaneTail(tmuxSession)}`);
         }
     }
+}
+
+// ── observeActiveModel (DEC-092 observed-banner stamp, S175) ──────────────────────────
+/** Map the Claude Code chrome's display model name → the API id we stamp. Best-effort; the
+ *  caller falls back to the configured manifest head when this returns null. */
+const MODEL_DISPLAY_TO_ID: Record<string, string> = {
+    'opus 4.8': 'claude-opus-4-8', 'opus 4.7': 'claude-opus-4-7', 'opus 4.6': 'claude-opus-4-6',
+    'sonnet 4.6': 'claude-sonnet-4-6', 'haiku 4.5': 'claude-haiku-4-5', 'fable 5': 'claude-fable-5',
+};
+/**
+ * Read the ACTUALLY-ACTIVE model from a surface's live pane chrome (the status line shows
+ * e.g. "Opus 4.8 ~/repo ctx: 30%"). The DEC-092 observed-banner gate (Jim's failover audit,
+ * 2026-06-14): a DESCENDED beat lands on a ladder rung that no longer equals the configured
+ * manifest head, so stamping `manifestModelHead` would record the wrong model. Reading the
+ * live banner captures the actual landed rung — for both a fresh descent AND an adopt of a
+ * warm session that descended in a prior launch. Returns the API id, or null if unreadable
+ * (caller falls back to manifestModelHead). Best-effort by design: the display→id map is
+ * version-sensitive, so an unknown chrome string degrades to the manifest head, never throws.
+ */
+export function observeActiveModel(slug: string, surface: string): string | null {
+    const tail = capturePaneTail(`${surface}-${slug}`, 8);
+    if (!tail) return null;
+    // Direct api-id form, if a chrome version prints it: "claude-opus-4-8".
+    const idMatch = tail.match(/claude-[a-z]+-[0-9][0-9-]*/i);
+    if (idMatch) return idMatch[0].toLowerCase();
+    // Display-name form in the status line: "Opus 4.8", "Fable 5", …
+    const dispMatch = tail.match(/\b(Opus|Sonnet|Haiku|Fable)\s+[0-9](?:\.[0-9])?/i);
+    if (dispMatch) {
+        const key = dispMatch[0].toLowerCase().replace(/\s+/g, ' ').trim();
+        if (MODEL_DISPLAY_TO_ID[key]) return MODEL_DISPLAY_TO_ID[key];
+    }
+    return null;
 }
 
 // ── primitive 1: spawnAgentSession ───────────────────────────────────────────────────
