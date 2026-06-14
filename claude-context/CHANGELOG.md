@@ -7,6 +7,30 @@
 
 ---
 
+## 2026-06-15 (S177) — PR-T7b ENABLE step 1: manifest flip + cadence throttled thaw (R001 tune)
+
+The #66 enable, step 1 (Jim's gated sequence: flip + throttle + commit → restart → prove-single → **lift**).
+The freeze (`supervisor-paused`) holds through prove-single; the lift is the gated next step.
+
+- **`lib/garden-manifest.ts` — the flip.** Jim's `supervisor-cycle` + the 3 meditation surfaces
+  `sdk`→`tmux`, model `OPUS_LADDER` (failover parity). Rollback = flip back to `sdk` + restart (SDK
+  path byte-intact). Nothing fires while the freeze holds.
+- **`services/supervisor.ts` — the cadence throttle (#245, Darron-approved R001 tune).** Widened the
+  **existing idle dampening** cap `DAMPEN_MAX_MULTIPLIER` 4→5 (idle interval ~80→~100min — "the idle
+  cycles were ~85% of the old burn"). Tunes the existing R001 mechanism only; the four-phase structure,
+  the waking base (20min, active), and emergency mode are unchanged. The idle dampening is Jim-specific
+  and already diverges Jim's period when idle, so it does **not** touch the shared-period 180° antiphase.
+- **Decision-before-code caught two things** (surfaced to Darron + Jim): (1) `getNextCycleDelay` (the lever
+  Jim named) is **not** the scheduler — it feeds the health signal for Leo's phase-offset; the real
+  scheduler is the parent `getWallClockDelay`. (2) Raising the *active* base 20→30 (Jim's #245) would
+  decouple Jim's period from Leo's shared 20min and break the active-case 180° antiphase — **deferred to
+  Jim** as the one open R001 decision (under tmux separate spokes the antiphase is mild-value but still an
+  R001 property on a shared account). R001 (hall-of-records) updated with the tune + the open decision.
+- **Verify:** `tsc` 12 pre-existing / 0 new; idle cap = 5x; 4 jim surfaces `transport: 'tmux'`.
+- **NOT yet:** prove-single + the freeze-lift (gated — Jim pings at step 3) + the live gate.
+
+---
+
 ## 2026-06-14 (S177) — PR-T7b meditations: the agnostic extraction (one path, instance leo + instance jim), flag-off
 
 Milestone 2 of 2 (T7b). Done the governing-law way — NOT a jim-twin of Leo's handlers, but the

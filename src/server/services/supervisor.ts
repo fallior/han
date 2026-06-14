@@ -75,7 +75,17 @@ let currentCycleStartTime = 0; // Track cycle start for distress detection
 // Prevents idle token burn (the $155 incident: 60 idle cycles in one day).
 let consecutiveIdleCycles = 0;
 const DAMPEN_AFTER = 2;            // Start dampening after 2 idle cycles
-const DAMPEN_MAX_MULTIPLIER = 4;   // Cap at 4x normal interval
+// PR-T7b throttled thaw (#245, Jim's call, Darron-approved 2026-06-15): widen
+// HARD when idle — the idle cycles were ~85% of the old burn. Raised 4→5 so the
+// idle interval caps at ~100min (waking base 20min × 5) instead of 80min, hitting
+// Jim's "~90 min+ when nothing's running." This tunes the EXISTING R001 idle-
+// dampening mechanism (Jim-specific; it already diverges Jim's period when idle,
+// so it does NOT touch the shared-period 180° antiphase the active base preserves).
+// The active base stays 20min (more responsive than Jim's ~30 AND antiphase-
+// coherent with Leo); slowing the active base to 30 would decouple Jim's period
+// from Leo's shared 20min — flagged to Jim as the one open R001 decision. R001
+// four-phase structure + emergency mode intact. (See hall-of-records R001.)
+const DAMPEN_MAX_MULTIPLIER = 5;   // Cap at 5x base interval (~100min idle, #245 throttled thaw)
 const DAMPEN_BASE = 2;             // Double each step
 
 // ── Transition dampening (Deferred #7) ──────────────────────

@@ -138,12 +138,14 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux. Rollback =
                 // flip back to 'sdk' + restart jim-human (SDK path byte-intact). Model OPUS_LADDER.
                 { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'jim-human-swap' },
-                // S173: aligned to 4-8 — authoritative source supervisor-worker.ts:2084 (config.supervisor.model overrides)
-                { name: 'supervisor-cycle',   enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'], swapPrefix: 'supervisor-swap' },
-                // S173: aligned to 4-8 — authoritative literals supervisor-worker.ts:363/1036/1131
-                { name: 'meditation-phase-a', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
-                { name: 'meditation-phase-b', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
-                { name: 'meditation-evening', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
+                // PR-T7b ENABLE (2026-06-15, S177): the last #66 flip — Jim's cycle +
+                // meditations sdk→tmux. Rollback = flip back to 'sdk' + restart (SDK path
+                // byte-intact). Model OPUS_LADDER (failover parity with the human/heartbeat
+                // surfaces). Gated: the freeze (supervisor-paused) holds until prove-single.
+                { name: 'supervisor-cycle',   enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'supervisor-swap' },
+                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
+                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
+                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
             ],
         },
         {
