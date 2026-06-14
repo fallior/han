@@ -2605,6 +2605,178 @@ function findUntranscribedFiles(): { filePath: string; agent: 'leo'; level: stri
     return null; // All files transcribed — Phase A complete
 }
 
+// ── Meditation: tmux warm-session transport (PR-T7a, T-7 SDK retirement) ──────
+// Meditations dispatch to the live heartbeat-leo spoke (Q-V2-3 — meditations
+// share the agent's session) through the same per-agent FIFO as the beats. The
+// light conscious record (DEC-093 / Darron's resolution: meditation is an act
+// of the conscious mind → a LIGHT curated diary, the full sitting in
+// claude-logged) becomes a c0/c1 via appendWorkingMemory. The re-encounter
+// markers ride INSIDE the curated record and are applied to the CONTEMPLATED
+// entry by applyMeditationMarkers — the host already knows the entry id, so
+// (unlike the dream path) it does not depend on the agent echoing
+// DREAM_MEDITATION_ENTRY. The SDK meditationPhaseA/B + evening bodies below
+// stay byte-intact as the rollback path; transport is chosen per meditation
+// surface in the manifest (flag-off until 'sdk'→'tmux').
+
+function isMeditationTmux(surface: string): boolean {
+    return manifestTransport('leo', surface) === 'tmux';
+}
+
+/**
+ * Apply the re-encounter markers parsed from a meditation's curated record to
+ * the contemplated entry. Faithful to the SDK meditation marker-handling:
+ * recordRevisit always (the re-encounter happened); FEELING_TAG → a fresh
+ * insert (Phase A, first encounter) or a history-tracked update (Phase B /
+ * evening, a revisit); ANNOTATION/CONTEXT and MEMORY_COMPLETE when the surface
+ * allows them. Empty text (a stand_down — nothing stirred) records only the
+ * revisit plus a possible stability upgrade: the tmux equivalent of the SDK
+ * path's `FEELING_TAG: none`.
+ */
+function applyMeditationMarkers(
+    entryId: string,
+    text: string,
+    opts: { freshTag: boolean; allowAnnotation: boolean; allowComplete: boolean; revisitCount: number; contextDefault: string },
+): void {
+    gradientStmts.recordRevisit.run(new Date().toISOString(), entryId);
+
+    const tagMatch = text.match(/FEELING_TAG:\s*(.+)/);
+    if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+        const tag = tagMatch[1].trim().substring(0, 100);
+        if (opts.freshTag) {
+            feelingTagStmts.insert.run(entryId, 'leo', 'revisit', tag, null, new Date().toISOString());
+        } else {
+            const updated = updateFeelingTagWithHistory(entryId, 'leo', 'revisit', tag, opts.revisitCount);
+            if (!updated) {
+                feelingTagStmts.insert.run(entryId, 'leo', 'revisit', tag, null, new Date().toISOString());
+            }
+        }
+    } else if (!opts.freshTag) {
+        maybeUpgradeTagStability(entryId, opts.revisitCount);
+    }
+
+    if (opts.allowAnnotation) {
+        const annotationMatch = text.match(/ANNOTATION:\s*(.+)/);
+        if (annotationMatch) {
+            const annotation = annotationMatch[1].trim();
+            const contextMatch = text.match(/CONTEXT:\s*(.+)/);
+            const context = contextMatch ? contextMatch[1].trim() : opts.contextDefault;
+            gradientAnnotationStmts.insert.run(entryId, 'leo', annotation, context, new Date().toISOString());
+        }
+    }
+
+    if (opts.allowComplete) {
+        const completeMatch = text.match(/MEMORY_COMPLETE:\s*(\S+)/);
+        if (completeMatch) {
+            gradientStmts.flagComplete.run(entryId);
+        }
+    }
+}
+
+const MEDITATION_ACTION_BLOCK =
+    `## This turn's actions (warm heartbeat seat — your identity is already loaded; the frame above is this turn's context only)\n` +
+    `1. Sit with the memory in the frame above — this is a meditation, a genuine re-encounter, not analysis.\n` +
+    `2. Carry the re-encounter marker lines (FEELING_TAG: / ANNOTATION: / CONTEXT: / MEMORY_COMPLETE:, as the frame requests) INSIDE your submit_response working_memory_full — the controller parses them from there to record the re-encounter on the contemplated memory.\n` +
+    `3. End the turn per the diary-tool instruction above: submit_response with a LIGHT curated record (the subject of the contemplation + what stirred — never the full sitting, which is already in your claude-logged log), or stand_down if genuinely nothing stirred.`;
+
+/** Stamp the light conscious record as a c0/c1 (observed-banner model, S175). */
+function appendMeditationRecord(phase: string, cap: CaptureRecord): void {
+    appendWorkingMemory(
+        'meditation', phase,
+        cap.args.working_memory_full,
+        cap.args.working_memory_compressed,
+        cap.args.input_quotes,
+        (observeActiveModel('leo', HEARTBEAT_SURFACE) ?? manifestModelHead('leo', HEARTBEAT_SURFACE)) ?? undefined,
+    );
+}
+
+async function meditationPhaseATmux(
+    file: { filePath: string; agent: string; level: string; contentType: string; label: string },
+    phase: string,
+    today: string,
+): Promise<void> {
+    // Content extraction identical to the SDK Phase A path (UV → labelled line).
+    let content: string;
+    if (file.level === 'uv') {
+        const fullContent = fs.readFileSync(file.filePath, 'utf8');
+        const match = fullContent.match(new RegExp(`\\*\\*${file.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*\\*:\\s*"(.+?)"`));
+        content = match ? match[1] : '';
+        if (!content) {
+            console.log(`[Leo] Meditation Phase A (tmux) — could not extract UV for ${file.label}, skipping`);
+            return;
+        }
+    } else {
+        content = fs.readFileSync(file.filePath, 'utf8');
+    }
+
+    const ctx = { fileLevel: file.level, fileLabel: file.label, fileContentType: file.contentType, fileContent: content };
+    const cap = await dispatchBeatViaTmux('meditation-phase-a-txn', ctx, MEDITATION_ACTION_BLOCK, `meditation-phase-a (${file.level}/${file.label}, tmux)`);
+    if (!cap) return; // dispatch failed/overbudget — file stays un-transcribed, retries next cadence
+
+    // Reincorporation is a host action: the file content joins the gradient once
+    // the meditation turn completed (even on a stand-down — the re-encounter
+    // happened, the memory still enters the DB). Faithful to the SDK path's
+    // always-insert-after-the-query shape.
+    const entryId = crypto.randomUUID();
+    gradientStmts.insert.run(
+        entryId, 'leo', file.label, file.level, content, file.contentType,
+        null, null, null, 'reincorporated', new Date().toISOString(),
+        null, 0, null,
+    );
+    console.log(`[Leo] Meditation Phase A (tmux) — reincorporated leo/${file.level}/${file.label}`);
+
+    const text = cap.mode === 'stand-down' ? '' : cap.args.working_memory_full;
+    applyMeditationMarkers(entryId, text, {
+        freshTag: true, allowAnnotation: true, allowComplete: false,
+        revisitCount: 0, contextDefault: `reincorporation meditation, ${today}`,
+    });
+    if (cap.mode !== 'stand-down') appendMeditationRecord(phase, cap);
+}
+
+async function meditationPhaseBTmux(phase: string, today: string): Promise<void> {
+    const entry = gradientStmts.getRandom.get() as any;
+    if (!entry) return;
+    const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+    const tagContext = existingTags.length > 0
+        ? `\nExisting feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type})`).join(', ')}`
+        : '';
+    const ctx = {
+        entryLevel: entry.level, entrySessionLabel: entry.session_label,
+        entryContentType: entry.content_type, entryContent: entry.content,
+        entryId: entry.id, tagContext,
+    };
+    const cap = await dispatchBeatViaTmux('meditation-phase-b-txn', ctx, MEDITATION_ACTION_BLOCK, `meditation-phase-b (${entry.level}/${entry.session_label}, tmux)`);
+    if (!cap) return;
+    const text = cap.mode === 'stand-down' ? '' : cap.args.working_memory_full;
+    applyMeditationMarkers(entry.id, text, {
+        freshTag: false, allowAnnotation: true, allowComplete: true,
+        revisitCount: entry.revisit_count || 0, contextDefault: `meditation beat, ${today}`,
+    });
+    if (cap.mode !== 'stand-down') appendMeditationRecord(phase, cap);
+}
+
+async function meditationEveningTmux(phase: string, today: string): Promise<void> {
+    const entry = gradientStmts.getRandom.get() as any;
+    if (!entry) return;
+    const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+    const tagContext = existingTags.length > 0
+        ? `\nExisting tags: ${existingTags.map((t: any) => `"${t.content}"`).join(', ')}`
+        : '';
+    const ctx = {
+        entryLevel: entry.level, entrySessionLabel: entry.session_label,
+        entryContentType: entry.content_type, entryContent: entry.content,
+        entryId: entry.id, tagContext,
+    };
+    const cap = await dispatchBeatViaTmux('meditation-evening-txn', ctx, MEDITATION_ACTION_BLOCK, `meditation-evening (${entry.level}/${entry.session_label}, tmux)`);
+    if (!cap) return;
+    const text = cap.mode === 'stand-down' ? '' : cap.args.working_memory_full;
+    // Evening is lighter by design — no ANNOTATION (the evening opening doesn't request one).
+    applyMeditationMarkers(entry.id, text, {
+        freshTag: false, allowAnnotation: false, allowComplete: true,
+        revisitCount: entry.revisit_count || 0, contextDefault: `evening meditation, ${today}`,
+    });
+    if (cap.mode !== 'stand-down') appendMeditationRecord(phase, cap);
+}
+
 async function maybeRunMeditation(phase: string): Promise<void> {
     // Run once daily during a work or personal beat (not sleep/dream)
     if (phase === 'sleep') return;
@@ -2621,13 +2793,16 @@ async function maybeRunMeditation(phase: string): Promise<void> {
         while (phaseACount < MAX_PHASE_A_PER_DAY) {
             const untranscribed = findUntranscribedFiles();
             if (!untranscribed) break;
-            await meditationPhaseA(untranscribed, today);
+            // PR-T7a: transport chosen per meditation surface (manifest).
+            if (isMeditationTmux('meditation-phase-a')) await meditationPhaseATmux(untranscribed, phase, today);
+            else await meditationPhaseA(untranscribed, today);
             phaseACount++;
         }
 
         // Phase B: if no Phase A work (or after finishing), do a re-reading
         if (phaseACount === 0) {
-            await meditationPhaseB(today);
+            if (isMeditationTmux('meditation-phase-b')) await meditationPhaseBTmux(phase, today);
+            else await meditationPhaseB(today);
         }
 
         lastMeditationDate = today;
@@ -2859,6 +3034,17 @@ async function maybeRunEveningMeditation(phase: string): Promise<void> {
     if (phase !== 'evening') return;
     const today = new Date().toISOString().split('T')[0];
     if (lastEveningMeditationDate === today) return;
+
+    // PR-T7a: tmux transport — dispatch to the warm heartbeat spoke.
+    if (isMeditationTmux('meditation-evening')) {
+        try {
+            await meditationEveningTmux(phase, today);
+        } catch (err) {
+            console.error(`[Leo] Evening meditation (tmux) failed:`, (err as Error).message);
+        }
+        lastEveningMeditationDate = today; // don't retry today (matches the SDK path)
+        return;
+    }
 
     try {
         const entry = gradientStmts.getRandom.get() as any;

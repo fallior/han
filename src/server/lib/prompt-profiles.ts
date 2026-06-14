@@ -30,6 +30,7 @@ import {
     leoPersonalBeatOpening,
     leoDreamBeatOpening,
     leoMeditationOpening,
+    leoMeditationTxnOpening,
 } from './leo-prompts';
 import {
     JIM_SUPERVISOR_SYSTEM_PROMPT,
@@ -537,6 +538,74 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'user',
         userPromptScaffold: (ctx) => buildMeditationEveningScaffold(ctx),
         totalBudgetTokens: 180_000,
+    },
+
+    /**
+     * PR-T7a (2026-06-14): Leo's three meditation surfaces on the TMUX warm-
+     * session transport (T-7 SDK retirement). Mirror of the dream-beat-txn
+     * pattern: ALL memory components suppressed (the warm heartbeat spoke
+     * already carries identity — Q-V2-3: meditations share the agent's
+     * session), mechanism 'mcp-tool' so the agent ends with submit_response
+     * carrying a LIGHT conscious record (DEC-093 / Darron's resolution:
+     * meditation is conscious → a light diary, full sitting in claude-logged).
+     *
+     * The re-encounter markers (FEELING_TAG / ANNOTATION / CONTEXT /
+     * MEMORY_COMPLETE / DREAM_MEDITATION_ENTRY) ride INSIDE the curated
+     * working_memory_full — the controller parses them via
+     * processDreamMeditationMarkers, exactly as the dream-beat tmux path
+     * already does (leo-heartbeat.ts). The *-txn openings drop the SDK
+     * "Output ONLY those lines" clause (leoMeditationTxnOpening); the
+     * scaffolds are reused from the SDK profiles (entry/file content + the
+     * concrete entry id).
+     *
+     * Flag-off until the manifest meditation surfaces flip 'sdk'→'tmux'
+     * (the post-Jim-GREEN enable). The SDK profiles above stay as the
+     * rollback path.
+     */
+    'meditation-phase-a-txn': {
+        name: 'meditation-phase-a-txn',
+        systemPromptOpening: leoMeditationTxnOpening('meditation-phase-a'),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildMeditationPhaseAScaffold(ctx),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true },
+    },
+    'meditation-phase-b-txn': {
+        name: 'meditation-phase-b-txn',
+        systemPromptOpening: leoMeditationTxnOpening('meditation-phase-b'),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildMeditationPhaseBScaffold(ctx),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true },
+    },
+    'meditation-evening-txn': {
+        name: 'meditation-evening-txn',
+        systemPromptOpening: leoMeditationTxnOpening('meditation-evening'),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildMeditationEveningScaffold(ctx),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true },
     },
 
     /**

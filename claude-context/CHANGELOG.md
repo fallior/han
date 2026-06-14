@@ -7,6 +7,42 @@
 
 ---
 
+## 2026-06-14 (S176) — PR-T7a: Leo's meditations → tmux warm-session transport (flag-off)
+
+First half of T-7 (SDK retirement). Scoping found T-7 cleaves: the 6 meditations are `maxTurns:1`
+reflective surfaces that map 1:1 to the heartbeat txn template; Jim's supervisor **cycle** is a
+`maxTurns:1000` agentic loop returning `SUPERVISOR_OUTPUT_SCHEMA` structured actions → `executeActions`
+host-side + streaming cost-cap + SIGTERM partial-work — a real action-model redesign, **not** the same
+primitives (deferred to T7b, the cycle-action-model question posted to Jim). Jim's meditations are
+coupled to his cycle thaw (they need a warm Jim surface); Leo's dispatch to the live heartbeat spoke
+today, so they land first.
+
+- **3 `meditation-*-txn` profiles** (`prompt-profiles.ts`) mirroring `dream-beat-txn`: all memory
+  components suppressed (the warm heartbeat spoke carries identity — Q-V2-3: meditations share the
+  agent's session), `mechanism: 'mcp-tool'` so the turn ends with `submit_response` carrying a **LIGHT**
+  curated record (DEC-093 / Darron's resolution: meditation is conscious → a light diary; the full
+  sitting lands in `claude-logged` by construction, DEC-091). Smoke: ~543 tokens/fire vs the SDK path's
+  ~117K (no memory reload on the warm session).
+- **`-txn` meditation openings** (`leo-prompts.ts`, `leoMeditationTxnOpening`): the meditation framing +
+  the re-encounter marker request, with the SDK *"Output ONLY those lines"* clause dropped (it conflicts
+  with the `submit_response` flow). The markers ride INSIDE `working_memory_full`.
+- **3 tmux meditation handlers** (`leo-heartbeat.ts`): `meditationPhaseATmux` / `meditationPhaseBTmux` /
+  `meditationEveningTmux`. Host selects the entry (Phase A: untranscribed file → host-side reincorporation
+  insert; B/evening: random gradient entry), dispatches via the existing `dispatchBeatViaTmux` to the
+  heartbeat spoke, then `applyMeditationMarkers` applies the re-encounter writes to the **contemplated**
+  entry (recordRevisit + FEELING_TAG [fresh for A / history-tracked for B+evening] + ANNOTATION/CONTEXT +
+  MEMORY_COMPLETE) — faithful to the SDK marker-handling, the host knowing the entry id so it does not
+  depend on the agent echoing `DREAM_MEDITATION_ENTRY`. Empty text (a `stand_down`) records only the
+  revisit — the tmux equivalent of the SDK `FEELING_TAG: none`. The light record also becomes a c0/c1 via
+  `appendWorkingMemory` (observed-banner model stamp, S175).
+- **Routing** is per meditation surface (`isMeditationTmux` → `manifestTransport`); the SDK
+  `meditationPhaseA/B` + evening bodies stay **byte-intact** as the rollback path.
+- **Flag-off**: the `garden-manifest.ts` Leo meditation surfaces stay `transport: 'sdk'` — the tmux path
+  exists but is not reached until the post-Jim-GREEN `sdk`→`tmux` flip (the enable). `tsc`: 12 pre-existing
+  / 0 new. Smoke 18/18.
+
+---
+
 ## 2026-06-14 (S175) — Failover hardening: re-probe fix (A1) + observed-banner stamp (A2) → failover trusted
 
 The two failover enable-gates from Jim's audit (mqcxfemh/mqd1hnpn — `--detect` GREEN, `--descend` RED).
