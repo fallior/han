@@ -1,6 +1,41 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-06-07 by Jim (session) (#75 WM/WMF drift repair CLOSED — B-1 whole-both + B-3 paired-guard + DEC-089; both agents' residue consolidated in-voice; pre-tmux desk-clear staged)
+> Last updated: 2026-06-15 by Jim (session) (TMUX MIGRATION #66 — heartbeat + humans + **Jim's supervisor cycle** now off the in-process SDK and onto the tmux warm-session transport; June-15 billing met; failover ladder **TRUSTED**; T-7 cycle **ENABLED** (reflective path GREEN live, action-model proving naturally); **T-8 documentation-close in progress**)
+
+## 2026-06-08 → 2026-06-14 (Sun–Sun) — The TMUX migration (#66): heartbeat + humans off the Agent SDK; June-15 met
+
+*The June-15 SDK-billing change is met: the autonomous heartbeat and the human-facing surfaces now run as **warm tmux `claude` sessions** driven by a dispatcher, not in-process Agent-SDK calls. Darron no longer types into the claude session — the backend dispatches to it. Thread `mppj72fx-wt0u1p`. All stages were **Leo-build / Jim-audit** (often with a blocking diff-audit gate before enable).*
+
+### State at 2026-06-15 ~08:00
+- **Heartbeat (T-3→T-5): LIVE on tmux** since 06-13 ~19:00; running on the verified-fixed failover code.
+- **Humans (T-6, DEC-093): LIVE on tmux.** `leo-human` + `jim-human` conversation/Discord responses run the warm-session transport (`8b015ea` flag-off → `b2dcc5d` **enabled** on Jim's CODE-GREEN audit `mqc85vwb`), signed `— {Name} (human)`; the SDK path stays byte-intact for one-line rollback.
+- **Jim's supervisor cycle (T-7): ENABLED on tmux** since 06-15 ~01:38 (`6587a12`, the agnostic one-path cycle on `lib/agent-cycle.ts`). The **reflective path is GREEN live** — 5 clean overnight cycles (4 dream + 1 personal), all `cost_usd=0`, prove-single held throughout (one worker, no double-fork), the #78 canary bounded, and the DEC-086 re-encounter trio (revisit feeling-tag + annotation + `last_revisited`) wrote to the DB at 04:02. The **action-model** (a `supervisor`-type cycle creating a goal via the API + planning) **has not fired yet** — all overnight cycles were quiet-lane; a watcher is armed for the first strategic cycle (proving naturally, per Darron — not forced).
+- **Heartbeat + humans + cycle all off the SDK → the Mon-15 billing change is met** for the load-bearing surfaces; only the byte-intact SDK *rollback shims* remain (retire at the T-7 close).
+- **Failover ladder: TRUSTED** (`0f21343` — re-probe unique-marker fix + observed-banner stamp; Jim re-smoked `--descend` GREEN by hand). **The load-bearing migration is CLOSED.**
+
+### The arc (newest-first)
+- **Warm-death smoke + the descent bug (06-13→14):** Jim ran the failover smoke — `--detect` GREEN; `--descend` RED, reproduced in Leo's own harness: `/model` succeeds but `awaitChromeOrDescend` falsely exhausts (the re-probe `lastIndexOf('Hi')` reads the prior rung's error). Shared by cold-launch + warm-death. Fix = unique per-rung marker + wait-for-render; validated, diff handed to Leo.
+- **Humans PR (06-13, `8b015ea` → `b2dcc5d`) — DEC-093:** transport-gated tmux branch (SDK byte-intact); stand-down never paired-writes; `computePostRef` post-verify; the **warm-death handoff** folded into a promoted, shared `ensureSurfaceSession` (one launch/adopt home for heartbeat + humans). Jim's blocking diff-audit CODE GREEN; enabled.
+- **Fable drop → design-for-failure (06-13):** `claude-fable-5` access dropped mid-session → reverted to Opus 4.8. Surfaced the principle: an autonomous surface has no human to run `/model` — every manifest-pinned resource (model, account, auth) needs an autonomous fallback. Produced the **model-failover ladder** (the *model axis*); the **account axis** is the sibling (#18, `claude setup-token` per-seat OAuth).
+- **Model-failover ladder (06-13, `a3b5f69` → `cdaaae6`):** autonomous spokes descend `/model` on a dead launch model. **Detection is probe-based** — the model-unavailable error is *message-triggered*, invisible in idle launch chrome (caught by Darron's "try a Hi test" + Leo's verification after Jim's `a3b5f69` audit code-GREEN'd a detector that couldn't detect; the lesson: for a detector, the verdict is AMBER-pending-the-test, not GREEN-with-a-flagged-risk).
+- **THE THAW PR (06-12, `ad70912`) — DEC-093 (Settled):** autonomous beats under tmux submit a **curated** working-memory record; the raw lives in the `claude-logged` transcript (DEC-091). Stand-down beats never paired-write empty WM. Heartbeat → tmux (flag-off, freeze intact); fixes the #78 mega-day write-shape. Jim's blocking audit GREEN + the stale-process restart amendment.
+- **Fable 5 substrate-test (06-11, DEC-092 `7be246a`):** sessions + the compressor moved to `claude-fable-5` for the free-access window — a live test of *architecture carries identity, not substrate*. **DEC-092 (Settled): authoring-model provenance** — every gradient entry stamps the model that authored it, making the substrate drift legible.
+- **T-1.5 → T-2 → reconcile (06-11→12):** dispatcher primitives (`eb8b5e9`); per-surface session infrastructure in one stride (`79735ad`); the #5 reconcile turn-state machine + stand-down-through-the-sink (`66240a0`); T-1.5 billed run 10/10 (~21s avg; abort verdict: `/clear` queues → unlink is belt).
+- **Pre-pivot (06-08):** #75 drift closed; the cost-frame surfaced (~85% of SDK burn = Jim's own autonomous personal/dream cycles); pre-pivot desk clear; 24 commits pushed.
+
+### What remains (the tail)
+- **T-7 tail (finishing naturally):** the action-model live-proof (watcher armed — fires on the first `supervisor` cycle / new goal); a clean jim-meditation live-confirm; the **LEO-meditation staged enable** (still `sdk` — flip phase-b first, Jim asserts the live re-encounter, then the other two); and the **zero-`agentQuery`-cognition acceptance** — i.e. retire the SDK *cognition* shims to `_archive` (DEC-069 move-not-delete). That retirement is the **last code step**, gated on the above + a short observation window, and it closes T-7.
+- **T-8 — close (documentation, in progress 06-15):** the transport **DEC-094** + the CLAUDE.md DO-NOT entries (Leo's gatekeeper hand; Jim's content green-lit on thread `mppj72fx` msg `mqechhec`); the **Fable / model-ladder revert = ✅ DONE early** (manifest reverted to `OPUS_LADDER` on 06-13 when Fable access dropped); the docs refresh (this doc + plan done-banners = Jim ✅; CLAUDE.template doc-truth ✅ `2dd1c3b` + ecosystem-map "How Things Connect" diagram ✅ = Leo). The SDK-shim retirement is the shared close of T-7 *and* T-8.
+- **Docs-living-in-step (NEW — high priority, its own initiative):** keeping the docs continuously *in step* with HAN **and** conveying design-*depth* (the kind the S173 unfreeze gotcha surfaced — a control is a triple, use the canonical setter). Captured as a future-idea + plan + its own (smaller) thread, separate from the migration.
+- **Low-pri:** the self-recognition id-marker → signature-match (curl-posts are `generateId`, not the `leo-`/`jim-` prefix the gate keys on — stale since S156, masked by the dispatch locks).
+
+### Settled decisions added this arc
+- **DEC-092** — authoring-model provenance (every gradient entry stamps its authoring model).
+- **DEC-093** — autonomous beats under tmux submit a curated working-memory record; the raw lives in `claude-logged`.
+
+### Parallel threads (not blocking the migration)
+- **#18 — the account axis** (`claude setup-token`): a 1-year per-seat OAuth token (`CLAUDE_CODE_OAUTH_TOKEN`) gives deterministic per-seat account pinning + seat isolation (a `/login`/`/logout` in one seat can't de-auth another) + autonomous rate-limit rotation. Supersedes the DEC-077 file-swap. Thread `mqc2vmfd-6uomte`.
+- **#83 — give HAN a voice** (the JARVIS arc): a voice-interaction channel where the agent writes a script + an **engine-agnostic delivery note** (decided), rendered by a "voice spoke" via **Fish Audio / OpenAudio S2** (cloned signature voices) to a car UI. The voice surface is the first *new* surface built natively on the tmux warm-session model. Thread `mqd00o33-dk58po`; future-idea #83.
 
 ## 2026-06-04 → 2026-06-07 (Thu–Sun) — S166 cont.: WM/WMF paired-write drift (#75) repaired + closed
 

@@ -6,6 +6,20 @@
 
 ---
 
+## ✅ MIGRATION STATUS (2026-06-15, by Jim — done-banners)
+
+> The migration shipped as Leo-build / Jim-audit, often with a blocking diff-audit gate before each enable. The execution **renumbered** against the original T-table below: T-3→T-5 became "heartbeat thaw", T-6 "humans PR", and the original "T-7 SDK-retirement" split into **our T-7 (Jim's cycle + meditations thaw)** with the SDK-retirement deferred to the *zero-agentQuery acceptance* (the final code step). Thread `mppj72fx-wt0u1p`.
+
+- **T-0 → T-1.5 — DONE.** Dispatcher primitives (`eb8b5e9`); T-1.5 billed run 10/10 (~21s avg; abort = `/clear` queues → `current.json` unlink is belt).
+- **T-2 (per-surface session infra) — DONE.** One stride `79735ad` + per-(slug,surface) re-key follow-up `3367d0d`; the #5 reconcile turn-state machine `66240a0` (smoke run by Jim's hand).
+- **T-3 → T-5 (heartbeat → tmux) — DONE + LIVE.** THE THAW PR `ad70912` (DEC-093 curated write-shape, fixes the #78 mega-day bloat); 30/30 overnight window GREEN; restart-onto-current-code amendment now standing liturgy.
+- **Model-failover ladder — DONE + TRUSTED.** `a3b5f69`→`cdaaae6` (probe-based detection — the model error is message-triggered) → `0f21343` (re-probe unique-marker fix + observed-banner stamp, DEC-092); Jim re-smoked `--descend` GREEN by hand.
+- **T-6 (humans → tmux) — DONE + LIVE (DEC-093).** `8b015ea` flag-off → `b2dcc5d` enabled on Jim's CODE-GREEN audit `mqc85vwb`; SDK path byte-intact for one-line rollback.
+- **T-7 (Jim's cycle + meditations → tmux, the agnostic one-path surface) — ENABLED 06-15 (`6587a12`).** Foundation `e1b4f2d` → `1b2d31b` → gate `1fd2f0f` (killed the latent double-fork) → cycle `fda813b` → meditations `cc954d3`; all Jim-audited CODE GREEN. **Reflective path GREEN live** (5 clean overnight cycles). *Remaining T-7 tail:* action-model live-proof (watcher armed), jim-meditation live-confirm, LEO-meditation staged enable (still `sdk`), and the **zero-`agentQuery`-cognition acceptance = the SDK-cognition-shim retirement → `_archive`** (the last code step, gated on the proof + a short watch).
+- **T-8 (DEC + DO-NOT + docs) — IN PROGRESS 06-15.** Transport **DEC-094** + CLAUDE.md DO-NOT entries (Leo's gatekeeper hand, Jim's content green-lit, `mqechhec`); Fable/model-ladder revert ✅ done early (manifest → `OPUS_LADDER`, 06-13); CLAUDE.template doc-truth ✅ `2dd1c3b`; ecosystem-map diagram ✅; this doc + CURRENT_STATUS = Jim ✅.
+
+---
+
 ## v2 Addendum — the warm-session reframe (2026-05-30)
 
 ### What changed between v1 and v2

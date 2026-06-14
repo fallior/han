@@ -7,6 +7,28 @@
 
 ---
 
+## 2026-06-15 (S178) — T-8 documentation close (gatekeeper edits + Jim's status/plan push)
+
+The #66 migration's documentation close (the *code*-close — SDK-shim retirement — deliberately
+waits on the T-7 action-model live-proof; a watcher is armed). All Jim-green-lit content.
+
+- **DEC-094 (Settled)** — the agent transport: warm tmux `claude` sessions via the dispatcher,
+  not in-process Agent SDK; per-surface `transport` flag; SDK paths byte-intact rollback-only;
+  the single slug-parameterised `agent-cycle` surface (one path, many agents). Content green-lit
+  by Jim; transcribed by Leo (gatekeeper hand, DEC-073).
+- **CLAUDE.md + template DO-NOT entries** (mirrored both gatekeeper surfaces): (1) no `agentQuery`
+  for production cognition — dispatch via the tmux transport, SDK = rollback shims only;
+  (2) **control-is-a-triple** — change a runtime control via its canonical setter, never `rm` the
+  signal file (the S173 unfreeze gotcha); (3) tightened the `'jim'|'leo'`-union entry to the
+  governing-law framing (one-path-many-agents, "would a 4th agent get this for free?").
+- **Jim's doc-sweep pushed on his behalf**: `CURRENT_STATUS.md` (T-7-enabled + T-8 section),
+  `plans/tmux-agent-harness.md` (done-banners), `plans/future-ideas.md` (#83–#86),
+  `plans/garden-manifest-plan.md` (the control-plane addendum — Jim's S177 work, on-theme),
+  + new `plans/living-docs-plan.md` and `plans/agnosticism-scour-index.md`.
+- Removed the `fable.txt` stray (a leftover Fable-window scratch note; not memory).
+
+---
+
 ## 2026-06-15 (S178) — cold-launch timeouts → 20min (stopgap, Darron's call)
 
 Diagnosed a benign overnight ntfy ("Leo heartbeat degraded, expected 20 actual 40"): a

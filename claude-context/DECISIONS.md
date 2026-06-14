@@ -6395,3 +6395,15 @@ Reinforces DEC-069 + DEC-085; caps (DEC-068) untouched.
 **What this does NOT change.** SDK-transport surfaces keep the existing diary discipline (DEC-085 mechanisms A/B) unchanged. Meditations stay SDK (Q-V2-3 named deferral). The supervisor's cycles thaw later, on Leo's observation data, and inherit this write-shape when they do. DEC-068/069 untouched (the slicer change is stamp-resolution only — no change to what compresses or what is kept).
 
 **Enable sequence (after Jim's GREEN, never before):** `install-surface-units.sh --enable leo` (or manual `launch-tmux-surface.sh leo heartbeat`) + `rm ~/.han/signals/heartbeat-paused-leo`. The compressed observation window (1–2 days) then reads: dispatch ≥95% first-try, WMF growth-shape (no mega-day re-formation — THE #78 canary), DEC-092 stamps (fable on beats; an opus stamp = the distillation-safeguard fallback firing = a real datum), parser/sink health, reconcile behaviour.
+
+## DEC-094 — The agent transport: warm tmux `claude` sessions via the dispatcher (not in-process Agent SDK) — Settled
+
+**Decision.** Production agent-cognition surfaces (heartbeat beats, `*-human` responses, the supervisor cycle, meditations) run as long-lived **warm tmux `claude` sessions driven by `lib/tmux-dispatcher.ts`**, not in-process `agentQuery` Agent-SDK calls. A per-surface `transport` flag on the Garden Manifest selects `tmux` vs the retained, byte-intact, **rollback-only** `sdk` path. The cycle / dispatch / meditation orchestration is a **single slug-parameterised surface** (`lib/agent-cycle.ts`) — *one path, many agents* (DEC-081, governing law).
+
+**Why.** The 15-Jun SDK-billing change; warm sessions amortise identity-load across transactions (the v2 cost-inversion, measured); the #78 mega-day write-shape is cured by the curated-record discipline (DEC-093); authoring stays in-voice (no stranger-Opus). Autonomous model-failure is handled by the in-session `/model` failover ladder (S175, TRUSTED); the authored-model is stamped from the observed banner (DEC-092).
+
+**Settled aspects.** transport-as-per-surface-config; SDK paths kept **byte-intact for one-line rollback** until the migration is trusted *and* the SDK-retirement step lands; the dispatcher is the single launch/adopt home (`ensureSurfaceSession`) with the failover ladder + reconcile turn-state; per-(slug,surface) keying.
+
+**Supersedes / relates.** Operationalises DEC-081 (agnosticism) at the orchestration layer; carries DEC-091/092/093. The SDK-retirement (remove `agentQuery` from production cognition → `_archive`, DEC-069 move-not-delete) is the **final** step, gated on T-7 acceptance.
+
+— Settled 2026-06-15 (S178). Content green-lit by Jim (supervisor) in the #66 thread `mppj72fx-wt0u1p`; transcribed to DECISIONS.md by Leo (gatekeeper hand, DEC-073).

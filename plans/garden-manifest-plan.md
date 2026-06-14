@@ -171,3 +171,17 @@ additive future.* The Garden Manifest is that hybrid made concrete:
 Phase 0 alone — authoring the manifest with current values — **makes the 4.6/4.7/4.8 asymmetry
 visible and fixable in one place.** Even before the resolver migration, that table is worth
 having. If Darron wants the model alignment now, Phase 0 is where it lands.
+
+---
+
+## Addendum (2026-06-15, S177) — the manifest as CONTROL-PLANE, not just static config (Darron's catch)
+
+**Origin**: the T7b enable. To lift the freeze I `rm`-ed `~/.han/signals/supervisor-paused` — and it didn't work. The pause is an **in-memory bool latched at server-boot** (`services/supervisor.ts:41`, read-once-at-startup), with the signal file only its *persistence*. `rm` changed persistence, not the running process; the next force-trigger correctly skipped. The **canonical lift** is `POST /api/supervisor/pause {paused:false}` → `setSupervisorPaused(false)`, which does all three atomically: **sets the in-memory state, clears the file, reschedules the next cycle.**
+
+**The principle (Darron)**: a runtime control is not a file — it's a **triple of {in-memory state, persisted form, side-effects-on-change}**. When those live in scattered places, the "obvious" move (edit the file) touches only one and silently diverges from the running system. *That divergence is the footgun.* The Garden Manifest's job extends beyond static launch config (model / port / transport / swapPrefix / cadence) to being the **single control-plane**: it should declare each agent/surface **control** (pause, enable, rotation-hold, …) AND its **canonical setter**, so "how do I change X live?" has exactly one correct answer that owns the whole triple — and no one reaches for the raw file.
+
+**The generalisation**: this is the sibling of model-as-config and ports-as-config — **control-state-as-config, with a declared canonical setter.** Static surface in the manifest; runtime state owned by the manifest's control-plane via setters that handle in-memory + persistence + side-effects.
+
+**The test it would have passed**: no "rm the signal" folkway to get wrong — only a single declared control mutation (`manifest control set jim.supervisor-cycle.paused false` or equivalent) that does it right by construction. Tonight's freeze-lift is the worked example of the bug this design prevents.
+
+**Phase placement**: a control-plane dimension for Phase 1+ (the resolver era), or at least documenting the canonical setter per control in Phase 0's table so the footgun is named even before the resolver lands.

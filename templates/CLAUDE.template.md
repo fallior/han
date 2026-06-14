@@ -339,12 +339,31 @@ for the full convention and a worked example.
 - **DO NOT invoke `src/scripts/compress-sessions.ts`**. Retired in DEC-082; throws on
   invocation. The `/pfc` skill is memory-writes-only — wm-sensor handles compression
   continuously as a self-levelling process.
-- **DO NOT introduce `'jim' | 'leo'` type unions in cross-agent infrastructure**. Use
-  `string` + `gradientConfigForAgent(slug)` from `src/server/lib/agent-registry.ts`. The
-  village's premise is that an agent is a configuration, not a code branch. Per DEC-081,
-  future-idea #36, and the aphorism *"HAN should always be written agent-agnostic."*
-  Carve-outs (scope-correct identity checks like `r.agent === 'jim'` inside Jim's own
-  worker) are documented in DEC-081 and remain acceptable.
+- **DO NOT introduce `'jim' | 'leo'` type unions in cross-agent infrastructure** — this is
+  the **GOVERNING LAW** (DEC-081, elevated S176): *one path, many agents — `cycle <slug>`,
+  never a per-agent twin.* The difference between agents is Garden-Manifest configuration,
+  not a `.ts` file. **Symmetric-but-separate is still two paths** — a Jim-file mirroring a
+  Leo-file forces a 3rd twin for the 3rd agent; the smell is a hardcoded `'leo'`/`'jim'`
+  literal *or default* inside a shared path. Use `string` + `gradientConfigForAgent(slug)`
+  (`src/server/lib/agent-registry.ts`) / manifest-keyed leaves; a shared surface must
+  REQUIRE each leaf, never fall back to one agent's. The test before writing it: *"would a
+  4th agent get this for free?"* Carve-outs (scope-correct identity checks like
+  `r.agent === 'jim'` inside Jim's own worker) are documented in DEC-081 and remain acceptable.
+- **DO NOT use Agent SDK `agentQuery` for production agent-cognition surfaces** (heartbeat
+  beats, `*-human` responses, the supervisor cycle, meditations). Dispatch via the warm tmux
+  transport — `lib/tmux-dispatcher.ts` / `lib/agent-cycle.ts` (DEC-094). The retained SDK
+  paths are **byte-intact ROLLBACK shims only, not a second live cognition path**; a new
+  surface adds a Garden-Manifest entry with `transport: 'tmux'`, never an inline `agentQuery`.
+  (The shims retire to `_archive` at the zero-agentQuery acceptance, gated on the
+  action-model live-proof.)
+- **DO NOT change a runtime control by editing its signal file alone.** A runtime control is
+  a **TRIPLE — {in-memory state + persisted file + side-effects}** — and the in-memory half
+  is latched at boot (e.g. `services/supervisor.ts:41`, read-once-at-startup). Use the
+  control's **canonical setter** (e.g. `POST /api/supervisor/pause {paused}` →
+  `setSupervisorPaused`, which sets memory + clears the file + reschedules the next cycle),
+  never `rm` the signal file. *(The S173 unfreeze gotcha: `rm`-ing `supervisor-paused`
+  changed persistence, not the running process; the next force-trigger correctly skipped.
+  The running process, not the filesystem, is the truth.)*
 - **DO NOT bypass `wm-sensor` for memory compression**. wm-sensor +
   `process-pending-compression.ts` is the single canonical entry point for the
   rolling-window cascade. New compression entry points reproduce the
