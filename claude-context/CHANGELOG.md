@@ -40,6 +40,18 @@ the world-action routes); the `leo-heartbeat` refactor + Jim's cycle/meditations
   (logic-identical, Jim's ctx-clear-outside-the-try fix preserved in the surface); meditations stay
   flag-off. T7a is now "the meditation surface, instance leo" — the migration's last piece is the agnostic
   codebase's first brick. `tsc` 12-pre / 0-new.
+- **Supervisor gated to its owning agent (latent double-fork fixed).** `initSupervisor()` + the cycle
+  scheduler ran UNCONDITIONALLY in every `server.ts` (`server.ts:335/337`, no slug gate), and
+  `supervisor-worker.ts` is hardcoded `'jim'` — so BOTH agent-servers (3847 Leo + 3848 Jim) forked a Jim
+  supervisor-worker (live-confirmed: `pgrep supervisor-worker` → 2). A latent double-Jim-cycle masked only
+  by the `supervisor-paused` freeze; it would fire the moment the freeze lifts. Gated to
+  `AGENT_SLUG === 'jim'` (the slug was already in the env, never read) → only Jim's server runs the
+  supervisor → the cycle's planning queue + AbortControllers have a single owner (jim's `PORT=3848`), which
+  the tmux cycle's `create_goal`/`cancel_task` reach in-process (Option A). Forward-compatible: `=== 'jim'`
+  becomes "this server runs its own slug's cycle" in project (b). Found by the trace-don't-claim discipline
+  (verifying which server owns the queue before baking the action-model port); Jim verified + endorsed.
+  Flagged for (b): the full slug-parameterisation of `supervisor-worker.ts` + single-owner planning across
+  the fleet (routers mount on every server). Freeze holds.
 
 ## 2026-06-14 (S176) — PR-T7a: Leo's meditations → tmux warm-session transport (flag-off)
 

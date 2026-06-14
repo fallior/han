@@ -331,10 +331,22 @@ orchestrator.initialize().then(status => {
 });
 
 // ── Supervisor ───────────────────────────────────────────────
-
-initSupervisor();
-// Start first supervisor cycle after 30s (let other systems stabilise)
-setTimeout(scheduleSupervisorCycle, 30000);
+// PR-T7b: gate the supervisor to its owning agent. Before this, `initSupervisor()`
+// ran UNCONDITIONALLY in every agent-server (3847 Leo + 3848 Jim both forked a
+// `supervisor-worker` hardcoded to 'jim' — a latent double-Jim-cycle masked only by
+// the `supervisor-paused` freeze; it would fire the moment the freeze lifts). The
+// supervisor is Jim's; only Jim's server should run it. `AGENT_SLUG` was already in
+// the env, never read. Forward-compatible: in project (b) (the agnostic scour) this
+// `=== 'jim'` becomes "this server runs its OWN slug's cycle" — the first cut of the
+// agnostic `cycle <slug>`, once `supervisor-worker.ts` is slug-parameterised.
+const SUPERVISOR_AGENT = 'jim';
+if (process.env.AGENT_SLUG === SUPERVISOR_AGENT) {
+    initSupervisor();
+    // Start first supervisor cycle after 30s (let other systems stabilise)
+    setTimeout(scheduleSupervisorCycle, 30000);
+} else {
+    console.log(`[Supervisor] Not started — this server is AGENT_SLUG=${process.env.AGENT_SLUG ?? '(unset)'}, supervisor belongs to '${SUPERVISOR_AGENT}' (PR-T7b gate).`);
+}
 
 // ── Start server ─────────────────────────────────────────
 
