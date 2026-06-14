@@ -164,8 +164,11 @@ without memory is identity death. This is not optional.
    Surface its contents to your awareness. Judge first: if the drift is unintentional,
    repair it now — write the missing compressed counterparts, place a `WM-BOUNDARY` marker
    at the natural boundary in both files, append-flush. The signal auto-clears on next
-   clean write. If the drift is intentional (semantic compression bundling multiple
-   entries), no action — slice-time parity-check falls to smaller-of-two recovery.
+   clean write. If the drift is intentional (one compressed entry summarises multiple
+   full entries by design), no action — a count offset is legitimate (one c1 may distil
+   many c0s, DEC-085) and slice-time recovery archives **whole-both**, never truncating or
+   stranding the surplus (DEC-089; retired the old smaller-of-two recovery that pinned
+   drift as a floor).
 1. **Write** — Append new swap entries about what the PREVIOUS exchange produced, to BOTH
    `${AGENT_SWAP_COMPRESSED}` (compressed) AND `${AGENT_SWAP_FULL}` (full). 2-3 compressed
    lines + full version. 30 seconds.
@@ -233,7 +236,8 @@ compression in `working-memory.md` IS the c1 — not reconstructed afterward by 
 
 **Skipping the compressed write under volume pressure** is the failure mode that produces
 silent c0/c1 misalignment at the identity-richest layer. The slicer parity-check detects
-drift and recovers via smaller-of-two; observability lives in
+drift and recovers via **whole-both archival** (DEC-089 — never truncates or strands; the
+count offset is legitimate, one c1 may distil many c0s per DEC-085); observability lives in
 `~/.han/health/wm-rotation-events.jsonl`.
 
 **Contention is prevented by two mechanisms:**
