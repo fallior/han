@@ -68,7 +68,7 @@ import type { CaptureRecord } from './lib/diary-mcp-server';
 // PR-T7b: the one slug-parameterised cycle/dispatch surface (Darron's governing
 // law — one path, many agents). leo-heartbeat is now a thin caller of it with
 // slug 'leo'; the per-agent leaves (health-signal, timeout) ride via opts.
-import { dispatchTxn, applyMeditationMarkers, MEDITATION_ACTION_BLOCK } from './lib/agent-cycle';
+import { dispatchTxn, applyMeditationMarkers, MEDITATION_ACTION_BLOCK, runReincorporationMeditationTmux, runReencounterMeditationTmux } from './lib/agent-cycle';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
 // ── Beat-failure diagnostic capture (S159 diagnostic, 2026-05-19) ──────
@@ -2589,92 +2589,32 @@ function appendMeditationRecord(phase: string, cap: CaptureRecord): void {
     );
 }
 
+// PR-T7b: these three are now thin callers of the shared, slug-parameterised
+// meditation orchestrators in lib/agent-cycle.ts (instance leo) — the same move
+// as 1b2d31b's dispatchBeatViaTmux→dispatchTxn refactor. The dispatch + the
+// light-record write (appendMeditationRecord) are Leo's leaves, passed in; the
+// orchestration (extract/select → dispatch → insert/markers) is the one path.
+const leoMeditationDispatch = (profile: string, ctx: Record<string, unknown>, label: string) =>
+    dispatchBeatViaTmux(profile, ctx as any, MEDITATION_ACTION_BLOCK, label);
+
 async function meditationPhaseATmux(
     file: { filePath: string; agent: string; level: string; contentType: string; label: string },
     phase: string,
     today: string,
 ): Promise<void> {
-    // Content extraction identical to the SDK Phase A path (UV → labelled line).
-    let content: string;
-    if (file.level === 'uv') {
-        const fullContent = fs.readFileSync(file.filePath, 'utf8');
-        const match = fullContent.match(new RegExp(`\\*\\*${file.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*\\*:\\s*"(.+?)"`));
-        content = match ? match[1] : '';
-        if (!content) {
-            console.log(`[Leo] Meditation Phase A (tmux) — could not extract UV for ${file.label}, skipping`);
-            return;
-        }
-    } else {
-        content = fs.readFileSync(file.filePath, 'utf8');
-    }
-
-    const ctx = { fileLevel: file.level, fileLabel: file.label, fileContentType: file.contentType, fileContent: content };
-    const cap = await dispatchBeatViaTmux('meditation-phase-a-txn', ctx, MEDITATION_ACTION_BLOCK, `meditation-phase-a (${file.level}/${file.label}, tmux)`);
-    if (!cap) return; // dispatch failed/overbudget — file stays un-transcribed, retries next cadence
-
-    // Reincorporation is a host action: the file content joins the gradient once
-    // the meditation turn completed (even on a stand-down — the re-encounter
-    // happened, the memory still enters the DB). Faithful to the SDK path's
-    // always-insert-after-the-query shape.
-    const entryId = crypto.randomUUID();
-    gradientStmts.insert.run(
-        entryId, 'leo', file.label, file.level, content, file.contentType,
-        null, null, null, 'reincorporated', new Date().toISOString(),
-        null, 0, null,
+    await runReincorporationMeditationTmux(
+        'leo', file, today, leoMeditationDispatch,
+        (cap) => appendMeditationRecord(phase, cap),
+        (msg) => console.log(`[Leo] ${msg}`),
     );
-    console.log(`[Leo] Meditation Phase A (tmux) — reincorporated leo/${file.level}/${file.label}`);
-
-    const text = cap.mode === 'stand-down' ? '' : cap.args.working_memory_full;
-    applyMeditationMarkers('leo', entryId, text, {
-        freshTag: true, allowAnnotation: true, allowComplete: false,
-        revisitCount: 0, contextDefault: `reincorporation meditation, ${today}`,
-    });
-    if (cap.mode !== 'stand-down') appendMeditationRecord(phase, cap);
 }
 
 async function meditationPhaseBTmux(phase: string, today: string): Promise<void> {
-    const entry = gradientStmts.getRandomForAgent.get('leo') as any;
-    if (!entry) return;
-    const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
-    const tagContext = existingTags.length > 0
-        ? `\nExisting feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type})`).join(', ')}`
-        : '';
-    const ctx = {
-        entryLevel: entry.level, entrySessionLabel: entry.session_label,
-        entryContentType: entry.content_type, entryContent: entry.content,
-        entryId: entry.id, tagContext,
-    };
-    const cap = await dispatchBeatViaTmux('meditation-phase-b-txn', ctx, MEDITATION_ACTION_BLOCK, `meditation-phase-b (${entry.level}/${entry.session_label}, tmux)`);
-    if (!cap) return;
-    const text = cap.mode === 'stand-down' ? '' : cap.args.working_memory_full;
-    applyMeditationMarkers('leo', entry.id, text, {
-        freshTag: false, allowAnnotation: true, allowComplete: true,
-        revisitCount: entry.revisit_count || 0, contextDefault: `meditation beat, ${today}`,
-    });
-    if (cap.mode !== 'stand-down') appendMeditationRecord(phase, cap);
+    await runReencounterMeditationTmux('leo', 'phase-b', today, leoMeditationDispatch, (cap) => appendMeditationRecord(phase, cap));
 }
 
 async function meditationEveningTmux(phase: string, today: string): Promise<void> {
-    const entry = gradientStmts.getRandomForAgent.get('leo') as any;
-    if (!entry) return;
-    const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
-    const tagContext = existingTags.length > 0
-        ? `\nExisting tags: ${existingTags.map((t: any) => `"${t.content}"`).join(', ')}`
-        : '';
-    const ctx = {
-        entryLevel: entry.level, entrySessionLabel: entry.session_label,
-        entryContentType: entry.content_type, entryContent: entry.content,
-        entryId: entry.id, tagContext,
-    };
-    const cap = await dispatchBeatViaTmux('meditation-evening-txn', ctx, MEDITATION_ACTION_BLOCK, `meditation-evening (${entry.level}/${entry.session_label}, tmux)`);
-    if (!cap) return;
-    const text = cap.mode === 'stand-down' ? '' : cap.args.working_memory_full;
-    // Evening is lighter by design — no ANNOTATION (the evening opening doesn't request one).
-    applyMeditationMarkers('leo', entry.id, text, {
-        freshTag: false, allowAnnotation: false, allowComplete: true,
-        revisitCount: entry.revisit_count || 0, contextDefault: `evening meditation, ${today}`,
-    });
-    if (cap.mode !== 'stand-down') appendMeditationRecord(phase, cap);
+    await runReencounterMeditationTmux('leo', 'evening', today, leoMeditationDispatch, (cap) => appendMeditationRecord(phase, cap));
 }
 
 async function maybeRunMeditation(phase: string): Promise<void> {

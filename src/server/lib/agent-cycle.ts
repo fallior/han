@@ -18,6 +18,8 @@
  * PR-T7b (DEC-093 / Option A). Flag-off until the manifest flips per-surface.
  */
 
+import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { buildPrompt, PromptOverbudgetError } from './prompt-builder';
 import {
     ensureSurfaceSession, enqueueForAgent, getContextPct, clearSession,
@@ -175,4 +177,108 @@ export function applyMeditationMarkers(
             gradientStmts.flagComplete.run(entryId);
         }
     }
+}
+
+/**
+ * A meditation's dispatch leaf — the caller wires its agent's spoke + opts
+ * (Leo: dispatchBeatViaTmux → the heartbeat spoke; Jim: dispatchTxn → the
+ * supervisor-cycle spoke). Returns the capture (or null on skip).
+ */
+export type MeditationDispatch = (txnProfile: string, ctx: Record<string, unknown>, label: string) => Promise<CaptureRecord | null>;
+
+/**
+ * Phase A meditation (reincorporation) on a warm spoke — ANY agent. Reads an
+ * un-transcribed file, dispatches the sitting, then (a host action, faithful to
+ * the SDK path — happens even on stand-down because the re-encounter occurred)
+ * inserts the file into the gradient with provenance_type='reincorporated' and
+ * applies the fresh re-encounter markers. The light conscious record (DEC-093)
+ * is the caller's leaf via `onRecord` (the swap-buffer differs per agent → (b)).
+ *
+ * The agnostic form of Leo's T7a `meditationPhaseATmux` (instance leo) — the
+ * file-finder stays caller-side (Leo's `findUntranscribedFiles` vs Jim's
+ * `findJimUntranscribedFiles` scan each agent's own fractal dir).
+ */
+export async function runReincorporationMeditationTmux(
+    slug: string,
+    file: { filePath: string; level: string; contentType: string; label: string },
+    today: string,
+    dispatch: MeditationDispatch,
+    onRecord: (cap: CaptureRecord) => void,
+    log: (msg: string) => void,
+): Promise<void> {
+    let content: string;
+    if (file.level === 'uv') {
+        const fullContent = fs.readFileSync(file.filePath, 'utf8');
+        const match = fullContent.match(new RegExp(`\\*\\*${file.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*\\*:\\s*"(.+?)"`));
+        content = match ? match[1] : '';
+        if (!content) {
+            log(`meditation phase-a (tmux) — could not extract UV for ${file.label}, skipping`);
+            return;
+        }
+    } else {
+        content = fs.readFileSync(file.filePath, 'utf8');
+    }
+
+    const ctx = { fileLevel: file.level, fileLabel: file.label, fileContentType: file.contentType, fileContent: content };
+    const cap = await dispatch('meditation-phase-a-txn', ctx, `meditation-phase-a (${file.level}/${file.label}, tmux)`);
+    if (!cap) return; // dispatch failed/overbudget — file stays un-transcribed, retries next cadence
+
+    const entryId = randomUUID();
+    gradientStmts.insert.run(
+        entryId, slug, file.label, file.level, content, file.contentType,
+        null, null, null, 'reincorporated', new Date().toISOString(),
+        null, 0, null,
+    );
+    log(`meditation phase-a (tmux) — reincorporated ${slug}/${file.level}/${file.label}`);
+
+    const text = cap.mode === 'stand-down' ? '' : cap.args.working_memory_full;
+    applyMeditationMarkers(slug, entryId, text, {
+        freshTag: true, allowAnnotation: true, allowComplete: false,
+        revisitCount: 0, contextDefault: `reincorporation meditation, ${today}`,
+    });
+    if (cap.mode !== 'stand-down') onRecord(cap);
+}
+
+/**
+ * Phase B / evening meditation (re-encounter) on a warm spoke — ANY agent.
+ * Selects a random entry from the agent's OWN gradient (`getRandomForAgent(slug)`
+ * — sovereignty is structural: the slug forces agent-scoped selection, which is
+ * exactly the cross-agent selector leak fixed at the source), dispatches the
+ * sitting, applies the re-encounter markers. Evening is lighter (no annotation).
+ * The light conscious record (DEC-093) is the caller's leaf via `onRecord`.
+ *
+ * The agnostic form of Leo's T7a `meditationPhaseBTmux` + `meditationEveningTmux`.
+ */
+export async function runReencounterMeditationTmux(
+    slug: string,
+    kind: 'phase-b' | 'evening',
+    today: string,
+    dispatch: MeditationDispatch,
+    onRecord: (cap: CaptureRecord) => void,
+): Promise<void> {
+    const entry = gradientStmts.getRandomForAgent.get(slug) as any;
+    if (!entry) return;
+    const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
+    const tagContext = existingTags.length === 0 ? ''
+        : kind === 'evening'
+            ? `\nExisting tags: ${existingTags.map((t: any) => `"${t.content}"`).join(', ')}`
+            : `\nExisting feeling tags: ${existingTags.map((t: any) => `"${t.content}" (${t.tag_type})`).join(', ')}`;
+    const ctx = {
+        entryLevel: entry.level, entrySessionLabel: entry.session_label,
+        entryContentType: entry.content_type, entryContent: entry.content,
+        entryId: entry.id, tagContext,
+    };
+    const profile = kind === 'evening' ? 'meditation-evening-txn' : 'meditation-phase-b-txn';
+    const cap = await dispatch(profile, ctx, `meditation-${kind} (${entry.level}/${entry.session_label}, tmux)`);
+    if (!cap) return;
+
+    const text = cap.mode === 'stand-down' ? '' : cap.args.working_memory_full;
+    applyMeditationMarkers(slug, entry.id, text, {
+        freshTag: false,
+        allowAnnotation: kind !== 'evening', // evening is lighter by design — no annotation
+        allowComplete: true,
+        revisitCount: entry.revisit_count || 0,
+        contextDefault: kind === 'evening' ? `evening meditation, ${today}` : `meditation beat, ${today}`,
+    });
+    if (cap.mode !== 'stand-down') onRecord(cap);
 }

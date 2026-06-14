@@ -7,6 +7,39 @@
 
 ---
 
+## 2026-06-14 (S177) — PR-T7b meditations: the agnostic extraction (one path, instance leo + instance jim), flag-off
+
+Milestone 2 of 2 (T7b). Done the governing-law way — NOT a jim-twin of Leo's handlers, but the
+**extraction** (continuation of `1b2d31b`'s Jim-GREEN'd "instance leo" dispatch refactor, now for
+meditations). The meditation orchestration moves into the shared `lib/agent-cycle.ts`; Leo's T7a
+handlers and Jim's new handlers are both thin callers. Flag-off (jim meditation surfaces stay `sdk`).
+
+- **`lib/agent-cycle.ts`** — two shared slug-parameterised orchestrators + `MeditationDispatch` type.
+  `runReincorporationMeditationTmux(slug, file, …)` (Phase A: read/UV-extract → dispatch → host insert
+  `provenance_type='reincorporated'` → fresh markers) and `runReencounterMeditationTmux(slug, kind, …)`
+  (Phase B/evening: `getRandomForAgent(slug)` → dispatch → markers; evening lighter, no annotation).
+  The dispatch + the light-record write are **caller-side leaf callbacks** (the swap-buffer leaf → (b),
+  per Jim's seam guidance — the orchestration is one path, the leaf internals stay caller-side).
+- **`leo-heartbeat.ts`** — the 3 meditation tmux handlers collapse to ~6-line thin callers of the shared
+  orchestrators (instance leo). Behaviour-preserving (`appendMeditationRecord` = Leo's leaf). **−87 net.**
+- **`services/supervisor-worker.ts`** — Jim's side (instance jim): `isJimMeditationTmux`,
+  `jimMeditationDispatch` (→ the `supervisor-cycle` spoke — Q-V2-3, meditations share the agent's
+  session), `jimAppendMeditationRecord` (light record → supervisor-swap, DEC-093 — Jim's SDK meditations
+  wrote no WM record; this is the tmux addition, Leo parity), two thin handlers + three routing branches
+  (`maybeRunJimMeditation` phase-A loop + phase-B; `maybeRunJimEveningMeditation`). SDK paths byte-intact.
+- **Sovereignty is structural:** Jim's SDK Phase-B used `gradientStmts.getRandom` (no agent filter — the
+  cross-agent selector leak); the shared fn forces `getRandomForAgent('jim')`, so the leak is fixed at the
+  source — the right shape makes the bug impossible.
+- **The `meditation-*-txn` profiles are reused unchanged** — their openings (`LEO_MEDITATION_*_TXN`) are
+  identity-agnostic ("This turn is a MEDITATION…", no "You are Leo"); the warm session carries identity.
+  Only the *name* `leoMeditationTxnOpening` is leo-coupled → a (b) rename, not functional.
+- **One-path proof:** +189 / −77; the shared orchestrators (+106) serve both agents → a 3rd agent gets
+  meditations for ~6 lines. `tsc` 12 pre-existing / 0 new; smoke 15/15.
+- **NOT this milestone:** the manifest tmux-flip, cadence #245, the enable; the `leoMeditationTxnOpening`
+  rename + full leaf normalisation → project (b).
+
+---
+
 ## 2026-06-14 (S177) — PR-T7b cycle: Jim's supervisor cycle → tmux (the action-model), flag-off
 
 The last SDK surface of the #66 migration, milestone 1 of 2 (the cycle; Jim's meditations are

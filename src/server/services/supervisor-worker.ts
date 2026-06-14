@@ -44,9 +44,10 @@ import { jimSupervisorCycleActionBlock, JIM_REFLECTIVE_CYCLE_ACTION_BLOCK } from
 // one path, many agents (Darron's governing law). jim passes its OWN leaves
 // (supervisor-swap, the supervisor_cycles telemetry, no health-signal file —
 // the supervisor's "health" is the cycle DB + sendMessage, not leo's signal).
-import { dispatchTxn, applyMeditationMarkers } from '../lib/agent-cycle';
+import { dispatchTxn, applyMeditationMarkers, MEDITATION_ACTION_BLOCK, runReincorporationMeditationTmux, runReencounterMeditationTmux } from '../lib/agent-cycle';
 import { manifestTransport, manifestModelLadder, manifestModelHead } from '../lib/garden-manifest';
 import { observeActiveModel } from '../lib/tmux-dispatcher';
+import type { CaptureRecord } from '../lib/diary-mcp-server';
 import { spawn as spawnChild } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
 import { rotateMemoryFile, loadMemoryFileGradient, loadTraversableGradient, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
@@ -982,6 +983,54 @@ function buildStateSnapshot(): string {
 
 let lastJimMeditationDate = '';
 
+// PR-T7b: Jim's meditations on the warm spoke — thin callers of the SAME shared
+// agnostic orchestrators Leo uses (instance jim, one path many agents). Jim's
+// leaves, passed in: the dispatch (the supervisor-cycle spoke — Q-V2-3,
+// meditations share the agent's session) and the light-record write
+// (supervisor-swap, flushed with the cycle — Jim's SDK meditations wrote no WM
+// record; the DEC-093 light record is the tmux addition, parity with Leo). The
+// finder (findJimUntranscribedFiles) stays caller-side. Selector sovereignty is
+// STRUCTURAL: the shared fn uses getRandomForAgent('jim'), fixing the cross-agent
+// leak the SDK path's gradientStmts.getRandom (no agent filter) carried. Flag-off
+// until the manifest flips jim's meditation surfaces 'sdk'→'tmux'.
+const JIM_MEDITATION_SPOKE = 'supervisor-cycle';
+
+function isJimMeditationTmux(surface: string): boolean {
+    return manifestTransport('jim', surface) === 'tmux';
+}
+
+const jimMeditationDispatch = (profile: string, ctx: Record<string, unknown>, label: string) =>
+    dispatchTxn('jim', JIM_MEDITATION_SPOKE, profile, ctx, MEDITATION_ACTION_BLOCK, {
+        ladder: manifestModelLadder('jim', JIM_MEDITATION_SPOKE),
+        welcomeBack: 'welcome back Jim',
+        timeoutMs: CYCLE_TXN_TIMEOUT_MS,
+        ctxClearThresholdPct: 85,
+        onOverbudget: (err) => log(`[Worker] jim meditation over budget — skipping (${err.message})`),
+        onDispatchFail: (err) => log(`[Worker] jim meditation dispatch failed — ${err.message}`),
+    });
+
+/** Jim's light meditation record → supervisor-swap (flushed with the cycle), DEC-093. */
+function jimAppendMeditationRecord(cap: CaptureRecord): void {
+    const observed = observeActiveModel('jim', JIM_MEDITATION_SPOKE) ?? manifestModelHead('jim', JIM_MEDITATION_SPOKE) ?? undefined;
+    const header = `\n\n### Meditation (tmux) — ${new Date().toISOString()}${observed ? ` [model: ${observed}]` : ''}`;
+    fs.appendFileSync(SUPERVISOR_SWAP_FILE, `${header}\n${cap.args.working_memory_compressed}`);
+    fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${header}\n${cap.args.working_memory_full}`);
+}
+
+async function jimMeditationPhaseATmux(
+    file: { filePath: string; level: string; contentType: string; label: string },
+    today: string,
+): Promise<void> {
+    await runReincorporationMeditationTmux(
+        'jim', file, today, jimMeditationDispatch, jimAppendMeditationRecord,
+        (msg) => log(`[Worker] ${msg}`),
+    );
+}
+
+async function jimMeditationReencounterTmux(kind: 'phase-b' | 'evening', today: string): Promise<void> {
+    await runReencounterMeditationTmux('jim', kind, today, jimMeditationDispatch, jimAppendMeditationRecord);
+}
+
 async function maybeRunJimMeditation(phase: string): Promise<void> {
     // Skip during sleep — meditation is a waking practice
     if (phase === 'sleep') return;
@@ -997,12 +1046,22 @@ async function maybeRunJimMeditation(phase: string): Promise<void> {
         while (phaseACount < MAX_PHASE_A_PER_DAY) {
             const untranscribed = findJimUntranscribedFiles();
             if (!untranscribed) break;
-            await jimMeditationPhaseA(untranscribed);
+            // PR-T7b: transport chosen per meditation surface (manifest, flag-off).
+            if (isJimMeditationTmux('meditation-phase-a')) await jimMeditationPhaseATmux(untranscribed, today);
+            else await jimMeditationPhaseA(untranscribed);
             phaseACount++;
         }
 
         // Phase B: if no Phase A work, do a re-reading
         if (phaseACount > 0) {
+            lastJimMeditationDate = today;
+            return;
+        }
+
+        // PR-T7b: tmux Phase B re-encounter (manifest, flag-off). The shared fn
+        // selects via getRandomForAgent('jim') — sovereignty structural.
+        if (isJimMeditationTmux('meditation-phase-b')) {
+            await jimMeditationReencounterTmux('phase-b', today);
             lastJimMeditationDate = today;
             return;
         }
@@ -1113,6 +1172,13 @@ async function maybeRunJimEveningMeditation(phase: string): Promise<void> {
     if (lastJimEveningMeditationDate === today) return;
 
     try {
+        // PR-T7b: tmux evening re-encounter (manifest, flag-off). getRandomForAgent('jim').
+        if (isJimMeditationTmux('meditation-evening')) {
+            await jimMeditationReencounterTmux('evening', today);
+            lastJimEveningMeditationDate = today;
+            return;
+        }
+
         const entry = gradientStmts.getRandom.get() as any;
         if (!entry) { lastJimEveningMeditationDate = today; return; }
 
