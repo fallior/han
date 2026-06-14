@@ -34,6 +34,7 @@ import {
 } from './leo-prompts';
 import {
     JIM_SUPERVISOR_SYSTEM_PROMPT,
+    JIM_SUPERVISOR_CYCLE_TXN_SYSTEM_PROMPT,
     JIM_DREAM_USER_PROMPT,
     JimCyclePhase,
     jimPersonalCycleOpening,
@@ -676,6 +677,83 @@ export const PROFILES: Record<string, PromptProfile> = {
         // cycle dispatch branch (C1-N4). The recovery vs personal distinction
         // is profile-name level; both go through the same handler refactor.
         pairedMemoryOutput: { enabled: true, mechanism: 'section', captureInput: true },
+    },
+    /**
+     * PR-T7b (DEC-093 / Option A): the tmux txn variants of Jim's four cycle
+     * types. Same openings/scaffolds as the SDK profiles above, but: memory
+     * SUPPRESSED (the warm spoke already carries Jim's full identity — same as
+     * Leo's `*-beat-txn`), mechanism 'mcp-tool' (the cycle ends with
+     * submit_response, not structured JSON / not a host-parsed prose section),
+     * budget 120K. supervisor-cycle-txn swaps the action-model system prompt
+     * (act-via-API). dispatched on the ONE 'supervisor-cycle' surface — the
+     * cycle TYPE picks the profile, exactly as Leo's heartbeat surface carries
+     * philosophy/personal/dream. Flag-off until the manifest flips.
+     */
+    'supervisor-cycle-txn': {
+        name: 'supervisor-cycle-txn',
+        systemPromptOpening: JIM_SUPERVISOR_CYCLE_TXN_SYSTEM_PROMPT,
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildJimSupervisorCycleScaffold(ctx),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true },
+    },
+    'personal-cycle-txn': {
+        name: 'personal-cycle-txn',
+        systemPromptOpening: (ctx) => jimPersonalCycleOpening(
+            ((ctx.phase as JimCyclePhase | undefined) ?? 'work'),
+            ((ctx.portfolioSummary as string | undefined) ?? ''),
+        ),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => jimPersonalUserPrompt(((ctx.phase as JimCyclePhase | undefined) ?? 'work')),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true },
+    },
+    'recovery-cycle-txn': {
+        name: 'recovery-cycle-txn',
+        systemPromptOpening: (ctx) => jimRecoveryCycleOpening(((ctx.phase as JimCyclePhase | undefined) ?? 'work')),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => jimRecoveryUserPrompt(((ctx.phase as JimCyclePhase | undefined) ?? 'work')),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true },
+    },
+    'dream-cycle-txn': {
+        name: 'dream-cycle-txn',
+        systemPromptOpening: (ctx) => jimDreamCycleOpening(
+            ((ctx.dreamSeeds as string | undefined) ?? ''),
+            ((ctx.meditationSection as string | undefined) ?? ''),
+        ),
+        envelope: 'user',
+        userPromptScaffold: () => JIM_DREAM_USER_PROMPT,
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true },
     },
     /**
      * Phase 7 (PR-AP7, 2026-05-22): the *-human responder surfaces.

@@ -7,6 +7,47 @@
 
 ---
 
+## 2026-06-14 (S177) — PR-T7b cycle: Jim's supervisor cycle → tmux (the action-model), flag-off
+
+The last SDK surface of the #66 migration, milestone 1 of 2 (the cycle; Jim's meditations are
+milestone 2). Jim's `runSupervisorCycle` becomes a thin caller of the shared agnostic surface
+(`lib/agent-cycle.ts:dispatchTxn('jim', 'supervisor-cycle', …)`). **Option A (DEC-093):** the warm
+spoke ACTS DIRECTLY via its HTTP API — the SDK `executeActions` structured-action middleman was an
+SDK-era artifact (the SDK couldn't touch the world, so it returned a plan for the host to run). Built
+**flag-off** (`jim`/`supervisor-cycle` stays `transport: 'sdk'`); the SDK path is byte-intact = one-line
+rollback. Jim's BLOCKING impl-audit gates the enable.
+
+- **`lib/jim-prompts.ts`** — `JIM_SUPERVISOR_CYCLE_TXN_SYSTEM_PROMPT` (the SDK supervisor system prompt
+  reframed: "How You Act" via tools + HTTP API replaces "Your Powers"; "Output Format: structured JSON"
+  dropped; ends with `submit_response`). `jimSupervisorCycleActionBlock(apiBase, ntfyTopic)` — the per-turn
+  directive built at dispatch so the API base is the **resolved** port (`process.env.PORT`, never a
+  literal — Jim's caution #2); endpoints match the real route contracts (create_goal → `POST /api/goals`;
+  adjust_priority → `PATCH /api/tasks/:id/priority`; propose_idea → `POST /api/supervisor/proposals`;
+  cancel_task → `POST /api/tasks/:id/cancel`; update_memory → Write/Edit; explore → tools; notify → ntfy).
+  `JIM_REFLECTIVE_CYCLE_ACTION_BLOCK` for personal/dream/recovery (carries the dream-cycle's embedded
+  meditation markers).
+- **`lib/prompt-profiles.ts`** — 4 cycle-txn profiles (`supervisor-cycle-txn`, `personal-cycle-txn`,
+  `recovery-cycle-txn`, `dream-cycle-txn`), mirroring Leo's `*-beat-txn`: memory suppressed (the warm
+  session carries identity), `mechanism: 'mcp-tool'`, 120K budget; reuse the existing openings/scaffolds.
+- **`services/supervisor-worker.ts`** — `dispatchSupervisorCycleViaTmux` (the thin jim caller) + the tmux
+  branch in `runSupervisorCycle` (after ctx-build; SDK path byte-intact below). The agent acts directly
+  (no host `executeActions`); **F1 telemetry preserved in the worker around the dispatch** (`insertCycle`
+  already ran; `completeCycle` with `cost_usd=0` — subscription-metered, the SDK cost-cap dissolves →
+  cadence #245 governs; `logCycleToSession`/`logCycleAudit`/broadcast/`sendMessage` kept); **F3** worker
+  slimmed, not retired (maintenance pre-work + telemetry stay); dream-cycle embedded meditation markers via
+  the shared `applyMeditationMarkers('jim', …)`; stand-down never paired-writes (DEC-093); jim passes its
+  OWN leaves (supervisor-swap, the cycle telemetry; no health-signal file — the supervisor's health is the
+  cycle DB + `sendMessage`, not Leo's `writeHealthSignal`) = Jim's hard-point #2.
+- **Manifest UNTOUCHED** — flag-off = the existing `jim`/`supervisor-cycle` `transport: 'sdk'`; the ONE
+  surface gates all 4 cycle types (the type picks the profile, as Leo's heartbeat surface carries
+  philosophy/personal/dream). The flip to `'tmux'` is the post-GREEN enable.
+- **Verify:** `tsc --noEmit` 12 pre-existing / 0 new; smoke 27/27 (flag-off; profiles memory_chars=0 +
+  bounded + mcp-tool + no structured-JSON; action-model framing; action block endpoints match the routes).
+- **NOT this milestone:** Jim's meditations (the agnostic `runMeditationTmux` extraction that collapses
+  Leo's T7a handlers too), the manifest tmux-flip, cadence #245, the enable.
+
+---
+
 ## 2026-06-14 (S176) — PR-T7b foundation: the agnostic cycle/dispatch surface (one path, many agents)
 
 Darron's governing law (S176): *"a `cycle <agent-slug>` where the slug parameterises the endpoint to the

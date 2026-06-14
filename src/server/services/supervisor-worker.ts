@@ -38,6 +38,15 @@ import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 import { gateIdentityOrThrow } from '../lib/identity-signing';
 import { buildPrompt, PromptOverbudgetError } from '../lib/prompt-builder';
 import type { JimCyclePhase } from '../lib/jim-prompts';
+import { jimSupervisorCycleActionBlock, JIM_REFLECTIVE_CYCLE_ACTION_BLOCK } from '../lib/jim-prompts';
+// PR-T7b (DEC-093 / Option A): the agnostic cycle/dispatch surface + manifest
+// gate. The supervisor cycle becomes a thin caller of dispatchTxn('jim',...) —
+// one path, many agents (Darron's governing law). jim passes its OWN leaves
+// (supervisor-swap, the supervisor_cycles telemetry, no health-signal file —
+// the supervisor's "health" is the cycle DB + sendMessage, not leo's signal).
+import { dispatchTxn, applyMeditationMarkers } from '../lib/agent-cycle';
+import { manifestTransport, manifestModelLadder, manifestModelHead } from '../lib/garden-manifest';
+import { observeActiveModel } from '../lib/tmux-dispatcher';
 import { spawn as spawnChild } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
 import { rotateMemoryFile, loadMemoryFileGradient, loadTraversableGradient, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
@@ -1768,6 +1777,176 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
     return summaries;
 }
 
+// ── PR-T7b (DEC-093 / Option A): tmux warm-session cycle dispatch ──────────
+// The supervisor cycle as a thin caller of the shared agnostic surface
+// (lib/agent-cycle: dispatchTxn). The warm jim spoke ACTS DIRECTLY via its HTTP
+// API (no host-side executeActions — that middleman was an SDK-era artifact) and
+// submits a curated record (DEC-093). Telemetry (insertCycle already ran before
+// this) stays in the worker around the dispatch (F1); the worker keeps its
+// maintenance pre-work (F3 — slimmed, not retired). The SDK path in
+// runSupervisorCycle stays byte-intact = one-line rollback (flip the manifest).
+// jim's per-agent leaves stay caller-side here (supervisor-swap, the cycle
+// telemetry); the full leaf normalisation is project (b).
+const CYCLE_TXN_TIMEOUT_MS = 15 * 60 * 1000;
+
+async function dispatchSupervisorCycleViaTmux(p: {
+    cycleType: 'supervisor' | 'personal' | 'dream';
+    profileName: string;
+    cycleId: string;
+    cycleNumber: number;
+    phase: string;
+    ctx: Record<string, unknown>;
+    cycleStartMs: number;
+}): Promise<void> {
+    const SURFACE = 'supervisor-cycle';
+    const txnProfile = `${p.profileName}-txn`;
+    const typeLabel = p.cycleType === 'personal' ? 'Personal' : p.cycleType === 'dream' ? 'Dream' : 'Supervisor';
+
+    // Action block — built at dispatch so the API base is the RESOLVED port
+    // (jim's own server, process.env.PORT — never a literal; Jim's caution #2).
+    const apiBase = `https://localhost:${process.env.PORT || '3848'}`;
+    let ntfyTopic: string | undefined;
+    try { ntfyTopic = loadConfig().ntfy_topic; } catch { /* optional */ }
+    const actionBlock = p.profileName === 'supervisor-cycle'
+        ? jimSupervisorCycleActionBlock(apiBase, ntfyTopic)
+        : JIM_REFLECTIVE_CYCLE_ACTION_BLOCK;
+
+    let cap;
+    try {
+        cap = await dispatchTxn('jim', SURFACE, txnProfile, p.ctx, actionBlock, {
+            ladder: manifestModelLadder('jim', SURFACE),
+            welcomeBack: 'welcome back Jim',
+            timeoutMs: CYCLE_TXN_TIMEOUT_MS,
+            ctxClearThresholdPct: 85,
+            onOverbudget: (err) => log(`[Worker] ${txnProfile} over budget — skipping cycle (${err.message})`),
+            onDispatchFail: (err) => log(`[Worker] ${txnProfile} tmux dispatch failed — ${err.message} (retries next cadence; #5 reconcile clears the wedge)`),
+        });
+    } catch (err: any) {
+        logError(`[Worker] tmux cycle dispatch threw: ${err.message}`);
+        supervisorStmts.failCycle.run(new Date().toISOString(), err.message, p.cycleId);
+        logCycleAudit(p.cycleNumber, p.cycleType, 'error', 0, Date.now() - p.cycleStartMs);
+        sendMessage({ type: 'cycle_failed', error: { message: err.message, stack: err.stack } });
+        return;
+    }
+
+    if (!cap) {
+        // Overbudget-skip or fail-loud dispatch failure (already surfaced via the
+        // callbacks). Record cleanly + retry next cadence — no token black hole (S74).
+        supervisorStmts.failCycle.run(new Date().toISOString(), 'tmux dispatch skipped (over budget or dispatch failure)', p.cycleId);
+        logCycleAudit(p.cycleNumber, p.cycleType, 'error', 0, Date.now() - p.cycleStartMs);
+        sendMessage({ type: 'cycle_skipped', reason: 'tmux dispatch skipped' });
+        return;
+    }
+
+    const observedModel = observeActiveModel('jim', SURFACE) ?? manifestModelHead('jim', SURFACE) ?? undefined;
+    const wmFull = cap.args.working_memory_full || '';
+    const wmCompressed = cap.args.working_memory_compressed || '';
+    const stoodDown = cap.mode === 'stand-down';
+
+    // Dream-cycle embedded meditation re-encounter (the dream frame surfaces a
+    // memory to sit with; the markers ride inside the curated record). Apply via
+    // the shared, slug-parameterised applyMeditationMarkers — the same handler
+    // the meditation surfaces use, faithful to the SDK dream path.
+    if (p.cycleType === 'dream' && !stoodDown) {
+        try {
+            const meditationEntryId =
+                (wmFull.match(/MEDITATION_ENTRY_ID:\s*(\S+)/))?.[1] ||
+                (String(p.ctx.meditationSection || '').match(/MEDITATION_ENTRY_ID:\s*(\S+)/))?.[1];
+            if (meditationEntryId) {
+                const entry = gradientStmts.get.get(meditationEntryId) as any;
+                applyMeditationMarkers('jim', meditationEntryId, wmFull, {
+                    freshTag: false,
+                    allowAnnotation: true,
+                    allowComplete: true,
+                    revisitCount: entry?.revisit_count || 0,
+                    contextDefault: `dream cycle meditation, cycle #${p.cycleNumber}`,
+                });
+            }
+        } catch (err: any) {
+            log(`[Worker] dream-cycle meditation marker apply failed (non-fatal): ${err.message}`);
+        }
+        // Mirror the SDK dream path: the body also lands in explorations.md.
+        try {
+            const body = wmFull.replace(/\[INPUT\][\s\S]*?\[BODY\]\s*/i, '').trim();
+            if (body.length > 10) {
+                const ts = new Date().toISOString().split('T')[0] + ' ' + new Date().toTimeString().split(' ')[0];
+                fs.appendFileSync(path.join(MEMORY_DIR, 'explorations.md'), `\n\n### Dream ${p.cycleNumber} (${ts})\n${body}\n`);
+            }
+        } catch { /* best effort */ }
+    }
+
+    // Memory write — jim's leaf: supervisor-swap → appendPairedMemory('jim',...).
+    // The curated record IS the c0/c1 (DEC-093); no parseTurnEntry needed. A
+    // stand-down NEVER paired-writes (DEC-093 stand-down rule). cap.args carry the
+    // bounded record directly; input_quotes are the cycle's input delta (kept in
+    // the gradient's c0 lineage via the slicer, not stored here).
+    if (!stoodDown && wmFull.trim() && wmCompressed.trim()) {
+        try {
+            const cycleHeader = `\n\n### Cycle #${p.cycleNumber} — ${p.cycleType} (tmux) (${new Date().toISOString()})${observedModel ? ` [model: ${observedModel}]` : ''}`;
+            fs.appendFileSync(SUPERVISOR_SWAP_FILE, `${cycleHeader}\n${wmCompressed}`);
+            fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${cycleHeader}\n${wmFull}`);
+
+            const swapContent = fs.existsSync(SUPERVISOR_SWAP_FILE) ? fs.readFileSync(SUPERVISOR_SWAP_FILE, 'utf8').trim() : '';
+            const swapFullContent = fs.existsSync(SUPERVISOR_SWAP_FULL_FILE) ? fs.readFileSync(SUPERVISOR_SWAP_FULL_FILE, 'utf8').trim() : '';
+            if (swapContent && swapFullContent) {
+                try {
+                    await appendPairedMemory('jim', '\n' + swapFullContent + '\n', '\n' + swapContent + '\n', { source: 'supervisor-cycle-tmux-flush' });
+                    fs.writeFileSync(SUPERVISOR_SWAP_FILE, '');
+                    fs.writeFileSync(SUPERVISOR_SWAP_FULL_FILE, '');
+                } catch (err: any) {
+                    log(`[Worker] tmux cycle paired flush failed; swap preserved for retry: ${err.message}`);
+                }
+            } else if (swapContent || swapFullContent) {
+                log(`[Worker] tmux cycle asymmetric swap (compressed=${swapContent.length}c, full=${swapFullContent.length}c) — skipping flush, swap preserved.`);
+            }
+        } catch (err: any) {
+            log(`[Worker] tmux cycle swap flush failed: ${err.message}`);
+        }
+    }
+
+    // Telemetry (F1): completeCycle around the dispatch. cost_usd = 0 — the warm
+    // session is subscription-metered, no per-token billing (the SDK cost-cap
+    // dissolves; #245 cadence governs). actions are taken directly via the API,
+    // so actions_taken stays '[]'; the curated record narrates what was done.
+    const observations = stoodDown
+        ? [`${p.cycleType} cycle (tmux) — stood down (${cap.reason || 'nothing required'})`]
+        : [wmCompressed.slice(0, 500) || `${p.cycleType} cycle (tmux) completed`];
+    const output = {
+        observations,
+        reasoning: wmCompressed,
+        actions: [],
+        self_reflection: wmFull,
+        working_memory_compressed: wmCompressed,
+        working_memory_full: wmFull,
+    } as any;
+
+    if (!stoodDown) logCycleToSession(p.cycleNumber, output, [], 0, p.cycleType);
+    supervisorStmts.completeCycle.run(
+        new Date().toISOString(), 0, 0, 0, 0, '[]',
+        JSON.stringify(observations), wmCompressed.slice(0, 1000), p.cycleId,
+    );
+    logCycleAudit(p.cycleNumber, p.cycleType, 'completed', 0, Date.now() - p.cycleStartMs);
+    if (p.cycleType === 'personal') recordRuminationTopic(p.cycleNumber, (wmCompressed || observations[0]).slice(0, 300));
+
+    broadcast({
+        type: 'supervisor_cycle',
+        data: { cycleId: p.cycleId, cycleNumber: p.cycleNumber, cycle_type: p.cycleType, observations, actions: [], reasoning: wmCompressed, cost_usd: 0 },
+    });
+    const nextDelay = getNextCycleDelay();
+    lastCycleDelay = nextDelay;
+    sendMessage({
+        type: 'cycle_complete',
+        result: {
+            cycleId: p.cycleId,
+            observations: observations.map(obs => ({ source: 'supervisor', content: obs })),
+            actionSummaries: [],
+            costUsd: 0,
+            nextDelayMs: nextDelay,
+        },
+    });
+    log(`[Worker] ${typeLabel} cycle #${p.cycleNumber} (tmux) complete${stoodDown ? ' — stand-down' : ''}`);
+}
+
 // ── Core cycle function ──────────────────────────────────────
 
 async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
@@ -1966,6 +2145,21 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             // intent (componentOverrides suppress the bulk memory bank).
             ctx.dreamSeeds = readJimDreamSeeds();
             ctx.meditationSection = computeJimDreamMeditationSection();
+        }
+
+        // ── PR-T7b (DEC-093 / Option A): tmux warm-session cycle dispatch ──
+        // Flag-off until the manifest flips jim/supervisor-cycle → 'tmux'. When
+        // flipped, the cycle runs as a warm-spoke txn (the agent acts DIRECTLY
+        // via its HTTP API) instead of the in-process agentQuery below. The SDK
+        // path below stays byte-intact = one-line rollback (flip back to 'sdk').
+        // The maintenance pre-work above (cleanup/ghost-recovery/backup-drain/
+        // dream-gradient/meditations/preflight) ran for both paths (F3 — worker
+        // slimmed, not retired). insertCycle already ran (telemetry F1).
+        if (manifestTransport('jim', 'supervisor-cycle') === 'tmux') {
+            await dispatchSupervisorCycleViaTmux({
+                cycleType, profileName, cycleId, cycleNumber, phase, ctx, cycleStartMs,
+            });
+            return;
         }
 
         let systemPrompt: string;
