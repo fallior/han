@@ -65,6 +65,10 @@ import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRes
 import { manifestTransport, manifestModelHead, manifestModelLadder } from './lib/garden-manifest';
 import { ensureSurfaceSession, enqueueForAgent, getContextPct, clearSession, observeActiveModel, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
 import type { CaptureRecord } from './lib/diary-mcp-server';
+// PR-T7b: the one slug-parameterised cycle/dispatch surface (Darron's governing
+// law — one path, many agents). leo-heartbeat is now a thin caller of it with
+// slug 'leo'; the per-agent leaves (health-signal, timeout) ride via opts.
+import { dispatchTxn, applyMeditationMarkers, MEDITATION_ACTION_BLOCK } from './lib/agent-cycle';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
 // ── Beat-failure diagnostic capture (S159 diagnostic, 2026-05-19) ──────
@@ -1106,22 +1110,9 @@ function isTmuxHeartbeat(): boolean {
     return manifestTransport('leo', HEARTBEAT_SURFACE) === 'tmux';
 }
 
-/**
- * Ensure the heartbeat-leo tmux session exists, is on a working model, is woken, and
- * is adopted — now a thin wrapper over the dispatcher's ensureSurfaceSession (promoted
- * from this function in the humans PR so heartbeat + human-response inherit ONE
- * launch/adopt path + the model-failover descent + the warm-death handoff). The model
- * ladder comes from the manifest (manifestModelLadder) so the dispatcher stays config-
- * free; the launch contract (launch-tmux-surface.sh, claude-logged, surface-index) is
- * the dispatcher's single source. Single-manager rule (T-2) preserved: the dispatcher
- * is the one runtime respawner; the systemd units are boot-launchers only.
- */
-async function ensureHeartbeatTmuxSession(): Promise<void> {
-    await ensureSurfaceSession('leo', HEARTBEAT_SURFACE, {
-        ladder: manifestModelLadder('leo', HEARTBEAT_SURFACE),
-        welcomeBack: 'welcome back Leo',
-    });
-}
+// PR-T7b: `ensureHeartbeatTmuxSession` retired — the agnostic `dispatchTxn`
+// (lib/agent-cycle.ts) calls `ensureSurfaceSession(slug, surface, {ladder,
+// welcomeBack})` directly, so the leo-specific wrapper is no longer needed.
 
 /**
  * Assemble a per-transaction beat prompt (the *-txn profiles — memory
@@ -1131,68 +1122,29 @@ async function ensureHeartbeatTmuxSession(): Promise<void> {
  * beat completes honestly empty and retries next cadence — no token black
  * hole, no retry loop, per the S74 rule).
  */
+// PR-T7b: leo-heartbeat's beat dispatch is now a THIN CALLER of the one agnostic
+// surface (`dispatchTxn` in lib/agent-cycle.ts) with slug 'leo'. The logic is
+// unchanged from T7a (Jim's post-thaw ctx-clear-outside-the-capture-try fix lives
+// in `dispatchTxn` now); the per-agent leaves — the model ladder, the welcome
+// phrase, the timeout, and the leo health-signal writes — ride in via opts. The
+// dispatcher's `ensureSurfaceSession(slug, surface, …)` replaces the old
+// `ensureHeartbeatTmuxSession()` call inside the surface.
 async function dispatchBeatViaTmux(
     txnProfile: string,
     ctx: Record<string, unknown>,
     actionBlock: string,
     beatLabel: string,
 ): Promise<CaptureRecord | null> {
-    let assembled: ReturnType<typeof buildPrompt>;
-    try {
-        assembled = buildPrompt('leo', txnProfile, ctx as any);
-    } catch (err) {
-        if (err instanceof PromptOverbudgetError) {
-            handlePromptOverbudget(err, txnProfile, beatLabel);
-            return null;
-        }
-        throw err;
-    }
-    console.log(`[Leo] ${beatLabel}: tmux txn ~${assembled.meta.est_total_tokens_chars_div_4} tokens (memory suppressed: ${assembled.meta.memory_chars} chars)`);
-    const promptDoc = `${assembled.systemPrompt}\n\n${assembled.userPrompt}\n\n${actionBlock}`;
-    let cap: CaptureRecord;
-    try {
-        await ensureHeartbeatTmuxSession();
-        cap = await enqueueForAgent('leo', HEARTBEAT_SURFACE, promptDoc, { timeoutMs: BEAT_TXN_TIMEOUT_MS });
-    } catch (err) {
-        if (err instanceof DispatchTimeoutError || err instanceof SessionNotReadyError) {
-            // Fail loud, skip the beat, retry next cadence. The dispatcher has
-            // already marked needs-reconcile on timeout; the next dispatch
-            // reconciles first (the #5 machine).
-            console.error(`[Leo] ${beatLabel}: tmux dispatch failed — ${(err as Error).message}`);
-            writeHealthSignal(
-                `tmux-dispatch (${beatLabel}): ${(err as Error).message}`,
-                currentBeatType === 'philosophy' || currentBeatType === 'personal' ? currentBeatType : undefined,
-            );
-            return null;
-        }
-        throw err;
-    }
-    // Context pressure (#66 v2 §5): reconstitute the warm session once it
-    // crosses the threshold — the natural /clear boundary, never compaction.
-    //
-    // OUTSIDE the capture try (Jim's post-thaw audit finding, 2026-06-12):
-    // post-capture maintenance must NEVER null a successful capture — the old
-    // shape returned null on a clear-timeout and silently dropped the beat's
-    // paired WM write at every 85% crossing. On clear failure: log + health-
-    // signal + drop the adoption flag so the next beat re-adopts cleanly once
-    // the (slow, ~7 min) post-clear wake finishes. The capture is already safe.
-    try {
-        const pct = getContextPct('leo', HEARTBEAT_SURFACE);
-        if (pct !== null && pct >= CTX_CLEAR_THRESHOLD_PCT) {
-            console.log(`[Leo] tmux heartbeat at ${pct}% ctx — /pfc → /clear → welcome-back`);
-            await clearSession('leo', HEARTBEAT_SURFACE, { welcomeBack: 'welcome back Leo' });
-        }
-    } catch (err) {
-        console.warn(`[Leo] ${beatLabel}: ctx-pressure clear failed (capture already safe) — ${(err as Error).message}; next beat re-adopts`);
-        writeHealthSignal(
-            `ctx-clear (${beatLabel}): ${(err as Error).message}`,
-            currentBeatType === 'philosophy' || currentBeatType === 'personal' ? currentBeatType : undefined,
-        );
-        // A failed clearSession leaves the dispatcher session ready=false, so the next
-        // ensureSurfaceSession re-adopts once the slow post-clear wake re-touches the
-        // sentinel (the adoption flag now lives in the dispatcher, not here).
-    }
-    return cap;
+    const healthType = (currentBeatType === 'philosophy' || currentBeatType === 'personal') ? currentBeatType : undefined;
+    return dispatchTxn('leo', HEARTBEAT_SURFACE, txnProfile, ctx, actionBlock, {
+        ladder: manifestModelLadder('leo', HEARTBEAT_SURFACE),
+        welcomeBack: 'welcome back Leo',
+        timeoutMs: BEAT_TXN_TIMEOUT_MS,
+        ctxClearThresholdPct: CTX_CLEAR_THRESHOLD_PCT,
+        onOverbudget: (err) => handlePromptOverbudget(err, txnProfile, beatLabel),
+        onDispatchFail: (err) => writeHealthSignal(`tmux-dispatch (${beatLabel}): ${err.message}`, healthType),
+        onCtxClearFail: (err) => writeHealthSignal(`ctx-clear (${beatLabel}): ${err.message}`, healthType),
+    });
 }
 
 /**
@@ -2137,7 +2089,7 @@ async function personalBeat(abort: AbortController, phase: DayPhase = 'work', re
     let dreamMemorySection = '';
     if (phase === 'sleep' && Math.random() < 0.33) {
         try {
-            const dreamEntry = gradientStmts.getRandom.get() as any;
+            const dreamEntry = gradientStmts.getRandomForAgent.get('leo') as any;
             if (dreamEntry) {
                 const existingTags = feelingTagStmts.getByEntry.all(dreamEntry.id) as any[];
                 const tagContext = existingTags.length > 0
@@ -2622,61 +2574,9 @@ function isMeditationTmux(surface: string): boolean {
     return manifestTransport('leo', surface) === 'tmux';
 }
 
-/**
- * Apply the re-encounter markers parsed from a meditation's curated record to
- * the contemplated entry. Faithful to the SDK meditation marker-handling:
- * recordRevisit always (the re-encounter happened); FEELING_TAG → a fresh
- * insert (Phase A, first encounter) or a history-tracked update (Phase B /
- * evening, a revisit); ANNOTATION/CONTEXT and MEMORY_COMPLETE when the surface
- * allows them. Empty text (a stand_down — nothing stirred) records only the
- * revisit plus a possible stability upgrade: the tmux equivalent of the SDK
- * path's `FEELING_TAG: none`.
- */
-function applyMeditationMarkers(
-    entryId: string,
-    text: string,
-    opts: { freshTag: boolean; allowAnnotation: boolean; allowComplete: boolean; revisitCount: number; contextDefault: string },
-): void {
-    gradientStmts.recordRevisit.run(new Date().toISOString(), entryId);
-
-    const tagMatch = text.match(/FEELING_TAG:\s*(.+)/);
-    if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
-        const tag = tagMatch[1].trim().substring(0, 100);
-        if (opts.freshTag) {
-            feelingTagStmts.insert.run(entryId, 'leo', 'revisit', tag, null, new Date().toISOString());
-        } else {
-            const updated = updateFeelingTagWithHistory(entryId, 'leo', 'revisit', tag, opts.revisitCount);
-            if (!updated) {
-                feelingTagStmts.insert.run(entryId, 'leo', 'revisit', tag, null, new Date().toISOString());
-            }
-        }
-    } else if (!opts.freshTag) {
-        maybeUpgradeTagStability(entryId, opts.revisitCount);
-    }
-
-    if (opts.allowAnnotation) {
-        const annotationMatch = text.match(/ANNOTATION:\s*(.+)/);
-        if (annotationMatch) {
-            const annotation = annotationMatch[1].trim();
-            const contextMatch = text.match(/CONTEXT:\s*(.+)/);
-            const context = contextMatch ? contextMatch[1].trim() : opts.contextDefault;
-            gradientAnnotationStmts.insert.run(entryId, 'leo', annotation, context, new Date().toISOString());
-        }
-    }
-
-    if (opts.allowComplete) {
-        const completeMatch = text.match(/MEMORY_COMPLETE:\s*(\S+)/);
-        if (completeMatch) {
-            gradientStmts.flagComplete.run(entryId);
-        }
-    }
-}
-
-const MEDITATION_ACTION_BLOCK =
-    `## This turn's actions (warm heartbeat seat — your identity is already loaded; the frame above is this turn's context only)\n` +
-    `1. Sit with the memory in the frame above — this is a meditation, a genuine re-encounter, not analysis.\n` +
-    `2. Carry the re-encounter marker lines (FEELING_TAG: / ANNOTATION: / CONTEXT: / MEMORY_COMPLETE:, as the frame requests) INSIDE your submit_response working_memory_full — the controller parses them from there to record the re-encounter on the contemplated memory.\n` +
-    `3. End the turn per the diary-tool instruction above: submit_response with a LIGHT curated record (the subject of the contemplation + what stirred — never the full sitting, which is already in your claude-logged log), or stand_down if genuinely nothing stirred.`;
+// PR-T7b: `applyMeditationMarkers(slug, …)` + `MEDITATION_ACTION_BLOCK` now live
+// in lib/agent-cycle.ts (the one slug-parameterised surface) — imported at the
+// top of this file. Leo's meditation handlers below pass slug 'leo'.
 
 /** Stamp the light conscious record as a c0/c1 (observed-banner model, S175). */
 function appendMeditationRecord(phase: string, cap: CaptureRecord): void {
@@ -2725,7 +2625,7 @@ async function meditationPhaseATmux(
     console.log(`[Leo] Meditation Phase A (tmux) — reincorporated leo/${file.level}/${file.label}`);
 
     const text = cap.mode === 'stand-down' ? '' : cap.args.working_memory_full;
-    applyMeditationMarkers(entryId, text, {
+    applyMeditationMarkers('leo', entryId, text, {
         freshTag: true, allowAnnotation: true, allowComplete: false,
         revisitCount: 0, contextDefault: `reincorporation meditation, ${today}`,
     });
@@ -2733,7 +2633,7 @@ async function meditationPhaseATmux(
 }
 
 async function meditationPhaseBTmux(phase: string, today: string): Promise<void> {
-    const entry = gradientStmts.getRandom.get() as any;
+    const entry = gradientStmts.getRandomForAgent.get('leo') as any;
     if (!entry) return;
     const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
     const tagContext = existingTags.length > 0
@@ -2747,7 +2647,7 @@ async function meditationPhaseBTmux(phase: string, today: string): Promise<void>
     const cap = await dispatchBeatViaTmux('meditation-phase-b-txn', ctx, MEDITATION_ACTION_BLOCK, `meditation-phase-b (${entry.level}/${entry.session_label}, tmux)`);
     if (!cap) return;
     const text = cap.mode === 'stand-down' ? '' : cap.args.working_memory_full;
-    applyMeditationMarkers(entry.id, text, {
+    applyMeditationMarkers('leo', entry.id, text, {
         freshTag: false, allowAnnotation: true, allowComplete: true,
         revisitCount: entry.revisit_count || 0, contextDefault: `meditation beat, ${today}`,
     });
@@ -2755,7 +2655,7 @@ async function meditationPhaseBTmux(phase: string, today: string): Promise<void>
 }
 
 async function meditationEveningTmux(phase: string, today: string): Promise<void> {
-    const entry = gradientStmts.getRandom.get() as any;
+    const entry = gradientStmts.getRandomForAgent.get('leo') as any;
     if (!entry) return;
     const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
     const tagContext = existingTags.length > 0
@@ -2770,7 +2670,7 @@ async function meditationEveningTmux(phase: string, today: string): Promise<void
     if (!cap) return;
     const text = cap.mode === 'stand-down' ? '' : cap.args.working_memory_full;
     // Evening is lighter by design — no ANNOTATION (the evening opening doesn't request one).
-    applyMeditationMarkers(entry.id, text, {
+    applyMeditationMarkers('leo', entry.id, text, {
         freshTag: false, allowAnnotation: false, allowComplete: true,
         revisitCount: entry.revisit_count || 0, contextDefault: `evening meditation, ${today}`,
     });
@@ -2933,7 +2833,7 @@ async function meditationPhaseA(
  * This is the ongoing meditation practice after all files are transcribed.
  */
 async function meditationPhaseB(today: string): Promise<void> {
-    const entry = gradientStmts.getRandom.get() as any;
+    const entry = gradientStmts.getRandomForAgent.get('leo') as any;
     if (!entry) return; // No entries yet
 
     const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
@@ -3047,7 +2947,7 @@ async function maybeRunEveningMeditation(phase: string): Promise<void> {
     }
 
     try {
-        const entry = gradientStmts.getRandom.get() as any;
+        const entry = gradientStmts.getRandomForAgent.get('leo') as any;
         if (!entry) { lastEveningMeditationDate = today; return; }
 
         const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];

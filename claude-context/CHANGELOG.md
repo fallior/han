@@ -31,6 +31,15 @@ the world-action routes); the `leo-heartbeat` refactor + Jim's cycle/meditations
   `adjust_priority`/`propose_idea`). `create_goal`/`cancel_task` already had endpoints.
 - Flag-off: `agent-cycle.ts` is unreferenced until the `leo-heartbeat` refactor wires it; the routes are
   additive. `tsc` 12-pre / 0-new.
+- **Leo wired onto the surface (instance `leo`).** `leo-heartbeat`'s `dispatchBeatViaTmux` is now a thin
+  `dispatchTxn('leo', …)` wrapper (per-agent leaves — health-signal, timeout, ladder, welcome — via opts
+  callbacks); the meditation handlers use the shared `applyMeditationMarkers('leo', …)` + the agent-scoped
+  `gradientStmts.getRandomForAgent('leo')` (the leak-fix made structural — Jim's entries can no longer
+  surface in Leo's meditations); the local `applyMeditationMarkers`/`MEDITATION_ACTION_BLOCK` + the
+  now-dead `ensureHeartbeatTmuxSession` are retired. Behaviour-preserving for the live beats
+  (logic-identical, Jim's ctx-clear-outside-the-try fix preserved in the surface); meditations stay
+  flag-off. T7a is now "the meditation surface, instance leo" — the migration's last piece is the agnostic
+  codebase's first brick. `tsc` 12-pre / 0-new.
 
 ## 2026-06-14 (S176) — PR-T7a: Leo's meditations → tmux warm-session transport (flag-off)
 

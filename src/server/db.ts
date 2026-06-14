@@ -880,6 +880,12 @@ export const gradientStmts = {
         ORDER BY created_at DESC
     `) as any,
     getRandom: db.prepare('SELECT * FROM gradient_entries ORDER BY RANDOM() LIMIT 1') as any,
+    // PR-T7b: agent-scoped random entry. The un-scoped `getRandom` above is the
+    // source of the cross-agent meditation-selector leak (S176: Jim's entries
+    // surfaced in Leo's dream-meditations 9× overnight) — a slug-parameterised
+    // meditation surface MUST select within the agent's own gradient, or a
+    // `slug='jim'` run writes a jim revisit onto a leo entry (sovereignty breach).
+    getRandomForAgent: db.prepare('SELECT * FROM gradient_entries WHERE agent = ? ORDER BY RANDOM() LIMIT 1') as any,
     recordRevisit: db.prepare(`UPDATE gradient_entries SET last_revisited = ?, revisit_count = revisit_count + 1 WHERE id = ?`) as any,
     flagComplete: db.prepare(`UPDATE gradient_entries SET completion_flags = completion_flags + 1 WHERE id = ?`) as any,
     // (`getCompleted` prepared statement removed in 2026-05-17 gradient triage.
