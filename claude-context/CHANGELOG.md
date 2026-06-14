@@ -7,6 +7,27 @@
 
 ---
 
+## 2026-06-15 (S178) — cold-launch timeouts → 20min (stopgap, Darron's call)
+
+Diagnosed a benign overnight ntfy ("Leo heartbeat degraded, expected 20 actual 40"): a
+Sun→Mon rest-day→weekday cadence step-down tripped the distress check (`actual > 2×current-base`)
+by 2ms — the monitor compared against the *current* normal, blind to the cadence that governed
+the measured interval. Same class as Robin-Hood's "Jim DOWN 118min" (last night's idle throttle).
+
+Stopgap (pending the single-source timing config — proposal thread `mqecuomw-knmzwk`): the
+cold-launch **wake** is bounded by `READY_TIMEOUT_MS` (10min), not the 15min txn budget; a
+~14min supervisor sleep-cycle cold wake was racing it. Bumped all three cold-launch tolerances
+to 20min so a legit slow reconstitution isn't failed:
+- `lib/tmux-dispatcher.ts` — `READY_TIMEOUT_MS` 10→20min (the real cold-wake bound).
+- `leo-heartbeat.ts` — `BEAT_TXN_TIMEOUT_MS` 15→20min.
+- `services/supervisor-worker.ts` — `CYCLE_TXN_TIMEOUT_MS` 15→20min.
+
+Not R001 (cadence unchanged; tolerances only). Trade-off: a wedged spoke fails-loud at 20min
+instead of 10/15 (the fail is safe — no billing, no writes). These become *definitions* in the
+single-source timing spec in the follow-up build (Jim's blocking audit).
+
+---
+
 ## 2026-06-15 (S177) — PR-T7b ENABLE step 1: manifest flip + cadence throttled thaw (R001 tune)
 
 The #66 enable, step 1 (Jim's gated sequence: flip + throttle + commit → restart → prove-single → **lift**).

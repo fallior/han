@@ -1103,7 +1103,7 @@ const HEARTBEAT_SURFACE = 'heartbeat';
 // The heartbeat tmux session name + launch-script path + adoption flag now live in
 // the dispatcher's ensureSurfaceSession (humans PR 2026-06-13) — ONE runtime
 // respawn+adopt home, shared with the human-response surfaces.
-const BEAT_TXN_TIMEOUT_MS = 15 * 60_000;   // beats can run minutes; > dispatcher default
+const BEAT_TXN_TIMEOUT_MS = 20 * 60_000;   // beats can run minutes; > dispatcher default. 20min stopgap (S178) — pending the single-source timing config.
 const CTX_CLEAR_THRESHOLD_PCT = 85;        // plan §5: /pfc → /clear → welcome-back past this
 
 function isTmuxHeartbeat(): boolean {

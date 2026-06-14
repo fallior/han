@@ -1853,7 +1853,7 @@ async function executeActions(actions: SupervisorAction[], cycleId: string): Pro
 // runSupervisorCycle stays byte-intact = one-line rollback (flip the manifest).
 // jim's per-agent leaves stay caller-side here (supervisor-swap, the cycle
 // telemetry); the full leaf normalisation is project (b).
-const CYCLE_TXN_TIMEOUT_MS = 15 * 60 * 1000;
+const CYCLE_TXN_TIMEOUT_MS = 20 * 60 * 1000; // 20min stopgap (S178) — pending the single-source timing config.
 
 async function dispatchSupervisorCycleViaTmux(p: {
     cycleType: 'supervisor' | 'personal' | 'dream';

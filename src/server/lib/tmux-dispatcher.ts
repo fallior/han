@@ -51,8 +51,11 @@ export const DELTA_REFRESH_ENABLED = false;
 // READY tuned 240s → 600s (first-warm-beat data, 2026-06-12): a full identity wake
 // measured ~6.5-7 min (18:56 launch → 19:03 sentinel), so 240s skipped one beat per
 // cold launch and timed out every post-clear welcome-back wait (Jim's post-thaw
-// audit). 600s covers the empirical wake with margin.
-const READY_TIMEOUT_MS = 10 * 60_000;
+// audit). 600s covered the heartbeat wake; raised to 20min (S178, Darron's call)
+// because the supervisor sleep-cycle COLD wake runs ~14min (fuller reconstitution)
+// > the old 10min, so a legit slow cold launch was racing the wait.
+// STOPGAP — to become a definition in the single-source cadence/timing config (S178 proposal).
+const READY_TIMEOUT_MS = 20 * 60_000;
 const TRANSACTION_TIMEOUT_MS = 12 * 60_000;
 const POLL_INTERVAL_MS = 750;
 
