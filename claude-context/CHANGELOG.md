@@ -7,6 +7,31 @@
 
 ---
 
+## 2026-06-14 (S176) — PR-T7b foundation: the agnostic cycle/dispatch surface (one path, many agents)
+
+Darron's governing law (S176): *"a `cycle <agent-slug>` where the slug parameterises the endpoint to the
+agent — one path many agents. The focus of everything we build from now on."* So T7b is built
+**agnostic-first**, not as a Jim twin of `leo-heartbeat`. This is the foundation commit (the surface +
+the world-action routes); the `leo-heartbeat` refactor + Jim's cycle/meditations land on top of it.
+
+- **`lib/agent-cycle.ts` (NEW) — the one slug-parameterised surface.** `dispatchTxn(slug, surface,
+  profile, ctx, action, opts)` is the agnostic form of T7a's Leo-baked `dispatchBeatViaTmux`
+  (buildPrompt(slug) → `ensureSurfaceSession(slug, surface)` → `enqueueForAgent` → ctx-pressure clear
+  outside the capture try); the per-(agent,surface) leaves — health-signal, timeout, ladder, welcome —
+  ride in via `DispatchTxnOpts` callbacks. `applyMeditationMarkers(slug, …)` is T7a's marker-apply with
+  the hardcoded `'leo'` → `slug` (faithful to the d60db5f branches Jim CODE-GREEN'd). `MEDITATION_ACTION_BLOCK`
+  is an agnostic const. The dispatcher primitives (`ensureSurfaceSession`/`enqueueForAgent`) were already
+  slug-parameterised; this makes the orchestration above them the same.
+- **The (a)/(b) seam:** dispatch + marker-apply + (coming) entry-selection are the one path NOW (project
+  a); the per-agent leaves that genuinely differ today (the swap-buffer the memory write lands in —
+  `heartbeat-swap` vs `supervisor-swap`; the health-signal file) stay caller-side and get normalised in
+  project (b), the truly-agent-agnostic codebase scour.
+- **F6 world-action routes** (so the tmux cycle spoke acts via HTTP, Option A): `PATCH /api/tasks/:id/priority`
+  (+ `taskStmts.updatePriority`) and `POST /api/supervisor/proposals` (column-parity with the worker's old
+  `adjust_priority`/`propose_idea`). `create_goal`/`cancel_task` already had endpoints.
+- Flag-off: `agent-cycle.ts` is unreferenced until the `leo-heartbeat` refactor wires it; the routes are
+  additive. `tsc` 12-pre / 0-new.
+
 ## 2026-06-14 (S176) — PR-T7a: Leo's meditations → tmux warm-session transport (flag-off)
 
 First half of T-7 (SDK retirement). Scoping found T-7 cleaves: the 6 meditations are `maxTurns:1`

@@ -113,6 +113,30 @@ router.post('/api/tasks/:id/cancel', (req: Request<{ id: string }>, res: Respons
 });
 
 /**
+ * PATCH /api/tasks/:id/priority -- Adjust a task's priority (PR-T7b, F6).
+ * HTTP equivalent of the supervisor worker's old `adjust_priority` action
+ * (`executeActions` → inline `UPDATE tasks SET priority`). Under the tmux cycle
+ * (Option A) the warm spoke calls this instead of writing the worker DB directly.
+ */
+router.patch('/api/tasks/:id/priority', (req: Request<{ id: string }>, res: Response) => {
+    try {
+        const { priority } = req.body;
+        if (priority === undefined || priority === null || Number.isNaN(Number(priority))) {
+            return res.status(400).json({ success: false, error: 'priority (number) is required' });
+        }
+        const task = taskStmts.get.get(req.params.id);
+        if (!task) return res.status(404).json({ success: false, error: 'Task not found' });
+
+        taskStmts.updatePriority.run(Number(priority), req.params.id);
+        const updated = taskStmts.get.get(req.params.id);
+        broadcastTaskUpdate(updated);
+        res.json({ success: true, task: updated });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
  * DELETE /api/tasks/:id -- Delete a task
  */
 router.delete('/api/tasks/:id', (req: Request<{ id: string }>, res: Response) => {

@@ -1,0 +1,178 @@
+/**
+ * Agent cycle/dispatch surface — ONE PATH, MANY AGENTS (Darron's governing law,
+ * S176, 2026-06-14: "a `cycle <agent-slug>` where the slug parameterises the
+ * endpoint to the agent, one path many agents").
+ *
+ * The tmux warm-session orchestration that was Leo-baked in `leo-heartbeat.ts`
+ * (the T7a `dispatchBeatViaTmux` + `applyMeditationMarkers`) lives here now,
+ * slug-parameterised. `leo-heartbeat` (slug `leo`) and `supervisor-worker`
+ * (slug `jim`) — and any future agent — are thin callers of this one path.
+ *
+ * The dispatcher primitives below (`ensureSurfaceSession`, `enqueueForAgent`,
+ * `getContextPct`, `clearSession`) are already slug-parameterised; this module
+ * makes the layer ABOVE them the same. The per-agent *leaves* that genuinely
+ * differ today (the swap-buffer the memory write lands in; the health-signal
+ * file) are passed in via callbacks/opts — the full normalisation of those
+ * leaves is project (b), the truly-agnostic codebase scour.
+ *
+ * PR-T7b (DEC-093 / Option A). Flag-off until the manifest flips per-surface.
+ */
+
+import { buildPrompt, PromptOverbudgetError } from './prompt-builder';
+import {
+    ensureSurfaceSession, enqueueForAgent, getContextPct, clearSession,
+    DispatchTimeoutError, SessionNotReadyError,
+} from './tmux-dispatcher';
+import type { CaptureRecord } from './diary-mcp-server';
+import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
+import { updateFeelingTagWithHistory, maybeUpgradeTagStability } from './memory-gradient';
+
+/**
+ * Per-dispatch knobs. The CORE of `dispatchTxn` (buildPrompt → ensure → enqueue
+ * → ctx-pressure clear) is agnostic; these carry the per-(agent,surface)
+ * differences that aren't yet normalised into the manifest/dispatcher.
+ */
+export interface DispatchTxnOpts {
+    /** The model failover ladder for this (slug, surface) — `manifestModelLadder(slug, surface)`. */
+    ladder: string[];
+    /** The wake phrase the spoke is welcomed back with (e.g. "welcome back Leo"). */
+    welcomeBack: string;
+    /** Dispatch timeout — beats ~15min; a multi-action cycle wants longer. */
+    timeoutMs: number;
+    /** Context-pressure /clear threshold (%, plan §5). Default 85. */
+    ctxClearThresholdPct?: number;
+    /** Called when buildPrompt is over budget — the caller logs + health-signals its way. */
+    onOverbudget?: (err: PromptOverbudgetError) => void;
+    /** Called when the dispatch fails loud (timeout / not-ready) — the caller writes its agent's health signal. */
+    onDispatchFail?: (err: Error) => void;
+    /** Called when the post-capture ctx-clear fails (capture already safe). */
+    onCtxClearFail?: (err: Error) => void;
+}
+
+/**
+ * Assemble a per-transaction prompt (the `*-txn` profiles — memory suppressed,
+ * the warm session already carries identity) and run it through the dispatcher's
+ * per-agent FIFO. Returns the capture, or null on overbudget-skip / dispatch
+ * failure (both surfaced via the opts callbacks; the turn completes honestly
+ * empty and retries next cadence — no token black hole, no retry loop, S74).
+ *
+ * This is the agnostic form of T7a's `dispatchBeatViaTmux` — same logic, the
+ * slug + surface + opts are the only things that vary (one path, many agents).
+ */
+export async function dispatchTxn(
+    slug: string,
+    surface: string,
+    txnProfile: string,
+    ctx: Record<string, unknown>,
+    actionBlock: string,
+    opts: DispatchTxnOpts,
+): Promise<CaptureRecord | null> {
+    let assembled: ReturnType<typeof buildPrompt>;
+    try {
+        assembled = buildPrompt(slug, txnProfile, ctx as any);
+    } catch (err) {
+        if (err instanceof PromptOverbudgetError) {
+            opts.onOverbudget?.(err);
+            return null;
+        }
+        throw err;
+    }
+    console.log(`[${slug}/${surface}] ${txnProfile}: tmux txn ~${assembled.meta.est_total_tokens_chars_div_4} tokens (memory suppressed: ${assembled.meta.memory_chars} chars)`);
+    const promptDoc = `${assembled.systemPrompt}\n\n${assembled.userPrompt}\n\n${actionBlock}`;
+
+    let cap: CaptureRecord;
+    try {
+        await ensureSurfaceSession(slug, surface, { ladder: opts.ladder, welcomeBack: opts.welcomeBack });
+        cap = await enqueueForAgent(slug, surface, promptDoc, { timeoutMs: opts.timeoutMs });
+    } catch (err) {
+        if (err instanceof DispatchTimeoutError || err instanceof SessionNotReadyError) {
+            // Fail loud, skip, retry next cadence. The dispatcher has already
+            // marked needs-reconcile on timeout; the next dispatch reconciles
+            // first (the #5 machine). The caller writes its agent's health signal.
+            console.error(`[${slug}/${surface}] ${txnProfile}: tmux dispatch failed — ${(err as Error).message}`);
+            opts.onDispatchFail?.(err as Error);
+            return null;
+        }
+        throw err;
+    }
+
+    // Context pressure (#66 v2 §5): reconstitute the warm session past the
+    // threshold — the natural /clear boundary, never compaction. OUTSIDE the
+    // capture try (Jim's post-thaw finding 2026-06-12): post-capture maintenance
+    // must NEVER null a successful capture. On clear failure: log + the caller's
+    // health-signal; the next dispatch re-adopts after the slow post-clear wake.
+    try {
+        const pct = getContextPct(slug, surface);
+        const threshold = opts.ctxClearThresholdPct ?? 85;
+        if (pct !== null && pct >= threshold) {
+            console.log(`[${slug}/${surface}] at ${pct}% ctx — /pfc → /clear → welcome-back`);
+            await clearSession(slug, surface, { welcomeBack: opts.welcomeBack });
+        }
+    } catch (err) {
+        console.warn(`[${slug}/${surface}] ${txnProfile}: ctx-pressure clear failed (capture already safe) — ${(err as Error).message}; next dispatch re-adopts`);
+        opts.onCtxClearFail?.(err as Error);
+    }
+    return cap;
+}
+
+/**
+ * The per-turn action block for a meditation dispatched to a warm spoke. Agnostic
+ * — the warm session (any slug) supplies identity; the markers ride inside the
+ * curated record so the controller can apply them to the contemplated entry.
+ */
+export const MEDITATION_ACTION_BLOCK =
+    `## This turn's actions (warm seat — your identity is already loaded; the frame above is this turn's context only)\n` +
+    `1. Sit with the memory in the frame above — this is a meditation, a genuine re-encounter, not analysis.\n` +
+    `2. Carry the re-encounter marker lines (FEELING_TAG: / ANNOTATION: / CONTEXT: / MEMORY_COMPLETE:, as the frame requests) INSIDE your submit_response working_memory_full — the controller parses them from there to record the re-encounter on the contemplated memory.\n` +
+    `3. End the turn per the diary-tool instruction above: submit_response with a LIGHT curated record (the subject of the contemplation + what stirred — never the full sitting, which is already in your claude-logged log), or stand_down if genuinely nothing stirred.`;
+
+/**
+ * Apply the re-encounter markers parsed from a meditation's curated record to
+ * the contemplated entry — for ANY agent (the slug authors the tag/annotation).
+ * Faithful to the SDK meditation marker-handling (Jim CODE-GREEN'd the Leo form
+ * in d60db5f): recordRevisit always; FEELING_TAG → a fresh insert (Phase A,
+ * first encounter) or a history-tracked update (Phase B / evening, a revisit);
+ * ANNOTATION/CONTEXT and MEMORY_COMPLETE when the surface allows them. Empty
+ * text (a stand_down — nothing stirred) records only the revisit (+ stability
+ * upgrade for non-fresh): the tmux equivalent of the SDK `FEELING_TAG: none`.
+ */
+export function applyMeditationMarkers(
+    slug: string,
+    entryId: string,
+    text: string,
+    opts: { freshTag: boolean; allowAnnotation: boolean; allowComplete: boolean; revisitCount: number; contextDefault: string },
+): void {
+    gradientStmts.recordRevisit.run(new Date().toISOString(), entryId);
+
+    const tagMatch = text.match(/FEELING_TAG:\s*(.+)/);
+    if (tagMatch && tagMatch[1].trim().toLowerCase() !== 'none') {
+        const tag = tagMatch[1].trim().substring(0, 100);
+        if (opts.freshTag) {
+            feelingTagStmts.insert.run(entryId, slug, 'revisit', tag, null, new Date().toISOString());
+        } else {
+            const updated = updateFeelingTagWithHistory(entryId, slug, 'revisit', tag, opts.revisitCount);
+            if (!updated) {
+                feelingTagStmts.insert.run(entryId, slug, 'revisit', tag, null, new Date().toISOString());
+            }
+        }
+    } else if (!opts.freshTag) {
+        maybeUpgradeTagStability(entryId, opts.revisitCount);
+    }
+
+    if (opts.allowAnnotation) {
+        const annotationMatch = text.match(/ANNOTATION:\s*(.+)/);
+        if (annotationMatch) {
+            const annotation = annotationMatch[1].trim();
+            const contextMatch = text.match(/CONTEXT:\s*(.+)/);
+            const context = contextMatch ? contextMatch[1].trim() : opts.contextDefault;
+            gradientAnnotationStmts.insert.run(entryId, slug, annotation, context, new Date().toISOString());
+        }
+    }
+
+    if (opts.allowComplete) {
+        const completeMatch = text.match(/MEMORY_COMPLETE:\s*(\S+)/);
+        if (completeMatch) {
+            gradientStmts.flagComplete.run(entryId);
+        }
+    }
+}

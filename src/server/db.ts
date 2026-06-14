@@ -493,6 +493,10 @@ export const taskStmts = {
     insert: db.prepare('INSERT INTO tasks (id, title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools, created_at, deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)') as any,
     insertWithGoal: db.prepare('INSERT INTO tasks (id, title, description, project_path, priority, model, max_turns, gate_mode, allowed_tools, created_at, goal_id, complexity, depends_on, auto_model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)') as any,
     updateStatus: db.prepare('UPDATE tasks SET status = ?, started_at = ? WHERE id = ?') as any,
+    // PR-T7b (F6): task priority update — the API equivalent of the supervisor
+    // worker's old inline `UPDATE tasks SET priority` (executeActions adjust_priority),
+    // so the tmux cycle spoke can adjust priority via HTTP, not the worker DB.
+    updatePriority: db.prepare('UPDATE tasks SET priority = ? WHERE id = ?') as any,
     updateCheckpoint: db.prepare('UPDATE tasks SET checkpoint_ref = ?, checkpoint_type = ?, checkpoint_created_at = ? WHERE id = ?') as any,
     updateLogFile: db.prepare('UPDATE tasks SET log_file = ? WHERE id = ?') as any,
     complete: db.prepare('UPDATE tasks SET status = ?, completed_at = ?, result = ?, cost_usd = ?, tokens_in = ?, tokens_out = ?, turns = ? WHERE id = ?') as any,

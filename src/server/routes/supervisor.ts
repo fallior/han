@@ -17,7 +17,7 @@ import {
     runSupervisorCycle, setSupervisorPaused, isSupervisorPaused,
     isSupervisorEnabled
 } from '../services/supervisor';
-import { createGoal } from '../services/planning';
+import { createGoal, generateId } from '../services/planning';
 
 const router = Router();
 const MEMORY_DIR = path.join(HAN_DIR, 'memory');
@@ -309,6 +309,38 @@ router.get('/proposals', (req: Request, res: Response) => {
             : strategicProposalStmts.list.all() as any[];
 
         res.json({ success: true, proposals });
+    } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/**
+ * POST /proposals — Create a strategic proposal (PR-T7b, F6).
+ * HTTP equivalent of the supervisor worker's old `propose_idea` action
+ * (`executeActions` → `strategicProposalStmts.insert`). Under the tmux cycle
+ * (Option A) the warm spoke calls this instead of writing the worker DB directly.
+ * Column parity with the worker insert: id, title, description, category,
+ * project_path, estimated_effort, supervisor_reasoning, cycle_id, created_at.
+ */
+router.post('/proposals', (req: Request, res: Response) => {
+    try {
+        const { title, description, category, project_path, estimated_effort, reasoning, cycle_id } = req.body;
+        if (!title || !description) {
+            return res.status(400).json({ success: false, error: 'title and description are required' });
+        }
+        const id = generateId();
+        strategicProposalStmts.insert.run(
+            id,
+            title,
+            description,
+            category || 'improvement',
+            project_path || null,
+            estimated_effort || 'medium',
+            reasoning || null,
+            cycle_id || null,
+            new Date().toISOString(),
+        );
+        res.json({ success: true, proposal_id: id });
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
     }
