@@ -59,6 +59,14 @@ export interface AgentManifest {
      *  jim's role is 'supervisor' (Jim's T-2 diff-audit catch #1: slug-derivation
      *  was right for every agent except exactly him). Defaults to the slug. */
     conversationRole?: string;
+    /** ⚠ Whether this agent's server runs the supervisor cycle (`initSupervisor` + the
+     *  scheduler). ONLY an agent whose supervisor-worker is slug-AGNOSTIC may set this true.
+     *  `supervisor-worker.ts` is jim-HARDCODED until Phase 3 → **only `jim`** today. A non-jim
+     *  holder would start a jim-hardcoded worker (the WRONG agent's cycle — the latent
+     *  double-Jim-cycle the PR-T7b gate killed). Defaults to false (unset slug → off). The real
+     *  structural guard (`worker.slug === AGENT_SLUG`) arrives with Phase-3's slug-agnostic
+     *  worker; until then this co-located warning is the mitigation. (Project-b Phase 1 — DEC-081.) */
+    runsSupervisorCycle?: boolean;
     active: boolean;
     surfaces: SurfaceManifest[];
     // ── Folded in during later phases (declared now as the foundation) ──
@@ -136,6 +144,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
             slug: 'jim',
             displayName: 'Jim',
             conversationRole: 'supervisor', // NOT the slug — Jim's diff-audit catch #1
+            runsSupervisorCycle: true, // ⚠ ONLY jim today — see the field warning (supervisor-worker.ts is jim-hardcoded until Phase 3)
             active: true,
             surfaces: [
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'supervisor-swap' },
@@ -247,6 +256,20 @@ export function displayNameForRole(role: string): string {
 export function conversationRoleFor(slug: string): string {
     const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
     return agent?.conversationRole ?? slug;
+}
+
+/**
+ * Whether the server for `slug` should run the supervisor cycle (`initSupervisor` + scheduler).
+ * Manifest capability flag, defaulting to FALSE — an unset/unknown slug never runs it, so
+ * server.ts's `else`-branch "not started" log still fires. Replaces the hardcoded
+ * `AGENT_SLUG === 'jim'` bootstrap gate (the PR-T7b double-fork fix) with a registry leaf.
+ * ⚠ Today ONLY `jim` returns true — see the warning on `AgentManifest.runsSupervisorCycle`
+ * (supervisor-worker.ts is jim-hardcoded until Phase 3). (Project-b Phase 1 — DEC-081.)
+ */
+export function runsSupervisorCycle(slug: string | undefined): boolean {
+    if (!slug) return false;
+    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
+    return agent?.runsSupervisorCycle ?? false;
 }
 
 /**

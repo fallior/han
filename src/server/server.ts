@@ -33,6 +33,7 @@ import { checkWeeklyReportSchedule } from './services/reports';
 // Maintenance removed — autonomous agents with unrestricted shell access are too dangerous
 import { advancePipeline, setCreateGoalFn, setBroadcastFn as setProductsBroadcastFn, setLoadConfigFn } from './services/products';
 import { initSupervisor, scheduleSupervisorCycle, stopSupervisor, setSupervisorBroadcastFn } from './services/supervisor';
+import { runsSupervisorCycle } from './lib/garden-manifest';
 
 // Route modules
 import promptsRouter from './routes/prompts';
@@ -331,21 +332,22 @@ orchestrator.initialize().then(status => {
 });
 
 // ── Supervisor ───────────────────────────────────────────────
-// PR-T7b: gate the supervisor to its owning agent. Before this, `initSupervisor()`
-// ran UNCONDITIONALLY in every agent-server (3847 Leo + 3848 Jim both forked a
-// `supervisor-worker` hardcoded to 'jim' — a latent double-Jim-cycle masked only by
-// the `supervisor-paused` freeze; it would fire the moment the freeze lifts). The
-// supervisor is Jim's; only Jim's server should run it. `AGENT_SLUG` was already in
-// the env, never read. Forward-compatible: in project (b) (the agnostic scour) this
-// `=== 'jim'` becomes "this server runs its OWN slug's cycle" — the first cut of the
-// agnostic `cycle <slug>`, once `supervisor-worker.ts` is slug-parameterised.
-const SUPERVISOR_AGENT = 'jim';
-if (process.env.AGENT_SLUG === SUPERVISOR_AGENT) {
+// PR-T7b gated the supervisor to its owning agent; project-b Phase 1 makes that gate
+// registry-derived. Before PR-T7b, `initSupervisor()` ran UNCONDITIONALLY in every
+// agent-server (3847 Leo + 3848 Jim both forked a `supervisor-worker` hardcoded to 'jim'
+// — a latent double-Jim-cycle masked only by the `supervisor-paused` freeze; it would
+// fire the moment the freeze lifts). The hardcoded `AGENT_SLUG === 'jim'` literal is now
+// the manifest capability `runsSupervisorCycle(slug)` (DEC-081, one-path-many-agents).
+// ⚠ Today ONLY jim's manifest sets the flag — supervisor-worker.ts is jim-hardcoded until
+// Phase 3 (see the loud warning on AgentManifest.runsSupervisorCycle). The flag is the seam:
+// once the worker is slug-agnostic (Phase 3) it becomes "this server runs its OWN slug's
+// cycle" with no code change here. An unset/unknown AGENT_SLUG returns false (else-branch fires).
+if (runsSupervisorCycle(process.env.AGENT_SLUG)) {
     initSupervisor();
     // Start first supervisor cycle after 30s (let other systems stabilise)
     setTimeout(scheduleSupervisorCycle, 30000);
 } else {
-    console.log(`[Supervisor] Not started — this server is AGENT_SLUG=${process.env.AGENT_SLUG ?? '(unset)'}, supervisor belongs to '${SUPERVISOR_AGENT}' (PR-T7b gate).`);
+    console.log(`[Supervisor] Not started — this server is AGENT_SLUG=${process.env.AGENT_SLUG ?? '(unset)'}; no manifest agent with this slug sets runsSupervisorCycle (project-b Phase 1 gate, DEC-081).`);
 }
 
 // ── Start server ─────────────────────────────────────────

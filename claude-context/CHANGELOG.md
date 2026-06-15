@@ -7,6 +7,29 @@
 
 ---
 
+## 2026-06-15 (S179) — project-b Phase-1: `server.ts:342` supervisor gate → manifest `runsSupervisorCycle` capability
+
+The last hardcoded `'jim'` literal out of the server bootstrap (DEC-081). The PR-T7b double-fork
+gate `const SUPERVISOR_AGENT='jim'; if (process.env.AGENT_SLUG === SUPERVISOR_AGENT)` is now a
+registry leaf — `if (runsSupervisorCycle(process.env.AGENT_SLUG))`:
+- New `AgentManifest.runsSupervisorCycle?: boolean` field carrying a **loud footgun warning
+  co-located ON the field** (Jim's refinement — the danger fires at the *manifest edit*, where
+  someone might set it on tenshi expecting a tenshi-supervisor; the warning must live there):
+  *only an agent whose supervisor-worker is slug-agnostic may set it; supervisor-worker.ts is
+  jim-hardcoded until Phase 3 → only `jim` today; a non-jim holder would start a jim-hardcoded
+  worker (the wrong agent's cycle).* jim's row sets `runsSupervisorCycle: true` + an inline ⚠.
+- New helper `runsSupervisorCycle(slug)` defaults **false** (`if (!slug) return false; … ?? false`)
+  — unset/unknown slug → false, so the gate's agnostic `else`-branch "not started" log still fires.
+- **Truth-table functional-proved** (both hands): jim=true; leo/tenshi/casey/unset/empty/unknown=false
+  — gate behaviour unchanged for every agent. tsc 12-baseline/0-new; grep-zero `SUPERVISOR_AGENT`.
+
+No structural guard now (deferred to Phase-3's slug-agnostic worker, where `worker.slug === AGENT_SLUG`
+becomes assertable without re-hardcoding `'jim'`); the co-located field warning is the mitigation under
+the current constraint. Behaviour-preserving (startup gate, inert until next bounce). Jim blocking-audit
+CODE GREEN. The flag is the seam — Phase 3 makes it fully honest with no code change at the gate.
+
+---
+
 ## 2026-06-15 (S178) — project-b Phase-1 (human-prompts Part A / F2): stand-down peers registry-derived
 
 The duplicate-post hole for a 3rd conversation agent (F2), closed structurally. `human-prompts.ts`
