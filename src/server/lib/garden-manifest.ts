@@ -241,3 +241,29 @@ export function displayNameForRole(role: string): string {
     const agent = GARDEN_MANIFEST.agents.find(a => (a.conversationRole ?? a.slug) === role);
     return agent?.displayName ?? (role.charAt(0).toUpperCase() + role.slice(1));
 }
+
+/** The conversation role for an agent slug — manifest `conversationRole`, defaulting to the slug
+ *  (jim→'supervisor', leo→'leo'). (Project-b Phase 1 — DEC-081.) */
+export function conversationRoleFor(slug: string): string {
+    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
+    return agent?.conversationRole ?? slug;
+}
+
+/**
+ * The human-responder STAND-DOWN peer list for `selfSlug` (comma-joined). Every agent that has a
+ * `human-response` surface contributes its seats — `session-<DisplayName>` + `<slug>-human` — EXCEPT
+ * the self human-seat (`<self>-human`); the self `session-<Name>` stays (the interactive self may
+ * answer first). Self listed first, then peers. Registry-derived, so a new conversation agent joins
+ * every stand-down list the moment it has a manifest `human-response` surface — closing the
+ * agent-#3 duplicate-post hole (F2). An agent with no conversation seat (e.g. tenshi) is excluded.
+ * (Project-b Phase 1 — DEC-081.)
+ */
+export function humanResponderPeers(selfSlug: string): string {
+    const responders = GARDEN_MANIFEST.agents.filter(a => a.surfaces.some(s => s.name === 'human-response'));
+    const self = responders.find(a => a.slug === selfSlug);
+    const peers = responders.filter(a => a.slug !== selfSlug);
+    const seats: string[] = [];
+    if (self) seats.push(`session-${self.displayName}`);
+    for (const p of peers) seats.push(`session-${p.displayName}`, `${p.slug}-human`);
+    return seats.join(', ');
+}

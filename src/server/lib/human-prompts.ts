@@ -15,6 +15,8 @@
  * priorAgentFailed) lives in the user-prompt scaffold.
  */
 
+import { conversationRoleFor, humanResponderPeers } from './garden-manifest';
+
 export const DISCORD_ATTACHMENT_HINT = `Discord attachments: when your prompt contains a "[Downloaded to]" section listing paths under ~/.han/downloads/discord/, those are real files attached to the Discord message. Open each path with the Read tool (works on text, code, images, PDFs) before responding. Never claim you cannot read Discord attachments — the paths are already in your prompt.`;
 
 interface HumanAgentSpec {
@@ -41,8 +43,8 @@ const JIM_HUMAN_SPEC: HumanAgentSpec = {
     name: 'Jim',
     longNames: 'Jim/Jimmy',
     idPrefix: 'jim-',
-    roleLabel: 'supervisor',
-    peerAgents: 'session-Jim, session-Leo, leo-human',
+    roleLabel: conversationRoleFor('jim'),
+    peerAgents: humanResponderPeers('jim'),
     closingTagline: 'Respond to the conversation. You are Jim, the supervisor. Be warm, strategic, direct.',
     sessionPeer: 'session-Jim',
 };
@@ -52,8 +54,8 @@ const LEO_HUMAN_SPEC: HumanAgentSpec = {
     name: 'Leo',
     longNames: 'Leo/Leonhard',
     idPrefix: 'leo-',
-    roleLabel: 'leo',
-    peerAgents: 'session-Leo, session-Jim, jim-human',
+    roleLabel: conversationRoleFor('leo'),
+    peerAgents: humanResponderPeers('leo'),
     closingTagline: 'Respond to the conversation. If someone is speaking to you directly, address them.',
     sessionPeer: 'session-Leo',
 };
@@ -250,7 +252,11 @@ Respond to the latest message in the Discord channel. Keep it concise and conver
     }
 
     // conversation mode (default) — LOCATOR, not embedded tail.
-    const roleLabel = ctx.roleLabel ?? 'leo';
+    // roleLabel MUST come from the controller (the agent's manifest conversationRole — leo→'leo',
+    // jim→'supervisor'); never a silent 'leo' default (would post Jim's reply as role=leo). Both
+    // controllers pass it; fail loud if a caller ever doesn't (project-b Phase 1, Jim's checkpoint).
+    if (!ctx.roleLabel) throw new Error("buildHumanResponseTxnScaffold: ctx.roleLabel is required — no silent leo-default; the controller must pass the agent's conversationRole");
+    const roleLabel = ctx.roleLabel;
     return `Conversation: "${ctx.title ?? '(untitled)'}" (id: ${ctx.conversationId ?? ''})
 
 This is a CONVERSATION turn. FETCH the current thread yourself before composing — run via the Bash tool:

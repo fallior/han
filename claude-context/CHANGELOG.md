@@ -7,6 +7,28 @@
 
 ---
 
+## 2026-06-15 (S178) — project-b Phase-1 (human-prompts Part A / F2): stand-down peers registry-derived
+
+The duplicate-post hole for a 3rd conversation agent (F2), closed structurally. `human-prompts.ts`
+no longer hardcodes the 2-agent `peerAgents` stand-down list or the `roleLabel`:
+- `peerAgents` → `humanResponderPeers(slug)` (new garden-manifest helper): every agent with a
+  `human-response` surface contributes `session-<Name>` + `<slug>-human`, minus the self human-seat.
+  A new conversation agent auto-joins every stand-down list the moment it has a manifest human-surface
+  (a seat-less agent like tenshi is excluded). **Functional-proved byte-verbatim** to both prior
+  specs → zero behavioural change for leo/jim; only the derivation moved.
+- `roleLabel` → `conversationRoleFor(slug)` (new helper); the live `buildHumanResponseTxnScaffold`
+  `?? 'leo'` default → **fail-loud** (both controllers always pass `roleLabel`; a missing one now
+  throws rather than silently posting Jim's reply as role=leo).
+- Helpers live on `garden-manifest` (one registry, the step-1 surface-family home; bare `displayName`).
+
+Part B deferred (the `HumanAgentSpec` fold → persona-registry: `closingTagline` endpoint batched with
+garden-init; `idPrefix=slug+'-'` derive in B; the id-marker self-recognition retirement stays the
+separate low-pri item). Jim flagged a collapse-phase follow-on: the controller `HUMAN_CONVERSATION_ROLE`
+const is a second derivation point of the role (agrees today) — single-source to `conversationRoleFor`
+in the collapse. Jim blocking-audit CODE GREEN. Next Phase-1 bite: `server.ts:342` (`runsSupervisorCycle`).
+
+---
+
 ## 2026-06-15 (S178) — project-b Phase-1 step-1+1b: supervisor responder-scan → registry-derived
 
 The first de-agentification edit of the agnostic scour (DEC-081). The supervisor cycle's
