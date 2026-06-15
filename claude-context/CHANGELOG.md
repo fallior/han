@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-15 (S179) — rhythm restore: revert the #245 throttled-thaw (`DAMPEN_MAX_MULTIPLIER` 5→4)
+
+Step 1 of clearing the Phase-2 fence (Jim's plan, Darron-directed). The #66-enable throttle
+(`supervisor.ts:88` idle-dampening cap widened 4x→5x, ~80→~100min) is reverted to **4x** now the
+tmux migration is proven — normal R001 cadence restored. The active base was never throttled
+(still 20min, antiphase-coherent); the R001 idle-dampening mechanism itself stays (NOT reverted to
+activity-driven scheduling — Hall of Records R001). Hall-of-records R001 doc updated to match.
+
+---
+
 ## 2026-06-15 (S179) — project-b Phase-1 #5 (the low-risk tail): **PHASE 1 COMPLETE**
 
 The do-anytime shared-infra tier of the agnostic scour is closed — no hardcoded finite agent-list
