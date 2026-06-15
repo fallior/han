@@ -258,6 +258,17 @@ export function conversationRoleFor(slug: string): string {
     return agent?.conversationRole ?? slug;
 }
 
+/** The agent slug for a conversation role — the reverse of `conversationRoleFor`. Matches the
+ *  manifest `conversationRole` (jim's is 'supervisor') OR the slug itself (leo→leo, tenshi→tenshi);
+ *  returns null for non-agent roles (human, system, discord). Registry-derived replacement for the
+ *  hardcoded `supervisor→jim` alias + the gradient-config slug-set. (Project-b Phase 1 — DEC-081.)
+ *  ⚠ An agent must have a manifest entry to participate in conversations — an agent present only in
+ *  AGENT_GRADIENT_CONFIG (e.g. casey) resolves to null here (correct: it has no conversation surface). */
+export function slugForConversationRole(role: string): string | null {
+    const agent = GARDEN_MANIFEST.agents.find(a => a.conversationRole === role || a.slug === role);
+    return agent?.slug ?? null;
+}
+
 /**
  * Whether the server for `slug` should run the supervisor cycle (`initSupervisor` + scheduler).
  * Manifest capability flag, defaulting to FALSE — an unset/unknown slug never runs it, so

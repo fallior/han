@@ -60,7 +60,7 @@ const UV_TOKEN_REVIEW_MARKER = 4000; // Flag when dream UVs exceed this
 
 // ── Agent path resolution ──────────────────────────────────────
 
-function getAgentDreamPaths(agent: AgentName = 'leo'): AgentDreamPaths {
+function getAgentDreamPaths(agent: AgentName): AgentDreamPaths {
     // Registry-driven path resolution per DEC-081 + S150 PR5. Replaces the
     // previous `agent === 'leo' ? leo-paths : jim-paths` hardcoded branch.
     // Adding a new agent's dream paths is a registry edit; no code change here.
@@ -138,7 +138,7 @@ function estimateTokens(text: string): number {
  * Run an Agent SDK query and return the result text.
  * Used for all compression calls — single-turn, no tools.
  */
-async function sdkCompress(prompt: string, systemAppend: string = '', agent: AgentName = 'leo'): Promise<string> {
+async function sdkCompress(prompt: string, systemAppend: string = '', agent: AgentName): Promise<string> {
     // ── DISABLED 2026-05-04 (S149) per Darron's direction ─────────────
     // This function spawned a stranger-Opus instance — Agent SDK call to
     // claude-opus-4-7 with no full identity loaded (tools: [], optional
@@ -216,7 +216,7 @@ interface NightBlock {
  * Parse explorations.md into individual dream entries.
  * Leo's entries use "### Beat N", Jim's use "### Dream N".
  */
-export function parseExplorations(agent: AgentName = 'leo'): DreamEntry[] {
+export function parseExplorations(agent: AgentName): DreamEntry[] {
     const paths = getAgentDreamPaths(agent);
     if (!fs.existsSync(paths.explorationsPath)) return [];
 
@@ -277,7 +277,7 @@ export function groupIntoNights(entries: DreamEntry[]): NightBlock[] {
  * Dreams enter at dream-day because they're already vague and emotional.
  * The prompt emphasises feeling over fact.
  */
-export async function compressDreamNight(night: NightBlock): Promise<{ content: string; feelingTag: string | null }> {
+export async function compressDreamNight(night: NightBlock, agent: AgentName): Promise<{ content: string; feelingTag: string | null }> {
     const raw = await sdkCompress(`Compress this night's dreams into a single emotional impression. Dreams are already vague — don't try to preserve facts, preserve the *feeling*. What did this night's dreaming taste like? What shapes moved through it?
 
 Night of: ${night.date}
@@ -287,7 +287,7 @@ Dream fragments:
 
 ${night.combined}
 
-Compress to roughly 1/3 the length. Keep the emotional texture. Drop specifics in favour of resonance. This is how dreams are remembered — not what happened, but how it felt.${FEELING_TAG_INSTRUCTION}`);
+Compress to roughly 1/3 the length. Keep the emotional texture. Drop specifics in favour of resonance. This is how dreams are remembered — not what happened, but how it felt.${FEELING_TAG_INSTRUCTION}`, '', agent);
     return parseFeelingTag(raw);
 }
 
@@ -296,14 +296,14 @@ Compress to roughly 1/3 the length. Keep the emotional texture. Drop specifics i
  * Per-row size stays similar; per-night-of-content compresses ~9:1 cumulative.
  * Shape of a week's dreaming.
  */
-export async function compressDreamToWeek(dayContent: string, label: string): Promise<{ content: string; feelingTag: string | null }> {
+export async function compressDreamToWeek(dayContent: string, label: string, agent: AgentName): Promise<{ content: string; feelingTag: string | null }> {
     const raw = await sdkCompress(`Compress these dream impressions further — from emotional impression to emotional shape. What was the *quality* of this dreaming period? Not what was dreamt, but the texture of the dreaming itself.
 
 Dreams: ${label}
 
 ${dayContent}
 
-Compress to roughly 1/3. Dreams fade fast. Keep only what lingers.${FEELING_TAG_INSTRUCTION}`);
+Compress to roughly 1/3. Dreams fade fast. Keep only what lingers.${FEELING_TAG_INSTRUCTION}`, '', agent);
     return parseFeelingTag(raw);
 }
 
@@ -311,26 +311,26 @@ Compress to roughly 1/3. Dreams fade fast. Keep only what lingers.${FEELING_TAG_
  * Compress three dream-week entries (batched) into one dream-month.
  * The feeling of a month's dreaming — what survived three weeks of forgetting.
  */
-export async function compressDreamToMonth(weekContent: string, label: string): Promise<{ content: string; feelingTag: string | null }> {
+export async function compressDreamToMonth(weekContent: string, label: string, agent: AgentName): Promise<{ content: string; feelingTag: string | null }> {
     const raw = await sdkCompress(`What remains when dreams have almost fully faded? Compress this to a wisp — the residue of dreaming, not the dreams themselves. A colour, a weight, a direction.
 
 Dreams: ${label}
 
 ${weekContent}
 
-Compress to roughly 1/3. Almost nothing should remain — but what remains should be true.${FEELING_TAG_INSTRUCTION}`);
+Compress to roughly 1/3. Almost nothing should remain — but what remains should be true.${FEELING_TAG_INSTRUCTION}`, '', agent);
     return parseFeelingTag(raw);
 }
 
 /**
  * Compress a dream to its unit vector — irreducible emotional kernel.
  */
-export async function compressDreamToUV(content: string, label: string): Promise<{ content: string; feelingTag: string | null }> {
+export async function compressDreamToUV(content: string, label: string, agent: AgentName): Promise<{ content: string; feelingTag: string | null }> {
     const raw = await sdkCompress(`What did this dreaming FEEL like? One sentence, maximum 50 characters. Not what was dreamt — the feeling that survived the forgetting.
 
 Dreams: ${label}
 
-${content}${FEELING_TAG_INSTRUCTION}`);
+${content}${FEELING_TAG_INSTRUCTION}`, '', agent);
 
     const parsed = parseFeelingTag(raw);
     const uv = parsed.content.trim();
@@ -362,7 +362,7 @@ export interface DreamProcessingResult {
  * 5. Generate unit vectors for all dream-month entries without one
  * 6. Check 4K UV marker
  */
-export async function processDreamGradient(agent: AgentName = 'leo'): Promise<DreamProcessingResult> {
+export async function processDreamGradient(agent: AgentName): Promise<DreamProcessingResult> {
     const paths = getAgentDreamPaths(agent);
     ensureDir(path.join(paths.dreamDir, 'dream-day'));
     ensureDir(path.join(paths.dreamDir, 'dream-week'));
@@ -391,7 +391,7 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
         if (night.entries.length === 0) continue;
 
         try {
-            const { content: dayContent, feelingTag } = await compressDreamNight(night);
+            const { content: dayContent, feelingTag } = await compressDreamNight(night, agent);
             fs.writeFileSync(dayPath, dayContent, 'utf-8');
             result.dayCreated.push(night.date);
             result.nightsProcessed++;
@@ -425,7 +425,7 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
                 fs.readFileSync(path.join(dayDir, f), 'utf-8')
             ).join('\n\n---\n\n');
 
-            const { content: weekContent, feelingTag } = await compressDreamToWeek(combined, `${firstDate} to ${lastDate}`);
+            const { content: weekContent, feelingTag } = await compressDreamToWeek(combined, `${firstDate} to ${lastDate}`, agent);
             fs.writeFileSync(path.join(weekDir, weekName), weekContent, 'utf-8');
             result.weekCreated.push(weekName);
 
@@ -462,7 +462,7 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
                 fs.readFileSync(path.join(weekDir, f), 'utf-8')
             ).join('\n\n---\n\n');
 
-            const { content: monthContent, feelingTag } = await compressDreamToMonth(combined, `${firstLabel} to ${lastLabel}`);
+            const { content: monthContent, feelingTag } = await compressDreamToMonth(combined, `${firstLabel} to ${lastLabel}`, agent);
             fs.writeFileSync(path.join(monthDir, monthName), monthContent, 'utf-8');
             result.monthCreated.push(monthName);
 
@@ -496,7 +496,7 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
 
         try {
             const content = fs.readFileSync(path.join(monthDir, f), 'utf-8');
-            const { content: uv, feelingTag } = await compressDreamToUV(content, label);
+            const { content: uv, feelingTag } = await compressDreamToUV(content, label, agent);
             const entry = `- **${label}**: "${uv}"\n`;
             fs.appendFileSync(uvPath, entry);
             existingUVs += entry;
@@ -523,7 +523,7 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
 
             try {
                 const content = fs.readFileSync(path.join(weekDir, f), 'utf-8');
-                const { content: uv, feelingTag } = await compressDreamToUV(content, label);
+                const { content: uv, feelingTag } = await compressDreamToUV(content, label, agent);
                 const entry = `- **${label}**: "${uv}"\n`;
                 fs.appendFileSync(uvPath, entry);
                 existingUVs += entry;
@@ -609,7 +609,7 @@ export async function processDreamGradient(agent: AgentName = 'leo'): Promise<Dr
  * Load dream gradient for non-dream instantiations.
  * Returns: 1 dream-day (last night), 4 dream-week, 8 dream-month, all UVs.
  */
-export function readDreamGradient(agent: AgentName = 'leo'): string {
+export function readDreamGradient(agent: AgentName): string {
     const paths = getAgentDreamPaths(agent);
     const cfg = gradientConfigForAgent(agent);
     const sections: string[] = [];

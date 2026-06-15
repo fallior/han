@@ -9,6 +9,7 @@ import { catalogueConversation, catalogueAllUncatalogued } from '../services/cat
 import { autoGenerateTts, autoTagLoop } from './voice';
 import { callLLM } from '../orchestrator';
 import { registeredAgentSlugs } from '../lib/agent-registry';
+import { slugForConversationRole } from '../lib/garden-manifest';
 import { orchestrate } from '../services/jemma-orchestrator';
 import { getPersonas, getAgentPersonas, getMentionPatterns } from '../services/village.js';
 
@@ -30,20 +31,21 @@ function getActiveAgents(): Set<string> {
     return new Set<string>(registeredAgentSlugs());
 }
 
-// Map a conversation_messages.role value to an agent slug. Most roles match
-// 1:1 (leo→leo, tenshi→tenshi, casey→casey); 'supervisor' is Jim's
-// conversation role for historical reasons. Returns null for non-agent roles
-// (human, darron, system, discord, user, etc.).
+// Map a conversation_messages.role value to an agent slug. Manifest-derived
+// (project-b Phase 1, DEC-081): matches the manifest conversationRole (jim's is
+// 'supervisor') or the slug itself (leo→leo, tenshi→tenshi). Returns null for
+// non-agent roles (human, darron, system, discord, user, etc.).
 //
-// Phase A Batch 5 (S155, 2026-05-10): registry-driven 1:1 mapping per DEC-081
-// (was hardcoded allowlist ['leo','tenshi','casey','sevn','six']). The
-// 'supervisor' → 'jim' special-case is preserved as HAN-bootstrap historical
-// reality; future-idea is to lift the role↔slug map into persona-registry
-// (Batch 7 Alt B) so other gardens can configure their own role vocabulary.
+// History: the old `supervisor→jim` literal + `registeredAgentSlugs()` slug-set
+// (S155 Batch 5) are now lifted into the garden-manifest reverse-lookup — this IS
+// the role↔slug-map-to-registry move the Batch-7 future-idea named.
+// ⚠ Behaviour-delta named: `casey` lives in AGENT_GRADIENT_CONFIG but NOT the
+// manifest, so `casey`→null now (was `casey`→'casey'). Verified vestigial — casey
+// has never posted a conversation role (it's the contempire project agent with no
+// conversation surface). A conversation-participating agent must have a manifest
+// entry. The live set (supervisor/leo/jim/tenshi/human) is preserved exactly.
 function roleToAgentSlug(role: string): string | null {
-    if (role === 'supervisor') return 'jim';
-    if (registeredAgentSlugs().includes(role)) return role;
-    return null;
+    return slugForConversationRole(role);
 }
 
 // Conversation participant register (#45 follow-on, S151).

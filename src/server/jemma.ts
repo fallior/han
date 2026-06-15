@@ -442,77 +442,9 @@ async function callLLMForClassification(message: any): Promise<ClassificationRes
   }
 }
 
-async function deliverToJim(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
-  // DEC-079 + DEC-080: HTTP is the only delivery path; the legacy signal-file
-  // fallback in this function's catch was a second wake-write site that violated
-  // one-write-site discipline (the parity bug to deliverToLeo's catch removed
-  // alongside). Failures now surface — the message stays in the thread, visible
-  // to Darron, per *"failures are visible by design"*.
-  const payload = {
-    recipient: 'jim',
-    message: message._enrichedContent || message.content,
-    channel: message.channel_id,
-    channelName,
-    author: message.author.username,
-    classification_confidence: classification.confidence,
-  };
-
-  try {
-    const res = await fetch(`${SERVER_URL}/api/jemma/deliver`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (!res.ok) {
-      throw new Error(`Server returned ${res.status}`);
-    }
-
-    console.log(`[Jemma] Delivered to Jim (#${channelName} — ${message.author.username}: ${(message.content || '').slice(0, 40)}...)`);
-  } catch (err) {
-    console.error(`[Jemma] Failed to deliver to Jim via server: ${(err as Error).message}`);
-    // No signal-file fallback — per DEC-080 the canonical writer lives in
-    // services/jemma-dispatch.writeSignalFile, reached via the HTTP path above.
-  }
-}
-
-async function deliverToLeo(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
-  // DEC-079 + DEC-080: HTTP is the only delivery path; the legacy signal-file
-  // fallback in this function's catch was the source of Bug A in #33 (it wrote
-  // both `leo-wake` and `leo-human-wake` directly, bypassing the persona
-  // registry's `delivery_config.wake_signals` resolution and creating a second
-  // wake-write site that violated one-write-site discipline). Failures now
-  // surface — the message stays in the thread, visible to Darron, per
-  // *"failures are visible by design"*.
-  const payload = {
-    recipient: 'leo',
-    message: message._enrichedContent || message.content,
-    channel: message.channel_id,
-    channelName,
-    author: message.author.username,
-    classification_confidence: classification.confidence,
-  };
-
-  try {
-    const res = await fetch(`${SERVER_URL}/api/jemma/deliver`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (!res.ok) {
-      throw new Error(`Server returned ${res.status}`);
-    }
-
-    console.log(`[Jemma] Delivered to Leo (#${channelName} — ${message.author.username}: ${(message.content || '').slice(0, 40)}...)`);
-  } catch (err) {
-    console.error(`[Jemma] Failed to deliver to Leo via server: ${(err as Error).message}`);
-    // No signal-file fallback — per DEC-080 the canonical writer lives in
-    // services/jemma-dispatch.writeSignalFile, reached via the HTTP path above.
-  }
-}
+// [project-b Phase 1, DEC-081] Retired the dead per-agent delivery wrappers
+// `deliverToJim` / `deliverToLeo` (0 live callers — superseded by the agnostic
+// `deliverToPersona` routing). Git-recoverable; not memory.
 
 function deliverToDarron(message: any, classification: ClassificationResult, channelName: string): void {
   try {
@@ -701,18 +633,14 @@ async function deliverToRemoteAgent(agent: string, message: any, classification:
   }
 }
 
-async function deliverToSevn(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
-  await deliverToRemoteAgent('sevn', message, classification, channelName);
-}
-
-async function deliverToSix(message: any, classification: ClassificationResult, channelName: string): Promise<void> {
-  await deliverToRemoteAgent('six', message, classification, channelName);
-}
+// [project-b Phase 1, DEC-081] Retired the dead per-agent delivery wrappers
+// `deliverToSevn` / `deliverToSix` (0 live callers — superseded by `deliverToPersona`'s
+// 'remote' case, which calls the agnostic `deliverToRemoteAgent(persona.name, …)`).
 
 /**
  * Generic persona delivery — routes based on persona.delivery type from the registry.
- * Replaces the per-agent deliverToX functions for routing decisions.
- * The specific deliverToX functions remain as implementation helpers.
+ * The sole routing path; the legacy per-agent deliverToX wrappers were retired
+ * (project-b Phase 1) now that delivery is registry-driven via `persona.delivery`.
  */
 async function deliverToPersona(persona: Persona, message: any, classification: ClassificationResult, channelName: string): Promise<void> {
   switch (persona.delivery) {
@@ -739,7 +667,7 @@ async function deliverToPersona(persona: Persona, message: any, classification: 
       break;
     }
     case 'http_local': {
-      // Try HTTP first (like deliverToJim), fall back to signal files
+      // Try HTTP first (the http_local delivery path), fall back to signal files
       try {
         const delivConfig = getDeliveryConfig(persona);
         const serverUrl = delivConfig.server_url || SERVER_URL;

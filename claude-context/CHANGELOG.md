@@ -7,6 +7,30 @@
 
 ---
 
+## 2026-06-15 (S179) — project-b Phase-1 #5 (the low-risk tail): **PHASE 1 COMPLETE**
+
+The do-anytime shared-infra tier of the agnostic scour is closed — no hardcoded finite agent-list
+survives in it. Three small cures (net −59 lines; the dead jemma wrappers go):
+- **jemma**: hard-deleted the 4 dead 0-caller delivery wrappers `deliverToJim/Leo/Sevn/Six` (the
+  live path is the agnostic `deliverToPersona`; `deliverToRemoteAgent` kept). Fixed the two dangling
+  comment-refs (the `http_local` comment + the `deliverToPersona` docstring).
+- **dream-gradient**: dropped the `agent: AgentName = 'leo'` defaults on `getAgentDreamPaths`/
+  `parseExplorations`/`processDreamGradient`/`readDreamGradient` (require the arg) and threaded
+  `agent` through `compressDream{Night,ToWeek,ToMonth,ToUV}` → `sdkCompress`. **Mechanical only** on
+  the DEC-082 retired-by-throw bodies — the throw is byte-unchanged.
+- **conversations.ts:44**: the hardcoded `supervisor→jim` alias + `registeredAgentSlugs()` slug-set
+  → `slugForConversationRole(role)` (new garden-manifest reverse-lookup: matches `conversationRole`
+  or slug). **Behaviour-delta named**: `casey` is in `AGENT_GRADIENT_CONFIG` but not the manifest →
+  `casey→null` now (was `casey→'casey'`). Verified vestigial — `SELECT DISTINCT role FROM
+  conversation_messages` = darron/discord/human/leo/supervisor/system/user; casey/tenshi never posted.
+
+Gates: conversations truth-table (incl casey→null), tsc 12-baseline/0-new, grep-zero wrapper-refs.
+Jim blocking-audit CODE GREEN. **Phase 1 complete** (responder-scan + conversation-scan + human-prompt
+peers + supervisor-startup gate + this tail — all registry-derived). Phase 2 (liveness layer) stays
+fenced behind the T-7 close + a maintenance window; Phase 3 (worker slug-parameterisation) is later.
+
+---
+
 ## 2026-06-15 (S179) — project-b Phase-1: `server.ts:342` supervisor gate → manifest `runsSupervisorCycle` capability
 
 The last hardcoded `'jim'` literal out of the server bootstrap (DEC-081). The PR-T7b double-fork
