@@ -216,3 +216,28 @@ export function manifestTransport(slug: string, surface: string): SurfaceTranspo
     const s = agent?.surfaces.find(x => x.name === surface);
     return s?.transport ?? null;
 }
+
+/**
+ * The conversation roles of every manifest agent EXCEPT `selfSlug` — each agent's
+ * `conversationRole`, defaulting to its slug. Lets a responder scan derive its peer-role
+ * set from the registry (a new agent participates the moment it's in the manifest, no data
+ * step). NOTE: `'human'` is NOT an agent conversationRole — callers must keep it explicit.
+ * (Project-b Phase 1, agnosticism scour — DEC-081.)
+ */
+export function conversationRolesExcept(selfSlug: string): string[] {
+    return GARDEN_MANIFEST.agents
+        .filter(a => a.slug !== selfSlug)
+        .map(a => a.conversationRole ?? a.slug);
+}
+
+/**
+ * Display name for a conversation role: `'human'` → `'Darron'`; else the manifest agent whose
+ * role (`conversationRole ?? slug`) matches → its `displayName`; fallback = the role capitalised.
+ * Replaces the 2-valued `sender_role==='leo'?'Leo':'Darron'` ternary (a tenshi post must render
+ * 'Tenshi', not 'Darron'). (Project-b Phase 1 — DEC-081.)
+ */
+export function displayNameForRole(role: string): string {
+    if (role === 'human') return 'Darron';
+    const agent = GARDEN_MANIFEST.agents.find(a => (a.conversationRole ?? a.slug) === role);
+    return agent?.displayName ?? (role.charAt(0).toUpperCase() + role.slice(1));
+}

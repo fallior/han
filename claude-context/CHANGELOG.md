@@ -7,6 +7,32 @@
 
 ---
 
+## 2026-06-15 (S178) — project-b Phase-1 step-1+1b: supervisor responder-scan → registry-derived
+
+The first de-agentification edit of the agnostic scour (DEC-081). The supervisor cycle's
+conversation responder-scan no longer hardcodes a finite agent list:
+- **Role-set**: `('human','leo')` → `['human', ...conversationRolesExcept('jim')]` — `'human'`
+  kept **explicit** (Jim's blocking checkpoint — it's not an agent `conversationRole`, so deriving
+  it away would blind the scan to Darron); agent-peers derived from the manifest with a `?? slug`
+  fallback (a new agent participates the moment it's in the manifest).
+- **Answered-by**: `role='supervisor'` → `SELF_ROLE` param (flagged `// TODO Phase-3` — the worker
+  is still jim-hardcoded; that's the Phase-3 headline).
+- **Mention-detect**: `JIM_MENTION_RE` → the agent's persona patterns (`getMentionPatterns`). NOTE:
+  broadens from direct-address to any-name-mention (acceptable; the supervisor observes, not responds).
+- **Sender-label**: `'leo'?'Leo':'Darron'` → `displayNameForRole` (tenshi→'Tenshi', fixing the latent
+  2-valued bug). `LEO_COOLDOWN_MS` → `PEER_RESPONSE_COOLDOWN_MS`.
+- **step-1b** (Jim's audit catch): `discussion_type NOT IN ('leo-question','leo-postulate')` →
+  `NOT LIKE '%-question' AND NOT LIKE '%-postulate'` (any agent's workshop tabs).
+- **db.ts**: dead `getPending` removed (zero consumers); `getLastSupervisorResponse` →
+  `getLastResponseByRole` (role parameterised). Conversation-scan statements only — no gradient
+  schema, DEC-068/069 untouched.
+
+New helpers `conversationRolesExcept` / `displayNameForRole` in `garden-manifest.ts`. Jim
+blocking-audit CODE GREEN. Phase 2 (liveness layer) stays fenced behind the T-7 close + a
+cycle-paused window; Phase 1 continues (next: `human-prompts.ts` TOP-5/F2, `server.ts:342`).
+
+---
+
 ## 2026-06-15 (S178) — retire the dead daily dream-gradient callers (Jim-green-lit)
 
 `processDreamGradient` → `sdkCompress`, which is retired-by-throw (DEC-082, S149): the daily

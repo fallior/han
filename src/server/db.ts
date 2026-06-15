@@ -634,8 +634,11 @@ export const conversationStmts = {
 export const conversationMessageStmts = {
     list: db.prepare('SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at ASC') as any,
     insert: db.prepare('INSERT INTO conversation_messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)') as any,
-    getPending: db.prepare(`SELECT cm.* FROM conversation_messages cm JOIN conversations c ON cm.conversation_id = c.id WHERE c.status = 'open' AND cm.role IN ('human', 'leo') AND NOT EXISTS (SELECT 1 FROM conversation_messages cm2 WHERE cm2.conversation_id = cm.conversation_id AND cm2.role = 'supervisor' AND cm2.created_at > cm.created_at) ORDER BY cm.created_at ASC`) as any,
-    getLastSupervisorResponse: db.prepare('SELECT created_at FROM conversation_messages WHERE conversation_id = ? AND role = \'supervisor\' ORDER BY created_at DESC LIMIT 1') as any,
+    // getPending RETIRED (project-b Phase 1, S178): DEAD — zero consumers across src/server; the
+    // live responder scan is the worker-local query in supervisor-worker.ts. Removed rather than
+    // carry a hardcoded ('human','leo') / 'supervisor' role-list in shared infra (DEC-081).
+    // role parameterised (was hardcoded 'supervisor') so the cooldown check is the responder's OWN role:
+    getLastResponseByRole: db.prepare('SELECT created_at FROM conversation_messages WHERE conversation_id = ? AND role = ? ORDER BY created_at DESC LIMIT 1') as any,
 };
 
 export const conversationLoopStmts = {

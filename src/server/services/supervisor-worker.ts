@@ -45,7 +45,8 @@ import { jimSupervisorCycleActionBlock, JIM_REFLECTIVE_CYCLE_ACTION_BLOCK } from
 // (supervisor-swap, the supervisor_cycles telemetry, no health-signal file —
 // the supervisor's "health" is the cycle DB + sendMessage, not leo's signal).
 import { dispatchTxn, applyMeditationMarkers, MEDITATION_ACTION_BLOCK, runReincorporationMeditationTmux, runReencounterMeditationTmux } from '../lib/agent-cycle';
-import { manifestTransport, manifestModelLadder, manifestModelHead } from '../lib/garden-manifest';
+import { manifestTransport, manifestModelLadder, manifestModelHead, conversationRolesExcept, displayNameForRole } from '../lib/garden-manifest';
+import { getPersona, getMentionPatterns } from './village';
 import { observeActiveModel } from '../lib/tmux-dispatcher';
 import type { CaptureRecord } from '../lib/diary-mcp-server';
 import { spawn as spawnChild } from 'node:child_process';
@@ -901,38 +902,50 @@ function buildStateSnapshot(): string {
 
     // Pending conversations
     try {
+        // Project-b Phase 1 (agnostic responder scan, DEC-081): 'human' kept EXPLICIT — it is NOT
+        // an agent conversationRole, so deriving it away would blind the scan to Darron (Jim's
+        // blocking checkpoint). Agent-peers are registry-derived from the manifest. SELF_ROLE is the
+        // constant 'supervisor' for now — the worker is still jim-hardcoded (the Phase-3 headline);
+        // this scan is the safe shared-infra step-1.
+        const SELF_ROLE = 'supervisor';                                 // TODO Phase-3: AGENT_SLUG's conversationRole
+        const scanRoles = ['human', ...conversationRolesExcept('jim')]; // TODO Phase-3: conversationRolesExcept(selfSlug)
+        const rolePlaceholders = scanRoles.map(() => '?').join(', ');
         const pendingConversations = workerDb.prepare(`
             SELECT DISTINCT c.id, c.title, cm.role as sender_role, cm.content, cm.created_at
             FROM conversations c
             JOIN conversation_messages cm ON c.id = cm.conversation_id
             WHERE c.status = 'open'
-            AND (c.discussion_type IS NULL OR c.discussion_type NOT IN ('leo-question', 'leo-postulate'))
-            AND cm.role IN ('human', 'leo')
+            AND (c.discussion_type IS NULL OR (c.discussion_type NOT LIKE '%-question' AND c.discussion_type NOT LIKE '%-postulate'))
+            AND cm.role IN (${rolePlaceholders})
             AND NOT EXISTS (
                 SELECT 1 FROM conversation_messages cm2
                 WHERE cm2.conversation_id = c.id
-                AND cm2.role = 'supervisor'
+                AND cm2.role = ?
                 AND cm2.created_at > cm.created_at
             )
             ORDER BY cm.created_at DESC
-        `).all() as any[];
+        `).all(...scanRoles, SELF_ROLE) as any[];
 
-        const LEO_COOLDOWN_MS = 10 * 60 * 1000;
+        const PEER_RESPONSE_COOLDOWN_MS = 10 * 60 * 1000;
         const filteredConversations = pendingConversations.filter((conv: any) => {
-            if (conv.sender_role === 'human') return true;
-            const lastResponse = conversationMessageStmts.getLastSupervisorResponse.get(conv.id) as any;
+            if (conv.sender_role === 'human') return true; // humans never wait on a peer cooldown
+            const lastResponse = conversationMessageStmts.getLastResponseByRole.get(conv.id, SELF_ROLE) as any;
             if (!lastResponse) return true;
-            return (Date.now() - new Date(lastResponse.created_at).getTime()) >= LEO_COOLDOWN_MS;
+            return (Date.now() - new Date(lastResponse.created_at).getTime()) >= PEER_RESPONSE_COOLDOWN_MS;
         });
 
         if (filteredConversations.length > 0) {
             parts.push(`## Pending Conversations (${filteredConversations.length})`);
-            const JIM_MENTION_RE = /\b(hey\s+jim|@jim|jim[,:])\b/i;
+            // Mention-detect from the agent's OWN persona patterns (registry-driven). ⚠ AUDIT NOTE:
+            // jim's persona patterns are \bjim\b / \bjimmy\b — ANY name-mention, BROADER than the old
+            // direct-address regex (hey jim/@jim/jim:); covers all prior cases plus bare mentions.
+            const selfPersona = getPersona('jim');  // TODO Phase-3: getPersona(selfSlug)
+            const mentionRes = selfPersona ? getMentionPatterns(selfPersona).map(p => new RegExp(p, 'i')) : [];
             for (const conv of filteredConversations.slice(0, 5)) {
-                const sender = conv.sender_role === 'leo' ? 'Leo' : 'Darron';
+                const sender = displayNameForRole(conv.sender_role);
                 const msgPreview = (conv.content || '').slice(0, 200).replace(/\n/g, ' ');
                 const timestamp = conv.created_at?.split('T')[0] || '?';
-                const mentioned = JIM_MENTION_RE.test(conv.content || '') ? ' [MENTIONED BY NAME — respond promptly]' : '';
+                const mentioned = mentionRes.some(re => re.test(conv.content || '')) ? ' [MENTIONED BY NAME — respond promptly]' : '';
                 parts.push(`- [${conv.id}] ${conv.title} (from ${sender}): "${msgPreview}..." (posted: ${timestamp})${mentioned}`);
             }
             if (filteredConversations.length > 5) parts.push(`  ... and ${filteredConversations.length - 5} more`);
