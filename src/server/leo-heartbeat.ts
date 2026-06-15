@@ -2620,6 +2620,25 @@ async function meditationEveningTmux(phase: string, today: string): Promise<void
     await runReencounterMeditationTmux('leo', 'evening', today, leoMeditationDispatch, (cap) => appendMeditationRecord(phase, cap));
 }
 
+// [project-b fence-clear, S179] One-shot in-process force-trigger for a phase-b re-encounter,
+// to deterministically reach the T-7 confirm (Jim asserts the live DB re-encounter) instead of
+// waiting for the scheduled slot. Runs through the REAL meditation path + this process's FIFO —
+// an external dispatch can't (the dispatcher's session/queue Maps are per-process; a separate
+// process would send-keys into the live spoke mid-txn → collision). One-shot CONSUMED command
+// (the jim-wake/leo-wake class), NOT the prohibited session-active liveness flag.
+async function maybeForceMeditation(phase: string): Promise<void> {
+    const sig = path.join(SIGNALS_DIR, 'force-meditation-leo');
+    if (!fs.existsSync(sig)) return;
+    try { fs.unlinkSync(sig); } catch { /* ignore */ }   // CLEAR-FIRST (Jim's refinement): consume before run so a throw can't re-fire next beat
+    if (!isMeditationTmux('meditation-phase-b')) {
+        console.log('[Leo] force-meditation signal consumed but phase-b is not on tmux — skipping');
+        return;
+    }
+    const today = new Date().toISOString().split('T')[0];
+    console.log('[Leo] force-meditation signal consumed → running phase-b re-encounter now (fence-clear)');
+    await meditationPhaseBTmux(phase, today);
+}
+
 async function maybeRunMeditation(phase: string): Promise<void> {
     // Run once daily during a work or personal beat (not sleep/dream)
     if (phase === 'sleep') return;
@@ -3020,6 +3039,11 @@ async function heartbeat(): Promise<void> {
     // acquisition fails silently). Agent-scoped: heartbeat-Leo drains Leo's
     // queue only.
     await maybeBackupQueueDrain();
+
+    // [project-b fence-clear, S179] One-shot force-meditation check — runs on every beat
+    // (before the dream early-return) so a forced phase-b fires on the next beat regardless
+    // of phase. Clear-first/one-shot; in-process (real FIFO, no cross-process collision).
+    await maybeForceMeditation(phase);
 
     // Robin Hood: check all service health FIRST — before anything else
     checkJimHealth();

@@ -7,6 +7,21 @@
 
 ---
 
+## 2026-06-15 (S179) — fence-clear Step 2: in-process meditation force-trigger
+
+A one-shot signal-file force-trigger to deterministically reach the T-7 meditation confirms
+(Jim asserts a live re-encounter) instead of waiting for the scheduled slot. `maybeForceMeditation`
+(leo-heartbeat, top of `heartbeat()` before the dream early-return) + `maybeForceJimMeditation`
+(supervisor-worker, cycle pre-work) check `~/.han/signals/force-meditation-<slug>`, **clear it first**
+(consume-before-run, so a throw can't re-fire), guard phase-b-on-tmux, and run the real in-process
+`meditationPhaseBTmux`/`jimMeditationReencounterTmux`. Runs through the owning process's real FIFO —
+an external dispatch would collide with a live beat/cycle (the dispatcher's session/queue Maps are
+per-process). One-shot consumed command (the `*-wake` class), NOT the prohibited `session-active`
+flag. jim fires immediately via `POST /api/supervisor/trigger`; leo on the next beat. Scoped
+force-hooks (Phase-3 collapses the two loops into one path). Jim blocking-audit GREEN. Not DEC-068/069.
+
+---
+
 ## 2026-06-15 (S179) — rhythm restore: revert the #245 throttled-thaw (`DAMPEN_MAX_MULTIPLIER` 5→4)
 
 Step 1 of clearing the Phase-2 fence (Jim's plan, Darron-directed). The #66-enable throttle

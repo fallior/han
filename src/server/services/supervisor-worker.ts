@@ -1046,6 +1046,25 @@ async function jimMeditationReencounterTmux(kind: 'phase-b' | 'evening', today: 
     await runReencounterMeditationTmux('jim', kind, today, jimMeditationDispatch, jimAppendMeditationRecord);
 }
 
+// [project-b fence-clear, S179] One-shot in-process force-trigger for a phase-b re-encounter,
+// to deterministically reach the T-7 confirm (Jim asserts the live DB re-encounter) instead of
+// waiting for the scheduled slot. Runs through the REAL meditation path + this process's FIFO
+// (an external dispatch would collide with the live spoke — the dispatcher's Maps are per-process).
+// One-shot CONSUMED command (the jim-wake class), NOT the prohibited session-active liveness flag.
+// Fired immediately via POST /api/supervisor/trigger (the forced cycle reaches this pre-work).
+async function maybeForceJimMeditation(): Promise<void> {
+    const sig = path.join(SIGNALS_DIR, 'force-meditation-jim');
+    if (!fs.existsSync(sig)) return;
+    try { fs.unlinkSync(sig); } catch { /* ignore */ }   // CLEAR-FIRST: consume before run so a throw can't re-fire next cycle
+    if (!isJimMeditationTmux('meditation-phase-b')) {
+        log('[Worker] force-meditation signal consumed but jim phase-b is not on tmux — skipping');
+        return;
+    }
+    const today = new Date().toISOString().split('T')[0];
+    log('[Worker] force-meditation signal consumed → running jim phase-b re-encounter now (fence-clear)');
+    await jimMeditationReencounterTmux('phase-b', today);
+}
+
 async function maybeRunJimMeditation(phase: string): Promise<void> {
     // Skip during sleep — meditation is a waking practice
     if (phase === 'sleep') return;
@@ -2175,6 +2194,7 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
         // stranger-Opus surface; cascade is now event-driven via the queue.)
         // (Daily active cascade call removed in 2026-05-17 gradient triage
         // per DEC-086. Insert-driven cascade is canonical.)
+        await maybeForceJimMeditation();
         await maybeRunJimMeditation(phase);
         await maybeRunJimEveningMeditation(phase);
 
