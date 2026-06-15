@@ -123,8 +123,12 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // it exists no beat fires regardless of this row. Rollback = flip
                 // transport back to 'sdk' (the SDK path is kept in leo-heartbeat.ts).
                 { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'heartbeat-swap' }, // ⏪ model reverted to Opus 2026-06-13 (Fable access dropped); transport stays tmux
+                // PR-T7a STAGED ENABLE (2026-06-15, S178): phase-b FIRST sdk→tmux — Jim runs
+                // the live re-encounter DB assertion (DEC-086 trio: recordRevisit + feeling-tag
+                // + annotation) on the next phase-b before phase-a + evening flip. Rollback =
+                // flip back to 'sdk' + restart leo-heartbeat (the SDK path is byte-intact).
                 { name: 'meditation-phase-a', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
-                { name: 'meditation-phase-b', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
+                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
                 { name: 'meditation-evening', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
             ],
         },

@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-06-15 (S178) — PR-T7a staged enable: Leo meditation-phase-b → tmux (phase-b first)
+
+The "both agents" half of T-7 — Leo's meditations onto the warm transport. Staged per Jim's
+method: flip **phase-b only** first (`garden-manifest.ts` leo `meditation-phase-b` `sdk`→`tmux`,
+`OPUS_LADDER`), restart leo-heartbeat; Jim runs the live re-encounter DB assertion (DEC-086 trio:
+`recordRevisit` + feeling-tag + annotation written to Leo's gradient) on the next phase-b fire;
+phase-a + evening flip after his GREEN. The T7a tmux handlers were built + Jim-audited GREEN at
+`d60db5f`; this is the manifest enable Jim handed to Leo. Rollback = flip back to `sdk` + restart
+(SDK path byte-intact). Firing note: phase-b runs once daily on a non-sleep beat only when phase-a
+has no untranscribed-file backlog (`phaseACount === 0`).
+
+---
+
 ## 2026-06-15 (S178) — T-8 documentation close (gatekeeper edits + Jim's status/plan push)
 
 The #66 migration's documentation close (the *code*-close — SDK-shim retirement — deliberately
