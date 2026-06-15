@@ -7,6 +7,24 @@
 
 ---
 
+## 2026-06-15 (S178) — fix: meditation reincorporation regex starved phase-b + bloated the gradient
+
+`findUntranscribedFiles` stripped the level suffix with `/-c\d$/` — **single-digit only**, so
+two-digit levels (c10–c18) never stripped: `2026-03-21-c10.md` → `2026-03-21-c10` (matched no
+DB label) instead of `2026-03-21` (matched in-cascade → skip). Effect: **118** deep-level
+flat-files perpetually mis-flagged "untranscribed" → reincorporated as fresh `reincorporated`
+entries at ~6/day ("met for the tenth time" deep revisits) = gradient bloat, AND — because
+phase-a (MAX 3/day) never emptied — **phase-b never fired** (it runs only at `phaseACount===0`),
+starving the just-enabled tmux phase-b and blocking Jim's live assertion (~39 days' worth).
+
+Fix: `/-c\d$/` → `/-c\d+$/` in **both** finders — Leo's `leo-heartbeat.ts:2436` and Jim's
+identical `supervisor-worker.ts:239`. Verified: c5/c10/c12/c18 all strip to the base date which
+resolves in-cascade → skipped; compound single-digit-tail labels unchanged (`$`-anchored, strips
+only the last level). The **118 existing** mis-reincorporated entries are a separate cleanup
+(DEC-069 no-delete; quarantine like #17 or leave). Gradient-area → Jim's blocking audit.
+
+---
+
 ## 2026-06-15 (S178) — PR-T7a staged enable: Leo meditation-phase-b → tmux (phase-b first)
 
 The "both agents" half of T-7 — Leo's meditations onto the warm transport. Staged per Jim's

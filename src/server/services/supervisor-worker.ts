@@ -236,7 +236,9 @@ function findJimUntranscribedFiles(): { filePath: string; level: string; content
 
         const files = fs.readdirSync(levelDir).filter((f: string) => f.endsWith('.md'));
         for (const file of files) {
-            const label = file.replace('.md', '').replace(/-c\d$/, '');
+            // \d+ not \d — two-digit levels (c10–c18) must strip too (S178; same bug as Leo's
+            // findUntranscribedFiles — single-digit-only regex perpetually mis-flags deep flat-files).
+            const label = file.replace('.md', '').replace(/-c\d+$/, '');
             const existing = (gradientStmts.getBySession.all(label) as any[]).filter(
                 (r: any) => r.agent === 'jim'
             );

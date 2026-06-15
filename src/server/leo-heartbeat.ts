@@ -2433,7 +2433,10 @@ function findUntranscribedFiles(): { filePath: string; agent: 'leo'; level: stri
 
             const files = fs.readdirSync(levelDir).filter(f => f.endsWith('.md'));
             for (const file of files) {
-                const label = file.replace('.md', '').replace(/-c\d$/, '');
+                // \d+ not \d — two-digit levels (c10–c18) must strip too, else their flat-files
+                // never match a DB label and reincorporate perpetually (S178: 118-file phase-a
+                // backlog that starved phase-b + bloated the gradient).
+                const label = file.replace('.md', '').replace(/-c\d+$/, '');
                 // Check if this file has a DB entry (any entry matching this label for this agent)
                 const existing = (gradientStmts.getBySession.all(label) as any[]).filter(
                     (r: any) => r.agent === agent
