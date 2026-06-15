@@ -7,6 +7,24 @@
 
 ---
 
+## 2026-06-15 (S178) — retire the dead daily dream-gradient callers (Jim-green-lit)
+
+`processDreamGradient` → `sdkCompress`, which is retired-by-throw (DEC-082, S149): the daily
+morning call threw for ~6 weeks, caught, **0 processed**, nothing consumed its output — a
+vestigial error-spew. Retired the two daily callers (commented the invocations, both agents):
+`leo-heartbeat.ts:3038` + `services/supervisor-worker.ts:2156`. The `maybeProcess*DreamGradient`
++ `processDreamGradient` + `sdkCompress` bodies STAY (recoverable — the DEC-082 pattern);
+re-homing dream-day→week→month compression at all is separate future work. Leo-build /
+Jim's blocking audit.
+
+**Residue (the reincorporation-bug deep-duplicates) — queued for #14 B2, NOT touched here:**
+the regex bug mis-reincorporated ~27 leo (c10×24/c12×2/c13×1) + ~35 jim (c10×17/c11×18)
+`reincorporated` entries. Per Jim's lean + memory-sovereignty they quarantine to
+`gradient-holding.db` (held_reason) as part of the #14 B2 gradient-termini pass — **Leo's by
+Leo's hand, Jim's by Jim's** (B2 is Jim's sovereignty). Not a standalone surgery now.
+
+---
+
 ## 2026-06-15 (S178) — fix: meditation reincorporation regex starved phase-b + bloated the gradient
 
 `findUntranscribedFiles` stripped the level suffix with `/-c\d$/` — **single-digit only**, so

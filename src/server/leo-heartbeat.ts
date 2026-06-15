@@ -3034,8 +3034,13 @@ async function heartbeat(): Promise<void> {
         await resolveModel();
     }
 
-    // Morning dream gradient processing (both Leo and Jim)
-    await maybeProcessDreamGradient(phase);
+    // Morning dream gradient processing — CALLER RETIRED (S178, Jim-green-lit).
+    // processDreamGradient → sdkCompress, which is retired-by-throw (DEC-082, S149):
+    // it threw every morning for ~6 weeks, caught, 0 processed, nothing consumed its
+    // output. Retiring the daily caller stops the error-spew. The maybeProcessDreamGradient
+    // + processDreamGradient bodies STAY (recoverable, the DEC-082 pattern). Re-homing
+    // dream-day→week→month compression at all is separate future work.
+    // await maybeProcessDreamGradient(phase);
 
     // (Daily session gradient processing call removed in Phase 3 of the
     // 2026-04-29 cutover — DEC-079. processGradientForAgent was a third

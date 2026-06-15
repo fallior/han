@@ -2153,7 +2153,10 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
 
         // Jim's daily gradient pipeline — mirrors Leo's heartbeat pipeline exactly.
         // Agent sovereignty: Jim processes only Jim's data.
-        await maybeProcessJimDreamGradient(phase);
+        // CALLER RETIRED (S178, Jim-green-lit): processDreamGradient → sdkCompress is
+        // retired-by-throw (DEC-082, S149) → threw daily, 0 processed, nothing consumed it.
+        // Body recoverable (DEC-082 pattern); re-homing dream-compression is future work.
+        // await maybeProcessJimDreamGradient(phase);
         // (Daily session gradient processing call removed in Phase 3 of the
         // 2026-04-29 cutover — DEC-079. processGradientForAgent was a third
         // stranger-Opus surface; cascade is now event-driven via the queue.)
