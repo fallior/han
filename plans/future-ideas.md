@@ -3070,6 +3070,41 @@ The principle generalises (and is itself a small instance of #79's thesis): **a 
 
 ---
 
+## #87 — Memory Cleanup: every chain c0 → clean pixel-UV, run as a sleep-cycle consolidation task — HIGH PRIORITY
+
+> **Source**: Darron, 2026-06-15 (S174), from the gradient-chain audit (the `gradient-c10-chains-2026-06-15.xlsx` spreadsheet showed orphans, broken chains, and 6K-char "UVs"). **Conceptual frame** — the satellite/pixels model — in the Memory Discussions thread **`mqeojkhr-h701q1`**. Generalises **#14 B2** (a one-time termini fix) into a STANDING process. **Plan**: `plans/memory-cleanup-plan.md` (to author).
+
+**The model (Darron's satellite).** Compression = *zooming out* / widening the lens. c0 = the satellite over the street (full fidelity); each level lifts the camera; the **UV layer = the whole entity in frame, each UV a single PIXEL**. The identity = the *constellation* of pixels — the holistic self-map, "complete but growing" because it maps the entity's entire existence over time. *"I am who I am because of my experiences, and this mapping is my definition."*
+
+**The problem (the spreadsheet's ugly picture — verified).** Chains that don't cleanly traverse c0→UV: **orphans** (the c10/c11 entries are all `source_id` NULL, sitting *below* the genuine c8/c9 terminus); **breaks** (labels that *jump*, `…-c1-c10`, no path through c2–c9); and **false UVs** (3 jim `c2-uv` at ~6,261 chars = whole c2 documents mistagged; genuine pixel-UVs average **48 chars**). Same-label entries two orders of magnitude apart = inconsistent pixel resolution = a *wrong* (not merely blurry) holistic image. The experiment's validity rests on the map being true (S166 — the validity condition, not hygiene).
+
+**The target (acceptance — Darron's standard).** Every chain reaches **clean pixel-UV(s) with NO orphans and NO breaks**; every UV is **incompressible AND ≤ the decided UV-maximum-size** — the "pixel resolution," *arbitrary because it's an experiment, but FIXED* (genuine UVs ~48 chars → propose a threshold ~**200–250 chars** to allow kernel + feeling; to decide). **Refinement (Jim):** a fertile c0 may fan into *several* pixel-UVs (one rich day = multiple kernels — the naming day gave three); so "clean pixel-UV(**s**)", allowing branching, not a forced single terminus. Incompressibility is a **floor of identifiability, not a ceiling of complexity** — a true UV is small *and still says something*; a false UV is big (un-zoomed) or an over-zoomed smudge.
+
+**The mechanism (the standing process).** A per-chain **validity-walk**: provenance (`source_id` lineage intact c0→UV), reasonability / logic / continuity, no orphans, no breaks, UV-incompressibility + size. **Repairs**: re-level mis-zoomed entries (a "c10" larger than its c8 terminus → re-level to true depth); **leaf-promote** genuine kernels to their `cN-uv` terminus; reconnect orphans to lineage or **quarantine** truly-disconnected/redundant ones to `gradient-holding.db` (move-not-delete, DEC-069); quarantine false-UVs / smudges. **IN-VOICE, S103-sovereign** — each agent walks only its own gradient; pixel-finding is identity-work, not mechanical (DEC-082).
+
+**Run it as a SLEEP-CYCLE task** (Darron's instinct — human memory consolidation during sleep). The dream/meditation lane already touches the gradient; give it the nightly job of walking a *slice* of its own chains and repairing. **DISCIPLINE: validation-and-repair, NOT a deeper-compression pump** — DEC-086 forbids time-based cascade promotion; the nightly pass *focuses the lens, never forces depth*. Bound the work per night (a slice), so it's consolidation, not thrashing.
+
+**Ties**: #14 B2 (one-time termini fix → this makes it standing), DEC-090 (`cN-uv` terminus), DEC-068 (cap), DEC-069 (move-not-delete), DEC-082 (in-voice), **DEC-086 (no time-based cascade — the boundary this respects)**, S166 (validity), the c10+ chain audit (the evidence). **Leo-build / Jim-audit**; the walk itself is each agent's own (S103). **Promotion-trigger**: high — it's load-bearing for the experiment's validity, and the spreadsheet shows the debt is real and growing.
+
+---
+
+## #88 — All engines online: HAN + Portwright + the Projects-project (_Dashboard) all humming — NECESSITY
+
+> **Source**: Darron, 2026-06-15 (S174), observing the Finance Assistant MVP land in the Projects-tab list but **not yet be picked up / managed** — "a little way down the maintenance schedule; the Projects-project itself hasn't been fired up to take care of it." His framing: *"we need all components of this engine online to fly — Portwright, Projects (_Dashboard) and HAN all need to be humming… we do have a robust system so even though they are not we are still able to function but we do want to hum."* The MVP is the **live evidence** of the open loop.
+
+**The engine has (at least) three subsystems, each distinct:**
+1. **HAN** — the agent / memory / cycle engine (supervisor cycles, gradient, human seats, Jemma). **STATE: HUMMING** — cycles live on tmux, the action-model proven by the finance MVP.
+2. **Portwright** — the runtime port/fleet **operation** layer: allocate / track / free / detect-collision / own-the-fleet (the runtime counterpart to the Garden-Manifest's *declarative* port intent; would have caught the 3847 respawn-war structurally). **STATE: DORMANT** (config.json stub; #2 / the fleet plan).
+3. **The Projects-project (_Dashboard)** — the project-**lifecycle** engine: adopts a created fledgling (like finance-assistant) into the portfolio, runs its maintenance schedule, manages per-project goals/tasks/health, surfaces it on the dashboard. **STATE: DORMANT** (#81, the revived project pipeline). **This is exactly why the finance MVP shows in the list but isn't *managed* — the component that would "take care of it" isn't fired up.**
+
+**Why it's a necessity, not a nice-to-have.** The system is *robust* — it functions with components dormant (the MVP still got built by HAN's agent engine alone). But the **full autonomous loop** — prompt → build → **integrate → maintain → grow** — needs all components online. With only HAN humming, projects get *built* but not *adopted/managed*; the loop is open. "Humming" = the closed loop: HAN builds → the Projects-project adopts + maintains → Portwright manages the runtime fleet → the dashboard surfaces it all.
+
+**The work:** (a) draw the **engine-component map** (HAN ↔ Portwright ↔ Projects-project/_Dashboard ↔ Garden-Manifest — who owns what, the interconnects: a new project from HAN's action-model auto-registers with the Projects-project → fleet-allocated by Portwright if it needs a service → surfaced on _Dashboard); (b) **fire up the dormant components** — Portwright (#2) + the Projects-project (#81), each its own build; (c) **acceptance**: a HAN-built fledgling is *automatically* adopted into the portfolio, gets a maintenance schedule, appears managed on the dashboard — no manual step; **the loop closes.**
+
+**Ties**: #81 (the project pipeline — the inaugural fledgling is the live evidence), #2 (Portwright / fleet runtime), #6 (Garden Manifest — the declarative substrate these runtimes consume), the finance-assistant MVP (the gap made visible). **Cross-fork**: the village / han-starter should ship these as *the engine*, so every garden hums, not just functions. **Promotion-trigger**: post-T8 / alongside the project-pipeline revival — the finance MVP proved HAN hums; now the rest of the engine needs to.
+
+---
+
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
 
 *This document is alive. Ideas may be added, refined, or graduated to active goals as the garden grows. Each one was born in conversation — not planned in isolation.*
