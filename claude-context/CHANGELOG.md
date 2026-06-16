@@ -7,6 +7,27 @@
 
 ---
 
+## 2026-06-16 (S180) — fix: #13 worker-local `getLastResponseByRole` (latent crash from d6b9527)
+
+Caught by the dual orphan-sweep (Darron's call for two independent passes). The S178 agnostic
+responder-scan (`d6b9527`) added `getLastResponseByRole` to `db.ts:641` (role-parameterised) and
+switched `buildStateSnapshot`'s peer-cooldown call to it — but never added the statement to the
+**worker's own** `conversationMessageStmts` copy (the forked worker has its own `workerDb.prepare`
+set). `:842` therefore called an undefined member → runtime `TypeError` whenever a pending **peer**
+(non-human) conversation existed during a supervisor cycle. Masked by `conversationMessageStmts: any`
+(defeats tsc) + quiet-lane cycles never hitting the peer branch; **both Leo and Jim audited d6b9527
+GREEN and missed it.**
+
+- `supervisor-worker.ts`: added `getLastResponseByRole` to the worker stmts (mirror `db.ts:641`).
+- **Root cause:** typed `conversationMessageStmts` (`interface`, killed the `any`) → tsc now enforces
+  the members; the missing-member is a compile error. (Full closure of the class = type the 7 sibling
+  `any` stmt-objects — a scoped follow-up.) The 3 now-unaccessed members (`insert`/`getRecent`/
+  `getLastSupervisorResponse`, orphaned by the SDK retirement) are clean removals for the sweep PR.
+
+tsc 12-baseline/0-new; runtime SQL smoke PASS. Jim blocking-audit GREEN (`mqgikbsf`). DEC-081; not DEC-068/069.
+
+---
+
 ## 2026-06-16 (S180) — feat: T-7 close — retire the SDK cognition shims (zero-`agentQuery`-cognition)
 
 The last code step of the #66 tmux migration. The migrated agent-cognition surfaces (heartbeat

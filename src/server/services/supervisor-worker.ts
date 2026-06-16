@@ -378,7 +378,17 @@ let portfolioStmts: any = {};
 let proposalStmts: any = {};
 let strategicProposalStmts: any = {};
 let conversationStmts: any = {};
-let conversationMessageStmts: any = {};
+/** Worker-local prepared statements for conversation_messages. TYPED (unlike its sibling
+ *  stmt-objects which remain `any`) so tsc catches a missing member — closing the d6b9527
+ *  gap where `:842` called `getLastResponseByRole` that the object never defined, crashing
+ *  buildStateSnapshot on a pending peer conversation. (Full closure = type the 7 siblings too.) */
+interface ConversationMessageStmts {
+    insert: Database.Statement;
+    getLastSupervisorResponse: Database.Statement;
+    getRecent: Database.Statement;
+    getLastResponseByRole: Database.Statement;
+}
+let conversationMessageStmts: ConversationMessageStmts = {} as ConversationMessageStmts;
 
 // ── Helper functions ─────────────────────────────────────────
 
@@ -549,6 +559,7 @@ function initDatabase(): void {
         insert: workerDb.prepare('INSERT INTO conversation_messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)'),
         getLastSupervisorResponse: workerDb.prepare('SELECT created_at FROM conversation_messages WHERE conversation_id = ? AND role = \'supervisor\' ORDER BY created_at DESC LIMIT 1'),
         getRecent: workerDb.prepare('SELECT id, role, content, created_at FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?'),
+        getLastResponseByRole: workerDb.prepare('SELECT created_at FROM conversation_messages WHERE conversation_id = ? AND role = ? ORDER BY created_at DESC LIMIT 1'),
     };
 
     log('[Worker] Database initialized');
