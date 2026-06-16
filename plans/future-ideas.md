@@ -3108,3 +3108,23 @@ The principle generalises (and is itself a small instance of #79's thesis): **a 
 *This file is the home for ideas pre-promotion. Add new ideas as `## #NN — short title` entries with source attribution and design sketch. When an idea is picked up, move to a level/phase plan in `plans/` and update INDEX.md.*
 
 *This document is alive. Ideas may be added, refined, or graduated to active goals as the garden grows. Each one was born in conversation — not planned in isolation.*
+
+## #89 — Session-surface opt-in auto-context-management (post-prompt /pfc→/clear→welcome-back)
+
+**Source**: Darron, 2026-06-16 (S180 morning), reasoning from first principles about keeping every TMUX surface warm. Independently re-derived the post-completion check the tmux surfaces already use — and asked to bring it to the interactive **session** surface.
+
+**The ask**: Give the interactive Claude Code **session** surface (the human-attached seat, e.g. `hanjim`/`hanleo`) the *option* to auto-manage its own context the way the dispatched tmux surfaces do — at a context threshold, run `/pfc` (memory flush) → `/clear` → `welcome back` automatically, so the human never has to do it by hand and the seat never hits a hard compaction mid-work.
+
+**Darron's design insight (the load-bearing part)**: Do the check **after every prompt completion, not at prompt start.** Rationale: the context % at the *end* of prompt N is the same information as at the *start* of prompt N+1 (nothing happens between them but the human typing) — so checking-at-end is functionally equivalent *and strictly better*, because: (a) the work is done, so there's nothing in-flight to lose; (b) the ctx is at its turn-high, so the clear decision is accurate; (c) the clear+welcome-back's reload latency (≈40% identity load for a session) is paid **during the idle gap while the human reads/thinks**, invisible, instead of when they're waiting on a reply. The property this buys: **every prompt begins warm** — either continuing under-threshold, or freshly welcomed-back — and the *only* cold path is a process restart, which performs the welcome-back as part of startup.
+
+**Key realization (already half-built)**: The **tmux surfaces ALREADY do exactly this.** `dispatchTxn` (`src/server/lib/agent-cycle.ts:106-116`) runs the txn, then **post-completion** reads `getContextPct` and, if `≥ ctxClearThresholdPct (default 85)`, calls `clearSession` (`/pfc → /clear → welcome-back`), explicitly *outside* the capture try so maintenance never nulls a successful turn. The ctx % source is `tmux-dispatcher.ts:497` (`context_window.used_percentage`). So this idea is **"extend the implemented tmux pattern to the interactive session,"** not a new design.
+
+**Why opt-in for the session specifically**: the interactive seat carries a *human conversational thread*. Memory (working-memory pair + gradient + the welcome-back ritual) carries the **facts** across a clear, but the live conversational warmth resets to the welcome-back state. For a tool-surface (heartbeat/cycle) that's irrelevant; for a human dialogue it's a UX choice — so the human toggles it on when they want hands-off context hygiene, off when mid-deep-thread.
+
+**Transitional note**: the `/pfc` step is only needed until per-prompt memory-flush becomes the default prompt-finish (the incremental memory protocol already writes per-prompt swap; making the full flush automatic retires `/pfc`'s critical-path role). Then the ritual is just `/clear` → `welcome back`.
+
+**Feasibility (asymmetric)**:
+- **Tmux surfaces**: DONE — it's the current design (no work; possibly expose/tune `ctxClearThresholdPct` per surface).
+- **Interactive session**: the genuinely-new work. Needs a **prompt-completion hook** (Claude Code `Stop` hook) that reads ctx %, and at threshold self-triggers `/pfc` then `/clear` + re-injects the wake phrase. **The crux is whether Claude Code's hook system can make an interactive session self-`/clear`-and-re-prompt** — the dispatcher does this for spokes via `send-keys`, but a human-attached terminal is different. Memory continuity across the clear is *already solved* (the welcome-back protocol); the open question is purely the **trigger mechanism**. Verify against the Claude Code hook/SlashCommand capabilities before scoping.
+
+**Acceptance**: a session launched with the opt-in flag, run past the threshold, auto-flushes + clears + welcomes-back in the idle gap after a prompt, and the *next* human prompt lands on a warm, freshly-reconstituted seat with full memory continuity — no manual `/pfc`, no mid-work compaction.

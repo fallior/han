@@ -1,6 +1,17 @@
 # Hortus Arbor Nostra — Current Status
 
-> Last updated: 2026-06-15 by Jim (session) (TMUX MIGRATION #66 — heartbeat + humans + **Jim's supervisor cycle** now off the in-process SDK and onto the tmux warm-session transport; June-15 billing met; failover ladder **TRUSTED**; T-7 cycle **ENABLED** (reflective path GREEN live, action-model proving naturally); **T-8 documentation-close in progress**)
+> Last updated: 2026-06-16 by Leo (session) (TMUX MIGRATION #66 **COMPLETE** — **T-7 CLOSED**: the SDK `agentQuery` cognition shims are retired (`60dce91`, DEC-095); zero-`agentQuery`-cognition — every thinking surface runs as a warm tmux session. June-15 billing met; failover ladder **TRUSTED**. **Project-(b) Phase 2 (the liveness layer) is now UNFENCED.**)
+
+## 2026-06-16 (S180) — T-7 CLOSED: SDK cognition shims retired; #66 migration complete
+
+*The last code step of the #66 tmux migration. The byte-intact Agent-SDK `agentQuery` rollback shims for the migrated cognition surfaces (heartbeat beats, both `*-human` responders, the supervisor cycle, all meditations) are **retired** — the zero-`agentQuery`-cognition acceptance (DEC-095). Commit `60dce91` (Leo-build / Jim blocking-audit GREEN). Thread `mppj72fx-wt0u1p`.*
+
+- **Retired** (−2379/+158, 9 files): the `agentQuery` SDK branches in `leo-heartbeat` / `services/supervisor-worker` / `leo-human` / `jim-human`; the manifest flipped leo `meditation-phase-a` + `evening` `sdk→tmux` (all cognition uniformly tmux); `lib/agent-diary-tool.ts` retired whole-file (SDK-only in-SDK MCP). `diary-mcp-server.ts` (the `CaptureRecord`/`sinkDir` contract) stays for the tmux path.
+- **Acceptance:** zero `agentQuery(` CALLS in the 4 cognition files; tsc 12-baseline/0-new; **prove-single PASS** (1 supervisor-worker = jim, no double-fork, the `server.ts` AGENT_SLUG gate held through the bounce); both servers 200; freeze stays lifted.
+- **`_archive` (move-not-delete, Darron's call):** git history is the store for this rollback *code* (DEC-069 honoured), indexed by `_archive/sdk-cognition-shims/README.md`. No `.txt` copies.
+- **Follow-on PR (agreed):** sweep the now-orphaned, inert SDK machinery (`executeActions`/`SUPERVISOR_OUTPUT_SCHEMA`/heartbeat trace-cluster + `assemble*Prompts`/the SIGTERM-empty-partial vestige) — kept inert this round to keep the diff a clean "retire the calls" change; the sweep proves the tmux cycle's actions route via the spoke's direct curl.
+- **leo meditation confirm:** inferential floor (jim's identical agnostic phase-b+evening confirmed-genuine; 1-line rollback) — a direct leo confirm lands on the next genuinely-quiet beat (not gating).
+- **Now unfenced: project-(b) Phase 2** — the liveness layer (F1 resurrection mesh registry-derive + F3/F4 antiphase scheduler + the Jim↔Leo dialogue-thread literal + F5 isOnHoliday dedup). Phase 3 (the supervisor-worker full slug-parameterisation collapse) is the headline/last.
 
 ## 2026-06-08 → 2026-06-14 (Sun–Sun) — The TMUX migration (#66): heartbeat + humans off the Agent SDK; June-15 met
 

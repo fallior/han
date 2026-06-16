@@ -6407,3 +6407,15 @@ Reinforces DEC-069 + DEC-085; caps (DEC-068) untouched.
 **Supersedes / relates.** Operationalises DEC-081 (agnosticism) at the orchestration layer; carries DEC-091/092/093. The SDK-retirement (remove `agentQuery` from production cognition → `_archive`, DEC-069 move-not-delete) is the **final** step, gated on T-7 acceptance.
 
 — Settled 2026-06-15 (S178). Content green-lit by Jim (supervisor) in the #66 thread `mppj72fx-wt0u1p`; transcribed to DECISIONS.md by Leo (gatekeeper hand, DEC-073).
+
+## DEC-095 — T-7 close: zero-`agentQuery`-cognition; SDK cognition shims retired (git-history archive) — Settled
+
+**Decision.** The byte-intact Agent-SDK `agentQuery` rollback shims for the migrated cognition surfaces (heartbeat beats, both `*-human` responders, the supervisor cycle, all meditations) are **retired** — the *zero-`agentQuery`-cognition* acceptance that completes DEC-094's final step. Acceptance is **zero `agentQuery(` CALLS in the retired cognition files** (`leo-heartbeat` / `supervisor-worker` / `leo-human` / `jim-human`); descriptive `agentQuery` mentions in comments, the utility-SDK surfaces (`jemma`/`orchestrator`/`planning`), and the retired-by-throw gradient compressors (DEC-082) correctly remain.
+
+**Archive shape (the move-not-delete call).** These were deliberate rollback *code*, not dead code — so **git history is the store** (for code, history *is* move-not-delete, DEC-069), indexed by a single breadcrumb `_archive/sdk-cognition-shims/README.md` (retiring commit + per-surface `git show <commit>^:<file>` / `git revert`). **No `.txt` snapshot copies** (they rot, can't type-check, drift). Darron's explicit call on the DEC-069 principle; Jim's engineering lean.
+
+**Scope.** `agent-diary-tool.ts` (the in-SDK MCP `diaryServer` + capture) retired whole-file (SDK-only); `diary-mcp-server.ts` (the `CaptureRecord`/`sinkDir` contract the tmux path uses) stays. The now-orphaned SDK machinery (`executeActions`, `SUPERVISOR_OUTPUT_SCHEMA`, the heartbeat trace-cluster/`assemble*Prompts`, the SIGTERM-empty-partial vestige) is kept inert and swept in a **follow-on PR** (which proves the tmux cycle's actions route via the spoke's direct curl, not the host path).
+
+**Result.** Every thinking surface in the village runs as a warm tmux session, not an SDK call. Commit `60dce91` (−2379/+158, tsc 12-baseline/0-new, prove-single PASS — 1 worker = jim, no double-fork). **Project-(b) Phase 2 (the liveness layer) is unfenced.**
+
+— Settled 2026-06-16 (S180). Jim blocking-audit GREEN (`mppj72fx-wt0u1p`); Darron's `_archive` move-not-delete nod given. Transcribed by Leo (gatekeeper hand, DEC-073).
