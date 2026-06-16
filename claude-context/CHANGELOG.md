@@ -7,6 +7,34 @@
 
 ---
 
+## 2026-06-16 (S180) — chore: T-7 orphan sweep (the SDK machinery the retirement left dead)
+
+The follow-on to the T-7 close (`60dce91`) — removing the in-process SDK-cycle/SDK-beat machinery
+orphaned when the `agentQuery` cognition paths retired. Dual-sweep (Leo ∪ Jim cross-checked), Jim
+blocking-audit GREEN (`mqgjt76z`). **−620/+8** across 4 files.
+
+- **supervisor-worker.ts:** `executeActions` (+ its 8 action-handlers), `SUPERVISOR_OUTPUT_SCHEMA`,
+  `readPostDelineation`; the partial-save mechanism (`savePartialCycleWork` + `currentCyclePartialContent`
+  + both call-sites) wholesale; cost counters (`currentCycleTokensIn/Out`) → honest-0 (worker doesn't
+  think; the kept `completeCycle` already feeds `cost_usd=0`); the 3 dead `conversationMessageStmts`
+  members + interface trimmed to its one live member (`getLastResponseByRole`).
+- **leo-heartbeat.ts:** `beginBeatTrace` + the trace cluster (`dumpLastBeatFailure`/`lastBeatContext`/
+  `BeatContext`); the beat-prompt assemblers (`assemble{Philosophy,Personal,Meditation}BeatPrompts`);
+  `logAgentUsage` (dead since `60dce91` — heartbeat cost is subscription=0); `MAX_TURNS_*`; `activeModel`
+  (banner ternary collapsed to the always-tmux branch); `isTmuxHeartbeat` (zero callers post-retirement);
+  dead imports (`crypto`/`getContextPct`/`clearSession`/`buildPrompt`/`LeoMeditationSurface`) + the unused
+  `MeditationRuntimeContext` type. **Kept `MODEL_PREFERENCE`** (live, startup banner) + `PromptOverbudgetError`.
+- **leo-human.ts / jim-human.ts:** dead imports (`parseTurnEntryStructured`/`loadTraversableGradient`/
+  `gateIdentityOrThrow`/`readDreamGradient`).
+
+**tsc 11 (12→11 — `executeActions` removal takes the nested `respond_conversation` baseline with it) / 0-new.**
+grep-zero all 16 deleted symbols. The Robin-Hood resurrection block + beat-loop + cycle dispatch/F1
+telemetry verified intact (Jim's hand). **DEFERRED to a follow-on PR:** the supervisor interrupt/resume
+Gary-cluster (`addDelineation`/`DELINEATION_MARKER`/resume-flags/write-only `currentCycle*` ids) — one
+coherent mechanism-retirement, not a dead-code tail. DEC-094/095 realised; not DEC-068/069.
+
+---
+
 ## 2026-06-16 (S180) — fix: #13 worker-local `getLastResponseByRole` (latent crash from d6b9527)
 
 Caught by the dual orphan-sweep (Darron's call for two independent passes). The S178 agnostic

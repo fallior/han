@@ -23,10 +23,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
 import { appendPairedMemory } from './lib/memory-paired-writer';
-import { parseTurnEntryStructured } from './lib/result-handlers';
-import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
-import { gateIdentityOrThrow } from './lib/identity-signing';
 import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder';
 // DEC-093 humans-PR thaw (2026-06-13): tmux warm-session transport for human-response.
 // Gated per-dispatch on manifestTransport (kept 'sdk' until enable); the SDK path below

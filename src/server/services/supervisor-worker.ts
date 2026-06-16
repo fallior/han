@@ -349,11 +349,8 @@ let lastCycleDelay: number | null = null;
 
 // Track current cycle state for SIGTERM handler and cost cap (so work isn't lost on kill)
 let currentCycleId: string | null = null;
-let currentCycleTokensIn = 0;
-let currentCycleTokensOut = 0;
 let currentCycleType: string = 'supervisor';
 let currentCycleNumber: number = 0;
-let currentCyclePartialContent: string[] = [];  // accumulated assistant text blocks
 
 // Gary Protocol — interruption/resume tracking
 // When a cycle is interrupted (cost cap, abort), a delineation marker is added to swap.
@@ -383,9 +380,6 @@ let conversationStmts: any = {};
  *  gap where `:842` called `getLastResponseByRole` that the object never defined, crashing
  *  buildStateSnapshot on a pending peer conversation. (Full closure = type the 7 siblings too.) */
 interface ConversationMessageStmts {
-    insert: Database.Statement;
-    getLastSupervisorResponse: Database.Statement;
-    getRecent: Database.Statement;
     getLastResponseByRole: Database.Statement;
 }
 let conversationMessageStmts: ConversationMessageStmts = {} as ConversationMessageStmts;
@@ -405,18 +399,6 @@ function addDelineation(): void {
         fs.appendFileSync(SUPERVISOR_SWAP_FILE, DELINEATION_MARKER);
         fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, DELINEATION_MARKER);
     } catch { /* best effort */ }
-}
-
-function readPostDelineation(): string | null {
-    try {
-        const content = fs.readFileSync(SUPERVISOR_SWAP_FULL_FILE, 'utf8');
-        const idx = content.lastIndexOf(DELINEATION_MARKER);
-        if (idx >= 0) {
-            const post = content.slice(idx + DELINEATION_MARKER.length).trim();
-            return post.length > 10 ? post : null;
-        }
-    } catch { /* no swap file */ }
-    return null;
 }
 
 // ── Rumination guard helpers ────────────────────────────────
@@ -556,9 +538,6 @@ function initDatabase(): void {
     };
 
     conversationMessageStmts = {
-        insert: workerDb.prepare('INSERT INTO conversation_messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)'),
-        getLastSupervisorResponse: workerDb.prepare('SELECT created_at FROM conversation_messages WHERE conversation_id = ? AND role = \'supervisor\' ORDER BY created_at DESC LIMIT 1'),
-        getRecent: workerDb.prepare('SELECT id, role, content, created_at FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?'),
         getLastResponseByRole: workerDb.prepare('SELECT created_at FROM conversation_messages WHERE conversation_id = ? AND role = ? ORDER BY created_at DESC LIMIT 1'),
     };
 
@@ -1201,60 +1180,6 @@ MEDITATION_ENTRY_ID: ${entry.id}`;
 }
 
 
-const SUPERVISOR_OUTPUT_SCHEMA = {
-    type: 'object',
-    properties: {
-        observations: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'What you observed about the current system state'
-        },
-        actions: {
-            type: 'array',
-            maxItems: 5,
-            items: {
-                type: 'object',
-                properties: {
-                    type: { type: 'string', enum: ['create_goal', 'adjust_priority', 'update_memory', 'send_notification', 'cancel_task', 'explore_project', 'propose_idea', 'no_action'] },
-                    goal_description: { type: 'string' },
-                    project_path: { type: 'string' },
-                    planning_model: { type: 'string', enum: ['haiku', 'sonnet', 'opus'] },
-                    task_id: { type: 'string' },
-                    new_priority: { type: 'integer', minimum: 1, maximum: 10 },
-                    memory_file: { type: 'string' },
-                    content: { type: 'string' },
-                    message: { type: 'string' },
-                    priority: { type: 'string', enum: ['low', 'default', 'high'] },
-                    reason: { type: 'string' },
-                    exploration_focus: { type: 'string' },
-                    idea_title: { type: 'string' },
-                    idea_description: { type: 'string' },
-                    idea_category: { type: 'string', enum: ['improvement', 'opportunity', 'risk', 'strategic'] },
-                    estimated_effort: { type: 'string', enum: ['small', 'medium', 'large'] },
-                },
-                required: ['type']
-            }
-        },
-        self_reflection: {
-            type: 'string',
-            description: 'Optional self-reflection notes to append'
-        },
-        working_memory_compressed: {
-            type: 'string',
-            description: 'Compressed summary of this cycle for working-memory.md (2-3 lines: what happened, what mattered)'
-        },
-        working_memory_full: {
-            type: 'string',
-            description: 'Full account of this cycle for working-memory-full.md (what you observed, what you thought, what you decided and why)'
-        },
-        reasoning: {
-            type: 'string',
-            description: 'Your reasoning trace'
-        }
-    },
-    required: ['observations', 'actions', 'reasoning']
-};
-
 // enforceTokenCap removed — was silently truncating Jim's memory files, causing identity
 // degradation. Memory file size is now managed through archiving, not truncation.
 
@@ -1331,85 +1256,6 @@ function logCycleAudit(cycleNumber: number, cycleType: string, outcome: 'complet
     } catch { /* best effort */ }
 }
 
-// ── Partial work save ───────────────────────────────────────
-
-function savePartialCycleWork(cycleNumber: number, cycleType: string, partialContent: string[], costUsd: number, reason: string): void {
-    if (partialContent.length === 0) return;
-    const combined = partialContent.join('\n\n').trim();
-    if (combined.length < 10) return;
-
-    // F9 guard: prompt-too-long failures carry no resumable content (the
-    // failure IS that the prompt couldn't be processed). Persisting the
-    // error text to swap + working-memory compounded the bloat that caused
-    // the failure — self-reinforcing F9 loop. The failure is already
-    // recorded via failCycle + logCycleAudit; nothing valuable is lost.
-    if (reason.includes('Prompt is too long')) {
-        log(`[Worker] F9 guard: skipping partial save for cycle #${cycleNumber} (prompt-too-long failure, no resumable content)`);
-        return;
-    }
-
-    try {
-        if (cycleType === 'dream') {
-            const explorationsPath = path.join(MEMORY_DIR, 'explorations.md');
-            const timestamp = new Date().toISOString().split('T')[0] + ' ' +
-                new Date().toTimeString().split(' ')[0];
-            const entry = `\n\n### Dream ${cycleNumber} — partial (${reason}) (${timestamp})\n${combined.slice(0, 5000)}\n`;
-            fs.appendFileSync(explorationsPath, entry);
-            log(`[Worker] Saved partial dream #${cycleNumber} (${combined.length} chars, $${costUsd.toFixed(2)})`);
-        }
-
-        // Write to swap files for all cycle types
-        const cycleHeader = `\n\n### Cycle #${cycleNumber} — ${cycleType} — partial (${reason}) (${new Date().toISOString()})`;
-        const summary = combined.slice(0, 500);
-        fs.appendFileSync(SUPERVISOR_SWAP_FILE, `${cycleHeader}\n${summary}`);
-        fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${cycleHeader}\n${combined}`);
-
-        // Gary Protocol: add delineation marker so next cycle can resume from here
-        addDelineation();
-        log(`[Worker] Gary Protocol: delineation added after interrupted ${cycleType} cycle #${cycleNumber}`);
-
-        // Flush swap to working memory (pre-delineation content).
-        //
-        // #49 carve-out (S153, 2026-05-09): this path is deliberately lock-less
-        // and synchronous — during abort/SIGTERM, withMemorySlot's retry-with-
-        // sleep would consume the SIGKILL grace budget before flush completes.
-        // The abort path uses inline symmetry validation instead of the
-        // appendPairedMemory helper. Trade-off: lose the cross-process lock
-        // (which is fine — abort happens rarely and the slicer is unlikely to
-        // be writing concurrently); preserve #49's structural promise that we
-        // never write single-side under the working-memory paired-file model.
-        const swapContent = fs.readFileSync(SUPERVISOR_SWAP_FILE, 'utf8').trim();
-        const swapFullContent = fs.readFileSync(SUPERVISOR_SWAP_FULL_FILE, 'utf8').trim();
-        if (swapContent && swapFullContent) {
-            // c0-FIRST ordering (Jim's §4, S169): write the c0 source (full)
-            // before the c1 source (compressed). This path is lock-less, so a
-            // SIGKILL landing between these two synchronous appends strands one
-            // side. Writing c0 first makes any such orphan a *c0 without c1* —
-            // the benign direction (a c0 may legitimately have no c1 yet; one c1
-            // may distil many c0s, DEC-085; whole-both recovery sweeps it cleanly,
-            // DEC-089). The old c1-first order risked a c1-orphan: a compressed
-            // entry whose c0 source was never written — a lineage violation at
-            // the identity-richest layer.
-            fs.appendFileSync(WORKING_MEMORY_FULL_FILE, '\n' + swapFullContent + '\n');
-            fs.appendFileSync(WORKING_MEMORY_FILE, '\n' + swapContent + '\n');
-            fs.writeFileSync(SUPERVISOR_SWAP_FILE, '');
-            fs.writeFileSync(SUPERVISOR_SWAP_FULL_FILE, '');
-        } else if (swapContent || swapFullContent) {
-            log(`[Worker] Abort path: asymmetric swap (compressed=${swapContent.length}c, full=${swapFullContent.length}c) — preserving for next cycle (#49 symmetry promise)`);
-        }
-
-        // Log to session file
-        const output: SupervisorOutput = {
-            observations: [`${cycleType} cycle — partial (${reason})`],
-            reasoning: combined.slice(0, 200),
-            actions: [],
-        };
-        logCycleToSession(cycleNumber, output, [], costUsd, cycleType as any);
-    } catch (err: any) {
-        log(`[Worker] Failed to save partial work: ${err.message}`);
-    }
-}
-
 function logCycleToSession(cycleNumber: number, output: SupervisorOutput, actionSummaries: string[], cost: number, cycleType: 'supervisor' | 'personal' | 'dream' = 'supervisor'): void {
     try {
         const now = new Date();
@@ -1434,198 +1280,6 @@ function logCycleToSession(cycleNumber: number, output: SupervisorOutput, action
             fs.appendFileSync(sessionFile, lines.join('\n'));
         }
     } catch { /* best effort */ }
-}
-
-// ── Action execution ─────────────────────────────────────────
-
-/**
- * Execute actions from the supervisor cycle.
- * Actions that modify main process state (create_goal, cancel_task) are sent as messages.
- * Actions that only touch DB/filesystem are executed directly.
- */
-async function executeActions(actions: SupervisorAction[], cycleId: string): Promise<string[]> {
-    const summaries: string[] = [];
-    const config = loadConfig();
-    let goalsCreated = 0;
-
-    for (const action of actions) {
-        try {
-            switch (action.type) {
-                case 'create_goal': {
-                    // Delegate to parent process (parent owns task execution and planning queue)
-                    if (goalsCreated >= 2) {
-                        summaries.push(`create_goal: skipped (max 2 per cycle)`);
-                        break;
-                    }
-                    if (!action.goal_description || !action.project_path) {
-                        summaries.push(`create_goal: skipped (missing description or project_path)`);
-                        break;
-                    }
-
-                    // Send message to parent to execute
-                    broadcast({
-                        type: 'system_event',
-                        data: {
-                            event: 'create_goal_request',
-                            goal_description: action.goal_description,
-                            project_path: action.project_path,
-                            planning_model: action.planning_model || null,
-                            cycleId
-                        }
-                    });
-
-                    goalsCreated++;
-                    summaries.push(`create_goal: requested — ${action.goal_description.slice(0, 60)}`);
-                    log(`[Worker] Requested create_goal: ${action.goal_description.slice(0, 80)}`);
-                    break;
-                }
-
-                case 'adjust_priority': {
-                    if (!action.task_id || action.new_priority === undefined) {
-                        summaries.push(`adjust_priority: skipped (missing task_id or new_priority)`);
-                        break;
-                    }
-                    workerDb!.prepare('UPDATE tasks SET priority = ? WHERE id = ?').run(action.new_priority, action.task_id);
-                    summaries.push(`adjust_priority: task ${action.task_id} → priority ${action.new_priority}`);
-                    log(`[Worker] Adjusted priority: task ${action.task_id} → ${action.new_priority}`);
-
-                    broadcast({
-                        type: 'supervisor_action',
-                        data: { action: 'adjust_priority', detail: `task ${action.task_id} → priority ${action.new_priority}`, cycleId }
-                    });
-                    break;
-                }
-
-                case 'update_memory': {
-                    if (!action.memory_file || !action.content) {
-                        summaries.push(`update_memory: skipped (missing file or content)`);
-                        break;
-                    }
-                    const safeName = action.memory_file.replace(/\.\./g, '').replace(/^\//, '');
-                    const filepath = path.join(MEMORY_DIR, safeName);
-
-                    const dir = path.dirname(filepath);
-                    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-                    fs.writeFileSync(filepath, action.content);
-                    summaries.push(`update_memory: ${safeName} (${action.content.length} chars)`);
-                    break;
-                }
-
-                case 'send_notification': {
-                    if (!action.message) {
-                        summaries.push(`send_notification: skipped (no message)`);
-                        break;
-                    }
-                    const ntfyTopic = config.ntfy_topic;
-                    if (ntfyTopic) {
-                        try {
-                            execFileSync('curl', [
-                                '-s', '-d', action.message,
-                                '-H', 'Title: Supervisor Insight',
-                                '-H', `Priority: ${action.priority || 'default'}`,
-                                '-H', 'Tags: brain',
-                                `https://ntfy.sh/${ntfyTopic}`
-                            ], { timeout: 10000, stdio: 'ignore' });
-                        } catch { /* best effort */ }
-                    }
-                    summaries.push(`send_notification: ${action.message.slice(0, 60)}`);
-                    log(`[Worker] Notification: ${action.message.slice(0, 80)}`);
-                    break;
-                }
-
-                case 'cancel_task': {
-                    // Delegate to parent process (parent owns AbortControllers and runningSlots)
-                    if (!action.task_id) {
-                        summaries.push(`cancel_task: skipped (no task_id)`);
-                        break;
-                    }
-
-                    broadcast({
-                        type: 'system_event',
-                        data: {
-                            event: 'cancel_task_request',
-                            task_id: action.task_id,
-                            reason: action.reason || 'Supervisor decision',
-                            cycleId
-                        }
-                    });
-
-                    summaries.push(`cancel_task: requested ${action.task_id} — ${action.reason || 'no reason'}`);
-                    log(`[Worker] Requested cancel_task: ${action.task_id} — ${action.reason}`);
-                    break;
-                }
-
-                case 'explore_project': {
-                    const projectName = action.project_path?.split('/').pop() || 'unknown';
-                    const focus = action.exploration_focus || 'general';
-                    summaries.push(`explore_project: ${projectName} (focus: ${focus})`);
-                    log(`[Worker] Explored project: ${projectName} (${focus})`);
-
-                    broadcast({
-                        type: 'supervisor_action',
-                        data: { action: 'explore_project', detail: `${projectName}: ${focus}`, cycleId }
-                    });
-                    break;
-                }
-
-                case 'propose_idea': {
-                    if (!action.idea_title || !action.idea_description) {
-                        summaries.push(`propose_idea: skipped (missing title or description)`);
-                        break;
-                    }
-                    const proposalId = generateId();
-                    strategicProposalStmts.insert.run(
-                        proposalId,
-                        action.idea_title,
-                        action.idea_description,
-                        action.idea_category || 'improvement',
-                        action.project_path || null,
-                        action.estimated_effort || 'medium',
-                        action.reason || null,
-                        cycleId,
-                        new Date().toISOString()
-                    );
-                    summaries.push(`propose_idea: ${action.idea_title.slice(0, 60)}`);
-                    log(`[Worker] Proposed idea: ${action.idea_title}`);
-
-                    broadcast({
-                        type: 'strategic_proposal',
-                        data: {
-                            id: proposalId,
-                            title: action.idea_title,
-                            category: action.idea_category || 'improvement',
-                            project_path: action.project_path || null,
-                            cycleId,
-                        }
-                    });
-                    break;
-                }
-
-                case 'respond_conversation': {
-                    // Conversation responses are handled exclusively by human agents
-                    // (jim-human.ts, leo-human.ts). Supervisor observes but does not respond.
-                    // This prevents duplicate responses (diagnosed S127).
-                    summaries.push(`respond_conversation: skipped (supervisor does not respond — handled by human agents)`);
-                    log(`[Worker] respond_conversation disabled — human agents handle conversations`);
-                    break;
-                }
-                // respond_conversation dead code removed — S127
-                // Human agents (jim-human.ts) handle all conversation responses,
-                // including Discord posting.
-
-                case 'no_action': {
-                    summaries.push(`no_action: ${action.reason || 'no reason given'}`);
-                    break;
-                }
-            }
-        } catch (err: any) {
-            summaries.push(`${action.type}: ERROR — ${err.message}`);
-            logError(`[Worker] Action ${action.type} failed:`, err.message);
-        }
-    }
-
-    return summaries;
 }
 
 // ── PR-T7b (DEC-093 / Option A): tmux warm-session cycle dispatch ──────────
@@ -2018,9 +1672,7 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
     } catch (err: any) {
         logError(`[Worker] Cycle #${cycleNumber} failed: ${err.message}`);
         supervisorStmts.failCycle.run(new Date().toISOString(), err.message, cycleId);
-        const estimatedCost = (currentCycleTokensIn * 15 + currentCycleTokensOut * 75) / 1_000_000;
-        savePartialCycleWork(cycleNumber, cycleType, currentCyclePartialContent, estimatedCost, `error: ${err.message.slice(0, 100)}`);
-        logCycleAudit(cycleNumber, cycleType, 'error', estimatedCost, Date.now() - cycleStartMs);
+        logCycleAudit(cycleNumber, cycleType, 'error', 0, Date.now() - cycleStartMs);
 
         const nextDelay = getNextCycleDelay();
         lastCycleDelay = nextDelay;
@@ -2045,11 +1697,8 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
     } finally {
         runningCycleAbort = null;
         currentCycleId = null;
-        currentCycleTokensIn = 0;
-        currentCycleTokensOut = 0;
         currentCycleType = 'supervisor';
         currentCycleNumber = 0;
-        currentCyclePartialContent = [];
     }
 }
 
@@ -2083,28 +1732,6 @@ process.on('message', async (msg: MainToWorkerMessage) => {
 // ── SIGTERM handler — record cost before dying ──────────────
 
 process.on('SIGTERM', () => {
-    if (currentCycleId && workerDb) {
-        const estimatedCost = (currentCycleTokensIn * 15 + currentCycleTokensOut * 75) / 1_000_000;
-        try {
-            if (currentCycleTokensIn > 0 || currentCycleTokensOut > 0) {
-                supervisorStmts.completeCycle.run(
-                    new Date().toISOString(),
-                    estimatedCost,
-                    currentCycleTokensIn,
-                    currentCycleTokensOut,
-                    0,
-                    '[]',
-                    JSON.stringify([`${currentCycleType} cycle — killed by SIGTERM`]),
-                    `SIGTERM — estimated $${estimatedCost.toFixed(4)}`,
-                    currentCycleId
-                );
-            }
-            // Save whatever work was achieved before the kill
-            savePartialCycleWork(currentCycleNumber, currentCycleType, currentCyclePartialContent, estimatedCost, 'SIGTERM');
-            logCycleAudit(currentCycleNumber, currentCycleType, 'sigterm', estimatedCost, 0);
-            log(`[Worker] SIGTERM — saved partial work, recorded $${estimatedCost.toFixed(4)} for cycle #${currentCycleNumber}`);
-        } catch { /* best effort */ }
-    }
     cleanupDatabase();
     process.exit(0);
 });

@@ -45,7 +45,6 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
-import crypto from 'node:crypto';
 import { execSync, execFileSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
@@ -53,8 +52,7 @@ import { loadTraversableGradient, rotateMemoryFile, rollingWindowRotate, updateF
 import { appendPairedMemory } from './lib/memory-paired-writer.js';
 import { parseTurnEntry } from './lib/result-handlers.js';
 import { gateIdentityOrThrow } from './lib/identity-signing.js';
-import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder.js';
-import type { LeoMeditationSurface } from './lib/leo-prompts.js';
+import { PromptOverbudgetError } from './lib/prompt-builder.js';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from './db.js';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRestDay, isWorkingBee, getPhaseInterval, type DayPhase } from './lib/day-phase';
@@ -62,7 +60,7 @@ import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRes
 // The manifest's transport field is the per-surface feature flag (rollback =
 // one-line manifest flip back to 'sdk'; the SDK paths below are kept intact).
 import { manifestTransport, manifestModelHead, manifestModelLadder } from './lib/garden-manifest';
-import { ensureSurfaceSession, enqueueForAgent, getContextPct, clearSession, observeActiveModel, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
+import { ensureSurfaceSession, enqueueForAgent, observeActiveModel, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
 import type { CaptureRecord } from './lib/diary-mcp-server';
 // PR-T7b: the one slug-parameterised cycle/dispatch surface (Darron's governing
 // law — one path, many agents). leo-heartbeat is now a thin caller of it with
@@ -70,139 +68,11 @@ import type { CaptureRecord } from './lib/diary-mcp-server';
 import { dispatchTxn, applyMeditationMarkers, MEDITATION_ACTION_BLOCK, runReincorporationMeditationTmux, runReencounterMeditationTmux } from './lib/agent-cycle';
 // Discord imports removed — conversation/Discord responses now handled by Leo/Human agent
 
-// ── Beat-failure diagnostic capture (S159 diagnostic, 2026-05-19) ──────
-//
-// On any failed agentQuery call we want THREE pieces of evidence on disk
-// alongside the journald log line:
-//   1. The exact system prompt that was sent (file)
-//   2. The exact user prompt that was sent (file)
-//   3. The full captured SDK subprocess stderr (file)
-//
-// The Claude Agent SDK spawns the underlying Claude Code subprocess with
-// stdio=[pipe,pipe,"ignore"] BY DEFAULT (sdk.mjs spawnLocalProcess). When
-// the subprocess fails, the parent only sees `Error("Claude Code process
-// exited with code N")` — no stderr context, no record of WHAT was being
-// sent. Setting options.stderr to a callback makes the SDK pipe stderr and
-// feed chunks to the callback. We accumulate to a module-level buffer per
-// beat AND forward each chunk to process.stderr (so journald sees it
-// real-time too).
-//
-// On failure, the top-level catch handler calls `dumpLastBeatFailure(err)`
-// which writes all three files to ~/.han/health/leo-beat-trace/ and logs
-// the paths. Lazy capture — files only written on actual failure (no disk
-// churn on the happy path).
-//
-// Initial deployment: 3 beat sites (philosophy×2 + personal) + 3 meditation
-// sites = 6 total. Diagnostic for the philosophy-beat silent-exit-1 mystery
-// from S157.
-
-interface BeatContext {
-    type: string;
-    systemPrompt: string;
-    userPrompt: string;
-    stderrCapture: string;
-    startedAt: string;
-}
-
-let lastBeatContext: BeatContext | null = null;
-
-// Begin a beat trace.
-//
-// S159 (2026-05-21, Darron's "we want all prompts recorded"): writes
-// system + user + meta files EVERY beat — not just on failure. This gives
-// an operator a complete comparison set (succeeding meditation prompts at
-// ~1 KB next to failing philosophy prompts at ~800 KB) for after-the-fact
-// analysis. On failure, dumpLastBeatFailure additionally writes stderr.txt
-// and updates meta with the failure annotation.
-//
-// File naming pattern (Darron's spec):
-//   {ISO-timestamp-with-ms}-{beat-type}-{system|user|stderr|meta}.{txt|json}
-// e.g. 2026-05-21T03-15-42-018Z-philosophy-system.txt
-// Millisecond precision deconflicts within a single second; in steady-state
-// beats are 20+ minutes apart so even second precision would suffice.
-//
-// Storage cost: 72 beats/day × ~800 KB per failed beat trace = ~10 MB/day
-// worst case. Meditation prompts are ~1 KB each so the average is much
-// lower. Operator can `rm -rf ~/.han/health/leo-beat-trace/` to clear.
-function beginBeatTrace(type: string, systemPrompt: string, userPrompt: string): (chunk: string) => void {
-    const startedAt = new Date().toISOString();
-    lastBeatContext = {
-        type,
-        systemPrompt,
-        userPrompt,
-        stderrCapture: '',
-        startedAt,
-    };
-    try {
-        const dir = path.join(process.env.HOME || '/root', '.han', 'health', 'leo-beat-trace');
-        fs.mkdirSync(dir, { recursive: true });
-        const ts = startedAt.replace(/[:.]/g, '-');
-        const base = `${ts}-${type}`;
-        const sysFile = path.join(dir, `${base}-system.txt`);
-        const userFile = path.join(dir, `${base}-user.txt`);
-        const metaFile = path.join(dir, `${base}-meta.json`);
-        fs.writeFileSync(sysFile, systemPrompt || '(none — beat had no system prompt)');
-        fs.writeFileSync(userFile, userPrompt);
-        fs.writeFileSync(metaFile, JSON.stringify({
-            timestamp: startedAt,
-            beat_type: type,
-            status: 'in-progress',
-            system_chars: systemPrompt.length,
-            user_chars: userPrompt.length,
-            est_total_tokens_chars_div_4: Math.ceil((systemPrompt.length + userPrompt.length) / 4),
-        }, null, 2));
-    } catch (traceErr: any) {
-        console.error(`[Leo] beginBeatTrace write failed (non-fatal): ${traceErr.message}`);
-    }
-    return (chunk: string) => {
-        if (lastBeatContext) lastBeatContext.stderrCapture += chunk;
-        process.stderr.write(`[SDK-stderr] ${chunk}`);
-    };
-}
-
-// Called by the top-level beat catch handler. The system + user prompts
-// were already written at beginBeatTrace; this function ADDS stderr.txt
-// and UPDATES meta.json with the failure annotation. Non-fatal on write
-// failure (won't break the error-reporting path).
-function dumpLastBeatFailure(err: Error): void {
-    if (!lastBeatContext) {
-        console.error(`[Leo] dumpLastBeatFailure: no lastBeatContext to dump (err.message="${err.message}")`);
-        return;
-    }
-    try {
-        const dir = path.join(process.env.HOME || '/root', '.han', 'health', 'leo-beat-trace');
-        fs.mkdirSync(dir, { recursive: true });
-        const ts = lastBeatContext.startedAt.replace(/[:.]/g, '-');
-        const base = `${ts}-${lastBeatContext.type}`;
-        const stderrFile = path.join(dir, `${base}-stderr.txt`);
-        const metaFile = path.join(dir, `${base}-meta.json`);
-        fs.writeFileSync(stderrFile, lastBeatContext.stderrCapture || '(empty — subprocess wrote nothing to stderr before exit)');
-        fs.writeFileSync(metaFile, JSON.stringify({
-            timestamp: lastBeatContext.startedAt,
-            beat_type: lastBeatContext.type,
-            status: 'failed',
-            error_message: err.message,
-            system_chars: lastBeatContext.systemPrompt.length,
-            user_chars: lastBeatContext.userPrompt.length,
-            stderr_chars: lastBeatContext.stderrCapture.length,
-            est_total_tokens_chars_div_4: Math.ceil((lastBeatContext.systemPrompt.length + lastBeatContext.userPrompt.length) / 4),
-        }, null, 2));
-        console.error(`[Leo] Beat-failure trace updated — type=${lastBeatContext.type}, err="${err.message}"`);
-        console.error(`[Leo]   system + user files were written at beat-start (see trace dir)`);
-        console.error(`[Leo]   stderr: ${stderrFile} (${lastBeatContext.stderrCapture.length} chars${lastBeatContext.stderrCapture.length === 0 ? ' — empty' : ''})`);
-        console.error(`[Leo]   meta:   ${metaFile} (status: failed)`);
-    } catch (traceErr: any) {
-        console.error(`[Leo] dumpLastBeatFailure write failed (non-fatal): ${traceErr.message}`);
-    }
-}
-
 // ── Config ────────────────────────────────────────────────────
 
 const BASE_DELAY_WAKING_MS = 20 * 60 * 1000;  // 20 minutes — morning, work, evening
 const BASE_DELAY_SLEEP_MS = 40 * 60 * 1000;   // 40 minutes — sleep + rest days
 const HOLIDAY_DELAY_MS = 80 * 60 * 1000;      // 80 minutes — holiday mode (rest day doubled)
-const MAX_TURNS_PERSONAL = 1000;
-const MAX_TURNS_PHILOSOPHY = 1000;
 const BEAT_COST_CAP_USD = 2.0;
 // Model preference: most capable first. 2026-06-02: moved to claude-opus-4-8 so ALL
 // Leo surfaces (session, human, heartbeat, meditations) run the same substrate — per
@@ -210,7 +80,6 @@ const BEAT_COST_CAP_USD = 2.0;
 // and the 1M window clears the gradient-dominated (~74K-token) load.
 // Fallbacks remain as aliases (lower tiers auto-adopt latest releases).
 const MODEL_PREFERENCE = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
-let activeModel: string = MODEL_PREFERENCE[0];
 
 const HOME = process.env.HOME || '/home/darron';
 const HAN_DIR = path.join(HOME, '.han');
@@ -1047,8 +916,8 @@ function appendWorkingMemory(
 // PR-T7 SDK retirement (2026-06-16): `resolveModel()` (the SDK model-ping
 // ladder) retired with the agentQuery transport. The warm tmux session's model
 // is a launch parameter from the manifest (manifestModelLadder); there is no
-// per-beat metered model-ping under tmux. `activeModel` / `MODEL_PREFERENCE`
-// are retained for the startup banner.
+// per-beat metered model-ping under tmux. `MODEL_PREFERENCE` is retained for
+// the startup banner.
 
 // ── DEC-093 thaw (2026-06-12): tmux warm-session transport for beats ─────────
 //
@@ -1072,10 +941,6 @@ const HEARTBEAT_SURFACE = 'heartbeat';
 // respawn+adopt home, shared with the human-response surfaces.
 const BEAT_TXN_TIMEOUT_MS = 20 * 60_000;   // beats can run minutes; > dispatcher default. 20min stopgap (S178) — pending the single-source timing config.
 const CTX_CLEAR_THRESHOLD_PCT = 85;        // plan §5: /pfc → /clear → welcome-back past this
-
-function isTmuxHeartbeat(): boolean {
-    return manifestTransport('leo', HEARTBEAT_SURFACE) === 'tmux';
-}
 
 // PR-T7b: `ensureHeartbeatTmuxSession` retired — the agnostic `dispatchTxn`
 // (lib/agent-cycle.ts) calls `ensureSurfaceSession(slug, surface, {ladder,
@@ -1177,33 +1042,6 @@ function ensureDirectories(): void {
 
 function getDb() {
     return new Database(DB_PATH, { readonly: false });
-}
-
-function logAgentUsage(resultMessage: any, context: string): void {
-    try {
-        const db = getDb();
-        db.exec(`CREATE TABLE IF NOT EXISTS agent_usage (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            agent TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            cost_usd REAL DEFAULT 0,
-            tokens_in INTEGER DEFAULT 0,
-            tokens_out INTEGER DEFAULT 0,
-            num_turns INTEGER DEFAULT 0,
-            model TEXT,
-            context TEXT
-        )`);
-        const cost = resultMessage?.total_cost_usd || 0;
-        const tokensIn = resultMessage?.usage?.input_tokens || 0;
-        const tokensOut = resultMessage?.usage?.output_tokens || 0;
-        const turns = resultMessage?.num_turns || 0;
-        db.prepare('INSERT INTO agent_usage (agent, timestamp, cost_usd, tokens_in, tokens_out, num_turns, model, context) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-            .run('leo-heartbeat', new Date().toISOString(), cost, tokensIn, tokensOut, turns, activeModel, context);
-        console.log(`[Leo] Usage: $${cost.toFixed(4)}, ${tokensIn}in/${tokensOut}out, ${turns} turns`);
-        db.close();
-    } catch (err) {
-        console.error('[Leo] Failed to log usage:', (err as Error).message);
-    }
 }
 
 function getRecentMessagesForConversation(db: Database.Database, conversationId: string, limit = 10): Array<{ role: string; content: string; created_at: string }> {
@@ -1504,23 +1342,6 @@ interface PhilosophyBeatRuntimeContext {
     activityContext?: string;
 }
 
-function assemblePhilosophyBeatPrompts(ctx: PhilosophyBeatRuntimeContext): {
-    systemPrompt: string;
-    userPrompt: string;
-    builderMeta: any;
-} {
-    // PR-AP8 (2026-05-22): feature flag + pre-migration fallback retired per
-    // DEC-087. Prompt assembly is the agnostic builder's responsibility.
-    // Inline assembly here would recreate the asymmetric-drift bug the AP
-    // migration cured. See plans/agnostic-prompt-builder-plan.md §"Phase 8".
-    const built = buildPrompt('leo', 'philosophy-beat', ctx as any);
-    return {
-        systemPrompt: built.systemPrompt,
-        userPrompt: built.userPrompt,
-        builderMeta: built.meta,
-    };
-}
-
 function handlePromptOverbudget(
     err: PromptOverbudgetError,
     surface: string,
@@ -1562,21 +1383,6 @@ interface PersonalBeatRuntimeContext {
     dreamMemorySection?: string;  // sleep-only (1-in-3 sleep beats include a memory)
 }
 
-function assemblePersonalBeatPrompts(ctx: PersonalBeatRuntimeContext): {
-    systemPrompt: string;
-    userPrompt: string;
-    builderMeta: any;
-} {
-    // PR-AP8: feature flag + fallback retired per DEC-087.
-    const profileName = ctx.phase === 'sleep' ? 'dream-beat' : 'personal-beat';
-    const built = buildPrompt('leo', profileName, ctx as any);
-    return {
-        systemPrompt: built.systemPrompt,
-        userPrompt: built.userPrompt,
-        builderMeta: built.meta,
-    };
-}
-
 // ── PR-AP5 (2026-05-22): meditation prompt assembly via the Agnostic
 //    Prompt Builder behind the same feature flag.
 //
@@ -1589,37 +1395,6 @@ function assemblePersonalBeatPrompts(ctx: PersonalBeatRuntimeContext): {
 //    ~117K tokens (uniform memory + scaffold) when builder is ON. Per
 //    Darron's reframe — *"Leo is Leo where he is meditating"* — accepted.
 
-interface MeditationRuntimeContext {
-    // Phase A specific
-    fileLevel?: string;
-    fileLabel?: string;
-    fileContentType?: string;
-    fileContent?: string;
-    // Phase B / Evening specific
-    entryLevel?: string;
-    entrySessionLabel?: string;
-    entryContentType?: string;
-    entryContent?: string;
-    entryId?: string;
-    tagContext?: string;
-}
-
-function assembleMeditationPrompts(
-    surface: LeoMeditationSurface,
-    ctx: MeditationRuntimeContext,
-): {
-    systemPrompt: string;
-    userPrompt: string;
-    builderMeta: any;
-} {
-    // PR-AP8: feature flag + fallback retired per DEC-087.
-    const built = buildPrompt('leo', surface, ctx as any);
-    return {
-        systemPrompt: built.systemPrompt,
-        userPrompt: built.userPrompt,
-        builderMeta: built.meta,
-    };
-}
 
 // ── Heartbeat: philosophy beat (tmux transport, DEC-093) ─────────────────────
 
@@ -2420,10 +2195,9 @@ async function heartbeat(): Promise<void> {
     await maybeRunEveningMeditation(phase);
 
     // Log truth (first-warm-beat finding, 2026-06-12): on the tmux transport the
-    // banner must show the manifest launch model, not the stale SDK activeModel.
-    const beatModelLabel = isTmuxHeartbeat()
-        ? `${(observeActiveModel('leo', HEARTBEAT_SURFACE) ?? manifestModelHead('leo', HEARTBEAT_SURFACE)) ?? 'unknown'} via tmux`
-        : activeModel;
+    // banner must show the manifest launch model. The heartbeat is always tmux
+    // now (the SDK path retired in PR-T7), so this is the only branch.
+    const beatModelLabel = `${(observeActiveModel('leo', HEARTBEAT_SURFACE) ?? manifestModelHead('leo', HEARTBEAT_SURFACE)) ?? 'unknown'} via tmux`;
     console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${beatModelLabel})`);
 
     // Create AbortController for this beat (Gary model: mid-beat abort)
@@ -2464,12 +2238,6 @@ async function heartbeat(): Promise<void> {
             await writeSwapToWorkingMemory();
             addDelineation();
         } else {
-            // S159 — dump the prompts + captured SDK stderr to disk before
-            // logging the bare error. Tracing only the 3 currently-patched
-            // sites: philosophy×2 + personal. Meditation sites pack their
-            // prompt inline and aren't traced yet (they currently succeed —
-            // extend when/if they start failing).
-            dumpLastBeatFailure(err as Error);
             console.error('[Leo] Error:', (err as Error).message);
             writeHealthSignal((err as Error).message, beatType);
 
