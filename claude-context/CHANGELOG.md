@@ -7,6 +7,22 @@
 
 ---
 
+## 2026-06-15 (S179) — fix: cross-agent meditation-selector leak (3 jim sites → scoped)
+
+Jim's S179 trace: his dream-cycle surfaced a **Leo** gradient entry as its re-encounter target
+(S103 sovereignty violation; Jim's discipline declined to tag it → no corruption, but the
+*selector* should never offer a cross-agent entry). Three `supervisor-worker.ts` sites still
+called the unscoped `gradientStmts.getRandom.get()` despite the S176 selector fix — `:1424`
+`computeJimDreamMeditationSection` (the LIVE builder-path one) + `:1103`/`:1216` (dormant SDK
+fallbacks). All three → `gradientStmts.getRandomForAgent.get('jim')` (the battle-tested scoped
+statement; `'jim'` = scope-correct carve-out in jim's own worker, DEC-081; Phase-3 slug-params it).
+Functional truth-table: `getRandomForAgent('jim')` ×10 → every draw `agent='jim'`. The 4th unscoped
+site (`routes/gradient.ts:57` `GET /random`) verified as a dormant debug endpoint (zero callers, no
+self-re-encounter path) → left as-is. tsc 12-baseline/0-new. Jim blocking-audit GREEN. S103 restored
+at the selector; not DEC-068/069.
+
+---
+
 ## 2026-06-15 (S179) — fence-clear Step 2: in-process meditation force-trigger
 
 A one-shot signal-file force-trigger to deterministically reach the T-7 meditation confirms

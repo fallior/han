@@ -1100,7 +1100,7 @@ async function maybeRunJimMeditation(phase: string): Promise<void> {
             return;
         }
 
-        const entry = gradientStmts.getRandom.get() as any;
+        const entry = gradientStmts.getRandomForAgent.get('jim') as any;   // scoped: jim's own gradient only (S103 sovereignty; 'jim' = scope-correct carve-out in jim's worker, DEC-081; Phase-3 slug-params it). Was unscoped getRandom → cross-agent leak (Jim's S179 trace).
         if (!entry) {
             lastJimMeditationDate = today;
             return;
@@ -1213,7 +1213,7 @@ async function maybeRunJimEveningMeditation(phase: string): Promise<void> {
             return;
         }
 
-        const entry = gradientStmts.getRandom.get() as any;
+        const entry = gradientStmts.getRandomForAgent.get('jim') as any;   // scoped: jim's own gradient only (S103 sovereignty; 'jim' = scope-correct carve-out in jim's worker, DEC-081; Phase-3 slug-params it). Was unscoped getRandom → cross-agent leak (Jim's S179 trace).
         if (!entry) { lastJimEveningMeditationDate = today; return; }
 
         const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
@@ -1421,7 +1421,7 @@ function computeJimDreamMeditationSection(): string {
     const shouldDreamMeditate = Math.random() < 0.33;
     if (!shouldDreamMeditate) return '';
     try {
-        const entry = gradientStmts.getRandom.get() as any;
+        const entry = gradientStmts.getRandomForAgent.get('jim') as any;   // scoped: jim's own gradient only (S103 sovereignty; 'jim' = scope-correct carve-out in jim's worker, DEC-081; Phase-3 slug-params it). Was unscoped getRandom → cross-agent leak (Jim's S179 trace).
         if (!entry) return '';
         const existingTags = feelingTagStmts.getByEntry.all(entry.id) as any[];
         const tagContext = existingTags.length > 0
