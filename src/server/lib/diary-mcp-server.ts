@@ -26,10 +26,10 @@
  * protocol still validates the tool args, so "can't emit prose instead of the diary
  * form" remains a structural property rather than being silently lost.
  *
- * The in-process server in `agent-diary-tool.ts` is left UNTOUCHED — it continues to
- * serve the SDK path for surfaces not yet migrated. Both share the `DiaryArgs` shape;
- * the zod schema is mirrored here deliberately (a 3-field duplication) to keep this
- * PR's blast radius to new files only. A later DRY pass can export one shared schema.
+ * The in-process SDK server (`agent-diary-tool.ts`) was RETIRED at the T-7 close
+ * (2026-06-16, S180, DEC-094) — every cognition surface is now on tmux, so this
+ * standalone server is the SOLE diary-capture path and the shapes defined here
+ * (`DiaryCaptureArgs`/`CaptureRecord`) are the single source of truth.
  *
  * RUNTIME CONTRACT (read by the dispatcher; see lib/tmux-dispatcher.ts)
  * --------------------------------------------------------------------
@@ -72,7 +72,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-/** Mirrors `DiaryArgs` in agent-diary-tool.ts — kept in sync deliberately (see header). */
+/** The diary tool's input shape — single source of truth since the T-7 SDK retirement (DEC-094). */
 export interface DiaryCaptureArgs {
     working_memory_full: string;
     working_memory_compressed: string;

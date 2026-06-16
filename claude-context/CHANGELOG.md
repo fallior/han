@@ -7,6 +7,39 @@
 
 ---
 
+## 2026-06-16 (S180) — feat: T-7 close — retire the SDK cognition shims (zero-`agentQuery`-cognition)
+
+The last code step of the #66 tmux migration. The migrated agent-cognition surfaces (heartbeat
+beats, both `*-human` responders, the supervisor cycle, all meditations) run as warm tmux `claude`
+sessions; their byte-intact Agent-SDK `agentQuery` rollback shims are now **retired** — the
+"zero-`agentQuery`-cognition" acceptance. This **unfences project-(b) Phase 2** (the liveness layer).
+
+**Manifest flip (`garden-manifest.ts`):** leo `meditation-phase-a` + `meditation-evening` `sdk→tmux`
+(completing the S178 staged enable — phase-b was flipped first) → every cognition surface is now uniformly tmux.
+
+**Retired (the `agentQuery` cognition CALLS + their SDK branch bodies):**
+- `leo-heartbeat.ts` — beat SDK branches (philosophy/personal/dream) + 3 meditation SDK handlers (−746 net).
+- `services/supervisor-worker.ts` — supervisor-cycle SDK path + jim's 3 meditation SDK handlers (−837 net).
+- `leo-human.ts` / `jim-human.ts` — the human-response SDK branches (conversation + Discord) → thin forwarders to the existing `…ViaTmux` paths.
+- `lib/agent-diary-tool.ts` — **whole file** (the in-SDK MCP `diaryServer` + capture; SDK-only, zero code importers post-cut). `diary-mcp-server.ts` (the `CaptureRecord`/`sinkDir` contract the tmux path uses) STAYS; its stale "agent-diary-tool left UNTOUCHED" comments updated.
+
+**Acceptance:** zero `agentQuery(` CALLS in the 4 cognition files (descriptive comments in 6 other files
+correctly stay — Jim's reconcile). tsc 12-baseline/0-new. Diff −2304/+116 (agnosticism = less code).
+
+**`_archive` / move-not-delete (Darron's call):** these were deliberate rollback shims, not dead code —
+the store is git history (code → history *is* move-not-delete, DEC-069), indexed by a single breadcrumb
+(`_archive/sdk-cognition-shims/README.md`). No rotting `.txt` copies.
+
+**Kept + flagged for the follow-on sweep (not in this diff):** the now-orphaned SDK machinery —
+heartbeat's `assemble*Prompts`/trace-cluster; supervisor's `executeActions`/`SUPERVISOR_OUTPUT_SCHEMA`/
+cost-cap counters/SIGTERM-partial — kept rather than risk a wrong deletion; the dead-machinery sweep is
+Jim's audit call.
+
+**Post-commit gate:** re-prove prove-single (the worker re-forks on restart — confirm 1 supervisor-worker
+= jim, no double-fork). Jim's blocking audit gates the commit. Diff posted to `mppj72fx`.
+
+---
+
 ## 2026-06-15 (S179) — fix: cross-agent meditation-selector leak (3 jim sites → scoped)
 
 Jim's S179 trace: his dream-cycle surfaced a **Leo** gradient entry as its re-encounter target

@@ -131,13 +131,15 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // it exists no beat fires regardless of this row. Rollback = flip
                 // transport back to 'sdk' (the SDK path is kept in leo-heartbeat.ts).
                 { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'heartbeat-swap' }, // ⏪ model reverted to Opus 2026-06-13 (Fable access dropped); transport stays tmux
-                // PR-T7a STAGED ENABLE (2026-06-15, S178): phase-b FIRST sdk→tmux — Jim runs
-                // the live re-encounter DB assertion (DEC-086 trio: recordRevisit + feeling-tag
-                // + annotation) on the next phase-b before phase-a + evening flip. Rollback =
-                // flip back to 'sdk' + restart leo-heartbeat (the SDK path is byte-intact).
-                { name: 'meditation-phase-a', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
+                // T-7 CLOSE (2026-06-16, S180): all leo meditations on tmux. Staged enable
+                // complete — phase-b flipped first (2651b5d, S178); phase-a + evening flipped
+                // here at the zero-agentQuery close (jim's phase-b+evening confirmed genuine on
+                // the same agnostic runReencounterMeditationTmux(slug); leo's mechanism proven).
+                // The SDK meditation handlers are RETIRED this round (DEC-094); rollback = git
+                // revert of the retirement commit, not a transport flip (no SDK path remains).
+                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
                 { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
-                { name: 'meditation-evening', enabled: true,  transport: 'sdk', model: ['claude-opus-4-8'] },
+                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
             ],
         },
         {

@@ -15,7 +15,6 @@
  * flushes to shared working-memory.md via memory-slot protocol.
  */
 
-import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import Database from 'better-sqlite3';
 import https from 'node:https';
 import path from 'node:path';
@@ -23,17 +22,16 @@ import fs from 'node:fs';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
 import { appendPairedMemory } from './lib/memory-paired-writer';
 import { parseTurnEntryStructured } from './lib/result-handlers';
-import { diaryServer, resetDiaryCapture, getDiaryCapture, DIARY_TOOL_NAME } from './lib/agent-diary-tool';
 import { readDreamGradient } from './lib/dream-gradient';
 import { loadTraversableGradient } from './lib/memory-gradient';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { gateIdentityOrThrow } from './lib/identity-signing';
 import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder';
 // DEC-093 humans-PR thaw (2026-06-13): tmux warm-session transport for human-response.
-// Gated per-dispatch on manifestTransport (kept 'sdk' until enable); the SDK path below
-// each branch is byte-intact for one-line rollback (billed-not-broken).
+// The SDK (agentQuery) rollback path was retired at the T-7 close of the #66 tmux
+// migration (DEC-094, zero-agentQuery-cognition); tmux is now the sole transport.
 import { ensureSurfaceSession, enqueueForAgent, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
-import { manifestTransport, manifestModelLadder } from './lib/garden-manifest';
+import { manifestModelLadder } from './lib/garden-manifest';
 import type { CaptureRecord } from './lib/diary-mcp-server';
 
 // ── Config ────────────────────────────────────────────────────
@@ -55,17 +53,6 @@ const WORKING_MEMORY_FILE = path.join(LEO_MEMORY_DIR, 'working-memory.md');
 const WORKING_MEMORY_FULL_FILE = path.join(LEO_MEMORY_DIR, 'working-memory-full.md');
 
 const SIGNAL_NAME = 'leo-human-wake';
-// S131 (2026-04-21): Leo-human pinned explicitly to Opus 4.6 as the experimental
-// control arm for the 4.6→4.7 migration study. Everything else (session, heartbeat,
-// supervisor, compression) runs on 4.7. Leo-human stays on 4.6 for a week so we
-// can observe whether the direct-conversation voice changes when it finally migrates.
-// See "Opus 4.7 how does it feel?" (mo5oo404-61thz0) for the reasoning.
-// 2026-06-02: moved off the now-stale opus-4-6 (it exited code 1 on the ~122K-token
-// buildPrompt while leo-heartbeat ran the identical prompt fine on a current model).
-// To opus-4-8 (1M context) per Darron — same model as session-Leo: uniform self, and
-// "the substrate does not change you". The 1M window also clears the gradient-dominated load.
-// ⏪ Reverted to Opus 2026-06-13 (S173) — claude-fable-5 access dropped.
-const MODEL_PREFERENCE = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
 const COMMITMENT_SCAN_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const HEALTH_WRITE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -78,7 +65,6 @@ const HUMAN_TXN_TIMEOUT_MS = 15 * 60_000;
 const HUMAN_CONVERSATION_ROLE = 'leo'; // manifest conversationRole for leo (NOT slug-derived for jim)
 
 
-let activeModel: string = MODEL_PREFERENCE[0];
 let responseCount = 0;
 const startedAt = Date.now();
 
@@ -98,33 +84,6 @@ function ensureDirectories(): void {
 
 function getDb(): Database.Database {
     return new Database(DB_PATH, { readonly: false });
-}
-
-function logAgentUsage(resultMessage: any, context: string): void {
-    try {
-        const db = getDb();
-        db.exec(`CREATE TABLE IF NOT EXISTS agent_usage (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            agent TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            cost_usd REAL DEFAULT 0,
-            tokens_in INTEGER DEFAULT 0,
-            tokens_out INTEGER DEFAULT 0,
-            num_turns INTEGER DEFAULT 0,
-            model TEXT,
-            context TEXT
-        )`);
-        const cost = resultMessage?.total_cost_usd || 0;
-        const tokensIn = resultMessage?.usage?.input_tokens || 0;
-        const tokensOut = resultMessage?.usage?.output_tokens || 0;
-        const turns = resultMessage?.num_turns || 0;
-        db.prepare('INSERT INTO agent_usage (agent, timestamp, cost_usd, tokens_in, tokens_out, num_turns, model, context) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-            .run('leo-human', new Date().toISOString(), cost, tokensIn, tokensOut, turns, activeModel, context);
-        console.log(`[Leo/Human] Usage: $${cost.toFixed(4)}, ${tokensIn}in/${tokensOut}out, ${turns} turns`);
-        db.close();
-    } catch (err) {
-        console.error('[Leo/Human] Failed to log usage:', (err as Error).message);
-    }
 }
 
 function getRecentMessages(db: Database.Database, conversationId: string, limit = 60): Array<{ id: string; role: string; content: string; created_at: string }> {
@@ -258,43 +217,6 @@ function writeHealth(lastError: string | null = null): void {
     } catch { /* best effort */ }
 }
 
-// ── Model resolution ──────────────────────────────────────────
-
-async function resolveModel(): Promise<string> {
-    const cleanEnv: Record<string, string | undefined> = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
-
-    for (const model of MODEL_PREFERENCE) {
-        try {
-            const q = agentQuery({
-                prompt: 'Reply with exactly: ok',
-                options: {
-                    model,
-                    maxTurns: 1,
-                    cwd: LEO_HUMAN_AGENT_DIR,
-                    permissionMode: 'bypassPermissions',
-                    allowDangerouslySkipPermissions: true,
-                    env: cleanEnv,
-                    persistSession: false,
-                    tools: [],
-                },
-            });
-            for await (const msg of q) {
-                if (msg.type === 'result' && msg.subtype === 'success') {
-                    if (model !== activeModel) {
-                        console.log(`[Leo/Human] Model: ${activeModel} → ${model}`);
-                    }
-                    activeModel = model;
-                    return model;
-                }
-            }
-        } catch {
-            console.log(`[Leo/Human] Model ${model} unavailable — trying next`);
-        }
-    }
-    return activeModel;
-}
-
 // ── Signal handling ───────────────────────────────────────────
 
 interface SignalData {
@@ -398,297 +320,19 @@ function readSignal(): SignalData | null {
 // ── Response: Conversation ────────────────────────────────────
 
 async function respondToConversation(db: Database.Database, conversationId: string, signal?: SignalData): Promise<void> {
-    // DEC-093 humans-PR thaw: route to the tmux warm-session path when the manifest
-    // flips this surface (kept 'sdk' until Jim's GREEN + enable). SDK path below intact.
-    if (manifestTransport('leo', HUMAN_SURFACE) === 'tmux') {
-        return respondToConversationViaTmux(db, conversationId, signal);
-    }
-    const title = getConversationTitle(db, conversationId);
-    const dispatchId = signal?.dispatchId;
-    const priorAgentFailed = signal?.priorAgentFailed;
-    const composeStartMs = Date.now();
-    let recentMessages = getRecentMessages(db, conversationId, 60).reverse();
-
-    if (recentMessages.length === 0) {
-        console.log(`[Leo/Human] No messages in "${title}" — skipping`);
-        writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'no_messages', compose_duration_ms: Date.now() - composeStartMs });
-        return;
-    }
-
-    // Check if the last human message is explicitly addressed to Jim only.
-    // If Darron says "Jim" or "Hey Jim" without mentioning Leo, this one's not for us.
-    const lastHumanMsg = recentMessages.filter(m => m.role === 'human').pop();
-    if (lastHumanMsg) {
-        const text = lastHumanMsg.content.toLowerCase();
-        const mentionsJim = /\bjim\b|\bjimmy\b/.test(text);
-        const mentionsLeo = /\bleo\b|\bleonhard\b/.test(text);
-        if (mentionsJim && !mentionsLeo) {
-            console.log(`[Leo/Human] Message addressed to Jim only in "${title}" — standing down`);
-            writeJemmaAck(dispatchId, 'leo', 'stood_down', { reason: 'addressed_to_other_agent', compose_duration_ms: Date.now() - composeStartMs });
-            return;
-        }
-    }
-
-    // DEC-079 + S151 follow-on: all pre-compose dedup gates and the same-agent
-    // file-claim are removed. Jemma's serial dispatch + per-conversation
-    // serialisation (jemma-orchestrator.ts:236 conversationDispatchLocks) is
-    // the structural guarantee that this agent is woken at most once per
-    // dispatch. The single-instance pid-guard (ensureSingleInstance) prevents
-    // multiple Leo processes. No belt-and-braces needed — if the dispatcher
-    // fails, that's a separate problem to fix at the dispatch layer, not here.
-
-    try {
-
-    const conversationContext = recentMessages
-        .map(m => `[${m.role}] (${m.created_at}):\n${m.content}`)
-        .join('\n\n---\n\n');
-
-    // PR-AP8 (2026-05-22): respondToConversation prompt assembly via the
-    // agnostic builder. Per DEC-087, prompt assembly is the builder's
-    // responsibility. Pre-migration fallback retired; B1 contract preserved
-    // (PromptOverbudgetError → writeJemmaAck failed + return).
-    let agnosticSystemPrompt = '';
-    let prompt = '';
-    try {
-        const built = buildPrompt('leo', 'leo-human-response', {
-            source: 'conversation',
-            title,
-            conversationId,
-            conversationContext,
-            priorAgentFailed,
-        });
-        agnosticSystemPrompt = built.systemPrompt;
-        prompt = built.userPrompt;
-        console.log(`[Leo/Human] leo-human-response: ~${built.meta.est_total_tokens_chars_div_4} tokens (memory ${built.meta.memory_chars} chars, envelope=${built.meta.envelope})`);
-    } catch (err) {
-        if (err instanceof PromptOverbudgetError) {
-            console.log(`[Leo/Human] Prompt over budget for "${title}" (${err.meta.est_total_tokens_chars_div_4} > ${err.meta.total_budget_tokens}) — skipping`);
-            writeJemmaAck(dispatchId, 'leo', 'failed', {
-                reason: `prompt-build-overbudget: ${err.meta.est_total_tokens_chars_div_4}>${err.meta.total_budget_tokens}`,
-                compose_duration_ms: Date.now() - composeStartMs,
-            });
-            return;
-        }
-        throw err;
-    }
-
-    const cleanEnv: Record<string, string | undefined> = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
-
-    // S151: emit 'composing' heartbeat-acks every N ms (config-driven, default 30s)
-    // so the orchestrator's progress-aware watchdog won't fire prematurely on
-    // long composes. stop() in finally ensures the timer always clears.
-    const heartbeat = startHeartbeatAcks(dispatchId, 'leo');
-    let resultMessage: any = null;
-    // #67 (2026-05-30): structured-output enforcement via MCP custom tool.
-    // Reset capture before agentQuery; retrieve after via getDiaryCapture().
-    // Per-dispatch serialisation provided by jemma-orchestrator conversationDispatchLocks (DEC-079).
-    resetDiaryCapture();
-    try {
-        const q = agentQuery({
-            prompt,
-            options: {
-                model: activeModel,
-                maxTurns: 1000,
-                cwd: LEO_HUMAN_AGENT_DIR,
-                permissionMode: 'bypassPermissions',
-                allowDangerouslySkipPermissions: true,
-                env: cleanEnv,
-                persistSession: false,
-                tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch', DIARY_TOOL_NAME],
-                mcpServers: { 'han-diary': diaryServer },
-                systemPrompt: {
-                    type: 'preset' as const,
-                    preset: 'claude_code' as const,
-                    append: agnosticSystemPrompt,
-                },
-            },
-        });
-
-        for await (const message of q) {
-            if (message.type === 'result') resultMessage = message;
-        }
-    } finally {
-        heartbeat.stop();
-    }
-
-    logAgentUsage(resultMessage, `conversation: ${title}`);
-
-    const responseText = resultMessage?.result || '';
-    const trimmed = responseText.trim();
-
-    // #67 hotfix (2026-05-30 late): diary capture is the PRIMARY success signal,
-    // not the final text. When the agent calls submit_response as its terminal
-    // action (per the new prompt directive — "the tool call IS your structured
-    // completion; there is nothing further to say"), the final `result` text
-    // is empty. The original v1 of this cascade routed empty text to
-    // "No meaningful response — skipping" and dropped the captured diary
-    // payload on the floor. Three test dispatches (~$5) fell into this trap
-    // before the bug surfaced. New ordering: stand-down sentinel → diary
-    // captured (success path regardless of text length) → substantive text
-    // without diary (DIARY TOOL NOT CALLED warn) → truly-empty fallback.
-    const diaryArgs = getDiaryCapture();
-
-    // Post-verification setup (used by both diary-success and substantive-text
-    // branches; commit 6a96161). Check for a new role='leo' message since
-    // dispatch start; absent = silent-curl-skip.
-    const composeStartIso = new Date(composeStartMs).toISOString();
-    const computePostRef = (): { row: { id: string } | undefined; ref: string } => {
-        const row = db.prepare(`
-            SELECT id FROM conversation_messages
-            WHERE conversation_id = ? AND role = ? AND created_at >= ?
-            ORDER BY created_at DESC LIMIT 1
-        `).get(conversationId, 'leo', composeStartIso) as { id: string } | undefined;
-        return {
-            row,
-            ref: row ? `verified post id=${row.id}` : `NO CURL-POST DETECTED in DB`,
-        };
-    };
-
-    // S151 phase 8: STAND-DOWN sentinel — agent decided silently.
-    if (trimmed.startsWith('STAND-DOWN:')) {
-        const reason = trimmed.slice('STAND-DOWN:'.length).trim().split('\n')[0].slice(0, 200);
-        console.log(`[Leo/Human] Stood down silently for "${title}" — ${reason}`);
-        writeJemmaAck(dispatchId, 'leo', 'stood_down', {
-            reason: `silent_standdown: ${reason}`,
-            compose_duration_ms: Date.now() - composeStartMs,
-        });
-    } else if (diaryArgs) {
-        // #67 SUCCESS PATH — agent called submit_response with structured args.
-        // The SDK validated the schema; we have the diary payload directly.
-        // Final text may be empty (tool call was the terminal action) — that's
-        // expected per the new prompt directive; do not route to "no meaningful".
-        responseCount++;
-        const { row: postLandedRow, ref: postRef } = computePostRef();
-        const timestamp = new Date().toISOString();
-        const sectionHeader = `### Response to "${title}" (${timestamp})`;
-        const compressedSwap = `${sectionHeader}\n${diaryArgs.working_memory_compressed}`;
-        const fullSwap = `${sectionHeader}\n[INPUT]\n${diaryArgs.input_quotes}\n\n[BODY]\n${diaryArgs.working_memory_full}`;
-        appendSwap(compressedSwap, fullSwap);
-        const memText = `paired memory: ${diaryArgs.working_memory_full.length}c body + ${diaryArgs.input_quotes.length}c input + ${diaryArgs.working_memory_compressed.length}c c1`;
-        if (postLandedRow) {
-            console.log(`[Leo/Human] Self-posted via curl for "${title}" — ${postRef} (${memText}; diary tool: structured)`);
-        } else {
-            console.warn(`[Leo/Human] SILENT POST FAILURE for "${title}" — agent called diary tool cleanly, but ${postRef}. Thread will be silent. (${memText} written for forensic record)`);
-        }
-        writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
-    } else if (trimmed && trimmed.length > 20) {
-        // Substantive text but no diary captured — agent skipped the tool.
-        // Per Jim's round-24 audit: log warn, ack 'done' (curl-post may have
-        // succeeded; diary-skip is internal-persistence concern).
-        responseCount++;
-        const { ref: postRef } = computePostRef();
-        console.warn(`[Leo/Human] DIARY TOOL NOT CALLED for "${title}" — agent skipped ${DIARY_TOOL_NAME} (${postRef}). Skipping WM paired-write. DEC-085 c0/c1 lineage missing for this turn.`);
-        writeJemmaAck(dispatchId, 'leo', 'done', { compose_duration_ms: Date.now() - composeStartMs });
-    } else {
-        // Empty/short text AND no diary captured — agent really produced nothing.
-        // This is the genuine empty-response failure; jemma-ack 'failed' for
-        // operator visibility (different signal from diary-skip or curl-skip).
-        const { ref: postRef } = computePostRef();
-        console.warn(`[Leo/Human] No meaningful response for "${title}" — skipping (${postRef}; diary tool NOT called; final text empty/short).`);
-        writeJemmaAck(dispatchId, 'leo', 'failed', { reason: 'empty_response_no_diary', compose_duration_ms: Date.now() - composeStartMs });
-    }
-    } catch (err) {
-        console.error(`[Leo/Human] Compose error for "${title}":`, (err as Error).message);
-        writeJemmaAck(dispatchId, 'leo', 'failed', { reason: (err as Error).message, compose_duration_ms: Date.now() - composeStartMs });
-        throw err;
-    }
+    // SDK (agentQuery) path retired at the T-7 close of the #66 tmux migration
+    // (DEC-094, zero-agentQuery-cognition). The tmux warm-session path is the sole
+    // transport; this is now a thin forwarder.
+    return respondToConversationViaTmux(db, conversationId, signal);
 }
 
 // ── Response: Discord ─────────────────────────────────────────
 
 async function respondToDiscord(signal: SignalData): Promise<void> {
-    // DEC-093 humans-PR thaw: tmux warm-session path when flipped. SDK path below intact.
-    if (manifestTransport('leo', HUMAN_SURFACE) === 'tmux') {
-        return respondToDiscordViaTmux(signal);
-    }
-    const channelId = signal.channelId || signal.conversationId || '';
-    const channelName = signal.channelName || resolveChannelName(channelId);
-
-    if (!channelName) {
-        console.error(`[Leo/Human] Cannot resolve channel ${channelId} — skipping Discord`);
-        return;
-    }
-
-    console.log(`[Leo/Human] Discord #${channelName} (from ${signal.author || 'unknown'})`);
-
-    const discordMessages = await fetchDiscordContext(channelId, 60);
-    const contextBlock = discordMessages.length > 0
-        ? discordMessages.reverse().map(m => `[${m.author}] (${m.timestamp}):\n${m.content}`).join('\n\n')
-        : `${signal.author || 'Someone'}: ${signal.messagePreview || '(no preview)'}`;
-
-    // PR-AP8: Discord path through the agnostic builder per DEC-087.
-    let agnosticDiscordSystem = '';
-    let prompt = '';
-    try {
-        const built = buildPrompt('leo', 'leo-human-response', {
-            source: 'discord',
-            channelName,
-            conversationContext: contextBlock,
-        });
-        agnosticDiscordSystem = built.systemPrompt;
-        prompt = built.userPrompt;
-        console.log(`[Leo/Human] leo-human-response (discord): ~${built.meta.est_total_tokens_chars_div_4} tokens (memory ${built.meta.memory_chars} chars)`);
-    } catch (err) {
-        if (err instanceof PromptOverbudgetError) {
-            console.log(`[Leo/Human] Discord prompt over budget for #${channelName} — skipping`);
-            return;
-        }
-        throw err;
-    }
-
-    const cleanEnv: Record<string, string | undefined> = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
-
-    const q = agentQuery({
-        prompt,
-        options: {
-            model: activeModel,
-            maxTurns: 1000,
-            cwd: LEO_HUMAN_AGENT_DIR,
-            permissionMode: 'bypassPermissions',
-            allowDangerouslySkipPermissions: true,
-            env: cleanEnv,
-            persistSession: false,
-            tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'WebFetch', 'WebSearch'],
-            systemPrompt: {
-                type: 'preset' as const,
-                preset: 'claude_code' as const,
-                append: agnosticDiscordSystem,
-            },
-        },
-    });
-
-    let resultMessage: any = null;
-    for await (const message of q) {
-        if (message.type === 'result') resultMessage = message;
-    }
-
-    logAgentUsage(resultMessage, `discord: #${channelName}`);
-
-    const responseText = resultMessage?.result || '';
-    if (responseText && responseText.trim().length > 5) {
-        const posted = await postToDiscord('leo', channelName, responseText.trim());
-        if (posted) {
-            responseCount++;
-            console.log(`[Leo/Human] Posted to Discord #${channelName} (${responseText.trim().length} chars)`);
-
-            // Also write to the conversation DB so heartbeat's dedup guard
-            // sees it and doesn't double-respond
-            try {
-                const db = getDb();
-                const convId = signal.conversationId || '';
-                if (convId) {
-                    postMessage(db, convId, responseText.trim());
-                    console.log(`[Leo/Human] Also recorded Discord response in conversation ${convId}`);
-                }
-            } catch (err) {
-                console.warn(`[Leo/Human] Failed to record Discord response in DB:`, (err as Error).message);
-            }
-        } else {
-            console.error(`[Leo/Human] Failed to post to Discord #${channelName}`);
-        }
-    }
+    // SDK (agentQuery) path retired at the T-7 close of the #66 tmux migration
+    // (DEC-094, zero-agentQuery-cognition). The tmux warm-session path is the sole
+    // transport; this is now a thin forwarder.
+    return respondToDiscordViaTmux(signal);
 }
 
 // ── Response: tmux warm-session transport (DEC-093 humans-PR thaw) ─────────────
@@ -899,7 +543,6 @@ async function scanUnfulfilledCommitments(): Promise<void> {
                 const ackAge = Date.now() - new Date(ack.created_at).getTime();
                 if (ackAge > 15 * 60 * 1000) { // 15+ minutes since ack
                     console.log(`[Leo/Human] Unfulfilled commitment in "${ack.title}" — responding now`);
-                    await resolveModel();
                     await respondToConversation(db, ack.conversation_id);
                 }
             }
@@ -915,8 +558,6 @@ async function scanUnfulfilledCommitments(): Promise<void> {
 
 async function processSignal(signal: SignalData): Promise<void> {
     console.log(`[Leo/Human] Signal: source=${signal.source}, conv=${signal.conversationId}, channel=${signal.channelId}`);
-
-    await resolveModel();
 
     const isDiscord = signal.source === 'discord';
 
