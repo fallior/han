@@ -136,6 +136,12 @@ const JIM_HEALTH_FILE = path.join(HEALTH_DIR, 'jim-health.json');
 const JEMMA_HEALTH_FILE = path.join(HEALTH_DIR, 'jemma-health.json');
 const RESURRECTION_LOG = path.join(HEALTH_DIR, 'resurrection-log.jsonl');
 const RESURRECTION_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+// F1 (2026-06-18): Jim's server is watchdog-managed (agent-server-watchdog.sh on :3848),
+// NOT a systemd unit — resurrect via the watchdog path (SIGTERM the live pid → watchdog
+// relaunches), never the disabled+failed `han-server.service` relic (which binds :3847 =
+// Leo's watchdog → collide, not rescue). Target derived from topology, not unit names.
+const RESTART_AGENT_SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'restart-agent-server.sh');
+const JIM_SERVER_PIDFILE = path.join(HAN_DIR, 'jim-server.pid');
 
 function checkJimHealth(): void {
     try {
@@ -202,25 +208,30 @@ function checkJimHealth(): void {
             // No resurrection log yet — proceed
         }
 
-        // Attempt resurrection
-        console.log('[Robin Hood] Resurrecting Jim via systemctl --user restart han-server.service');
+        // Attempt resurrection via the watchdog path (F1, 2026-06-18). Jim's server is
+        // watchdog-managed on :3848, NOT a systemd unit — restart-agent-server.sh SIGTERMs the
+        // live pid so agent-server-watchdog.sh relaunches it. (The old systemctl restart of the
+        // disabled+failed han-server.service relic would have bound :3847 — Leo's watchdog —
+        // and collided rather than rescued.) restart-agent-server.sh is a no-op when the pidfile
+        // is absent/dead, i.e. when the watchdog itself is gone — which Leo cannot relaunch from
+        // the heartbeat; that case falls through to the ntfy escalation below.
+        console.log('[Robin Hood] Resurrecting Jim via restart-agent-server.sh jim (watchdog relaunch)');
         let success = false;
         try {
-            execSync('systemctl --user restart han-server.service', { timeout: 30000 });
+            execFileSync('bash', [RESTART_AGENT_SCRIPT, 'jim'], { timeout: 30000, stdio: 'inherit' });
 
-            // Wait for Node.js/tsx Express server to fully start before verification
-            // 12s allows time for module loading, port binding, and health signal setup
+            // Wait for the watchdog to relaunch + the server to bind + rewrite its pidfile.
             execSync('sleep 12');
+
+            // Verify against topology truth (NOT systemctl — jim isn't a systemd unit): the
+            // server pidfile is present with a live pid (the watchdog rewrites it on relaunch).
             try {
-                const status = execSync('systemctl --user is-active han-server.service', { timeout: 5000 }).toString().trim();
-                if (status === 'active') {
-                    console.log('[Robin Hood] Jim RESURRECTED — service active');
-                    success = true;
-                } else {
-                    console.log(`[Robin Hood] Resurrection FAILED — service status: ${status}`);
-                }
+                const jimPid = parseInt(fs.readFileSync(JIM_SERVER_PIDFILE, 'utf-8').trim(), 10);
+                process.kill(jimPid, 0); // throws if not alive
+                console.log(`[Robin Hood] Jim RESURRECTED — server pid ${jimPid} alive (watchdog relaunched)`);
+                success = true;
             } catch {
-                console.log('[Robin Hood] Resurrection FAILED — service not active after restart');
+                console.log('[Robin Hood] Resurrection FAILED — jim server pidfile absent or pid dead (watchdog may be down → escalating)');
             }
         } catch (err) {
             console.error('[Robin Hood] Resurrection FAILED:', (err as Error).message);

@@ -7,6 +7,27 @@
 
 ---
 
+## 2026-06-18 (S181) — fix(F1/B1): re-point Jim resurrection off the disabled han-server.service relic
+
+Phase-2 (de-agentification liveness layer), the F1 standalone correctness fix — **B1** of the converged
+sequence. Built under a quiesce-window (supervisor + heartbeat paused), Jim blocking-audit GREEN, the
+split (B1 relic re-point now / B2 spoke-lifecycle next) approved. **+24/−13**, `leo-heartbeat.ts` only.
+
+- **`checkJimHealth` resurrection** no longer calls `systemctl --user restart han-server.service` — a
+  **disabled+failed relic** that binds `:3847` (Leo's watchdog) and would **collide, not rescue**.
+  Re-pointed to the live topology: `restart-agent-server.sh jim` (SIGTERM the live pid →
+  `agent-server-watchdog.sh` relaunches Jim's server on `:3848`), verified against **topology truth**
+  (`jim-server.pid` present + `process.kill(pid,0)` alive), not `systemctl`. The other 4 resurrection
+  targets (jemma / leo-human / jim-human / jim→leo) verified enabled+active — unchanged; the relic was
+  isolated to `checkJimHealth`.
+- **Honest escalation:** `restart-agent-server.sh` no-ops on a dead pid (watchdog itself gone) → B1's
+  verify throws → the existing ntfy human-escalation fires. No pretend-rescue. Auto-relaunch of a
+  truly-dead watchdog is heavier (can't be done from the heartbeat) → deferred to the agnostic mesh
+  (Phase-2 step 5).
+- Pre-merge audit: Jim (`leo-heartbeat.ts` is on the audit list); GREEN. tsc 11/0-new. Settled
+  decisions: none altered (DEC-081 agnostic-mesh is the eventual target; B1 is a correctness
+  re-point). DEC-068/069 untouched.
+
 ## 2026-06-16 (S180) — chore: T-7 orphan sweep (the SDK machinery the retirement left dead)
 
 The follow-on to the T-7 close (`60dce91`) — removing the in-process SDK-cycle/SDK-beat machinery
