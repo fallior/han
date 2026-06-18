@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-18 (S181) — feat(F1/B2): spoke-lifecycle — wedged-alive recovery + orphan reap (S167-safe)
+
+Phase-2 liveness, **B2** of the F1 sequence — the genuinely-uncovered surface (the 10h `/clear` wedge + the orphan leak). Built garden-live, Jim blocking-audit GREEN (he reproduced every gate by hand), validated by a **live destructive reap-test** under a fresh quiesce-window. **+146** `tmux-dispatcher.ts`, curl-fold in `leo-heartbeat.ts`, 2 new test scripts.
+
+- **B2a — wedged-but-alive recovery** (`tmux-dispatcher.ts:ensureSurfaceSession`): a session that exists but never signals ready (falls through the warm-death/model-unavailable check) now triggers `kill + cold-relaunch ONCE` (bounded, S74 no-retry-storm) on the adopt `SessionNotReadyError`; a second failure propagates. Cold-launch refactored into a shared `coldLaunch()` closure.
+- **B2b — orphan reap** (`tmux-dispatcher.ts`): `findOrphanedSpokePids(slug, surface)` (READ-ONLY, exported) matches `AGENT_SLUG`+`AGENT_SURFACE` in `/proc/<pid>/environ` and **excludes self-ancestry (walk-ppid from `process.pid`, the S167 self-kill guard) + live-pane processes**. `reapOrphanedSpokes` (SIGTERM→2s→SIGKILL) runs inside `coldLaunch` before relaunch. **Safe-by-construction, triple-guarded.**
+- **curl-verify fold** (`checkJimHealth`): verify-by-serving — `curl :3848` HTTP 200, replacing `process.kill(wrapper-pid)` (the wrapper ≠ the :3848 listener — Jim's catch). Removed the unused `JIM_SERVER_PIDFILE`.
+- **Tests:** `scripts/test-orphan-reap.ts` (4 negative tests, re-derive the guards independently of the impl — self/ancestry/live-pane never flagged, no false positives) + `scripts/test-orphan-reap-live.ts` (live destructive: a real pane-less orphan is reaped, a live-pane control is untouched). Both PASS; Jim re-ran the negative suite from his own session.
+- Pre-merge audit: Jim, GREEN. tsc 11/0-new. Settled: none altered (DEC-081 — dispatcher stays slug-agnostic; DEC-068/069 untouched).
+
 ## 2026-06-18 (S181) — fix(F1/B1): re-point Jim resurrection off the disabled han-server.service relic
 
 Phase-2 (de-agentification liveness layer), the F1 standalone correctness fix — **B1** of the converged

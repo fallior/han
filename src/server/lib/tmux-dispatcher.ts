@@ -343,6 +343,102 @@ const LAUNCH_SURFACE_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts
  *  level `heartbeatSessionAdopted`. */
 const adopted = new Map<string, boolean>();
 
+// ── B2b: orphaned-spoke reap (Phase-2 liveness, 2026-06-18) ──────────────────────────
+// A service restart drops the dispatcher's in-memory maps; a spoke whose tmux session
+// died but whose `claude` process survived (reparented to init) is an ORPHAN — it holds
+// no live pane yet keeps running (4 reaped by hand, S180). Reap them on relaunch.
+//
+// S167 SELF-KILL SAFETY is the cardinal rule here (I nearly killed my own session twice):
+// identification is read-only + separated from the kill, and EXCLUDES (a) my own process
+// ancestry (walk ppid from process.pid) and (b) anything under a live tmux pane. The
+// negative tests (scripts/test-orphan-reap.ts) prove both exclusions hold.
+
+/** Parent pid of `pid` via /proc/<pid>/status (robust vs /proc/<pid>/stat comm-spaces). 0 if unknown. */
+function procPPid(pid: number): number {
+    try {
+        const m = fs.readFileSync(`/proc/${pid}/status`, 'utf-8').match(/^PPid:\s*(\d+)/m);
+        return m ? parseInt(m[1], 10) : 0;
+    } catch { return 0; }
+}
+
+/** The pid's full ancestry chain (inclusive of `pid`), walked to init. Used to never kill self. */
+function procAncestry(pid: number): Set<number> {
+    const chain = new Set<number>();
+    let cur = pid;
+    for (let depth = 0; cur > 1 && depth < 24 && !chain.has(cur); depth++) {
+        chain.add(cur);
+        cur = procPPid(cur);
+    }
+    return chain;
+}
+
+/** Shell pids of every LIVE tmux pane (a live spoke's tree descends from one of these). */
+function livePanePids(): Set<number> {
+    try {
+        return new Set(
+            tmux(['list-panes', '-a', '-F', '#{pane_pid}'])
+                .split('\n').map((s) => parseInt(s.trim(), 10)).filter((n) => n > 0),
+        );
+    } catch { return new Set(); }
+}
+
+/** True if `pid` (or any ancestor) is the shell of a live tmux pane → it's a live spoke, never an orphan. */
+function isUnderLivePane(pid: number, panePids: Set<number>): boolean {
+    let cur = pid;
+    for (let depth = 0; cur > 1 && depth < 24; depth++) {
+        if (panePids.has(cur)) return true;
+        cur = procPPid(cur);
+    }
+    return false;
+}
+
+/** `/proc/<pid>/environ` as a token set (KEY=VALUE), or null if unreadable (perm/race). */
+function procEnviron(pid: number): Set<string> | null {
+    try {
+        return new Set(fs.readFileSync(`/proc/${pid}/environ`, 'utf-8').split('\0').filter(Boolean));
+    } catch { return null; }
+}
+
+/**
+ * READ-ONLY identification of orphaned spoke pids for (slug, surface): processes whose env
+ * marks them as this surface's spoke (`AGENT_SLUG=<slug>` AND `AGENT_SURFACE=<surface>`) but
+ * which are NOT under any live tmux pane and NOT in our own ancestry. No side effects — this
+ * is the function the negative tests assert against.
+ */
+export function findOrphanedSpokePids(slug: string, surface: string): number[] {
+    const selfAncestry = procAncestry(process.pid); // never kill self or any ancestor (S167)
+    const panePids = livePanePids();
+    const wantSlug = `AGENT_SLUG=${slug}`;
+    const wantSurface = `AGENT_SURFACE=${surface}`;
+    const orphans: number[] = [];
+    let pids: string[] = [];
+    try { pids = fs.readdirSync('/proc').filter((e) => /^\d+$/.test(e)); } catch { return []; }
+    for (const ent of pids) {
+        const pid = parseInt(ent, 10);
+        if (selfAncestry.has(pid)) continue;                    // guard 1: never self/ancestor
+        const env = procEnviron(pid);
+        if (!env || !env.has(wantSlug) || !env.has(wantSurface)) continue; // only this surface's spokes
+        if (isUnderLivePane(pid, panePids)) continue;           // guard 2: live spoke, leave it
+        orphans.push(pid);
+    }
+    return orphans;
+}
+
+/** Reap orphaned spokes for (slug, surface): SIGTERM, then SIGKILL stragglers. Safe-by-construction
+ *  (findOrphanedSpokePids excludes self-ancestry + live-pane procs). Called on relaunch. */
+async function reapOrphanedSpokes(slug: string, surface: string): Promise<void> {
+    const orphans = findOrphanedSpokePids(slug, surface);
+    if (orphans.length === 0) return;
+    console.warn(`[tmux-dispatcher] ${slug}/${surface}: reaping ${orphans.length} orphaned spoke pid(s) (no live pane): ${orphans.join(', ')}`);
+    for (const pid of orphans) {
+        try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+    await sleep(2000);
+    for (const pid of orphans) {
+        try { process.kill(pid, 0); process.kill(pid, 'SIGKILL'); } catch { /* dead — good */ }
+    }
+}
+
 /**
  * Ensure the surface's tmux session exists, is on a WORKING model, is woken, and is
  * adopted into the dispatcher registry. The single-manager runtime respawner (T-2):
@@ -372,6 +468,25 @@ export async function ensureSurfaceSession(
     const key = sessionKey(slug, surface);
     const welcomeBack = opts.welcomeBack ?? 'welcome back';
 
+    // Cold launch: reap any orphaned spoke for this surface (B2b — a service restart can
+    // leave a pane-less `claude` running), then launch fresh + identity-load. Shared by the
+    // no-session branch AND the B2a wedged-but-alive recovery below.
+    const coldLaunch = async (): Promise<void> => {
+        adopted.set(key, false); // dead/absent session invalidates any prior adoption
+        await reapOrphanedSpokes(slug, surface);
+        // Stale per-surface sentinel must not satisfy waitForReady — unlink so the
+        // adoption proves a FRESH wake (the T-1.5 cross-talk lesson).
+        try { fs.unlinkSync(readyPath(slug, surface)); } catch { /* none */ }
+        console.log(`[tmux-dispatcher] ${slug}/${surface}: launching ${tmuxSession} via launch-tmux-surface.sh`);
+        execFileSync('bash', [LAUNCH_SURFACE_SCRIPT, slug, surface], { stdio: 'inherit' });
+        // Wait for the claude prompt chrome before the wake (send-keys fired too early
+        // lands in bash, not claude). awaitChromeOrDescend also auto-descends the model-
+        // failover ladder if the launch model is unavailable (S173); any OTHER stuck
+        // prompt fails loud with a pane snapshot → the caller's catch health-signals it.
+        await awaitChromeOrDescend(slug, surface, tmuxSession, opts.ladder);
+        sendLine(tmuxSession, welcomeBack);
+    };
+
     // Warm-death handoff: a dead-model spoke can't be clear-reconciled (the welcome-back
     // would re-run the dead model). Kill it so the cold-launch below descends the ladder.
     const existing = sessions.get(key);
@@ -385,29 +500,38 @@ export async function ensureSurfaceSession(
     }
 
     if (!tmuxSessionExists(tmuxSession)) {
-        adopted.set(key, false); // dead session invalidates any prior adoption
-        // Stale per-surface sentinel must not satisfy waitForReady — unlink so the
-        // adoption below proves a FRESH wake (the T-1.5 cross-talk lesson).
-        try { fs.unlinkSync(readyPath(slug, surface)); } catch { /* none */ }
-        console.log(`[tmux-dispatcher] ${slug}/${surface}: launching ${tmuxSession} via launch-tmux-surface.sh`);
-        execFileSync('bash', [LAUNCH_SURFACE_SCRIPT, slug, surface], { stdio: 'inherit' });
-        // Wait for the claude prompt chrome before the wake (send-keys fired too early
-        // lands in bash, not claude). awaitChromeOrDescend also auto-descends the model-
-        // failover ladder if the launch model is unavailable (S173); any OTHER stuck
-        // prompt fails loud with a pane snapshot → the caller's catch health-signals it.
-        await awaitChromeOrDescend(slug, surface, tmuxSession, opts.ladder);
-        sendLine(tmuxSession, welcomeBack);
+        await coldLaunch();
     }
     // Adopt when not yet adopted OR the registered session is not ready (e.g. a failed
     // ctx-pressure clearSession left ready=false — re-adopt once the slow post-clear
     // wake re-touches the sentinel). spawnAgentSession(adoptExisting) waits on it.
     if (!adopted.get(key) || !sessions.get(key)?.ready) {
-        await spawnAgentSession(slug, surface, {
-            tmuxSession,
-            launchCommand: `(launched by ${LAUNCH_SURFACE_SCRIPT})`,
-            adoptExisting: true,
-        });
-        adopted.set(key, true);
+        try {
+            await spawnAgentSession(slug, surface, {
+                tmuxSession,
+                launchCommand: `(launched by ${LAUNCH_SURFACE_SCRIPT})`,
+                adoptExisting: true,
+            });
+            adopted.set(key, true);
+        } catch (err) {
+            // B2a — wedged-but-alive recovery (the 10h S180 wedge): the session EXISTS but
+            // never signalled ready within READY_TIMEOUT_MS (a genuine wake completes well
+            // inside that), and it is NOT the model-unavailable case the warm-death handoff
+            // catches — it is stuck (e.g. at a /clear prompt). Kill + cold-relaunch ONCE
+            // (bounded — no retry storm, S74); a second failure propagates to the caller's
+            // health-signal path rather than looping.
+            if (!(err instanceof SessionNotReadyError)) throw err;
+            console.warn(`[tmux-dispatcher] ${slug}/${surface}: wedged-but-alive (ready-timeout on adopt) — kill + one cold-relaunch`);
+            try { tmux(['kill-session', '-t', tmuxSession]); } catch { /* already gone */ }
+            sessions.delete(key);
+            await coldLaunch();
+            await spawnAgentSession(slug, surface, {
+                tmuxSession,
+                launchCommand: `(launched by ${LAUNCH_SURFACE_SCRIPT})`,
+                adoptExisting: true,
+            });
+            adopted.set(key, true);
+        }
     }
 }
 

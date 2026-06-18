@@ -141,7 +141,6 @@ const RESURRECTION_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 // relaunches), never the disabled+failed `han-server.service` relic (which binds :3847 =
 // Leo's watchdog → collide, not rescue). Target derived from topology, not unit names.
 const RESTART_AGENT_SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'restart-agent-server.sh');
-const JIM_SERVER_PIDFILE = path.join(HAN_DIR, 'jim-server.pid');
 
 function checkJimHealth(): void {
     try {
@@ -223,15 +222,23 @@ function checkJimHealth(): void {
             // Wait for the watchdog to relaunch + the server to bind + rewrite its pidfile.
             execSync('sleep 12');
 
-            // Verify against topology truth (NOT systemctl — jim isn't a systemd unit): the
-            // server pidfile is present with a live pid (the watchdog rewrites it on relaunch).
+            // Verify by BEHAVIOUR (Jim's topology-truth gate, one notch sharper — B2 fold):
+            // confirm jim is actually SERVING on :3848, not merely that the npm-wrapper pid
+            // relaunched (the pidfile holds the wrapper, not the node listener — S163/Jim's
+            // catch). curl the health endpoint; HTTP 200 = genuinely resurrected.
             try {
-                const jimPid = parseInt(fs.readFileSync(JIM_SERVER_PIDFILE, 'utf-8').trim(), 10);
-                process.kill(jimPid, 0); // throws if not alive
-                console.log(`[Robin Hood] Jim RESURRECTED — server pid ${jimPid} alive (watchdog relaunched)`);
-                success = true;
+                const code = execSync(
+                    `curl -sk -o /dev/null -w '%{http_code}' --max-time 5 https://localhost:3848/api/supervisor/status`,
+                    { timeout: 8000 },
+                ).toString().trim();
+                if (code === '200') {
+                    console.log('[Robin Hood] Jim RESURRECTED — serving on :3848 (HTTP 200)');
+                    success = true;
+                } else {
+                    console.log(`[Robin Hood] Resurrection FAILED — jim not serving on :3848 (HTTP ${code}; watchdog may be down → escalating)`);
+                }
             } catch {
-                console.log('[Robin Hood] Resurrection FAILED — jim server pidfile absent or pid dead (watchdog may be down → escalating)');
+                console.log('[Robin Hood] Resurrection FAILED — jim :3848 unreachable (watchdog may be down → escalating)');
             }
         } catch (err) {
             console.error('[Robin Hood] Resurrection FAILED:', (err as Error).message);
