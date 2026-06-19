@@ -7,6 +7,10 @@
 
 ---
 
+## 2026-06-19 (S193) — fix(F-warmth/#90): cadence guard-dog reads the DEFINED cadence (false-fire fix)
+
+Phase-2 liveness, the **final plank** of the "fix Leo" thread (Part 1 `d846275` + DEC-096 `9e0178c` + Part 2 `18547c1`). The heartbeat distress detector measured each beat against `getCurrentPeriodMs()` — the *current* phase base, blind to the phase step-down + the transition/idle dampening the scheduler already applied — so a rest/dampened/boundary beat false-fired ("expected 20min, actual 81min"). **Fix:** `scheduleNext()` records its own `getWallClockDelay()` result (the interval *actually scheduled* for the upcoming beat, dampening/phase/holiday folded in) into `lastScheduledIntervalMs`; the detector reads that. The guard now flags against the rhythm-as-defined — boundary/dampened beats stop false-firing, a genuine >2× overrun still trips (and it now catches the persistent-chrome hung-but-live turn the Part-2 wedged-recovery deliberately won't kill — the backstop that "lives in #90"). **R001 relocate-not-change** — `getWallClockDelay`/`getCurrentPeriodMs`/the dampening are byte-unchanged; only record + read. Jim blocking-audit (R001-adjacent) CODE GREEN. tsc 11/0-new. **1 file, +14/−1.** Minimal cut; the fuller #90 (agent-agnostic shared monitor → project-(b) scour; feed the #92 supervisor sweep; tolerances from a cadence single-source → thread `mqecuomw`) is deferred to fresh windows. Settled: none altered.
+
 ## 2026-06-19 (S193) — fix(F-warmth/part2): R011 Invariant 2 — chrome-discriminator wedged-recovery + cli-busy agent-scope/let-it-finish
 
 Phase-2 liveness, **Part 2** of the "fix Leo" / F-warmth thread (Part 1 = `d846275` the wake terminus; DEC-096 = `9e0178c` R011). Implements R011 **Invariant 2** (never terminate mid-thinking). Jim blocking-audit **CODE GREEN** (reproduced tsc + verified the live agent-scoping by his own hand). Atomic cutover: the live-on-save hooks + the `leo-heartbeat` restart flipped together. tsc 11/0-new; `bash -n` clean. **4 files, +60/−17.**

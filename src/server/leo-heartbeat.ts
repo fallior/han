@@ -120,6 +120,14 @@ let resumingFromInterruption = false;
 
 // Distress signal detection — track time between beats
 let lastHeartbeatStartMs: number | null = null;
+// #90 cadence guard-dog (R011 / DEC-096; R001 relocate-not-change): the DEFINED interval the
+// scheduler actually used for the upcoming beat — `getWallClockDelay()`'s output, which already
+// folds in the phase base + transition/idle dampening + rest/holiday. The distress detector
+// reads THIS (the rhythm as actually defined) instead of re-deriving `getCurrentPeriodMs()`
+// (the current phase base, blind to dampening + the phase step-down) — that re-derivation was
+// the false-fire at phase boundaries (e.g. a 40-min rest-day beat measured against the 20-min
+// work base read 2x). Recording the scheduler's own decision is the single source of "normal".
+let lastScheduledIntervalMs: number | null = null;
 
 // Optimistic concurrency: resolve function for retry-wait promise
 // When set, the signal watcher can call it to wake the retry loop early
@@ -2125,7 +2133,11 @@ async function heartbeat(): Promise<void> {
     // Distress signal detection: check if heartbeat interval is degraded
     if (lastHeartbeatStartMs !== null) {
         const actualIntervalMs = beatStartMs - lastHeartbeatStartMs;
-        const expectedIntervalMs = getCurrentPeriodMs();
+        // #90 guard-dog: measure against the DEFINED cadence the scheduler actually used for
+        // this beat (dampening + phase + holiday all already folded in), not the raw current
+        // phase base — which false-fired at every phase/dampening boundary. Fall back to the
+        // base only before the first scheduleNext has recorded a delay.
+        const expectedIntervalMs = lastScheduledIntervalMs ?? getCurrentPeriodMs();
         const minAbsoluteMs = 5 * 60 * 1000; // 5 minutes
 
         // Trigger if: actual > 2x expected AND absolute > 5 minutes
@@ -2388,6 +2400,7 @@ function startSignalWatcher(): void {
 
 function scheduleNext(): void {
     const delay = getWallClockDelay();
+    lastScheduledIntervalMs = delay; // #90: record the defined cadence for the distress guard-dog (relocate-not-change)
     setTimeout(async () => {
         // Durable holiday stand-down (read FRESH each beat): if heartbeat-paused-leo is
         // present, fire NO beat — no SDK call, no WMF/WM/explorations write, no Robin-Hood.
