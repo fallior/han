@@ -84,7 +84,8 @@ const DAMPEN_AFTER = 2;            // Start dampening after 2 idle cycles
 // so it does NOT touch the shared-period 180° antiphase the active base preserves).
 // The active base stays 20min (more responsive than Jim's ~30 AND antiphase-
 // coherent with Leo); slowing the active base to 30 would decouple Jim's period
-// from Leo's shared 20min — flagged to Jim as the one open R001 decision. R001
+// from Leo's shared 20min. RESOLVED (not open): the active-30 proposal was declined (S179)
+// and closed by the S184 cycle-symmetry decision (shared cadence, 20min active base). R001
 // four-phase structure + emergency mode intact. (See hall-of-records R001.)
 const DAMPEN_MAX_MULTIPLIER = 4;   // Cap at 4x base interval (~80min idle). R001 normal cadence restored (S179, Darron-directed) — the #245 throttled-thaw widening (5x ~100min) reverted now the tmux migration is proven; R001 idle-dampening itself stays (not activity-driven).
 const DAMPEN_BASE = 2;             // Double each step
