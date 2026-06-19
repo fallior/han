@@ -9,4 +9,11 @@
 SIGNALS_DIR="${HOME}/.han/signals"
 mkdir -p "$SIGNALS_DIR"
 
-date -Iseconds > "${SIGNALS_DIR}/cli-busy"
+# Agent-scoped + session-only (R011 Invariant 2 / DEC-096, DEC-081). cli-busy is the
+# interactive session telling ITS OWN agent's heartbeat to yield the Opus slot. Only an
+# interactive session writes it — a dispatched spoke (AGENT_SURFACE != session) must not make
+# the heartbeat yield to its own beats — and it is keyed per-agent so e.g. Leo's heartbeat
+# yields to Leo's session, never to Jim's activity (the cross-agent global-cli-busy bug, live
+# on beat #17).
+[ "${AGENT_SURFACE:-session}" = "session" ] || exit 0
+date -Iseconds > "${SIGNALS_DIR}/cli-busy-${AGENT_SLUG:-leo}"

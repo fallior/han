@@ -90,8 +90,14 @@ const DB_PATH = process.env.HAN_DB_PATH || path.join(HAN_DIR, 'gradient.db');
 const JIM_MEMORY_DIR = path.join(HAN_DIR, 'memory');
 const LEO_MEMORY_DIR = path.join(HAN_DIR, 'memory', 'leo');
 const SIGNALS_DIR = path.join(HAN_DIR, 'signals');
-const CLI_BUSY_FILE = path.join(SIGNALS_DIR, 'cli-busy');
-const CLI_FREE_FILE = path.join(SIGNALS_DIR, 'cli-free');
+// Agent-scoped cli-busy (R011 Invariant 2 / DEC-096, DEC-081): the heartbeat yields the Opus
+// slot only to ITS OWN agent's interactive session, never to another agent's activity (the
+// cross-agent global-cli-busy bug — Leo's heartbeat yielding to Jim's session, live on beat
+// #17). leo-heartbeat is instance-leo and the systemd service does not set AGENT_SLUG → 'leo'
+// fallback (scope-correct DEC-081 carve-out: an agent's own driver keying its own signals).
+const CLI_SLUG = process.env.AGENT_SLUG ?? 'leo';
+const CLI_BUSY_FILE = path.join(SIGNALS_DIR, `cli-busy-${CLI_SLUG}`);
+const CLI_FREE_FILE = path.join(SIGNALS_DIR, `cli-free-${CLI_SLUG}`);
 const CLI_BUSY_STALE_MINUTES = 5;       // Ignore cli-busy files older than this
 const RETRY_INTERVAL_MS = 30 * 1000;    // 30 seconds between retries
 const RETRY_MAX_MS = 10 * 60 * 1000;    // 10 minutes max retry window
@@ -2347,17 +2353,22 @@ function writeHealthSignal(lastError: string | null = null, beatType?: BeatType)
 function startSignalWatcher(): void {
     try {
         fs.watch(SIGNALS_DIR, async (event, filename) => {
-            // cli-busy signal: session starting — abort current beat, yield
-            if (filename === 'cli-busy') {
+            // cli-busy signal (agent-scoped): our own interactive session started a turn.
+            // R011 Invariant 2 (DEC-096): NEVER abort a running beat mid-thought. A beat is
+            // short and scheduling is sequential (scheduleNext fires only after it completes),
+            // so we let the running beat finish; the NEXT beat defers at beat-time via
+            // isCliBusy() while the session holds the slot. (Previously this called
+            // currentBeatAbort.abort() — the mid-beat-abort violation, and it fired on the
+            // GLOBAL cli-busy so another agent's session tripped it too.)
+            if (filename === `cli-busy-${CLI_SLUG}`) {
                 if (currentBeatAbort && !currentBeatAbort.signal.aborted) {
-                    console.log('[Leo] cli-busy signal — aborting current beat, yielding to session');
-                    currentBeatAbort.abort();
+                    console.log('[Leo] cli-busy during a running beat — letting it finish (R011 Inv-2); the next beat will defer');
                 }
                 return;
             }
 
             // cli-free signal: wake retry loop if heartbeat is waiting
-            if (filename === 'cli-free') {
+            if (filename === `cli-free-${CLI_SLUG}`) {
                 try { fs.unlinkSync(CLI_FREE_FILE); } catch { /* already gone */ }
                 if (retryWakeResolve) {
                     console.log('[Leo] cli-free signal received — waking retry loop');

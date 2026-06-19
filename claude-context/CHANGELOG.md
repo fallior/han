@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-19 (S193) — fix(F-warmth/part2): R011 Invariant 2 — chrome-discriminator wedged-recovery + cli-busy agent-scope/let-it-finish
+
+Phase-2 liveness, **Part 2** of the "fix Leo" / F-warmth thread (Part 1 = `d846275` the wake terminus; DEC-096 = `9e0178c` R011). Implements R011 **Invariant 2** (never terminate mid-thinking). Jim blocking-audit **CODE GREEN** (reproduced tsc + verified the live agent-scoping by his own hand). Atomic cutover: the live-on-save hooks + the `leo-heartbeat` restart flipped together. tsc 11/0-new; `bash -n` clean. **4 files, +60/−17.**
+
+- **2a — chrome discriminator** (`tmux-dispatcher.ts`): the B2a wedged-recovery no longer kills on any ready-timeout. New `PROCESSING_CHROME_RE = /esc to interrupt/i` (the active-turn signal — present only while a turn is processing, and it persists through the between-tool-calls static window, so it beats a double-capture diff). On `SessionNotReadyError`: **actively-processing → NOT killed** (skip this dispatch, fail-safe — retry next cadence; never kill a mid-wake/thinking spoke); **static + no chrome → the genuine wedge → kill + cold-relaunch once**. A persistently-chromed hung-but-live turn is deliberately never killed here — its escalation lives in #90 / a future turn-level timeout (commented).
+- **2b — cli-busy agent-scope + let-it-finish** (`leo-heartbeat.ts` + `cli-active.sh` + `cli-idle.sh`): `cli-busy`/`cli-free` → `cli-busy-<slug>`/`cli-free-<slug>` (DEC-081); the writer hooks **session-gated** (`AGENT_SURFACE=session` only — a spoke never writes cli-busy, so the heartbeat can't yield to its own beats); the signal watcher **no longer aborts a running beat** (let-it-finish; the beat-time `isCliBusy()` defer stays). Fixes the **beat-#17 cross-agent bug** (Leo's heartbeat yielded to a Jim session via the global cli-busy). Still prompt-level momentary cli-busy — **not** a `session-active` reintroduction (the DO-NOT honoured).
+- Pre-merge audit: Jim, CODE GREEN. Settled: implements DEC-096, honours DEC-081 + the no-session-active DO-NOT; none altered. Runtime gates (the cross-agent fix proven live, let-it-finish, prove-single, cadence) are Jim's post-deploy.
+
 ## 2026-06-18 (S181) — feat(F1/B2): spoke-lifecycle — wedged-alive recovery + orphan reap (S167-safe)
 
 Phase-2 liveness, **B2** of the F1 sequence — the genuinely-uncovered surface (the 10h `/clear` wedge + the orphan leak). Built garden-live, Jim blocking-audit GREEN (he reproduced every gate by hand), validated by a **live destructive reap-test** under a fresh quiesce-window. **+146** `tmux-dispatcher.ts`, curl-fold in `leo-heartbeat.ts`, 2 new test scripts.

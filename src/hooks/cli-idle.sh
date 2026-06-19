@@ -9,5 +9,7 @@
 SIGNALS_DIR="${HOME}/.han/signals"
 mkdir -p "$SIGNALS_DIR"
 
-rm -f "${SIGNALS_DIR}/cli-busy"
-date -Iseconds > "${SIGNALS_DIR}/cli-free"
+# Agent-scoped + session-only (mirror cli-active.sh; R011 Invariant 2 / DEC-096, DEC-081).
+[ "${AGENT_SURFACE:-session}" = "session" ] || exit 0
+rm -f "${SIGNALS_DIR}/cli-busy-${AGENT_SLUG:-leo}"
+date -Iseconds > "${SIGNALS_DIR}/cli-free-${AGENT_SLUG:-leo}"

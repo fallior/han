@@ -180,6 +180,12 @@ export const MODEL_UNAVAILABLE_RE = /issue with the selected model|Run \/model/i
 /** The normal ready chrome (a live Claude prompt). The model-error screen ALSO shows `❯`
  *  + a status line, so MODEL_UNAVAILABLE_RE is ALWAYS checked first. */
 const READY_CHROME_RE = /❯|shortcuts|bypass permissions/i;
+/** Active-turn chrome: Claude Code shows the interruptible "esc to interrupt" line ONLY while
+ *  a turn (a wake load, a beat) is actively processing — and it persists through the momentary
+ *  static window BETWEEN tool calls. That is exactly why it beats a double-capture diff for the
+ *  R011 Invariant 2 (DEC-096) discriminator: a diff races a between-tool-calls spoke and misreads
+ *  it as wedged. Present = actively thinking / mid-wake (never kill); absent + not-ready = wedged. */
+export const PROCESSING_CHROME_RE = /esc to interrupt/i;
 
 const CHROME_TIMEOUT_MS = 3 * 60_000; // overall budget: chrome appears in seconds; margin for probes + descents
 const DESCEND_COOLDOWN_MS = 6_000;    // let /model re-render before re-probing
@@ -514,14 +520,31 @@ export async function ensureSurfaceSession(
             });
             adopted.set(key, true);
         } catch (err) {
-            // B2a — wedged-but-alive recovery (the 10h S180 wedge): the session EXISTS but
-            // never signalled ready within READY_TIMEOUT_MS (a genuine wake completes well
-            // inside that), and it is NOT the model-unavailable case the warm-death handoff
-            // catches — it is stuck (e.g. at a /clear prompt). Kill + cold-relaunch ONCE
-            // (bounded — no retry storm, S74); a second failure propagates to the caller's
-            // health-signal path rather than looping.
+            // B2a — wedged-recovery, hardened per R011 Invariant 2 (DEC-096): the session
+            // EXISTS but never signalled ready within READY_TIMEOUT_MS, and it is NOT the
+            // model-unavailable case the warm-death handoff catches. BUT a genuine wake (and
+            // R011 1b's full-self load) legitimately approaches the timeout — so we must NEVER
+            // kill a spoke that is mid-wake or actively thinking. Discriminate by the PROCESSING
+            // chrome ("esc to interrupt"), which persists through the momentary static window
+            // between tool calls — not a double-capture diff (which would race that window and
+            // misread a thinking spoke as wedged).
             if (!(err instanceof SessionNotReadyError)) throw err;
-            console.warn(`[tmux-dispatcher] ${slug}/${surface}: wedged-but-alive (ready-timeout on adopt) — kill + one cold-relaunch`);
+            if (PROCESSING_CHROME_RE.test(capturePaneTail(tmuxSession))) {
+                // Actively processing (mid-wake / thinking) — leave it intact to finish.
+                // Skip THIS dispatch fail-safe (the caller health-signals + retries next
+                // cadence, by which time the long wake/turn has completed); do NOT kill.
+                // NOTE (R011 Inv-2 backstop boundary): a *persistently*-chromed turn (hung-but-
+                // live, never resolving) is therefore never killed here by design — it would
+                // skip indefinitely. Its escalation lives ELSEWHERE: #90 (the guard-dog flags
+                // the cadence stall against the defined rhythm) / a future turn-level timeout —
+                // deliberately NOT this wedged-recovery, which must never kill a thinker.
+                console.warn(`[tmux-dispatcher] ${slug}/${surface}: ready-timeout but pane is actively processing (mid-wake/thinking) — NOT killing (R011 Inv-2), leaving it to finish; skipping this dispatch`);
+                throw err;
+            }
+            // Static pane past timeout, no processing chrome → a GENUINE wedge (e.g. stuck at
+            // a /clear prompt). Kill + cold-relaunch ONCE (bounded — no retry storm, S74); a
+            // second failure propagates to the caller's health-signal path rather than looping.
+            console.warn(`[tmux-dispatcher] ${slug}/${surface}: wedged (ready-timeout, static pane, no processing chrome) — kill + one cold-relaunch`);
             try { tmux(['kill-session', '-t', tmuxSession]); } catch { /* already gone */ }
             sessions.delete(key);
             await coldLaunch();
