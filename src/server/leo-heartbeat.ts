@@ -59,7 +59,7 @@ import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRes
 // DEC-093 thaw (2026-06-12): tmux warm-session transport for the beat surfaces.
 // The manifest's transport field is the per-surface feature flag (rollback =
 // one-line manifest flip back to 'sdk'; the SDK paths below are kept intact).
-import { manifestTransport, manifestModelHead, manifestModelLadder } from './lib/garden-manifest';
+import { manifestTransport, manifestModelHead, manifestModelLadder, peerConversationFor } from './lib/garden-manifest';
 import { ensureSurfaceSession, enqueueForAgent, observeActiveModel, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
 import type { CaptureRecord } from './lib/diary-mcp-server';
 // PR-T7b: the one slug-parameterised cycle/dispatch surface (Darron's governing
@@ -105,7 +105,15 @@ const HEALTH_DIR = path.join(HAN_DIR, 'health');
 const HEARTBEAT_STATE_FILE = path.join(LEO_MEMORY_DIR, 'heartbeat-state.md');
 const LEO_AGENT_DIR = path.join(HAN_DIR, 'agents', 'Leo');
 const PROJECTS_DIR = path.join(HOME, 'Projects');
-const JIM_CONVERSATION_ID = 'mlwk79ew-v1ggpt'; // "On curiosity, research, and growing together"
+// The standing Jim↔Leo philosophy thread — now a manifest peer-edge (Phase-2:
+// JIM_CONVERSATION_ID → peerConversations), read from the registry, not a literal.
+// Fail-fast (no silent default — DEC-081 hard-point): the heartbeat's whole
+// conversation surface depends on this id, so a missing manifest leaf is a real misconfig.
+const JIM_CONVERSATION_ID = (() => {
+    const id = peerConversationFor(CLI_SLUG, 'jim');
+    if (!id) throw new Error(`[leo-heartbeat] no peerConversations.jim in manifest for slug '${CLI_SLUG}'`);
+    return id;
+})();
 
 const LAST_SCAN_FILE = path.join(LEO_MEMORY_DIR, 'last-conversation-scan.txt');
 const REPLY_DELAY_MINUTES = 0; // Immediate — no artificial delay (PDF spec: None)

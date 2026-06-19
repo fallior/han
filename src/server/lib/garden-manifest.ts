@@ -77,6 +77,10 @@ export interface AgentManifest {
     /** The DEC-083 signed identity-file set — incl. self-reflections-curated.md.
      *  Declarative here would have structurally caught the curated-unsigned gap. */
     identityFiles?: string[];
+    /** Standing shared conversation threads with peer agents, keyed by peer slug
+     *  (e.g. the leo↔jim philosophy thread). The Jim↔Leo edge as manifest DATA,
+     *  not a literal welded into an agent's driver. (Project-b Phase 2 — DEC-081.) */
+    peerConversations?: Record<string, string>;
 }
 
 export interface GardenManifest {
@@ -141,6 +145,10 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
                 { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
             ],
+            // The standing Jim↔Leo philosophy thread ("On curiosity, research, and growing
+            // together") — moved out of the leo-heartbeat.ts literal (Phase-2: JIM_CONVERSATION_ID
+            // → manifest peer-edge). leo-heartbeat reads it via peerConversationFor(slug, 'jim').
+            peerConversations: { jim: 'mlwk79ew-v1ggpt' },
         },
         {
             slug: 'jim',
@@ -269,6 +277,14 @@ export function conversationRoleFor(slug: string): string {
 export function slugForConversationRole(role: string): string | null {
     const agent = GARDEN_MANIFEST.agents.find(a => a.conversationRole === role || a.slug === role);
     return agent?.slug ?? null;
+}
+
+/** The standing shared conversation-thread id between `slug` and `peerSlug` — manifest
+ *  `peerConversations[peerSlug]`, or null if none declared. Registry-derived replacement for
+ *  the hardcoded JIM_CONVERSATION_ID literal in leo-heartbeat. (Project-b Phase 2 — DEC-081.) */
+export function peerConversationFor(slug: string, peerSlug: string): string | null {
+    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
+    return agent?.peerConversations?.[peerSlug] ?? null;
 }
 
 /**
