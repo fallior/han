@@ -17,6 +17,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { HAN_DIR, taskStmts, memoryStmts } from '../db';
 import { loadConfig, createGoal, getAbortForTask } from './planning';
+import { isOnHoliday, isRestDay, getDayPhase, HOLIDAY_INTERVAL } from '../lib/day-phase';
 import type {
     MainToWorkerMessage,
     WorkerToMainMessage,
@@ -445,50 +446,15 @@ function sendDistressNtfy(expectedMinutes: number, actualMinutes: number): void 
 
 const BASE_DELAY_WAKING_MS = 20 * 60 * 1000;  // 20 minutes — morning, work, evening
 const BASE_DELAY_SLEEP_MS = 40 * 60 * 1000;   // 40 minutes — sleep + rest days
-const HOLIDAY_DELAY_MS = 80 * 60 * 1000;      // 80 minutes — holiday mode (rest day doubled)
-
-type DayPhase = 'sleep' | 'morning' | 'work' | 'evening';
-
-function isRestDay(): boolean {
-    const config = loadConfig();
-    const restDays: number[] = config.supervisor?.rest_days ?? [0, 6];
-    return restDays.includes(new Date().getDay());
-}
-
-function isOnHoliday(): boolean {
-    return fs.existsSync(path.join(HAN_DIR, 'signals', 'holiday-jim'));
-}
-
-function getDayPhase(): DayPhase {
-    // Rest days follow normal time-of-day phases — rest ≠ sleep.
-    // The only difference is longer intervals (see getCurrentPeriodMs).
-    const config = loadConfig();
-    const quietStart = config.supervisor?.quiet_hours_start || config.quiet_hours_start || '22:00';
-    const quietEnd = config.supervisor?.quiet_hours_end || config.quiet_hours_end || '06:00';
-    const workStart = config.supervisor?.work_hours_start || '09:00';
-    const workEnd = config.supervisor?.work_hours_end || '17:00';
-
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const toMinutes = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); };
-
-    const quietStartM = toMinutes(quietStart);
-    const quietEndM = toMinutes(quietEnd);
-    const workStartM = toMinutes(workStart);
-    const workEndM = toMinutes(workEnd);
-
-    if (quietStartM > quietEndM) {
-        if (currentMinutes >= quietStartM || currentMinutes < quietEndM) return 'sleep';
-    } else {
-        if (currentMinutes >= quietStartM && currentMinutes < quietEndM) return 'sleep';
-    }
-    if (currentMinutes >= quietEndM && currentMinutes < workStartM) return 'morning';
-    if (currentMinutes >= workStartM && currentMinutes < workEndM) return 'work';
-    return 'evening';
-}
+// F5: HOLIDAY_DELAY_MS retired → shared lib HOLIDAY_INTERVAL (byte-identical 80min).
+// F5: type DayPhase + isRestDay/isOnHoliday/getDayPhase retired → imported from ../lib/day-phase
+//     (byte-equivalent; the agnostic-lib pattern is already live in leo-heartbeat + supervisor-worker).
+// NB: getCurrentPeriodMs + BASE_DELAY_* stay LOCAL by design — supervisor sleep-phase = 40min vs
+//     lib PHASE_INTERVALS.sleep = 20min; unifying would halve Jim's overnight cadence (R001).
+//     That canonicalisation is Darron's call and belongs in F3/F4 cadence-single-source, not F5.
 
 function getCurrentPeriodMs(): number {
-    if (isOnHoliday()) return HOLIDAY_DELAY_MS; // 80min on holiday
+    if (isOnHoliday('jim')) return HOLIDAY_INTERVAL; // 80min on holiday (shared lib const)
     if (isRestDay()) return BASE_DELAY_SLEEP_MS; // 40min on rest days, all phases
     return getDayPhase() === 'sleep' ? BASE_DELAY_SLEEP_MS : BASE_DELAY_WAKING_MS;
 }
@@ -544,7 +510,7 @@ function getWallClockDelay(): number {
     // If within 30s of boundary, skip to next period
     if (delay < 30000) delay += periodMs;
     const phase = getDayPhase();
-    const phaseLabel = isOnHoliday() ? `holiday/${phase}` : isRestDay() ? `rest/${phase}` : phase;
+    const phaseLabel = isOnHoliday('jim') ? `holiday/${phase}` : isRestDay() ? `rest/${phase}` : phase;
     console.log(`[Supervisor] Wall-clock: ${phaseLabel} phase, period ${periodMs / 60000}min, next cycle in ${Math.round(delay / 1000)}s (${Math.round(delay / 60000)}min)`);
     return delay;
 }

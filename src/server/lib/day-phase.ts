@@ -115,8 +115,9 @@ export const PHASE_INTERVALS = {
 /** Rest day interval — slower pace for all phases on weekends */
 const REST_DAY_INTERVAL = 40 * 60 * 1000;
 
-/** Holiday interval — rest day but doubled (80 min) */
-const HOLIDAY_INTERVAL = 80 * 60 * 1000;
+/** Holiday interval — rest day but doubled (80 min). Exported (F5) so the supervisor scheduler
+ *  shares this single source instead of a local HOLIDAY_DELAY_MS shadow. */
+export const HOLIDAY_INTERVAL = 80 * 60 * 1000;
 
 export function getPhaseInterval(agent?: string): number {
     if (isOnHoliday(agent)) return HOLIDAY_INTERVAL;
