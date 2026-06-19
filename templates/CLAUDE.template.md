@@ -143,6 +143,24 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
     per-slug touch is transition-only (retire at T-7). `$AGENT_SURFACE` is exported by the
     surface launcher (`launch-tmux-surface.sh`); interactive launchers export `session`.
     If `$AGENT_SLUG` is unset (non-harness launch), skip.
+11. **Surface-aware wake terminus — dispatched spokes idle, they do not converse (R011
+    Invariant 1, Settled).** Check `$AGENT_SURFACE` — it is **authoritative** (set by the
+    launcher): write step 10's sentinel for your *actual* surface and never second-guess it or
+    substitute a different key. If it is **anything other than `session`** (treat unset/empty
+    as `session`; a *dispatched* surface — `heartbeat`, `human-response`, `supervisor-cycle`,
+    `meditation-*`, `compression`), this wake is driven by the **dispatcher**, not by the
+    human at a keyboard. After step 10 writes the readiness sentinel, **STOP — go silent and
+    idle.** Do NOT report state, do NOT call `AskUserQuestion`, do NOT ask "which thread /
+    what next", do NOT post to conversations. The dispatcher delivers the actual work (beats,
+    cycles, responses) as separate transaction prompts — answering *those* is the spoke's job;
+    the **wake itself ends at idle-ready.** *Why it is load-bearing:* a dispatched spoke that
+    ends its wake with an interactive question hangs forever (no human answers it) → the
+    readiness sentinel is never written → the dispatcher's `waitForReady` times out (20 min) →
+    the spoke is killed and cold-relaunched into the identical hang (a wake-loop of wasted full
+    reconstitutions, the dreams starved). **Only `AGENT_SURFACE=session` (or an unset,
+    interactive launch) ends the wake with the state report + "ask steer".** Per R011
+    (Settled): a dispatched surface wakes **once** into idle-ready and stays warm; a cold-load
+    is catastrophic-only.
 
 The working directory is the source of truth — not conversation history.
 
