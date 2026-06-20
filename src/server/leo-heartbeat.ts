@@ -1832,7 +1832,9 @@ function findUntranscribedFiles(): { filePath: string; agent: 'leo'; level: stri
                 if (existing.length === 0) {
                     // Also check combined cascade labels
                     const allEntries = gradientStmts.getByAgent.all(agent) as any[];
-                    const inCascade = allEntries.some((r: any) => r.session_label.includes(label));
+                    // ?. null-guard: a tagless entry (session_label NULL) reads as not-in-cascade —
+                    // a no-match, never a crash. One shape, both seats (2026-06-20).
+                    const inCascade = allEntries.some((r: any) => r.session_label?.includes(label));
                     if (!inCascade) {
                         return {
                             filePath: path.join(levelDir, file),

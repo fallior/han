@@ -244,7 +244,9 @@ function findJimUntranscribedFiles(): { filePath: string; level: string; content
             );
             if (existing.length === 0) {
                 const allEntries = gradientStmts.getByAgent.all('jim') as any[];
-                const inCascade = allEntries.some((r: any) => r.session_label.includes(label));
+                // ?. null-guard: a tagless entry (session_label NULL — e.g. a hand-composed c1
+                // missing its tag) reads as not-in-cascade — a no-match, never a crash (2026-06-20).
+                const inCascade = allEntries.some((r: any) => r.session_label?.includes(label));
                 if (!inCascade) {
                     return { filePath: path.join(levelDir, file), level, contentType: 'session', label };
                 }
