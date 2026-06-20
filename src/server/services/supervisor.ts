@@ -17,7 +17,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { HAN_DIR, taskStmts, memoryStmts } from '../db';
 import { loadConfig, createGoal, getAbortForTask } from './planning';
-import { isOnHoliday, isRestDay, getDayPhase, HOLIDAY_INTERVAL } from '../lib/day-phase';
+import { computeWallClockDelay } from '../lib/agent-scheduler';
 import type {
     MainToWorkerMessage,
     WorkerToMainMessage,
@@ -72,30 +72,12 @@ let cycleCount = 0;
 let currentCycleStartTime = 0; // Track cycle start for distress detection
 
 // ── Dampening (Deferred #4) ─────────────────────────────────
-// When consecutive cycles produce no actions, increase interval exponentially.
-// Prevents idle token burn (the $155 incident: 60 idle cycles in one day).
-let consecutiveIdleCycles = 0;
-const DAMPEN_AFTER = 2;            // Start dampening after 2 idle cycles
-// PR-T7b throttled thaw (#245, Jim's call, Darron-approved 2026-06-15): widen
-// HARD when idle — the idle cycles were ~85% of the old burn. Raised 4→5 so the
-// idle interval caps at ~100min (waking base 20min × 5) instead of 80min, hitting
-// Jim's "~90 min+ when nothing's running." This tunes the EXISTING R001 idle-
-// dampening mechanism (Jim-specific; it already diverges Jim's period when idle,
-// so it does NOT touch the shared-period 180° antiphase the active base preserves).
-// The active base stays 20min (more responsive than Jim's ~30 AND antiphase-
-// coherent with Leo); slowing the active base to 30 would decouple Jim's period
-// from Leo's shared 20min. RESOLVED (not open): the active-30 proposal was declined (S179)
-// and closed by the S184 cycle-symmetry decision (shared cadence, 20min active base). R001
-// four-phase structure + emergency mode intact. (See hall-of-records R001.)
-const DAMPEN_MAX_MULTIPLIER = 4;   // Cap at 4x base interval (~80min idle). R001 normal cadence restored (S179, Darron-directed) — the #245 throttled-thaw widening (5x ~100min) reverted now the tmux migration is proven; R001 idle-dampening itself stays (not activity-driven).
-const DAMPEN_BASE = 2;             // Double each step
+// Idle-dampening RETIRED (F3/F4 cycle-symmetry, S184): idleness is content, not clock.
+// An idle beat is a cheap content-gated stand-down on the uniform shared rhythm — the
+// meditation principle (the rhythm never stops; the LOAD flexes), not a slowed clock.
 
-// ── Transition dampening (Deferred #7) ──────────────────────
-// When returning from holiday/rest to normal, ramp down gradually instead of
-// jumping from 80min to 20min. Eases the transition.
-let previousPeriodMs = 0;          // Track last period for transition detection
-const TRANSITION_STEPS = [0.75, 0.5, 0.25]; // Blend ratios: 75% old, 50% old, 25% old
-let transitionStep = -1;           // -1 = no transition in progress
+// Transition-dampening + wall-clock scheduling relocated to lib/agent-scheduler
+// (F3/F4 cycle-symmetry — one shared rhythm, per-slug transition state).
 
 // ── Health signal (Robin Hood Protocol) ──────────────────────
 
@@ -445,75 +427,17 @@ function sendDistressNtfy(expectedMinutes: number, actualMinutes: number): void 
 //   Leo fires at: epoch mod period == 0        (phase 0°)
 //   Jim fires at: epoch mod period == period/2  (phase 180°)
 
-const BASE_DELAY_WAKING_MS = 20 * 60 * 1000;  // 20 minutes — morning, work, evening
-const BASE_DELAY_SLEEP_MS = 40 * 60 * 1000;   // 40 minutes — sleep + rest days
-// F5: HOLIDAY_DELAY_MS retired → shared lib HOLIDAY_INTERVAL (byte-identical 80min).
-// F5: type DayPhase + isRestDay/isOnHoliday/getDayPhase retired → imported from ../lib/day-phase
-//     (byte-equivalent; the agnostic-lib pattern is already live in leo-heartbeat + supervisor-worker).
-// NB: getCurrentPeriodMs + BASE_DELAY_* stay LOCAL by design — supervisor sleep-phase = 40min vs
-//     lib PHASE_INTERVALS.sleep = 20min; unifying would halve Jim's overnight cadence (R001).
-//     That canonicalisation is Darron's call and belongs in F3/F4 cadence-single-source, not F5.
+// F3/F4 cycle-symmetry (S184): jim's local cadence shadow retired — jim adopts the SHARED
+// lib/day-phase cadence (sleep 40→20, matching leo; active 20 / rest 40 / holiday 80, shared
+// for all agents). The wall-clock delay + N-body antiphase + transition-dampening now live in
+// lib/agent-scheduler; getCurrentPeriodMs + BASE_DELAY_* + the local day-phase import retired with it.
 
-function getCurrentPeriodMs(): number {
-    if (isOnHoliday('jim')) return HOLIDAY_INTERVAL; // 80min on holiday (shared lib const)
-    if (isRestDay()) return BASE_DELAY_SLEEP_MS; // 40min on rest days, all phases
-    return getDayPhase() === 'sleep' ? BASE_DELAY_SLEEP_MS : BASE_DELAY_WAKING_MS;
-}
-
-/**
- * Calculate delay until next wall-clock-aligned cycle.
- * Jim is at phase 180°: fires when epoch_ms mod period == period/2.
- *
- * Applies two dampening mechanisms:
- * - Idle dampening (#4): exponential backoff when consecutive cycles produce no actions
- * - Transition dampening (#7): gradual ramp-down when returning from holiday/rest
- */
+/** Delay until Jim's next wall-clock-aligned cycle — delegated to the shared cycle-symmetry
+ *  scheduler (lib/agent-scheduler). Jim's antiphase index resolves to 180° at N=2 (byte-identical
+ *  to the prior `period/2` offset). Idle-dampening retired (content-gated in the activity layer);
+ *  transition-dampening relocated (shared). */
 function getWallClockDelay(): number {
-    let periodMs = getCurrentPeriodMs();
-
-    // ── Transition dampening (#7) ────────────────────────────
-    // Detect transition from longer to shorter interval (e.g. holiday→normal)
-    if (previousPeriodMs > 0 && periodMs < previousPeriodMs) {
-        // Just transitioned to a faster interval — start ramping
-        transitionStep = 0;
-        console.log(`[Supervisor] Transition detected: ${previousPeriodMs / 60000}min → ${periodMs / 60000}min, ramping down gradually`);
-    }
-
-    if (transitionStep >= 0 && transitionStep < TRANSITION_STEPS.length) {
-        const blendRatio = TRANSITION_STEPS[transitionStep];
-        const blendedPeriod = Math.round(periodMs + (previousPeriodMs - periodMs) * blendRatio);
-        console.log(`[Supervisor] Transition step ${transitionStep + 1}/${TRANSITION_STEPS.length}: ${Math.round(blendedPeriod / 60000)}min (blending ${Math.round(blendRatio * 100)}% of old interval)`);
-        periodMs = blendedPeriod;
-        transitionStep++;
-    } else if (transitionStep >= TRANSITION_STEPS.length) {
-        // Transition complete
-        transitionStep = -1;
-    }
-
-    previousPeriodMs = getCurrentPeriodMs(); // Store raw (undampened) period for next comparison
-
-    // ── Idle dampening (#4) ──────────────────────────────────
-    // After DAMPEN_AFTER consecutive idle cycles, multiply interval
-    if (consecutiveIdleCycles >= DAMPEN_AFTER) {
-        const steps = consecutiveIdleCycles - DAMPEN_AFTER;
-        const multiplier = Math.min(Math.pow(DAMPEN_BASE, steps + 1), DAMPEN_MAX_MULTIPLIER);
-        const dampenedPeriod = Math.round(periodMs * multiplier);
-        console.log(`[Supervisor] Idle dampening: ${consecutiveIdleCycles} consecutive idle cycles, ${multiplier}x multiplier → ${Math.round(dampenedPeriod / 60000)}min`);
-        periodMs = dampenedPeriod;
-    }
-
-    const offsetMs = Math.floor(periodMs / 2); // 180° offset
-    const now = Date.now();
-    const remainder = (now - offsetMs) % periodMs;
-    // remainder could be negative if offsetMs > now%periodMs, normalise
-    const normRemainder = ((remainder % periodMs) + periodMs) % periodMs;
-    let delay = periodMs - normRemainder;
-    // If within 30s of boundary, skip to next period
-    if (delay < 30000) delay += periodMs;
-    const phase = getDayPhase();
-    const phaseLabel = isOnHoliday('jim') ? `holiday/${phase}` : isRestDay() ? `rest/${phase}` : phase;
-    console.log(`[Supervisor] Wall-clock: ${phaseLabel} phase, period ${periodMs / 60000}min, next cycle in ${Math.round(delay / 1000)}s (${Math.round(delay / 60000)}min)`);
-    return delay;
+    return computeWallClockDelay('jim');
 }
 
 // ── Helper functions ─────────────────────────────────────────
@@ -545,8 +469,6 @@ function startSupervisorSignalWatcher(): void {
                     fs.unlinkSync(signalPath);
                 } catch { /* already gone */ }
                 console.log(`[Supervisor] Running wake-triggered cycle${humanTriggered ? ' (human message — full voice)' : ''}`);
-                // Wake signals indicate activity — reset idle dampening
-                consecutiveIdleCycles = 0;
                 await runSupervisorCycle({ humanTriggered });
             } catch (err) {
                 console.error('[Supervisor] Wake signal cycle error:', (err as Error).message);
@@ -1005,18 +927,8 @@ export function scheduleSupervisorCycle(): void {
             cycleCount++;
 
             if (result) {
-                // ── Idle dampening: track consecutive idle cycles ──
-                const isIdle = result.actionSummaries.length === 0 ||
-                    (result.actionSummaries.length === 1 && result.actionSummaries[0].startsWith('no_action'));
-                if (isIdle) {
-                    consecutiveIdleCycles++;
-                    console.log(`[Supervisor] Idle cycle (${consecutiveIdleCycles} consecutive)`);
-                } else {
-                    if (consecutiveIdleCycles > 0) {
-                        console.log(`[Supervisor] Productive cycle — idle dampening reset (was ${consecutiveIdleCycles} idle)`);
-                    }
-                    consecutiveIdleCycles = 0;
-                }
+                // Idle-dampening retired (F3/F4): idleness is content-gated on the uniform
+                // rhythm, not tracked to slow the clock (the meditation principle, S184).
 
                 // Check for slow cycle (distress signal)
                 const actualDurationMs = Date.now() - currentCycleStartTime;

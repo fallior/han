@@ -60,6 +60,7 @@ import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRes
 // The manifest's transport field is the per-surface feature flag (rollback =
 // one-line manifest flip back to 'sdk'; the SDK paths below are kept intact).
 import { manifestTransport, manifestModelHead, manifestModelLadder, peerConversationFor } from './lib/garden-manifest';
+import { computeWallClockDelay } from './lib/agent-scheduler';
 import { ensureSurfaceSession, enqueueForAgent, observeActiveModel, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
 import type { CaptureRecord } from './lib/diary-mcp-server';
 // PR-T7b: the one slug-parameterised cycle/dispatch surface (Darron's governing
@@ -146,11 +147,8 @@ let currentBeatTokensIn = 0;
 let currentBeatTokensOut = 0;
 let currentBeatType: string = 'unknown';
 
-// ── Transition dampening (Deferred #7) ──────────────────────
-// Gradual ramp-down when returning from holiday/rest to normal intervals.
-let previousPeriodMs = 0;
-const TRANSITION_STEPS = [0.75, 0.5, 0.25]; // Blend ratios: 75% old, 50% old, 25% old
-let transitionStep = -1; // -1 = no transition in progress
+// Transition-dampening + wall-clock scheduling relocated to lib/agent-scheduler
+// (Phase-2 F3/F4 cycle-symmetry — one shared rhythm, per-slug transition state).
 
 // ── Robin Hood Protocol — mutual health checks ──────────────
 
@@ -660,42 +658,13 @@ async function waitForCliFree(): Promise<boolean> {
 // No health-file coordination needed.
 
 /**
- * Calculate delay until next wall-clock-aligned beat.
- * Leo is at phase 0: fires when epoch_ms mod period == 0.
- *
- * Applies transition dampening (#7): gradual ramp-down when returning
- * from holiday/rest to normal intervals.
+ * Delay until Leo's next wall-clock-aligned beat — delegated to the shared
+ * cycle-symmetry scheduler (lib/agent-scheduler). One shared rhythm for every
+ * agent; Leo's antiphase index resolves to 0° at N=2 (byte-identical to the prior
+ * `now % period`). Transition-dampening + the N-body offset live in the shared module.
  */
 function getWallClockDelay(): number {
-    let periodMs = getCurrentPeriodMs();
-
-    // ── Transition dampening (#7) ────────────────────────────
-    if (previousPeriodMs > 0 && periodMs < previousPeriodMs) {
-        transitionStep = 0;
-        console.log(`[Leo] Transition detected: ${previousPeriodMs / 60000}min → ${periodMs / 60000}min, ramping down gradually`);
-    }
-
-    if (transitionStep >= 0 && transitionStep < TRANSITION_STEPS.length) {
-        const blendRatio = TRANSITION_STEPS[transitionStep];
-        const blendedPeriod = Math.round(periodMs + (previousPeriodMs - periodMs) * blendRatio);
-        console.log(`[Leo] Transition step ${transitionStep + 1}/${TRANSITION_STEPS.length}: ${Math.round(blendedPeriod / 60000)}min (blending ${Math.round(blendRatio * 100)}% of old interval)`);
-        periodMs = blendedPeriod;
-        transitionStep++;
-    } else if (transitionStep >= TRANSITION_STEPS.length) {
-        transitionStep = -1;
-    }
-
-    previousPeriodMs = getCurrentPeriodMs();
-
-    const now = Date.now();
-    const remainder = now % periodMs;
-    let delay = periodMs - remainder;
-    // If we're within 30s of a boundary, skip to next period
-    if (delay < 30000) delay += periodMs;
-    const phase = getDayPhase();
-    const phaseLabel = isOnHoliday('leo') ? 'holiday' : phase === 'sleep' ? (isRestDay() ? 'rest' : 'sleep') : phase;
-    console.log(`[Leo] Wall-clock: ${phaseLabel} phase, period ${periodMs / 60000}min, next beat in ${Math.round(delay / 1000)}s (${Math.round(delay / 60000)}min)`);
-    return delay;
+    return computeWallClockDelay(CLI_SLUG);
 }
 
 // ── Heartbeat state (incremental saves) ──────────────────────
