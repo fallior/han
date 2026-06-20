@@ -80,23 +80,16 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       // Store ref for cleanup
       (ws as any)._pingInterval = pingInterval;
 
-      // On reconnect, fetch conversations to reconcile missed events
-      try {
-        const response = await fetch('/api/conversations', {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        if (response.ok) {
-          const data = await response.json();
-          // API returns { conversations: [...] } — unwrap before passing to store
-          const convList = Array.isArray(data) ? data : (data.conversations || []);
-          useStore.getState().setConversations(convList);
-        }
-      } catch (error) {
-        console.error('[WebSocket] Failed to reconcile conversations on reconnect:', error);
-      }
-
-      // Notify components so they can refetch their active thread's messages
-      useStore.getState().dispatchWsEvent({ type: 'ws_reconnected' });
+      // ⛔ EMBARGO (2026-06-20, Darron-directed, thread mppj72fx-wt0u1p): the on-reconnect
+      // conversations refetch + the ws_reconnected dispatch are DISABLED. The WebSocket
+      // flaps every ~15-30s (Safari/Tailscale wss, 1006 "network connection lost"), and
+      // EACH reconnect was doing a wholesale setConversations replace (fresh fetch → all-new
+      // object identities → heavy master/detail re-render → snaps back to the thread list,
+      // cancelling audio playback and wiping the compose box). Darron, driving: "put an
+      // embargo — I'll do a manual refresh." Both actions removed so a flap is now a no-op on
+      // the UI. RESTORE deliberately once the flap root is fixed — and when restored, use a
+      // stable-merge (preserve identities for unchanged threads), never a wholesale replace,
+      // and gate it on an actual missed-event, not on every reconnect.
     });
 
     ws.addEventListener('message', (event) => {
