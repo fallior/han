@@ -114,13 +114,33 @@ function readyPath(slug: string, surface: string): string { return path.join(HEA
 function ctxPath(slug: string, surface: string): string { return path.join(HEALTH_DIR, `${slug}-${surface}-ctx.json`); }
 
 // ── small utilities ──────────────────────────────────────────────────────────────────
-function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
+
+/**
+ * Test-only IO seams (repro / unit tests). Production NEVER sets these — an empty hooks
+ * object is the real behaviour. The clear↔wake-race repro (scripts/test-clear-wake-race.ts,
+ * P1) sets them to record sendLine ordering, fast-forward the (real-time) sleeps, and fake
+ * tmux presence, so the concurrent clear-vs-wake interleave is driven deterministically
+ * without a real spoke. Kept tiny + clearly fenced; no production path references __setTestHooks.
+ */
+interface TestHooks {
+    sendLine?: (tmuxSession: string, line: string) => void;
+    sleep?: (ms: number) => Promise<void> | void;
+    tmuxSessionExists?: (name: string) => boolean;
+}
+let testHooks: TestHooks = {};
+export function __setTestHooks(h: TestHooks | null): void { testHooks = h ?? {}; }
+
+function sleep(ms: number): Promise<void> {
+    if (testHooks.sleep) return Promise.resolve(testHooks.sleep(ms));
+    return new Promise((r) => setTimeout(r, ms));
+}
 
 function tmux(args: string[]): string {
     return execFileSync('tmux', args, { encoding: 'utf-8' });
 }
 
 function tmuxSessionExists(name: string): boolean {
+    if (testHooks.tmuxSessionExists) return testHooks.tmuxSessionExists(name);
     try { tmux(['has-session', '-t', name]); return true; } catch { return false; }
 }
 
@@ -131,6 +151,7 @@ function tmuxSessionExists(name: string): boolean {
  * NEVER pass hostile/large content here — that is what the prompt file is for (A3).
  */
 function sendLine(tmuxSession: string, line: string): void {
+    if (testHooks.sendLine) { testHooks.sendLine(tmuxSession, line); return; }
     tmux(['send-keys', '-t', tmuxSession, '-l', line]);
     tmux(['send-keys', '-t', tmuxSession, 'Enter']);
 }
@@ -479,6 +500,14 @@ export async function ensureSurfaceSession(
     slug: string, surface: string,
     opts: { ladder: string[]; welcomeBack?: string },
 ): Promise<void> {
+    // P1: serialise on the per-slug session lock — the wake must never run concurrently with
+    // an in-flight clearSession on the same pane (the clear↔wake race → 20-min wedge).
+    return withSlugLock(slug, () => ensureSurfaceSessionInner(slug, surface, opts));
+}
+async function ensureSurfaceSessionInner(
+    slug: string, surface: string,
+    opts: { ladder: string[]; welcomeBack?: string },
+): Promise<void> {
     const tmuxSession = `${surface}-${slug}`;
     const key = sessionKey(slug, surface);
     const welcomeBack = opts.welcomeBack ?? 'welcome back';
@@ -670,6 +699,10 @@ export function getContextPct(slug: string, surface: string): number | null {
  * Between /clear and the new welcome-back's ready, no transaction may be dispatched.
  */
 export async function clearSession(slug: string, surface: string, opts: { welcomeBack?: string } = {}): Promise<void> {
+    // P1: serialise on the per-slug session lock so a clear never overlaps a wake on the same pane.
+    return withSlugLock(slug, () => clearSessionInner(slug, surface, opts));
+}
+async function clearSessionInner(slug: string, surface: string, opts: { welcomeBack?: string } = {}): Promise<void> {
     const session = sessions.get(sessionKey(slug, surface));
     if (!session) throw new SessionNotReadyError(`${slug}/${surface}: no session to clear`);
     session.ready = false;
@@ -732,6 +765,28 @@ export async function reconcileSession(slug: string, surface: string): Promise<v
  * once this prompt reaches the head of the queue and completes.
  */
 const queueTails = new Map<string, Promise<unknown>>();
+
+// ── per-slug session lock (P1, S196) — serialises the wake/clear lifecycle ops ────────
+/**
+ * The clear↔wake race fix. ensureSurfaceSession (the WAKE) ran OUTSIDE the per-slug FIFO, so
+ * a new dispatch's wake could run concurrently with an in-flight clearSession (ctx-pressure
+ * or reconcile) on the SAME pane — the wake re-adopted the ready=false session and
+ * spawnAgentSession REPLACED the registry object mid-clear, orphaning the clear's
+ * finalisation and losing welcome-back/ready-sentinel ownership (→ the 20-min wedge:
+ * leo @13:03 + jim @21:38, 2026-06-21). This lock makes wake and clear MUTUALLY EXCLUSIVE
+ * per agent: a clear holds it across /pfc→/clear→welcome-back→ready; a concurrent wake queues
+ * behind it, then sees ready=true and skips re-adoption. Distinct from queueTails (which
+ * serialises DISPATCHES + their reconcile). No re-entrancy / no deadlock: ensureSurfaceSession
+ * and clearSession never call each other, and reconcileSession calls the public (locked)
+ * clearSession from OUTSIDE this lock; the wake never touches queueTails, so no lock cycle.
+ */
+const slugLockTail = new Map<string, Promise<unknown>>();
+function withSlugLock<T>(slug: string, fn: () => Promise<T>): Promise<T> {
+    const prior = slugLockTail.get(slug) ?? Promise.resolve();
+    const run = prior.catch(() => undefined).then(fn);
+    slugLockTail.set(slug, run.catch(() => undefined));
+    return run;
+}
 
 /** NOTE (T-2 re-key): the queue stays keyed per-SLUG even though readiness/ctx
  *  went per-surface — one live transaction per AGENT across all its surface
