@@ -1,14 +1,24 @@
 #!/bin/bash
 # restart-human-service.sh — restart a *-human systemd-user service so it
-# picks up fresh code from src/server/<slug>-human.ts. No-op if:
-#   - the corresponding source file did NOT change in HEAD
+# picks up fresh code. No-op if:
+#   - neither the seat's own source NOR any shared server-runtime dep changed
 #   - the systemd service isn't installed (missing on this host)
 #   - the service isn't currently active
 #
-# Why conditional-on-file-change (different from restart-agent-server.sh):
-# the *-human services are continuously running responder processes; an
-# unrelated commit (e.g. a docs change) shouldn't interrupt an in-flight
-# compose. We restart only when the actual .ts file changed.
+# What counts as "fresh code" for a long-running seat (P0, S196): the seat loads
+# src/server/<slug>-human.ts AND a shared runtime surface at boot —
+# src/server/lib/** (tmux-dispatcher, prompt-builder, memory-paired-writer,
+# garden-manifest, …), src/server/db.ts, src/server/services/discord.ts. A change
+# in any of those does NOT take effect until the process restarts. The earlier
+# source-file-ONLY check was blind to the shared libs — which is why the seats
+# sat 4 days on a stale tmux-dispatcher (missing the fix-Leo arc) until a manual
+# restart. We now trigger on the whole runtime surface.
+#
+# Why still conditional (different from restart-agent-server.sh, which restarts
+# the agent SERVERS unconditionally): the *-human seats are continuously running
+# responders; an unrelated commit (docs, another surface) shouldn't bounce an
+# idle responder. Asymmetry by design: an over-restart briefly bounces an idle
+# seat; an under-restart strands it on stale code for days — favour freshness.
 #
 # Called by local git hooks installed via install-restart-hooks.sh.
 # Sibling to restart-agent-server.sh (which targets pidfile-based agent
@@ -19,11 +29,15 @@ set -u
 SLUG="${1:?usage: $0 <slug> [post-commit|post-merge]}"
 EVENT="${2:-post-commit}"  # safer default — only checks HEAD~1..HEAD
 SERVICE="${SLUG}-human.service"
-SOURCE_FILE="src/server/${SLUG}-human.ts"
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "")"
 if [[ -z "$REPO_ROOT" ]]; then exit 0; fi
 cd "$REPO_ROOT" || exit 0
+
+# The seat restarts when its own entrypoint OR any shared server-runtime dep it
+# loads at boot changed. Agent-agnostic (DEC-081): $SLUG parameterises the only
+# per-agent leaf; the shared surface is identical for every seat.
+TRIGGER_RE="^(src/server/${SLUG}-human\.ts|src/server/lib/|src/server/db\.ts|src/server/services/discord\.ts)"
 
 # Pick the diff range based on the event that called us.
 #   post-commit → HEAD~1..HEAD (just the new commit)
@@ -35,24 +49,19 @@ cd "$REPO_ROOT" || exit 0
 # every post-commit-after-a-merge inherited the pre-merge range as a stale
 # pointer and matched .ts files that hadn't actually changed in the new commit.
 # Routing the range by event-name eliminates the leak.
-CHANGED=""
+RANGE=""
 if [[ "$EVENT" == "post-merge" ]]; then
-    if git rev-parse ORIG_HEAD >/dev/null 2>&1; then
-        if git diff --name-only ORIG_HEAD HEAD 2>/dev/null | grep -qx "$SOURCE_FILE"; then
-            CHANGED="merge"
-        fi
-    fi
+    git rev-parse ORIG_HEAD >/dev/null 2>&1 && RANGE="ORIG_HEAD HEAD"
 else
     # post-commit (or unspecified — same default)
-    if git rev-parse HEAD~1 >/dev/null 2>&1; then
-        if git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -qx "$SOURCE_FILE"; then
-            CHANGED="commit"
-        fi
-    fi
+    git rev-parse HEAD~1 >/dev/null 2>&1 && RANGE="HEAD~1 HEAD"
 fi
+if [[ -z "$RANGE" ]]; then exit 0; fi
 
-if [[ -z "$CHANGED" ]]; then
-    # Source file didn't change — silent no-op, don't pollute git output.
+# Any own-source or shared-runtime file in the range? (capture them for the log)
+CHANGED_FILES="$(git diff --name-only $RANGE 2>/dev/null | grep -E "$TRIGGER_RE" || true)"
+if [[ -z "$CHANGED_FILES" ]]; then
+    # Neither the seat's source nor a shared runtime dep changed — silent no-op.
     exit 0
 fi
 
@@ -68,5 +77,6 @@ if ! systemctl --user is-active --quiet "$SERVICE"; then
     exit 0
 fi
 
-echo "[restart-human-service] ${SOURCE_FILE} changed (via ${CHANGED}) — restarting ${SERVICE}"
+echo "[restart-human-service] runtime change in ${EVENT} range — restarting ${SERVICE}:"
+echo "$CHANGED_FILES" | sed 's/^/[restart-human-service]   /'
 systemctl --user restart "$SERVICE"

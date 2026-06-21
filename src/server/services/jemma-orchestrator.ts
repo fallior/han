@@ -627,36 +627,80 @@ export function startAckWatcher(): void {
 
     console.log(`[Orchestrator] Watching ${SIGNALS_DIR} for jemma-ack-*`);
 
-    let processing = false;
-    fs.watch(SIGNALS_DIR, async (_event, filename) => {
-        if (!filename || !filename.startsWith('jemma-ack-')) return;
-        if (processing) return;
-        processing = true;
+    // Ack processing is a DRAIN over the whole signals dir, not a 1:1 per-event
+    // handler. Two races the per-event handler had (P6, S196):
+    //   1) ENOENT spam — existsSync()→readFileSync() could race a transient
+    //      jemma-ack-<id>-hb-<seq> heartbeat file being rewritten/unlinked
+    //      between the check and the read, logging the miss as an error.
+    //   2) Dropped acks — a single shared `processing` boolean dropped any 2nd
+    //      ack whose event landed inside another's ~200ms window (concurrent
+    //      heartbeat+final, or leo+jim), and fs.watch coalesces/drops events
+    //      under load — so a dropped ack was never re-examined → a stalled
+    //      dispatch waiting on an ack that had already been written to disk.
+    // The drain re-scans the directory each pass (no individual event needs to
+    // be caught 1:1), and `rescan` guarantees an event arriving mid-drain
+    // triggers another pass — no ack is lost. Single-flighted by `draining`.
+    let draining = false;
+    let rescan = false;
 
-        // Small delay to let the file finish writing
-        await new Promise(r => setTimeout(r, 200));
-
+    async function processAckFile(filename: string): Promise<void> {
+        const filepath = path.join(SIGNALS_DIR, filename);
+        let raw: string;
         try {
-            const filepath = path.join(SIGNALS_DIR, filename);
-            if (!fs.existsSync(filepath)) return;
-
-            const raw = fs.readFileSync(filepath, 'utf8');
-            let ack: AckPayload;
-            try {
-                ack = JSON.parse(raw) as AckPayload;
-            } catch (err) {
-                console.warn(`[Orchestrator] Unparseable ack file ${filename}: ${(err as Error).message}`);
-                try { fs.unlinkSync(filepath); } catch { /* best effort */ }
-                return;
+            raw = fs.readFileSync(filepath, 'utf8');
+        } catch (err) {
+            // ENOENT = the file was unlinked between the dir-scan and the read
+            // (a transient -hb- rewrite, or a prior pass already took it).
+            // Expected under concurrency — skip silently, never error-spam.
+            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+                console.error(`[Orchestrator] Ack read error for ${filename}: ${(err as Error).message}`);
             }
+            return;
+        }
+        let ack: AckPayload;
+        try {
+            ack = JSON.parse(raw) as AckPayload;
+        } catch (err) {
+            console.warn(`[Orchestrator] Unparseable ack file ${filename}: ${(err as Error).message}`);
             try { fs.unlinkSync(filepath); } catch { /* best effort */ }
-
+            return;
+        }
+        // Consume before handling so a re-fire can't double-process the same ack.
+        try { fs.unlinkSync(filepath); } catch { /* best effort — already gone */ }
+        try {
             await handleAck(ack);
         } catch (err) {
-            console.error('[Orchestrator] Ack watcher error:', (err as Error).message);
-        } finally {
-            processing = false;
+            console.error(`[Orchestrator] handleAck error for ${filename}: ${(err as Error).message}`);
         }
+    }
+
+    async function drainAcks(): Promise<void> {
+        if (draining) { rescan = true; return; }
+        draining = true;
+        try {
+            do {
+                rescan = false;
+                // Small settle so a just-created ack finishes writing (the seats
+                // write non-atomically via writeFileSync).
+                await new Promise(r => setTimeout(r, 200));
+                let names: string[];
+                try {
+                    names = fs.readdirSync(SIGNALS_DIR).filter(n => n.startsWith('jemma-ack-'));
+                } catch { names = []; }
+                for (const name of names) {
+                    await processAckFile(name);
+                }
+            } while (rescan);
+        } finally {
+            draining = false;
+        }
+    }
+
+    fs.watch(SIGNALS_DIR, (_event, filename) => {
+        if (!filename || !filename.startsWith('jemma-ack-')) return;
+        drainAcks().catch(err =>
+            console.error('[Orchestrator] Ack drain error:', (err as Error).message)
+        );
     });
 
     // Watchdog poll
@@ -668,6 +712,11 @@ export function startAckWatcher(): void {
 
     // Startup sweep — reconcile any dispatches that completed while orchestrator was down
     checkWatchdogs().catch(err => console.error('[Orchestrator] Startup sweep error:', (err as Error).message));
+
+    // Startup ack-drain — pick up acks written while the orchestrator was down
+    // (e.g. during a server bounce), so they aren't stranded until the next
+    // fs.watch event. Also clears any stale ack files left by prior runs.
+    drainAcks().catch(err => console.error('[Orchestrator] Startup ack-drain error:', (err as Error).message));
 }
 
 // Clear the watchdog poll on shutdown so a server that orphans (server.close hangs on
