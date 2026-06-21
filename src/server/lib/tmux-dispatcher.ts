@@ -48,7 +48,7 @@ const PIPES_DIR = process.env.HAN_PIPES_DIR || path.join(os.homedir(), '.han', '
  * only on a confirmed-clean delta. (No agent-echo layer — the dispatcher-side confirm is
  * sufficient + self-contained.) The primitive is built; the gate is shut.
  */
-export const DELTA_REFRESH_ENABLED = false;
+export const DELTA_REFRESH_ENABLED = true;
 
 // Timeouts (ms). Compose can run minutes (leo-human dispatches observed at 3-5 min);
 // identity load (welcome-back) is ~130K tokens. Conservative defaults; tune at T-3/T-4.
