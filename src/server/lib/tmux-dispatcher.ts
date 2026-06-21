@@ -33,16 +33,20 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
+import { withMemorySlot } from './memory-slot';
+import { gradientConfigForAgent } from './agent-registry';
 
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
 const PIPES_DIR = process.env.HAN_PIPES_DIR || path.join(os.homedir(), '.han', 'agent-pipes');
 
 /**
- * Q-V2-4 GATE. The dispatcher-computed memory-delta is the warm-session model's load-
- * bearing-but-dangerous piece: a mis-computed delta silently lags the in-session memory
- * behind disk. Per Jim's disposition it MUST stay OFF on identity-bearing surfaces until
- * the fail-loud confirmation (delta carries a checksum; agent echoes "delta: N entries"
- * in its diary; dispatcher cross-checks) lands. The primitive is built; the gate is shut.
+ * Q-V2-4 GATE. The dispatcher-computed memory-delta (#91 the watermark) is the warm-session
+ * model's load-bearing-but-dangerous piece: a mis-computed delta silently lags the in-session
+ * memory behind disk. Per Jim's disposition it MUST stay OFF until the fail-loud confirmation
+ * lands — the DISPATCHER-SIDE confirm in computeMemoryDelta: compute behind the #49 memory
+ * slot, boundary-check the slice point, confirm via an independent re-read, advance the cursor
+ * only on a confirmed-clean delta. (No agent-echo layer — the dispatcher-side confirm is
+ * sufficient + self-contained.) The primitive is built; the gate is shut.
  */
 export const DELTA_REFRESH_ENABLED = false;
 
@@ -85,8 +89,13 @@ export interface AgentSession {
      *  not "the session is idle". The queue runs reconcileSession ahead of the
      *  next dispatch. Confirm idleness; never assume it from elapsed time. */
     turnState: 'idle' | 'busy' | 'needs-reconcile';
-    /** Epoch ms of the last completed transaction — the cursor for computeMemoryDelta. */
+    /** Epoch ms of the last completed transaction — the orphan-capture mtime gate (#5). */
     lastTransactionTs: number;
+    /** Byte length of working-memory.md last delta-read by this session — the #91 cross-
+     *  surface watermark cursor (B2). In-memory only: clearSession reloads full memory, so
+     *  the cursor never outlives the reload that resets it. Advances monotonically, only on
+     *  a confirmed-clean delta (computeMemoryDelta). */
+    lastMemoryLen: number;
 }
 
 /** Registry keyed per (slug, surface) — many sessions per agent under T-2+. */
@@ -332,7 +341,7 @@ export async function spawnAgentSession(
         await waitForReady(slug, surface, null, READY_TIMEOUT_MS);
     }
 
-    const session: AgentSession = { slug, surface, tmuxSession, launchCommand, ready: true, turnState: 'idle', lastTransactionTs: Date.now() };
+    const session: AgentSession = { slug, surface, tmuxSession, launchCommand, ready: true, turnState: 'idle', lastTransactionTs: Date.now(), lastMemoryLen: currentWmLen(slug) };
     sessions.set(sessionKey(slug, surface), session);
     console.log(`[tmux-dispatcher] session ready: slug=${slug} surface=${surface} tmux=${tmuxSession}`);
     return session;
@@ -589,8 +598,13 @@ export async function sendTransactionPrompt(
     // 1) Point the diary sink at this transaction BEFORE the prompt can be answered.
     writeAtomic(currentPtrPath(slug), JSON.stringify({ txnId, startedAt: new Date().toISOString() }));
     // 2) Deliver the (possibly hostile/large) prompt via file, not send-keys (A3).
+    //    #91: prepend the cross-surface memory delta (other surfaces' WM writes since this
+    //    session last looked). GATED OFF (DELTA_REFRESH_ENABLED=false) → computeMemoryDelta
+    //    returns '' → finalPrompt === prompt, a true no-op until Jim's audit opens the gate.
+    const deltaBlock = await computeMemoryDelta(slug, session);
+    const finalPrompt = deltaBlock ? `${deltaBlock}\n${prompt}` : prompt;
     const promptFile = pipePath(slug, txnId);
-    writeAtomic(promptFile, prompt);
+    writeAtomic(promptFile, finalPrompt);
     // 3) send-keys only a short, safe instruction pointing the agent at the file.
     sendLine(session.tmuxSession,
         `Your next turn's full prompt is in the file ${promptFile} — read it with the Read tool and act on its entire contents as this turn's instructions.`);
@@ -678,6 +692,10 @@ export async function clearSession(slug: string, surface: string, opts: { welcom
     session.ready = true;
     session.turnState = 'idle';
     session.lastTransactionTs = Date.now();
+    // #91: the post-clear welcome-back full-loaded memory → this session has "seen" the whole
+    // current working-memory.md; reset the watermark cursor so the next delta carries only
+    // genuinely-newer entries.
+    session.lastMemoryLen = currentWmLen(slug);
     console.log(`[tmux-dispatcher] ${slug}/${surface}: cleared + reloaded`);
 }
 
@@ -736,31 +754,103 @@ export function enqueueForAgent(slug: string, surface: string, prompt: string, o
     return run;
 }
 
-// ── primitive 6: computeMemoryDelta (built, GATED OFF — Q-V2-4) ───────────────────────
+// ── primitive 6: computeMemoryDelta (#91 the watermark — entry-level, GATED OFF) ──────
+
+/** The working-memory.md (c1) path — the cheap compressed source the watermark reads
+ *  (Q3: c1 only; the c0 working-memory-full.md is source-of-record but too heavy per-turn). */
+function wmCompressedPath(slug: string): string {
+    // Resolve via the agent-registry memoryDir — jim's WM is at the ROOT (~/.han/memory),
+    // leo's at ~/.han/memory/leo, etc. NEVER path.join(memory, slug) (jim has no /jim subdir;
+    // DEC-081 — the registry is the one resolver, so a 4th agent gets this for free).
+    return path.join(gradientConfigForAgent(slug).memoryDir, 'working-memory.md');
+}
+
+/** Current byte length of an agent's working-memory.md (0 if absent) — the cursor's unit. */
+function currentWmLen(slug: string): number {
+    try { return fs.statSync(wmCompressedPath(slug)).size; } catch { return 0; }
+}
+
 /**
- * Return the memory entries written since `lastTransactionTs` as an injectable block for
- * the next per-transaction prompt, so a warm session stays aligned with disk without re-
- * paying the full identity load. Scope per Jim's disposition: working-memory PAIR only for
- * T-1/T-3 (the entire reason the delta exists is cross-aspect WM writes); felt-moments /
- * self-reflection / discoveries are added after the T-4 observation period.
+ * #91 cross-surface watermark (B2, the shared present). Return the working-memory.md (c1)
+ * entries appended since THIS session last looked, as an injectable block for the next per-
+ * transaction prompt — so a warm session sees its other surfaces' WM writes without re-paying
+ * the full identity load. Scope (Q3, Jim): the compressed c1 ONLY (WM-pair = source scope;
+ * felt-moments / gradient / identity stay wake-load).
  *
- * GATED OFF (DELTA_REFRESH_ENABLED=false) until the fail-loud confirmation lands. While the
- * gate is shut this returns '' so warm sessions simply carry their session-start identity
- * unchanged — correct, just not yet refreshed. Drift cannot outlive a session because
- * clearSession reloads full memory from disk.
+ * Cursor (Q1, Jim): a byte length `session.lastMemoryLen`, slice-safe. A timestamp can't do
+ * this (WM entries carry no parseable epoch, and the file slices mid-session). Growth →
+ * slice(lastLen); a SHRINK means the wm-sensor sliced the file (rotation → header reset) →
+ * the post-header catch-up (Q2).
+ *
+ * Fail-loud (D, Jim): compute behind the #49 memory slot (`withMemorySlot` → null on stale-
+ * steal / acquire-fail → skip + warn, NEVER block dispatch); BOUNDARY-CHECK the delta starts
+ * on a clean `## ` entry (a moved WM-BOUNDARY marker would shift the slice mid-entry → desync
+ * → skip + resync, inject nothing); CONFIRM by an independent re-read (mismatch → skip, do not
+ * advance); advance `lastMemoryLen` MONOTONICALLY, only on a confirmed-clean delta.
+ *
+ * Contract (Q2, Jim): best-effort cross-pollination, NOT a lossless feed. Entries appended in
+ * the window between the last delta and a slice reach the gradient before another surface
+ * delta-reads them → missed by the delta-stream, but never LOST (gradient-preserved, surfaced
+ * at the next full wake-load). The right contract for a cheap per-turn inject.
+ *
+ * GATED OFF (DELTA_REFRESH_ENABLED=false) until Jim's blocking audit of the build + the
+ * confirm. While shut this returns '' and never touches the cursor — a warm session carries
+ * its session-start identity unchanged (correct, just not yet refreshed).
  */
-export function computeMemoryDelta(slug: string, lastTransactionTs: number): string {
+export async function computeMemoryDelta(slug: string, session: AgentSession): Promise<string> {
     if (!DELTA_REFRESH_ENABLED) return '';
-    const memDir = path.join(os.homedir(), '.han', 'memory', slug);
-    const files = ['working-memory.md', 'working-memory-full.md'];
-    const changed = files
-        .map((f) => path.join(memDir, f))
-        .filter((p) => { try { return fs.statSync(p).mtimeMs > lastTransactionTs; } catch { return false; } });
-    if (!changed.length) return '';
-    // NOTE: file-level mtime is a coarse signal; entry-level diffing + the checksum/echo
-    // confirmation is the work that must land before the gate opens. Skeleton stub only.
-    const block = changed.map((p) => `- ${path.basename(p)} changed since last transaction`).join('\n');
-    return `## Memory delta since your last transaction\n${block}\n`;
+    const memDir = gradientConfigForAgent(slug).memoryDir;
+    const file = wmCompressedPath(slug);
+    const lastLen = session.lastMemoryLen;
+
+    // candidate delta for a given file content — or {desync:true} when the cursor no longer
+    // lands on an entry boundary (a non-tail edit shifted the slice point).
+    const candidateFor = (content: string): { candidate: string; desync: boolean; curLen: number } => {
+        const curLen = content.length;
+        if (curLen === lastLen) return { candidate: '', desync: false, curLen };
+        if (curLen > lastLen) {
+            const c = content.slice(lastLen);
+            // Q1 boundary-check: an append begins a fresh heading entry — h2 (`## S…`) OR
+            // h3 (`### Cycle…` / `### Heartbeat…`). If it doesn't, a WM-BOUNDARY marker (or
+            // any non-tail edit) moved → the slice starts mid-entry → desync.
+            if (!/^#{2,6} /.test(c.replace(/^\s+/, ''))) return { candidate: '', desync: true, curLen };
+            return { candidate: c, desync: false, curLen };
+        }
+        // shrink → a slice happened; Q2 catch-up = the post-header entries. Find the first
+        // h2–h6 heading at a LINE START (skips the h1 file-header + the blockquote; NOTE a
+        // plain indexOf('## ') would false-match one char inside a '### ' marker → corrupt
+        // header). Pre-slice entries are gradient-bound + were already seen.
+        const m = content.match(/^#{2,6} /m);
+        const firstEntry = m && m.index !== undefined ? m.index : -1;
+        return { candidate: firstEntry >= 0 ? content.slice(firstEntry) : '', desync: false, curLen };
+    };
+
+    const result = await withMemorySlot(memDir, `${slug}-delta-read`, () => {
+        const read = (): string => { try { return fs.readFileSync(file, 'utf-8'); } catch { return ''; } };
+        const r1 = candidateFor(read());
+        if (r1.curLen === lastLen) return { block: '', advanceTo: null as number | null }; // no change
+        if (r1.desync) {
+            console.warn(`[tmux-dispatcher] ${slug}: memory-delta cursor desync (slice point is not a '## ' boundary) — resync, inject nothing this turn`);
+            return { block: '', advanceTo: r1.curLen }; // resync the cursor, no inject
+        }
+        // D confirm: an independent re-read must agree (a writer can't interleave inside the
+        // slot; this catches a torn read / external race). Mismatch → skip, do NOT advance.
+        const r2 = candidateFor(read());
+        if (r2.curLen !== r1.curLen || r2.candidate !== r1.candidate) {
+            console.warn(`[tmux-dispatcher] ${slug}: memory-delta confirm mismatch (file changed mid-read) — skip, do not advance cursor`);
+            return { block: '', advanceTo: null };
+        }
+        const body = r1.candidate.trim();
+        const block = body ? `## Shared memory since you last looked (other surfaces' writes)\n${body}\n` : '';
+        return { block, advanceTo: r1.curLen };
+    });
+
+    if (result === null) {
+        console.warn(`[tmux-dispatcher] ${slug}: memory-delta slot unavailable — skip this turn (never block dispatch)`);
+        return '';
+    }
+    if (result.advanceTo !== null) session.lastMemoryLen = result.advanceTo;
+    return result.block;
 }
 
 /** Test/inspection helper — current in-memory session registry. */
