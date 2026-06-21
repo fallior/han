@@ -1,6 +1,6 @@
 #!/bin/bash
 # install-restart-hooks.sh — install local git hooks that auto-restart
-# agent servers AND human-responder systemd services on code change.
+# agent servers, human-responder + heartbeat systemd services on code change.
 #
 # Run once after clone. The hooks are written to .git/hooks/ which is local
 # (not tracked) — so this script is the canonical install path.
@@ -9,18 +9,24 @@
 #   post-commit   — fires after `git commit` lands a local commit
 #   post-merge    — fires after `git pull` / `git merge`
 #
-# Each hook fires two restart layers:
+# Each hook fires three restart layers:
 #   1. restart-agent-server.sh per slug (hanjim/hanleo/hantenshi/hancasey)
 #      — pidfile-based agent servers (Darron's interactive Claude Code
 #      sessions). Silent no-op if the pidfile doesn't exist.
 #   2. restart-human-service.sh per slug (jim/leo) — systemd-user services
 #      (jim-human.service, leo-human.service — the Jemma-dispatched
-#      conversation responders). Conditional on the relevant *.ts file
-#      having actually changed in the commit/merge, so unrelated commits
-#      don't interrupt in-flight composes. Silent no-op if no file change.
-#      Added 2026-05-11 (S156) after the gap was caught: jim-human and
-#      leo-human were running 2-day-old code from before the controller-
-#      postMessage strip (commit 6834324) because nothing restarted them.
+#      conversation responders). Conditional on the seat's own *.ts source
+#      OR a shared server-runtime dep (src/server/lib/, db.ts, services/
+#      discord.ts) having changed, so unrelated commits don't interrupt an
+#      in-flight compose. Silent no-op if no relevant change. Added 2026-05-11
+#      (S156); widened to the shared runtime surface 2026-06-21 (P0, S196)
+#      after the seats sat 4 days on a stale tmux-dispatcher (the wedge).
+#   3. restart-heartbeat-service.sh per slug (leo) — the <slug>-heartbeat
+#      systemd-user service (the autonomous beat scheduler). Same shape as
+#      Layer 2 (own *.ts OR shared lib/ + db.ts). Added 2026-06-21 (P0b,
+#      S196): the heartbeat loads tmux-dispatcher/agent-cycle too but was
+#      previously uncovered by the hook — the same staleness exposure on the
+#      surface no human is watching.
 
 set -e
 
@@ -28,8 +34,12 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 HOOKS_DIR="$(git rev-parse --git-path hooks)"
 RESTART_SCRIPT="$REPO_ROOT/scripts/restart-agent-server.sh"
 HUMAN_RESTART_SCRIPT="$REPO_ROOT/scripts/restart-human-service.sh"
+HEARTBEAT_RESTART_SCRIPT="$REPO_ROOT/scripts/restart-heartbeat-service.sh"
 SLUGS=(jim leo tenshi casey)
 HUMAN_SLUGS=(jim leo)
+HEARTBEAT_SLUGS=(leo)  # only leo runs a <slug>-heartbeat.service today; the
+                       # script silent-no-ops on an absent unit, so adding a
+                       # slug here is the only change a new agent needs (P0b).
 
 if [[ ! -x "$RESTART_SCRIPT" ]]; then
     echo "Error: $RESTART_SCRIPT not found or not executable" >&2
@@ -37,6 +47,10 @@ if [[ ! -x "$RESTART_SCRIPT" ]]; then
 fi
 if [[ ! -x "$HUMAN_RESTART_SCRIPT" ]]; then
     echo "Error: $HUMAN_RESTART_SCRIPT not found or not executable" >&2
+    exit 1
+fi
+if [[ ! -x "$HEARTBEAT_RESTART_SCRIPT" ]]; then
+    echo "Error: $HEARTBEAT_RESTART_SCRIPT not found or not executable" >&2
     exit 1
 fi
 
@@ -58,6 +72,14 @@ for event in post-commit post-merge; do
         for slug in "${HUMAN_SLUGS[@]}"; do
             echo "\"$HUMAN_RESTART_SCRIPT\" $slug $event"
         done
+        echo "# Layer 3: restart <slug>-heartbeat systemd services (leo) when their .ts"
+        echo "# source OR a shared server-runtime lib (src/server/lib/, db.ts) changes."
+        echo "# The heartbeat is the autonomous surface + loads tmux-dispatcher/agent-cycle"
+        echo "# too, but was previously uncovered by the hook (P0b, S196). Same event-routed"
+        echo "# range + silent no-op on absent/inactive unit."
+        for slug in "${HEARTBEAT_SLUGS[@]}"; do
+            echo "\"$HEARTBEAT_RESTART_SCRIPT\" $slug $event"
+        done
     } > "$HOOK"
     chmod +x "$HOOK"
     echo "Installed: $HOOK"
@@ -67,8 +89,10 @@ echo
 echo "Done. The following will auto-restart on git commit / pull / merge:"
 echo "  Agent servers (pidfile-based, no-op if not running):"
 echo "    hanjim, hanleo, hantenshi, hancasey"
-echo "  Human-responder systemd services (conditional on relevant .ts file change):"
+echo "  Human-responder systemd services (conditional on own .ts OR shared lib/ change):"
 echo "    jim-human.service, leo-human.service"
+echo "  Heartbeat systemd services (conditional on own .ts OR shared lib/ change):"
+echo "    leo-heartbeat.service"
 echo
 echo "Each agent-server restart is ~2s of connection-refused for the affected agent's CLI."
-echo "Each human-service restart is ~3s during which Jemma dispatches will queue."
+echo "Each human/heartbeat-service restart is ~3s during which dispatches/beats queue."
