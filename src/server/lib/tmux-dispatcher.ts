@@ -126,6 +126,7 @@ interface TestHooks {
     sendLine?: (tmuxSession: string, line: string) => void;
     sleep?: (ms: number) => Promise<void> | void;
     tmuxSessionExists?: (name: string) => boolean;
+    capturePaneTail?: (name: string) => string;
 }
 let testHooks: TestHooks = {};
 export function __setTestHooks(h: TestHooks | null): void { testHooks = h ?? {}; }
@@ -216,6 +217,15 @@ const READY_CHROME_RE = /❯|shortcuts|bypass permissions/i;
  *  R011 Invariant 2 (DEC-096) discriminator: a diff races a between-tool-calls spoke and misreads
  *  it as wedged. Present = actively thinking / mid-wake (never kill); absent + not-ready = wedged. */
 export const PROCESSING_CHROME_RE = /esc to interrupt/i;
+/** P7 (S197): a TRANSIENT mid-turn rate limit (Anthropic usage-window throttle). The model
+ *  AND the account are fine — the same turn will compose once the throttle clears, so the
+ *  recovery is "wait it out + re-submit" (the autonomous up-arrow), NOT a model descent
+ *  (MODEL_UNAVAILABLE_RE → awaitChromeOrDescend) and NOT an account/credential swap (the
+ *  `rate-limited` signal → jemma swap; the account axis, #18). Distinct chrome, distinct cure.
+ *  NOTE (verify-don't-claim): this string is from the handover analysis, not a pane captured
+ *  this session — the LIVE chrome + re-submit semantics are the belt-and-braces confirmation
+ *  item (needs a real rate limit; the repro proves the detect→backoff→resubmit→collect LOGIC). */
+export const RATE_LIMITED_RE = /temporarily limiting|Rate limited/i;
 
 const CHROME_TIMEOUT_MS = 3 * 60_000; // overall budget: chrome appears in seconds; margin for probes + descents
 const DESCEND_COOLDOWN_MS = 6_000;    // let /model re-render before re-probing
@@ -227,9 +237,23 @@ const PROBE_REPLY_WINDOW_MS = 20_000; // a dead model errors in ~0s; no error wi
  *  no billing, loud in the health signal. */
 export class ModelLadderExhaustedError extends SessionNotReadyError {}
 
+/** P7: bounded mid-turn rate-limit retries exhausted (a SUSTAINED limit, longer than the
+ *  bounded backoff window). Extends DispatchTimeoutError so the existing surface handlers
+ *  (dispatchTxn's `catch (DispatchTimeoutError | SessionNotReadyError)` → fail-loud + skip +
+ *  retry-next-cadence) treat it correctly. A sustained limit is the account axis's (#18)
+ *  domain — P7 recovers transient throttles, then fails safe. */
+export class RateLimitedError extends DispatchTimeoutError {}
+/** P7 bounded-retry backoff (NO SILENT CONSTRAINTS, S74 — these values are stated to Darron):
+ *  base 30s, ×2 each retry, capped at 5min/wait, max 4 retries → ~30/60/120/240s ≈ 7.5min
+ *  bounded total before fail-safe. Never a tight loop. */
+const RATE_LIMIT_BASE_BACKOFF_MS = 30_000;
+const RATE_LIMIT_BACKOFF_CAP_MS = 5 * 60_000;
+const RATE_LIMIT_MAX_RETRIES = 4;
+
 /** Last `lines` non-empty lines of the VISIBLE pane (current state, not deep scrollback —
  *  bounding it keeps a pre-descent error line from false-matching after a successful switch). */
 export function capturePaneTail(tmuxSession: string, lines = 14): string {
+    if (testHooks.capturePaneTail) return testHooks.capturePaneTail(tmuxSession);
     let pane = '';
     try { pane = tmux(['capture-pane', '-p', '-t', tmuxSession]); } catch { return ''; }
     return pane.split('\n').filter((l) => l.trim()).slice(-lines).join('\n');
@@ -596,6 +620,47 @@ async function ensureSurfaceSessionInner(
     }
 }
 
+/**
+ * P7 — capture-wait with autonomous rate-limit recovery. Polls `captureReady()` for this
+ * transaction's diary capture (same as the bare waitFor), but ALSO watches the pane for a
+ * transient mid-turn rate limit (RATE_LIMITED_RE): on a hit with no capture yet, it backs off
+ * (bounded exponential, S74 — never a tight loop) and `resubmit()`s the turn (the "up-arrow":
+ * re-deliver the file-pointer instruction; the prompt file still exists on disk), up to
+ * RATE_LIMIT_MAX_RETRIES. The transient throttle clears and the re-submitted turn composes.
+ * Retries exhausted (a SUSTAINED limit) → RateLimitedError (fail-safe; the caller skips +
+ * retries next cadence; sustained limits are the account axis's job, #18). A non-rate-limit
+ * stall still hits the plain `timeoutMs` → DispatchTimeoutError, exactly as before.
+ * Exported for the C4 deterministic repro (scripts/test-rate-limit-retry.ts) — the new logic
+ * driven directly with seamed capturePaneTail/sleep, same spirit as __setTestHooks (P1). */
+export async function waitForCaptureWithRateLimitRetry<T>(
+    captureReady: () => T | null,
+    tmuxSession: string,
+    resubmit: () => void,
+    timeoutMs: number,
+): Promise<T> {
+    const deadline = Date.now() + timeoutMs;
+    let retries = 0;
+    for (;;) {
+        const v = captureReady();
+        if (v) return v;
+        // Transient mid-turn rate limit? back off + re-submit (bounded) instead of burning the
+        // whole 12-min timeout then a wasteful needs-reconcile reconstitution.
+        if (RATE_LIMITED_RE.test(capturePaneTail(tmuxSession))) {
+            if (retries >= RATE_LIMIT_MAX_RETRIES) {
+                throw new RateLimitedError(`${tmuxSession}: still rate-limited after ${retries} bounded retries — fail-safe skip, retry next cadence (sustained limit → account axis #18)`);
+            }
+            const backoff = Math.min(RATE_LIMIT_BASE_BACKOFF_MS * 2 ** retries, RATE_LIMIT_BACKOFF_CAP_MS);
+            retries += 1;
+            console.warn(`[tmux-dispatcher] ${tmuxSession}: rate-limited mid-turn — backoff ${Math.round(backoff / 1000)}s then re-submit (retry ${retries}/${RATE_LIMIT_MAX_RETRIES})`);
+            await sleep(backoff);
+            resubmit();
+            continue;
+        }
+        if (Date.now() > deadline) throw new DispatchTimeoutError(`waitFor timed out after ${timeoutMs}ms`);
+        await sleep(POLL_INTERVAL_MS);
+    }
+}
+
 // ── primitive 2: sendTransactionPrompt ───────────────────────────────────────────────
 /**
  * Deliver one assembled per-transaction prompt to the agent's session and return the
@@ -634,12 +699,17 @@ export async function sendTransactionPrompt(
     const finalPrompt = deltaBlock ? `${deltaBlock}\n${prompt}` : prompt;
     const promptFile = pipePath(slug, txnId);
     writeAtomic(promptFile, finalPrompt);
-    // 3) send-keys only a short, safe instruction pointing the agent at the file.
-    sendLine(session.tmuxSession,
+    // 3) send-keys only a short, safe instruction pointing the agent at the file. P7: the SAME
+    //    instruction is the rate-limit re-submit (the autonomous "up-arrow") — the prompt file
+    //    persists on disk, so re-delivering the pointer re-runs the identical turn.
+    const submitTurn = () => sendLine(session.tmuxSession,
         `Your next turn's full prompt is in the file ${promptFile} — read it with the Read tool and act on its entire contents as this turn's instructions.`);
+    submitTurn();
 
-    // 4) Poll the sink for this txn's capture (or an orphan, surfaced as fail-loud).
-    const cap = await waitFor<CaptureRecord>(() => {
+    // 4) Poll the sink for this txn's capture (or an orphan, surfaced as fail-loud). P7: the
+    //    poll is rate-limit-aware — a transient mid-turn throttle backs off + re-submits
+    //    (bounded) rather than burning the full 12-min timeout then a wasteful reconcile.
+    const cap = await waitForCaptureWithRateLimitRetry<CaptureRecord>(() => {
         const exact = capturePath(slug, txnId);
         if (fs.existsSync(exact)) return JSON.parse(fs.readFileSync(exact, 'utf-8')) as CaptureRecord;
         // Orphan capture (pointer was missing when the tool fired) — accept newest orphan
@@ -657,10 +727,13 @@ export async function sendTransactionPrompt(
             return JSON.parse(fs.readFileSync(orphans.sort()[orphans.length - 1], 'utf-8')) as CaptureRecord;
         }
         return null;
-    }, timeoutMs).catch(() => {
-        // Timeout ≠ idle: the session may still be composing. Mark for forced
-        // reconciliation; the queue runs reconcileSession before the next dispatch.
+    }, session.tmuxSession, submitTurn, timeoutMs).catch((err) => {
+        // Timeout / rate-limit-exhausted ≠ idle: the session may still be composing or be
+        // throttled. Mark for forced reconciliation; the queue runs reconcileSession before the
+        // next dispatch. Preserve RateLimitedError's specific message (it extends
+        // DispatchTimeoutError, so the caller's catch still treats it as fail-loud + skip).
         session.turnState = 'needs-reconcile';
+        if (err instanceof RateLimitedError) throw err;
         throw new DispatchTimeoutError(`${slug}/${surface}: no capture for ${txnId} within ${timeoutMs}ms (agent never called submit_response/stand_down, or session is wedged) — session marked needs-reconcile`);
     });
 
