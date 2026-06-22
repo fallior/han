@@ -548,7 +548,14 @@ async function ensureSurfaceSessionInner(
 ): Promise<void> {
     const tmuxSession = `${surface}-${slug}`;
     const key = sessionKey(slug, surface);
-    const welcomeBack = opts.welcomeBack ?? 'welcome back';
+    // Identity-correct welcome-back (W6, S198). A BARE 'welcome back' triggers the
+    // global ~/.claude/CLAUDE.md "Leo Invocation" rule → loads LEO regardless of the
+    // pane's AGENT_SLUG. So a default-bare wake CORRUPTS every non-leo surface (a Leo
+    // cognition camps a jim spoke → wedges every jim dispatch). The default must be
+    // slug-specific — identical to what the controllers already pass ('welcome back
+    // <displayName>'); the `??` only covers callers that omit it (reconcile/cycle).
+    // DEC-081: derived from the registry, so a 4th agent is correct for free.
+    const welcomeBack = opts.welcomeBack ?? `welcome back ${gradientConfigForAgent(slug).displayName}`;
 
     // Cold launch: reap any orphaned spoke for this surface (B2b — a service restart can
     // leave a pane-less `claude` running), then launch fresh + identity-load. Shared by the
@@ -819,7 +826,11 @@ async function clearSessionInner(slug: string, surface: string, opts: { welcomeB
     // prompt chrome to (re)appear before welcome-back — mirroring coldLaunch's awaitChromeOrDescend.
     await sleep(2_000);
     await awaitReadyChrome(slug, surface, session.tmuxSession);
-    sendLine(session.tmuxSession, opts.welcomeBack ?? 'welcome back');
+    // Identity-correct welcome-back (W6, S198) — see coldLaunch. reconcileSession(slug,
+    // surface) calls clearSession with NO welcomeBack → a bare default here loads LEO into
+    // a recycled jim spoke (the S198 corruption: a needs-reconcile jim-human → bare wake →
+    // Leo cognition camps the jim slot → all_failed). Default to the slug-correct message.
+    sendLine(session.tmuxSession, opts.welcomeBack ?? `welcome back ${gradientConfigForAgent(slug).displayName}`);
 
     await waitForReady(slug, surface, beforeMtime, READY_TIMEOUT_MS);
     session.ready = true;
