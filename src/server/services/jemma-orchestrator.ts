@@ -16,7 +16,7 @@
  *   - Ack watcher (fs.watch on ~/.han/signals/, filter jemma-ack-*)
  *   - Watchdog at 285s (T_futile 225s + 60s grace) with thread-as-ground-truth
  *     reconciliation before declaring failure
- *   - Distress log (~/.han/health/distress.jsonl) + ntfy for all-failed
+ *   - Distress log (~/.han/health/distress.jsonl) for all-failed — engineering record only, no phone alarm (B, S198)
  *   - Instrumentation: dispatch.total_duration_ms + recipients[i].compose_ms
  *     + attempts + exit_reason for Phase 2 tuning
  *
@@ -29,7 +29,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import type Database from 'better-sqlite3';
 import { db, HAN_DIR } from '../db';
 import { deliverMessage, SIGNALS_DIR, HEALTH_DIR } from './jemma-dispatch';
@@ -137,16 +136,6 @@ interface AckPayload {
 // `isEnabled()` config flag and its rollback fallback were retired alongside
 // the compose-lock; the legacy parallel-fanout path in routes/conversations.ts
 // is gone. Always-on by construction.
-
-function ntfyTopic(): string | null {
-    try {
-        const cfgPath = path.join(process.env.HOME || '', '.han', 'config.json');
-        const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-        return cfg?.ntfy_topic || null;
-    } catch {
-        return null;
-    }
-}
 
 // ── Prepared statements ───────────────────────────────────────
 
@@ -562,7 +551,7 @@ async function checkWatchdogs(): Promise<void> {
     }
 }
 
-// ── Distress + ntfy ───────────────────────────────────────────
+// ── Distress (engineering record; no phone alarm — B, S198) ───
 
 function writeDistress(row: DispatchRow, state: RecipientState, severity: 'warning' | 'severe'): void {
     try {
@@ -585,34 +574,22 @@ function writeDistress(row: DispatchRow, state: RecipientState, severity: 'warni
 async function handleAllFailed(row: DispatchRow, states: RecipientState[]): Promise<void> {
     writeDistress(row, states[states.length - 1], 'severe');
 
-    // S151 follow-on: the user-facing "[System] No agent was able to respond"
-    // message that this function used to post to the thread has been removed.
-    // It fired on watchdog-timeout, which had no connection to whether agents
-    // would eventually post — agents composing 5K+ char responses regularly
-    // crossed the 285s timeout while still successfully composing. The
-    // false-positive system messages added noise without naming a real
-    // failure. Per Darron: "I'll notice if no one responds; I don't need to
-    // be given an arbitrary timeout call that has no connection to the truth."
+    // S151 removed the user-facing "[System] No agent was able to respond" thread message
+    // (it fired on watchdog-timeout, which has no connection to whether agents would post —
+    // agents composing long responses routinely cross the timeout while still succeeding).
+    // B (S198) finishes that: the **"all-failed" ntfy phone-push is also removed** — same
+    // no-connection-to-truth problem. A watchdog-timeout all_failed can't distinguish a
+    // genuine no-response from a posted-but-ack-missed turn (DEC-079 retired the thread-truth
+    // reconcile, so `failed` covers both). An alarm on it manufactures a catastrophe-fear the
+    // facts don't warrant on top of a non-response the user already sees. Per Darron (S198):
+    // "I can tell when no one responds... I don't need another alarm adding concern." (The
+    // ntfy helper is recoverable from git history if a future GENUINE alarm — one connected
+    // to truth — wants it; DEC-069 move-not-delete spirit.)
     //
-    // Distress writes (writeDistress above) and ntfy pushes (below) remain —
-    // those go to engineering surfaces (~/.han/health/), not the user-facing
-    // thread. The structural-failure case (no eligible recipients at dispatch
-    // time) posts its own system message immediately at the no-recipients
-    // path in routes/conversations.ts:classifyAndDispatch.
-
-    // ntfy push
-    const topic = ntfyTopic();
-    if (topic) {
-        try {
-            execFileSync('curl', [
-                '-s',
-                '-d', `Dispatch ${row.id} all-failed on conv ${row.conversation_id}`,
-                '-H', 'Title: Jemma all-failed',
-                '-H', 'Priority: high',
-                `https://ntfy.sh/${topic}`,
-            ], { timeout: 10000, stdio: 'ignore' });
-        } catch { /* best effort */ }
-    }
+    // What remains: the distress.jsonl record above — an engineering surface (~/.han/health/)
+    // that feeds the #92 maintenance loop, NOT a phone alarm. The structural-failure case (no
+    // eligible recipients at dispatch time) still posts its own system message at
+    // routes/conversations.ts:classifyAndDispatch — that one IS connected to truth.
 }
 
 // ── Ack watcher ───────────────────────────────────────────────
