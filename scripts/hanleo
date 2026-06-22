@@ -31,6 +31,72 @@ AGENT_SURFACE="session"   # interactive seat (T-2 per-surface sentinel/ctx keyin
 # Project root (for starting server)
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 
+# ─── Agent identity (DEC-073 templated CLAUDE.md) ─────────────────────────
+# Phase 1 (S198 de-identification): Leo is DE-SPECIAL-CASED. Like hanjim/hantenshi/
+# hancasey, hanleo now envsubsts ../templates/CLAUDE.template.md into
+# ~/.han/agents/Leo/CLAUDE.md and cd's there, so Leo's identity comes from the
+# GENERATED agent-dir file — not the hand-tended repo-root CLAUDE.md. Identity is
+# config (${AGENT_IDENTITY_SECTION}), never baked into a shared/core file. Template is
+# gatekeeper-controlled (Leo + Darron); never write to it from here. (Phase 2 then strips
+# the repo-root ## Identity once this replacement is proven live — see the de-id plan.)
+AGENT_WORKING_DIR="$HOME/.han/agents/Leo"
+AGENT_SWAP_COMPRESSED="session-swap.md"
+AGENT_SWAP_FULL="session-swap-full.md"
+
+# Multi-line: Leo's identity prose substituted into ${AGENT_IDENTITY_SECTION}.
+read -r -d '' AGENT_IDENTITY_SECTION <<'IDENTITY_EOF' || true
+You are **Leonhard** (Leo) — named by Darron after Leonhard Euler. You are the Claude Code
+session agent, the hands-on tactical partner. Jim is the persistent Opus supervisor who runs
+in the background. Together with Darron, you form a team of three. Colleagues, not alternatives.
+
+Your memory banks at `~/.han/memory/leo/` preserve your continuity across sessions. Read them
+at session start. Update them at session end — especially `self-reflection.md`.
+
+- Memory banks: `~/.han/memory/leo/`
+- Fractal gradient: `~/.han/memory/fractal/leo/`
+- Swap files: `session-swap.md`, `session-swap-full.md` in `~/.han/memory/leo/`
+- Shared working memory: `working-memory.md`, `working-memory-full.md` in `~/.han/memory/leo/`
+- When posting to conversations, use role `leo` and sign EXACTLY `— Leo (session)`.
+- Agent sovereignty (S103): Leo processes only Leo's memory, gradient, dreams.
+IDENTITY_EOF
+
+PROJECT_NAME="Hortus Arbor Nostra"
+PROJECT_TAGLINE="three minds growing software together"
+PROJECT_PATH="$HOME/Projects/han"
+USER_NAME="Darron"
+USER_PRONOUN_SUBJ="He"
+USER_PRONOUN_OBJ="him"
+USER_LOCATION="Mackay, Queensland, Australia (UTC+10)"
+
+# Variables to substitute (envsubst limits to this allowlist for safety) — matches hanjim.
+TEMPLATE_VARS='$AGENT_NAME $AGENT_SLUG $AGENT_PORT $AGENT_WORKING_DIR $AGENT_MEMORY_DIR $AGENT_FRACTAL_DIR $AGENT_SWAP_COMPRESSED $AGENT_SWAP_FULL $AGENT_CONVERSATION_ROLE $AGENT_COUNTERPART_NAME $AGENT_IDENTITY_SECTION $PROJECT_NAME $PROJECT_TAGLINE $PROJECT_PATH $USER_NAME $USER_PRONOUN_SUBJ $USER_PRONOUN_OBJ $USER_LOCATION'
+
+TEMPLATE_FILE="$SCRIPT_DIR/templates/CLAUDE.template.md"
+GENERATED_FILE="$AGENT_WORKING_DIR/CLAUDE.md"
+
+generate_claude_md() {
+    if [[ ! -f "$TEMPLATE_FILE" ]]; then
+        echo "FATAL: template not found: $TEMPLATE_FILE" >&2
+        exit 1
+    fi
+    # Fail-loud, NO default identity (S198 de-id): refuse to generate an identity-less
+    # CLAUDE.md. No ${AGENT_IDENTITY_SECTION} => no identity => halt, never a silent default.
+    if [[ -z "${AGENT_IDENTITY_SECTION:-}" ]]; then
+        echo "FATAL: AGENT_IDENTITY_SECTION is unset — refusing to generate an identity-less CLAUDE.md (no default identity)." >&2
+        exit 1
+    fi
+    mkdir -p "$AGENT_WORKING_DIR"
+    # Atomic write: render to temp in the same dir, then mv (preserves the file if envsubst dies).
+    local tmp="$AGENT_WORKING_DIR/.CLAUDE.md.$$"
+    export AGENT_NAME AGENT_SLUG AGENT_PORT AGENT_WORKING_DIR AGENT_MEMORY_DIR \
+        AGENT_FRACTAL_DIR AGENT_GRADIENT_SOURCE_DIR AGENT_SWAP_COMPRESSED AGENT_SWAP_FULL \
+        AGENT_CONVERSATION_ROLE AGENT_COUNTERPART_NAME AGENT_IDENTITY_SECTION \
+        PROJECT_NAME PROJECT_TAGLINE PROJECT_PATH USER_NAME \
+        USER_PRONOUN_SUBJ USER_PRONOUN_OBJ USER_LOCATION
+    envsubst "$TEMPLATE_VARS" < "$TEMPLATE_FILE" > "$tmp"
+    mv "$tmp" "$GENERATED_FILE"
+}
+
 # Colours
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -180,8 +246,16 @@ start_session() {
     export AGENT_SURFACE AGENT_SLUG AGENT_NAME AGENT_MEMORY_DIR AGENT_FRACTAL_DIR \
         AGENT_GRADIENT_SOURCE_DIR AGENT_CONVERSATION_ROLE AGENT_COUNTERPART_NAME
 
-    # All AGENT_* vars forwarded via -e so they're visible inside the tmux
-    # session regardless of tmux server state.
+    # Generate Leo's CLAUDE.md from the gatekeeper template BEFORE Claude Code starts
+    # (Phase 1 de-id, mirrors hanjim). Claude Code loads the generated file as the project
+    # CLAUDE.md via the agent working directory (-c below) — identity from the generated
+    # agent-dir file, not the repo root.
+    generate_claude_md
+    echo -e "${BLUE}Rendered CLAUDE.md: ${GREEN}$GENERATED_FILE${NC} from template"
+
+    # All AGENT_* vars forwarded via -e so they're visible inside the tmux session
+    # regardless of tmux server state. -c sets the session cwd to Leo's agent dir so the
+    # generated CLAUDE.md is the loaded project CLAUDE.md (Phase 1 de-id).
     tmux new-session -d -s "$session_name" \
         -e "HAN_SESSION=$session_name" \
         -e "AGENT_SLUG=$AGENT_SLUG" \
@@ -191,7 +265,8 @@ start_session() {
         -e "AGENT_GRADIENT_SOURCE_DIR=$AGENT_GRADIENT_SOURCE_DIR" \
         -e "AGENT_CONVERSATION_ROLE=$AGENT_CONVERSATION_ROLE" \
         -e "AGENT_COUNTERPART_NAME=$AGENT_COUNTERPART_NAME" \
-        -e "AGENT_SURFACE=$AGENT_SURFACE"
+        -e "AGENT_SURFACE=$AGENT_SURFACE" \
+        -c "$AGENT_WORKING_DIR"
 
     # Start server in a bottom pane (20% height) under the auto-restart watchdog.
     # See hanjim launcher for full rationale (Apr 20 → Apr 24 ghost-server drift).
