@@ -260,6 +260,25 @@ export function capturePaneTail(tmuxSession: string, lines = 14): string {
 }
 
 /**
+ * Bounded wait for the live claude prompt chrome (READY_CHROME_RE) to appear in the pane.
+ * Shared by awaitChromeOrDescend (post-LAUNCH: bash→claude, chrome absent→present) and
+ * clearSession (W2, post-/clear: don't send welcome-back while the TUI is still mid-clear).
+ * Throws SessionNotReadyError on timeout. NOTE (W2 caveat): post-/clear the chrome can re-appear
+ * faster than a big /clear actually finishes — the caller keeps a short floor sleep first so we
+ * don't match the PRE-/clear prompt; a fully swallow-proof form (verify the wake actually started,
+ * re-send if not — the P7 shape) is the next hardening if a live /clear shows this isn't enough.
+ */
+async function awaitReadyChrome(slug: string, surface: string, tmuxSession: string, timeoutMs = CHROME_TIMEOUT_MS): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!READY_CHROME_RE.test(capturePaneTail(tmuxSession))) {
+        if (Date.now() > deadline) {
+            throw new SessionNotReadyError(`${slug}/${surface}: claude prompt chrome never appeared (timeout ${timeoutMs}ms). Pane tail:\n${capturePaneTail(tmuxSession)}`);
+        }
+        await sleep(2_000);
+    }
+}
+
+/**
  * Ensure a freshly-launched session is on a WORKING model — auto-descending the ladder via
  * in-session `/model <next rung>` — BEFORE the (expensive) welcome-back wake.
  *
@@ -282,12 +301,7 @@ export async function awaitChromeOrDescend(
 ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     // Phase 1: wait for the launch chrome (claude is UP at the prompt — NOT a model check).
-    while (!READY_CHROME_RE.test(capturePaneTail(tmuxSession))) {
-        if (Date.now() > deadline) {
-            throw new SessionNotReadyError(`${slug}/${surface}: claude prompt chrome never appeared after launch. Pane tail:\n${capturePaneTail(tmuxSession)}`);
-        }
-        await sleep(2_000);
-    }
+    await awaitReadyChrome(slug, surface, tmuxSession, timeoutMs);
     // Phase 2: probe the model (the only way to surface a message-triggered error) and descend.
     // Each rung uses a UNIQUE probe marker (not a shared "Hi"), and we judge the result ONLY
     // once THIS probe's marker has rendered in the pane — then test for the error in the text
@@ -788,10 +802,23 @@ async function clearSessionInner(slug: string, surface: string, opts: { welcomeB
     const beforeMtime = readySentinelMtime(slug, surface);
     try { fs.unlinkSync(readyPath(slug, surface)); } catch { /* none */ }
 
-    sendLine(session.tmuxSession, '/pfc');
-    await sleep(2_000); // let /pfc flush before /clear wipes context
+    // W1 (C4 root cure, S197): `/pfc` is the INTERACTIVE session's swap-flush ritual. A
+    // dispatched-responder / beat spoke has NO swap to flush — its memory is the submit_response
+    // diary sink (DEC-093) — and `/pfc` is not surface-gated (skill reads $AGENT_SLUG), so on a
+    // non-session spoke it invokes the full heavy memory ritual, which never calls submit_response
+    // → the recycle hangs the turn → needs-reconcile → another `/pfc` → the self-sustaining wedge
+    // loop. Only the `session` surface flushes swap on clear. (DEC-081: a surface check, not a slug.)
+    if (surface === 'session') {
+        sendLine(session.tmuxSession, '/pfc');
+        await sleep(2_000); // let /pfc flush before /clear wipes context
+    }
     sendLine(session.tmuxSession, '/clear');
+    // W2 (chrome-aware welcome-back, S197): a fixed sleep can be shorter than a big /clear, so
+    // welcome-back lands mid-/clear and is swallowed → 20-min waitForReady wedge. Keep the 2s
+    // FLOOR (lets /clear begin so we don't match the pre-/clear chrome), then wait for the ready
+    // prompt chrome to (re)appear before welcome-back — mirroring coldLaunch's awaitChromeOrDescend.
     await sleep(2_000);
+    await awaitReadyChrome(slug, surface, session.tmuxSession);
     sendLine(session.tmuxSession, opts.welcomeBack ?? 'welcome back');
 
     await waitForReady(slug, surface, beforeMtime, READY_TIMEOUT_MS);
