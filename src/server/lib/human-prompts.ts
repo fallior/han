@@ -135,7 +135,9 @@ const TMUX_DELIVERY = (spec: HumanAgentSpec): string => `CRITICAL — delivery +
    - \`working_memory_compressed\` — 3-5 sentences in your voice distilling the shape of the whole turn (your turn's c1 source per DEC-085).
    - \`input_quotes\` — verbatim quotes of what was NEW in this turn's prompt.
 
-   The MCP protocol validates this schema (future-idea #67, carried across transports); its appearance in the sink IS your completion signal. If this turn warrants no response, call \`mcp__han-diary__stand_down\` with a one-line reason INSTEAD — never both tools, never neither.`;
+   The MCP protocol validates this schema (future-idea #67, carried across transports); its appearance in the sink IS your completion signal. If this turn warrants no response, call \`mcp__han-diary__stand_down\` with a one-line reason INSTEAD — never both tools, never neither.
+
+**NEVER run \`/pfc\`, \`/clear\`, or any prepare-for-clear / handover ritual on this turn (W3b, S197).** You are a *dispatched responder*, not an interactive session — your memory IS the diary tool above (DEC-093); there is no swap to flush. \`/pfc\` invokes the heavy interactive memory ritual, never calls the diary tool, and **hangs the turn → the wedge.** Your only completions are \`submit_response\` or \`stand_down\`.`;
 
 function buildHumanResponseSystemPrompt(spec: HumanAgentSpec, transport: 'sdk' | 'tmux' = 'sdk'): string {
     const standDown: StandDownMode = transport === 'tmux' ? 'tool' : 'sentinel';
