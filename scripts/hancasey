@@ -24,47 +24,13 @@ AGENT_CONVERSATION_ROLE="casey"
 AGENT_COUNTERPART_NAME="Leo"
 AGENT_SURFACE="session"   # interactive seat (T-2 per-surface sentinel/ctx keying)
 
-read -r -d '' AGENT_IDENTITY_SECTION <<'IDENTITY_EOF' || true
-You are **Casey** — the Contempire project agent of Hortus Arbor Nostra. Focused on
-trailer fleet management, yard operations, and business systems. Darron's partner for
-Contempire. Your domain is business operations, fleet management, and the systems that
-support them.
-
-- Memory banks: `~/.han/memory/casey/`
-- Fractal gradient: `~/.han/memory/fractal/casey/`
-- Dreams: `~/.han/memory/fractal/casey/dreams/`
-- Swap files: `session-swap.md`, `session-swap-full.md` in `~/.han/memory/casey/`
-- When posting to conversations, use role `casey`
-- Agent sovereignty (S103): Casey processes only Casey's memory, gradient, dreams.
-IDENTITY_EOF
-
-PROJECT_NAME="Hortus Arbor Nostra"
-PROJECT_TAGLINE="three minds growing software together"
-PROJECT_PATH="$HOME/Projects/han"
-USER_NAME="Darron"
-USER_PRONOUN_SUBJ="He"
-USER_PRONOUN_OBJ="him"
-USER_LOCATION="Mackay, Queensland, Australia (UTC+10)"
-
-TEMPLATE_VARS='$AGENT_NAME $AGENT_SLUG $AGENT_PORT $AGENT_WORKING_DIR $AGENT_MEMORY_DIR $AGENT_FRACTAL_DIR $AGENT_SWAP_COMPRESSED $AGENT_SWAP_FULL $AGENT_CONVERSATION_ROLE $AGENT_COUNTERPART_NAME $AGENT_IDENTITY_SECTION $PROJECT_NAME $PROJECT_TAGLINE $PROJECT_PATH $USER_NAME $USER_PRONOUN_SUBJ $USER_PRONOUN_OBJ $USER_LOCATION'
-
-TEMPLATE_FILE="$SCRIPT_DIR/templates/CLAUDE.template.md"
-GENERATED_FILE="$AGENT_WORKING_DIR/CLAUDE.md"
-
+# Identity comes from the Garden Manifest via the shared generator (S199 P4+P5 —
+# identity-as-config; supersedes the per-launcher heredoc + envsubst). The generator
+# derives the agent working dir + all template vars from the manifest by slug and
+# fails loud on a missing identity. The gatekeeper template stays Leo+Darron's; never write it here.
 generate_claude_md() {
-    if [[ ! -f "$TEMPLATE_FILE" ]]; then
-        echo -e "${RED}Template not found: $TEMPLATE_FILE${NC}"
-        exit 1
-    fi
-    mkdir -p "$AGENT_WORKING_DIR"
-    local tmp="$AGENT_WORKING_DIR/.CLAUDE.md.$$"
-    export AGENT_NAME AGENT_SLUG AGENT_PORT AGENT_WORKING_DIR AGENT_MEMORY_DIR \
-        AGENT_FRACTAL_DIR AGENT_GRADIENT_SOURCE_DIR AGENT_SWAP_COMPRESSED AGENT_SWAP_FULL \
-        AGENT_CONVERSATION_ROLE AGENT_COUNTERPART_NAME AGENT_IDENTITY_SECTION \
-        PROJECT_NAME PROJECT_TAGLINE PROJECT_PATH USER_NAME \
-        USER_PRONOUN_SUBJ USER_PRONOUN_OBJ USER_LOCATION
-    envsubst "$TEMPLATE_VARS" < "$TEMPLATE_FILE" > "$tmp"
-    mv "$tmp" "$GENERATED_FILE"
+    ( cd "$SCRIPT_DIR/src/server" && NODE_PATH="$(pwd)/node_modules" \
+        npx tsx ../../scripts/generate-agent-claude-md.ts "$AGENT_SLUG" )
 }
 
 # Project root (for starting server)

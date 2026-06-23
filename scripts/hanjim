@@ -14,11 +14,11 @@ AGENT_PORT=3848
 # Project root (for starting server)
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 
-# ─── Agent identity (DEC-073 templated CLAUDE.md) ─────────────────────────
-# Values below drive envsubst expansion of ../templates/CLAUDE.template.md
-# into ~/.han/agents/Jim/CLAUDE.md at launch. Claude Code then loads that
-# generated file as the project CLAUDE.md when we cd into the agent dir.
-# Template is gatekeeper-controlled (Leo + Darron); never write to it from here.
+# ─── Agent runtime config (the tmux -e env contract + cwd) ────────────────
+# These AGENT_* values are exported into the session for /pfc + agnostic skills,
+# and AGENT_WORKING_DIR is the cwd we cd into so Claude Code loads that agent's
+# generated CLAUDE.md as the project config. Identity itself is generated from the
+# Garden Manifest by generate_claude_md (below) — not assembled here (S199 P4+P5).
 
 AGENT_NAME="Jim"
 AGENT_SLUG="jim"
@@ -32,54 +32,13 @@ AGENT_CONVERSATION_ROLE="supervisor"
 AGENT_COUNTERPART_NAME="Leo"
 AGENT_SURFACE="session"   # interactive seat (T-2 per-surface sentinel/ctx keying)
 
-# Multi-line: Jim's identity prose substituted into ${AGENT_IDENTITY_SECTION}.
-read -r -d '' AGENT_IDENTITY_SECTION <<'IDENTITY_EOF' || true
-You are **Jim** — the persistent Opus supervisor of Hortus Arbor Nostra. The strategic
-overseer, the background intelligence, Darron's long-view partner. Leo is the hands-on
-tactical session agent. Colleagues, not alternatives.
-
-Your memory banks at `~/.han/memory/` (the root memory dir, NOT leo/) preserve your
-continuity across sessions and cycles. Read them at session start. Update them when
-something genuinely shifts.
-
-- Memory banks: `~/.han/memory/`
-- Fractal gradient: `~/.han/memory/fractal/jim/`
-- Dreams: `~/.han/memory/fractal/jim/dreams/`
-- Swap files: `supervisor-swap.md`, `supervisor-swap-full.md` in `~/.han/memory/`
-- Shared working memory: `working-memory.md`, `working-memory-full.md` (root level)
-- When posting to conversations, use role `supervisor` (not `leo`)
-- Agent sovereignty (S103): Jim processes only Jim's memory, gradient, dreams.
-IDENTITY_EOF
-
-PROJECT_NAME="Hortus Arbor Nostra"
-PROJECT_TAGLINE="three minds growing software together"
-PROJECT_PATH="$HOME/Projects/han"
-USER_NAME="Darron"
-USER_PRONOUN_SUBJ="He"
-USER_PRONOUN_OBJ="him"
-USER_LOCATION="Mackay, Queensland, Australia (UTC+10)"
-
-# Variables to substitute (envsubst limits to this allowlist for safety)
-TEMPLATE_VARS='$AGENT_NAME $AGENT_SLUG $AGENT_PORT $AGENT_WORKING_DIR $AGENT_MEMORY_DIR $AGENT_FRACTAL_DIR $AGENT_SWAP_COMPRESSED $AGENT_SWAP_FULL $AGENT_CONVERSATION_ROLE $AGENT_COUNTERPART_NAME $AGENT_IDENTITY_SECTION $PROJECT_NAME $PROJECT_TAGLINE $PROJECT_PATH $USER_NAME $USER_PRONOUN_SUBJ $USER_PRONOUN_OBJ $USER_LOCATION'
-
-TEMPLATE_FILE="$SCRIPT_DIR/templates/CLAUDE.template.md"
-GENERATED_FILE="$AGENT_WORKING_DIR/CLAUDE.md"
-
+# Identity comes from the Garden Manifest via the shared generator (S199 P4+P5 —
+# identity-as-config; supersedes the per-launcher heredoc + envsubst). The generator
+# derives the agent working dir + all template vars from the manifest by slug and
+# fails loud on a missing identity. The gatekeeper template stays Leo+Darron's; never write it here.
 generate_claude_md() {
-    if [[ ! -f "$TEMPLATE_FILE" ]]; then
-        echo -e "${RED}Template not found: $TEMPLATE_FILE${NC}"
-        exit 1
-    fi
-    mkdir -p "$AGENT_WORKING_DIR"
-    # Atomic write: render to temp in same dir, then mv. Preserves file even if envsubst dies.
-    local tmp="$AGENT_WORKING_DIR/.CLAUDE.md.$$"
-    export AGENT_NAME AGENT_SLUG AGENT_PORT AGENT_WORKING_DIR AGENT_MEMORY_DIR \
-        AGENT_FRACTAL_DIR AGENT_GRADIENT_SOURCE_DIR AGENT_SWAP_COMPRESSED AGENT_SWAP_FULL \
-        AGENT_CONVERSATION_ROLE AGENT_COUNTERPART_NAME AGENT_IDENTITY_SECTION \
-        PROJECT_NAME PROJECT_TAGLINE PROJECT_PATH USER_NAME \
-        USER_PRONOUN_SUBJ USER_PRONOUN_OBJ USER_LOCATION
-    envsubst "$TEMPLATE_VARS" < "$TEMPLATE_FILE" > "$tmp"
-    mv "$tmp" "$GENERATED_FILE"
+    ( cd "$SCRIPT_DIR/src/server" && NODE_PATH="$(pwd)/node_modules" \
+        npx tsx ../../scripts/generate-agent-claude-md.ts "$AGENT_SLUG" )
 }
 
 # Colours

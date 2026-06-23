@@ -271,6 +271,31 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 { name: 'session', enabled: true, transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
             ],
         },
+        {
+            slug: 'casey',
+            displayName: 'Casey',
+            port: 3850,
+            pronounObj: 'them', // hancasey sets no pronoun; 'them' (no gender assumption) closes the gap
+            // Verbatim from scripts/hancasey (heredoc). Added for the step-3 launcher refactor (Jim's
+            // prerequisite — hancasey can't call the generator until casey is in the manifest).
+            identitySection: [
+                "You are **Casey** — the Contempire project agent of Hortus Arbor Nostra. Focused on",
+                "trailer fleet management, yard operations, and business systems. Darron's partner for",
+                "Contempire. Your domain is business operations, fleet management, and the systems that",
+                "support them.",
+                "",
+                "- Memory banks: `~/.han/memory/casey/`",
+                "- Fractal gradient: `~/.han/memory/fractal/casey/`",
+                "- Dreams: `~/.han/memory/fractal/casey/dreams/`",
+                "- Swap files: `session-swap.md`, `session-swap-full.md` in `~/.han/memory/casey/`",
+                "- When posting to conversations, use role `casey`",
+                "- Agent sovereignty (S103): Casey processes only Casey's memory, gradient, dreams.",
+            ].join('\n'),
+            active: false, // dormant — Contempire agent, has agent dir + CLAUDE.md, no running service
+            surfaces: [
+                { name: 'session', enabled: true, transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
+            ],
+        },
     ],
 };
 

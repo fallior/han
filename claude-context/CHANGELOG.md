@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-23 (S199) — feat(de-id P4+P5 step 3): launchers refactored onto the shared generator; the per-launcher heredocs retired
+
+**Why.** Steps 1+2 made the Garden Manifest the single source of identity + built the one shared render path; step 3 makes every launcher *use* it, retiring the duplicated identity heredocs (the de-id win — no agent's identity prose lives in a launcher script anymore).
+
+**Casey's manifest entry (prerequisite).** Added `casey` to `GARDEN_MANIFEST` (port 3850, `pronounObj: 'them'`, `identitySection` verbatim from the `hancasey` heredoc, `active: false`) so `hancasey` can call the generator. Proven byte-equivalent (pronoun line only). Jim-verified identical to the pre-step-3 heredoc.
+
+**Launcher refactor — `scripts/han{jim,leo,tenshi,casey}`.** Each launcher's identity heredoc + project/user block + `TEMPLATE_VARS` + `TEMPLATE_FILE`/`GENERATED_FILE` + the `envsubst` body of `generate_claude_md` are deleted; `generate_claude_md` now calls `scripts/generate-agent-claude-md.ts "$AGENT_SLUG"` (the one shared render path). The load-bearing launch code (tmux `new-session`, the runtime `AGENT_*` `-e` exports, `-c "$AGENT_WORKING_DIR"`) is preserved untouched. `hanleo` supersedes its own Phase-1 heredoc (folded). **+63 / −197**, 5 files.
+
+**Proof.** Zero identity heredocs remain in any launcher; `bash -n` clean ×4; each launcher's generate path writes the correct agent identity (jim→Jim, leo→Leonhard, tenshi→Tenshi, casey→Casey), the only unexpanded token the legit `${AGENT_SURFACE:-session}` bash literal; tsc 0-new. Bonus: removed a latent `hancasey`/`hanjim` `SCRIPT_DIR`-ordering bug and two contradicting stale `hanleo` comment-blocks (a pre-Phase-1 "does not run envsubst" *and* the Phase-1 "now envsubsts"). Jim blocking-audit GREEN by his own hand. `hanleo` = DEC-073 gatekeeper → Darron's hand at commit (given). Mylene (a dictation ghost of "my lean") correctly NOT fabricated into the manifest. `USER_LOCATION` unchanged. No Settled altered. **Next:** step 4 — the `.mcp.json` hard gate (han-diary + `submit_response` from the agent dir) before the spokes cd (step 5).
+
 ## 2026-06-23 (S199) — feat(de-id P4+P5 steps 1+2): identity-as-config — the Garden Manifest carries identity + one shared generator
 
 **Why.** Continuing the starter de-identification (emergency thread `mqoxgf0n`, item 2). The per-agent identity prose (the "You are X…" block + project/user vars) was **duplicated across all four `han<agent>` launcher heredocs** — and a serverless spoke launcher (the agnostic P4 target) had no agnostic source to render it from. Darron's call: *"put it in the manifest, single source of truth, do it right first time"* — fold P4 (spokes→agent-dir) and P5 (gatekeeper/identity → config) into one move.
