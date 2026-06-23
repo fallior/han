@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-06-23 (S199) — feat(de-id P4+P5 steps 1+2): identity-as-config — the Garden Manifest carries identity + one shared generator
+
+**Why.** Continuing the starter de-identification (emergency thread `mqoxgf0n`, item 2). The per-agent identity prose (the "You are X…" block + project/user vars) was **duplicated across all four `han<agent>` launcher heredocs** — and a serverless spoke launcher (the agnostic P4 target) had no agnostic source to render it from. Darron's call: *"put it in the manifest, single source of truth, do it right first time"* — fold P4 (spokes→agent-dir) and P5 (gatekeeper/identity → config) into one move.
+
+**Steps 1+2 (additive — nothing reads these yet; launchers refactor to call them in step 3).**
+- **`src/server/lib/garden-manifest.ts`** — `GardenIdentity` (garden-level `project`/`user`) + per-agent `port`/`pronounObj`/`gatekeeper`/`identitySection`. Populated leo/jim/tenshi, the `identitySection` prose copied **verbatim** from the launcher heredocs. `gatekeeper: true` on leo (the P5 landing — DEC-073 role → registry flag, reused by the deferred Dynamic-Residence admission gate).
+- **`src/server/lib/agent-template-vars.ts`** (new) — `agentTemplateVars(slug, surface)`, the one assembler of the full **19-var** template contract. **Fail-loud**: throws on unknown slug / missing `identitySection` (no slug → no identity → error, never a default).
+- **`scripts/generate-agent-claude-md.ts`** (new) — the one render path. `.ts` (not `.sh`): the multi-line backtick-dense identity makes bash→`envsubst` escaping-fragile; in-process substitution is byte-deterministic. Matches `envsubst` semantics (both `${VAR}` and bare `$VAR`, allowlist-filtered). Jim-accepted over `.sh`, no veto.
+
+**Proof.** Byte-diff generator vs the launcher-equivalent `envsubst` render (jim **and** leo): the **only** difference is `${AGENT_PRONOUN_OBJ}` → `him` — the long-standing unexpanded-var gap (template referenced it, no launcher allowlist carried it), now closed. tenshi renders clean (the 3rd agent, agnostic). Fail-loud exit 1. tsc 0-new. The proof earned two catches that would've shipped silently: the template uses **bare `$VAR`** too (not only `${VAR}`), and the identity value has **no trailing newline** (ground-truthed vs the on-disk `Jim/CLAUDE.md`). Jim blocking-audit GREEN by his own hand.
+
+**Decisions in-flight.** Dynamic Residence (open-world resident discovery) = **Option A** — proceed on the static manifest now (consumers are already population-agnostic — they look up, never enumerate — so closed-world lives only in a replaceable data source), design discovery as its own phase (future-idea #98). No Settled altered; DEC-073 gatekeeper files untouched this step (the launcher refactor incl. `hanleo` is step 3 — Leo's hand + Darron). `USER_LOCATION` kept verbatim ("Mackay") for byte-equivalence; the value is a pending one-line data fix (Darron in Brisbane now).
+
 ## 2026-06-22 (S198) — feat(de-id Phase 1 + template-completeness): de-special-case Leo; restore the missing generic protocols
 
 **Why.** The starter-de-identification keystone (emergency thread `mqoxgf0n`, item 2). Leo was the special-cased gatekeeper — `hanleo` alone didn't templatize, so Leo's identity was baked into the repo-root `CLAUDE.md`, and every spoke launched `cwd = repo-root` (the structural half of the W6 corruption). True agnosticism requires de-special-casing Leo.

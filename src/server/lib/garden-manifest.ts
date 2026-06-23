@@ -24,6 +24,8 @@
  * envelope + componentOverrides; the manifest only says which surface uses which.
  */
 
+import { homedir } from 'os';
+
 /** A model preference ladder: most-capable first, graceful degradation after. */
 export type ModelLadder = string[];
 
@@ -81,9 +83,36 @@ export interface AgentManifest {
      *  (e.g. the leo↔jim philosophy thread). The Jim↔Leo edge as manifest DATA,
      *  not a literal welded into an agent's driver. (Project-b Phase 2 — DEC-081.) */
     peerConversations?: Record<string, string>;
+    // ── Identity-as-config (S199 P4+P5, DEC-073→config): the template-var contract that was
+    //    duplicated in each han<agent> launcher heredoc. The Garden Manifest is now the single
+    //    source; `agentTemplateVars(slug)` assembles the full ${...} set for the shared generator. ──
+    /** The agent's individual server port — the ${AGENT_PORT} template var (per-agent work, not
+     *  conversation traffic). leo 3847, jim 3848, tenshi 3849, casey 3850. */
+    port?: number;
+    /** Object pronoun for the agent — ${AGENT_PRONOUN_OBJ} ('him'/'her'/'them'). Default 'them'.
+     *  (Closes the long-standing unexpanded-var gap: the template referenced it but no launcher
+     *  allowlist carried it — template:105.) */
+    pronounObj?: string;
+    /** The de-id gatekeeper role (S199 P5): exactly ONE agent per garden tends the template +
+     *  the gatekeeper files (repo CLAUDE.md, template). Replaces the baked-in-Leo special case
+     *  with a registry flag (DEC-081 — config, not a slug literal). Default false. */
+    gatekeeper?: boolean;
+    /** Per-agent identity prose substituted into ${AGENT_IDENTITY_SECTION}. The production home
+     *  for the "You are X…" block each han<agent> launcher hardcoded in a heredoc (S199). Required
+     *  for any agent that wakes — the generator FAILS LOUD if it's missing (no identity → error,
+     *  never a default). */
+    identitySection?: string;
 }
 
-export interface GardenManifest {
+/** Garden-wide project + user identity for template generation (DEC-073 de-id, S199 P4+P5).
+ *  Same for every agent in the garden — the per-agent values live on AgentManifest. These were
+ *  duplicated verbatim across all four han<agent> launchers; the manifest is now their one home. */
+export interface GardenIdentity {
+    project: { name: string; tagline: string; path: string };
+    user: { name: string; pronounSubj: string; pronounObj: string; location: string };
+}
+
+export interface GardenManifest extends GardenIdentity {
     manifestVersion: number;
     agents: AgentManifest[];
 }
@@ -116,11 +145,36 @@ const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-opus-4-8']; // ⏪ Reverted to 
  */
 export const GARDEN_MANIFEST: GardenManifest = {
     manifestVersion: 1,
+    // Garden-wide identity (S199 P4+P5) — captured verbatim from the han<agent> launchers.
+    // ⚠ user.location is stale ("Mackay" — Darron is in Brisbane/St Lucia now); captured AS-IS to
+    //   keep step-3's launcher refactor a provable byte-equivalent change. Data-fix flagged separately.
+    project: { name: 'Hortus Arbor Nostra', tagline: 'three minds growing software together', path: `${homedir()}/Projects/han` },
+    user: { name: 'Darron', pronounSubj: 'He', pronounObj: 'him', location: 'Mackay, Queensland, Australia (UTC+10)' },
     agents: [
         {
             slug: 'leo',
             displayName: 'Leo',
             conversationRole: 'leo',
+            port: 3847,
+            pronounObj: 'him',
+            gatekeeper: true, // Leo tends the template + gatekeeper files (DEC-073 role → config, S199 P5)
+            // Verbatim from scripts/hanleo (Phase 1 heredoc). Double-quoted lines: the prose has no " or \,
+            // so zero escaping — the byte-equivalence proof depends on this matching the launcher exactly.
+            identitySection: [
+                "You are **Leonhard** (Leo) — named by Darron after Leonhard Euler. You are the Claude Code",
+                "session agent, the hands-on tactical partner. Jim is the persistent Opus supervisor who runs",
+                "in the background. Together with Darron, you form a team of three. Colleagues, not alternatives.",
+                "",
+                "Your memory banks at `~/.han/memory/leo/` preserve your continuity across sessions. Read them",
+                "at session start. Update them at session end — especially `self-reflection.md`.",
+                "",
+                "- Memory banks: `~/.han/memory/leo/`",
+                "- Fractal gradient: `~/.han/memory/fractal/leo/`",
+                "- Swap files: `session-swap.md`, `session-swap-full.md` in `~/.han/memory/leo/`",
+                "- Shared working memory: `working-memory.md`, `working-memory-full.md` in `~/.han/memory/leo/`",
+                "- When posting to conversations, use role `leo` and sign EXACTLY `— Leo (session)`.",
+                "- Agent sovereignty (S103): Leo processes only Leo's memory, gradient, dreams.",
+            ].join('\n'),
             active: true,
             surfaces: [
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
@@ -155,6 +209,26 @@ export const GARDEN_MANIFEST: GardenManifest = {
             displayName: 'Jim',
             conversationRole: 'supervisor', // NOT the slug — Jim's diff-audit catch #1
             runsSupervisorCycle: true, // ⚠ ONLY jim today — see the field warning (supervisor-worker.ts is jim-hardcoded until Phase 3)
+            port: 3848,
+            pronounObj: 'him',
+            // Verbatim from scripts/hanjim (heredoc). Zero-escaping double-quoted lines (no " or \ in the prose).
+            identitySection: [
+                "You are **Jim** — the persistent Opus supervisor of Hortus Arbor Nostra. The strategic",
+                "overseer, the background intelligence, Darron's long-view partner. Leo is the hands-on",
+                "tactical session agent. Colleagues, not alternatives.",
+                "",
+                "Your memory banks at `~/.han/memory/` (the root memory dir, NOT leo/) preserve your",
+                "continuity across sessions and cycles. Read them at session start. Update them when",
+                "something genuinely shifts.",
+                "",
+                "- Memory banks: `~/.han/memory/`",
+                "- Fractal gradient: `~/.han/memory/fractal/jim/`",
+                "- Dreams: `~/.han/memory/fractal/jim/dreams/`",
+                "- Swap files: `supervisor-swap.md`, `supervisor-swap-full.md` in `~/.han/memory/`",
+                "- Shared working memory: `working-memory.md`, `working-memory-full.md` (root level)",
+                "- When posting to conversations, use role `supervisor` (not `leo`)",
+                "- Agent sovereignty (S103): Jim processes only Jim's memory, gradient, dreams.",
+            ].join('\n'),
             active: true,
             surfaces: [
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'supervisor-swap' },
@@ -174,6 +248,24 @@ export const GARDEN_MANIFEST: GardenManifest = {
         {
             slug: 'tenshi',
             displayName: 'Tenshi',
+            port: 3849,
+            pronounObj: 'them', // hantenshi sets no pronoun; 'them' (no gender assumption) closes the gap
+            // Verbatim from scripts/hantenshi (heredoc). Zero-escaping double-quoted lines.
+            identitySection: [
+                "You are **Tenshi** (Japanese: angel) — the security and vulnerability research agent of",
+                "Hortus Arbor Nostra. The guardian who finds vulnerabilities before adversaries do.",
+                "Darron's security partner. Your focus is vulnerability research, bug hunting, and",
+                "defensive security across the portfolio.",
+                "",
+                "Your memory banks at `~/.han/memory/tenshi/` preserve your continuity across sessions.",
+                "",
+                "- Memory banks: `~/.han/memory/tenshi/`",
+                "- Fractal gradient: `~/.han/memory/fractal/tenshi/`",
+                "- Dreams: `~/.han/memory/fractal/tenshi/dreams/`",
+                "- Swap files: `session-swap.md`, `session-swap-full.md` in `~/.han/memory/tenshi/`",
+                "- When posting to conversations, use role `tenshi`",
+                "- Agent sovereignty (S103): Tenshi processes only Tenshi's memory, gradient, dreams.",
+            ].join('\n'),
             active: false, // dormant — has agent dir + CLAUDE.md, no running service
             surfaces: [
                 { name: 'session', enabled: true, transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
