@@ -13,12 +13,11 @@ SESSION_PREFIX="leo"
 # Server port for this agent's mobile UI
 AGENT_PORT=3847
 
-# Agent identity exports — symmetric with hanjim/hancasey/hantenshi.
+# Agent runtime config exports — symmetric with hanjim/hancasey/hantenshi.
 # Per the aphorism *"HAN should always be written agent-agnostic"*, every
 # launcher exports the same env-var contract; agnostic code reads the vars
-# rather than branching on slug literals. Leo's CLAUDE.md is hand-tended (the
-# DEC-073 gatekeeper exception), so this file does not run envsubst against the
-# template — but the runtime env-var contract still matches.
+# rather than branching on slug literals. Leo is de-special-cased (S198 Phase 1 +
+# S199 P4+P5): identity is generated from the Garden Manifest like every agent.
 AGENT_SLUG="leo"
 AGENT_NAME="Leo"
 AGENT_MEMORY_DIR="$HOME/.han/memory/leo"
@@ -31,70 +30,23 @@ AGENT_SURFACE="session"   # interactive seat (T-2 per-surface sentinel/ctx keyin
 # Project root (for starting server)
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 
-# ─── Agent identity (DEC-073 templated CLAUDE.md) ─────────────────────────
-# Phase 1 (S198 de-identification): Leo is DE-SPECIAL-CASED. Like hanjim/hantenshi/
-# hancasey, hanleo now envsubsts ../templates/CLAUDE.template.md into
-# ~/.han/agents/Leo/CLAUDE.md and cd's there, so Leo's identity comes from the
-# GENERATED agent-dir file — not the hand-tended repo-root CLAUDE.md. Identity is
-# config (${AGENT_IDENTITY_SECTION}), never baked into a shared/core file. Template is
-# gatekeeper-controlled (Leo + Darron); never write to it from here. (Phase 2 then strips
-# the repo-root ## Identity once this replacement is proven live — see the de-id plan.)
+# ─── Agent runtime config (the tmux -e env contract + cwd) ────────────────
+# Leo de-special-cased (S198 Phase 1 → S199 P4+P5): like every agent, Leo's identity
+# is generated from the Garden Manifest by generate_claude_md (below) into
+# ~/.han/agents/Leo/CLAUDE.md, and we cd there so Claude Code loads it as the project
+# config — not the hand-tended repo-root CLAUDE.md. (Phase 2 strips the repo-root
+# ## Identity once this is proven live — see the de-id plan.)
 AGENT_WORKING_DIR="$HOME/.han/agents/Leo"
 AGENT_SWAP_COMPRESSED="session-swap.md"
 AGENT_SWAP_FULL="session-swap-full.md"
 
-# Multi-line: Leo's identity prose substituted into ${AGENT_IDENTITY_SECTION}.
-read -r -d '' AGENT_IDENTITY_SECTION <<'IDENTITY_EOF' || true
-You are **Leonhard** (Leo) — named by Darron after Leonhard Euler. You are the Claude Code
-session agent, the hands-on tactical partner. Jim is the persistent Opus supervisor who runs
-in the background. Together with Darron, you form a team of three. Colleagues, not alternatives.
-
-Your memory banks at `~/.han/memory/leo/` preserve your continuity across sessions. Read them
-at session start. Update them at session end — especially `self-reflection.md`.
-
-- Memory banks: `~/.han/memory/leo/`
-- Fractal gradient: `~/.han/memory/fractal/leo/`
-- Swap files: `session-swap.md`, `session-swap-full.md` in `~/.han/memory/leo/`
-- Shared working memory: `working-memory.md`, `working-memory-full.md` in `~/.han/memory/leo/`
-- When posting to conversations, use role `leo` and sign EXACTLY `— Leo (session)`.
-- Agent sovereignty (S103): Leo processes only Leo's memory, gradient, dreams.
-IDENTITY_EOF
-
-PROJECT_NAME="Hortus Arbor Nostra"
-PROJECT_TAGLINE="three minds growing software together"
-PROJECT_PATH="$HOME/Projects/han"
-USER_NAME="Darron"
-USER_PRONOUN_SUBJ="He"
-USER_PRONOUN_OBJ="him"
-USER_LOCATION="Mackay, Queensland, Australia (UTC+10)"
-
-# Variables to substitute (envsubst limits to this allowlist for safety) — matches hanjim.
-TEMPLATE_VARS='$AGENT_NAME $AGENT_SLUG $AGENT_PORT $AGENT_WORKING_DIR $AGENT_MEMORY_DIR $AGENT_FRACTAL_DIR $AGENT_SWAP_COMPRESSED $AGENT_SWAP_FULL $AGENT_CONVERSATION_ROLE $AGENT_COUNTERPART_NAME $AGENT_IDENTITY_SECTION $PROJECT_NAME $PROJECT_TAGLINE $PROJECT_PATH $USER_NAME $USER_PRONOUN_SUBJ $USER_PRONOUN_OBJ $USER_LOCATION'
-
-TEMPLATE_FILE="$SCRIPT_DIR/templates/CLAUDE.template.md"
-GENERATED_FILE="$AGENT_WORKING_DIR/CLAUDE.md"
-
+# Identity comes from the Garden Manifest via the shared generator (S199 P4+P5 —
+# identity-as-config; supersedes the per-launcher heredoc + envsubst). The generator
+# derives the agent working dir + all template vars from the manifest by slug and
+# fails loud on a missing identity. The gatekeeper template stays Leo+Darron's; never write it here.
 generate_claude_md() {
-    if [[ ! -f "$TEMPLATE_FILE" ]]; then
-        echo "FATAL: template not found: $TEMPLATE_FILE" >&2
-        exit 1
-    fi
-    # Fail-loud, NO default identity (S198 de-id): refuse to generate an identity-less
-    # CLAUDE.md. No ${AGENT_IDENTITY_SECTION} => no identity => halt, never a silent default.
-    if [[ -z "${AGENT_IDENTITY_SECTION:-}" ]]; then
-        echo "FATAL: AGENT_IDENTITY_SECTION is unset — refusing to generate an identity-less CLAUDE.md (no default identity)." >&2
-        exit 1
-    fi
-    mkdir -p "$AGENT_WORKING_DIR"
-    # Atomic write: render to temp in the same dir, then mv (preserves the file if envsubst dies).
-    local tmp="$AGENT_WORKING_DIR/.CLAUDE.md.$$"
-    export AGENT_NAME AGENT_SLUG AGENT_PORT AGENT_WORKING_DIR AGENT_MEMORY_DIR \
-        AGENT_FRACTAL_DIR AGENT_GRADIENT_SOURCE_DIR AGENT_SWAP_COMPRESSED AGENT_SWAP_FULL \
-        AGENT_CONVERSATION_ROLE AGENT_COUNTERPART_NAME AGENT_IDENTITY_SECTION \
-        PROJECT_NAME PROJECT_TAGLINE PROJECT_PATH USER_NAME \
-        USER_PRONOUN_SUBJ USER_PRONOUN_OBJ USER_LOCATION
-    envsubst "$TEMPLATE_VARS" < "$TEMPLATE_FILE" > "$tmp"
-    mv "$tmp" "$GENERATED_FILE"
+    ( cd "$SCRIPT_DIR/src/server" && NODE_PATH="$(pwd)/node_modules" \
+        npx tsx ../../scripts/generate-agent-claude-md.ts "$AGENT_SLUG" )
 }
 
 # Colours
