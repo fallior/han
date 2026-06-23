@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-23 (S199) — feat(de-id P4+P5 step 5): spokes cd into the agent dir — the structural corruption root closes
+
+**Why.** The last structural piece: a serverless spoke launched with `cwd = repo-root` (`launch-tmux-surface.sh`), so **every spoke sat next to Leo's repo-root CLAUDE.md** — the structural half of the W6 corruption (W6 only fixed the phrase layer). Closing it makes a spoke load its **own** identity, and is the prerequisite for step 6 (stripping the repo-root identity).
+
+**`scripts/launch-tmux-surface.sh`.** Before launch the spoke now (1) derives `AGENT_DIR=~/.han/agents/$AGENT_NAME` (`AGENT_NAME` from `manifest-get env`, agnostic; fail-loud if unresolved), (2) runs the shared generator to (re)write the agent-dir CLAUDE.md **+ `.mcp.json`** (Jim's note a — refresh before cd), and (3) `tmux new-session -c "$REPO_ROOT"` → `-c "$AGENT_DIR"`. Generation uses the `session` surface so the shared agent-dir file is **idempotent** across an agent's co-launching surfaces; the per-surface swap prefix flows via the `-e` env (the operational source the B-3 guard + `/pfc` read), not the file's descriptive text.
+
+**Proof — the live gate, met naturally.** Jim's elevated gate (a real spoke through the new launcher wakes the right agent from the agent dir AND `submit_response` works) cannot be proven from static code. It was met **live by a real dispatch**: a `heartbeat-leo` beat (13:16) launched through the new launcher — verified `cwd=~/.han/agents/Leo` (via `/proc` + `pane_current_path`), woke Leo cleanly, ran a full beat, and **"Called han-diary"** (submit_response landed). The critical Leo case (Leo from the agent dir, not the repo root) is proven. The launcher is agnostic → jim rides the identical path (confirms on its next dispatch). `bash -n` clean; Jim code-GREEN by hand. No Settled altered. **Next:** step 6 — strip the repo-root `## Identity` (now safe: all consumers load the agent-dir file) — gatekeeper, Darron's hand.
+
 ## 2026-06-23 (S199) — feat(de-id P4+P5 step 4): the generator provisions the agent-dir `.mcp.json` (han-diary hard gate)
 
 **Why.** Step 5 cd's the spokes into the agent dir; han-diary (the `submit_response` diary tool) is discovered from **cwd**, and the agent dirs had no `.mcp.json`. So before that removal, the agent dir must carry one — Jim's elevated **HARD GATE**.

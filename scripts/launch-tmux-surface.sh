@@ -13,7 +13,9 @@
 # Spine = the T-1.5 fixture learnings (2026-06-11):
 #   - env contract via `tmux -e` (mirrors han<agent> launchers)
 #   - CLAUDECODE unset in the pane (L012 nested-exec guard)
-#   - repo cwd so .mcp.json registers han-diary (trust approval inherits per-project)
+#   - AGENT-DIR cwd (S199 P4 step 5) so the spoke loads its OWN generated CLAUDE.md +
+#     .mcp.json (han-diary) — closes the structural corruption root (a spoke no longer
+#     sits next to a foreign agent's identity file; W6 only patched the phrase layer)
 #   - NO watchdog pane (the hub server is launched once per agent, elsewhere)
 #   - claude-logged ON by default (canonical provenance + the #78 write-shape both
 #     depend on the raw transcript landing in ~/.han/logs/<slug>/ — Jim's note #4);
@@ -71,10 +73,29 @@ fi
 MODEL="${MODEL_OVERRIDE:-$(manifest_get model "$SLUG" "$SURFACE")}"
 
 # AGENT_* env contract from the manifest + registry (agent-agnostic, DEC-081).
+ENV_KV="$(manifest_get env "$SLUG" "$SURFACE")"
 ENV_ARGS=()
 while IFS= read -r kv; do
-    ENV_ARGS+=(-e "$kv")
-done < <(manifest_get env "$SLUG" "$SURFACE")
+    [[ -n "$kv" ]] && ENV_ARGS+=(-e "$kv")
+done <<< "$ENV_KV"
+
+# Agent working dir = ~/.han/agents/<DisplayName> (uniform across the garden — verified;
+# AGENT_NAME is manifest-derived, so this stays agnostic). The spoke cd's here so its project
+# CLAUDE.md is its OWN generated identity, not the repo root's (S199 P4 step 5).
+AGENT_NAME="$(grep '^AGENT_NAME=' <<< "$ENV_KV" | cut -d= -f2-)"
+AGENT_DIR="$HOME/.han/agents/$AGENT_NAME"
+if [[ -z "$AGENT_NAME" ]]; then
+    echo "launch-tmux-surface: could not resolve AGENT_NAME for '$SLUG' from the manifest" >&2
+    exit 1
+fi
+
+# Generate the agent's CLAUDE.md + .mcp.json from the Garden Manifest BEFORE cd-ing (Jim's
+# note a — refresh before launch, else the spoke cd's into a stub/stale file). Same shared
+# generator the interactive launchers use. 'session' surface keeps the agent-dir file stable
+# across an agent's surfaces — the per-surface swap prefix flows via the -e env above (the
+# operational source), not this file's descriptive text.
+( cd "$REPO_ROOT/src/server" && NODE_PATH="$(pwd)/node_modules" \
+    npx tsx ../../scripts/generate-agent-claude-md.ts "$SLUG" ) >&2
 
 # HAN_SPOKE=1 marks the pane as a detached serverless spoke: ~/.bashrc's
 # ssh-agent init must skip under it (the ssh-add passphrase prompt blocks a
@@ -87,7 +108,7 @@ done < <(manifest_get env "$SLUG" "$SURFACE")
 # pollutes the pane and could wedge an autonomous seat that can't answer TUI chrome;
 # (2) PRIVACY — we do not want autonomous spokes auto-consenting to data-use on the
 # experiment's content; suppressed = no per-session consent, posture stays account-default.
-tmux new-session -d -s "$SESSION_NAME" -c "$REPO_ROOT" \
+tmux new-session -d -s "$SESSION_NAME" -c "$AGENT_DIR" \
     "${ENV_ARGS[@]}" \
     -e "AGENT_SURFACE=$SURFACE" \
     -e "HAN_SESSION=$SESSION_NAME" \
