@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-23 (S199) — feat(de-id P4+P5 step 4): the generator provisions the agent-dir `.mcp.json` (han-diary hard gate)
+
+**Why.** Step 5 cd's the spokes into the agent dir; han-diary (the `submit_response` diary tool) is discovered from **cwd**, and the agent dirs had no `.mcp.json`. So before that removal, the agent dir must carry one — Jim's elevated **HARD GATE**.
+
+**`scripts/generate-agent-claude-md.ts`.** The generator now also writes `$AGENT_DIR/.mcp.json` — a verbatim copy of the repo `.mcp.json` (atomic temp+rename; warns, doesn't crash, if the repo file is missing). The content is already agent-agnostic — `HAN_DIARY_SLUG=${AGENT_SLUG}` stays literal and is env-expanded by Claude Code at session launch — so one copy serves every agent.
+
+**Hard gate — proven empirically.** Tool availability under the spoke's exact launch flag (`--dangerously-skip-permissions`): `mcp__han-diary__submit_response` is **AVAILABLE from the agent dir** (`~/.han/agents/Leo`), matching the repo-root control. (`claude mcp list` shows "Pending approval" — the non-skip-permissions trust state — which the spoke's flag auto-approves; same mechanism the repo-root spokes rely on today.) Jim verified discovery + the approval mechanism + preconditions by his own hand and GREEN'd. `scripts/generate-agent-claude-md.ts` only; tsc 0-new. Export note: the `.mcp.json` absolute paths → `${PROJECT_PATH}` is a close-sweep item, not blocking. No Settled altered.
+
 ## 2026-06-23 (S199) — feat(de-id P4+P5 step 3): launchers refactored onto the shared generator; the per-launcher heredocs retired
 
 **Why.** Steps 1+2 made the Garden Manifest the single source of identity + built the one shared render path; step 3 makes every launcher *use* it, retiring the duplicated identity heredocs (the de-id win — no agent's identity prose lives in a launcher script anymore).

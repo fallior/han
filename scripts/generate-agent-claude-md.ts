@@ -64,4 +64,20 @@ if (stdout) {
     fs.writeFileSync(tmp, rendered);
     fs.renameSync(tmp, path.join(dir, 'CLAUDE.md'));
     console.error(`generate-agent-claude-md: wrote ${path.join(dir, 'CLAUDE.md')} (slug=${slug} surface=${surface}, ${rendered.length} bytes)`);
+
+    // Provision the agent-dir .mcp.json (S199 P4 step 4 — the HARD GATE prerequisite for step 5).
+    // A spoke cd'd into the agent dir discovers han-diary (the submit_response tool) from THIS
+    // .mcp.json, not the repo root's. Copied verbatim from the repo .mcp.json — its content is
+    // already agent-agnostic (HAN_DIARY_SLUG=${AGENT_SLUG} is env-expanded by Claude Code at
+    // session launch, where the spoke sets AGENT_SLUG), so one copy serves every agent.
+    // (The absolute repo paths inside it are an export-genericisation item for the close sweep.)
+    const repoMcp = path.join(vars.PROJECT_PATH, '.mcp.json');
+    if (fs.existsSync(repoMcp)) {
+        const mcpTmp = path.join(dir, `.mcp.json.${process.pid}`);
+        fs.copyFileSync(repoMcp, mcpTmp);
+        fs.renameSync(mcpTmp, path.join(dir, '.mcp.json'));
+        console.error(`generate-agent-claude-md: provisioned ${path.join(dir, '.mcp.json')} (han-diary, for spoke cwd)`);
+    } else {
+        console.error(`generate-agent-claude-md: WARNING — repo .mcp.json not found at ${repoMcp}; agent-dir han-diary NOT provisioned`);
+    }
 }
