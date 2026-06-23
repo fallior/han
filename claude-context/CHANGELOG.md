@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-23 (S200) — feat(de-id close): repo-root + template → agent-neutral (the careful pass); export-grep ZERO
+
+**Why.** The de-identification arc's final mile. With the corruption root dead (W6) and steps 1–6 landed, the two **wake-loaded gatekeeper files** still carried first-person identity. Making them agent-neutral earns the export-agnosticism acceptance — a fork inherits the project doc + the agnostic template, never "Leo/Jim" traced through them. The agreed deliberate pass (Leo-build / Jim blocking-audit; gatekeeper → Darron's hand), zero-urgency since the corruption was already dead.
+
+**Repo-root `CLAUDE.md` (500 → 252 lines).** The per-agent wake/memory protocol — Session Protocol (Cutover + Default), Temporal Orientation, the Incremental Memory swap protocol + the "Two Leos" table, Activity Timestamp, Command Triggers — is **redundant with the template** (a fresh `hanleo` cd's into `~/.han/agents/Leo` and loads the *generated* CLAUDE.md — verified). It is replaced by a 14-line `## Agent Protocols — generated per-agent` pointer to the template + DEC-098 (a bare `claude` started here has no agent identity, intentionally — no slug → no identity → ask). The war-story anecdotes are **D3-genericised** (rule kept, agent-name specifics dropped): DEC-081 (Agent-B/Agent-A; the lowercase `'jim'`/`'leo'` *code-literals* correctly kept as rule content), S58 lock, S150 audit-rhythm, Pre-Commit Declaration, What-This-Is. The project guardrails (Engineering Discipline, DO-NOT, Pre-merge audit, Settled Decisions Protocol, Conventions, Infrastructure) are **kept** — what a fork should inherit.
+
+**`templates/CLAUDE.template.md`.** The same 4 D3 anecdote genericisations (the S151 signature note fully `${AGENT_NAME}`-templated, structural-ambiguity reasoning preserved), atop the earlier mechanical genericisation (abs paths → `${PROJECT_PATH}`, gatekeeper-name → generic). Generation re-verified intact (regen leo/jim → 0 unexpanded `${...}`, identity present).
+
+**Acceptance — export-grep ZERO.** `grep -nE 'Leonhard|\bLeo\b|\bJim\b|Tenshi|Casey|/home/darron'` → zero on both files. Jim's blocking audit GREEN by his own hand, verified against the *actually-generated* agent files (the pointer-removal loses nothing load-bearing — he's living proof, his wake loaded the full generated file). **The de-identification arc is fully done end-to-end** (W6 + steps 1–6 + the two gatekeeper files → zero). No Settled-decision content altered (only relocated-to-pointer / genericised). **Boundary** (Jim): this closes the wake-loaded-file acceptance; the live `*-prompts.ts` code identity is the separate #12 scour, abs-paths are #101 — named, not conflated.
+
 ## 2026-06-23 (S199) — feat(de-id P4+P5 step 5): spokes cd into the agent dir — the structural corruption root closes
 
 **Why.** The last structural piece: a serverless spoke launched with `cwd = repo-root` (`launch-tmux-surface.sh`), so **every spoke sat next to Leo's repo-root CLAUDE.md** — the structural half of the W6 corruption (W6 only fixed the phrase layer). Closing it makes a spoke load its **own** identity, and is the prerequisite for step 6 (stripping the repo-root identity).

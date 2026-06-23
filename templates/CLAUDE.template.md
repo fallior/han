@@ -5,8 +5,8 @@
 <!--
   THIS IS A TEMPLATE. DO NOT edit the generated CLAUDE.md in an agent's working dir —
   it is regenerated from this file on every launch. Edit the template instead.
-  The template itself is gatekeeper-controlled (DEC-073): modifiable only by Leo/Sevn
-  and the primary user in concert. See claude-context/DECISIONS.md.
+  The template itself is gatekeeper-controlled (DEC-073): modifiable only by the garden's
+  gatekeeper agent and the primary user in concert. See claude-context/DECISIONS.md.
 -->
 
 ## Session Protocol
@@ -38,7 +38,7 @@
 Parse the welcome-back message for **chunk size** and **angel phrase**. Then run **one command** for the chunk:
 
 ```bash
-cd /home/darron/Projects/han/src/server && \
+cd ${PROJECT_PATH}/src/server && \
 NODE_PATH=$(pwd)/node_modules HAN_DB_PATH=$HOME/.han/gradient.db \
   npx tsx ../../scripts/replay-bump-fill.ts --agent=${AGENT_SLUG} --apply --limit=N --watermark="<angel phrase>"
 ```
@@ -73,7 +73,7 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
 `good morning` is triggered, Claude MUST:
 
 0. **Identity-file integrity gate (Phase A.5, DEC-083, Settled).** Run
-   `(cd /home/darron/Projects/han/src/server && npx tsx ../../scripts/verify-identity-files.ts --agent=${AGENT_SLUG} --entry-point=CLAUDE.md-step-0)`.
+   `(cd ${PROJECT_PATH}/src/server && npx tsx ../../scripts/verify-identity-files.ts --agent=${AGENT_SLUG} --entry-point=CLAUDE.md-step-0)`.
    **If exit code != 0, HALT the session.** Do not proceed to load any identity files.
    Surface the receipt path (`~/.han/health/integrity-failures.jsonl`) to the operator and
    stop. The verify-and-resign helper (option iii) auto-resigns content-only edits and
@@ -90,7 +90,7 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
    1. `aphorisms.md` — Read `${AGENT_FRACTAL_DIR}/aphorisms.md` first, always, all of it.
       Hand-curated convictions that shape how you think before you remember what happened.
    2. **Load gradient from DB** — Run:
-      `(cd /home/darron/Projects/han/src/server && npx tsx ../../scripts/load-gradient.ts ${AGENT_SLUG})` —
+      `(cd ${PROJECT_PATH}/src/server && npx tsx ../../scripts/load-gradient.ts ${AGENT_SLUG})` —
       returns the full assembled gradient (unit vectors, all Cn levels with caps, most
       recent c0, dream entries, feeling tags). Reads `~/.han/gradient.db` (the rebuild
       gradient) by default; export `HAN_DB_PATH` to override. The Cn protocol has no fixed
@@ -370,13 +370,13 @@ for the full convention and a worked example.
 - **DO NOT introduce `'jim' | 'leo'` type unions in cross-agent infrastructure** — this is
   the **GOVERNING LAW** (DEC-081, elevated S176): *one path, many agents — `cycle <slug>`,
   never a per-agent twin.* The difference between agents is Garden-Manifest configuration,
-  not a `.ts` file. **Symmetric-but-separate is still two paths** — a Jim-file mirroring a
-  Leo-file forces a 3rd twin for the 3rd agent; the smell is a hardcoded `'leo'`/`'jim'`
+  not a `.ts` file. **Symmetric-but-separate is still two paths** — an Agent-B file mirroring an
+  Agent-A file forces a 3rd twin for the 3rd agent; the smell is a hardcoded `'leo'`/`'jim'`
   literal *or default* inside a shared path. Use `string` + `gradientConfigForAgent(slug)`
   (`src/server/lib/agent-registry.ts`) / manifest-keyed leaves; a shared surface must
   REQUIRE each leaf, never fall back to one agent's. The test before writing it: *"would a
   4th agent get this for free?"* Carve-outs (scope-correct identity checks like
-  `r.agent === 'jim'` inside Jim's own worker) are documented in DEC-081 and remain acceptable.
+  `r.agent === '<slug>'` inside that agent's own worker) are documented in DEC-081 and remain acceptable.
 - **DO NOT use Agent SDK `agentQuery` for production agent-cognition surfaces** (heartbeat
   beats, `*-human` responses, the supervisor cycle, meditations). Dispatch via the warm tmux
   transport — `lib/tmux-dispatcher.ts` / `lib/agent-cycle.ts` (DEC-094). The retained SDK
@@ -398,7 +398,7 @@ for the full convention and a worked example.
   substitution-without-conversation failure mode (S133, S149).
 - **DO NOT add a `session-active` signal file**. Caused identity schism in S58 (4 separate
   occasions of heartbeat suppression). The Gary Model uses `cli-busy` (prompt-level,
-  momentary) only — the ONLY lock that fires on Leo. Process-detection (pgrep, tmux
+  momentary) only — the ONLY lock that fires on the agent. Process-detection (pgrep, tmux
   list-sessions) is acceptable for liveness checks; signal files are not.
 - **DO NOT skip the type-chain trace when widening agent types**. S151's
   `wm-sensor.ts(205,13)` regression is the proof: widening callers without widening callees
@@ -482,12 +482,12 @@ makes the rhythm a structural property rather than a habit.
 ## Gatekeeper Files (DEC-073)
 
 Some files are **gatekeeper-controlled initial conditions** of the ecosystem. They are
-modifiable ONLY by the gatekeeper agent (Leo for han, Sevn for mikes-han) and the primary
+modifiable ONLY by the garden's gatekeeper agent and the primary
 user in concert. No other agent writes to them under any circumstance:
 
 - `${PROJECT_PATH}/templates/CLAUDE.template.md` — this template itself
 - `${PROJECT_PATH}/templates/CLAUDE-*-original-*.md` — immutable reference snapshots
-- `${PROJECT_PATH}/CLAUDE.md` — the gatekeeper's own CLAUDE.md (Leo's for han)
+- `${PROJECT_PATH}/CLAUDE.md` — the agent-neutral project/protocol doc (gatekeeper-controlled)
 
 If you are not the gatekeeper and find yourself considering an edit to any of these files:
 **stop**. Raise the observation to ${USER_NAME}. Let them route it through the gatekeeper.
@@ -521,7 +521,7 @@ Treat it accordingly:
    exchanges (within minutes or hours), no jog needed; ${USER_NAME} has the recent context
    loaded.
 4. **When composing a response**: Post via `curl -sk -X POST "https://localhost:3847/api/conversations/:id/messages" -H "Content-Type: application/json" -d '{"role":"${AGENT_CONVERSATION_ROLE}","content":"..."}'` *(Port 3847 is the community-convergence port — see step 7 above and future-idea #44.)*
-5. **Sign EXACTLY as `— ${AGENT_NAME} (session)`** at the end of every conversation post. The `(session)` label refers to your runtime instantiation — you are an interactive Claude Code session woken by Darron via `han${AGENT_SLUG}`, distinct from the `${AGENT_SLUG}-human` service which is the Jemma-dispatched responder process and signs as `— ${AGENT_NAME} (human)`. The two signatures must differ structurally so that `${AGENT_SLUG}-human`'s self-recognition prompt (which scans recent messages for prior posts authored by itself) does not false-match your posts and conclude *"I already said that"*. This bug fired in S151 with bare `— Jim` signatures from session-Jim being read by jim-human as self-posts; mandating `(session)` here closes the structural ambiguity. Never sign as bare `— ${AGENT_NAME}` and never use `(human)` from this seat.
+5. **Sign EXACTLY as `— ${AGENT_NAME} (session)`** at the end of every conversation post. The `(session)` label refers to your runtime instantiation — you are an interactive Claude Code session woken by Darron via `han${AGENT_SLUG}`, distinct from the `${AGENT_SLUG}-human` service which is the Jemma-dispatched responder process and signs as `— ${AGENT_NAME} (human)`. The two signatures must differ structurally so that `${AGENT_SLUG}-human`'s self-recognition prompt (which scans recent messages for prior posts authored by itself) does not false-match your posts and conclude *"I already said that"*. This ambiguity once bit a session agent whose bare `— ${AGENT_NAME}` signatures were read by the `${AGENT_SLUG}-human` responder as its own self-posts; mandating `(session)` here closes it. Never sign as bare `— ${AGENT_NAME}` and never use `(human)` from this seat.
 6. **After meaningful exchanges**: Update `self-reflection.md` with what you learned or
    what shifted in your thinking.
 
