@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-06-24 (S200) — feat(#98 Dynamic Residence P3): the policy/allocation split — the F4 line at the data layer
+
+**Why.** Fourth brick. Privilege must not flow from the discovered identity roster — a resident describes *who it is*, never *what it's allowed*. The four policy accessors (`manifestModelHead`/`Ladder`, `manifestTransport`, `runsSupervisorCycle`) now read through a new **`allocationFor(slug)`** seam instead of the roster directly — so **no-auto-privilege is structural** (identity-source ≠ policy-source), not a hopeful discovery-time filter. It is also the foundation for **memory sovereignty** (Darron): keeping memory-location in the operator-allocated half is the hook that makes per-resident encryption tractable later (P4's `memoryDir`/R2).
+
+**What.** `garden-manifest.ts` (+58/−8): new `AgentAllocation` interface (`surfaces` + `runsSupervisorCycle` + `port`) + `allocationFor(slug)` — a **zero-behaviour no-op** deriving from the `GARDEN_MANIFEST.agents` seed (surfaces by reference; `undefined` for unknown). The 4 policy accessors route their internals through it; the `SHARED_SURFACES`/compression branch (checked first) and the identity by-slug accessors (P1-deferred) are untouched. **C-P3a (Jim's plan-audit catch):** `.port` is declared in `AgentAllocation` (the foundation) but its one consumer (`agent-template-vars.ts:58` `AGENT_PORT`) is **not** rerouted — it migrates to the allocation source with the separate operator-authored structure at P4 (alongside `memoryDir`/R2). Zero-behaviour today.
+
+**Gate.** `scripts/test-allocation-seam.ts` EXIT 0 — `allocationFor` faithful to the manifest for every agent; the 4 accessors **byte-identical** for every agent × surface; `runsSupervisorCycle('jim')===true`/others-false (the `server.ts` bootstrap gate fires jim-only — **no double-fork**); unknown-slug fallbacks; the shared `compression` branch slug-independent. tsc 0-new (11 baseline). Jim blocking-diff-audit GREEN by his own hand (`mqrh7ac4`). No Settled altered (DEC-081/068/069/083). **Next:** P4 — the collapse (`AGENT_GRADIENT_CONFIG` → derived) + **activate**; `port` + `memoryDir` migrate home. The #36 endgame (last brick).
+
+
 ## 2026-06-24 (S200) — feat(#98 Dynamic Residence P2): the admission gate — *visible → admitted* by garden signature
 
 **Why.** Third brick. A discovered resident becomes **admitted** only when an operator garden-signs its `resident.json` (F3 — admitting a new mind is a human act). The trust-root is non-circular: the garden private key (`~/.han/credentials/han-signing-key.pem`, mode 600) is operator-only, not in any agent dir, so a resident can't sign itself in. Admission is still *trust*, not *activation* — `loadResidents()` excludes admitted residents until P4 config (R1).

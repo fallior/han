@@ -324,6 +324,52 @@ export function loadResidents(): AgentManifest[] {
 }
 
 /**
+ * The PRIVILEGE/POLICY half of an agent — the *allocated* fields, separate from the *discovered*
+ * identity roster. Per-surface model ladder + transport, the server port, and whether the agent
+ * runs the supervisor cycle. (`memoryDir` joins at P4 with the registry collapse — R2.)
+ */
+export interface AgentAllocation {
+    /** Per-surface model ladder + transport — the dispatcher's per-surface policy, keyed by
+     *  surface `name`. (`allocationFor` returns the manifest agent's `surfaces` array by reference
+     *  in the P3 no-op, so order + identity are preserved; the accessors `.find` by name.) */
+    surfaces: SurfaceManifest[];
+    /** Whether this agent's server runs the supervisor cycle (`initSupervisor` + scheduler). */
+    runsSupervisorCycle?: boolean;
+    /** The agent's individual server port. C-P3a (Jim's P3 plan-audit, 2026-06-24): `port` is a
+     *  policy field but its one CONSUMER (`agentTemplateVars` → `AGENT_PORT`, agent-template-vars.ts)
+     *  reads it directly from the roster, not via an accessor — so it is DECLARED here now as the
+     *  foundation, but its consumer migrates to this allocation source with the separate
+     *  operator-authored allocation STRUCTURE at P4 (alongside `memoryDir`/R2). Until then `port`
+     *  stays roster-sourced (zero behaviour). */
+    port?: number;
+}
+
+/**
+ * The **allocation/policy seam** (P3, #98 Dynamic Residence — the F4 line at the data layer).
+ *
+ * **P3: a zero-behaviour no-op** — derives the allocation from the static `GARDEN_MANIFEST.agents`
+ * seed (today's policy fields), so the four policy accessors below (`manifestModelHead`,
+ * `manifestModelLadder`, `manifestTransport`, `runsSupervisorCycle`) return byte-identical data.
+ * It exists so an operator-authored allocation source plugs in *here, once* (P3-F1: the separate
+ * structure lands by P4 — the shape that lets a fork ship "empty roster + example allocation").
+ *
+ * **Why this is its own source (the F4 line — identity-source ≠ policy-source):** privilege must
+ * NOT flow from the discovered identity roster — a resident describes *who it is* (`resident.json`),
+ * never *what it's allowed* (port/model/transport/supervisor-cycle). Routing the policy accessors
+ * through this seam (instead of the roster) makes **no-auto-privilege structural**, not a hopeful
+ * discovery-time filter. It is also the **foundation for memory sovereignty** (Darron, 2026-06-24):
+ * keeping memory-location (P4's `memoryDir`/R2) in the operator-allocated half — never the
+ * self-declared identity half — is the hook that makes per-resident memory access-control tractable.
+ *
+ * Returns `undefined` for an unknown slug (the accessors fall back exactly as before — null/[]/false).
+ */
+export function allocationFor(slug: string): AgentAllocation | undefined {
+    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
+    if (!agent) return undefined;
+    return { surfaces: agent.surfaces, runsSupervisorCycle: agent.runsSupervisorCycle, port: agent.port };
+}
+
+/**
  * Shared (non-agent-scoped) surface: the wm-sensor → pending-compression cascade
  * (scripts/process-pending-compression.ts:377). Identity-loaded SDK Opus, runs
  * for whichever agent's entry is being compressed. S173: aligned to 4-8.
@@ -343,8 +389,7 @@ export const SHARED_SURFACES: Record<string, ModelLadder> = {
 export function manifestModelHead(slug: string, surface: string): string | null {
     const shared = SHARED_SURFACES[surface];
     if (shared && shared.length) return shared[0];
-    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
-    const s = agent?.surfaces.find(x => x.name === surface);
+    const s = allocationFor(slug)?.surfaces.find(x => x.name === surface);
     return s?.model?.[0] ?? null;
 }
 
@@ -358,8 +403,7 @@ export function manifestModelHead(slug: string, surface: string): string | null 
 export function manifestModelLadder(slug: string, surface: string): string[] {
     const shared = SHARED_SURFACES[surface];
     if (shared && shared.length) return [...shared];
-    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
-    const s = agent?.surfaces.find(x => x.name === surface);
+    const s = allocationFor(slug)?.surfaces.find(x => x.name === surface);
     return s?.model ? [...s.model] : [];
 }
 
@@ -372,8 +416,7 @@ export function manifestModelLadder(slug: string, surface: string): string[] {
  * established path, never to an unlaunched tmux session).
  */
 export function manifestTransport(slug: string, surface: string): SurfaceTransport | null {
-    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
-    const s = agent?.surfaces.find(x => x.name === surface);
+    const s = allocationFor(slug)?.surfaces.find(x => x.name === surface);
     return s?.transport ?? null;
 }
 
@@ -438,8 +481,7 @@ export function peerConversationFor(slug: string, peerSlug: string): string | nu
  */
 export function runsSupervisorCycle(slug: string | undefined): boolean {
     if (!slug) return false;
-    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
-    return agent?.runsSupervisorCycle ?? false;
+    return allocationFor(slug)?.runsSupervisorCycle ?? false;
 }
 
 /**
