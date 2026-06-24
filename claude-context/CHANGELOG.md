@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-24 (S200) — feat(#98 Dynamic Residence P1): filesystem discovery — *visible but inert*
+
+**Why.** Second brick of open-world residence. A resident can now self-describe in its own dir and be **discovered** — but discovery makes it *visible*, never *live*: per R1, a net-new discovered resident stays fully inert (not in `loadResidents()` / any throwing path) until admitted (P2) + configured (P4). Purely additive — `loadResidents()` is byte-identical to P0.
+
+**`lib/resident-discovery.ts` (new).** `ResidentFragment` = identity-only `{slug, displayName, pronounObj, identitySection}` — **F4 enforced at the type level** (the type has no `port`/`model`/`transport`/`runsSupervisorCycle`/`memoryDir`, and `toFragment()` reads only the four identity keys, so a self-claimed policy field can't even be *parsed in*, never mind trusted). `discoverResidentFragments()` fail-soft-scans `~/.han/agents/*/resident.json` (missing dir / missing file / malformed JSON / missing field → skip + informational log, never throw, never alarm). `discoveredResidents()` is the read-only roster view (P2 will enrich it with admission status).
+
+**R1 by construction.** `loadResidents()` is untouched (seed-only) — there is no merge to forget; activation arrives *with its gates* at P2/P4. **`scripts/test-resident-discovery.ts`** proves it: drop a fragment carrying `port:9999, runsSupervisorCycle:true` → `discoveredResidents()` shows it with **neither policy field** → `loadResidents()` does NOT include it → `schedulingAgents()` still `["leo","jim"]`, no throw; malformed + partial skipped, no throw. `tsc` 0-new (11 baseline). Jim blocking-diff-audit GREEN by his own hand (ran the test + drove every gate). No Settled altered. **Next:** P2 — the DEC-083 garden-key admission gate (*visible* → *admitted*).
+
 ## 2026-06-24 (S200) — feat(#98 Dynamic Residence P0): the `loadResidents()` roster seam (zero-behaviour)
 
 **Why.** First brick of open-world residence (#98) — the garden discovering its population instead of two hand-authored lists. P0 introduces the seam that discovery (P1) plugs into, with **zero behaviour change**, behind the already-population-agnostic consumers.
