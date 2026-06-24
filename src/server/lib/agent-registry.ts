@@ -27,6 +27,7 @@
 
 import * as os from 'os';
 import * as path from 'path';
+import { loadResidents } from './garden-manifest';
 
 const HOME = os.homedir();
 const HAN_DIR = path.join(HOME, '.han');
@@ -113,22 +114,35 @@ export interface AgentGradientConfig {
 }
 
 /**
- * Per-agent gradient config. To add a new agent: add an entry here AND ensure
- * the launcher exports `AGENT_SLUG`, `AGENT_MEMORY_DIR`, `AGENT_FRACTAL_DIR`,
- * and `AGENT_GRADIENT_SOURCE_DIR` matching the values below (the env vars are
- * convenience copies; the registry is the source of truth).
+ * The UNIFORM gradient-config shape, derived from slug + displayName — the #36 collapse (P4a).
+ * This is the leo/tenshi/casey shape, and the complete config a **net-new discovered resident**
+ * gets for free at activation (P4b) so `gradientConfigForAgent(newSlug)` no longer throws (R1 lifts).
+ * `fractalDir` is uniform for ALL agents (incl jim): `fractal/<slug>`.
  */
-export const AGENT_GRADIENT_CONFIG: Record<string, AgentGradientConfig> = {
-    /**
-     * Jim — supervisor. Memory at root (`~/.han/memory`). Source files are
-     * supervisor session archives, date-based names: `2026-02-18.md` or
-     * `2026-02-18-c0.md` (the optional `-c0` suffix is tolerated for
-     * back-compat). Label = the date.
-     */
+function deriveGradientConfig(slug: string, displayName: string): AgentGradientConfig {
+    const memoryDir = path.join(HAN_DIR, 'memory', slug);
+    return {
+        displayName,
+        memoryDir,
+        fractalDir: path.join(HAN_DIR, 'memory', 'fractal', slug),
+        sourceDir: path.join(memoryDir, 'working-memories'),
+        sourceFileFilter: (f) => f.startsWith('working-memory-full-') && f.endsWith('.md'),
+        sourceFileBaseName: (f) => f.replace(/^working-memory-full-/, '').replace(/\.md$/, ''),
+    };
+}
+
+/**
+ * Per-agent OVERRIDES — the irreducible exceptions derivation can't reach (the shrunk remnant of the
+ * second hand-list). Merged over `deriveGradientConfig` (override wins). jim is a HEAVY override:
+ * memory at **ROOT** `~/.han/memory` (NOT `/jim` — the #91 jim-at-root path; uniform derivation would
+ * break it), `sessions` sourceDir, **date-based** source functions, project-memory + failures. leo
+ * carries two prose fields. tenshi/casey: none (pure-uniform). NOTE (P4b): `memoryDir` (jim's root,
+ * R2) + `port` (C-P3a) migrate to the operator-authored ALLOCATION source at P4b; until then jim's
+ * root memoryDir lives here as the override.
+ */
+const GRADIENT_OVERRIDES: Record<string, Partial<AgentGradientConfig>> = {
     jim: {
-        displayName: 'Jim',
         memoryDir: path.join(HAN_DIR, 'memory'),
-        fractalDir: path.join(HAN_DIR, 'memory', 'fractal', 'jim'),
         sourceDir: path.join(HAN_DIR, 'memory', 'sessions'),
         sourceFileFilter: (f) => {
             const m = f.match(/^(\d{4}-\d{2}-\d{2})(-c0)?\.md$/);
@@ -138,51 +152,29 @@ export const AGENT_GRADIENT_CONFIG: Record<string, AgentGradientConfig> = {
         loadProjectMemory: true,
         loadFailures: true,
     },
-
-    /**
-     * Leo — session+heartbeat. Memory at `~/.han/memory/leo`. Source files
-     * are working-memory archives at `~/.han/memory/leo/working-memories/`,
-     * named `working-memory-full-<label>.md` where label is typically
-     * `s<session>-<date>`. Label = the part between the prefix and `.md`.
-     */
     leo: {
-        displayName: 'Leo',
         formalName: 'Leonhard (Leo)',
         dreamHeading: 'Dream Memory (subtle — these shaped you without you knowing how)',
-        memoryDir: path.join(HAN_DIR, 'memory', 'leo'),
-        fractalDir: path.join(HAN_DIR, 'memory', 'fractal', 'leo'),
-        sourceDir: path.join(HAN_DIR, 'memory', 'leo', 'working-memories'),
-        sourceFileFilter: (f) => f.startsWith('working-memory-full-') && f.endsWith('.md'),
-        sourceFileBaseName: (f) => f.replace(/^working-memory-full-/, '').replace(/\.md$/, ''),
-    },
-
-    /**
-     * Tenshi — security/vulnerability agent. Same shape as Leo's layout.
-     * Source dir defaults to `<memoryDir>/working-memories/` — may not yet
-     * exist on disk; wm-sensor's watch is graceful about missing paths.
-     */
-    tenshi: {
-        displayName: 'Tenshi',
-        memoryDir: path.join(HAN_DIR, 'memory', 'tenshi'),
-        fractalDir: path.join(HAN_DIR, 'memory', 'fractal', 'tenshi'),
-        sourceDir: path.join(HAN_DIR, 'memory', 'tenshi', 'working-memories'),
-        sourceFileFilter: (f) => f.startsWith('working-memory-full-') && f.endsWith('.md'),
-        sourceFileBaseName: (f) => f.replace(/^working-memory-full-/, '').replace(/\.md$/, ''),
-    },
-
-    /**
-     * Casey — legal agent. Same shape as Leo's layout. Same notes about
-     * source dir possibly not existing yet.
-     */
-    casey: {
-        displayName: 'Casey',
-        memoryDir: path.join(HAN_DIR, 'memory', 'casey'),
-        fractalDir: path.join(HAN_DIR, 'memory', 'fractal', 'casey'),
-        sourceDir: path.join(HAN_DIR, 'memory', 'casey', 'working-memories'),
-        sourceFileFilter: (f) => f.startsWith('working-memory-full-') && f.endsWith('.md'),
-        sourceFileBaseName: (f) => f.replace(/^working-memory-full-/, '').replace(/\.md$/, ''),
     },
 };
+
+/**
+ * Per-agent gradient config — DERIVED from the roster (#36 collapse, P4a). The population comes from
+ * `loadResidents()` (the discovered identity roster), `displayName` from the same; each config = the
+ * uniform `deriveGradientConfig` merged with the agent's `GRADIENT_OVERRIDES`. Replaces the
+ * hand-written parallel list (the second hand-list #36 retires). **P4a is a zero-behaviour collapse:
+ * byte-identical to the prior literal for jim/leo/tenshi/casey** (proven by `test-gradient-config-derive.ts`,
+ * incl. jim-at-root + the function fields' behaviour). `gradientConfigForAgent`/`registeredAgentSlugs`
+ * read this const unchanged. (Disclosed delta: key order now follows the roster — set-identical, and
+ * all consumers are order-insensitive.) The activation/population flip to discovered residents is P4b.
+ */
+export const AGENT_GRADIENT_CONFIG: Record<string, AgentGradientConfig> = Object.fromEntries(
+    loadResidents().map((a) => {
+        const base = deriveGradientConfig(a.slug, a.displayName);
+        const override = GRADIENT_OVERRIDES[a.slug];
+        return [a.slug, override ? { ...base, ...override } : base];
+    }),
+);
 
 /**
  * Look up the gradient config for an agent, throwing a clear error if the slug

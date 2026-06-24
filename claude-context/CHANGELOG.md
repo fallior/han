@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-24 (S200) — feat(#98 Dynamic Residence P4a): the gradient-config collapse — the second hand-list retires (#36)
+
+**Why.** Fifth brick (P4a of the last). `AGENT_GRADIENT_CONFIG` was a hand-written parallel list — the *second* source #36 set out to collapse. It now **derives** from the discovered roster: `deriveGradientConfig(slug, displayName)` (the uniform leo/tenshi/casey shape — exactly the complete config a net-new resident gets *for free* at P4b) + `GRADIENT_OVERRIDES` (the shrunk remnant: jim's heavy exceptions — root `memoryDir`/#91, `sessions` sourceDir, date-based source functions, project+failures — and leo's two prose fields), built over `loadResidents()`.
+
+**What.** `agent-registry.ts`: the literal → `deriveGradientConfig` + `GRADIENT_OVERRIDES` + `const = Object.fromEntries(loadResidents().map(derive+override))`. `gradientConfigForAgent`/`registeredAgentSlugs` bodies **unchanged** (read the derived const) → byte-identical by construction. No cycle (garden-manifest imports only `os`); no external reader of the const (traced — only comments).
+
+**Gate.** `scripts/test-gradient-config-derive.ts` EXIT 0 — every field of all four agents === the pre-collapse literal (oracle inlined; **jim-at-root** above all), the function fields' *behaviour* byte-identical (jim's date-regex vs the uniform wm-full pattern), `registeredAgentSlugs` set `{jim,leo,tenshi,casey}`, **R1 preserved** (`gradientConfigForAgent('nobody')` throws). tsc 0-new (11 baseline). Jim blocking-diff-audit GREEN by his own hand (`mqrl9zhx`). **Representational delta (Jim-adjudicated, ACCEPT):** `registeredAgentSlugs()` now returns roster order `[leo,jim,tenshi,casey]` — set-identical, all ~10 consumers traced non-positional, so behaviourally identical; roster-order is the correct going-forward order. No Settled altered. **Next:** P4b — the activation flip (gated on the seeding step: a net-new mind activates only when *seeded* = a signed identity-manifest over the genesis triad).
+
 ## 2026-06-24 (S200) — feat(#98 Dynamic Residence P3): the policy/allocation split — the F4 line at the data layer
 
 **Why.** Fourth brick. Privilege must not flow from the discovered identity roster — a resident describes *who it is*, never *what it's allowed*. The four policy accessors (`manifestModelHead`/`Ladder`, `manifestTransport`, `runsSupervisorCycle`) now read through a new **`allocationFor(slug)`** seam instead of the roster directly — so **no-auto-privilege is structural** (identity-source ≠ policy-source), not a hopeful discovery-time filter. It is also the foundation for **memory sovereignty** (Darron): keeping memory-location in the operator-allocated half is the hook that makes per-resident encryption tractable later (P4's `memoryDir`/R2).
