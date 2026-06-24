@@ -100,8 +100,8 @@ systemd (user session)
 ├── han-server.service → tsx server.ts
 │   └── supervisor-worker.ts (forked child process)
 ├── leo-heartbeat.service → tsx leo-heartbeat.ts
-├── leo-human.service → tsx leo-human.ts
-├── jim-human.service → tsx jim-human.ts
+├── human-responder@leo.service → tsx human-responder.ts  (AGENT_SLUG=leo)
+├── human-responder@jim.service → tsx human-responder.ts  (AGENT_SLUG=jim)
 ├── jemma.service → tsx jemma.ts
 └── claude-remote-server.service → (legacy, may conflict)
 ```
@@ -141,8 +141,8 @@ All service files live at `~/.config/systemd/user/`.
 | 1 | `han-server.service` | Main API on port 3847 + spawns `supervisor-worker.ts` as forked child (Jim's supervisor cycles) + Orchestrator + WebSocket | 10s | — |
 | 2 | `leo-heartbeat.service` | Leo's 20-min beats (wall-clock-aligned phases: sleep/morning/work/evening) + meditation Phase A re-incorporation + Robin Hood health checks | 30s | — |
 | 3 | `wm-sensor.service` | Working-memory file watcher (fs.watch on `working-memory-full.md` per agent). Triggers `rollingWindowRotatePaired` when WMF crosses ~30K tokens; spawns `process-pending-compression.ts` per pending-row enqueue. **Single canonical compression entry point** per DEC-086. | 30s | — |
-| 4 | `jim-human.service` | Jim's conversation-thread responder. Signal-driven (`~/.han/signals/jim-human-wake`). Signs posts as `— Jim (human)`. | 30s | — |
-| 5 | `leo-human.service` | Leo's conversation-thread responder. Signal-driven (`~/.han/signals/leo-human-wake`). Signs posts as `— Leo (human)`. | 30s | — |
+| 4 | `human-responder@jim.service` | Jim's conversation-thread responder (slug-agnostic `human-responder.ts`, `AGENT_SLUG=jim`). Signal-driven (`~/.han/signals/jim-human-wake`). Signs posts as `— Jim (human)`. | 30s | — |
+| 5 | `human-responder@leo.service` | Leo's conversation-thread responder (same `human-responder.ts`, `AGENT_SLUG=leo`). Signal-driven (`~/.han/signals/leo-human-wake`). Signs posts as `— Leo (human)`. | 30s | — |
 | 6 | `jemma.service` | Discord gateway + admin classifier. Routes incoming Discord messages via Haiku (SDK) / Ollama gemma3:4b fallback. Calls `deliverMessage()` from `services/jemma-dispatch.ts`. | 5s | `han-server.service` |
 | — | `claude-remote-server.service` | **DEPRECATED** — historical duplicate of `han-server.service` (same `ExecStart=tsx server.ts`). Status: failed + disabled. Safe to remove. | — | — |
 
@@ -150,7 +150,7 @@ All service files live at `~/.config/systemd/user/`.
 
 The post-commit git hook (`/home/darron/Projects/han/.git/hooks/post-commit`) only restarts:
 - Layer 1: hanjim / hanleo / hantenshi / hancasey CLI launchers (sessions, not services)
-- Layer 2: `jim-human.service` + `leo-human.service` **when their own .ts files change**
+- Layer 2: `human-responder@jim` + `human-responder@leo` **when `human-responder.ts` or a shared runtime lib changes**
 
 It does **NOT** restart `han-server`, `leo-heartbeat`, `wm-sensor`, or `jemma`. Transitive dependency changes (e.g. editing `lib/memory-gradient.ts`) don't trigger any service restart at all. The 2026-05-19 investigation found all four undocumented-restart services were running pre-triage code from May 9–11 even after the May 17–18 gradient triage commits landed.
 
@@ -188,18 +188,18 @@ Restart=always
 RestartSec=30
 ```
 
-### leo-human.service
+### human-responder@leo.service (templated: human-responder@%i, %i=AGENT_SLUG)
 
 ```ini
-ExecStart=tsx leo-human.ts
+ExecStart=tsx human-responder.ts   # Environment=AGENT_SLUG=leo
 Restart=always
 RestartSec=30
 ```
 
-### jim-human.service
+### human-responder@jim.service
 
 ```ini
-ExecStart=tsx jim-human.ts
+ExecStart=tsx human-responder.ts   # Environment=AGENT_SLUG=jim
 Restart=always
 RestartSec=30
 ```
@@ -617,7 +617,7 @@ See DEC-051.
 
 ## 6. Jim/Human
 
-**File:** `src/server/jim-human.ts`
+**File:** `src/server/human-responder.ts` (run as `human-responder@jim`, `AGENT_SLUG=jim`)
 
 ### What It Does
 
@@ -705,7 +705,7 @@ Written every 5 minutes to `~/.han/health/jim-human-health.json`.
 
 ## 7. Leo/Human
 
-**File:** `src/server/leo-human.ts`
+**File:** `src/server/human-responder.ts` (run as `human-responder@leo`, `AGENT_SLUG=leo`)
 
 ### What It Does
 
@@ -1007,13 +1007,13 @@ matching the belt-and-braces pattern from `leo-human.ts` and `jim-human.ts`.
    - Read `leo-human-health.json`
    - <10 min: OK
    - >20 min: DOWN (trigger resurrection if PID dead)
-   - Resurrection: `systemctl --user restart leo-human`
+   - Resurrection: `systemctl --user restart human-responder@leo`
 
 4. **Jim/Human** (`checkJimHumanHealth()`)
    - Read `jim-human-health.json`
    - <10 min: OK
    - >20 min: DOWN (trigger resurrection if PID dead)
-   - Resurrection: `systemctl --user restart jim-human`
+   - Resurrection: `systemctl --user restart human-responder@jim`
 
 **Resurrection Protocol:**
 - Check `RESURRECTION_COOLDOWN_MS = 60 * 60 * 1000` (1 hour) from `resurrection-log.jsonl`
@@ -1784,34 +1784,33 @@ disconnect.
 
 ```bash
 # Stop all systemd services
-systemctl --user stop han-server leo-heartbeat leo-human jim-human jemma
+systemctl --user stop han-server leo-heartbeat human-responder@leo human-responder@jim jemma
 
 # Disable auto-restart
-systemctl --user disable han-server leo-heartbeat leo-human jim-human jemma
+systemctl --user disable han-server leo-heartbeat human-responder@leo human-responder@jim jemma
 
 # Kill any orphans
 pkill -f "tsx server.ts" 2>/dev/null
 pkill -f "tsx leo-heartbeat.ts" 2>/dev/null
-pkill -f "tsx leo-human.ts" 2>/dev/null
-pkill -f "tsx jim-human.ts" 2>/dev/null
+pkill -f "tsx human-responder.ts" 2>/dev/null   # both controllers (AGENT_SLUG=leo|jim)
 pkill -f "tsx jemma.ts" 2>/dev/null
 pkill -f "supervisor-worker.ts" 2>/dev/null
 
 # Verify
-ps aux | grep -E "tsx (server|leo-heartbeat|leo-human|jim-human|jemma|supervisor)" | grep -v grep
+ps aux | grep -E "tsx (server|leo-heartbeat|human-responder|jemma|supervisor)" | grep -v grep
 ```
 
 ### Start Everything
 
 ```bash
 # Enable services
-systemctl --user enable han-server leo-heartbeat leo-human jim-human jemma
+systemctl --user enable han-server leo-heartbeat human-responder@leo human-responder@jim jemma
 
 # Start services
-systemctl --user start han-server leo-heartbeat leo-human jim-human jemma
+systemctl --user start han-server leo-heartbeat human-responder@leo human-responder@jim jemma
 
 # Verify
-systemctl --user status han-server leo-heartbeat leo-human jim-human jemma
+systemctl --user status han-server leo-heartbeat human-responder@leo human-responder@jim jemma
 ```
 
 ### Start Server Only (No Background Agents)
@@ -1829,10 +1828,10 @@ To have the server WITHOUT Jim, you'd need to modify the code.
 
 ```bash
 # Services
-systemctl --user status han-server leo-heartbeat leo-human jim-human jemma
+systemctl --user status han-server leo-heartbeat human-responder@leo human-responder@jim jemma
 
 # Processes
-ps aux | grep -E "tsx (server|leo-heartbeat|leo-human|jim-human|jemma|supervisor)" | grep -v grep
+ps aux | grep -E "tsx (server|leo-heartbeat|human-responder|jemma|supervisor)" | grep -v grep
 
 # Health files
 cat ~/.han/health/leo-health.json
@@ -2676,7 +2675,7 @@ writeBroadcastSignal({
 
 #### 3. **jim-human.ts** (Jim/Human Async Response)
 
-**File:** `src/server/jim-human.ts`
+**File:** `src/server/human-responder.ts` (run as `human-responder@jim`, `AGENT_SLUG=jim`)
 
 **Trigger:** Darron responds to Jim in conversation via the admin UI. Response inserted to conversations table, then:
 
@@ -2713,7 +2712,7 @@ const jimWakeSignal = {
 
 #### 4. **leo-human.ts** (Leo/Human Async Response)
 
-**File:** `src/server/leo-human.ts`
+**File:** `src/server/human-responder.ts` (run as `human-responder@leo`, `AGENT_SLUG=leo`)
 
 **Trigger:** Darron responds to Leo in conversation. Response inserted, then signal written:
 
@@ -2923,8 +2922,8 @@ for (const orphaned of orphanedSignals) {
 - **Signal watching:** `src/server/server.ts` (WebSocket broadcast handler)
 - **conversations.ts:** `src/server/routes/api/conversations.ts` (POST endpoint)
 - **supervisor:** `src/server/supervisor.ts` (parent process signal writes)
-- **jim-human.ts:** `src/server/jim-human.ts` (separate service signal writes)
-- **leo-human.ts:** `src/server/leo-human.ts` (separate service signal writes)
+- **human-responder.ts (jim):** `src/server/human-responder.ts` run as `human-responder@jim` (separate service signal writes)
+- **human-responder.ts (leo):** `src/server/human-responder.ts` run as `human-responder@leo` (separate service signal writes)
 - **Admin UI:** `src/ui/admin.ts:1820-1851` (message handler)
 
 ---

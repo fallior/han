@@ -1,0 +1,29 @@
+# Templated controller unit for the human-responder collapse (P2, DEC-081 / S176).
+# `human-responder@<slug>` (human-responder@leo, human-responder@jim, …) REPLACES the former
+# per-agent leo-human.service + jim-human.service twins. %i = AGENT_SLUG parameterises the one
+# src/server/human-responder.ts, which reads AGENT_SLUG and derives every per-agent leaf from the
+# registry. The de-id guard holds by construction: %i → Environment=AGENT_SLUG → the controller's
+# gradientConfigForAgent(slug) → the right identity, committed at launch (the S199 cure).
+#
+# Deploy (per-host, not version-controlled): `systemctl --user daemon-reload` after symlinking this
+# into ~/.config/systemd/user/, then `systemctl --user enable --now human-responder@leo human-responder@jim`,
+# and `systemctl --user disable --now leo-human jim-human` (retire the twins).
+[Unit]
+Description=Human Responder (%i) — conversation follow-through agent
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/darron/Projects/han/src/server
+ExecStart=/home/darron/Projects/han/src/server/node_modules/.bin/tsx human-responder.ts
+Restart=always
+RestartSec=30
+Environment=HOME=/home/darron
+Environment=AGENT_SLUG=%i
+Environment=PATH=/home/darron/.nvm/versions/node/v23.9.0/bin:/usr/local/bin:/usr/bin:/bin
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=human-responder@%i
+
+[Install]
+WantedBy=default.target

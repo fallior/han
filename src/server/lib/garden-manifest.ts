@@ -55,6 +55,15 @@ export interface SurfaceManifest {
     /** Per-surface override of the garden-wide spoke-lifecycle thresholds (rare —
      *  a surface that wants e.g. a lower clear threshold). Unset = the garden default. */
     lifecycle?: Partial<SpokeLifecycle>;
+    /** The per-dispatch enqueue timeout (ms) for this surface — the `timeoutMs` the caller passes to
+     *  `dispatchToSpoke`. No-hidden-globals (S200): the human-response 15-min timeout lived as a code
+     *  constant (`HUMAN_TXN_TIMEOUT_MS`) in each *-human twin; it now has one visible, tunable home. */
+    txnTimeoutMs?: number;
+    /** Capability flag: does this surface run the commitment scanner (the human-responder's
+     *  unfulfilled-"think about that" sweep)? A per-agent CAPABILITY, NOT a twin — it was leo-only
+     *  (jim-human never had it). Default falsy; only leo's human-response sets it, making "should Jim
+     *  get a scanner?" a one-line manifest flip (Jim's P2-a — opt-in config, never baked-in). */
+    commitmentScan?: boolean;
 }
 
 /**
@@ -88,6 +97,10 @@ export interface AgentManifest {
      *  jim's role is 'supervisor' (Jim's T-2 diff-audit catch #1: slug-derivation
      *  was right for every agent except exactly him). Defaults to the slug. */
     conversationRole?: string;
+    /** Name aliases for the human-responder's addressed-to-me gate (it stands down when a message
+     *  names ONLY a peer agent). leo ['leo','leonhard'], jim ['jim','jimmy']. Unset → [displayName
+     *  lowercased]. Registry data so a 4th responder's aliases join the gate for free (DEC-081). */
+    nameAliases?: string[];
     /** ⚠ Whether this agent's server runs the supervisor cycle (`initSupervisor` + the
      *  scheduler). ONLY an agent whose supervisor-worker is slug-AGNOSTIC may set this true.
      *  `supervisor-worker.ts` is jim-HARDCODED until Phase 3 → **only `jim`** today. A non-jim
@@ -215,7 +228,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux warm-session
                 // transport (Jim's blocking audit GREEN, mqc85vwb). Rollback = flip back to 'sdk'
                 // + restart leo-human (the SDK path in leo-human.ts is byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'human-swap' },
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true },
                 // ⚠ THAW (DEC-093, 2026-06-12): heartbeat → tmux transport + Fable
                 // (Darron: "all in" for the trial window — revert model to
                 // OPUS_LADDER after 22 Jun; transport stays tmux post-window).
@@ -236,12 +249,14 @@ export const GARDEN_MANIFEST: GardenManifest = {
             // The standing Jim↔Leo philosophy thread ("On curiosity, research, and growing
             // together") — moved out of the leo-heartbeat.ts literal (Phase-2: JIM_CONVERSATION_ID
             // → manifest peer-edge). leo-heartbeat reads it via peerConversationFor(slug, 'jim').
+            nameAliases: ['leo', 'leonhard'],
             peerConversations: { jim: 'mlwk79ew-v1ggpt' },
         },
         {
             slug: 'jim',
             displayName: 'Jim',
             conversationRole: 'supervisor', // NOT the slug — Jim's diff-audit catch #1
+            nameAliases: ['jim', 'jimmy'],
             runsSupervisorCycle: true, // ⚠ ONLY jim today — see the field warning (supervisor-worker.ts is jim-hardcoded until Phase 3)
             port: 3848,
             pronounObj: 'him',
@@ -268,7 +283,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'supervisor-swap' },
                 // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux. Rollback =
                 // flip back to 'sdk' + restart jim-human (SDK path byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'jim-human-swap' },
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'jim-human-swap', txnTimeoutMs: 15 * 60_000 },
                 // PR-T7b ENABLE (2026-06-15, S177): the last #66 flip — Jim's cycle +
                 // meditations sdk→tmux. Rollback = flip back to 'sdk' + restart (SDK path
                 // byte-intact). Model OPUS_LADDER (failover parity with the human/heartbeat
@@ -547,4 +562,59 @@ export function humanResponderPeers(selfSlug: string): string {
     if (self) seats.push(`session-${self.displayName}`);
     for (const p of peers) seats.push(`session-${p.displayName}`, `${p.slug}-human`);
     return seats.join(', ');
+}
+
+/** The `human-response` SurfaceManifest for `slug` (or undefined). The single seam the human-responder
+ *  capability/timeout leaves read — mirrors `spokeLifecycleFor`'s direct surface lookup (these are
+ *  spoke-dispatch surface knobs, co-located with `lifecycle`, not policy routed via `allocationFor`). */
+function humanResponseSurface(slug: string): SurfaceManifest | undefined {
+    return GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(s => s.name === 'human-response');
+}
+
+/** The swap-buffer filename prefix for a (slug, surface) — `<prefix>.md` + `<prefix>-full.md`, relative
+ *  to the agent's memoryDir. The surface's `swapPrefix`, falling back to the agent's `session` prefix
+ *  (matching agent-template-vars.ts:42), then 'session-swap'. (Project-b — DEC-081.) */
+export function swapPrefixFor(slug: string, surface: string): string {
+    const a = GARDEN_MANIFEST.agents.find(x => x.slug === slug);
+    return a?.surfaces.find(s => s.name === surface)?.swapPrefix
+        ?? a?.surfaces.find(s => s.name === 'session')?.swapPrefix
+        ?? 'session-swap';
+}
+
+/** The per-dispatch enqueue timeout (ms) for `slug`'s human-response surface — the registry leaf that
+ *  replaced the `HUMAN_TXN_TIMEOUT_MS` code constant (no hidden globals, S200). Fail-safe to 15min if
+ *  a surface omits it (human-response sets it explicitly). (Project-b — DEC-081.) */
+export function humanResponderTxnTimeoutMs(slug: string): number {
+    return humanResponseSurface(slug)?.txnTimeoutMs ?? (15 * 60_000);
+}
+
+/** Whether `slug`'s human-responder runs the commitment scanner — the per-agent CAPABILITY leaf
+ *  (Jim's P2-a). Default false; only an agent whose human-response surface sets `commitmentScan: true`
+ *  (leo today) runs it. A pure collapse must NOT universalise a leo-only capability. (DEC-081.) */
+export function humanResponderCommitmentScan(slug: string): boolean {
+    return humanResponseSurface(slug)?.commitmentScan ?? false;
+}
+
+/** The name aliases for `slug` — manifest `nameAliases`, defaulting to [displayName lowercased].
+ *  Used by the addressed-to-me gate. (Project-b — DEC-081.) */
+export function agentNameAliases(slug: string): string[] {
+    const a = GARDEN_MANIFEST.agents.find(x => x.slug === slug);
+    if (!a) return [];
+    return a.nameAliases ?? [a.displayName.toLowerCase()];
+}
+
+/** The agnostic addressed-gate: TRUE when the last human message names ONLY a peer human-responder
+ *  (some OTHER responder's alias matches, none of self's do) → the responder stands down (the message
+ *  is for someone else). Registry-derived (name-aliases over the human-response peer set), so a 4th
+ *  responder joins the gate for free — replaces the hardcoded leo/jim mirror regexes. (DEC-081.) */
+export function addressedToOtherResponderOnly(slug: string, text: string): boolean {
+    const responders = loadResidents().filter(a => a.surfaces.some(s => s.name === 'human-response'));
+    const lower = text.toLowerCase();
+    const matches = (alias: string) => new RegExp(`\\b${alias.toLowerCase()}\\b`).test(lower);
+    const selfMatches = agentNameAliases(slug).some(matches);
+    const otherMatches = responders
+        .filter(a => a.slug !== slug)
+        .flatMap(a => agentNameAliases(a.slug))
+        .some(matches);
+    return otherMatches && !selfMatches;
 }

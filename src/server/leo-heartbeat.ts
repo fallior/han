@@ -462,12 +462,12 @@ function checkLeoHumanHealth(): void {
             }
         } catch { /* no log */ }
 
-        console.log('[Robin Hood] Resurrecting Leo/Human via systemctl --user restart leo-human');
+        console.log('[Robin Hood] Resurrecting Leo/Human via systemctl --user restart human-responder@leo');
         let success = false;
         try {
-            execSync('systemctl --user restart leo-human', { timeout: 30000 });
+            execSync('systemctl --user restart human-responder@leo', { timeout: 30000 });
             execSync('sleep 5');
-            const status = execSync('systemctl --user is-active leo-human', { timeout: 5000 }).toString().trim();
+            const status = execSync('systemctl --user is-active human-responder@leo', { timeout: 5000 }).toString().trim();
             success = status === 'active';
             console.log(success ? '[Robin Hood] Leo/Human RESURRECTED' : `[Robin Hood] Leo/Human resurrection FAILED — ${status}`);
         } catch (err) {
@@ -528,12 +528,12 @@ function checkJimHumanHealth(): void {
             }
         } catch { /* no log */ }
 
-        console.log('[Robin Hood] Resurrecting Jim/Human via systemctl --user restart jim-human');
+        console.log('[Robin Hood] Resurrecting Jim/Human via systemctl --user restart human-responder@jim');
         let success = false;
         try {
-            execSync('systemctl --user restart jim-human', { timeout: 30000 });
+            execSync('systemctl --user restart human-responder@jim', { timeout: 30000 });
             execSync('sleep 5');
-            const status = execSync('systemctl --user is-active jim-human', { timeout: 5000 }).toString().trim();
+            const status = execSync('systemctl --user is-active human-responder@jim', { timeout: 5000 }).toString().trim();
             success = status === 'active';
             console.log(success ? '[Robin Hood] Jim/Human RESURRECTED' : `[Robin Hood] Jim/Human resurrection FAILED — ${status}`);
         } catch (err) {

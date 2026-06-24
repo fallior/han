@@ -35,8 +35,8 @@ set -u
 HAN_SERVICES=(
     leo-heartbeat      # Leo's 20-min beats (work/sleep/dream/evening)
     wm-sensor          # Working-memory file watcher → paired rotation → cascade enqueue
-    jim-human          # Jim's conversation-thread responder (signal-driven)
-    leo-human          # Leo's conversation-thread responder (signal-driven)
+    human-responder@jim   # Jim's conversation-thread responder (signal-driven)
+    human-responder@leo   # Leo's conversation-thread responder (signal-driven)
     jemma              # Discord gateway / message dispatcher
 )
 
@@ -123,7 +123,7 @@ ss -tlnp 2>/dev/null | grep ':3847' | head -1 | sed 's/^/  /' || echo "  (no lis
 # Orphan-process detection: tsx processes outside systemd
 echo ""
 echo "=== Orphan tsx processes (outside systemd) ==="
-orphans=$(pgrep -af "tsx server.ts\|tsx jemma.ts\|tsx leo-heartbeat.ts\|tsx leo-human.ts\|tsx jim-human.ts\|tsx services/wm-sensor.ts" 2>/dev/null | grep -v "systemd-managed" || true)
+orphans=$(pgrep -af "tsx server.ts\|tsx jemma.ts\|tsx leo-heartbeat.ts\|tsx human-responder.ts\|tsx services/wm-sensor.ts" 2>/dev/null | grep -v "systemd-managed" || true)
 if [[ -n "$orphans" ]]; then
     # Filter out the legit systemd-managed ones we just started
     legit_pids=""

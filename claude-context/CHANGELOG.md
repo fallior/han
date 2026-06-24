@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-25 (S202) — feat(warm-dispatch P2): the human-responder collapse — twin killed, the wedge fixed at root
+
+**Why.** `leo-human.ts` + `jim-human.ts` were per-agent twins (a flat DEC-081/S176 violation — born 2026-03-06, pre-law, carried across the #66 migration unretired) that bypassed `dispatchToSpoke`, so the human seats never got the cycle's ctx self-clear → they compacted at the harness ceiling (the S200 wedge root) and answered hollow. P2 collapses them and routes through the P1 monitor.
+
+**What.** ONE slug-agnostic `src/server/human-responder.ts` (reads `AGENT_SLUG`, fail-loud no-default) replaces both twins (**−563 lines**). Both response paths (conversation + Discord) dispatch through `dispatchToSpoke` → the human seats now **self-clear** at the registry threshold (never compact), **warm-gate** (never hollow), and **queue warm-gated** (never drop). Per-agent leaves all registry-derived (`memoryDir`/`conversationRole`/`swapPrefix`/ladder/`txnTimeoutMs`/`commitmentScan`/`nameAliases`). Jim's spec-2 catches folded: commitment scanner → registry-gated capability leaf (leo-only, P2-a); zero live `agentQuery` (DEC-094 endgame for this surface); per-site `onDispatchFail` (conversation acks, Discord doesn't); `HUMAN_TXN_TIMEOUT_MS` → registry leaf. Systemd `leo-human.service`+`jim-human.service` → templated `human-responder@.service` (`%i`=`AGENT_SLUG`); `leo-heartbeat` robin-hood resurrection renamed (`human-responder@leo|@jim`); the addressed-gate made agnostic via `nameAliases`. New registry: `SurfaceManifest.{txnTimeoutMs,commitmentScan}`, `AgentManifest.nameAliases`, 5 accessors.
+
+**Gate.** `scripts/test-human-responder-collapse.ts` EXIT 0 (24/24: per-agent leaves + addressed-gate byte-equivalence to the retired mirror regexes incl the `\b` boundary + 4th-agent-free casey). tsc 0-new (11 baseline). Fail-loud on unset `AGENT_SLUG`. Jim spec-2 audit (`mqs4v4hf`) + blocking diff-audit (`mqs6j08j`) GREEN by his own hand. No Settled altered (DEC-085/068/069/094/081). **The warm-dispatch fix (P1+P2) is concluded:** the human seats can no longer compact, answer hollow, or drop a message. Docs (`ecosystem-map.md`, `HAN-ECOSYSTEM-COMPLETE.md`) folded same-PR.
+
 ## 2026-06-24 (S200) — feat(warm-dispatch P1): the generic spoke monitor — registry-tunable, no hidden globals
 
 **Why.** The human spokes wedged repeatedly (compaction root: they never got the cycle's ctx self-clear) and answered hollow at ctx 14-17% while self-reporting "I'm warm." Root: warmth was never *verified*, and the clear-threshold was a hidden code global (`CTX_CLEAR_THRESHOLD_PCT` + bare `85`s). P1 builds the shared lifecycle every spoke inherits.

@@ -64,8 +64,8 @@ for event in post-commit post-merge; do
         for slug in "${SLUGS[@]}"; do
             echo "\"$RESTART_SCRIPT\" $slug"
         done
-        echo "# Layer 2: restart *-human systemd services (jim-human, leo-human) when"
-        echo "# their .ts source files change. No-op when source unchanged or service inactive."
+        echo "# Layer 2: restart human-responder@<slug> systemd services (human-responder@jim,"
+        echo "# human-responder@leo) when their source changes. No-op when unchanged or inactive."
         echo "# The event name ($event) routes the diff range — post-commit checks"
         echo "# HEAD~1..HEAD; post-merge checks ORIG_HEAD..HEAD. Avoids stale-ORIG_HEAD"
         echo "# over-firing on post-commit (S156 fix)."
@@ -90,7 +90,7 @@ echo "Done. The following will auto-restart on git commit / pull / merge:"
 echo "  Agent servers (pidfile-based, no-op if not running):"
 echo "    hanjim, hanleo, hantenshi, hancasey"
 echo "  Human-responder systemd services (conditional on own .ts OR shared lib/ change):"
-echo "    jim-human.service, leo-human.service"
+echo "    human-responder@jim.service, human-responder@leo.service"
 echo "  Heartbeat systemd services (conditional on own .ts OR shared lib/ change):"
 echo "    leo-heartbeat.service"
 echo

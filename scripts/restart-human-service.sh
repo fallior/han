@@ -28,7 +28,7 @@ set -u
 
 SLUG="${1:?usage: $0 <slug> [post-commit|post-merge]}"
 EVENT="${2:-post-commit}"  # safer default — only checks HEAD~1..HEAD
-SERVICE="${SLUG}-human.service"
+SERVICE="human-responder@${SLUG}.service"
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "")"
 if [[ -z "$REPO_ROOT" ]]; then exit 0; fi
@@ -37,7 +37,7 @@ cd "$REPO_ROOT" || exit 0
 # The seat restarts when its own entrypoint OR any shared server-runtime dep it
 # loads at boot changed. Agent-agnostic (DEC-081): $SLUG parameterises the only
 # per-agent leaf; the shared surface is identical for every seat.
-TRIGGER_RE="^(src/server/${SLUG}-human\.ts|src/server/lib/|src/server/db\.ts|src/server/services/discord\.ts)"
+TRIGGER_RE="^(src/server/human-responder\.ts|src/server/lib/|src/server/db\.ts|src/server/services/discord\.ts)"
 
 # Pick the diff range based on the event that called us.
 #   post-commit → HEAD~1..HEAD (just the new commit)
