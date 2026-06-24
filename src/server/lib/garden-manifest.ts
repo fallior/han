@@ -300,6 +300,30 @@ export const GARDEN_MANIFEST: GardenManifest = {
 };
 
 /**
+ * The garden's resident roster — the single seam through which the population is *sourced*.
+ *
+ * **P0 (#98 Dynamic Residence): a zero-behaviour no-op** returning the static
+ * `GARDEN_MANIFEST.agents` seed in declared order. It exists so that discovery (P1: signed
+ * `resident.json` fragments under `~/.han/agents/*`) plugs in *here, once*, and every roster
+ * **enumerator** (`schedulingAgents`, `conversationRolesExcept`, `humanResponderPeers`) sees the
+ * discovered population for free — the external readers are already population-agnostic.
+ *
+ * ⚠ **Order is load-bearing.** `schedulingAgents()` derives the N-body antiphase index from array
+ * position (`{leo:0, jim:1}`), so this MUST preserve manifest declaration order exactly — a reorder
+ * silently breaks the 180° cycle antiphase. P0 returns the seed array as-is.
+ *
+ * Scope note (F4, decided 2026-06-24): this is the **roster/identity** seam. Per-surface **policy**
+ * lookups (model ladder, transport, `runsSupervisorCycle`) are deliberately NOT routed here — they
+ * belong to the operator-authored **allocation** source (P3), keeping identity-discovered separate
+ * from privilege-allocated. The by-slug *identity* lookups route through this seam in P1, when
+ * discovery lands. (R1: a net-new discovered resident stays inert — not surfaced to any
+ * throwing consumer, scheduler + gradient included — until P4 derives its gradient config.)
+ */
+export function loadResidents(): AgentManifest[] {
+    return GARDEN_MANIFEST.agents;
+}
+
+/**
  * Shared (non-agent-scoped) surface: the wm-sensor → pending-compression cascade
  * (scripts/process-pending-compression.ts:377). Identity-loaded SDK Opus, runs
  * for whichever agent's entry is being compressed. S173: aligned to 4-8.
@@ -361,7 +385,7 @@ export function manifestTransport(slug: string, surface: string): SurfaceTranspo
  * (Project-b Phase 1, agnosticism scour — DEC-081.)
  */
 export function conversationRolesExcept(selfSlug: string): string[] {
-    return GARDEN_MANIFEST.agents
+    return loadResidents()
         .filter(a => a.slug !== selfSlug)
         .map(a => a.conversationRole ?? a.slug);
 }
@@ -428,7 +452,7 @@ export function runsSupervisorCycle(slug: string | undefined): boolean {
  * (Project-b Phase 1 — DEC-081.)
  */
 export function humanResponderPeers(selfSlug: string): string {
-    const responders = GARDEN_MANIFEST.agents.filter(a => a.surfaces.some(s => s.name === 'human-response'));
+    const responders = loadResidents().filter(a => a.surfaces.some(s => s.name === 'human-response'));
     const self = responders.find(a => a.slug === selfSlug);
     const peers = responders.filter(a => a.slug !== selfSlug);
     const seats: string[] = [];

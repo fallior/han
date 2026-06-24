@@ -20,7 +20,7 @@
  */
 
 import { getPhaseInterval, getDayPhase, isOnHoliday, isRestDay } from './day-phase';
-import { GARDEN_MANIFEST } from './garden-manifest';
+import { loadResidents } from './garden-manifest';
 
 const TRANSITION_STEPS = [0.75, 0.5, 0.25]; // Blend ratios: 75% old, 50% old, 25% old
 
@@ -42,7 +42,7 @@ const CADENCE_SURFACES = new Set(['heartbeat', 'supervisor-cycle']);
  * and reproduce {leo, jim} → {0, 1} (manifest declares leo before jim).
  */
 export function schedulingAgents(): string[] {
-    return GARDEN_MANIFEST.agents
+    return loadResidents()
         .filter(a => a.active && a.surfaces.some(s => CADENCE_SURFACES.has(s.name)))
         .map(a => a.slug);
 }

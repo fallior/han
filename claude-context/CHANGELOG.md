@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-24 (S200) — feat(#98 Dynamic Residence P0): the `loadResidents()` roster seam (zero-behaviour)
+
+**Why.** First brick of open-world residence (#98) — the garden discovering its population instead of two hand-authored lists. P0 introduces the seam that discovery (P1) plugs into, with **zero behaviour change**, behind the already-population-agnostic consumers.
+
+**`lib/garden-manifest.ts` + `lib/agent-scheduler.ts`.** New `loadResidents(): AgentManifest[]` returns the static `GARDEN_MANIFEST.agents` seed **as-is** (same reference, declared order). The 3 roster **enumerators** — `schedulingAgents()`, `conversationRolesExcept()`, `humanResponderPeers()` — route through it. Per the locked **F4 split** (identity-discovered vs privilege-allocated), the per-surface **policy** lookups (model/transport/`runsSupervisorCycle`) are deliberately NOT routed (they belong to the P3 allocation seam); the by-slug **identity** lookups route in P1 with discovery — keeping P0 a pure roster-list seam.
+
+**Order-preservation (load-bearing).** `schedulingAgents()` derives the N-body antiphase index from array position, so a reorder silently breaks the 180° cycle. Proven: `loadResidents() === GARDEN_MANIFEST.agents` (same ref), `schedulingAgents()` → `["leo","jim"]`, `agentPhaseIndex` `{leo:0, jim:1}` byte-identical. `tsc` 0-new (11 baseline). Jim blocking-audit GREEN by his own hand (drove order-preservation to ground). No Settled altered (DEC-081/068/069). Decisions (F3 — human authorizes a net-new mind; F4 — split identity from privilege; R1–R3) folded into `plans/dynamic-residence-plan.md`. **Next:** P1 — filesystem discovery (`~/.han/agents/*/resident.json`), the identity-lookups route through the seam, the R1 inertness invariant for net-new residents.
+
 ## 2026-06-23 (S200) — feat(de-id close): repo-root + template → agent-neutral (the careful pass); export-grep ZERO
 
 **Why.** The de-identification arc's final mile. With the corruption root dead (W6) and steps 1–6 landed, the two **wake-loaded gatekeeper files** still carried first-person identity. Making them agent-neutral earns the export-agnosticism acceptance — a fork inherits the project doc + the agnostic template, never "Leo/Jim" traced through them. The agreed deliberate pass (Leo-build / Jim blocking-audit; gatekeeper → Darron's hand), zero-urgency since the corruption was already dead.
