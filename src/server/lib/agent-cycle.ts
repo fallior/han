@@ -21,10 +21,7 @@
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { buildPrompt, PromptOverbudgetError } from './prompt-builder';
-import {
-    ensureSurfaceSession, enqueueForAgent, getContextPct, clearSession,
-    DispatchTimeoutError, SessionNotReadyError,
-} from './tmux-dispatcher';
+import { dispatchToSpoke } from './tmux-dispatcher';
 import type { CaptureRecord } from './diary-mcp-server';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
 import { updateFeelingTagWithHistory, maybeUpgradeTagStability } from './memory-gradient';
@@ -41,8 +38,6 @@ export interface DispatchTxnOpts {
     welcomeBack: string;
     /** Dispatch timeout — beats ~15min; a multi-action cycle wants longer. */
     timeoutMs: number;
-    /** Context-pressure /clear threshold (%, plan §5). Default 85. */
-    ctxClearThresholdPct?: number;
     /** Called when buildPrompt is over budget — the caller logs + health-signals its way. */
     onOverbudget?: (err: PromptOverbudgetError) => void;
     /** Called when the dispatch fails loud (timeout / not-ready) — the caller writes its agent's health signal. */
@@ -82,39 +77,17 @@ export async function dispatchTxn(
     console.log(`[${slug}/${surface}] ${txnProfile}: tmux txn ~${assembled.meta.est_total_tokens_chars_div_4} tokens (memory suppressed: ${assembled.meta.memory_chars} chars)`);
     const promptDoc = `${assembled.systemPrompt}\n\n${assembled.userPrompt}\n\n${actionBlock}`;
 
-    let cap: CaptureRecord;
-    try {
-        await ensureSurfaceSession(slug, surface, { ladder: opts.ladder, welcomeBack: opts.welcomeBack });
-        cap = await enqueueForAgent(slug, surface, promptDoc, { timeoutMs: opts.timeoutMs });
-    } catch (err) {
-        if (err instanceof DispatchTimeoutError || err instanceof SessionNotReadyError) {
-            // Fail loud, skip, retry next cadence. The dispatcher has already
-            // marked needs-reconcile on timeout; the next dispatch reconciles
-            // first (the #5 machine). The caller writes its agent's health signal.
-            console.error(`[${slug}/${surface}] ${txnProfile}: tmux dispatch failed — ${(err as Error).message}`);
-            opts.onDispatchFail?.(err as Error);
-            return null;
-        }
-        throw err;
-    }
-
-    // Context pressure (#66 v2 §5): reconstitute the warm session past the
-    // threshold — the natural /clear boundary, never compaction. OUTSIDE the
-    // capture try (Jim's post-thaw finding 2026-06-12): post-capture maintenance
-    // must NEVER null a successful capture. On clear failure: log + the caller's
-    // health-signal; the next dispatch re-adopts after the slow post-clear wake.
-    try {
-        const pct = getContextPct(slug, surface);
-        const threshold = opts.ctxClearThresholdPct ?? 85;
-        if (pct !== null && pct >= threshold) {
-            console.log(`[${slug}/${surface}] at ${pct}% ctx — /pfc → /clear → welcome-back`);
-            await clearSession(slug, surface, { welcomeBack: opts.welcomeBack });
-        }
-    } catch (err) {
-        console.warn(`[${slug}/${surface}] ${txnProfile}: ctx-pressure clear failed (capture already safe) — ${(err as Error).message}; next dispatch re-adopts`);
-        opts.onCtxClearFail?.(err as Error);
-    }
-    return cap;
+    // The LIFECYCLE (ensure + warm-gate + enqueue + ctx-pressure self-clear) is the shared
+    // generic spoke monitor — `dispatchToSpoke` (Jim's F1 seam: ONE lifecycle, surface CONTENT
+    // above). dispatchTxn's content half is buildPrompt + the action block; the lifecycle below
+    // is identical for every spoke. Thresholds come from the registry (no code-constant).
+    return dispatchToSpoke(slug, surface, promptDoc, {
+        ladder: opts.ladder,
+        welcomeBack: opts.welcomeBack,
+        timeoutMs: opts.timeoutMs,
+        onDispatchFail: opts.onDispatchFail,
+        onCtxClearFail: opts.onCtxClearFail,
+    });
 }
 
 /**

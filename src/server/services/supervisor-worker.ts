@@ -917,7 +917,6 @@ const jimMeditationDispatch = (profile: string, ctx: Record<string, unknown>, la
         ladder: manifestModelLadder('jim', JIM_MEDITATION_SPOKE),
         welcomeBack: 'welcome back Jim',
         timeoutMs: CYCLE_TXN_TIMEOUT_MS,
-        ctxClearThresholdPct: 85,
         onOverbudget: (err) => log(`[Worker] jim meditation over budget — skipping (${err.message})`),
         onDispatchFail: (err) => log(`[Worker] jim meditation dispatch failed — ${err.message}`),
     });
@@ -1324,7 +1323,6 @@ async function dispatchSupervisorCycleViaTmux(p: {
             ladder: manifestModelLadder('jim', SURFACE),
             welcomeBack: 'welcome back Jim',
             timeoutMs: CYCLE_TXN_TIMEOUT_MS,
-            ctxClearThresholdPct: 85,
             onOverbudget: (err) => log(`[Worker] ${txnProfile} over budget — skipping cycle (${err.message})`),
             onDispatchFail: (err) => log(`[Worker] ${txnProfile} tmux dispatch failed — ${err.message} (retries next cadence; #5 reconcile clears the wedge)`),
         });

@@ -949,7 +949,8 @@ const HEARTBEAT_SURFACE = 'heartbeat';
 // the dispatcher's ensureSurfaceSession (humans PR 2026-06-13) — ONE runtime
 // respawn+adopt home, shared with the human-response surfaces.
 const BEAT_TXN_TIMEOUT_MS = 20 * 60_000;   // beats can run minutes; > dispatcher default. 20min stopgap (S178) — pending the single-source timing config.
-const CTX_CLEAR_THRESHOLD_PCT = 85;        // plan §5: /pfc → /clear → welcome-back past this
+// ctx-clear threshold moved to GARDEN_MANIFEST.spokeLifecycle (S200 — no hidden code globals,
+// Darron's principle); dispatchToSpoke reads it per (slug,surface) from the registry.
 
 // PR-T7b: `ensureHeartbeatTmuxSession` retired — the agnostic `dispatchTxn`
 // (lib/agent-cycle.ts) calls `ensureSurfaceSession(slug, surface, {ladder,
@@ -981,7 +982,6 @@ async function dispatchBeatViaTmux(
         ladder: manifestModelLadder('leo', HEARTBEAT_SURFACE),
         welcomeBack: 'welcome back Leo',
         timeoutMs: BEAT_TXN_TIMEOUT_MS,
-        ctxClearThresholdPct: CTX_CLEAR_THRESHOLD_PCT,
         onOverbudget: (err) => handlePromptOverbudget(err, txnProfile, beatLabel),
         onDispatchFail: (err) => writeHealthSignal(`tmux-dispatch (${beatLabel}): ${err.message}`, healthType),
         onCtxClearFail: (err) => writeHealthSignal(`ctx-clear (${beatLabel}): ${err.message}`, healthType),

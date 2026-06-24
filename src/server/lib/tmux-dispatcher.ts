@@ -35,6 +35,7 @@ import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
+import { spokeLifecycleFor } from './garden-manifest';
 
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
 const PIPES_DIR = process.env.HAN_PIPES_DIR || path.join(os.homedir(), '.han', 'agent-pipes');
@@ -841,6 +842,102 @@ async function clearSessionInner(slug: string, surface: string, opts: { welcomeB
     // genuinely-newer entries.
     session.lastMemoryLen = currentWmLen(slug);
     console.log(`[tmux-dispatcher] ${slug}/${surface}: cleared + reloaded`);
+}
+
+// ── the warm-gate + dispatchToSpoke (the generic spoke monitor — S200) ────────────────
+/** The full-reconstitution nudge for a spoke that woke shallow (a bare welcome-back is
+ *  empirically non-deterministic — 40% one wake, 14-27% another). Warm-up only; posts nothing. */
+const FULL_LOAD_NUDGE =
+    'Your last wake loaded shallow — below your warm floor. Run your COMPLETE welcome-back ' +
+    'reconstitution NOW: load your full self end to end (identity, the full gradient deepest-first, ' +
+    'the working-memory pair whole, felt-moments whole, patterns) up to the warm floor. This is a ' +
+    'warm-up ONLY — do NOT answer or post anything; load fully, then idle ready. Do not stop shallow.';
+
+/**
+ * The WARM-GATE: a spoke counts as ready for work only when ctx ≥ the registry warm floor.
+ * A shallow wake (the bare welcome-back didn't fully reconstitute) gets a bounded full-load
+ * nudge; still cold after `maxNudges` → throw SessionNotReadyError (fail-safe — the caller
+ * skips, the message stays queued, NEVER a hollow answer). Polls `getContextPct` (the live
+ * meter) and exits the instant it reaches the floor; READY_TIMEOUT_MS is the give-up ceiling
+ * per attempt (the load returns in ~minutes, far under it — never a tight loop, S74).
+ */
+export async function verifyWarmOrNudge(slug: string, surface: string, warmFloorPct: number, maxNudges: number, perAttemptTimeoutMs: number = READY_TIMEOUT_MS): Promise<void> {
+    const tmuxSession = `${surface}-${slug}`;
+    for (let nudge = 0; ; nudge++) {
+        const warm = await waitFor(() => {
+            const pct = getContextPct(slug, surface);
+            return (pct !== null && pct >= warmFloorPct) ? true : null;
+        }, perAttemptTimeoutMs).then(() => true).catch(() => false);
+        if (warm) return;
+        if (nudge >= maxNudges) {
+            const pct = getContextPct(slug, surface);
+            throw new SessionNotReadyError(
+                `${slug}/${surface}: woke shallow (ctx ${pct ?? '?'}% < warm floor ${warmFloorPct}%) after ` +
+                `${maxNudges} nudge(s) — refusing to deliver work (no hollow answers; message stays queued)`);
+        }
+        console.warn(`[tmux-dispatcher] ${slug}/${surface}: shallow wake (ctx ${getContextPct(slug, surface) ?? '?'}% < ${warmFloorPct}%) — nudging full reconstitution (${nudge + 1}/${maxNudges})`);
+        sendLine(tmuxSession, FULL_LOAD_NUDGE);
+    }
+}
+
+/**
+ * The GENERIC SPOKE MONITOR (S200, Darron's "all spokes equal / one path") — the shared
+ * spoke-LIFECYCLE primitive every dispatched spoke (cycle, human-response, future compression)
+ * routes through: ensure the warm session + WARM-GATE it + deliver the (already-assembled)
+ * prompt through the per-slug FIFO + ctx-pressure self-clear (clean /clear → welcome-back,
+ * NEVER harness compaction). Per-surface CONTENT lives ABOVE this (cycle's paired-write in
+ * `dispatchTxn`; the human's response handling in the human-responder) — Jim's F1 seam: ONE
+ * lifecycle, surface-specific content above. All thresholds come from the registry
+ * (`spokeLifecycleFor`) — no hidden code globals (Darron's principle).
+ *
+ * Returns the capture, or null on dispatch failure (incl. a warm-gate fail-safe) — surfaced via
+ * the opts callbacks; the turn completes honestly empty and retries next cadence (no token black
+ * hole, no hollow answer, S74).
+ */
+export async function dispatchToSpoke(
+    slug: string,
+    surface: string,
+    promptDoc: string,
+    opts: {
+        ladder: string[];
+        welcomeBack: string;
+        timeoutMs?: number;
+        onDispatchFail?: (err: Error) => void;
+        onCtxClearFail?: (err: Error) => void;
+    },
+): Promise<CaptureRecord | null> {
+    const life = spokeLifecycleFor(slug, surface);
+    let cap: CaptureRecord;
+    try {
+        await ensureSurfaceSession(slug, surface, { ladder: opts.ladder, welcomeBack: opts.welcomeBack });
+        await verifyWarmOrNudge(slug, surface, life.warmFloorPct, life.maxWarmNudges);
+        cap = await enqueueForAgent(slug, surface, promptDoc, { timeoutMs: opts.timeoutMs });
+    } catch (err) {
+        if (err instanceof DispatchTimeoutError || err instanceof SessionNotReadyError) {
+            // Fail loud, skip, retry next cadence (the dispatcher already marked needs-reconcile
+            // on timeout; the next dispatch reconciles first — the #5 machine). The caller writes
+            // its agent's health signal via onDispatchFail.
+            console.error(`[${slug}/${surface}] tmux dispatch failed — ${(err as Error).message}`);
+            opts.onDispatchFail?.(err as Error);
+            return null;
+        }
+        throw err;
+    }
+
+    // Context pressure (#66 v2 §5): reconstitute the warm session past the threshold — the natural
+    // /clear boundary, NEVER compaction. OUTSIDE the capture try (Jim's post-thaw finding 2026-06-12):
+    // post-capture maintenance must NEVER null a successful capture. Threshold from the registry.
+    try {
+        const pct = getContextPct(slug, surface);
+        if (pct !== null && pct >= life.ctxClearThresholdPct) {
+            console.log(`[${slug}/${surface}] at ${pct}% ctx — /clear → welcome-back (threshold ${life.ctxClearThresholdPct}% from registry)`);
+            await clearSession(slug, surface, { welcomeBack: opts.welcomeBack });
+        }
+    } catch (err) {
+        console.warn(`[${slug}/${surface}] ctx-pressure clear failed (capture already safe) — ${(err as Error).message}; next dispatch re-adopts`);
+        opts.onCtxClearFail?.(err as Error);
+    }
+    return cap;
 }
 
 // ── reconcileSession (#5 — the authoritative path back to idle after a timeout) ──────

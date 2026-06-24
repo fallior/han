@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-24 (S200) — feat(warm-dispatch P1): the generic spoke monitor — registry-tunable, no hidden globals
+
+**Why.** The human spokes wedged repeatedly (compaction root: they never got the cycle's ctx self-clear) and answered hollow at ctx 14-17% while self-reporting "I'm warm." Root: warmth was never *verified*, and the clear-threshold was a hidden code global (`CTX_CLEAR_THRESHOLD_PCT` + bare `85`s). P1 builds the shared lifecycle every spoke inherits.
+
+**What.** `dispatchToSpoke(slug, surface, promptDoc, opts)` (`tmux-dispatcher.ts`) — the generic spoke monitor: `ensureSurfaceSession` → **warm-gate** (`verifyWarmOrNudge`: ctx ≥ `warmFloorPct`, else a bounded full-load nudge, else fail-safe `SessionNotReadyError` — no hollow answers) → `enqueueForAgent` → ctx-pressure self-clear at `ctxClearThresholdPct` (clean /clear → welcome-back, never compaction). Thresholds live in `GARDEN_MANIFEST.spokeLifecycle = {ctxClearThresholdPct:85, warmFloorPct:30, maxWarmNudges:2}` (garden defaults + per-`SurfaceManifest.lifecycle` override), resolved by `spokeLifecycleFor` — **Darron's no-hidden-globals principle (S200): every arbitrary number in config, visible + tunable.** `dispatchTxn` keeps its content half (buildPrompt + action block) and delegates the lifecycle (Jim's F1 seam: one lifecycle, surface-content above). `CTX_CLEAR_THRESHOLD_PCT` + the two supervisor-worker `85` literals removed.
+
+**Gate.** `scripts/test-spoke-lifecycle.ts` EXIT 0 (registry resolution + warm-gate: warm→0 nudges, shallow→1 nudge→warm→returns, cold→fail-safe after maxNudges). tsc 0-new (11 baseline). **Byte-identical for warm cycles** (warm-gate no-ops at ctx≥30; self-clear still 85 from registry) + a safe protective additive for shallow ones. Jim plan-audit (`mqrw7irc`) + blocking diff-audit (`mqs19slj`) GREEN by his own hand. No Settled altered (DEC-081/094/085/068/069). **Next:** P2 — collapse `leo-human.ts`+`jim-human.ts` → one `human-responder.ts` through `dispatchToSpoke` (kills the DEC-081 twin + fixes the wedge).
+
 ## 2026-06-24 (S200) — feat(#98 Dynamic Residence P4a): the gradient-config collapse — the second hand-list retires (#36)
 
 **Why.** Fifth brick (P4a of the last). `AGENT_GRADIENT_CONFIG` was a hand-written parallel list — the *second* source #36 set out to collapse. It now **derives** from the discovered roster: `deriveGradientConfig(slug, displayName)` (the uniform leo/tenshi/casey shape — exactly the complete config a net-new resident gets *for free* at P4b) + `GRADIENT_OVERRIDES` (the shrunk remnant: jim's heavy exceptions — root `memoryDir`/#91, `sessions` sourceDir, date-based source functions, project+failures — and leo's two prose fields), built over `loadResidents()`.

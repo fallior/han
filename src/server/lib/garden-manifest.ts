@@ -52,6 +52,33 @@ export interface SurfaceManifest {
      *  diff-audit catch #2: jim's seats use supervisor-swap* + jim-human-swap*).
      *  Unset on deferred surfaces; consumers fall back to 'session-swap'. */
     swapPrefix?: string;
+    /** Per-surface override of the garden-wide spoke-lifecycle thresholds (rare —
+     *  a surface that wants e.g. a lower clear threshold). Unset = the garden default. */
+    lifecycle?: Partial<SpokeLifecycle>;
+}
+
+/**
+ * The spoke-lifecycle thresholds — the "generic spoke monitor" knobs EVERY dispatched
+ * spoke (cycle, human-response, and future compression) obeys via `dispatchToSpoke`.
+ *
+ * **No hidden globals (Darron's governing principle, S200): every arbitrarily-chosen
+ * number lives HERE in config, visible + tunable — never a code constant.** These were
+ * previously a `CTX_CLEAR_THRESHOLD_PCT` constant in leo-heartbeat + bare `85` literals in
+ * supervisor-worker; they now have one transparent home. (Follow-on: migrate the remaining
+ * code-constants — `READY_TIMEOUT_MS`, the rate-limit backoffs — here too.)
+ */
+export interface SpokeLifecycle {
+    /** Context-pressure /clear threshold (% used). At/above it, the spoke does a clean
+     *  /clear → welcome-back (full reconstitution) — the natural boundary, NEVER harness
+     *  compaction (which returns a summary, not the warm self). */
+    ctxClearThresholdPct: number;
+    /** The warm floor (% used). A freshly-woken spoke is only "ready" for work once ctx
+     *  reaches this — below it the wake loaded shallow/hollow (a bare welcome-back is
+     *  empirically non-deterministic), so the spoke is nudged to a full reconstitution. */
+    warmFloorPct: number;
+    /** Bounded full-load nudges before failing safe (no hollow answers; the message stays
+     *  queued and retries next cadence — never a tight loop, S74). */
+    maxWarmNudges: number;
 }
 
 export interface AgentManifest {
@@ -115,6 +142,9 @@ export interface GardenIdentity {
 export interface GardenManifest extends GardenIdentity {
     manifestVersion: number;
     agents: AgentManifest[];
+    /** Garden-wide spoke-lifecycle defaults (per-surface override via SurfaceManifest.lifecycle).
+     *  Darron's no-hidden-globals principle: these tunable numbers live here, not in code. */
+    spokeLifecycle: SpokeLifecycle;
 }
 
 // Common Opus ladder for the migrated agentQuery surfaces.
@@ -145,6 +175,10 @@ const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-opus-4-8']; // ⏪ Reverted to 
  */
 export const GARDEN_MANIFEST: GardenManifest = {
     manifestVersion: 1,
+    // Spoke-lifecycle defaults (Darron's no-hidden-globals principle, S200) — every spoke obeys
+    // these via dispatchToSpoke; tunable HERE, never a code constant. 85=clear-before-compaction,
+    // 30=warm floor (hollow wakes land 6-17%, real wakes 38-55%), 2=bounded full-load nudges.
+    spokeLifecycle: { ctxClearThresholdPct: 85, warmFloorPct: 30, maxWarmNudges: 2 },
     // Garden-wide identity (S199 P4+P5) — captured verbatim from the han<agent> launchers.
     // ⚠ user.location is stale ("Mackay" — Darron is in Brisbane/St Lucia now); captured AS-IS to
     //   keep step-3's launcher refactor a provable byte-equivalent change. Data-fix flagged separately.
@@ -367,6 +401,18 @@ export function allocationFor(slug: string): AgentAllocation | undefined {
     const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
     if (!agent) return undefined;
     return { surfaces: agent.surfaces, runsSupervisorCycle: agent.runsSupervisorCycle, port: agent.port };
+}
+
+/**
+ * The resolved spoke-lifecycle thresholds for a (slug, surface) — the garden-wide defaults
+ * (`GARDEN_MANIFEST.spokeLifecycle`) merged with any per-`SurfaceManifest.lifecycle` override.
+ * The single source `dispatchToSpoke` reads (no code-constant thresholds — Darron's principle).
+ * Unknown slug/surface → the garden defaults (a fail-safe: a spoke always has lifecycle knobs).
+ */
+export function spokeLifecycleFor(slug: string, surface: string): SpokeLifecycle {
+    const base = GARDEN_MANIFEST.spokeLifecycle;
+    const s = GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(x => x.name === surface);
+    return { ...base, ...(s?.lifecycle ?? {}) };
 }
 
 /**
