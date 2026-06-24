@@ -41,6 +41,16 @@ prompt_full=$(grep -oE 'prompt_full_mtime=[0-9]+' "$STATE" | cut -d= -f2); promp
 prompt_comp=$(grep -oE 'prompt_comp_mtime=[0-9]+' "$STATE" | cut -d= -f2); prompt_comp=${prompt_comp:-0}
 skip=$(grep -oE 'skip=[0-9]+' "$STATE" | cut -d= -f2); skip=${skip:-0}
 blocked=$(grep -oE 'blocked=[0-9]+' "$STATE" | cut -d= -f2); blocked=${blocked:-0}
+wake_grace=$(grep -oE 'wake_grace=[0-9]+' "$STATE" | cut -d= -f2); wake_grace=${wake_grace:-0}
+
+# WAKE-GRACE (2026-06-24): orient-inject.sh sets wake_grace=1 on a welcome-back turn.
+# A wake is reconstitution, not an exchange to record — blocking here interrupts the
+# welcome-back. Exempt exactly this one turn, then clear the flag so the NEXT turn is
+# guarded normally. Sits ahead of the anti-loop/paired checks so the wake is never held.
+if [ "$wake_grace" -eq 1 ] 2>/dev/null; then
+  printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=%s\nblocked=0\nwake_grace=0\n' "$prompt_full" "$prompt_comp" "$skip" > "$STATE"
+  allow
+fi
 
 now_full=$(stat -c %Y "$FULL_SWAP" 2>/dev/null || echo 0)
 now_comp=$(stat -c %Y "$COMP_SWAP" 2>/dev/null || echo 0)

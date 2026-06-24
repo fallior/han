@@ -19,6 +19,18 @@ FULL_SWAP="${MEM}/${AGENT_SWAP_FULL:-session-swap-full.md}"
 COMP_SWAP="${MEM}/${AGENT_SWAP_COMPRESSED:-session-swap.md}"
 mkdir -p "$SIGNALS_DIR"
 
+# Consume the UserPromptSubmit JSON on stdin (we inspect it for the wake trigger).
+PROMPT_JSON=$(cat 2>/dev/null)
+
+# WAKE-GRACE (2026-06-24): a wake turn is reconstitution, not an exchange to record —
+# there is nothing to swap-write mid-wake. If the guard fired here it would interrupt
+# the welcome-back (it has, twice). Detect ANY of the three wake triggers (matching the
+# template's Command Triggers: session start / welcome back / good morning) and set a
+# one-turn grace flag that memory-guard.sh honours then clears, exempting exactly the
+# wake turn. Fail-safe direction: a false positive only SKIPS the guard for one turn.
+wake_grace=0
+printf '%s' "$PROMPT_JSON" | grep -qiE 'welcome back|good morning|session start' && wake_grace=1
+
 # 1. ORIENTATION — universal, zero-risk, every prompt.
 echo "⏰ Oriented: $(date '+%A %-d %B %Y, %-I:%M %p %Z') — open your reply by saying this line (re-queried fresh, not extrapolated)."
 
@@ -35,5 +47,5 @@ fi
 full_mtime=0; comp_mtime=0
 [ -n "$MEM" ] && [ -f "$FULL_SWAP" ] && full_mtime=$(stat -c %Y "$FULL_SWAP" 2>/dev/null || echo 0)
 [ -n "$MEM" ] && [ -f "$COMP_SWAP" ] && comp_mtime=$(stat -c %Y "$COMP_SWAP" 2>/dev/null || echo 0)
-printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=%s\nblocked=0\n' "$full_mtime" "$comp_mtime" "$skip" > "$STATE"
+printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=%s\nblocked=0\nwake_grace=%s\n' "$full_mtime" "$comp_mtime" "$skip" "$wake_grace" > "$STATE"
 exit 0
