@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-24 (S200) — feat(#98 Dynamic Residence P2): the admission gate — *visible → admitted* by garden signature
+
+**Why.** Third brick. A discovered resident becomes **admitted** only when an operator garden-signs its `resident.json` (F3 — admitting a new mind is a human act). The trust-root is non-circular: the garden private key (`~/.han/credentials/han-signing-key.pem`, mode 600) is operator-only, not in any agent dir, so a resident can't sign itself in. Admission is still *trust*, not *activation* — `loadResidents()` excludes admitted residents until P4 config (R1).
+
+**`lib/resident-discovery.ts`.** `admitResident(slug, signingKeyPem, logPath?)` — the reusable admission act (find → `buildResidentManifest` → `signManifest` → write `resident.sig` → append the admissions ledger); **requires the key**, so the human-authorizes act lives in the caller, never a bare click (endpoint-ready: the CLI wraps it now, a future `POST /api/residents/:slug/admit` wraps the same). `admittedResidents()` = discovered ∩ garden-signed-and-unchanged. `discoveredResidents()` (P1) behaviourally unchanged.
+
+**Three security catches (Jim's plan-audit) + the sig-copy close — all proven.** **C1** admission = `verifySignature(fixed garden pubkey)` **AND** re-hash current `resident.json` vs the signed hash, **never `verifyAndResign`** — so the sign-then-swap attack (admit v1, swap the file, auto-re-admit) is dead. **C2** a config-independent `buildResidentManifest` (no `gradientConfigForAgent`, which throws pre-P4 — admission works before the resident has a memory). **C3** verify against the fixed garden pubkey only, never a resident-supplied key. **Sig-copy** `isAdmitted` binds the sig to the resident's own path (`entry.path !== jsonPath → reject`). **F3** every admission logs to `~/.han/health/resident-admissions.jsonl`; `sign-resident.ts` is the explicit human act (requires the key, confirms). `scripts/test-resident-admission.ts` proves all of it (EXIT 0). `tsc` 0-new; `admitResident` has no runtime caller (endpoint-ready); `loadResidents()`/scheduler untouched. Jim blocking-diff-audit GREEN by hand. No Settled altered (DEC-083 *reused*). **Next:** P3 — the policy/allocation split (privilege gets its operator-authored source; `memoryDir` lives there, R2).
+
 ## 2026-06-24 (S200) — feat(#98 Dynamic Residence P1): filesystem discovery — *visible but inert*
 
 **Why.** Second brick of open-world residence. A resident can now self-describe in its own dir and be **discovered** — but discovery makes it *visible*, never *live*: per R1, a net-new discovered resident stays fully inert (not in `loadResidents()` / any throwing path) until admitted (P2) + configured (P4). Purely additive — `loadResidents()` is byte-identical to P0.
