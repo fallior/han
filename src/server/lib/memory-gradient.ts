@@ -1077,6 +1077,51 @@ function splitMemoryFileEntries(content: string): MemoryFileEntry[] {
 }
 
 /**
+ * Count TURN-ENTRIES for the pre-slice pair-parity SIGNAL (#53) only — deliberately distinct from
+ * `splitMemoryFileEntries` (which splits on EVERY `### ` and is left byte-unchanged for the
+ * slicer/rotation/position consumers — Jim's path (b), the contained fix).
+ *
+ * **Why a separate counter (the false-positive root, S203):** the c0 (full) diary entries carry
+ * INTERNAL `### ` body sub-headers inside their `[BODY]` — e.g. every heartbeat beat is
+ * `### Heartbeat #N` → `[INPUT]` → `[BODY]` → `### Dream beat (tmux) — <title>` — that the lean c1
+ * (compressed) entries lack. `splitMemoryFileEntries` counts each body sub-header as its own entry,
+ * so the full side inflates over the compressed (e.g. 70 vs 44) and the drift SIGNAL fires though
+ * every entry is genuinely PAIRED. (Confirmed live: the "unpaired" list was `Heartbeat #14` then
+ * `Dream beat (tmux) …` pairs all the way down.) This counter counts TURN-boundaries only.
+ *
+ * **The discriminator:** a turn-boundary is a `## ` header (always), OR a `### ` header that starts a
+ * turn. Once a `[BODY]` marker is seen within an entry, subsequent `### ` lines are body sub-headers
+ * and do NOT start a turn — UNTIL the next genuine boundary: a `## ` line, or a `### ` immediately
+ * followed by `[INPUT]` (the next diary entry's header). Entries without a `[BODY]` (older/plain) never
+ * enter the suppressed state, so each of their headers counts (historical behaviour preserved). The
+ * c1/compressed side carries no `[BODY]`, so its counting is identical to before — the fix only
+ * deflates the spuriously-inflated full side. File-title `# ` lines never match (`## `/`### ` only).
+ */
+function splitTurnEntries(content: string): { header: string; date: string | null }[] {
+    const lines = content.split('\n');
+    const entries: { header: string; date: string | null }[] = [];
+    let inBody = false;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (/^\[BODY\]/.test(line)) { inBody = true; continue; }
+        const isH2 = /^## /.test(line);   // `## ` (h2); `### ` has '#' as its 3rd char, so it won't match
+        const isH3 = /^### /.test(line);
+        if (!isH2 && !isH3) continue;
+        if (isH3 && inBody) {
+            // A `### ` inside a [BODY] — a turn-boundary ONLY if the next non-blank line is `[INPUT]`
+            // (the next diary entry's header); otherwise it's a body sub-header → not a turn.
+            let j = i + 1;
+            while (j < lines.length && lines[j].trim() === '') j++;
+            if (!(j < lines.length && /^\[INPUT\]/.test(lines[j]))) continue;
+        }
+        inBody = false; // genuine turn-boundary
+        const dateMatch = line.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+        entries.push({ header: line.replace(/^#+\s+/, '').trim().slice(0, 75), date: dateMatch ? dateMatch[1] : null });
+    }
+    return entries;
+}
+
+/**
  * Group entries by month (YYYY-MM) for compression.
  */
 function groupEntriesByMonth(entries: MemoryFileEntry[]): Map<string, MemoryFileEntry[]> {
@@ -1497,8 +1542,12 @@ export function checkPairParity(
 ): PairParityResult {
     const fullContent = fs.readFileSync(fullPath, 'utf8');
     const compContent = fs.readFileSync(compPath, 'utf8');
-    const fullEntries = splitMemoryFileEntries(fullContent);
-    const compEntries = splitMemoryFileEntries(compContent);
+    // Path (b), S203: the SIGNAL counts TURN-entries (body `### ` sub-headers inside a `[BODY]` are
+    // NOT separate entries) — `splitMemoryFileEntries` stays byte-unchanged for the slicer/rotation/
+    // position consumers. Fixes the false-positive drift where structurally-richer c0 entries
+    // over-counted vs their paired c1 twins.
+    const fullEntries = splitTurnEntries(fullContent);
+    const compEntries = splitTurnEntries(compContent);
     const drift = Math.abs(fullEntries.length - compEntries.length);
     const inSync = drift === 0;
     const unpairedSide: 'full' | 'compressed' | null = inSync
