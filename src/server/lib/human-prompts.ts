@@ -128,7 +128,7 @@ const SDK_DELIVERY = (spec: HumanAgentSpec): string => `CRITICAL — two-stage d
  */
 const TMUX_DELIVERY = (spec: HumanAgentSpec): string => `CRITICAL — delivery + completion (the per-transaction scaffold below names the channel):
 1. **Post your response body** per the channel directive in the scaffold:
-   - **Conversation turn:** run curl via the Bash tool to POST to the conversation API — the pattern lives in CLAUDE.md ("Posting" section), with \`role:"${spec.roleLabel}"\` and the conversation id from the scaffold. Self-posting is how the body reaches the thread; do NOT prepend framing like "Here's my response:".
+   - **Conversation turn:** run curl via the Bash tool to POST to the conversation API. The scaffold below hands you the EXACT, self-contained POST sequence (write body to file → build JSON payload → \`curl --data @file\`) — use it; do NOT rely on CLAUDE.md's "Posting" section (a light welcome-back may not have loaded it). Self-posting is how the body reaches the thread; do NOT prepend framing like "Here's my response:".
    - **Discord turn:** do NOT curl — the scaffold's DELIVERY OVERRIDE applies; the controller posts your submitted \`working_memory_full\` to the channel for you.
 2. **End your turn by calling the \`mcp__han-diary__submit_response\` tool — exactly once, as your final action, no prose after it** — with three required fields:
    - \`working_memory_full\` — your response BODY (the same text you curl-posted for a conversation turn; the reply to be delivered for a Discord turn). This is your turn's c0 source.
@@ -263,5 +263,13 @@ Respond to the latest message in the Discord channel. Keep it concise and conver
 
 This is a CONVERSATION turn. FETCH the current thread yourself before composing — run via the Bash tool:
   curl -sk "https://localhost:3847/api/conversations/${ctx.conversationId ?? ''}"
-That returns the thread's recent messages. Apply the self-recognition + already-responded + distinct-angle gates above against what you fetch. If you compose, POST your reply back to the SAME thread (\`role:"${roleLabel}"\`, the Posting pattern in CLAUDE.md), then call \`mcp__han-diary__submit_response\`. If a gate says stand down, call \`mcp__han-diary__stand_down\` instead.${priorFailedBlock}`;
+That returns the thread's recent messages. Apply the self-recognition + already-responded + distinct-angle gates above against what you fetch.
+
+If a gate says stand down, call \`mcp__han-diary__stand_down\` and stop. Otherwise compose your reply, then **POST it to this thread yourself** — the controller does NOT post on your behalf (S156), so if you skip this curl your reply is silently lost. The exact command is **self-contained here — do NOT rely on CLAUDE.md** (a light welcome-back may not have loaded its "Posting" section):
+  1. Write your reply body verbatim to a file — use the Write tool to write \`/tmp/human-reply-${roleLabel}.txt\`.
+  2. Build the JSON payload safely (this escapes a multi-paragraph body for you — NEVER hand-escape a body into \`-d\`):
+     \`python3 -c "import json; print(json.dumps({'role':'${roleLabel}','content':open('/tmp/human-reply-${roleLabel}.txt').read()}))" > /tmp/human-payload-${roleLabel}.json\`
+  3. POST it, and confirm the response JSON contains an \`"id"\` (that is proof it landed):
+     \`curl -sk -X POST "https://localhost:3847/api/conversations/${ctx.conversationId ?? ''}/messages" -H "Content-Type: application/json" --data @/tmp/human-payload-${roleLabel}.json\`
+Then call \`mcp__han-diary__submit_response\` (with that same reply body as \`working_memory_full\`).${priorFailedBlock}`;
 }

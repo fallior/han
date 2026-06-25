@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-06-25 (S203) — fix(human-responder): the leo-human silent-post-fail — inline the curl-post (Jim's folded fix)
+
+**Why.** human-Leo composed full replies but they didn't land (`SILENT POST FAILURE — diary captured but NO CURL-POST DETECTED`). Root (Jim, `mqt60e7r`): the conversation turn-prompt **deferred** the curl-post to the agent's CLAUDE.md ("Posting" section). A spoke that welcome-back-loads LIGHT (#107) doesn't have that section loaded → it knows it should curl but lacks the pattern → composes, calls `submit_response`, **skips the curl**. Not a code path — a prompt deferral × the light-load. leo-vs-jim was the light-load asymmetry (leo-human is dispatched to threads where session-Leo is the dominant same-name voice); the fix is agnostic. Same family as `plans/silent-fail-directive-audit.md` (self-post surfaces are fragile to "I just emit text").
+
+**What.** `lib/human-prompts.ts` — the conversation txn scaffold (`buildHumanResponseTxnScaffold`) and the `TMUX_DELIVERY` directive no longer say "the Posting pattern in CLAUDE.md"; they **inline the literal, self-contained POST sequence** (the `conversationId` is already in hand for the LOCATOR fetch): write the reply body to a file → build the JSON payload via `python3 -c "import json…"` (escapes a multi-paragraph body — the JSON-escape dodge the 10:44 *success* path used a scratchpad for) → `curl -sk -X POST …/messages --data @file`, with `role:"${roleLabel}"` (slug-agnostic). The spoke now posts even when it loaded light, with no dependence on CLAUDE.md. **S156 intact** — the spoke still self-posts; NO controller-fallback (Jim: that created duplicate `leo-`-prefixed messages). The Discord path (controller-delivered) is untouched.
+
+**Gate.** `scripts/test-human-post-inline.ts` (NEW) — asserts the conversation scaffold inlines the literal POST with the conversation id + the agent's role, builds the payload via python3, no CLAUDE.md deferral, states S156, keeps the LOCATOR fetch — for leo, jim, AND a synthetic 4th agent (slug-agnostic); the Discord path still says do-NOT-curl. tsc 0-new. The live `dispatch → compose → role:'leo' post lands in the thread` round-trip (the test class P2's audit lacked, per Jim) is the deploy verification. No Settled altered (S156 intact / DEC-093 / DEC-087-088). **Companion:** #107 (the light-load *trigger*); this is the robust independent fix.
+
+---
+
 ## 2026-06-25 (S203) — feat(#98 Dynamic Residence P4b-ii): the activation flip — RESIDENCE CLOSED
 
 **Why.** The LAST #98 brick. The garden could discover (P1), admit (P2), allocate (P3/P4b-i) and seed
