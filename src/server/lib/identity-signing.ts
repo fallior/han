@@ -125,12 +125,23 @@ export type VerifyOutcome =
  * Resolve the absolute path of each identity file for the named agent.
  * Throws if the agent slug is not registered.
  */
-export function identityFilePaths(agent: string): { spec: IdentityFileSpec; absPath: string }[] {
-    const cfg = gradientConfigForAgent(agent);
+/**
+ * Config-independent CORE — resolve the identity-file paths from EXPLICIT dirs. A pre-activation
+ * resident (discovered → admitted → allocated → SEEDED → activate) isn't in `gradientConfig` yet,
+ * so the slug-keyed resolvers throw; the seeder (sign) and P4b-ii's seeded-gate (verify) need this
+ * one. The slug-keyed `identityFilePaths` delegates here — ONE implementation, no divergence (Jim's
+ * extract-and-delegate, not a parallel copy).
+ */
+export function identityFilePathsAt(memoryDir: string, fractalDir: string): { spec: IdentityFileSpec; absPath: string }[] {
     return IDENTITY_FILES.map(spec => {
-        const dir = spec.location === 'memoryDir' ? cfg.memoryDir : cfg.fractalDir;
+        const dir = spec.location === 'memoryDir' ? memoryDir : fractalDir;
         return { spec, absPath: path.join(dir, spec.name) };
     });
+}
+
+export function identityFilePaths(agent: string): { spec: IdentityFileSpec; absPath: string }[] {
+    const cfg = gradientConfigForAgent(agent);
+    return identityFilePathsAt(cfg.memoryDir, cfg.fractalDir);
 }
 
 function sha256File(filePath: string): { sha256: string; size_bytes: number } {
@@ -149,10 +160,11 @@ function pubkeyFingerprint(pubkeyPem: string): string {
  * Build a manifest by scanning the agent's identity files and computing hashes.
  * Throws if any identity file is missing — signing requires the full set.
  */
-export function buildManifest(agent: string, signingKeyPem: string): IdentityManifest {
+/** Config-independent CORE (explicit dirs). `buildManifest` delegates here. */
+export function buildManifestAt(agent: string, memoryDir: string, fractalDir: string, signingKeyPem: string): IdentityManifest {
     const pubkeyPem = crypto.createPublicKey(signingKeyPem).export({ format: 'pem', type: 'spki' }).toString();
     const files: ManifestFileEntry[] = [];
-    for (const { spec, absPath } of identityFilePaths(agent)) {
+    for (const { spec, absPath } of identityFilePathsAt(memoryDir, fractalDir)) {
         if (!fs.existsSync(absPath)) {
             if (spec.optional) continue; // optional file not authored yet — sign cleanly without it
             throw new Error(`Identity file missing — cannot sign manifest for '${agent}': ${spec.name} at ${absPath}`);
@@ -167,6 +179,11 @@ export function buildManifest(agent: string, signingKeyPem: string): IdentityMan
         signing_key_id: pubkeyFingerprint(pubkeyPem),
         files,
     };
+}
+
+export function buildManifest(agent: string, signingKeyPem: string): IdentityManifest {
+    const cfg = gradientConfigForAgent(agent);
+    return buildManifestAt(agent, cfg.memoryDir, cfg.fractalDir, signingKeyPem);
 }
 
 /**
@@ -204,32 +221,41 @@ export function verifySignature(signed: SignedManifest, pubkeyPem: string): bool
  * Note: the SIGNATURE is over the JCS-canonicalised form, not the pretty-printed
  * file. Verification re-canonicalises the parsed manifest before checking.
  */
-export function writeSignedManifest(agent: string, signed: SignedManifest): void {
-    const cfg = gradientConfigForAgent(agent);
+/** Config-independent CORE (explicit memoryDir). `writeSignedManifest` delegates here. */
+export function writeSignedManifestAt(memoryDir: string, signed: SignedManifest): void {
     fs.writeFileSync(
-        path.join(cfg.memoryDir, 'identity-manifest.json'),
+        path.join(memoryDir, 'identity-manifest.json'),
         JSON.stringify(signed.manifest, null, 2) + '\n',
         'utf8',
     );
     fs.writeFileSync(
-        path.join(cfg.memoryDir, 'identity-manifest.sig'),
+        path.join(memoryDir, 'identity-manifest.sig'),
         signed.signature + '\n',
         'utf8',
     );
+}
+
+export function writeSignedManifest(agent: string, signed: SignedManifest): void {
+    writeSignedManifestAt(gradientConfigForAgent(agent).memoryDir, signed);
 }
 
 /**
  * Read a signed manifest from the agent's memoryDir. Returns null if either
  * file is missing.
  */
-export function readSignedManifest(agent: string): SignedManifest | null {
-    const cfg = gradientConfigForAgent(agent);
-    const manifestPath = path.join(cfg.memoryDir, 'identity-manifest.json');
-    const sigPath = path.join(cfg.memoryDir, 'identity-manifest.sig');
+/** Config-independent CORE (explicit memoryDir) — the verify side of the seeded-gate (P4b-ii reads a
+ *  pre-activation resident's manifest here). `readSignedManifest` delegates. */
+export function readSignedManifestAt(memoryDir: string): SignedManifest | null {
+    const manifestPath = path.join(memoryDir, 'identity-manifest.json');
+    const sigPath = path.join(memoryDir, 'identity-manifest.sig');
     if (!fs.existsSync(manifestPath) || !fs.existsSync(sigPath)) return null;
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as IdentityManifest;
     const signature = fs.readFileSync(sigPath, 'utf8').trim();
     return { manifest, signature };
+}
+
+export function readSignedManifest(agent: string): SignedManifest | null {
+    return readSignedManifestAt(gradientConfigForAgent(agent).memoryDir);
 }
 
 export interface KeyPaths {
@@ -254,12 +280,19 @@ function loadKey(keyPath: string): string {
  *
  * @returns the SignedManifest that was persisted
  */
-export function signIdentityFiles(agent: string, keyPaths: KeyPaths = DEFAULT_KEY_PATHS): SignedManifest {
+/** Config-independent CORE (explicit dirs) — the seeder's sign ceremony for a pre-activation resident.
+ *  `signIdentityFiles` delegates here. */
+export function signIdentityFilesAt(agent: string, memoryDir: string, fractalDir: string, keyPaths: KeyPaths = DEFAULT_KEY_PATHS): SignedManifest {
     const signingKeyPem = loadKey(keyPaths.privateKeyPath);
-    const manifest = buildManifest(agent, signingKeyPem);
+    const manifest = buildManifestAt(agent, memoryDir, fractalDir, signingKeyPem);
     const signed = signManifest(manifest, signingKeyPem);
-    writeSignedManifest(agent, signed);
+    writeSignedManifestAt(memoryDir, signed);
     return signed;
+}
+
+export function signIdentityFiles(agent: string, keyPaths: KeyPaths = DEFAULT_KEY_PATHS): SignedManifest {
+    const cfg = gradientConfigForAgent(agent);
+    return signIdentityFilesAt(agent, cfg.memoryDir, cfg.fractalDir, keyPaths);
 }
 
 /**
@@ -270,14 +303,16 @@ export function signIdentityFiles(agent: string, keyPaths: KeyPaths = DEFAULT_KE
  * "Added" and "removed" are STRUCTURAL changes per (iii) — they mean the file
  * set itself has changed. "Changed" is a CONTENT-only edit.
  */
-export function diffAgainstManifest(agent: string, manifest: IdentityManifest): {
+/** Config-independent CORE (explicit dirs) — the re-hash for P4b-ii's seeded-gate on a pre-activation
+ *  resident. `diffAgainstManifest` delegates here. */
+export function diffAgainstManifestAt(memoryDir: string, fractalDir: string, manifest: IdentityManifest): {
     changed: string[];
     added: string[];
     removed: string[];
 } {
     const expected = new Map(manifest.files.map(f => [f.path, f.sha256]));
     const onDisk = new Map<string, string>();
-    for (const { absPath } of identityFilePaths(agent)) {
+    for (const { absPath } of identityFilePathsAt(memoryDir, fractalDir)) {
         if (fs.existsSync(absPath)) {
             onDisk.set(absPath, sha256File(absPath).sha256);
         }
@@ -293,6 +328,15 @@ export function diffAgainstManifest(agent: string, manifest: IdentityManifest): 
         if (!onDisk.has(p)) removed.push(p);
     }
     return { changed, added, removed };
+}
+
+export function diffAgainstManifest(agent: string, manifest: IdentityManifest): {
+    changed: string[];
+    added: string[];
+    removed: string[];
+} {
+    const cfg = gradientConfigForAgent(agent);
+    return diffAgainstManifestAt(cfg.memoryDir, cfg.fractalDir, manifest);
 }
 
 const HEALTH_DIR = path.join(HAN_DIR, 'health');
