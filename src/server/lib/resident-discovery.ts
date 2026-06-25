@@ -18,7 +18,7 @@ import { createHash, createPublicKey } from 'crypto';
 import {
     IdentityManifest, SignedManifest, ManifestFileEntry,
     signManifest, verifySignature, DEFAULT_KEY_PATHS,
-} from './identity-signing';
+} from './identity-manifest-core'; // the LEAF (no agent-registry) — keeps garden-manifest→resident-discovery cycle-free
 
 /**
  * A discovered resident's self-described IDENTITY — and ONLY identity. **F4 enforced at the type

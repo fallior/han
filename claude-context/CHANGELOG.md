@@ -7,6 +7,48 @@
 
 ---
 
+## 2026-06-25 (S203) — feat(#98 Dynamic Residence P4b-ii): the activation flip — RESIDENCE CLOSED
+
+**Why.** The LAST #98 brick. The garden could discover (P1), admit (P2), allocate (P3/P4b-i) and seed
+(the seeder) a net-new mind, but `loadResidents()` still returned only the hardcoded seed roster — a
+fully-prepared resident stayed inert. P4b-ii flips activation on: a net-new resident joins the active
+roster (R1 lifts — `gradientConfigForAgent` stops throwing) iff it has passed ALL FOUR lifecycle gates.
+The garden can now birth a mind end-to-end.
+
+**What.** `loadResidents()` (garden-manifest.ts) = `[...seed, ...activatedNetNew()]`, **memoized once
+per process** (process-stable: `AGENT_GRADIENT_CONFIG` snapshots `loadResidents()` at module-eval while
+`agent-scheduler` reads it live — a live re-scan could surface a mid-process-seeded resident to the
+scheduler but not the config snapshot → crash; a newly-seeded resident activates on the next restart,
+the deploy bounce). `activatedNetNew()` = discovered ∧ admitted ∧ allocated (`allocationFor`) ∧ **seeded**
+(`isSeededAt`). `fragmentToManifest` maps IDENTITY from the discovered fragment, PRIVILEGE
+(surfaces/memoryDir/port/runsSupervisorCycle) from the operator allocation — never self-claimed (the F4
+line); seed roster stays first + in declaration order (antiphase), net-new appends in discovery order.
+Root-special **fail-loud** (agent-registry): a roster agent without allocation throws rather than silently
+resolve jim-at-root to the wrong derived `/jim` (replaces the P4b-i `?? merged.memoryDir` bridge).
+
+**The leaf module (Fork-1 (b), Darron's call — delete the cycle, don't document it).** Wiring the
+seeded-check into `loadResidents` would close an import cycle (`garden-manifest → identity-signing →
+agent-registry → garden-manifest`). NEW `lib/identity-manifest-core.ts` holds the config-independent
+half — the `*At` cores, `signManifest`/`verifySignature`, the manifest types, `IDENTITY_FILES`, the key
+paths, and the new **`isSeededAt(memoryDir, fractalDir)`** (`readSignedManifestAt` ∧ verify vs the FIXED
+garden pubkey ∧ `diffAgainstManifestAt` with `changed===0 && removed===0` ONLY — growth-by-living can't
+un-seed, DEC-085). It imports NO `agent-registry`, so `garden-manifest`/`resident-discovery`/
+`resident-seeding` reach it without a path back — the cycle is **structurally impossible**, not an
+invariant. `identity-signing.ts` is now the slug-keyed wrappers + verify-and-resign gate and
+`export *`s the leaf, so every existing importer is byte-unaffected.
+
+**Gate.** `scripts/test-p4b-activation.ts` (NEW) 15/15 — inert at each missing precondition, ACTIVE only
+when all four hold, privilege-from-allocation, seed order preserved, **tamper-un-seeds**,
+**de-allocate-revokes** (the never-wakeable AND never-revocable mind both structurally impossible).
+`verify-identity-files` leo+jim EXIT 0 (the leaf-split is byte-equivalent — real manifests verify through
+the delegating wrappers). tsc 0-new (11 baseline, none in the 7 files). Full regression suite (seeder /
+resident-admission / resident-discovery / gradient-config-derive / allocation-seam / spoke-lifecycle /
+human-responder-collapse) EXIT 0. Module-eval smoke: `loadResidents`=[leo,jim,tenshi,casey],
+`schedulingAgents`=[leo,jim], jim-at-root resolves, no cycle crash, zero-behaviour today. Jim diff-audit
+(`mqsztgbc`) GREEN by his own hand (chased a module-eval scare to ground — a require()-of-ESM harness
+artifact, not a real cycle). No Settled altered (DEC-083 byte-equivalent / DEC-081 / DEC-068-069 /
+DEC-085). **#98 Dynamic Residence is CLOSED** (P0 → P4b-ii): discover → admit → allocate → seed → activate.
+
 ## 2026-06-25 (S203) — feat(#98 Dynamic Residence): the seeder — the garden's genesis engine
 
 **Why.** The penultimate residence brick. For the garden to *birth* a net-new mind (native or immigrant), it must write the five DEC-083 identity files that make a self and garden-sign their manifest — but at seed time the resident is allocated yet **not activated** (not in `loadResidents`/`AGENT_GRADIENT_CONFIG` until P4b-ii), so `gradientConfigForAgent(newSlug)` *throws*. The signing layer therefore needs a **config-independent** path. That layer is DEC-083 protected, so the work was design-first (Jim plan-audit) then build-held (Jim diff-audit), never built-ahead.

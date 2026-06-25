@@ -26,6 +26,13 @@
 
 import { homedir } from 'os';
 import { join } from 'path';
+// P4b-ii activation gate. Both imports reach NO agent-registry (resident-discovery imports the LEAF
+// identity-manifest-core, not identity-signing) — so `loadResidents`'s seeded-check closes no import
+// cycle on the seam everything reads (Jim's Fork-1, Darron's call (b): delete the fragility, not
+// document it).
+import { isSeededAt } from './identity-manifest-core';
+import { discoveredResidents, admittedResidents } from './resident-discovery';
+import type { ResidentFragment } from './resident-discovery';
 
 /** A model preference ladder: most-capable first, graceful degradation after. */
 export type ModelLadder = string[];
@@ -366,11 +373,84 @@ export const GARDEN_MANIFEST: GardenManifest = {
  * lookups (model ladder, transport, `runsSupervisorCycle`) are deliberately NOT routed here — they
  * belong to the operator-authored **allocation** source (P3), keeping identity-discovered separate
  * from privilege-allocated. The by-slug *identity* lookups route through this seam in P1, when
- * discovery lands. (R1: a net-new discovered resident stays inert — not surfaced to any
- * throwing consumer, scheduler + gradient included — until P4 derives its gradient config.)
+ * discovery lands.
+ *
+ * **P4b-ii — the activation flip (the LAST #98 brick).** `loadResidents = seed ∪ activatedNetNew()`.
+ * A net-new resident joins the ACTIVE roster — surfaced to every consumer, R1 lifted
+ * (`AGENT_GRADIENT_CONFIG = loadResidents().map(...)`, so `gradientConfigForAgent` stops throwing) —
+ * iff it passes ALL FOUR lifecycle gates: discovered (P1) ∧ admitted (P2) ∧ allocated (`allocationFor`)
+ * ∧ seeded (a garden-signed identity-manifest over its genesis files, intact — `isSeededAt`). Until all
+ * four hold it stays inert: the never-wakeable mind is structurally impossible.
+ *
+ * **Process-stable (Jim's Fork 2).** The union is computed ONCE per process. `AGENT_GRADIENT_CONFIG`
+ * snapshots `loadResidents()` at agent-registry's module-eval, while `agent-scheduler` reads it live —
+ * a live re-scan could surface a mid-process-seeded resident to the scheduler but not the config
+ * snapshot → `gradientConfigForAgent` throws on a scheduled slug. Memoizing makes every consumer see one
+ * stable roster for the process's life; a newly-seeded resident activates on the next restart (the
+ * deploy bounce — the established activation trigger, identical to how the seed roster itself loads).
+ *
+ * **Note (Jim):** because `AGENT_GRADIENT_CONFIG`'s eval calls `loadResidents()`, the seeded-check's
+ * filesystem reads (manifest + identity files) now run at module-eval — acceptable, consistent with
+ * P1's discovery fs reads, bounded (a handful of residents). The check uses ONLY the config-independent
+ * leaf — no path back to agent-registry, so no import cycle.
+ *
+ * ⚠ **Order is load-bearing.** `schedulingAgents()` derives the N-body antiphase index from array
+ * position, so the SEED agents keep their declaration order (they come first, unchanged); net-new
+ * residents append after, in discovery order.
  */
+const SEED_SLUGS = new Set(GARDEN_MANIFEST.agents.map((a) => a.slug));
+
+/** Map a fully-qualified net-new resident (its discovered identity fragment + its operator allocation)
+ *  to an `AgentManifest`. The IDENTITY half comes from the fragment (slug/displayName/pronounObj/
+ *  identitySection); the PRIVILEGE half (surfaces/memoryDir/port/runsSupervisorCycle) from the
+ *  allocation — never self-claimed (the F4 line). `conversationRole` defaults to the slug. */
+function fragmentToManifest(f: ResidentFragment, alloc: AgentAllocation): AgentManifest {
+    return {
+        slug: f.slug,
+        displayName: f.displayName,
+        pronounObj: f.pronounObj,
+        identitySection: f.identitySection,
+        active: true,
+        surfaces: alloc.surfaces,
+        memoryDir: alloc.memoryDir,
+        port: alloc.port,
+        runsSupervisorCycle: alloc.runsSupervisorCycle,
+    };
+}
+
+/** The net-new residents that pass all four lifecycle gates (the seed roster is excluded — it is active
+ *  by construction). `fractalDir` is uniform `memory/fractal/<slug>`, matching
+ *  `agent-registry.deriveGradientConfig`. */
+function activatedNetNew(): AgentManifest[] {
+    const out: AgentManifest[] = [];
+    const admitted = new Set(admittedResidents().map((f) => f.slug)); // discovered ∧ admitted (P2)
+    for (const f of discoveredResidents()) {
+        if (SEED_SLUGS.has(f.slug)) continue;            // the seed roster is already active
+        if (!admitted.has(f.slug)) continue;             // admitted (garden-signed AND unchanged)
+        const alloc = allocationFor(f.slug);
+        if (!alloc?.memoryDir) continue;                 // allocated (operator-granted privilege)
+        const fractalDir = join(MEMORY_ROOT, 'fractal', f.slug);
+        if (!isSeededAt(alloc.memoryDir, fractalDir)) continue; // seeded (genesis manifest intact)
+        out.push(fragmentToManifest(f, alloc));
+    }
+    return out;
+}
+
+let _activeResidents: AgentManifest[] | null = null;
+
 export function loadResidents(): AgentManifest[] {
-    return GARDEN_MANIFEST.agents;
+    if (_activeResidents === null) {
+        _activeResidents = [...GARDEN_MANIFEST.agents, ...activatedNetNew()];
+    }
+    return _activeResidents;
+}
+
+/** Test-only: drop the memoized active-resident roster so the next `loadResidents()` recomputes the
+ *  seed ∪ activation union. Production never calls this (the roster is process-stable — a newly-seeded
+ *  resident activates on restart); the synthetic-resident lifecycle test uses it to re-evaluate the
+ *  gates after staging/removing fixtures within one process. */
+export function __resetResidentCacheForTests(): void {
+    _activeResidents = null;
 }
 
 /**
@@ -448,6 +528,18 @@ const AGENT_ALLOCATION: Record<string, AgentAllocation> = {
 
 export function allocationFor(slug: string): AgentAllocation | undefined {
     return AGENT_ALLOCATION[slug];
+}
+
+/** Test-only: register/drop an allocation for a synthetic slug, so the P4b-ii synthetic-resident
+ *  lifecycle test can exercise the allocate→seed→activate path without editing the operator-authored
+ *  AGENT_ALLOCATION literal. These MUTATE the table directly (so `activatedNetNew`'s live `allocationFor`
+ *  sees it) and are paired with `__resetResidentCacheForTests`; production never calls them, and
+ *  `allocationFor` itself is byte-unchanged. The test deletes its entry on teardown. */
+export function __setTestAllocationForTests(slug: string, alloc: AgentAllocation): void {
+    AGENT_ALLOCATION[slug] = alloc;
+}
+export function __deleteTestAllocationForTests(slug: string): void {
+    delete AGENT_ALLOCATION[slug];
 }
 
 /**

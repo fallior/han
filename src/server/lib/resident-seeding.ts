@@ -17,8 +17,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { allocationFor } from './garden-manifest';
-import { signIdentityFilesAt, DEFAULT_KEY_PATHS } from './identity-signing';
-import type { SignedManifest, KeyPaths } from './identity-signing';
+import { signIdentityFilesAt, DEFAULT_KEY_PATHS } from './identity-manifest-core'; // the LEAF (config-independent)
+import type { SignedManifest, KeyPaths } from './identity-manifest-core';
 
 const HAN_DIR = path.join(os.homedir(), '.han');
 

@@ -174,10 +174,23 @@ export const AGENT_GRADIENT_CONFIG: Record<string, AgentGradientConfig> = Object
         const base = deriveGradientConfig(a.slug, a.displayName);
         const override = GRADIENT_OVERRIDES[a.slug];
         const merged = override ? { ...base, ...override } : base;
-        // R2 (P4b-i): memoryDir's SOURCE is the operator-authored allocation table; the accessor
-        // gradientConfigForAgent(slug).memoryDir stays stable (it sources from here). The `??` keeps a
-        // discovered-but-not-yet-allocated resident's config resolvable (derived `<slug>`) until P4b-ii.
-        const memoryDir = allocationFor(a.slug)?.memoryDir ?? merged.memoryDir;
+        // R2 (P4b-i) + P4b-ii fail-loud (Jim's note): memoryDir's SOURCE is the operator-authored
+        // allocation table; gradientConfigForAgent(slug).memoryDir stays the stable accessor (it sources
+        // here). At P4b-ii EVERY agent in loadResidents() is allocated by precondition — the seed roster
+        // is all in AGENT_ALLOCATION, and a net-new resident's `allocated` is an activation gate — so a
+        // missing allocation here is a real misconfiguration. FAIL LOUD rather than silently fall back to
+        // the derived `<slug>` path (the old P4b-i `?? merged.memoryDir` bridge for discovered-but-
+        // unallocated residents): a root-special agent like jim-at-root would otherwise resolve to the
+        // WRONG ~/.han/memory/jim (#91). Activation closes the bridge.
+        const memoryDir = allocationFor(a.slug)?.memoryDir;
+        if (!memoryDir) {
+            throw new Error(
+                `Agent '${a.slug}' is in the active roster (loadResidents) but has no allocation.memoryDir. ` +
+                `Activation requires allocation (the F4 no-auto-privilege gate); refusing to silently fall back ` +
+                `to the derived path '${merged.memoryDir}' (a root-special agent like jim would resolve to the ` +
+                `WRONG directory). Add an AGENT_ALLOCATION entry for '${a.slug}' in lib/garden-manifest.ts.`,
+            );
+        }
         return [a.slug, { ...merged, memoryDir }];
     }),
 );
