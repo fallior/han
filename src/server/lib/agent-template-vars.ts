@@ -14,7 +14,7 @@
  */
 
 import { homedir } from 'os';
-import { GARDEN_MANIFEST } from './garden-manifest';
+import { GARDEN_MANIFEST, allocationFor } from './garden-manifest';
 import { gradientConfigForAgent } from './agent-registry';
 
 /** The full template-var map for one agent surface — every ${VAR} the template needs. */
@@ -34,6 +34,7 @@ export function agentTemplateVars(slug: string, surface = 'session'): Record<str
     }
 
     const cfg = gradientConfigForAgent(slug);
+    const allocated = allocationFor(slug); // C-P3a (P4b-i): port is allocation-sourced, not roster-sourced
     const { project, user } = GARDEN_MANIFEST;
 
     // Per-seat swap prefix: this surface's, else the session seat's, else the agnostic
@@ -55,7 +56,7 @@ export function agentTemplateVars(slug: string, surface = 'session'): Record<str
     return {
         AGENT_NAME: a.displayName,
         AGENT_SLUG: a.slug,
-        AGENT_PORT: a.port != null ? String(a.port) : '',
+        AGENT_PORT: allocated?.port != null ? String(allocated.port) : '',
         AGENT_WORKING_DIR: workingDir,
         AGENT_MEMORY_DIR: cfg.memoryDir,
         AGENT_FRACTAL_DIR: cfg.fractalDir,

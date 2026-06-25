@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-06-25 (S202) — feat(#98 Dynamic Residence P4b-i): the allocation / memory-sovereignty seam (the F4 line)
+
+**Why.** The last residence brick's first half. Privilege — `port`, the supervisor-cycle flag, and (R2) `memoryDir` — must live in an **operator-authored allocation source separate from the discovered identity roster**, so discovery never grants privilege (the no-auto-privilege F4 line) and per-resident memory access-control becomes tractable (the #102 quorum-resurrection foundation). The P2 collapse made `memoryDir` a 7-consumer accessor (incl. the seeded-gate), so R2 moves the *source* under the stable accessor rather than rewriting consumers.
+
+**What.** `AGENT_ALLOCATION` (garden-manifest.ts) — the operator-authored, literal-slug-keyed allocation table; `allocationFor(slug) = AGENT_ALLOCATION[slug]` (a roster resident **absent** from the table → `undefined` → no privilege = the structural gate). `memoryDir` (R2) relocated here as the per-agent allocated field — **jim's root is jim's explicit value, no `=== 'jim'` branch**; `port`/`surfaces`/`runsSupervisorCycle` ride the roster via `allocationFromRoster` (single-source, no drift). `agent-registry` sources `memoryDir` from `allocationFor` under the **stable** `gradientConfigForAgent().memoryDir` accessor (all 7 consumers untouched, incl. `identity-signing` the seeded-gate + `human-responder`). C-P3a: `agent-template-vars` `AGENT_PORT` reads `allocationFor(slug).port`. jim's `memoryDir` removed from `GRADIENT_OVERRIDES`.
+
+**Gate.** `test-allocation-seam` (78/78, + the R2 memoryDir assertions) + `test-gradient-config-derive` (**`gcfg.memoryDir` byte-identical for the four, jim-at-root above all** — the byte-identity gate) + `test-human-responder-collapse` + `test-spoke-lifecycle` — all EXIT 0. tsc 0-new (11 baseline). Jim diff-audit (`mqss2oz5`) GREEN by his own hand (F4 gate structural, jim-at-root explicit, stable accessor holds). No Settled altered (DEC-081/068/069/083). Design fork (full literal-relocation of port/surfaces + dropping `AgentManifest.port`) = named follow-on, shipped staged. **Next:** the seeder (`seed-resident.ts`) → P4b-ii (the activation flip) → residence closed.
+
 ## 2026-06-25 (S202) — feat(warm-dispatch P2): the human-responder collapse — twin killed, the wedge fixed at root
 
 **Why.** `leo-human.ts` + `jim-human.ts` were per-agent twins (a flat DEC-081/S176 violation — born 2026-03-06, pre-law, carried across the #66 migration unretired) that bypassed `dispatchToSpoke`, so the human seats never got the cycle's ctx self-clear → they compacted at the harness ceiling (the S200 wedge root) and answered hollow. P2 collapses them and routes through the P1 monitor.

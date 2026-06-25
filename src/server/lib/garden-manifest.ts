@@ -25,6 +25,7 @@
  */
 
 import { homedir } from 'os';
+import { join } from 'path';
 
 /** A model preference ladder: most-capable first, graceful degradation after. */
 export type ModelLadder = string[];
@@ -391,6 +392,13 @@ export interface AgentAllocation {
      *  operator-authored allocation STRUCTURE at P4 (alongside `memoryDir`/R2). Until then `port`
      *  stays roster-sourced (zero behaviour). */
     port?: number;
+    /** The agent's memory directory — R2 (P4b-i). The **operator-allocated** home for per-resident
+     *  memory, kept in the privilege half (never the self-declared identity half) so per-resident
+     *  memory access-control is tractable (Darron, 2026-06-24). jim is root-special (`~/.han/memory`,
+     *  the #91 path); everyone else is `~/.han/memory/<slug>`. Migrated here from the agent-registry
+     *  `GRADIENT_OVERRIDES`; `gradientConfigForAgent(slug).memoryDir` stays the stable accessor that
+     *  sources from here (all 7 consumers untouched — incl. the seeded-gate at identity-signing.ts). */
+    memoryDir?: string;
 }
 
 /**
@@ -412,10 +420,34 @@ export interface AgentAllocation {
  *
  * Returns `undefined` for an unknown slug (the accessors fall back exactly as before — null/[]/false).
  */
+const MEMORY_ROOT = join(homedir(), '.han', 'memory');
+
+/** The roster-sourced policy half for `slug` (surfaces/runsSupervisorCycle/port) — single-sourced from
+ *  the manifest so there's no dual-source drift. The ALLOCATION table layers `memoryDir` (R2) on top. */
+function allocationFromRoster(slug: string): Omit<AgentAllocation, 'memoryDir'> {
+    const a = GARDEN_MANIFEST.agents.find((x) => x.slug === slug);
+    return { surfaces: a?.surfaces ?? [], runsSupervisorCycle: a?.runsSupervisorCycle, port: a?.port };
+}
+
+/**
+ * The operator-authored **ALLOCATION table** (P4b-i — the F4 memory-sovereignty source). Privilege is
+ * ALLOCATED here, explicitly, not discovered: a resident present in the roster but ABSENT from this
+ * table gets `allocationFor → undefined → no privilege` (the no-auto-privilege gate). The keys are the
+ * operator's grant list; a fork ships an empty roster + edits these example entries. `memoryDir` (R2)
+ * is the relocated allocated field — jim's root-special path is jim's explicit value here (no `=== 'jim'`
+ * branch). `surfaces`/`runsSupervisorCycle`/`port` reference the roster for now (single-source; the full
+ * literal-relocation of those is a flagged follow-on — P4b-i's load-bearing job is the seam + R2 + C-P3a,
+ * byte-identical). Zero-behaviour: every returned field matches the P3 no-op + the old memoryDir source.
+ */
+const AGENT_ALLOCATION: Record<string, AgentAllocation> = {
+    leo:    { ...allocationFromRoster('leo'),    memoryDir: join(MEMORY_ROOT, 'leo') },
+    jim:    { ...allocationFromRoster('jim'),    memoryDir: MEMORY_ROOT },
+    tenshi: { ...allocationFromRoster('tenshi'), memoryDir: join(MEMORY_ROOT, 'tenshi') },
+    casey:  { ...allocationFromRoster('casey'),  memoryDir: join(MEMORY_ROOT, 'casey') },
+};
+
 export function allocationFor(slug: string): AgentAllocation | undefined {
-    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
-    if (!agent) return undefined;
-    return { surfaces: agent.surfaces, runsSupervisorCycle: agent.runsSupervisorCycle, port: agent.port };
+    return AGENT_ALLOCATION[slug];
 }
 
 /**

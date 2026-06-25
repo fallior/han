@@ -27,7 +27,7 @@
 
 import * as os from 'os';
 import * as path from 'path';
-import { loadResidents } from './garden-manifest';
+import { loadResidents, allocationFor } from './garden-manifest';
 
 const HOME = os.homedir();
 const HAN_DIR = path.join(HOME, '.han');
@@ -136,13 +136,14 @@ function deriveGradientConfig(slug: string, displayName: string): AgentGradientC
  * second hand-list). Merged over `deriveGradientConfig` (override wins). jim is a HEAVY override:
  * memory at **ROOT** `~/.han/memory` (NOT `/jim` — the #91 jim-at-root path; uniform derivation would
  * break it), `sessions` sourceDir, **date-based** source functions, project-memory + failures. leo
- * carries two prose fields. tenshi/casey: none (pure-uniform). NOTE (P4b): `memoryDir` (jim's root,
- * R2) + `port` (C-P3a) migrate to the operator-authored ALLOCATION source at P4b; until then jim's
- * root memoryDir lives here as the override.
+ * carries two prose fields. tenshi/casey: none (pure-uniform). NOTE (P4b-i, DONE): `memoryDir` (jim's root, R2)
+ * MIGRATED to the operator-authored ALLOCATION source (`allocationFor(slug).memoryDir`, garden-manifest)
+ * — it no longer lives here; `gradientConfigForAgent(slug).memoryDir` sources from there under the stable
+ * accessor (all 7 consumers untouched). `port` (C-P3a) likewise reroutes its consumer to the allocation.
+ * jim's `sourceDir`/date-functions/flags remain the irreducible override.
  */
 const GRADIENT_OVERRIDES: Record<string, Partial<AgentGradientConfig>> = {
     jim: {
-        memoryDir: path.join(HAN_DIR, 'memory'),
         sourceDir: path.join(HAN_DIR, 'memory', 'sessions'),
         sourceFileFilter: (f) => {
             const m = f.match(/^(\d{4}-\d{2}-\d{2})(-c0)?\.md$/);
@@ -172,7 +173,12 @@ export const AGENT_GRADIENT_CONFIG: Record<string, AgentGradientConfig> = Object
     loadResidents().map((a) => {
         const base = deriveGradientConfig(a.slug, a.displayName);
         const override = GRADIENT_OVERRIDES[a.slug];
-        return [a.slug, override ? { ...base, ...override } : base];
+        const merged = override ? { ...base, ...override } : base;
+        // R2 (P4b-i): memoryDir's SOURCE is the operator-authored allocation table; the accessor
+        // gradientConfigForAgent(slug).memoryDir stays stable (it sources from here). The `??` keeps a
+        // discovered-but-not-yet-allocated resident's config resolvable (derived `<slug>`) until P4b-ii.
+        const memoryDir = allocationFor(a.slug)?.memoryDir ?? merged.memoryDir;
+        return [a.slug, { ...merged, memoryDir }];
     }),
 );
 

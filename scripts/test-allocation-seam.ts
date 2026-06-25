@@ -22,6 +22,9 @@ import {
     GARDEN_MANIFEST, allocationFor,
     manifestModelHead, manifestModelLadder, manifestTransport, runsSupervisorCycle,
 } from '../src/server/lib/garden-manifest';
+import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
+import { homedir } from 'os';
+import { join } from 'path';
 
 let failures = 0;
 const ok = (cond: boolean, msg: string) => { if (cond) { console.log(`  ✓ ${msg}`); } else { console.error(`  ✗ ${msg}`); failures++; } };
@@ -36,6 +39,17 @@ for (const agent of GARDEN_MANIFEST.agents) {
     ok(alloc?.runsSupervisorCycle === agent.runsSupervisorCycle, `  '${agent.slug}'.runsSupervisorCycle === manifest flag`);
 }
 ok(allocationFor('nobody') === undefined, `allocationFor('nobody') === undefined (unknown slug)`);
+
+console.log('[1b] R2 (P4b-i): memoryDir is allocation-sourced; gradientConfigForAgent().memoryDir stays the stable accessor (byte-identical)');
+const MEM = join(homedir(), '.han', 'memory');
+const expectedMemoryDir: Record<string, string> = {
+    leo: join(MEM, 'leo'), jim: MEM, tenshi: join(MEM, 'tenshi'), casey: join(MEM, 'casey'),
+};
+for (const agent of GARDEN_MANIFEST.agents) {
+    const exp = expectedMemoryDir[agent.slug];
+    ok(allocationFor(agent.slug)?.memoryDir === exp, `  allocationFor('${agent.slug}').memoryDir === ${exp}${agent.slug === 'jim' ? '  (jim root-special, #91)' : ''}`);
+    ok(gradientConfigForAgent(agent.slug).memoryDir === exp, `  gradientConfigForAgent('${agent.slug}').memoryDir === allocation memoryDir (stable accessor sources from the allocation)`);
+}
 
 console.log('[2] the four accessors are byte-identical to the manifest, for every agent × surface');
 for (const agent of GARDEN_MANIFEST.agents) {
