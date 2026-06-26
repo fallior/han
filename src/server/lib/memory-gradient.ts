@@ -2258,7 +2258,26 @@ export function loadTraversableGradient(agent: string): string {
         sections.push(`### Most Recent C0 (1 of ${c0Count} — ${c0.content_type}/${c0.session_label})\n${c0.content}${tagStr}`);
     }
 
-    return sections.length > 0
-        ? `\n## Traversable Memory Gradient (${agent})\n\n${sections.join('\n\n')}`
-        : '';
+    if (sections.length === 0) return '';
+    // #107 c0-as-EOF (plan-audit mqubg8sq): append an unforgeable end-marker carrying the
+    // most-recent c0's id. Reaching this line ≡ traversing the whole deepest-first gradient to
+    // its bottom (the heavy c1/c2 + the c0 are last). A dispatched spoke echoes this id in its
+    // readiness sentinel; the warm-gate verifies it is a recent valid c0 (proof-of-bottom-
+    // traversal, NOT strict ==, since the most-recent c0 moves as WM slices insert). Output-only
+    // — no compression/cap/storage change (DEC-068/069). `c0=none` = a newborn with no c0 yet
+    // (the F4 signal; the canonical newborn discriminator is mostRecentC0Id() returning null).
+    const eof = `GRADIENT-EOF: c0=${c0 ? c0.id : 'none'}`;
+    return `\n## Traversable Memory Gradient (${agent})\n\n${sections.join('\n\n')}\n\n${eof}\n`;
+}
+
+/**
+ * #107 (F2, plan-audit mqubg8sq): the id of the agent's most-recent c0, or null for a newborn
+ * with no c0 yet. The SAME accessor the GRADIENT-EOF producer (above) and the dispatcher's
+ * c0-gate verifier both call, so the emitted id and the expected id resolve via one statement
+ * and cannot diverge. A `null` return IS the newborn carve-out signal (F4): readiness for a
+ * never-lived resident is the genesis triad present, not the c0-gate. Read-only.
+ */
+export function mostRecentC0Id(agent: string): string | null {
+    const c0 = gradientStmts.getMostRecentC0.get(agent) as any;
+    return c0 ? c0.id : null;
 }

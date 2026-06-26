@@ -9,6 +9,13 @@
 
 ---
 
+## 2026-06-26 (S204) — feat(#107 c0-spine, code-side slice): GRADIENT-EOF marker + mostRecentC0Id accessor + hook surface-gate
+
+The F5-safe first slice of the warm-load fix (plan-audit `mqubg8sq`, diff-audit GREEN). Harmless-additive — the gate is NOT live yet (verifier + the template consumer await the gatekeeper phase).
+- **`memory-gradient.ts` (DEC-068/069, OUTPUT-ONLY):** `loadTraversableGradient` appends `GRADIENT-EOF: c0=<id>` (the unforgeable proof-of-bottom-traversal landmark; `c0=none` for a newborn). NEW export `mostRecentC0Id(slug)` — the F2 shared accessor the producer + the future verifier both resolve through (can't diverge by construction); `null` = the F4 newborn discriminator.
+- **`src/hooks/welcome-back-handover.sh` (P1b):** surface-gate — the handover pointer fires only for the interactive seat (`AGENT_SURFACE=session`/unset), suppressed on dispatched spokes (the accelerant leak). **Caveat (Jim's diff-audit):** fail-OPEN on an *unset* surface (defaults to session) → the leak is only closed as reliably as `AGENT_SURFACE` reaches the hook — couple with **fix-2** (AGENT_SURFACE→hook propagation) + a live dispatched-spoke suppression test before trusting it closed.
+- *Verified: tsc 11-baseline/0-new; marker matches `mostRecentC0Id` exactly; newborn→null. Deferred (gatekeeper/F5): the spoke-consumer (template step-10), the verifier-flip (with proof-of-traversal, not strict ==), P2 reframe + Hall-of-Records principle.*
+
 ## 2026-06-26 (S204) — docs(living-docs sweep D+E + Q5): signpost layer-map, stated convention, archive early docs, Robin-Hood danger-banners
 
 - **Batch D** — `ecosystem-map.md` (the orientation layer): added the **layer-map** (Decisions/Config/State/History/Orientation → canonical home) + referencing-vs-archival classification (also fixed a pre-existing "step 5"→"step 4" wake-protocol reference). `living-docs-sweep-plan.md`: **stated the `status:`/`last-verified` frontmatter convention** as the anti-drift rule (Jim's 3-clause banner-sufficiency test), flagged promote-to-DEC.
