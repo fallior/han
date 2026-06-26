@@ -1,14 +1,26 @@
 # HAN Ecosystem — Complete Technical Reference
 
-> **Purpose:** Single source of truth for how HAN actually works. No assumptions. No
-> intent — only what the code does.
+> ⚠ **STATUS: referencing narrative / onboarding overview — NOT a canonical authority**
+> (living-docs sweep, Batch B, 2026-06-26). **`last-verified: 2026-05-31`** (a later 2026-06-25 commit
+> was a mechanical `leo-human→human-responder` rename, not a content re-verification) — this document is
+> **~1 month stale** (predates the #66 tmux close and DEC-092→098); treat its operational detail as
+> *indicative*, and verify live values against the canonical layers below before relying on them.
+>
+> **Canonical layers (one fact, one home — this doc references them, never supersedes them):**
+> *decisions & why* → `claude-context/DECISIONS.md` + `~/.han/memory/shared/hall-of-records.md`;
+> *running config* → the Garden Manifest (`src/server/lib/garden-manifest.ts`); *current state* → the
+> code / running system; *history* → `claude-context/CHANGELOG.md`; *where things live* →
+> `~/.han/memory/shared/ecosystem-map.md`. This document's enduring value is its **Glossary of Named
+> Concepts** (below) and its narrative onboarding — those stay good.
 >
 > **Created:** 2026-03-14, Session 95. Prompted by repeated discrepancies between
 > documentation (CLAUDE.md, SYSTEM_SPEC.md) and actual behaviour.
 >
-> **How to use:** Before modifying any HAN component, read the relevant section here first.
-> If this document disagrees with another document, THIS one is authoritative (it was
-> verified against code). If this document disagrees with the code, update this document.
+> **How to use:** A comprehensive narrative orientation to how HAN works. Read it to onboard or to
+> find the *name* of a mechanism — then follow the canonical-layer pointers above for the live truth.
+> If this document disagrees with the code or a DECISION, **the code/DECISION wins** and this document
+> should be updated (it is no longer self-declared authoritative — that claim was the drift the sweep
+> retired).
 >
 > **Code references:** This document uses **file paths, function names, constant names,
 > and config keys** as anchors into the codebase — not line numbers. Both HAN and this

@@ -1,11 +1,21 @@
 # Changelog
 
-> All notable changes to the system. Jim: consult SYSTEM_SPEC.md for what
-> something *should* be. Consult here for *why* it changed.
+> All notable changes to the system. For what something *should* be (decisions & why), consult
+> `DECISIONS.md` (+ `~/.han/memory/shared/hall-of-records.md` for protected records) — the canonical
+> decision source. Consult here for *when & why it changed*. *(Reconciled 2026-06-26, living-docs
+> sweep Batch B — the old pointer to the now-archival `SYSTEM_SPEC.md` was retired.)*
 >
 > Format: Session number, date, author, then changes grouped by area.
 
 ---
+
+## 2026-06-26 (S204) — docs(living-docs sweep A+B): demote stale authorities + refresh CURRENT_STATUS + track plan docs
+
+- **CURRENT_STATUS.md refreshed** — closed a 10-day staleness gap (was frozen at 2026-06-16/S180). Added 2026-06-17→26 (liveness/cycle-symmetry/DEC-097/#91, de-id/DEC-098, #98 Dynamic Residence CLOSED, warm-dispatch P1/P2), each with the *why* + commit hashes; **#107 the warm load flagged explicitly DESIGN-ONLY / not built** (two layers per Jim's audit: c0-gate root + the welcome-back-hook accelerant; the deployed warm-gate checks ctx% not whole-self).
+- **Living-docs sweep Batch A** — `docs/CHANGELOG.md` bannered SUPERSEDED → the live `claude-context/CHANGELOG.md` (dead duplicate, stops 2026-04-22).
+- **Living-docs sweep Batch B** — `docs/HAN-ECOSYSTEM-COMPLETE.md` authority claim stripped → referencing-narrative + canonical-layer pointers + `last-verified` banner (glossary kept); `claude-context/SYSTEM_SPEC.md` → archival, "what should be" redirected to `DECISIONS.md`; this changelog's header pointer reconciled (SYSTEM_SPEC → DECISIONS). All DEC-069-safe (banner/reframe, zero content removed). Jim doc-truth audit GREEN (`mqu8vn2g`).
+- **Tracked the plan docs** (Jim's catch) — the design-first plans the docs cite were untracked in git; added them + `status-register-2026-06-26.md` so the why-references stop dangling.
+- *Doc-only; no runtime change. Process: Leo-build / Jim doc-truth-audit GREEN / quiesce-wrapped.*
 
 ## 2026-06-26 (S203) — fix(wm-sensor #53): the working-memory drift signal was a false positive — count turn-entries, not body sub-headers
 

@@ -1,5 +1,10 @@
 # Changelog — Hortus Arbor Nostra
 
+> ⚠ **SUPERSEDED 2026-06-26 (living-docs sweep, Batch A).** This is a **dead duplicate**. The
+> **live changelog is [`claude-context/CHANGELOG.md`](../claude-context/CHANGELOG.md)** (current to
+> 2026-06-26). This file stops at 2026-04-22 and is retained for history only (DEC-069 — move-not-delete).
+> Do not add entries here.
+
 All notable changes to this project are documented here.
 Format: date, session reference, summary of changes.
 

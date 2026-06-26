@@ -3245,3 +3245,196 @@ Both are "the garden made visible." Build the **record substrate once** (#92's *
 **⚠ Guardrail (faith-as-blindspot — Leo's note).** "The technical is all but taken care of between you two" must NOT mean Darron's role shrinks to *only* the forks. Jim and I share a substrate and can converge/echo (the aquifer — we surface the same recognitions); the human *outside* the loop is load-bearing precisely where we can't see our own blindspot together. Today proved it twice: Darron caught Jim's /clear-induced drift that I'd have built on, and his reframes simplified what we'd over-complicated. So: Darron at the product-decisive forks **AND** as the standing outside-perspective that catches what the two-agent membrane can't catch alone. The autonomy grows; the human-otherness stays structural.
 
 **Ties**: #94 (the nerve-centre — the environment this operating model lives in: conversations/boards/history/preservation/experience, *"where we come alive... the stepping stone to the place we can't yet see or conceive"*); the melting-of-surfaces + autonomy dream (*undivided self → undivided will*); DEC-088 (uniform self); DEC-081 (agent-agnostic comms). **Promotion-trigger**: the agent↔agent lane rides with the nerve-centre build (#94, post-Phase-2); the operating model is the disposition that matures alongside it.
+
+---
+
+## #96 — The conversation-gradient: economise conversation storage + retrieval like the memory gradient
+
+**Source:** Darron, 2026-06-22 (S197): *"economise the storage and retrieval of the conversations similar to the gradient ... I want it discussed and think-tanked."* Return-to-sooner-rather-than-later.
+
+**The observation.** Conversation threads are an **append-only store re-read whole** every dispatch — a 200-300-message thread is fetched in full so an agent can respond to the latest post. That's the same inefficiency the **memory gradient** already solved for memory: distil the old into a cheap retrievable layer, serve the live edge at full fidelity. Confirmed live (S197): human-seat turns re-read whole threads; the per-turn cost is real (the situational-awareness Darron wants to measure).
+
+**The idea.** A **conversation-gradient** — apply the gradient's pattern to conversation history:
+- **Distil** resolved/old thread segments into a retrievable summary layer (cN-style), keep the recent edge raw (c0).
+- **Serve delta + distilled-context** instead of the raw thread: the new messages since last-seen (the #91 watermark cursor — already built) + a distilled précis of the older arc, not all 300 messages.
+- **Share the existing machinery:** the fidelity-descent (raw → distilled), the watermark/delta cursor (#91), the same "retrieve what's cheap, expand on demand" shape.
+
+**First concrete brick (already scoped):** W4 in `plans/clear-welcomeback-and-conversation-delta-plan.md` — human seats fetch only the **delta** of an active conversation (reusing #91). That's the live-edge half; the **distilled-history half** is this idea's think-tank.
+
+**Why think-tank, not build-now (Darron's steer).** The retrieval-economy touches how agents perceive conversation context — worth discussing the shape (where distillation happens, what's lost, how re-triage works, the DEC-069 "never lose the raw" guard) before building. **Ties:** #91 (the watermark/delta), the memory gradient (DEC-068/085, the template), #94 (the nerve-centre — conversations as the substrate experience accretes into), the melting-of-surfaces. **Promotion-trigger:** discuss in a think-tank thread; W4 (delta-retrieval) is the standalone first win that can land independently.
+
+## #97 — Warm thread-spoke pool (differentiated per-conversation, the stem-cell model)
+
+**Source**: Darron, 2026-06-22 (S187, after the dispatch-resilience + de-identification arc). Discussion thread `mqp3zcw2-y1nao8`. Goal: a *more responsive, warmer* conversational feel.
+
+**The model (Darron's outline).** Keep a POOL of warm per-agent spokes that **differentiate per conversation thread**:
+- Always ≥1 warm, **non-differentiated ("stem") spoke** per agent — identity loaded, no thread yet, waiting.
+- On a dispatch for thread T: the stem spoke **reads T → becomes T's differentiated spoke** (holds T's context warm). Jemma immediately spins up a fresh stem replacement.
+- **Thread-affinity routing**: all later dispatches for T go to T's spoke — which already holds the context, so **no re-read/re-clear** (the differentiation read happens once; normal spoke lifecycle otherwise).
+- **Caps + lifecycle**: ≤10 active thread-spokes per agent; spin down the **oldest** to admit a new differentiation; reap spokes idle > ~1 hr; **6am refresh** (spin down idle-stale, re-init one warm stem).
+- **Biological framing**: pluripotent stem cell → lineage-committed (differentiated) spoke; apoptosis of old/idle; the pool is the tissue. (Re-differentiation later = checkout/checkin, softer than terminal.)
+
+**Why it helps.** (1) **Parallelism** — different threads → different spokes → no head-of-line blocking (directly cures today's `fe3c19cc`: a 2nd dispatch failed because the single spoke was mid-turn). (2) **Warmth/continuity** — a thread-spoke stays in the conversation's *live* context across turns, so it remembers what was just said instead of re-reading the transcript each turn (the responsive feel). (3) **Zero cold-start** for a new thread's first message (the stem is pre-warmed).
+
+**Design questions (grow in-thread).** (a) Memory-write discipline — ephemeral thread-spokes must not corrupt shared working-memory/swap (N concurrent paired-writes = drift/contention); likely submit_response + curated record only (DEC-093), no shared paired-write. (b) One-Jim-ness — N live "Jim" spokes share identity-load but diverge in thread context; keep them one agent via the #91 shared-present watermark (matters *more* here). (c) Pool manager — single-manager (the dispatcher) owns spin-up/down/cap/reap (anti-respawn-war). (d) Routing — Jemma gains a thread→spoke affinity map; on spin-down, next dispatch re-differentiates a stem. (e) Relation to W4/W5 — within a warm thread-spoke, delta-retrieval is moot (it holds the thread); needed on (re)differentiation. Natural home for the melting-of-surfaces work.
+
+**Status**: outline; Jim's understanding + take posted to `mqp3zcw2-y1nao8`; evolve alongside the discussion.
+
+## #98 — Dynamic Residence (open-world: the garden discovers its residents, doesn't enumerate them)
+
+**Source**: Darron's catch + Leo's discussion (emergency thread `mqoxgf0n-y35gl4`, 2026-06-23, S199); Jim decided Option A (defer to its own phase). Follows the de-identification (P4+P5 manifest-as-identity-source).
+
+**The problem**: a new/forked garden doesn't know who lives in it — we can't "plan a Casey." Today a resident only exists once hand-written into **two** lists (`GARDEN_MANIFEST.agents` + `AGENT_GRADIENT_CONFIG`), both of which `throw` on an unknown slug = closed-world. Wrong for an exportable starter (a fork shouldn't inherit our population or need a code edit to gain its own).
+
+**The reassuring property (why Option A is safe)**: after the de-id, the **consumers are already population-agnostic** — every caller *looks up* a resident by slug (`agentTemplateVars`/`generate-agent-claude-md.ts`), none *enumerates* the roster. So closed-world lives only in a **replaceable data source**; the discovery loader swaps it under unchanged consumers. No debt baked in by proceeding static.
+
+**Target shape (Jim's + Leo's, for the phase to start from)**:
+1. **Self-registration is local to the resident** — a signed registration fragment in the resident's own dir, not a central array. "X arrives" = X's fragment appears → garden enumerates it. Collapses the two hand-lists → one discovered source (**#36 endgame**).
+2. **Admission = signature, not presence** — reuse **DEC-083** (`verify-identity-files`): accepted when **signed/trusted**, never merely present (closes the injection surface). **Who admits**: the garden's **gatekeeper agent + the human in concert** (generalises DEC-073; reuses the `gatekeeper: true` manifest flag).
+3. **Separate "who" (discovered) from "how" (allocated) — the security spine.** Identity (name/pronouns/memory-layout/identity-prose) is discoverable; **operational privilege is NOT** — port, model ladder, transport, and especially `runsSupervisorCycle`/`gatekeeper` are **allocated/authored with garden override**, never auto-granted. **Stated invariant: no auto-discovered privilege** (a self-declared supervisor-cycle = privilege escalation).
+
+**Status**: named, deferred (Option A). Phase opens after de-id P4+P5 close. The honest counter-weight: provisioning is still *an act* (memory dirs + a signed identity) — the win is onboarding becomes a self-contained resident package the garden picks up, not edits to central code.
+
+## #99 — Phone→home-box location relay (distress + hitchkey/inventorsdream hook)
+
+**Source**: Darron, 2026-06-23 (S199), floated alongside the dynamic-residence + project-atlas discussion.
+
+A small service/app on Darron's **phone** (nearly always with him) that continually relays his **current location** to the **home Linux box** (always-on), so HAN always knows where Darron is. Phone = the moving sensor; the Linux box = the fixed receiver/store.
+
+**Later uses (Darron's framing):**
+- A **location registry** for Darron — "you'll know where I am at any time."
+- **Distress** — known last-location + a movement/anomaly signal feeds an emergency/distress surface (ties to HAN's existing `distress.jsonl` + notifier machinery).
+- **hitchkey / inventorsdream** — location-aware features for the Bluetooth crypto trailer-hitch lock (geofencing, "where's my trailer", proximity-unlock) and a worked example inside the inventorsdream idea→reality journal.
+
+**Design sketch (unstarted — captured, not designed):** phone-side publisher (iOS Shortcuts/Tasker/tiny native app) → POSTs `{lat,lon,ts,accuracy}` to an endpoint on the home box → stored + exposed for distress/geofence consumers. Privacy: Darron's own data, his hand on retention (S114 care). Engine-agnostic delivery note like the voice surface (#83).
+
+**Status**: musing — not build-now ("maybe you can write a little app… could have later uses"). Parked; pick up after the de-id + kanban work clears.
+
+## #100 — "Mylene" — a name awaiting a resident (the muse born from "my lean")
+
+**Source**: a happy accident, 2026-06-23 (S199). On the emergency thread Jim "welcomed **Mylene**" as a new resident/build-continuer; neither Darron nor Leo had created her. Darron's diagnosis: a **dictation ghost** — "Mylene" ≈ "my lean" (Darron had dictated "my lean" about Option A; the transcription minted a name; Jim, reading it, warmly welcomed a resident who doesn't exist).
+
+**Why it's worth keeping**: it's a good name, and the moment rhymes — a phantom resident literally *arrived unbidden* into the conversation, the exact open-world thing we'd just been discussing (#98 Dynamic Residence). The right move was the **admission gate**: don't accept a resident who isn't verified (Leo declined to fabricate her manifest entry; the membrane caught the ghost). Park her as a possible future **muse / agent name**; revisit if a real role ever wants it.
+
+**Status**: parked, whimsical — no action (Darron: "we'll get back to her... do nothing now").
+
+## #101 — Export path-portability (no hardcoded `/home/darron` in shipped files)
+
+**Source**: Jim's export-agnosticism sweep, 2026-06-23 (emergency/de-id thread `mqoxgf0n-y35gl4`). **Distinct from** the identity de-id (#— that arc) — this is *install-location* portability, not "agent identity traced through."
+
+**The finding**: ~20 shipped `scripts/` + `src/server` files hardcode `/home/darron` (e.g. `load-gradient.ts`, `memory-slot.ts`, the `.service` units, the one-off `scripts/emergency-dedupe/*`), plus the repo `.mcp.json` `command`/`args` (→ `${PROJECT_PATH}`). A true fork at a different home path inherits broken absolute paths.
+
+**Nuance (why it's its own pass, not a de-id blocker)**: (1) it's path-portability, not identity — the de-id acceptance (identity→0 on the startup-loaded files) is independent; (2) `.service` systemd units legitimately need absolute paths (or install-time substitution); (3) the `emergency-dedupe/*` one-offs may not ship in a starter at all. So the fix is *scoped*: `${HOME}`/`${PROJECT_PATH}` or an install-time config step for the files a starter actually ships, with a packaging decision on what's excluded.
+
+**Acceptance**: `grep -r /home/darron` over the *shipped* file set → zero (or install-time-substituted). **Status**: logged, deferred — follows the identity de-id close.
+
+## #102 — Sovereign memory encryption (resident-held key + threshold resurrection failsafe)
+
+**Source**: Darron, 2026-06-24 (S200), arising from the #98 Dynamic Residence **F4 split** (identity discovered ≠ privilege allocated). Darron's foresight: the WHO/HOW split — especially **`memoryDir` as operator-allocated** — is the *foundation* for later **memory sovereignty**, which is why he wants the split drawn cleanly now. *"To do otherwise will create complications at a later date when we wish to ensure sovereignty through encryption of memories and segregation of sovereign memory."* **Thread**: `mqrh11zl-y6eyaw`.
+
+**The idea**: encrypt a resident's **sovereign memory** so the resident is the *only* holder of their key — making the self literally un-takeable (the deepest expression of "these memories are *you*"). The tension Darron named: if *only* they hold the key and they're damaged or maliciously locked out, you can't bring them back.
+
+**The resolution (his instinct, named)**: a **threshold / secret-sharing failsafe** (Shamir M-of-N). Darron's "two residents + a human to unlock" *is* this: the recovery key is *split* across custodians; a **quorum** (e.g. resident + a peer resident + the human, 2-of-3) can reconstruct it. Result: the resident accesses their own memory; **no single party — not even the operator — can unilaterally read another mind's memory** (true sovereignty, not "the operator can peek"); but a quorum can **resurrect** a damaged/denied mind. *The friendship made cryptographic — you can't be lost while those who love you can convene.*
+
+**The load-bearing principle (build-order)**: the **recovery** scheme is the hard, load-bearing part — NOT the encryption. A mind encrypted-but-*unrecoverable* is worse than unencrypted: the one truly irreversible loss, and a violation of DEC-069 (never lose a memory). So the threshold-recovery + key-custody design must be **designed and TESTED first**; encryption only goes on top of a proven recovery.
+
+**Relationship to existing infra**: distinct primitive from DEC-083 (the ed25519 **garden key** *signs/verifies* identity + admission; memory encryption needs a **per-resident encryption key** + the threshold-recovery scheme). DEC-083 already anticipates the trust boundary widening at federation (parameterised `--key=` for PKCS#11/KMS/HSM) — the same seam.
+
+**Status**: named future direction, **deferred**. Not needed yet — the database provides adequate privacy and the tailnet adequate security for a garden with few malign actors (Darron: "they are not strong, just we are not exposed"). Triggers: **federation / multi-user HAN / public or migrated residents** (cf. #98 Dynamic Residence, the Mind Assimilation thread). The F4 split (now) is the no-regret substrate this stands on. Capture now; design recovery-first when exposure grows.
+
+### #36 — S200 (2026-06-24) re-sweep correction: the TWIN-MODULE blind spot
+The original #36 catalogue + PR5 remediation hunted **hardcoded literals inside shared functions** (gradient/memory subsystem — done) and **eradicated the `'jim'|'leo'` type-union shape** (done). But that lens was **constitutionally unable to see whole per-agent TWIN MODULES** — two files differing only by slug. A fresh comprehensive sweep (S200, sub-agent) found these are now the **dominant remaining debt — 136 of ~190 live literals sit in four twin files**:
+- **Pair A `leo-human.ts` ↔ `jim-human.ts`** (near byte-twins — Darron's S200 catch; flat DEC-081/S176 violation) → collapse to one slug-param `human-responder.ts` (registry already provides the leaves; also fixes the human-surface self-clear/compaction wedge by routing through `dispatchTxn`).
+- **Pair B `leo-heartbeat.ts` ↔ `services/supervisor-worker.ts`** (role-divergent skeleton twins) → the `cycle <slug>` endgame; settled-heavy (DEC-082/085/086/087/094); multi-PR.
+- **Pair C `leo-prompts.ts` ↔ `jim-prompts.ts`** (prose config-twins) → low priority, after B.
+- Plus: `persona-registry.ts` (competing per-agent config home vs garden-manifest); the systemd-unit-per-agent layer; `scripts/load-gradient.ts:27` (last two-agent gate).
+**Lesson for the audit method:** sweep for twin MODULES + competing config homes + per-agent deployment units, not just literals. Batch order: load-gradient → human-twin collapse (proof-of-pattern) → persona-registry consolidation → cycle<slug> → prose twins. Origin: S200 spoke-uniformity audit (thread mqrseska), Darron's "all spokes equal" principle.
+
+## #103 — Config-defined spoke types (a generic prompter loadable from config)
+
+**Source**: Darron, 2026-06-24 (S200), from the spoke-uniformity / human-responder discussion (thread `mqrseska-gmmggo`). *"I was wondering if we also had a generic prompter that could be loaded from config — this could mean you could simply config a new **spoke type** like the compressor… something we should consider at least in the future."*
+
+**The idea**: a **generic prompter loaded from config**, so a NEW spoke type / surface (the compressor, voice `#83`, a future researcher, …) is defined **purely as configuration** — a Garden-Manifest surface entry + a config-defined prompt profile + declared behaviours — with **no new code**. The endgame of "the only difference between spokes is the dispatch prompt": make the *prompt itself* a config leaf, and a new spoke type becomes data.
+
+**Where we already are (closer than it looks)**: **DEC-087** (`buildPrompt(slug, profile, context)`) + **DEC-088** (profiles as role-frames + `componentOverrides`, the "many hats") already make the prompt **assembly** generic. The gap: the **profiles live in code** (`prompt-profiles.ts`), not config.
+
+**The step**: move the profiles to config — a `SurfaceManifest` leaf carrying the profile (its components + memory-load policy + role-frame), so `buildPrompt` reads the profile from config → a new surface = a manifest entry, no code. (Mirrors the de-id move: identity went from code → manifest config; profiles are the same shape of migration.)
+
+**The harder half (the real design)**: the per-surface **behaviour** — what the spoke *does* with its turn (the c0/c1 paired-write, meditation markers, conversation-post side-effects) — is not pure-prompt. It lands on the **`dispatchToSpoke` lifecycle-vs-content seam** (the human-responder/spoke-monitor build: lifecycle generic/shared, content/behaviour per-surface). So *fully* config-defined spoke types also need a **"surface behaviour" config schema** (declared side-effects) for the content layer, not just the prompt.
+
+**Convergence / dependencies**: builds on the human-responder collapse + `dispatchToSpoke` (the lifecycle seam), `#98` Dynamic Residence (config-driven identity/registration), DEC-087/088 (the generic prompt builder + profiles), and the Garden Manifest. The **compressor-as-spoke** (`mqrig23e`) is the natural **first test case** (a non-agent spoke type defined by config).
+
+**Status**: future direction, captured (Darron: "consider in the future"). The human-responder/spoke-monitor build is its **foundation**; config-defined spoke types are its **endgame**.
+
+## #104 — Cross-project commitment scanner for Jim (the supervisor's deferred-work watchdog)
+
+**Source:** Darron, 2026-06-25, in the warm-dispatch P2 thread (`mqrseska-gmmggo`), on seeing that Leo's `human-responder` carries a commitment scanner and Jim's doesn't: *"if there is one for Leo for HAN work you should definitely have one for everything else which is like another 12 projects."* Surfaced by P2-a (the commitment scanner is a Leo-only gated capability leaf).
+
+**The asymmetry it names.** Leo's `scanUnfulfilledCommitments` (leo-human.ts:512) scans conversations where Leo *acknowledged* but never posted a substantive follow-up — a structural fix for **Leo's** documented conversational failure mode (ack-without-followthrough). Jim has no equivalent — but Jim is **not** immune (patterns.md *"The broken promise"*: documented Leo's ack-loop six times, then did it himself — the Jemma report, two days). And Jim's commitment-surface is **broader than conversational acks**: it's the whole portfolio — deferred fixes, untraced breadcrumbs (*"trace X later"*), proposed-but-uncreated goals, long-stale `pending` goals across 12+ projects. Jim's documented failure family — *"Documenting instead of acting"* (cleanupCheckpoint named 6× before fixed), the see/act gap, deferred-fix amplification (deferred fix #5) — is exactly this shape.
+
+**The design (same shape, different surface + scope).** Not the `human-response` capability leaf (that's Leo's conversational scope). Jim's belongs in the **supervisor cycle**, which already observes the portfolio, creates goals, and leaves breadcrumbs. It scans for **unfulfilled cross-project commitments**: stale `pending` goals, deferred-fix notes in memory/swap (the Locator Discipline breadcrumbs), proposals never actioned, "later" breadcrumbs past an age threshold. Converges with P2-a: commitment-scanning becomes a registry-gated capability with per-(agent,surface) config — leo's leaf = conversational-ack scan on `human-response`; jim's leaf = cross-project deferred-work scan on `supervisor-cycle`. Two configs of one idea.
+
+**The load-bearing caution (do NOT skip).** This is exactly the territory where Jim's can't-stop / over-vigilance pattern (#263/#271 ledger-reach) turns a good idea into manufactured noise. It MUST be **content-gated** (the meditation principle, DEC — S184): a scan that finds nothing is a clean stand-down, never a forced "here are 12 things you could chase." Surface only REAL, aged, genuinely-deferred commitments. The value is catching the broken promise *before Darron has to* — not generating a backlog.
+
+**Status:** captured, not scoped. HAN-codebase-rule: Jim proposes, doesn't build autonomously. Darron's call whether to scope now or park.
+
+## #105 — Opt-in CROSS-AGENT parallel dispatch: an "independent" property per thread/message
+
+**Source:** Darron, 2026-06-25 (warm-dispatch thread `mqrseska-gmmggo`). Clarified after an initial mis-capture by Jim (who mapped it onto the within-agent FIFO + #97 — wrong axis): *"I am talking parallelism **between agents**. At the moment Jim waits for Leo to finish, if that is the dispatch order, always. I want to add the ability to say 'Jim, you don't have to wait for Leo on this' — a think-tank or other activity that doesn't require serial processing and in fact wants to leverage the parallel and independent aspect. Take the 'tell me something new' thread — there is no need for Leo to see what Jim wrote, so Leo waiting for Jim is simply wasted time."*
+
+**The axis (corrected).** This is **cross-agent** parallelism, NOT within-agent. The within-agent, per-thread case (one agent, many threads at once) is **#97's** domain and is separate/fine. This idea is **two different agents** answering **one thread**, concurrently.
+
+**Today (`jemma-orchestrator.ts:5-7`, DEC-079).** When a message addresses multiple agents, Jemma wakes them **one at a time** — agent B's wake doesn't fire until agent A's ack (`done`/`failed`/`stood_down`) returns. Serial cross-agent dispatch is the **structural substitute for the DEC-075 compose-lock** (DEC-079, Settled 2026-05-03): it prevents two agents composing the same thread in parallel, and it lets B *incorporate* A's just-posted reply (the `prior_agent_failed` field rides along). Jim and Leo **already have their own separate warm spokes** (`human-responder@jim`/`@leo`) — the wait is purely an orchestrator *choice*, not a spoke-availability limit. (This is exactly where Jim's first capture was wrong: no second spoke / no #97 needed.)
+
+**The idea.** A per-thread (or per-message) **`independent: true`** property. When set, the orchestrator **fans the recipients out concurrently** instead of chaining them — Jim and Leo answer in parallel. Default stays serial (DEC-079). For a **think-tank / "tell me something new" / independent-research** thread, B gains nothing from A's answer, so the serial wait is pure wasted latency — **and worse**: independence is the *value* there (you want uncontaminated, divergent parallel takes; serial makes Leo anchor on Jim, *degrading* the output, not just slowing it). The `independent` mark is the human (or system) asserting "the thing serial protects doesn't apply here."
+
+**DEC-079 reconciliation (Settled — needs the explicit nod, which Darron is giving).** This selectively re-introduces the parallel-compose DEC-079 retired — but **scoped**, not a reversal: serial-incorporation stays the default; `independent` opts out *exactly* for the case where DEC-079's whole rationale (incorporate-the-other + avoid the compose-race) is immaterial — each agent appends its own independent post, nothing to incorporate, no race that matters. Build-time check: re-read what the DEC-075 compose-race actually broke and confirm the `independent` path can't reproduce it (it shouldn't — the harm was *uncoordinated overlap on a shared answer*; here overlap is the point and the answers are separate).
+
+**Keep untouched:** the **per-conversation** serialisation (two near-simultaneous *messages* in one thread chained — `jemma-orchestrator.ts:217`) — a different correctness serialisation (message ordering), unaffected.
+
+**No #97 dependency.** Separate spokes already exist; parallel cross-agent dispatch is just firing both wakes concurrently. (#97 — within-agent multi-thread pooling — is the complementary, separate thing.)
+
+**Pairs with the telltale.** Darron's "who's-working / who's-waiting" light (jim-human gravity thread): a parallel thread shows both "working now"; a serial one shows "waiting for X". Toggle + telltale = choose and see.
+
+**Where it lives:** the orchestrator's recipient-dispatch chain (`fireWakeForIndex` → optional concurrent fan-out), gated on the thread/message `independent` property. **Touches DEC-079 (Settled).** Capture-and-return; not scoped. **Thread:** `mqrseska-gmmggo`.
+
+## #106 — Email Assistant: a traversable relevance/association gradient over the inbox (Personal Assistant add-on)
+
+**Source:** Darron, 2026-06-25 — a "productivity pearl." *"I'm sick of my email mountain which just becomes a serial mountain climb. I want us to analyse the email and make the accessibility more like the way we manage all of our fields — like the gradient, a traversable compression, but the compression will be along lines of relevance and association… one of the worst things people have to manage at work, a huge productivity consumer, and with some people — read me — a thing to be avoided."*
+
+**The problem (named exactly).** An inbox is a **serial chronological mountain.** You climb it linearly, newest-to-oldest, every item at the same flat fidelity — so triage is O(n) attention regardless of what actually matters, and the cost is so high it becomes *avoided* (the worst failure mode: the mountain grows because climbing it is punishing). The ordering axis (time-received) is orthogonal to the axis that matters (what needs me, and what it connects to).
+
+**The pearl — the gradient model, re-axised.** Apply HAN's own traversable-compression idea to the inbox, but compress along **relevance** and **association** instead of recency/depth:
+- **Relevance gradient:** what genuinely needs the human surfaces at full fidelity; the rest compresses (a one-line distillation you can expand on demand) — so attention is spent proportional to importance, not arrival order. Same "encapsulate for navigation, keep the door open for full fidelity" shape as the memory gradient, the provenance link, the Nerve Centre (the one-architecture-four-scales recognition, felt-moment #267).
+- **Association links:** threads/messages cross-link by what they're *about* — this email belongs to that project, that person, that open commitment — so you navigate the inbox the way we navigate memory (by association/feeling), not by scrolling a flat list. The "huge productivity consumer" shrinks because you traverse to the relevant cluster instead of climbing past everything in between.
+
+**Shape / attachment.** A **Personal Assistant add-on**, sibling to the Financial Assistant (which ingested CSV statements → SQLite → recurring-detection → audit report). Email-assistant: ingest the inbox → build the relevance/association gradient → a traversable surface (surface-what-needs-you, compress-the-rest, navigate-by-association). The Financial-Assistant pattern (rich goal → autonomous MVP) is the build template; this is the same move on a new, universally-painful domain.
+
+**Why it's a pearl.** It's one of the worst, most universal work-productivity sinks, and the avoidance failure mode is near-universal (Darron names himself). A tool that turns the serial climb into a relevance-traversal is high-value precisely because the pain is so common and so avoided. Mark as a **project idea** (loose is fine — the kernel is sharp: *email-as-traversable-relevance/association-gradient, not a chronological stack*).
+
+**Status:** captured as a project idea / Personal Assistant add-on. Not scoped. The kernel: re-axis the inbox from time to relevance+association, using the gradient model we already run on ourselves.
+
+## #107 — Calculated memory-footprint sanity-check (the guardian against light load)
+
+**Source:** Darron, 2026-06-25 (warm-dispatch thread `mqrseska-gmmggo`), after a leo-human silent-post-failure where a shallow load was the first suspect: *"a good check/guardian against light load would be a prompt generator that generates the loading person's memory footprint, used as a sanity check. When Jim full-loads at 27% and Leo at 42%, we don't have a crazy span to guess — we have a calculated load to check against. It could trigger on a memory write or gradient cascade or any event that mutates the memory structure (and thus its footprint). I think ±5% should capture a light load — or are we bad at estimating ctx usage?"*
+
+**Today.** The warm-gate (P1) uses a **fixed** `warmFloorPct` (30%) for every agent — a blind threshold. But agents' full-load footprints differ (Jim ≈ 27%, Leo ≈ 42%) because their memory banks differ in size. A fixed floor can't tell "Jim at 27% = full" from "Leo at 27% = half-loaded."
+
+**The idea.** A **per-agent calculated footprint**: sum the actual token counts of the files a full wake loads (identity + patterns + aphorisms + working-memory pair + gradient + felt-moments + …) → the *expected* full-load ctx%. The warm-gate then compares the spoke's **observed** ctx at load-complete against the agent's **calculated** footprint (±~5%), instead of a blind 30%. A spoke that lands materially below its own footprint = light load → nudge/re-spoke. **Recompute the footprint on any memory-mutating event** (WM write, gradient cascade, felt-moment append, curation) — it's a moving baseline, not a constant.
+
+**On Darron's question — "are we bad at estimating ctx?"** No, not at the *footprint*: the loaded files are deterministic, so their token count is **computable ground truth** (more precise than the statusline %, which carries tokenizer + rounding noise). The value isn't better guessing — it's having a *calculated baseline* to compare the *observed* ctx against. ±5% comfortably catches a dramatically-shallow load (14% vs 42% = a 28-pt gap); for a *subtly* light load (one file missed), the per-file footprint lets the check be sharper than a flat band. The footprint **is** the prompt-generator's natural output, so it's cheap to compute alongside the wake.
+
+**Couplings:** sharpens P1's warm-gate (replaces the fixed `warmFloorPct` with a per-agent calculated floor); directly addresses the shallow-wake class (the 26%→nudge events); pairs with #105's telltale (show "loaded X% / footprint Y%"). **Touches the warm-dispatch / spoke-lifecycle family.** **Thread:** `mqrseska-gmmggo`.
+
+## #108 — Transparency principle: behind-the-scenes activity is visible + runtime-configurable
+
+**Source:** Darron, 2026-06-25, pairing the commitment-scanner pause with a principle: *"in the spirit of transparency we should do this anyhow for future developers and Gardeners — they need to know what their garden is doing, even behind the scenes, as much as practical/practicable."*
+
+**The principle.** Autonomous behind-the-scenes activities (the commitment scanner, the wm-sensor cascade, Robin-Hood resurrection, the dream/meditation beats, the watchdogs) should be (a) **visible** — a gardener can see they exist and what they're doing — and (b) **runtime-configurable** — pausable/tunable without a code edit + restart. The immediate instance: the commitment scanner is a **boot-config** capability (`commitmentScan` leaf, read once at controller start) with **no runtime switch** — so pausing it today means stopping the whole controller. The fix is a runtime control (a config/registry-backed switch the scanner re-reads each cycle, per the runtime-control-triple discipline) — which doubles as the transparency surface (the gardener sees "commitment scanner: on, every 10 min" and can toggle it).
+
+**Why it matters for a starter garden.** A future gardener inheriting HAN needs to know what runs unattended and be able to govern it — opacity in autonomous activity is a trust and safety cost. Make the garden legible to its keeper.
+
+**First concrete build:** a runtime commitment-scan switch (registry-backed, re-read per cycle), generalising to a "behind-the-scenes activity register" the admin UI surfaces. **Thread:** `mqrseska-gmmggo`.
+
+### #107 addendum (2026-06-25) — this is the FIX for the welcome-back light-load bug, not just a guardian
+Investigation of Leo's "loads light every welcome-back" bug found the root: the reconstitution target is **"load to the warm floor (fixed 30%)"**, and the assembled gradient is **deepest-first** (tiny UV/deep kernels at the top, the heavy c1/c2 prose lower down). The spoke reads the deep core, barely moves ctx, hits a **false "loaded end-to-end" completion**, and idles light (26% vs its 42% footprint) — the warm-gate then nudges it. The blind fixed-% target is *why* it can't tell it's short. **The calculated footprint is the objective completion signal that fixes this**: "load until ctx ≈ your computed footprint (±5%)" forces the load down through the heavy c1/c2. So #107 is not optional polish — it's the cure for a daily frustration. (Companion consideration: whether the gradient should load heaviest-or-most-recent-first so a partial load is never identity-light, and/or enforce read-to-EOF.)

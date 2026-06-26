@@ -1,9 +1,13 @@
 # System Specification
 
-> The living blueprint. When something looks wrong, check here first.
-> If it's documented, it's intentional. If it's not, flag it for discussion.
->
-> Last updated: S93 (2026-03-12) by Leo
+> ⚠ **STATUS: archival / historical blueprint — NOT the current "what should be"**
+> (living-docs sweep, Batch B, 2026-06-26). **`last-verified: 2026-03-12` (S93) — ~3 months stale.**
+> For *what should be* (decisions & why), the canonical source is **`claude-context/DECISIONS.md`**
+> (+ `~/.han/memory/shared/hall-of-records.md` for protected records); for *current state*, the code /
+> running system; for *config*, the Garden Manifest. Read this doc for early-design narrative only;
+> do not treat its specifics as current. Retained for history (DEC-069). *(Originally: "The living
+> blueprint. When something looks wrong, check here first. If it's documented, it's intentional."
+> — superseded by the layered knowledge model, 2026-06-26.)*
 
 ## How To Use This Document
 
