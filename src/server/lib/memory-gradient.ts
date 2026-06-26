@@ -2281,3 +2281,20 @@ export function mostRecentC0Id(agent: string): string | null {
     const c0 = gradientStmts.getMostRecentC0.get(agent) as any;
     return c0 ? c0.id : null;
 }
+
+/**
+ * #107 (Jim's moving-target catch, plan-audit mqubg8sq): the ids of the agent's most-recent c0s
+ * (by created_at desc), up to `limit`. The dispatcher's c0-gate accepts the spoke's echoed id if
+ * it is in this set — a RECENT VALID c0 (proof-of-bottom-traversal), NOT strict `==` the single
+ * latest, because a WM slice can insert a newer c0 between the spoke's load and the dispatcher's
+ * verify (false-nudging a fully-loaded spoke). Read-only.
+ */
+export function recentC0Ids(agent: string, limit = 3): string[] {
+    const c0s = gradientStmts.getByAgentLevel.all(agent, 'c0') as any[];
+    return c0s
+        .slice()
+        .sort((a, b) =>
+            a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : (a.id < b.id ? 1 : -1))
+        .slice(0, Math.max(1, limit))
+        .map((e) => e.id);
+}

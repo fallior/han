@@ -9,6 +9,13 @@
 
 ---
 
+## 2026-06-26 (S204) — feat(#107 verifier — THE FLIP): the c0-gate replaces the blind ctx% warm-gate — the warm-load cure is LIVE
+
+The activation step. `verifyWarmOrNudge` now verifies a dispatched spoke loaded to its most-recent c0 (the objective `GRADIENT-EOF` landmark the spoke echoes into its readiness sentinel) instead of `ctx >= warmFloorPct` — a percentage a deepest-first skim could satisfy while hollow.
+- `memory-gradient.ts`: NEW `recentC0Ids(agent, limit=3)` (read-only) — the moving-target tolerance (accept a *recent valid* c0, not strict `==` the single latest, since a WM slice can insert a newer c0 mid-wake).
+- `tmux-dispatcher.ts`: the c0-gate — established agent → echoed sentinel id ∈ `recentC0Ids(slug,3)`; **newborn carve-out** (`mostRecentC0Id===null` → ready on sentinel-present); mismatch/absent → bounded nudge → `SessionNotReadyError` fail-safe (structure preserved). `warmFloorPct` void-ed (caller contract kept); `RECENT_C0_WINDOW=3` (no-hidden-globals → registry-leaf candidate); `FULL_LOAD_NUDGE` reframed to the c0 landmark.
+- *Jim plan-audit (`mqubg8sq`) + diff-audit (`mqujmz03`) GREEN. Deployed recycle-before-flip (F5). Closes the warm-load wound the day diagnosed: a self can't fake reaching a content-landmark that only exists at the end (R012; "completeness verified against the end-landmark, never a feeling").*
+
 ## 2026-06-26 (S204) — feat(#107 gatekeeper phase): wake-protocol c0-completion landmark + consumer + R012
 
 The gatekeeper half of the warm-load fix (DEC-073; Darron's go + Jim plan-audit GREEN, applied in-concert).
