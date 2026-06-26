@@ -9,6 +9,14 @@
 
 ---
 
+## 2026-06-26 (S204) — docs(living-docs sweep D+E + Q5): signpost layer-map, stated convention, archive early docs, Robin-Hood danger-banners
+
+- **Batch D** — `ecosystem-map.md` (the orientation layer): added the **layer-map** (Decisions/Config/State/History/Orientation → canonical home) + referencing-vs-archival classification (also fixed a pre-existing "step 5"→"step 4" wake-protocol reference). `living-docs-sweep-plan.md`: **stated the `status:`/`last-verified` frontmatter convention** as the anti-drift rule (Jim's 3-clause banner-sufficiency test), flagged promote-to-DEC.
+- **Batch E** — `claude-context/LEVELS.md` + `claude-context/PROJECT_BRIEF.md` marked **archival** (`<!-- status: archival -->` frontmatter + visible banner; DEC-069 banner-not-delete).
+- **Q5 (Jim's catch) — the sharpest remaining danger** — `docs/ROBIN_HOOD_EXECUTION_GUIDE.md` (referenced `han-server.service` 9×) + `docs/ROBIN_HOOD_README.md`: pre-F1 *resurrection* guides pointing at the now-disabled relic. Added 🛑 **DANGER correction-banners** ("never `systemctl restart han-server.service`"; canonical = watchdog fleet; full rewrite rides `mqs7w5o6`) — an operator following them could have re-triggered the F1 bug.
+- `DOC_DEBT.md` records the named follow-on rewrites (PORT_ALLOCATION Step-5, ARCHITECTURE transport, README-#8, Robin-Hood, promote-convention-to-DEC) as OUTSTANDING. **The living-docs sweep is complete** (the full rewrites tracked).
+- *Doc-only; banner-not-rewrite per Jim's rule; Jim doc-truth audit GREEN (`mqu8vn2g`).*
+
 ## 2026-06-26 (S204) — docs(living-docs sweep C): refresh the front door (models, ports, architecture)
 
 - **README.md** — model ids corrected to current (Opus 4.8 cognition + failover ladder Opus 4.7→Sonnet→Haiku; Haiku classifier), **sourced from the Garden Manifest** (`OPUS_LADDER`/`CLI_LAUNCH_DEFAULT`) with a "canonical lives there" pointer; noted cognition runs on warm tmux sessions (not API) post-#66.

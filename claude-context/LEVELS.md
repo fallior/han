@@ -1,4 +1,11 @@
+<!-- status: archival; last-verified: 2026-03-07 -->
+
 # Hortus Arbor Nostra — Implementation Levels
+
+> ⚠ **STATUS: ARCHIVAL** (living-docs sweep, Batch E, 2026-06-26). `last-verified: 2026-03-07` —
+> an early-design roadmap document (Levels 1–13), kept for history (DEC-069). All levels are long
+> complete; this is **not** current state. For current state → the code; for what-changed →
+> `CHANGELOG.md`; for orientation → `~/.han/memory/shared/ecosystem-map.md`.
 
 > Progressive enhancement from MVP to full mobile development
 

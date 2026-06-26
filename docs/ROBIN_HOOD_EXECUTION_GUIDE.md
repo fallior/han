@@ -1,4 +1,16 @@
+<!-- status: archival; last-verified: 2026-03-07; superseded-by: mqs7w5o6 (Robin-Hood ring redesign) -->
+
 # Robin Hood Protocol — Test Execution Guide
+
+> 🛑 **DANGER / STALE — DO NOT EXECUTE AS-WRITTEN** (living-docs sweep, 2026-06-26). This guide
+> (last-verified 2026-03-07, **pre-F1**) describes a resurrection topology built around the systemd
+> **`han-server.service`** (referenced 9×) — **that unit is now a DISABLED RELIC.** Following these
+> steps could target or restart the dead unit — **which is *literally* the F1 bug** (a real Jim death
+> pointed at the relic, un-rescued; fixed `9911587`). **Never `systemctl restart han-server.service`**
+> (S163/S167). The canonical servers are the per-agent watchdog instances (Leo 3847 / Jim 3848). The
+> current resurrection model is the **per-agent watchdog + the mutual-guardian-ring redesign** (thread
+> `mqs7w5o6`); the full rewrite of this guide rides that work (tracked in `DOC_DEBT.md`). Retained for
+> history (DEC-069); read as a record of the pre-F1 approach, not a runbook.
 
 **Quick Start**: Follow these steps to test all three improvements in sequence.
 

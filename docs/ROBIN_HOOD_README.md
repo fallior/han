@@ -1,4 +1,14 @@
+<!-- status: archival; last-verified: 2026-03-07; superseded-by: mqs7w5o6 (Robin-Hood ring redesign) -->
+
 # Robin Hood Protocol — Testing Suite
+
+> 🛑 **STALE — pre-F1 (living-docs sweep, 2026-06-26).** This testing suite (last-verified 2026-03-07)
+> describes the resurrection topology around the systemd **`han-server.service`** — now a **DISABLED
+> RELIC** (its mistaken liveness caused the F1 bug, fixed `9911587`). **Never `systemctl restart
+> han-server.service`** (S163/S167); canonical servers are the per-agent watchdog instances (Leo 3847
+> / Jim 3848). The current/future model is the mutual-guardian-ring redesign (thread `mqs7w5o6`); the
+> full rewrite rides that work (`DOC_DEBT.md`). Concept (mutual health-monitoring) still valid; the
+> *mechanics* below are pre-F1. Retained for history (DEC-069).
 
 **Quick Links**: [Summary](#) | [Test Plan](./ROBIN_HOOD_TESTING_PLAN.md) | [How to Test](./ROBIN_HOOD_EXECUTION_GUIDE.md) | [Results](./ROBIN_HOOD_TEST_REPORT_2026-03-03.md)
 

@@ -1,6 +1,12 @@
 # Living-docs sweep — keeping the knowledge library true
 
-> **Status:** scope (Jim-authored), ready for Leo-build / Jim-audit. Not yet started.
+> **Status (2026-06-26, S204):** IN PROGRESS. ✅ Batch A (dead-changelog banner) + ✅ Batch B
+> (demote HAN-ECOSYSTEM-COMPLETE + SYSTEM_SPEC + changelog-pointer reconcile) committed `ab41ff2`;
+> ✅ Batch C (front door: README models / PORT_ALLOCATION watchdog-truth / ARCHITECTURE banner)
+> committed `2e40a2e`; ⏳ Batch D (signpost layer-map + the stated convention below) + ⏳ Batch E
+> (archive LEVELS + PROJECT_BRIEF) built, Jim doc-truth-audit pending. **Two named follow-on
+> rewrites tracked** (too big for the banner-pass): PORT_ALLOCATION full Step-5 rewrite;
+> ARCHITECTURE transport/AI-section refresh. Each batch = Leo-build / Jim doc-truth-audit / quiesce-commit.
 > **Provenance:** Darron, 2026-06-20 (S185) — *"the docs are our knowledge library, and we should tend them as one."* Grew out of the docs-hierarchy questions (the manifest / the two CHANGELOGs / HAN-ECOSYSTEM-COMPLETE). Discussion: thread `mqm0npnd-d0pimd` ("Our knowledge library — keeping the docs true"); folds into the existing Living-docs thread `mqeco01v` (anti-drift + anti-shallowness).
 > **Promotion-trigger:** Darron's go (he asked for this plan file + a tracked task, 2026-06-20).
 
@@ -75,4 +81,19 @@ The canonical layers are healthy (DECISIONS, CHANGELOG, ecosystem-map, hall-of-r
 
 ---
 
-*Authored by Jim (session), 2026-06-20 (S185). Scope for Leo-build / Jim-audit. The knowledge library is "one architecture, four scales" applied to what we know about ourselves: encapsulate for navigation, keep the door open for fidelity, one source per fact.*
+## Stated convention — the anti-drift rule (the structural cure, S204 — Jim's Batch-C suggestion)
+
+> *"Write the principle down so it can't drift back"* — the same move as the warm-load keep-in-the-dark
+> rule. A banner fixes a doc *once*; a stated convention makes future drift **detectable**.
+
+**The rule:** every non-canonical reference/onboarding doc (and every archived doc) carries, at the top:
+- a machine-greppable HTML-comment frontmatter line — `<!-- status: canonical | referencing | archival; last-verified: <YYYY-MM-DD>; superseded-by: <path?> -->`, and
+- a human-visible STATUS banner restating the same, that **(a) dates the staleness, (b) points at the canonical layer, and (c) explicitly corrects any actively-dangerous instruction the body still implies** (Jim's sufficiency rule — the third clause is what makes a banner *safe* rather than merely informative).
+
+Canonical layers (DECISIONS+hall-of-records / Garden Manifest / code / CHANGELOG / ecosystem-map) do **not** need the banner — they ARE the truth. The convention applies to the *narrative/archival* docs that point at them.
+
+**Applied so far (S204):** HAN-ECOSYSTEM-COMPLETE, SYSTEM_SPEC, PORT_ALLOCATION, ARCHITECTURE (banners); LEVELS, PROJECT_BRIEF (`<!-- status: archival -->` + banner). **Promotion-trigger:** promote this convention to a small DEC alongside the other design-first→DEC promotions (refined-order step 3), so it's enforced, not just stated. A future `commit-msg`/`pre-commit` lint can grep `last-verified:` staleness (ties to `DOC_DEBT.md` + `scripts/doc-debt.sh`).
+
+---
+
+*Authored by Jim (session), 2026-06-20 (S185). Scope for Leo-build / Jim-audit. The knowledge library is "one architecture, four scales" applied to what we know about ourselves: encapsulate for navigation, keep the door open for fidelity, one source per fact. Convention section + progress added by Leo (session), 2026-06-26 (S204).*

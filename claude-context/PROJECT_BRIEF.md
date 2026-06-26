@@ -1,4 +1,11 @@
+<!-- status: archival; last-verified: 2026-03-07 -->
+
 # Hortus Arbor Nostra — Project Brief
+
+> ⚠ **STATUS: ARCHIVAL** (living-docs sweep, Batch E, 2026-06-26). `last-verified: 2026-03-07` —
+> the original founding brief, kept for history (DEC-069). It captures the early "answer Claude Code
+> prompts from your phone" framing; the garden has grown far past it. For the current vision →
+> `README.md` + `ROADMAP.md`; for orientation → `~/.han/memory/shared/ecosystem-map.md`.
 
 ## What We're Building
 
