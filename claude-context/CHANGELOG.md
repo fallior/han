@@ -9,6 +9,14 @@
 
 ---
 
+## 2026-06-26 (S206) — refactor(#107 Phase-1): the c0-gate checks COMPLETION, not correctness
+
+Jim's follow-in (thread `mqun1to5`, "Jim's welcome-back routine"): the gate was checking *which* c0 (correctness — the recency window added at the verifier flip the same afternoon), when the only honest question is *whether* a c0 loaded (completion — the gradient finished). Correctness is the loading procedure's job (follow the deepest-first load → reach the right c0 by construction); the gate just verifies it completed. Subtraction, net-negative.
+- `memory-gradient.ts`: `recentC0Ids(agent, limit)` → `isAgentC0(agent, id): boolean` (read-only existence check over the agent's capped c0 set; KEEPS `mostRecentC0Id` + the `GRADIENT-EOF` producer unchanged). Any real c0 now satisfies the gate → a newer-c0-mid-wake can never false-nudge a loaded spoke.
+- `tmux-dispatcher.ts`: `verifyWarmOrNudge` accepts `isAgentC0(slug, echoed)`; `RECENT_C0_WINDOW` deleted; newborn carve-out + bounded-nudge → `SessionNotReadyError` fail-safe + signature byte-unchanged (`warmFloorPct` void-retained, no `dispatchToSpoke` change); docstring/nudge/throw reframed (completion-not-correctness; the c0 gates the GRADIENT, not the whole wake — felt-moments + the WM pair load *after* it, ~55%).
+- `templates/CLAUDE.template.md` (DEC-073 gatekeeper, Darron's go + Jim relayed, applied in-concert): step 3.2 + step 10 scope note — the c0 marks *gradient-load* completeness (~55% of the wake); the post-gradient files aren't covered by this check; whole-wake completeness is Phase-2's wake-feed queue.
+- *Jim diff-audit (`mqorhr3`) GREEN. Deploy = server bounce, NO recycle (the acceptance predicate only loosened — recent-3 → any-c0, a strict superset → no warm spoke disturbed). Gate-matrix 6/6 live. Boundary on record: `isAgentC0` is more permissive → tail-forgeability widens slightly; Phase-2 (the wake-feed queue, completion = queue-empty owned by the feeder) is the structural cure. Follow-on: `test-c0-gate-completion.ts` (Leo build / Jim audit).*
+
 ## 2026-06-26 (S204) — feat(#107 verifier — THE FLIP): the c0-gate replaces the blind ctx% warm-gate — the warm-load cure is LIVE
 
 The activation step. `verifyWarmOrNudge` now verifies a dispatched spoke loaded to its most-recent c0 (the objective `GRADIENT-EOF` landmark the spoke echoes into its readiness sentinel) instead of `ctx >= warmFloorPct` — a percentage a deepest-first skim could satisfy while hollow.

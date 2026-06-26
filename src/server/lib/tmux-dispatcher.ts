@@ -36,13 +36,9 @@ import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
 import { spokeLifecycleFor } from './garden-manifest';
-import { mostRecentC0Id, recentC0Ids } from './memory-gradient';
+import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
-// #107 c0-gate: accept the spoke's echoed c0 id if it is among the agent's last N c0s (Jim's
-// moving-target tolerance — a WM slice can insert a newer c0 mid-wake). No-hidden-globals
-// candidate → a registry leaf later, alongside the warm-floor/timeout knobs.
-const RECENT_C0_WINDOW = 3;
 const PIPES_DIR = process.env.HAN_PIPES_DIR || path.join(os.homedir(), '.han', 'agent-pipes');
 
 /**
@@ -868,17 +864,23 @@ const FULL_LOAD_NUDGE =
     'load fully, then idle ready. Do not stop shallow.';
 
 /**
- * The WARM-GATE (#107 c0-gate, plan-audit mqubg8sq + diff-audit mqubxhlu): a spoke counts as ready
- * for work only when it has proven it loaded to its most-recent c0 — the OBJECTIVE end-landmark,
- * not a context-fullness percentage (which a deepest-first skim can satisfy while hollow). The spoke
- * writes the c0 id it reached (`GRADIENT-EOF`) into its readiness sentinel at wake step 10; we accept
- * it if that id is a RECENT VALID c0 (within the last `RECENT_C0_WINDOW` — Jim's moving-target
- * tolerance, NOT strict `==`, since a WM slice can insert a newer c0 mid-wake). A NEWBORN (no c0
- * exists yet → `mostRecentC0Id` is null) is ready once the sentinel is merely present (the genesis
- * triad loaded; the spoke writes the literal `none`). A shallow wake gets a bounded full-load nudge;
- * still unverified after `maxNudges` → SessionNotReadyError (fail-safe — caller skips, message stays
- * queued, NEVER a hollow answer). `perAttemptTimeoutMs` is the give-up ceiling per attempt (the load
- * returns in ~minutes, far under it — never a tight loop, S74).
+ * The WARM-GATE (#107 c0-gate, Phase-1 completion-not-correctness, thread mqun1to5): a spoke counts
+ * as ready for work only when it has proven a c0 LOADED — the OBJECTIVE landmark, not a context-
+ * fullness percentage (which a deepest-first skim can satisfy while hollow). The spoke writes the c0
+ * id it reached (`GRADIENT-EOF`) into its readiness sentinel at wake step 10; we accept it iff that
+ * id is ANY c0 of this agent (`isAgentC0`) — a COMPLETION check (did a c0 load → the gradient
+ * finished), NOT which c0 (correctness is the loading procedure's job; follow the load and you reach
+ * the right c0 by construction). This SUPERSEDES the recent-window moving-target tolerance: any real
+ * c0 satisfies the gate, so a newer-c0-mid-wake can never false-nudge a loaded spoke.
+ *
+ * SCOPE, stated honestly: this gates the GRADIENT load (the gradient ends in a c0), NOT the whole
+ * wake — felt-moments + the WM pair load AFTER the gradient (~55% mark; Jim's routine analysis,
+ * mqun1to5). Full-wake completeness is Phase-2 (the wake-feed queue: completion = queue-empty, owned
+ * by the feeder). A NEWBORN (no c0 exists yet → `mostRecentC0Id` is null) is ready once the sentinel
+ * is merely present (the genesis triad loaded; the spoke writes the literal `none`). A shallow wake
+ * gets a bounded full-load nudge; still unverified after `maxNudges` → SessionNotReadyError (fail-
+ * safe — caller skips, message stays queued, NEVER a hollow answer). `perAttemptTimeoutMs` is the
+ * give-up ceiling per attempt (the load returns in ~minutes, far under it — never a tight loop, S74).
  *
  * `warmFloorPct` is retained in the signature (the registry/caller contract) but superseded by the
  * c0-gate; a footprint-% sanity belt could return here later behind it.
@@ -893,18 +895,18 @@ export async function verifyWarmOrNudge(slug: string, surface: string, warmFloor
                 return readySentinelMtime(slug, surface) !== null ? true : null;
             }
             const echoed = readSentinelC0Id(slug, surface);
-            if (echoed && recentC0Ids(slug, RECENT_C0_WINDOW).includes(echoed)) return true;
+            if (echoed && isAgentC0(slug, echoed)) return true;
             return null;
         }, perAttemptTimeoutMs).then(() => true).catch(() => false);
         if (ok) return;
         if (nudge >= maxNudges) {
             const echoed = readSentinelC0Id(slug, surface);
             throw new SessionNotReadyError(
-                `${slug}/${surface}: c0-gate not satisfied (sentinel c0=${echoed ?? 'absent'}, expected a ` +
-                `recent valid c0) after ${maxNudges} nudge(s) — refusing to deliver work (no hollow answers; ` +
-                `message stays queued)`);
+                `${slug}/${surface}: c0-gate not satisfied (sentinel c0=${echoed ?? 'absent'}, not a c0 of ` +
+                `this agent — the gradient did not finish loading) after ${maxNudges} nudge(s) — refusing to ` +
+                `deliver work (no hollow answers; message stays queued)`);
         }
-        console.warn(`[tmux-dispatcher] ${slug}/${surface}: shallow wake (sentinel c0=${readSentinelC0Id(slug, surface) ?? 'absent'}, not a recent valid c0) — nudging full reconstitution (${nudge + 1}/${maxNudges})`);
+        console.warn(`[tmux-dispatcher] ${slug}/${surface}: shallow wake (sentinel c0=${readSentinelC0Id(slug, surface) ?? 'absent'}, not a c0 of this agent) — nudging full reconstitution (${nudge + 1}/${maxNudges})`);
         sendLine(tmuxSession, FULL_LOAD_NUDGE);
     }
 }

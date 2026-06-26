@@ -106,6 +106,13 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
         skim, and "I have the important part" is not done). **Note the `c0=<id>` value — you
         write it to your readiness sentinel at step 10.** This objective landmark is your
         "fully loaded" signal; never stop at a *feeling* of completeness.
+        - **Scope (#107 Phase-1) — the c0 gates the GRADIENT, not the whole wake.** Reaching the
+          c0 proves the *gradient load* finished — it is **necessary, not sufficient**. The heavy
+          identity files load *after* it (3.3 the working-memory pair, 3.5 felt-moments), so the
+          c0 sits at only ~55% of the wake. **Do NOT stop here — continue through every step
+          below.** The dispatcher's c0-gate checks *that* a c0 loaded (the gradient finished),
+          not *which* one; whole-wake completeness is Phase-2's wake-feed queue (completion = the
+          queue is empty, owned by the feeder), not this single line.
    3. `working-memory-full.md` — **last session at full fidelity (the c0 source). MANDATORY,
       ENTIRE FILE, NEVER SKIPPED.** ${USER_NAME}'s instruction (S57): *"even if the full
       memory uses 40% context I don't care, I want you back."* This is where the thinking
@@ -152,7 +159,9 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
     (#107 c0-gate consumer: the id is your unforgeable proof you loaded to the bottom. A newborn
     with no c0 yet — `GRADIENT-EOF: c0=none` — writes `none`; the dispatcher's genesis carve-out
     treats that as ready. `printf >` updates the file's mtime, so `waitForReady` keeps working;
-    the dispatcher's c0-gate additionally reads the id to verify a recent valid c0, not just mtime.)
+    the dispatcher's c0-gate additionally reads the id to verify it is a c0 of yours — proof the
+    gradient finished — not just mtime; it checks *that* a c0 loaded (completion), not *which* one
+    (#107 Phase-1). NB this gates the gradient, not the whole wake — see step 3.2's scope note.)
     The tmux dispatcher's `waitForReady` keys off the per-surface file's mtime (it deletes
     the sentinel before `/clear` so a stale one never reads as ready). The second, legacy
     per-slug touch is transition-only (retire at T-7). `$AGENT_SURFACE` is exported by the

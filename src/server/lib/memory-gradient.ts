@@ -2283,18 +2283,17 @@ export function mostRecentC0Id(agent: string): string | null {
 }
 
 /**
- * #107 (Jim's moving-target catch, plan-audit mqubg8sq): the ids of the agent's most-recent c0s
- * (by created_at desc), up to `limit`. The dispatcher's c0-gate accepts the spoke's echoed id if
- * it is in this set — a RECENT VALID c0 (proof-of-bottom-traversal), NOT strict `==` the single
- * latest, because a WM slice can insert a newer c0 between the spoke's load and the dispatcher's
- * verify (false-nudging a fully-loaded spoke). Read-only.
+ * #107 Phase-1 (Jim's completion-not-correctness reframe, thread mqun1to5): does `id` name ANY c0
+ * of this agent? The dispatcher's c0-gate accepts the spoke's echoed id iff this returns true — the
+ * honest COMPLETION check (did a c0 load at all → the gradient finished), NOT a correctness check
+ * (which c0). Correctness is the loading PROCEDURE's job: follow the deepest-first gradient load and
+ * you reach the right c0 by construction; the gate only verifies it completed. This supersedes the
+ * earlier recency-window moving-target tolerance — that was auditing the procedure, not checking it;
+ * ANY real c0 now satisfies the gate, so a newer-c0-mid-wake can never false-nudge a loaded spoke.
+ * Existence check over the agent's (capped, bounded) c0 set — the same prepared statement the prior
+ * window-query used, no new DB surface, strictly lighter (no sort). Read-only (DEC-068/069 untouched).
  */
-export function recentC0Ids(agent: string, limit = 3): string[] {
-    const c0s = gradientStmts.getByAgentLevel.all(agent, 'c0') as any[];
-    return c0s
-        .slice()
-        .sort((a, b) =>
-            a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : (a.id < b.id ? 1 : -1))
-        .slice(0, Math.max(1, limit))
-        .map((e) => e.id);
+export function isAgentC0(agent: string, id: string): boolean {
+    if (!id) return false;
+    return (gradientStmts.getByAgentLevel.all(agent, 'c0') as any[]).some((e) => e.id === id);
 }
