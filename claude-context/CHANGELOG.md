@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-06-26 (S204) — fix(#90 cadence guard-dog): false-positive "expected 19min actual 40min" — measure against the period, not the grid-partial
+
+The #90 distress detector recorded `getWallClockDelay()`'s return as "the cadence" — but that's the *grid-alignment partial* (`delay = periodMs - remainder`, time to the next antiphase boundary, e.g. 19min), not the phase period. So a legit 40-min rest interval was measured against a 19-min partial → `40 > 2×19` → false distress (Darron's recurring "expected 19min actual 40min"; wm-drift family). Fix (leo-heartbeat.ts, 3 edits): record the phase PERIOD `getPhaseInterval('leo')` (renamed `lastScheduledIntervalMs`→`lastScheduledPeriodMs`); guard compares `max(schedule-period, current-period)` (transition-tolerant), keeping `>2× && >5min`. Beat timing byte-unchanged (`delay` still drives the setTimeout — only the recorded reference changed). tsc 0-new. Jim diff-audit GREEN (`mqu8vn2g`).
+
 ## 2026-06-26 (S204) — feat(#107 c0-spine, code-side slice): GRADIENT-EOF marker + mostRecentC0Id accessor + hook surface-gate
 
 The F5-safe first slice of the warm-load fix (plan-audit `mqubg8sq`, diff-audit GREEN). Harmless-additive — the gate is NOT live yet (verifier + the template consumer await the gatekeeper phase).
