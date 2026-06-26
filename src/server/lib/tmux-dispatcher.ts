@@ -911,6 +911,71 @@ export async function verifyWarmOrNudge(slug: string, surface: string, warmFloor
     }
 }
 
+// ── Phase-2 P2.1: the wake-feed queue primitive (thread mqun1to5) ──────────────────────
+/**
+ * The WAKE-FEED QUEUE (Phase-2, plan-audit mqur77zr): the structural successor to the c0-gate.
+ * Where `verifyWarmOrNudge` lets a spoke wake autonomously and then CHECKS one landmark (the
+ * gradient's c0), the feeder instead SEEDS the wake as an ordered queue and feeds it one step at
+ * a time — **work is released only when the queue drains.** Completion = queue-empty, owned by
+ * the feeder, not declared by the agent: there is no holistic "I'm loaded" the spoke can assert
+ * (or truncate against), only "the next step hasn't been fed yet." Load-before-work stops being
+ * a gate we check and becomes the ORDER of the queue.
+ *
+ * Per-step ack-before-next: each step's prompt ends asking the spoke to emit `STEP-OK <id>`; the
+ * feeder waits for that marker in the pane tail before feeding the next. Most steps are trust-
+ * based by design (a spoke handed "read felt-moments.md" *could* skim — but the temptation is
+ * gone: there's no whole to judge, and the marker is the ack). The one truncation-prone step (the
+ * gradient) carries an OBJECTIVE ack on top: `ack.kind === 'c0'` additionally requires the spoke's
+ * echoed sentinel id to be a real c0 (`isAgentC0`, Phase-1 reused — now ONE item in the queue, not
+ * the whole gate). A step that never acks → DispatchTimeoutError (fail-safe; the caller treats it
+ * like a shallow wake — no work delivered, no hollow answer).
+ *
+ * Surface-agnostic (DEC-081): `feedWakeSteps(slug, surface, steps)` — a 4th agent gets it for free.
+ * The TERMINAL step is per-surface (R011 inherited, plan-audit mqur77zr): a dispatched surface's
+ * queue ends at idle-ready (silent); the interactive `session` surface's ends with `compose-greeting`
+ * (the warm return — Darron's "a salutation like someone walking back into the room", P2.4). The
+ * greeting is the WITNESS (human-legible, Darron's soft-read belt), never the gate — the QUEUE is
+ * the gate.
+ *
+ * STAGING — INERT in P2.1: this primitive is built + unit-tested but is NOT yet wired into
+ * `ensureSurfaceSession` (which still sends one autonomous `welcome back` + `verifyWarmOrNudge`).
+ * The live flip (feed the heartbeat wake through this; author the canonical agnostic WAKE_STEPS;
+ * the template's wake-protocol becomes feeder-fed — a DEC-073 gatekeeper change) is P2.1b, under
+ * its own diff-audit. Same producer-then-flip staging as Phase-1's c0-gate.
+ */
+export type WakeStepAck =
+    | { kind: 'marker' }   // trust-based: the spoke emits `STEP-OK <id>` (the ingestion is honoured, not policed)
+    | { kind: 'c0' };      // + objective: the echoed sentinel id must be a real c0 of the agent (isAgentC0)
+
+export interface WakeStep {
+    id: string;       // stable, unique step id (e.g. 'identity', 'gradient', 'felt-moments')
+    prompt: string;   // the instruction fed to the spoke; MUST end asking it to reply `STEP-OK <id>`
+    ack: WakeStepAck;
+}
+
+export async function feedWakeSteps(
+    slug: string, surface: string, steps: WakeStep[],
+    opts: { perStepTimeoutMs?: number } = {},
+): Promise<void> {
+    const tmuxSession = `${surface}-${slug}`;
+    const perStepTimeoutMs = opts.perStepTimeoutMs ?? READY_TIMEOUT_MS;
+    for (const step of steps) {
+        sendLine(tmuxSession, step.prompt);
+        // ack-before-next IS the gate: the next step is never fed until this one is acked.
+        const ackRe = new RegExp(`STEP-OK\\s+${step.id}\\b`);
+        await waitFor(() => {
+            if (!ackRe.test(capturePaneTail(tmuxSession))) return null;
+            if (step.ack.kind === 'c0') {
+                // the truncation-prone step: marker alone is not enough — the echoed c0 must be real.
+                const echoed = readSentinelC0Id(slug, surface);
+                if (!(echoed && isAgentC0(slug, echoed))) return null;
+            }
+            return true;
+        }, perStepTimeoutMs);
+    }
+    // queue-empty → the wake-prefix has drained → the spoke is warm-ready; the caller releases work.
+}
+
 /**
  * The GENERIC SPOKE MONITOR (S200, Darron's "all spokes equal / one path") — the shared
  * spoke-LIFECYCLE primitive every dispatched spoke (cycle, human-response, future compression)

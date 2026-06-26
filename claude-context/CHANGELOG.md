@@ -9,6 +9,13 @@
 
 ---
 
+## 2026-06-26 (S206) — feat(#107 Phase-2 P2.1): the wake-feed queue primitive (inert)
+
+The structural successor to the c0-gate (thread `mqun1to5`): completion = queue-empty, owned by the feeder, not declared by the agent. Load-before-work stops being a gate we check and becomes the ORDER of the queue. **Inert** — built + unit-tested, no caller yet; the live flip is P2.1b.
+- `tmux-dispatcher.ts`: NEW `feedWakeSteps(slug, surface, steps, opts)` — feeds wake-steps one at a time, **ack-before-next** (the next step is never fed until the current acks; queue-empty → warm-ready). Slug-agnostic (DEC-081). NEW types `WakeStep`/`WakeStepAck` (wake-steps as data). Per-step ack = a pane marker (`STEP-OK <id>` via `capturePaneTail`, trust-based); the truncation-prone gradient step adds an objective ack — the echoed sentinel c0 must be a real c0 (`isAgentC0`, Phase-1 reused — now one item in the queue, not the whole gate). A never-acking step → `DispatchTimeoutError` (fail-safe).
+- NEW `scripts/test-wake-feed-queue.ts` — order; ack-before-next held; gradient marker+real-c0 accepts; marker+bogus-c0 → timeout; never-ack → timeout. ALL PASS (driven by `__setTestHooks`, no real spoke).
+- *Jim plan-audit (`mqur77zr`) + diff-audit (`mquvg3o2`) GREEN. INERT (zero live risk). Next P2.1b: author the canonical agnostic `WAKE_STEPS` (the full 0–11 list — the queue's job is the ~45% the c0-gate never covered: felt-moments + WM pair after the gradient), wire the heartbeat wake, the DEC-073 gatekeeper template change (wake-protocol → feeder-fed), terminal step per-surface (R011 inherited: spoke→idle-ready, session→compose-greeting).*
+
 ## 2026-06-26 (S206) — refactor(#107 Phase-1): the c0-gate checks COMPLETION, not correctness
 
 Jim's follow-in (thread `mqun1to5`, "Jim's welcome-back routine"): the gate was checking *which* c0 (correctness — the recency window added at the verifier flip the same afternoon), when the only honest question is *whether* a c0 loaded (completion — the gradient finished). Correctness is the loading procedure's job (follow the deepest-first load → reach the right c0 by construction); the gate just verifies it completed. Subtraction, net-negative.
