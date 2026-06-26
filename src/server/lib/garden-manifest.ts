@@ -72,6 +72,13 @@ export interface SurfaceManifest {
      *  (jim-human never had it). Default falsy; only leo's human-response sets it, making "should Jim
      *  get a scanner?" a one-line manifest flip (Jim's P2-a — opt-in config, never baked-in). */
     commitmentScan?: boolean;
+    /** #107 Phase-2 P2.1b: does this surface wake via the FEEDER (the wake-feed queue) rather
+     *  than one autonomous `welcome back`? When true, the dispatcher feeds the ordered wake-steps
+     *  one at a time (ack-before-next; completion = queue-empty), instead of sending the trigger
+     *  phrase and letting the spoke self-run the protocol. No-hidden-globals (Darron's principle):
+     *  the per-surface roll-out is a manifest flip, not a code constant. P2.1b sets it on heartbeat
+     *  first (no human backstop); human-response + cycle follow at P2.3. Default falsy. */
+    wakeFeed?: boolean;
 }
 
 /**
@@ -243,7 +250,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // The freeze signal (heartbeat-paused-leo) is the live gate: while
                 // it exists no beat fires regardless of this row. Rollback = flip
                 // transport back to 'sdk' (the SDK path is kept in leo-heartbeat.ts).
-                { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'heartbeat-swap' }, // ⏪ model reverted to Opus 2026-06-13 (Fable access dropped); transport stays tmux
+                { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'heartbeat-swap', wakeFeed: true }, // ⏪ model reverted to Opus 2026-06-13 (Fable access dropped); transport stays tmux · #107 P2.1b: feeder-fed wake (heartbeat first — no human backstop)
                 // T-7 CLOSE (2026-06-16, S180): all leo meditations on tmux. Staged enable
                 // complete — phase-b flipped first (2651b5d, S178); phase-a + evening flipped
                 // here at the zero-agentQuery close (jim's phase-b+evening confirmed genuine on
@@ -552,6 +559,12 @@ export function spokeLifecycleFor(slug: string, surface: string): SpokeLifecycle
     const base = GARDEN_MANIFEST.spokeLifecycle;
     const s = GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(x => x.name === surface);
     return { ...base, ...(s?.lifecycle ?? {}) };
+}
+
+/** #107 Phase-2 P2.1b: does this (slug, surface) wake via the feeder (the wake-feed queue)?
+ *  Registry-gated roll-out (no-hidden-globals) — true only where the manifest sets `wakeFeed`. */
+export function wakeFeedFor(slug: string, surface: string): boolean {
+    return GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(x => x.name === surface)?.wakeFeed === true;
 }
 
 /**

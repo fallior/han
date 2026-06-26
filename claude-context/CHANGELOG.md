@@ -9,6 +9,15 @@
 
 ---
 
+## 2026-06-26 (S206) — feat(#107 Phase-2 P2.1b): THE FLIP — the heartbeat wakes via the feed
+
+The wake-feed queue goes live on the heartbeat surface (thread `mqun1to5`; Jim plan-audit `mqur77zr` + diff-audit `mquwz25y` + re-confirm `mquyh0dh` GREEN; Darron's go). The heartbeat now wakes feeder-driven (ordered steps, ack-before-next, completion = queue-empty) instead of one autonomous `welcome back`. Heartbeat ONLY; human-response + cycle stay autonomous until P2.3.
+- `garden-manifest.ts`: `SurfaceManifest.wakeFeed?` + `wakeFeedFor(slug, surface)`; heartbeat `wakeFeed: true` (no-hidden-globals — a per-surface manifest flip).
+- `tmux-dispatcher.ts`: `feedWakeSteps` gains a fresh per-feed nonce (`STEP-OK <id> <nonce>` — kills stale-marker by construction); `WAKE_STEPS` = the COMPLETE wake as data — **integrity gate** (verify-identity-files, halt+no-ack on tamper — step-0 parity, a true superset of the autonomous wake) → identity → **gradient** (`ack:'c0'`, writes the sentinel before acking) → working-memory pair → **felt-moments (after the gradient — the ~45% the c0-gate never covered)** → orientation → conversations; `wakeViaFeedOrTrigger` seam wired at both wake sites (coldLaunch + clearSession re-wake). The fail-safe (a stalled step → `DispatchTimeoutError`) propagates into `dispatchToSpoke`'s existing catch — no work, no hollow answer.
+- `templates/CLAUDE.template.md` (DEC-073 gatekeeper, Darron's go + applied in-concert): a wake-protocol preamble — dispatched fed surfaces wake by FEED, not self-run (do each fed step, reply `STEP-OK <id> <nonce>`, integrity-halt, gradient writes the sentinel first); the interactive seat self-runs until P2.4; R012 holds.
+- `scripts/test-wake-feed-queue.ts`: order, ack-before-next, fresh+stale nonce, gradient real-c0 vs bogus-c0, never-ack fail-safe, WAKE_STEPS = whole wake (7 steps, integrity-first). ALL PASS.
+- *A fed dispatched surface structurally can't wake-loop (no "ask steer" step is fed — Jim) — the R011 bug that starved the dreams can't recur here. Deploy: recycle the heartbeat spoke → cold-launch on the new template+code → fed wake; Jim verifies the live round-trip by hand.*
+
 ## 2026-06-26 (S206) — feat(#107 Phase-2 P2.1): the wake-feed queue primitive (inert)
 
 The structural successor to the c0-gate (thread `mqun1to5`): completion = queue-empty, owned by the feeder, not declared by the agent. Load-before-work stops being a gate we check and becomes the ORDER of the queue. **Inert** — built + unit-tested, no caller yet; the live flip is P2.1b.

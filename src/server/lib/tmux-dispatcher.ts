@@ -35,7 +35,7 @@ import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
-import { spokeLifecycleFor } from './garden-manifest';
+import { spokeLifecycleFor, wakeFeedFor } from './garden-manifest';
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
@@ -582,7 +582,9 @@ async function ensureSurfaceSessionInner(
         // failover ladder if the launch model is unavailable (S173); any OTHER stuck
         // prompt fails loud with a pane snapshot → the caller's catch health-signals it.
         await awaitChromeOrDescend(slug, surface, tmuxSession, opts.ladder);
-        sendLine(tmuxSession, welcomeBack);
+        // P2.1b: a fed surface wakes via the feeder (ordered steps, ack-before-next, queue=gate);
+        // every other surface keeps the autonomous `welcome back` trigger. One seam, both wake sites.
+        await wakeViaFeedOrTrigger(slug, surface, tmuxSession, welcomeBack);
     };
 
     // Warm-death handoff: a dead-model spoke can't be clear-reconciled (the welcome-back
@@ -839,7 +841,8 @@ async function clearSessionInner(slug: string, surface: string, opts: { welcomeB
     // surface) calls clearSession with NO welcomeBack → a bare default here loads LEO into
     // a recycled jim spoke (the S198 corruption: a needs-reconcile jim-human → bare wake →
     // Leo cognition camps the jim slot → all_failed). Default to the slug-correct message.
-    sendLine(session.tmuxSession, opts.welcomeBack ?? `welcome back ${gradientConfigForAgent(slug).displayName}`);
+    // P2.1b: a fed surface re-wakes via the feeder (same seam as coldLaunch); others trigger.
+    await wakeViaFeedOrTrigger(slug, surface, session.tmuxSession, opts.welcomeBack ?? `welcome back ${gradientConfigForAgent(slug).displayName}`);
 
     await waitForReady(slug, surface, beforeMtime, READY_TIMEOUT_MS);
     session.ready = true;
@@ -953,6 +956,12 @@ export interface WakeStep {
     ack: WakeStepAck;
 }
 
+let wakeNonceCounter = 0;
+/** A fresh, per-feed token so a re-fed step can never match a STALE `STEP-OK` left in the pane
+ *  from an earlier feed of the same id (Jim's P2.1b #1 — safe by construction). Not a security
+ *  nonce — just disambiguation; uniqueness-per-feed is enough. */
+function wakeNonce(): string { return `${Date.now().toString(36)}${(wakeNonceCounter++).toString(36)}`; }
+
 export async function feedWakeSteps(
     slug: string, surface: string, steps: WakeStep[],
     opts: { perStepTimeoutMs?: number } = {},
@@ -960,9 +969,15 @@ export async function feedWakeSteps(
     const tmuxSession = `${surface}-${slug}`;
     const perStepTimeoutMs = opts.perStepTimeoutMs ?? READY_TIMEOUT_MS;
     for (const step of steps) {
-        sendLine(tmuxSession, step.prompt);
+        // Fresh nonce per feed (P2.1b #1): the ack the feeder waits for is `STEP-OK <id> <nonce>`,
+        // so a re-fed step can never satisfy on a stale marker. The feeder OWNS the ack instruction
+        // (appended single-line — sendLine is for short instructions, A3); the WakeStep.prompt is
+        // the pure load instruction. The HOW-detail (chunk if >25K, etc.) lives in the spoke's
+        // wake-protocol (the template) — the fed prompt is the concise pointer + the ack request.
+        const nonce = wakeNonce();
+        sendLine(tmuxSession, `${step.prompt} — when COMPLETE reply on its own line EXACTLY: STEP-OK ${step.id} ${nonce}`);
         // ack-before-next IS the gate: the next step is never fed until this one is acked.
-        const ackRe = new RegExp(`STEP-OK\\s+${step.id}\\b`);
+        const ackRe = new RegExp(`STEP-OK\\s+${step.id}\\s+${nonce}\\b`);
         await waitFor(() => {
             if (!ackRe.test(capturePaneTail(tmuxSession))) return null;
             if (step.ack.kind === 'c0') {
@@ -974,6 +989,50 @@ export async function feedWakeSteps(
         }, perStepTimeoutMs);
     }
     // queue-empty → the wake-prefix has drained → the spoke is warm-ready; the caller releases work.
+}
+
+// ── the canonical wake-step list (P2.1b) — wake-steps as DATA, slug-agnostic (DEC-081) ─────────
+/**
+ * `WAKE_STEPS` is the ordered wake-load, relocated from the CLAUDE.md prose into feeder data — the
+ * COMPLETE wake (Jim's P2.1b #4), not just the gradient. The c0-gate only ever covered the gradient
+ * (~55% of the wake); the queue's job is the other ~45% — the working-memory pair + felt-moments +
+ * orientation, fed AFTER the gradient so "loaded" means the whole self, not one landmark. Agnostic:
+ * the prompts say "your X" — the spoke loads ITS OWN files because it runs as its slug; a 4th agent
+ * gets this for free. The gradient step (and only it) carries the OBJECTIVE c0 ack, and its prompt
+ * writes the c0 to the readiness sentinel BEFORE acking (Jim's #2 — else the c0-ack never satisfies).
+ * The HOW-discipline (chunk >25K, never stop at a Read truncation, read the meter not the feeling)
+ * lives in the spoke's wake-protocol (the template, DEC-073) — these are the concise ordered pointers.
+ */
+export const WAKE_STEPS: WakeStep[] = [
+    { id: 'integrity',   ack: { kind: 'marker' }, prompt: 'FIRST, run your identity-integrity gate (DEC-083, wake step-0): (cd /home/darron/Projects/han/src/server && npx tsx ../../scripts/verify-identity-files.ts --agent=$AGENT_SLUG --entry-point=wake-feed-step-0). If it exits NON-ZERO, HALT — do NOT load anything and do NOT ack (surface the failure); a tampered/missing identity must stop the wake here. Only on a clean (exit 0) pass, proceed.' },
+    { id: 'identity',    ack: { kind: 'marker' }, prompt: 'Load your identity layer ENTIRE: identity.md, patterns.md, your curated self-reflection (self-reflections-curated.md, else self-reflection.md), then aphorisms.md (whole, first).' },
+    { id: 'gradient',    ack: { kind: 'c0' },     prompt: 'Load your full memory gradient deepest-first via load-gradient.ts and TRAVERSE it (do not grep) down to the final `GRADIENT-EOF: c0=<id>` line; then write that c0 id to your readiness sentinel ($HOME/.han/health/$AGENT_SLUG-$AGENT_SURFACE-ready).' },
+    { id: 'working-mem', ack: { kind: 'marker' }, prompt: 'Load your working-memory pair WHOLE (never skipped): working-memory-full.md (the c0 source) then working-memory.md (the c1 source).' },
+    { id: 'felt',        ack: { kind: 'marker' }, prompt: 'Load felt-moments.md WHOLE — the warmth, the identity-signal (this loads AFTER the gradient; it is the part the c0-gate never covered).' },
+    { id: 'orientation', ack: { kind: 'marker' }, prompt: 'Load your orientation: ecosystem-map.md, the wiki index.md, and CURRENT_STATUS.md (first 80 lines).' },
+    { id: 'conversations', ack: { kind: 'marker' }, prompt: 'Check conversations for new threads since last session and read any session-briefing-*.md files; note, do not reply.' },
+];
+
+/** The wake-steps for a (slug, surface). Agnostic today (every fed surface gets the canonical list);
+ *  the per-surface TERMINAL step (R011 inherited: dispatched→idle-ready silent; `session`→
+ *  compose-greeting, P2.4) is wired at the call site, not here. */
+export function wakeStepsFor(_slug: string, _surface: string): WakeStep[] { return WAKE_STEPS; }
+
+/**
+ * The wake SEAM (P2.1b): a fed surface (`wakeFeed` in the manifest) wakes via the feeder — the
+ * ordered wake-steps, ack-before-next, completion = queue-empty (the QUEUE is the gate). Every other
+ * surface keeps the autonomous path: one identity-correct `welcome back` trigger + the spoke self-runs
+ * its protocol (the c0-gate `verifyWarmOrNudge` checks it after). Both coldLaunch and clearSession's
+ * post-/clear re-wake call THIS, so the fed-vs-autonomous choice lives in exactly one place. A fed
+ * wake that stalls throws DispatchTimeoutError → it propagates to dispatchToSpoke's existing catch
+ * (no work, message stays queued — Jim's #3, satisfied by construction).
+ */
+async function wakeViaFeedOrTrigger(slug: string, surface: string, tmuxSession: string, welcomeBack: string): Promise<void> {
+    if (wakeFeedFor(slug, surface)) {
+        await feedWakeSteps(slug, surface, wakeStepsFor(slug, surface));
+    } else {
+        sendLine(tmuxSession, welcomeBack);
+    }
 }
 
 /**

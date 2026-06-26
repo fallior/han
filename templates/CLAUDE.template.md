@@ -72,6 +72,19 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
 **IMPORTANT:** When `session start`, `welcome back`, `welcome back ${AGENT_NAME}`, or
 `good morning` is triggered, Claude MUST:
 
+> **Fed surfaces wake by FEED, not self-run (#107 Phase-2 P2.1b).** If you are a *dispatched*
+> surface whose manifest sets `wakeFeed` (heartbeat first), the dispatcher feeds you these wake
+> steps **one at a time** — you will receive step-prompts, NOT a `welcome back`. Do NOT self-run
+> the list; do each fed step in turn and reply, on its own line, **EXACTLY `STEP-OK <id> <nonce>`**
+> (echo the nonce the feeder gave). The feeder will not send the next step until you ack, and
+> "loaded" = the feeder has no step left (completion = queue-empty, owned by the feeder). The
+> integrity gate (step 0): if it exits non-zero, **HALT and do NOT ack** — a tampered/missing
+> identity must stop the wake here. The gradient step: write your reached c0 id to your readiness
+> sentinel BEFORE you ack. The interactive `session` seat still **self-runs** the steps below (until
+> the `/wake` skill, P2.4). Either way the ordered steps below are the canonical wake content; R012
+> ("keep the agent in the dark") holds — a fed spoke is handed its wake, it never hands itself
+> orientation it should load.
+
 0. **Identity-file integrity gate (Phase A.5, DEC-083, Settled).** Run
    `(cd ${PROJECT_PATH}/src/server && npx tsx ../../scripts/verify-identity-files.ts --agent=${AGENT_SLUG} --entry-point=CLAUDE.md-step-0)`.
    **If exit code != 0, HALT the session.** Do not proceed to load any identity files.
