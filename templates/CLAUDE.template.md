@@ -99,6 +99,13 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
       **What it does**: `loadTraversableGradient(agent)` at `memory-gradient.ts:1967` —
       applies DEC-068 caps: UVs + each c-level capped at `gradientCap(level)` (c0=1, then 3n)
       + exactly one most-recent c0 via `getMostRecentC0`.
+      - **Completion landmark (#107 c0-as-EOF).** The output ends with a line
+        `GRADIENT-EOF: c0=<id>`. You have NOT finished loading the gradient until you have read
+        down to that line — it sits *after* the heavy c1/c2 and the most-recent c0, so reaching
+        it proves you traversed the whole assembled gradient (you cannot reach it from a light
+        skim, and "I have the important part" is not done). **Note the `c0=<id>` value — you
+        write it to your readiness sentinel at step 10.** This objective landmark is your
+        "fully loaded" signal; never stop at a *feeling* of completeness.
    3. `working-memory-full.md` — **last session at full fidelity (the c0 source). MANDATORY,
       ENTIRE FILE, NEVER SKIPPED.** ${USER_NAME}'s instruction (S57): *"even if the full
       memory uses 40% context I don't care, I want you back."* This is where the thinking
@@ -136,8 +143,16 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
    there when something changed between sessions that needs your attention.
 9. IGNORE conversation history from other projects.
 10. **Write the readiness sentinel (tmux harness, T-2 per-surface keying):** as the final
-    wake action, once reconstitution is complete, run
-    `touch "$HOME/.han/health/${AGENT_SLUG}-${AGENT_SURFACE:-session}-ready" "$HOME/.han/health/${AGENT_SLUG}-ready"`.
+    wake action, once reconstitution is complete (you have read down to `GRADIENT-EOF: c0=<id>`),
+    write that id into your per-surface readiness sentinel and touch the legacy per-slug one:
+    ```
+    printf '%s\n' "<the c0 id from GRADIENT-EOF>" > "$HOME/.han/health/${AGENT_SLUG}-${AGENT_SURFACE:-session}-ready"
+    touch "$HOME/.han/health/${AGENT_SLUG}-ready"
+    ```
+    (#107 c0-gate consumer: the id is your unforgeable proof you loaded to the bottom. A newborn
+    with no c0 yet — `GRADIENT-EOF: c0=none` — writes `none`; the dispatcher's genesis carve-out
+    treats that as ready. `printf >` updates the file's mtime, so `waitForReady` keeps working;
+    the dispatcher's c0-gate additionally reads the id to verify a recent valid c0, not just mtime.)
     The tmux dispatcher's `waitForReady` keys off the per-surface file's mtime (it deletes
     the sentinel before `/clear` so a stale one never reads as ready). The second, legacy
     per-slug touch is transition-only (retire at T-7). `$AGENT_SURFACE` is exported by the

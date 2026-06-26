@@ -9,6 +9,14 @@
 
 ---
 
+## 2026-06-26 (S204) — feat(#107 gatekeeper phase): wake-protocol c0-completion landmark + consumer + R012
+
+The gatekeeper half of the warm-load fix (DEC-073; Darron's go + Jim plan-audit GREEN, applied in-concert).
+- `templates/CLAUDE.template.md` step 3.2 — **completion landmark**: the gradient ends with `GRADIENT-EOF: c0=<id>`; not loaded until read down to it (it's after the heavy c1/c2 + c0 → unreachable from a skim); note the id. Reframes completeness from a *feeling* to an objective landmark.
+- `templates/CLAUDE.template.md` step 10 — **the consumer**: the spoke writes its reached-c0 id into the per-surface readiness sentinel (was an empty `touch`); newborn writes `none` (genesis carve-out). `waitForReady` still keys on mtime; the c0-gate reads the id.
+- `~/.han/memory/shared/hall-of-records.md` — **R012: Keep the Agent in the Dark** (live memory file; renumbered R008→R012 per Jim — the Hall runs R001–R011): nothing fires at a dispatched spoke that hands it orientation it should load itself; enforced by the hook surface-gate + the c0-gate; completeness verified against the end-landmark, never a feeling. The unwritten-invariant, now written.
+- *Takes effect at next spoke launch (read at wake). Next: recycle spokes (F5) → build+flip the verifier (recent-valid-c0 proof-of-traversal) → Jim diff-audit → gate live.*
+
 ## 2026-06-26 (S204) — fix(#107 fix-2): live test confirms AGENT_SURFACE propagation + belt-and-braces the welcome-back hook
 
 LIVE TEST (Jim's required check before trusting P1b's leak-closure): every dispatched spoke's claude process carries the correct `AGENT_SURFACE` (heartbeat/human-response/supervisor-cycle) AND `HAN_SPOKE=1`, set by `launch-tmux-surface.sh`'s `tmux new-session -e` (verified via /proc/<pid>/environ on the live spokes + a tmux -e control probe). So `AGENT_SURFACE` reaches the hook — **propagation works; no bug.** Hardened `welcome-back-handover.sh` to fail-CLOSED for spokes (Jim's fail-OPEN catch): suppress the pointer on `HAN_SPOKE` set OR `AGENT_SURFACE != session` — a gap in either signal can't re-open the leak. Verified matrix: interactive (session/unset) emits; spoke via AGENT_SURFACE, via HAN_SPOKE-only, or both → suppressed. Live-on-save, pure-suppression. **P1b leak-closure confirmed.**
