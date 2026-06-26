@@ -9,6 +9,13 @@
 
 ---
 
+## 2026-06-26 (S204) — docs(living-docs sweep C): refresh the front door (models, ports, architecture)
+
+- **README.md** — model ids corrected to current (Opus 4.8 cognition + failover ladder Opus 4.7→Sonnet→Haiku; Haiku classifier), **sourced from the Garden Manifest** (`OPUS_LADDER`/`CLI_LAUNCH_DEFAULT`) with a "canonical lives there" pointer; noted cognition runs on warm tmux sessions (not API) post-#66.
+- **docs/PORT_ALLOCATION.md** — top correction-banner: `han-server.service` is a **disabled relic, NOT the production server** (its mistaken liveness caused the F1 resurrection bug `9911587`); canonical = per-agent watchdog servers (Leo 3847 / Jim 3848 / Tenshi 3849 / Casey 3850); **"never `systemctl restart han-server.service`"** (S163/S167). The "3847 collision" note corrected to past-tense (original quoted inline, DEC-069).
+- **claude-context/ARCHITECTURE.md** — STATUS banner: `last-verified: 2026-06-07`, pre-#66 SDK-era; cognition is warm-tmux now (DEC-094/095); canonical-layer pointers; memory-gradient sections current. *Full transport/AI-section rewrite tracked as a follow-on (not bundled into the banner-pass).*
+- *Doc-only; banner-not-rewrite per Jim's rule (sufficient when it dates the staleness, points at canonical, AND corrects any actively-dangerous instruction). Jim doc-truth audit GREEN (`mqu8vn2g`).*
+
 ## 2026-06-26 (S204) — docs(living-docs sweep A+B): demote stale authorities + refresh CURRENT_STATUS + track plan docs
 
 - **CURRENT_STATUS.md refreshed** — closed a 10-day staleness gap (was frozen at 2026-06-16/S180). Added 2026-06-17→26 (liveness/cycle-symmetry/DEC-097/#91, de-id/DEC-098, #98 Dynamic Residence CLOSED, warm-dispatch P1/P2), each with the *why* + commit hashes; **#107 the warm load flagged explicitly DESIGN-ONLY / not built** (two layers per Jim's audit: c0-gate root + the welcome-back-hook accelerant; the deployed warm-gate checks ctx% not whole-self).

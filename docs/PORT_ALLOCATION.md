@@ -1,5 +1,16 @@
 # Port Allocation — How HAN Agents Get Their Port Numbers
 
+> ⚠ **CORRECTION 2026-06-26 (living-docs sweep, Batch C) — `last-verified: 2026-06-26`.** The body
+> below treats the systemd **`han-server.service`** as "the production server" — **that is no longer
+> true.** `han-server.service` is a **DISABLED RELIC** (its mistaken liveness caused the F1
+> resurrection bug — a real Jim death pointed at the dead unit, un-rescued; fixed `9911587`). The
+> **canonical servers are the per-agent watchdog-managed instances** — **Leo on 3847, Jim on 3848**
+> (Tenshi 3849, Casey 3850) — each under `agent-server-watchdog.sh <slug> <port>` in a tmux pane.
+> **Never `systemctl restart han-server.service`** (S163/S167). The per-agent *launcher → watchdog →
+> port* mechanic (Steps 1–4 below) remains accurate; only the "Step 5 — orthogonal main server" +
+> "3847 collision" framing is the retired pre-2026-06 topology. Current orientation:
+> `~/.han/memory/shared/ecosystem-map.md`. Body retained as historical detail (DEC-069).
+>
 > **Purpose.** This document maps the *current mechanic* by which each HAN agent (Leo, Jim, Tenshi, Casey) chooses what port to bind its server to, plus the wider relationship to the infrastructure registry and Portwright. It exists so any operator (Darron, Mike, future garden-tenders, future-Leo, future-Jim) can read it cold and understand the topology, rather than discovering it the painful way during a port collision or a "why isn't my agent's server reachable" investigation.
 >
 > **Status.** Living document. Created 2026-05-06 (S151) by Leo at Darron's request, after a TTM-voice trace surfaced the per-agent-server topology. Verified against the actual code state at `fe2c2c8...74c8c38` and the actual `services.toml` at HEAD.
@@ -108,7 +119,13 @@ It runs `server.ts` with no explicit `PORT` env var, so the server defaults to `
 | Tenshi agent server | `hantenshi` → watchdog | 3849 | `~/.han/tenshi-server.pid` | tmux pane / `terminal-log-v2.txt` |
 | Casey agent server | `hancasey` → watchdog | 3850 | `~/.han/casey-server.pid` | tmux pane / `terminal-log-v2.txt` |
 
-**Note on the 3847 collision:** when both `han-server.service` (systemd) AND `hanleo` (tmux watchdog) try to run, only the first to bind 3847 succeeds; the second sits in a respawn loop failing. Today we don't typically run both — `han-server.service` is the production server and `hanleo` is the interactive Leo session that posts via the existing 3847 server. But the topology allows the collision; it's not structurally prevented.
+**Note on the 3847 collision (HISTORICAL — resolved 2026-06):** this described the pre-2026-06 world
+where `han-server.service` (systemd) and `hanleo` (tmux watchdog) both wanted 3847. **`han-server.service`
+is now a disabled relic** — the canonical Leo server is the `hanleo` watchdog instance on 3847; Jim's is
+the `hanjim` watchdog on 3848. The collision is no longer live (the relic is disabled), and `han-server.service`
+must never be restarted (S163/S167). *(Original note retained for history: "when both han-server.service and
+hanleo try to run, only the first to bind 3847 succeeds; the second sits in a respawn loop failing… han-server.service
+is the production server… the topology allows the collision; it's not structurally prevented." — superseded 2026-06-26.)*
 
 ---
 

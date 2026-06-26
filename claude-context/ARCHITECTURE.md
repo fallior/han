@@ -1,6 +1,17 @@
 # Hortus Arbor Nostra — Architecture
 
 > System design and technical reference
+>
+> ⚠ **STATUS 2026-06-26 (living-docs sweep, Batch C): partially stale — `last-verified: 2026-06-07`.**
+> Much of this doc describes the **pre-#66 Agent-SDK era** (autonomous cognition via `query()`/the
+> Anthropic API, "Opus via Agent SDK"). Since the #66 migration (DEC-094/095), **agent cognition runs
+> on warm tmux `claude` sessions** dispatched by `lib/tmux-dispatcher.ts` — zero `agentQuery`-cognition;
+> the SDK shims are retired. For live truth, follow the canonical layers: *decisions/why* →
+> `DECISIONS.md` + hall-of-records; *config* → the Garden Manifest (`src/server/lib/garden-manifest.ts`);
+> *current state* → the code; *orientation* → `~/.han/memory/shared/ecosystem-map.md` ("How Things
+> Connect" is the post-#66 diagram). The memory-gradient sections (DEC-085 in-situ c1 harvest) are
+> current. **A full post-#66 refresh of the transport/AI sections is a tracked follow-on** (too large
+> for this banner-pass; flagged in the living-docs sweep). Read the SDK-era prose as historical.
 
 ## Overview
 

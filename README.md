@@ -117,7 +117,7 @@ Full schema definition: [`src/server/db.ts`](./src/server/db.ts)
 ### AI & Autonomy
 - **Claude Agent SDK** 0.2.44 — Autonomous task execution via `@anthropic-ai/claude-agent-sdk`
 - **Dual LLM backend**:
-  - **Anthropic API** (primary) — Opus 4.6 (supervisor), Sonnet 4.5 (orchestrator), Haiku 4.5 (fast tasks)
+  - **Claude models** (primary) — Opus 4.8 for agent cognition (supervisor, sessions, heartbeat, human responders), with a failover ladder (Opus 4.7 → Sonnet → Haiku); Haiku for Jemma's message classification. *(Canonical model ids live in the Garden Manifest, `src/server/lib/garden-manifest.ts` — that's the single home; this line mirrors it.)* Cognition now runs on warm tmux `claude` sessions (subscription), not in-process Agent-SDK API calls, since the #66 migration.
   - **Ollama local** (fallback) — For cost control or offline operation
 - **Memory banks** — Per-project knowledge accumulation, learning capture, context injection
 
@@ -275,7 +275,7 @@ All 13 levels complete — from MVP prompt responder to full autonomous developm
 
 **Supervisor** — Persistent Opus agent running on adaptive schedule (2min when active, 30min when idle). Maintains memory banks per project (identity, active-context, patterns, self-reflection). Audits documentation health, proposes strategic improvements, and engages in conversation contemplation protocol with the orchestrator for nuanced decision-making. Actions: create goals, adjust priorities, update memory, send notifications, propose ideas.
 
-**Orchestrator** — Decomposes high-level goals into ordered tasks with dependency chains. Memory-based model routing: Haiku 4.5 for fast tasks, Sonnet 4.5 for complex work, Opus 4.6 for high-stakes decisions. 3 concurrent pipelines: 2 normal task slots + 1 dedicated remediation. Escalating retry ladder: reset → Sonnet diagnostic → Opus diagnostic → human notification. Git checkpoint before every task with automatic rollback on failure.
+**Orchestrator** — Decomposes high-level goals into ordered tasks with dependency chains. Memory-based model routing: Haiku for fast tasks, Sonnet for complex work, Opus 4.8 for high-stakes decisions (canonical model ids: the Garden Manifest). 3 concurrent pipelines: 2 normal task slots + 1 dedicated remediation. Escalating retry ladder: reset → Sonnet diagnostic → Opus diagnostic → human notification. Git checkpoint before every task with automatic rollback on failure.
 
 **Command Centre Dashboard** — Central portfolio management interface:
   - *Activity Feed* — Chronological system events and task completions across all projects
