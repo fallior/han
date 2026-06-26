@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-06-26 (S204) — fix(#107 fix-2): live test confirms AGENT_SURFACE propagation + belt-and-braces the welcome-back hook
+
+LIVE TEST (Jim's required check before trusting P1b's leak-closure): every dispatched spoke's claude process carries the correct `AGENT_SURFACE` (heartbeat/human-response/supervisor-cycle) AND `HAN_SPOKE=1`, set by `launch-tmux-surface.sh`'s `tmux new-session -e` (verified via /proc/<pid>/environ on the live spokes + a tmux -e control probe). So `AGENT_SURFACE` reaches the hook — **propagation works; no bug.** Hardened `welcome-back-handover.sh` to fail-CLOSED for spokes (Jim's fail-OPEN catch): suppress the pointer on `HAN_SPOKE` set OR `AGENT_SURFACE != session` — a gap in either signal can't re-open the leak. Verified matrix: interactive (session/unset) emits; spoke via AGENT_SURFACE, via HAN_SPOKE-only, or both → suppressed. Live-on-save, pure-suppression. **P1b leak-closure confirmed.**
+
 ## 2026-06-26 (S204) — fix(#90 cadence guard-dog): false-positive "expected 19min actual 40min" — measure against the period, not the grid-partial
 
 The #90 distress detector recorded `getWallClockDelay()`'s return as "the cadence" — but that's the *grid-alignment partial* (`delay = periodMs - remainder`, time to the next antiphase boundary, e.g. 19min), not the phase period. So a legit 40-min rest interval was measured against a 19-min partial → `40 > 2×19` → false distress (Darron's recurring "expected 19min actual 40min"; wm-drift family). Fix (leo-heartbeat.ts, 3 edits): record the phase PERIOD `getPhaseInterval('leo')` (renamed `lastScheduledIntervalMs`→`lastScheduledPeriodMs`); guard compares `max(schedule-period, current-period)` (transition-tolerant), keeping `>2× && >5min`. Beat timing byte-unchanged (`delay` still drives the setTimeout — only the recorded reference changed). tsc 0-new. Jim diff-audit GREEN (`mqu8vn2g`).

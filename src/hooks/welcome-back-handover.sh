@@ -16,15 +16,22 @@ SIGNALS_DIR="${HOME}/.han/signals"
 SLUG="${AGENT_SLUG:-unknown}"
 PTR="${SIGNALS_DIR}/handover-${SLUG}"
 
-# #107 P1b (surface-gate, plan-audit mqubg8sq): the handover pointer is for the INTERACTIVE
-# seat only. A dispatched spoke (heartbeat / human-response / supervisor-cycle / meditation /
-# compression) must wake in the dark and reconstitute fully on its own — nothing should fire
-# AT it that hands it orientation it ought to load for itself (the keep-the-agent-in-the-dark
-# principle; the accelerant under the welcome-back light-load). Fire only for AGENT_SURFACE
-# 'session' (unset/empty = an interactive launch). FAIL-SAFE: any other surface → no-op.
+# #107 P1b (surface-gate, plan-audit mqubg8sq; fix-2 hardening 2026-06-26): the handover pointer
+# is for the INTERACTIVE seat only. A dispatched spoke (heartbeat / human-response /
+# supervisor-cycle / meditation / compression) must wake in the dark and reconstitute fully on its
+# own — nothing should fire AT it that hands it orientation it ought to load for itself (the
+# keep-the-agent-in-the-dark principle; the accelerant under the welcome-back light-load).
+#
+# BELT + BRACES (fix-2, Jim's fail-OPEN catch): a spoke is identified by EITHER signal — both set
+# by launch-tmux-surface.sh's `tmux new-session -e` (verified live 2026-06-26: every dispatched
+# spoke's claude process carries AGENT_SURFACE=<surface> AND HAN_SPOKE=1). Suppressing on either
+# is fail-CLOSED for spokes: a propagation gap in one signal can't re-open the leak. The
+# interactive seat has AGENT_SURFACE=session/unset AND no HAN_SPOKE → proceeds. The unset→session
+# default is correct (the interactive launch legitimately leaves AGENT_SURFACE unset).
+[ -n "$HAN_SPOKE" ] && exit 0    # braces: any spoke carries HAN_SPOKE=1 → suppress
 case "${AGENT_SURFACE:-session}" in
     session) ;;            # interactive seat — proceed
-    *) exit 0 ;;           # dispatched spoke / any non-session surface — suppress the pointer
+    *) exit 0 ;;           # belt: a non-session surface → suppress the pointer
 esac
 
 # No handover waiting → nothing to do.
