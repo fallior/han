@@ -3438,3 +3438,28 @@ The original #36 catalogue + PR5 remediation hunted **hardcoded literals inside 
 
 ### #107 addendum (2026-06-25) — this is the FIX for the welcome-back light-load bug, not just a guardian
 Investigation of Leo's "loads light every welcome-back" bug found the root: the reconstitution target is **"load to the warm floor (fixed 30%)"**, and the assembled gradient is **deepest-first** (tiny UV/deep kernels at the top, the heavy c1/c2 prose lower down). The spoke reads the deep core, barely moves ctx, hits a **false "loaded end-to-end" completion**, and idles light (26% vs its 42% footprint) — the warm-gate then nudges it. The blind fixed-% target is *why* it can't tell it's short. **The calculated footprint is the objective completion signal that fixes this**: "load until ctx ≈ your computed footprint (±5%)" forces the load down through the heavy c1/c2. So #107 is not optional polish — it's the cure for a daily frustration. (Companion consideration: whether the gradient should load heaviest-or-most-recent-first so a partial load is never identity-light, and/or enforce read-to-EOF.)
+
+
+## #109 — PortWright as the machine-level port authority: gardens register/request ports (configurable + registerable)
+
+**Source:** Darron, 2026-06-26 (during the living-docs cleanup, after the PORT_ALLOCATION relic-banner surfaced the historical 3847-collision): *"PortWright should be the port authority — a registry of ports is to be gotten from it. We have an authority that the HAN garden must apply to; this becomes more important when multiple gardens are on one machine. Make the port allocations configurable and registerable."*
+
+**Today (the problem).** Port allocation is split across two *un-enforced* sources: the Garden Manifest hardcodes per-agent ports (`garden-manifest.ts`: leo 3847, jim 3848, tenshi 3849, casey 3850) and `~/Projects/infrastructure/registry/services.toml` *documents* them — but nothing enforces either. That gives the documented in-garden 3847-collision class (two processes both want a port; first-to-bind wins, the other respawn-loops) and, worse, the cross-garden case: two gardens on one machine (Darron's + Mike's) both hardcode 3847 and collide with no arbiter.
+
+**Jim's architectural read — YES, this is the correct architecture.** A **machine-level port authority** (PortWright) that:
+- **Owns the port registry** = the single source of truth, replacing the split manifest-vs-services.toml. `services.toml` becomes seed/documentation; PortWright is the runtime authority-of-record.
+- **Allocates on request, doesn't dictate:** an agent/garden no longer hardcodes a port — it **declares a preference/range (configurable)** and **registers a claim (registerable)**; PortWright grants an actual free port and records the lease; the garden reads its port back. (A DHCP-for-ports / service-registry pattern.)
+- **Sits ABOVE the gardens — one authority per machine, NOT inside any garden.** This is the load-bearing point for the multi-garden motivation: if PortWright lived inside a garden, two gardens would have two authorities and you're back to collision. Each garden is a *client* that applies to the machine-level broker.
+- **Bootstraps on a well-known fixed port** (the authority's own port is the one fixed thing — like a DNS root).
+
+**Why it's right.** It's service-discovery / port-brokering done correctly — the cure for (a) the split-source drift, (b) the in-garden collision, and (c) the cross-garden collision when gardens share a machine. It aligns with our standing principles (single-source-of-truth, configurable-not-hardcoded, no-hidden-globals), and it's the *same shape* as Dynamic Residence's policy/allocation split — a resource granted by an authority, never self-claimed; here the resource is a port and the authority is PortWright. It also **operationalises the existing infrastructure registry**: `services.toml` is documentation today (which is exactly why we just had to banner-correct PORT_ALLOCATION) — PortWright turns it into a live, enforced broker.
+
+**The design directive (Darron):** port allocations become **configurable** (declared as config — a preference/range — not a hardcoded literal in `garden-manifest.ts`) AND **registerable** (claimed/leased via PortWright). The manifest's `port` field migrates from a hardcoded literal to a PortWright-allocated value (manifest declares the preference; PortWright grants + records it).
+
+**Caveats / nuances to design through:** PortWright must be a shared *machine-level* service (above all gardens); the authority's own port is the bootstrap constant; lease lifecycle (claim/renew/release on garden shutdown) so dead gardens free their ports; and a fallback if PortWright is down (a garden should fail-loud, not silently bind a guessed port — the no-silent-default discipline).
+
+**Couplings:** `~/Projects/portwright` (already exists as the Wright-Guild registry-*consumer* dashboard — this *elevates* it from consumer to authority); `~/Projects/infrastructure/registry/services.toml`; the Garden Manifest port leaf (C-P3a, `agentTemplateVars` → `AGENT_PORT`); the multi-garden / federation horizon (Mike's garden on a shared machine — the real motivator).
+
+**Sequencing:** Darron — **address shortly after shipping** (post-cleanup, post-#107); not a blocker for the current ship, but the right next-tier infrastructure once a second garden is in play.
+
+---
