@@ -9,6 +9,13 @@
 
 ---
 
+## 2026-06-27 (S207) — fix(#107 Phase-2): feeder-submission robustness — the long fed line couldn't race its Enter
+
+The surface-1 stall fix (thread `mqvs3r6l`; Jim diff-audit `mqvzdasr` GREEN; Darron's go). The fed-wake stalled at the gradient step because `sendLine` typed a long line via `send-keys -l` then fired a *separate* `send-keys Enter` — on the longest fed line the Enter raced the TUI's ingestion of the paste, leaving the prompt typed-but-unsubmitted (so the feeder waited and fail-safed). The fix is **(a) settle + (c) terser line**, entirely in `tmux-dispatcher.ts` (no template change — the spoke knows the sentinel path from its loaded wake-protocol step 10):
+- `sendLineSettled` (async): `send-keys -l` → `await sleep(SEND_SETTLE_MS=500)` → `Enter`. `feedWakeSteps` now awaits it; `sendLine` stays sync for the short command instructions (/clear, /model, markers) that never raced — minimal blast radius. The settle makes the submit reliable; the existing ack-wait stays the belt (a lost race still fails safe — no hollow work).
+- The gradient `WAKE_STEP` tersed (dropped the inline `$HOME/.han/health/...` path → 213 chars), with a test guard against re-bloat.
+- Stays in the shared feeder (the fed-wake-shared invariant), slug-agnostic. Gates: tsc 0-new (11 baseline); `test-wake-feed-queue.ts` ALL PASS incl the terse guard. (a)+(c) is the interim root; (b) verify-then-retry is the guarantee, added only if the race recurs live (Jim's call). NEXT: re-attempt surface-1 (the decisive live proof).
+
 ## 2026-06-27 (S206) — revert(#107 P2.3 surface-1): supervisor-cycle back to autonomous — fed-wake stalled at the gradient step
 
 Live-verify (the careful flip's whole point) caught a real stall: the supervisor-cycle fed-wake did integrity + identity cleanly (jim-root confirmed — loaded jim's files from root), then the **gradient step prompt sat unsubmitted in the spoke's input, idle** (ctx never rose, sentinel never written); the cycle hung (fail-safe, no hollow work). The heartbeat got past this same step; jim's didn't — intermittent, leading hypothesis a `send-keys`/Enter race on the longest WAKE_STEP. Rolled back `supervisor-cycle` to autonomous (`wakeFeed` removed) → the proven c0-gate guards it again. Heartbeat left fed (warm + working; its stall mode is the same safe fail-safe). NEXT: fix `feedWakeSteps` submission robustness (chunk/anchor the long gradient prompt; verify Enter registers) + re-validate, then re-attempt surface-1.

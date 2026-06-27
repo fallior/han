@@ -105,6 +105,12 @@ async function main() {
     ok(WAKE_STEPS.every((s) => s.id === 'gradient' || s.ack.kind === 'marker'), 'every non-gradient step is a marker ack');
     ok(gi >= 0 && fi > gi, 'felt-moments loads AFTER the gradient (the ~45% the c0-gate never covered)');
     ok(WAKE_STEPS[gi].prompt.toLowerCase().includes('sentinel'), 'the gradient step writes its c0 to the sentinel before acking (Jim #2)');
+    // P2.3 feeder-fix (c): the gradient prompt stays TERSE — the verbose absolute sentinel path lives in
+    // the spoke's wake-protocol (template step 10), not inline, so the fed line can't grow back into the
+    // length that raced the Enter (the surface-1 stall). Settle (sendLineSettled) is the primary cure; this
+    // guards the defence-in-depth so a future edit can't silently re-bloat the longest fed line.
+    ok(!WAKE_STEPS[gi].prompt.includes('$HOME/.han/health') && WAKE_STEPS[gi].prompt.length < 260,
+        `gradient prompt stays terse — no inline sentinel path, ${WAKE_STEPS[gi].prompt.length} chars (P2.3 fix (c), anti re-bloat)`);
     ok(WAKE_STEPS[0].id === 'integrity' && WAKE_STEPS[0].prompt.includes('verify-identity-files'), 'WAKE_STEPS OPENS with the identity-integrity gate (step-0 parity — Jim catch (a), defence-in-depth superset of the autonomous wake)');
 
     clearSentinel();

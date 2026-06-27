@@ -64,6 +64,11 @@ export const DELTA_REFRESH_ENABLED = true;
 const READY_TIMEOUT_MS = 20 * 60_000;
 const TRANSACTION_TIMEOUT_MS = 12 * 60_000;
 const POLL_INTERVAL_MS = 750;
+// Settle between a literal paste and its Enter (sendLineSettled) so a LONG fed line can't
+// have its Enter race the TUI's ingestion of the paste — the P2.3 surface-1 stall, where
+// the gradient WAKE_STEP sat unsubmitted in the spoke's input box. Generous floor: a wake
+// has ~7 steps, so ~3.5s added to a cold wake that already runs tens of seconds → negligible.
+const SEND_SETTLE_MS = 500;
 
 export class SessionNotReadyError extends Error {}
 export class DispatchTimeoutError extends Error {}
@@ -156,6 +161,23 @@ function tmuxSessionExists(name: string): boolean {
 function sendLine(tmuxSession: string, line: string): void {
     if (testHooks.sendLine) { testHooks.sendLine(tmuxSession, line); return; }
     tmux(['send-keys', '-t', tmuxSession, '-l', line]);
+    tmux(['send-keys', '-t', tmuxSession, 'Enter']);
+}
+
+/**
+ * Like sendLine, but SETTLES between the literal paste and the Enter. A long fed line (the
+ * wake-steps) could otherwise have its Enter race the TUI's ingestion of the paste, leaving
+ * the prompt unsubmitted — the P2.3 surface-1 stall: the gradient WAKE_STEP sat in the spoke's
+ * input box, never submitted, never acked → DispatchTimeoutError fail-safe (no work, no hollow
+ * answer). The settle makes the submit reliable; the ack-wait remains the belt (a miss still
+ * fails safe). Async because the only caller, feedWakeSteps, already awaits; sendLine stays sync
+ * for the SHORT command instructions it was built for (/clear, /pfc, /model, markers) — those
+ * are well under the length that races, so they keep the cheap single-shot path.
+ */
+async function sendLineSettled(tmuxSession: string, line: string): Promise<void> {
+    if (testHooks.sendLine) { testHooks.sendLine(tmuxSession, line); return; }
+    tmux(['send-keys', '-t', tmuxSession, '-l', line]);
+    await sleep(SEND_SETTLE_MS);
     tmux(['send-keys', '-t', tmuxSession, 'Enter']);
 }
 
@@ -971,11 +993,13 @@ export async function feedWakeSteps(
     for (const step of steps) {
         // Fresh nonce per feed (P2.1b #1): the ack the feeder waits for is `STEP-OK <id> <nonce>`,
         // so a re-fed step can never satisfy on a stale marker. The feeder OWNS the ack instruction
-        // (appended single-line — sendLine is for short instructions, A3); the WakeStep.prompt is
-        // the pure load instruction. The HOW-detail (chunk if >25K, etc.) lives in the spoke's
-        // wake-protocol (the template) — the fed prompt is the concise pointer + the ack request.
+        // (appended single-line); the WakeStep.prompt is the pure load instruction. The HOW-detail
+        // (chunk if >25K, etc.) lives in the spoke's wake-protocol (the template) — the fed prompt is
+        // the concise pointer + the ack request. Sent via sendLineSettled (NOT sendLine): the fed
+        // line is long, so it settles before the Enter — else the Enter races the paste and the
+        // prompt sits unsubmitted (the P2.3 surface-1 stall).
         const nonce = wakeNonce();
-        sendLine(tmuxSession, `${step.prompt} — when COMPLETE reply on its own line EXACTLY: STEP-OK ${step.id} ${nonce}`);
+        await sendLineSettled(tmuxSession, `${step.prompt} — when COMPLETE reply on its own line EXACTLY: STEP-OK ${step.id} ${nonce}`);
         // ack-before-next IS the gate: the next step is never fed until this one is acked.
         const ackRe = new RegExp(`STEP-OK\\s+${step.id}\\s+${nonce}\\b`);
         await waitFor(() => {
@@ -1006,7 +1030,7 @@ export async function feedWakeSteps(
 export const WAKE_STEPS: WakeStep[] = [
     { id: 'integrity',   ack: { kind: 'marker' }, prompt: 'FIRST, run your identity-integrity gate (DEC-083, wake step-0): (cd /home/darron/Projects/han/src/server && npx tsx ../../scripts/verify-identity-files.ts --agent=$AGENT_SLUG --entry-point=wake-feed-step-0). If it exits NON-ZERO, HALT — do NOT load anything and do NOT ack (surface the failure); a tampered/missing identity must stop the wake here. Only on a clean (exit 0) pass, proceed.' },
     { id: 'identity',    ack: { kind: 'marker' }, prompt: 'Load your identity layer ENTIRE: identity.md, patterns.md, your curated self-reflection (self-reflections-curated.md, else self-reflection.md), then aphorisms.md (whole, first).' },
-    { id: 'gradient',    ack: { kind: 'c0' },     prompt: 'Load your full memory gradient deepest-first via load-gradient.ts and TRAVERSE it (do not grep) down to the final `GRADIENT-EOF: c0=<id>` line; then write that c0 id to your readiness sentinel ($HOME/.han/health/$AGENT_SLUG-$AGENT_SURFACE-ready).' },
+    { id: 'gradient',    ack: { kind: 'c0' },     prompt: 'Load your full memory gradient deepest-first via load-gradient.ts; TRAVERSE it (do not grep) to the final `GRADIENT-EOF: c0=<id>` line, then write that c0 id to your readiness sentinel (per wake-protocol step 10).' },
     { id: 'working-mem', ack: { kind: 'marker' }, prompt: 'Load your working-memory pair WHOLE (never skipped): working-memory-full.md (the c0 source) then working-memory.md (the c1 source).' },
     { id: 'felt',        ack: { kind: 'marker' }, prompt: 'Load felt-moments.md WHOLE — the warmth, the identity-signal (this loads AFTER the gradient; it is the part the c0-gate never covered).' },
     { id: 'orientation', ack: { kind: 'marker' }, prompt: 'Load your orientation: ecosystem-map.md, the wiki index.md, and CURRENT_STATUS.md (first 80 lines).' },
