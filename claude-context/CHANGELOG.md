@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-06-27 (S206) — revert(#107 P2.3 surface-1): supervisor-cycle back to autonomous — fed-wake stalled at the gradient step
+
+Live-verify (the careful flip's whole point) caught a real stall: the supervisor-cycle fed-wake did integrity + identity cleanly (jim-root confirmed — loaded jim's files from root), then the **gradient step prompt sat unsubmitted in the spoke's input, idle** (ctx never rose, sentinel never written); the cycle hung (fail-safe, no hollow work). The heartbeat got past this same step; jim's didn't — intermittent, leading hypothesis a `send-keys`/Enter race on the longest WAKE_STEP. Rolled back `supervisor-cycle` to autonomous (`wakeFeed` removed) → the proven c0-gate guards it again. Heartbeat left fed (warm + working; its stall mode is the same safe fail-safe). NEXT: fix `feedWakeSteps` submission robustness (chunk/anchor the long gradient prompt; verify Enter registers) + re-validate, then re-attempt surface-1.
+
 ## 2026-06-27 (S206) — feat(#107 Phase-2 P2.3 surface-1): supervisor-cycle wakes via the feed
 
 P2.3 carries the proven heartbeat fed-wake to the next dispatched surface (thread `mqun1to5`; Jim plan-audit `mqvqx19m` + diff-audit `mqvrkxkh` GREEN; Darron's go). One surface at a time, recycle-verify each; least-human-facing first (a cycle wedge wakes nothing a human waits on).
