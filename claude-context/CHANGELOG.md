@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-06-27 (S207) — feat(#107 Phase-2 P2.3 surface-3): jim-human wakes via the guaranteed feeder (P2.3 complete)
+
+The last P2.3 flip — the slug-twin of surface-2 (thread `mqvs3r6l`; Jim diff-audit `mqw6sspo` GREEN; Darron's go). `garden-manifest.ts:301` jim `human-response` → `+ wakeFeed: true` (one line; jim's entry has no `commitmentScan`, untouched). `wakeFeedFor` matrix: jim/human-response=true (NEW) — **all three dispatched surfaces (supervisor-cycle, leo-human, jim-human) + the heartbeat are now on the `(a)+(c)+(b)` guaranteed feeder**; meditations + sessions still autonomous (c0-gate-guarded). tsc 0-new. No template change. Live round-trip proves the **jim-ROOT** resolution (#91): the fed gradient step writes `jim-human-response-ready` with a real jim c0 from `~/.han/memory` (root, not `/jim`). Deploy: recycle `human-response-jim` → [TEST]-thread dispatch routed to jim → cold-launch fed → jim-root c0 + substantive reply. Rollback = remove `wakeFeed`. **P2.3 complete; remaining Phase A = P2.3b meditations (lighter WAKE_STEPS variant) + P2.4 interactive `/wake` + greeting.**
+
 ## 2026-06-27 (S207) — feat(#107 Phase-2 P2.3 surface-2): leo-human wakes via the guaranteed feeder
 
 Carries the fed-wake to the first comms-critical surface, onto the proven-live `(a)+(c)+(b)` feeder (thread `mqvs3r6l`; Jim diff-audit `mqw3y7ok` GREEN; Darron's go). `garden-manifest.ts:246` leo `human-response` → `+ wakeFeed: true` (one line; `commitmentScan: true` independent of the flag; the controller is already the agnostic `human-responder.ts` → no code). `wakeFeedFor` matrix: leo/human-response=true (NEW), jim/human-response=false (surface-3 next), supervisor-cycle + heartbeat=true, meditations + session=false. tsc 0-new. No template change. Deploy: recycle any warm `human-response-leo` → next dispatch cold-launches fed; verify via a [TEST]-thread dispatch (Jemma → cold-launch fed → compose + self-post → leo c0 in the sentinel + the reply lands), no disruption to real conversations. Rollback = remove `wakeFeed` (one line; c0-gate guards meanwhile).
