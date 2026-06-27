@@ -303,7 +303,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // meditations sdk→tmux. Rollback = flip back to 'sdk' + restart (SDK path
                 // byte-intact). Model OPUS_LADDER (failover parity with the human/heartbeat
                 // surfaces). Gated: the freeze (supervisor-paused) holds until prove-single.
-                { name: 'supervisor-cycle',   enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'supervisor-swap' }, // #107 P2.3 surface-1 ROLLED BACK 2026-06-27: fed-wake stalled at the gradient step (long-prompt submission); autonomous+c0-gate restored pending a feedWakeSteps submission fix
+                { name: 'supervisor-cycle',   enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'supervisor-swap', wakeFeed: true }, // #107 P2.3 surface-1 RE-ATTEMPT 2026-06-27 (S207): fed-wake re-enabled after the feedWakeSteps submission fix (ece6a72 — settle + terser line); the live cold-launch is the decisive proof of the fix on the case that stalled. Rollback = remove wakeFeed
                 { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
                 { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
                 { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: OPUS_LADDER },

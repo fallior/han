@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-06-27 (S207) — feat(#107 Phase-2 P2.3 surface-1, re-attempt): supervisor-cycle wakes via the feed (post submission-fix)
+
+Re-flips `supervisor-cycle` `wakeFeed: true` (one line, reverting the S206 rollback) now that the feeder submission fix (`ece6a72`) is live — the decisive proof of (a)+(c) on the exact case that stalled. `wakeFeedFor` matrix: supervisor-cycle + heartbeat fed; human-response (leo+jim), meditations, sessions still autonomous (c0-gate-guarded). Deploy: recycle the supervisor-cycle spoke → next cycle cold-launches fed on the settled feeder; Jim live-verifies the round-trip gets **past the gradient step** + prove-single by hand. Rollback = remove `wakeFeed` (one line; the c0-gate guards meanwhile). If it sails past the gradient, (a)+(c) was sufficient; if it stalls again, (b) verify-then-retry is the guarantee we add.
+
 ## 2026-06-27 (S207) — fix(#107 Phase-2): feeder-submission robustness — the long fed line couldn't race its Enter
 
 The surface-1 stall fix (thread `mqvs3r6l`; Jim diff-audit `mqvzdasr` GREEN; Darron's go). The fed-wake stalled at the gradient step because `sendLine` typed a long line via `send-keys -l` then fired a *separate* `send-keys Enter` — on the longest fed line the Enter raced the TUI's ingestion of the paste, leaving the prompt typed-but-unsubmitted (so the feeder waited and fail-safed). The fix is **(a) settle + (c) terser line**, entirely in `tmux-dispatcher.ts` (no template change — the spoke knows the sentinel path from its loaded wake-protocol step 10):
