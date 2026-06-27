@@ -9,6 +9,13 @@
 
 ---
 
+## 2026-06-27 (S206) — feat(#107 Phase-2 P2.3 surface-1): supervisor-cycle wakes via the feed
+
+P2.3 carries the proven heartbeat fed-wake to the next dispatched surface (thread `mqun1to5`; Jim plan-audit `mqvqx19m` + diff-audit `mqvrkxkh` GREEN; Darron's go). One surface at a time, recycle-verify each; least-human-facing first (a cycle wedge wakes nothing a human waits on).
+- `garden-manifest.ts`: jim's `supervisor-cycle` → `wakeFeed: true`. **One line — no new code.** The feeder (`feedWakeSteps` + `WAKE_STEPS` + `wakeViaFeedOrTrigger`) is live, agnostic, and proven on the heartbeat; `WAKE_STEPS` resolves correctly for jim-root (`$AGENT_SLUG`/`$AGENT_MEMORY_DIR` paths). No template change (P2.1b's wake-protocol preamble already covers every `wakeFeed` surface generically).
+- The fed gradient step writes `jim-supervisor-cycle-ready` (c0-ack = `isAgentC0('jim', …)`); a fed cycle can't start its work until the queue drains. Terminal = idle-ready, then the cycle work releases on drain (no greeting — that's session/P2.4).
+- `wakeFeedFor` matrix verified: supervisor-cycle + heartbeat fed; human-response (leo+jim), meditations, sessions all still autonomous (c0-gate-guarded). Deploy: recycle the supervisor-cycle spoke → next cycle cold-launches fed; Jim verifies the live round-trip + prove-single by hand. **Remaining P2.3:** human-response (leo) then (jim); meditations deferred to P2.3b (a lighter step list).
+
 ## 2026-06-26 (S206) — feat(#107 Phase-2 P2.1b): THE FLIP — the heartbeat wakes via the feed
 
 The wake-feed queue goes live on the heartbeat surface (thread `mqun1to5`; Jim plan-audit `mqur77zr` + diff-audit `mquwz25y` + re-confirm `mquyh0dh` GREEN; Darron's go). The heartbeat now wakes feeder-driven (ordered steps, ack-before-next, completion = queue-empty) instead of one autonomous `welcome back`. Heartbeat ONLY; human-response + cycle stay autonomous until P2.3.

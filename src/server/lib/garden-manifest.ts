@@ -303,7 +303,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // meditations sdk→tmux. Rollback = flip back to 'sdk' + restart (SDK path
                 // byte-intact). Model OPUS_LADDER (failover parity with the human/heartbeat
                 // surfaces). Gated: the freeze (supervisor-paused) holds until prove-single.
-                { name: 'supervisor-cycle',   enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'supervisor-swap' },
+                { name: 'supervisor-cycle',   enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'supervisor-swap', wakeFeed: true }, // #107 P2.3 surface-1: feeder-fed wake (the proven heartbeat mechanism; jim-root agnostic)
                 { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
                 { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
                 { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
