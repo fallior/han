@@ -69,6 +69,13 @@ const POLL_INTERVAL_MS = 750;
 // the gradient WAKE_STEP sat unsubmitted in the spoke's input box. Generous floor: a wake
 // has ~7 steps, so ~3.5s added to a cold wake that already runs tens of seconds → negligible.
 const SEND_SETTLE_MS = 500;
+// (b) the submission GUARANTEE (Jim's spec, thread mqvs3r6l): if a fed step's submit is LOST
+// (no STEP-OK ack AND no processing chrome) for this many consecutive poll-ticks, the Enter is
+// re-pressed — bounded by MAX_WAKE_RESUBMITS. So a lost race self-recovers AT the step (ms) rather
+// than aborting the whole wake; the existing DispatchTimeoutError fail-safe is reached only AFTER
+// retrying. Tick-based (not wall-clock) so it's deterministic under the tests' no-op sleep.
+const SUBMIT_GRACE_TICKS = 3;          // ~3 × POLL_INTERVAL_MS ≈ 2.25s of no-chrome-no-ack before a re-press
+export const MAX_WAKE_RESUBMITS = 3;   // bounded re-presses; then fail safe (never a hollow wake)
 
 export class SessionNotReadyError extends Error {}
 export class DispatchTimeoutError extends Error {}
@@ -131,6 +138,7 @@ function ctxPath(slug: string, surface: string): string { return path.join(HEALT
  */
 interface TestHooks {
     sendLine?: (tmuxSession: string, line: string) => void;
+    pressEnter?: (tmuxSession: string) => void;   // (b) re-submit seam — count/observe re-presses without real tmux
     sleep?: (ms: number) => Promise<void> | void;
     tmuxSessionExists?: (name: string) => boolean;
     capturePaneTail?: (name: string) => string;
@@ -178,6 +186,13 @@ async function sendLineSettled(tmuxSession: string, line: string): Promise<void>
     if (testHooks.sendLine) { testHooks.sendLine(tmuxSession, line); return; }
     tmux(['send-keys', '-t', tmuxSession, '-l', line]);
     await sleep(SEND_SETTLE_MS);
+    pressEnter(tmuxSession);
+}
+
+/** Press Enter at a session's prompt — the submit. Its own seam so (b)'s re-submit (feedWakeSteps)
+ *  and sendLineSettled's first attempt share one path, and a test can count re-presses without tmux. */
+function pressEnter(tmuxSession: string): void {
+    if (testHooks.pressEnter) { testHooks.pressEnter(tmuxSession); return; }
     tmux(['send-keys', '-t', tmuxSession, 'Enter']);
 }
 
@@ -1001,16 +1016,44 @@ export async function feedWakeSteps(
         const nonce = wakeNonce();
         await sendLineSettled(tmuxSession, `${step.prompt} — when COMPLETE reply on its own line EXACTLY: STEP-OK ${step.id} ${nonce}`);
         // ack-before-next IS the gate: the next step is never fed until this one is acked.
+        // (b) the submission GUARANTEE (Jim's spec) — three states per poll-tick:
+        //   1. STEP-OK <id> <nonce> (+ a real c0 for the gradient step) → acked, proceed;
+        //   2. processing chrome (or the marker already up) → the turn submitted/ran, keep waiting;
+        //   3. neither for SUBMIT_GRACE_TICKS running → the submit was lost → re-press Enter (bounded).
+        // The submit lands within a few re-presses (self-recovers at THIS step) or the EXISTING
+        // DispatchTimeoutError fail-safe fires — only AFTER retrying, never a hollow wake. `submitted`
+        // latches once the turn is seen running/acked, so a live turn is never double-submitted.
         const ackRe = new RegExp(`STEP-OK\\s+${step.id}\\s+${nonce}\\b`);
-        await waitFor(() => {
-            if (!ackRe.test(capturePaneTail(tmuxSession))) return null;
+        const isAcked = (tail: string): boolean => {
+            if (!ackRe.test(tail)) return false;
             if (step.ack.kind === 'c0') {
                 // the truncation-prone step: marker alone is not enough — the echoed c0 must be real.
                 const echoed = readSentinelC0Id(slug, surface);
-                if (!(echoed && isAgentC0(slug, echoed))) return null;
+                if (!(echoed && isAgentC0(slug, echoed))) return false;
             }
             return true;
-        }, perStepTimeoutMs);
+        };
+        let submitted = false;
+        let unsubmittedTicks = 0;
+        let resubmits = 0;
+        const deadline = Date.now() + perStepTimeoutMs;
+        for (;;) {
+            const tail = capturePaneTail(tmuxSession);
+            if (isAcked(tail)) break;                                                              // state 1
+            if (!submitted && (ackRe.test(tail) || PROCESSING_CHROME_RE.test(tail))) submitted = true; // state 2
+            if (submitted) {
+                unsubmittedTicks = 0;
+            } else if (++unsubmittedTicks >= SUBMIT_GRACE_TICKS && resubmits < MAX_WAKE_RESUBMITS) {
+                pressEnter(tmuxSession);                                                           // state 3
+                resubmits++;
+                unsubmittedTicks = 0;
+            }
+            if (Date.now() > deadline) {
+                throw new DispatchTimeoutError(
+                    `wake step '${step.id}' not acked after ${resubmits} re-submit(s) (timeout ${perStepTimeoutMs}ms)`);
+            }
+            await sleep(POLL_INTERVAL_MS);
+        }
     }
     // queue-empty → the wake-prefix has drained → the spoke is warm-ready; the caller releases work.
 }

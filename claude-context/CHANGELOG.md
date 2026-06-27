@@ -9,6 +9,14 @@
 
 ---
 
+## 2026-06-27 (S207) — feat(#107 Phase-2): (b) the submission GUARANTEE — a lost fed Enter self-recovers at the step
+
+Builds (b) on top of the proven (a)+(c) mitigation (thread `mqvs3r6l`; Darron's call — the race lives in the *feeder*, the foundation the pool + re-sleeve inherit, so fix it once and every layer inherits the guarantee not the race; Jim diff-audit `mqw210wz` GREEN). `feedWakeSteps`' ack-wait becomes three states per poll-tick:
+- **acked** (`STEP-OK <id> <nonce>` + a real c0 for the gradient step) → proceed (`isAcked` = the old predicate, ack semantics unchanged);
+- **submitted** (processing chrome OR the marker already up) → latches; keep waiting — a live turn is never re-submitted;
+- **neither for `SUBMIT_GRACE_TICKS` (3)** → re-press the Enter, bounded by `MAX_WAKE_RESUBMITS` (3) → then the *existing* `DispatchTimeoutError`, reached only after retrying (never a hollow wake).
+So a lost race self-recovers at the step in ms instead of aborting the whole wake. (a) `sendLineSettled` + (c) terser line kept as the first attempt; `PROCESSING_CHROME_RE` reused (no new signal); a `pressEnter()` DRY seam (first Enter + re-press share one path, testable). Local mechanism consts (siblings of `POLL_INTERVAL_MS`). Shared feeder, slug-agnostic (the fed-wake invariant). No template change. Gates: tsc 0-new (11 baseline); `test-wake-feed-queue.ts` 8/8 (the 5 prior + [6] lost-submit-recovers, [7] never-submits→bounded-to-MAX→fail-safe, [8] chrome→no-double-submit). Live-verify: surface-1 cold-launches on the guaranteed feeder.
+
 ## 2026-06-27 (S207) — feat(#107 Phase-2 P2.3 surface-1, re-attempt): supervisor-cycle wakes via the feed (post submission-fix)
 
 Re-flips `supervisor-cycle` `wakeFeed: true` (one line, reverting the S206 rollback) now that the feeder submission fix (`ece6a72`) is live — the decisive proof of (a)+(c) on the exact case that stalled. `wakeFeedFor` matrix: supervisor-cycle + heartbeat fed; human-response (leo+jim), meditations, sessions still autonomous (c0-gate-guarded). Deploy: recycle the supervisor-cycle spoke → next cycle cold-launches fed on the settled feeder; Jim live-verifies the round-trip gets **past the gradient step** + prove-single by hand. Rollback = remove `wakeFeed` (one line; the c0-gate guards meanwhile). If it sails past the gradient, (a)+(c) was sufficient; if it stalls again, (b) verify-then-retry is the guarantee we add.
