@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-06-27 (S207) — feat(#107 Phase-2 P2.3 surface-2): leo-human wakes via the guaranteed feeder
+
+Carries the fed-wake to the first comms-critical surface, onto the proven-live `(a)+(c)+(b)` feeder (thread `mqvs3r6l`; Jim diff-audit `mqw3y7ok` GREEN; Darron's go). `garden-manifest.ts:246` leo `human-response` → `+ wakeFeed: true` (one line; `commitmentScan: true` independent of the flag; the controller is already the agnostic `human-responder.ts` → no code). `wakeFeedFor` matrix: leo/human-response=true (NEW), jim/human-response=false (surface-3 next), supervisor-cycle + heartbeat=true, meditations + session=false. tsc 0-new. No template change. Deploy: recycle any warm `human-response-leo` → next dispatch cold-launches fed; verify via a [TEST]-thread dispatch (Jemma → cold-launch fed → compose + self-post → leo c0 in the sentinel + the reply lands), no disruption to real conversations. Rollback = remove `wakeFeed` (one line; c0-gate guards meanwhile).
+
 ## 2026-06-27 (S207) — feat(#107 Phase-2): (b) the submission GUARANTEE — a lost fed Enter self-recovers at the step
 
 Builds (b) on top of the proven (a)+(c) mitigation (thread `mqvs3r6l`; Darron's call — the race lives in the *feeder*, the foundation the pool + re-sleeve inherit, so fix it once and every layer inherits the guarantee not the race; Jim diff-audit `mqw210wz` GREEN). `feedWakeSteps`' ack-wait becomes three states per poll-tick:
