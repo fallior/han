@@ -9,6 +9,12 @@
 
 ---
 
+## 2026-06-27 (S208) — docs(DEC-099): stem-sleeve amendment + R1/R2/R3 build plan
+
+The North Star sharpened after Darron's P2.4 catch (*"the reason we are doing this is to take the L1 off the critical path"* — feeding the human's own cold session doesn't). Leo-writes / Jim blocking-audit GREEN (`mqvs3r6l` 13:30Z), two fixes + one sharpening folded, committed on Darron's go.
+- `claude-context/DECISIONS.md` — **DEC-099 amendment** (appended; base DEC intact, never-delete): the **stem-sleeve unification** — DISPATCH (work→stem) + ATTACH (human→stem) are the same sleeve operation on one per-agent pool, so the interactive `session` stops being special; **re-sleeving promoted from a Phase-C detail to the core**. The **empty-pool fallback floor** (P2.4a's cold-feed = the never-block floor; `/wake` = attach-warm-else-cold-feed; ~100% salvage). The **#91 attach-flush pinned into R1** (inject watermark-delta + transcript-tail before the greeting; compose from flushed context, never the snapshot). **R1/R2/R3** phasing + live-prove gates; R2's full `AGENT_SURFACE`-keyed re-point list (incl the #0 logger); R3 ~0-token-idle (cost lever = replenish rate, not #245 idle-burn). Base destination/layered-model/fed-wake-shared-invariant/authority-trajectory unchanged.
+- `plans/stem-sleeve-pool-plan.md` (new) — the build map: §1 the floor already built; R1 (pool-of-1 AS-`session`, attach-or-cold-feed, the #91 mesh, gates a/b/c); R2 (surface→sleeve-param + the keyed-list table + the live-env-mutation gate); R3 (the pool manager + retire-at-85 from #0).
+
 ## 2026-06-27 (S207) — feat(#0): wake-ctx logger — per-wake ctx forensics as a standing capability
 
 Per-prompt-boundary ctx telemetry so "how much did the wake cost / where did it go / is something double-loading" is a `cat`, not a JSONL spelunk (Jim spec `mqw3zj52`; diff-audit `mqw6sspy` GREEN; Darron's go `mqw7aobh`). Agnostic across **all** surfaces (the pool's telemetry — DEC-099 retire-at-85 + dynamic-sizing want every spoke's ctx curve).
