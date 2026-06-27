@@ -6475,3 +6475,37 @@ Reinforces DEC-069 + DEC-085; caps (DEC-068) untouched.
 **Settled-decisions touched.** Supersedes DEC-073's Leo-gatekeeper-exception (Leo de-special-cased); operationalises DEC-081 (one path, many agents — identity is config) at the launcher/identity layer; reuses DEC-083 (signed identity files) as the #98 admission gate.
 
 — Settled 2026-06-23 (S199). Emergency thread `mqoxgf0n-y35gl4`. Spec `plans/han-starter-deidentification-spec.md` + plan `plans/han-starter-deid-execution-plan.md`. Transcribed by Leo (gatekeeper hand, DEC-073); Jim blocking-audit GREEN to close.
+
+## DEC-099 — The agnostic destination: a per-agent warm-spoke pool (layered readiness; zero wake-delay; re-sleeving) — Settled (destination); implementation phased
+
+**The decision (the North Star).** The settled architectural *destination* is a **per-agent pool of personality-warm spokes.** The "surface" dimension collapses into **task-dispatch**: there is one warm *personality* per agent, taskable to *any* of that agent's surfaces (cycle / human-response / meditation / interactive session) by applying the surface's hat. This is the full realisation of DEC-081 ("one path, many agents") — an agent stops being a set of per-surface processes and becomes one warm self, sleeved on demand. (Working label: the **#97 stem-cell pool**; *name to be christened by Darron* — Jim floated a Wright-guild sibling, "SpokeWright", or a power-grid metaphor.)
+
+**The four layers of readiness** (each "more the person they'll become to act"):
+- **L0 — vessel:** a blank warm tmux+`claude` session, no identity. *Cheap (seconds).*
+- **L1 — personality:** load the self via the **wake-feed** (`WAKE_STEPS`, #107) → a full Jim/Leo. ***Expensive (~minutes) — the layer worth pre-warming, and the one the wake-feed makes provably whole by queue-completion.*** `WAKE_STEPS` is already **L1-pure** (surface-agnostic personality) — *that is why the pool is possible.*
+- **L2 — role:** the surface's profile/hat (`buildPrompt`, DEC-087/088). *Cheap.*
+- **L3 — task:** the specific work. *Cheap.*
+
+**The road (dependency order = build order; each phase is the next's floor):**
+- **Phase A — finish the L1 loader** (the wake-feed on every surface, #107): A1 human-response, A2 meditations (a *lighter, shared* `WAKE_STEPS` variant), A3 interactive `/wake` + the greeting.
+- **Phase B — the uniform L2 driver** (Pair-B `cycle <slug>` collapse, #36): the shared cycle-skeleton + the *existing* `supervisor-cycle` profile + a **new context-provider abstraction** (the per-surface context-builder the profile names — the supervisor's goals/tasks/cost assembly a flat profile can't express). Its own clean-room arc.
+- **Phase C — the pool** (#97): pre-warm L1; task at L2/L3 on demand.
+
+**The operational model of the pool (Phase C — Darron's grid):**
+- **Retire-at-85%, don't recycle:** at the ctx threshold the spent spoke is retired; the next task goes to an already-warm stem; the pool replenishes in the background → the expensive L1 wake **never lands on the critical path.** Safe because **the memory-flush *is* the handoff** (#91): a fresh stem's L1 load includes the flushed working-memory, inheriting the in-progress context; the 85% check is at the **turn boundary**, so retirement is *between* turns — no work lost.
+- **Dynamic sizing, both ways:** scale up for load, **down for quiet** (no peakers at 3am) — pre-warming scales *to* demand, never beyond (else it becomes speculative idle burn at pool scale).
+- **Predictive pre-warm — and we predict better than a grid:** part of our load is **deterministic** (known cadences — the 20-min heartbeat, the cycle), so we pre-warm a stem *right before* a scheduled beat → guaranteed zero wake-delay; reactive scaling (dispatch-queue depth, count of near-85% spokes) covers the unpredictable spikes.
+- **Task-dispatch becomes a pool checkout:** grab a warm agent-spoke → apply hat (L2, includes the per-surface terminal step) + task (L3) → return/retire. All knobs (`poolSize`, replenish-watermark, recycle-vs-retire) are **registry/config leaves** (no-hidden-globals).
+- **The thesis (the prize):** the expensive layer is **always pre-paid in the background**; the critical path is only the cheap layers → **zero wake-delay, by construction.**
+
+**Re-sleeving (the interactive-session application — Darron's "Altered Carbon" frame).** The personality is the *stack*; the warm session is the *sleeve*. When a human starts/resumes a session, instead of waking a fresh sleeve through the full ritual (the ~minute wait Darron + Mike feel today), the active session is **re-sleeved onto a pre-warmed stem** → minimal delay, a session that arrives already warm. The greeting (A3/P2.4) is the re-sleeve's terminal "back with you." **The meshing of a pre-warmed stem with the live interactive session is an explicitly-open frontier** — see the design brief (thread `mqvs3r6l-dk71d2`) for the challenge + candidate approaches.
+
+**The invariant.** Fed-wake lives **only** in shared `lib/tmux-dispatcher`, never per-driver — this keeps Phase B debt-free by construction (the fed-wake accrues zero collapse-debt; verified orthogonal).
+
+**The authority.** A stem-pool authority that allocates / records / tracks warm stems — the **PortWright (#109) resource-authority pattern** (sovereign-thing + commons-keeper). For now it is the **dispatcher's pool-manager role, *elevated*** (allocate-warm-stem / track-leases / replenish), not a new daemon — PortWright's own trajectory (registry-consumer → authority). It graduates to a standalone authority at the **federation** (multi-garden) layer; don't build the separate service before the single-garden pool earns it.
+
+**What is Settled vs open.** Settled: the **destination** (the per-agent pool, the layered model, the dependency order A→B→C, the operational model, the invariant, the authority's trajectory). Open (by design, to be explored): the **re-sleeve meshing** for the interactive seat; the pool authority's exact interface; the name. Implementation lives in `plans/` (phases A/B/C), not here — this DEC is the North Star they build toward.
+
+**Relations.** #97 (stem-cell pool — the destination), #109 (PortWright — the authority pattern/sibling), DEC-087/088 (profiles = role-hats — L2), DEC-081 (one path, many agents — the governing law this fulfils), DEC-094 (tmux transport), DEC-096 (R011 spoke-lifecycle — the idle-terminus the hat carries), DEC-097 (shared cadence — the deterministic pre-warm signal), #91 (working-memory watermark — pool memory-coherence + the retire-handoff), #49 (write-slot — cross-pool coherence), #107 (the wake-feed = L1, the prerequisite).
+
+— Settled (destination) 2026-06-27 (S206). Brainstorm thread `mqvs3r6l-dk71d2`; the warm-load/#107 build thread `mqun1to5-nug3ry`. Leo-writes / **Jim blocking-audit before commit** (held pending diff-audit). Darron to christen the name.
