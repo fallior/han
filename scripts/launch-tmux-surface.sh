@@ -29,24 +29,45 @@
 # shape: exactly one manager per resource.
 #
 # Usage:
-#   launch-tmux-surface.sh <slug> <surface> [--no-log] [--model <model>]
+#   launch-tmux-surface.sh <slug> <surface> [--no-log] [--model <model>] [--stem]
 #   e.g. launch-tmux-surface.sh leo heartbeat
+#        launch-tmux-surface.sh leo session --stem   # pre-warm a session-stem (R1, DEC-099)
+#
+# --stem (R1, DEC-099 stem-sleeve): pre-warm a STEM — a personality-warm `session` self that
+# idles ready to be ATTACHED to (re-sleeved) by a human, taking the expensive L1 load off the
+# critical path. The interactive `session` is NOT in the manifest's launchable surface set (it's
+# human-launched via `han`/`hanjim`, never the dispatcher), so --stem BYPASSES the launchable-
+# surface check (and ONLY for the stem path — the normal validation stays intact for real spokes,
+# preserving the anti-respawn-war single-manager guard). Everything else reuses the proven contract:
+# the env (manifest-derived, surface=session — incl jim's root-special memoryDir), HAN_SPOKE=1 (so
+# a detached pane skips the ssh-agent prompt), claude-logged, the ready-sentinel. The greet-less
+# wake-feed + the stem-registry are the caller's job (scripts/prewarm-stem.ts). This is also the
+# first brick of R2's `launch-tmux-surface.sh → launch-stem` collapse (surface → sleeve-param).
 
 set -euo pipefail
 
-SLUG="${1:?usage: launch-tmux-surface.sh <slug> <surface> [--no-log] [--model <model>]}"
-SURFACE="${2:?usage: launch-tmux-surface.sh <slug> <surface> [--no-log] [--model <model>]}"
+SLUG="${1:?usage: launch-tmux-surface.sh <slug> <surface> [--no-log] [--model <model>] [--stem]}"
+SURFACE="${2:?usage: launch-tmux-surface.sh <slug> <surface> [--no-log] [--model <model>] [--stem]}"
 shift 2
 
 NO_LOG=false
 MODEL_OVERRIDE=""
+STEM=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-log) NO_LOG=true; shift ;;
         --model)  MODEL_OVERRIDE="${2:?--model needs a value}"; shift 2 ;;
+        --stem)   STEM=true; shift ;;
         *) echo "unknown arg: $1" >&2; exit 1 ;;
     esac
 done
+
+# --stem is R1-AS-session only: a stem pre-warms the interactive `session` self. Guard against
+# misuse on a real (launchable) surface — those go through normal validation, not the bypass.
+if [[ "$STEM" == true && "$SURFACE" != "session" ]]; then
+    echo "launch-tmux-surface: --stem is for the 'session' surface only (got '$SURFACE')" >&2
+    exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -59,7 +80,10 @@ manifest_get() {
 
 # Validate the surface against the manifest's launchable set (fail loud on typos
 # and on deferred surfaces — Q-V2-3 meditations are a named deferral, not launchable).
-if ! manifest_get surfaces "$SLUG" | grep -qx "$SURFACE"; then
+# --stem skips this ONE check (the interactive `session` is deliberately not in the launchable
+# set — human-launched, never the dispatcher), and ONLY this check: the env/model/cwd contract
+# below is unchanged, and real spokes still validate normally (the single-manager guard intact).
+if [[ "$STEM" == false ]] && ! manifest_get surfaces "$SLUG" | grep -qx "$SURFACE"; then
     echo "launch-tmux-surface: '$SURFACE' is not a launchable surface for '$SLUG' (per the Garden Manifest + Q-V2-3 deferrals)" >&2
     echo "launchable: $(manifest_get surfaces "$SLUG" | tr '\n' ' ')" >&2
     exit 1

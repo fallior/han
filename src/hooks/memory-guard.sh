@@ -32,6 +32,19 @@ allow() { exit 0; }
 # interactive session (AGENT_SURFACE unset or 'session') stays fully guarded.
 [ -n "$AGENT_SURFACE" ] && [ "$AGENT_SURFACE" != "session" ] && allow
 
+# R1 (DEC-099 stem-sleeve): a PRE-WARM session-stem runs AGENT_SURFACE=session but has NO human
+# client attached — it is INERT (fed its load, never asked to PRODUCE a turn-record until a human
+# ATTACHES via switch-client). Without this it confabulates plausible-but-FALSE swap into the SHARED
+# session files (the R1 solo-smoke caught it). Key on STATE — "is a human attached?" — NEVER a
+# baked-in env: HAN_SPOKE/AGENT_SURFACE are fixed at launch and switch-client does NOT restart the
+# process, so a baked exemption would leave the now-attached human session permanently UN-guarded.
+# `tmux list-clients` empty = no human = pre-warm = exempt; it flips to GUARDED the instant a human
+# attaches. Fails TOWARD guarding: HAN_SESSION unset / tmux absent / session-not-found / any error
+# → falls through to the normal guard, so a real (attached) session is never left unguarded.
+if [ -n "$HAN_SESSION" ] && command -v tmux >/dev/null 2>&1 && tmux has-session -t "$HAN_SESSION" 2>/dev/null; then
+  [ "$(tmux list-clients -t "$HAN_SESSION" 2>/dev/null | wc -l)" -eq 0 ] && allow
+fi
+
 [ -z "$MEM" ] && allow
 [ ! -f "$STATE" ] && allow
 [ ! -f "$FULL_SWAP" ] && allow

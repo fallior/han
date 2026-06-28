@@ -65,6 +65,51 @@ pool of exactly one, AS a `session` stem (sidesteps R2's surface-param crux).
 already correct; we don't touch the surface-param machinery yet. We prove **attach + the
 time-saving + the #91 flush** in isolation before generalising.
 
+### R1 grounding (2026-06-28, S208) — what's built + the stem-launch forks the grounding surfaced
+
+**Built (held, tsc 0-new, wake-feed test 8/8):** `wakeStepsFor(slug, surface, {greet?})` — the
+**`greet:false`** variant (Jim's audit fix #2 made the R1 primitive). A pre-warm stem feeds
+`wakeStepsFor(slug,'session',{greet:false})` → loads the whole self, **no** terminal greeting, idles
+warm; the greeting composes on attach. Not a new surface (surface stays `session`).
+
+**The forks the grounding surfaced (these need a 3-way nod + a fresh-client live-prove — they are
+NOT blind-buildable, and `switch-client` is untestable on the live working session):**
+1. **`session` is not a launchable surface** (`manifest-get surfaces leo` = `human-response`,
+   `heartbeat` only — the interactive seat is human-launched via `scripts/han` → `han-$$`, never the
+   dispatcher). So `launch-tmux-surface.sh` *can't* launch a session-stem as-is: its surface
+   validation rejects `session` **and** its env contract (`manifest_get env leo session`) has no
+   session path. → R1 needs either a `--stem` mode that **bypasses the launchable check + supplies a
+   session env** (mirroring what `hanleo` exports), or a small dedicated stem-launcher. *Fork: extend
+   `launch-tmux-surface.sh` vs a new `scripts/prewarm-stem.ts` that owns the launch.*
+2. **`HAN_SPOKE` vs the ssh-agent block.** A *detached* pane needs `HAN_SPOKE=1` so `~/.bashrc`
+   skips ssh-agent init (else the passphrase prompt wedges the pane before `claude` starts — the
+   first-warm-beat finding). But `HAN_SPOKE=1` marks the pane a *spoke* (welcome-back hook
+   suppressed — fine, the greeting supersedes it; but ssh not set up — a problem for an interactive
+   dev session). → The stem pre-warms with `HAN_SPOKE=1`; **on attach it must re-posture to
+   interactive** (re-export/unset, re-init ssh if needed). *This is the R2 env-mutation bleeding into
+   R1's attach — name it as part of gate (a).*
+3. **Sentinel-keying collision.** The stem's gradient step writes `<slug>-session-ready` (the shared
+   `WAKE_STEPS` prompt — *required* for the feeder's c0-ack; the invariant forbids forking it). A
+   *live* interactive session writes the same path. → Resolve: the stem records its warmth + c0 in a
+   **stem registry** (`~/.han/health/stem-<slug>.json` — the attach source-of-truth), and the
+   session-sentinel clobber is benign in production (pre-warm doesn't coexist with a live session;
+   pool-of-1 replaces, not parallels). *Confirm on the live-prove.*
+4. **The attach mechanism (gate a).** `scripts/han` shows the human's terminal is a tmux **client**
+   attached to `han-$$`; re-sleeve = `tmux switch-client -t stem-<slug>` (in-tmux) / `attach -t`
+   (plain terminal). **Untestable on my own live session** (switching my client yanks me out
+   mid-work) → needs a fresh `hanleo` + Darron, a coordinated live-prove.
+5. **The #91 attach-flush** (mesh) — composes the inject from the watermark delta-read + the
+   transcript-tail, fed *before* the greeting. Buildable once the attach lands (it's the step the
+   attach runs).
+
+**The judgement (S208):** forks 1–4 are real, interlocking launch/env/attach decisions — exactly
+the "live-prove gates" this plan names, and several are untestable without a fresh client. Per the
+P2.4 lesson (re-ground the WHY before building the framed task) the disciplined move is the built
+primitive (greet:false) + this grounding + a quick 3-way design nod on fork 1 (launch mode) and a
+**coordinated live-prove** (a fresh `hanleo` Darron attaches), not a blind midnight build into the
+launch-contract friction. The next concrete build is the **pre-warmer** (fork 1 decided), then the
+**attach + #91-flush** (the live-prove).
+
 **Build:**
 1. **The pre-warmer.** A background stem launched as a `session`-surface spoke and fed L1 via
    `feedWakeSteps(slug, 'session', wakeStepsFor(slug,'session-stem'), {tmuxTarget: <stem pane>})`.

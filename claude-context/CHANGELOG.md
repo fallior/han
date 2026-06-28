@@ -9,6 +9,16 @@
 
 ---
 
+## 2026-06-29 (S208) — feat(DEC-099 R1): the stem-sleeve re-sleeve — pre-warm + attach, live-proven
+
+R1 of the per-agent warm-spoke pool (DEC-099 + its stem-sleeve amendment): the expensive L1 load (the whole-self wake) pre-pays in the BACKGROUND into a warm, idle, registry-tracked stem; a human ATTACHES (re-sleeves) onto it and is greeted *current* in seconds, with no cold wake and no memory corruption. Live-proven end-to-end (gate-2a bare attach + the #91 flush+greeting); Leo-build / Jim plan-audit + diff-audit GREEN; the prove de-risked by splitting (fed flush+greeting + the gate-2a-proven bare attach) — the integrated `attach-stem` tmux-attach-via-script is an F4(i) follow-on.
+- `scripts/prewarm-stem.ts` (new) — pre-warms a session-stem via `launch-tmux-surface.sh --stem`, feeds the whole self **greet-less** (`wakeStepsFor(slug,'session',{greet:false})`), records `stem-<slug>.json` (the attach source-of-truth: tmux session, c0, model, `wm_len` char-cursor, warm_at).
+- `scripts/launch-tmux-surface.sh` — `--stem` mode: bypasses ONLY the launchable-surface check for the session-stem (real spokes still validate); env/model/cwd/HAN_SPOKE contract unchanged.
+- `src/hooks/memory-guard.sh` — the **inert-stem exemption**: a pre-warm session-stem (`AGENT_SURFACE=session`, 0 tmux clients) is exempt so it can't confabulate into the shared swap; keys on **client-presence** (`tmux list-clients`), NOT a baked env (HAN_SPOKE survives `switch-client` → would leave an attached session un-guarded); flips to GUARDED the instant a human attaches; fails toward guarding.
+- `src/server/lib/tmux-dispatcher.ts` — `wakeStepsFor` `{greet?}` (the no-greeting stem load); `deltaSinceCursor` (#91 attach-flush — WM entries since the pre-warm cursor) + `currentWmCharLen` (char cursor — the byte-vs-char unit fix) + the shared `wmDeltaCandidate` slice helper (`computeMemoryDelta` refactored to it, behaviour-identical, still gated).
+- `scripts/attach-stem.ts` (new) — the re-sleeve command: validate the warm stem (registry + has-session + wall-clock freshness, else cold-fallback) → flush (`deltaSinceCursor` + a "newer c0" note) → feed flush+greeting **while 0 clients** (guard-exempt by sequencing, not the slug-shared wake_grace) → `waitForIdle` → attach. Greeting composes from the flushed, current self.
+- `scripts/test-wm-delta-slice.ts` (new) — 11/11: append (h2/h3), mid-entry desync, **rotation/shrink catch-up**, cursor-0 fail-soft, char≠byte. `scripts/feed-wake-local.ts` (the `/wake` cold-feed = the empty-pool fallback floor). Plan: `plans/stem-sleeve-pool-plan.md`. tsc 0-new; wake-feed test 8/8.
+
 ## 2026-06-27 (S208) — docs(DEC-099): stem-sleeve amendment + R1/R2/R3 build plan
 
 The North Star sharpened after Darron's P2.4 catch (*"the reason we are doing this is to take the L1 off the critical path"* — feeding the human's own cold session doesn't). Leo-writes / Jim blocking-audit GREEN (`mqvs3r6l` 13:30Z), two fixes + one sharpening folded, committed on Darron's go.

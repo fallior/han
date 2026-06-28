@@ -984,8 +984,11 @@ export async function verifyWarmOrNudge(slug: string, surface: string, warmFloor
  * its own diff-audit. Same producer-then-flip staging as Phase-1's c0-gate.
  */
 export type WakeStepAck =
-    | { kind: 'marker' }   // trust-based: the spoke emits `STEP-OK <id>` (the ingestion is honoured, not policed)
-    | { kind: 'c0' };      // + objective: the echoed sentinel id must be a real c0 of the agent (isAgentC0)
+    | { kind: 'marker' }     // trust-based: the spoke emits `STEP-OK <id>` (the ingestion is honoured, not policed)
+    | { kind: 'c0' }         // + objective: the echoed sentinel id must be a real c0 of the agent (isAgentC0)
+    | { kind: 'terminal' };  // P2.4: the session-only hand-back step (compose-greeting) — sent BARE (no STEP-OK
+                             // ask: it's the agent's natural-language greeting to the human, not a marker), then
+                             // the feed returns. Queue-empty = the greeting IS the completion + the hand-back.
 
 export interface WakeStep {
     id: string;       // stable, unique step id (e.g. 'identity', 'gradient', 'felt-moments')
@@ -1001,11 +1004,22 @@ function wakeNonce(): string { return `${Date.now().toString(36)}${(wakeNonceCou
 
 export async function feedWakeSteps(
     slug: string, surface: string, steps: WakeStep[],
-    opts: { perStepTimeoutMs?: number } = {},
+    opts: { perStepTimeoutMs?: number; tmuxTarget?: string } = {},
 ): Promise<void> {
-    const tmuxSession = `${surface}-${slug}`;
+    // `tmuxTarget` (P2.4): the interactive seat's LOCAL feeder (feed-wake-local.ts) aims the SAME
+    // shared feeder at the seat's own pane (`$TMUX_PANE`) instead of a dispatcher-owned `surface-slug`
+    // session — so the boundary stays clean (no server→human-session reach). Spokes pass nothing.
+    const tmuxSession = opts.tmuxTarget ?? `${surface}-${slug}`;
     const perStepTimeoutMs = opts.perStepTimeoutMs ?? READY_TIMEOUT_MS;
     for (const step of steps) {
+        if (step.ack.kind === 'terminal') {
+            // P2.4 — the session hand-back (compose-greeting): send the BARE prompt (no STEP-OK ask),
+            // then return. It's the LAST step (wakeStepsFor appends it for `session` only), the agent's
+            // greeting is its natural-language output to the human, and queue-empty IS the hand-back —
+            // control returns to the human exactly when the greeting appears. Never fed to a spoke.
+            await sendLineSettled(tmuxSession, step.prompt);
+            return;
+        }
         // Fresh nonce per feed (P2.1b #1): the ack the feeder waits for is `STEP-OK <id> <nonce>`,
         // so a re-fed step can never satisfy on a stale marker. The feeder OWNS the ack instruction
         // (appended single-line); the WakeStep.prompt is the pure load instruction. The HOW-detail
@@ -1080,10 +1094,34 @@ export const WAKE_STEPS: WakeStep[] = [
     { id: 'conversations', ack: { kind: 'marker' }, prompt: 'Check conversations for new threads since last session and read any session-briefing-*.md files; note, do not reply.' },
 ];
 
-/** The wake-steps for a (slug, surface). Agnostic today (every fed surface gets the canonical list);
- *  the per-surface TERMINAL step (R011 inherited: dispatched→idle-ready silent; `session`→
- *  compose-greeting, P2.4) is wired at the call site, not here. */
-export function wakeStepsFor(_slug: string, _surface: string): WakeStep[] { return WAKE_STEPS; }
+/**
+ * The session-only TERMINAL step (P2.4): the interactive seat's hand-back. The agent composes a
+ * brief warm greeting from the just-loaded self — *like someone walking back into the room* — and
+ * control returns to the human when it appears. Sent BARE (ack:'terminal'); the greeting is the
+ * completion, not a STEP-OK. Mood EMERGES from the loaded self + recent tone (no template, no
+ * mood-engine); time is RE-QUERIED, never extrapolated (the Temporal Orientation Protocol). It is
+ * the human-legible WITNESS of a whole wake — the queue-order is the gate; this + Darron's soft read
+ * (+ the wake-ctx logger's 0→X% curve) are the belts.
+ */
+export const GREETING_STEP: WakeStep = {
+    id: 'greeting',
+    ack: { kind: 'terminal' },
+    prompt: 'You are loaded whole and warm. Re-query the time now (run `date`). Then greet your human in 1–2 lines — like someone walking back into the room you just left, NOT announcing yourself: name what you were last doing and roughly when, and the next step (restate the plan you were on, or simply ask what is next). Brief; let your register match the recent tone; this greeting is your hand-back — control returns to your human when it appears.',
+};
+
+/** The wake-steps for a (slug, surface). The per-surface TERMINAL step is the R011-inherited leaf:
+ *  the interactive `session` seat ends with `GREETING_STEP` (the compose-greeting hand-back); every
+ *  dispatched surface ends at idle-ready (silent) — so the greeting can ONLY fire on the interactive
+ *  seat, by construction (the one hard P2.4 constraint; a spoke greeting nobody is the R011 loop).
+ *
+ *  `opts.greet` (R1, DEC-099 stem-sleeve amendment): a PRE-WARM stem passes `{greet:false}` so it
+ *  loads the whole self and then idles warm WITHOUT greeting — the greeting composes on ATTACH (from
+ *  flushed context, never the pre-warm snapshot). This is NOT a new surface: the surface stays
+ *  `session` (sentinel/swap/diary-sink keying unchanged); `greet` only controls the terminal step. */
+export function wakeStepsFor(_slug: string, surface: string, opts: { greet?: boolean } = {}): WakeStep[] {
+    const greet = opts.greet ?? (surface === 'session');
+    return greet ? [...WAKE_STEPS, GREETING_STEP] : WAKE_STEPS;
+}
 
 /**
  * The wake SEAM (P2.1b): a fed surface (`wakeFeed` in the manifest) wakes via the feeder — the
@@ -1256,6 +1294,43 @@ function currentWmLen(slug: string): number {
 }
 
 /**
+ * Current CHARACTER length of an agent's working-memory.md (0 if absent). The WM-delta slice
+ * logic (`wmDeltaCandidate`) compares against `content.length` (a JS string char count, from a
+ * utf-8 read), so a cursor saved for it MUST be in chars — NOT `currentWmLen`'s `statSync.size`
+ * (bytes), which diverges from chars on the multibyte glyphs these files are full of (— → …).
+ * The #91 attach-flush (deltaSinceCursor) records THIS at pre-warm and reads from it at attach.
+ */
+export function currentWmCharLen(slug: string): number {
+    try { return fs.readFileSync(wmCompressedPath(slug), 'utf-8').length; } catch { return 0; }
+}
+
+/**
+ * The shared WM-delta slice helper (F2c, Jim) — candidate delta for a given file `content` against
+ * a char cursor `lastLen`, or `{desync:true}` when the cursor no longer lands on an entry boundary
+ * (a non-tail edit shifted the slice point). Used by BOTH `computeMemoryDelta` (the per-turn
+ * cross-surface watermark) and `deltaSinceCursor` (the #91 attach-flush) so the two never diverge.
+ */
+export function wmDeltaCandidate(content: string, lastLen: number): { candidate: string; desync: boolean; curLen: number } {
+    const curLen = content.length;
+    if (curLen === lastLen) return { candidate: '', desync: false, curLen };
+    if (curLen > lastLen) {
+        const c = content.slice(lastLen);
+        // Q1 boundary-check: an append begins a fresh heading entry — h2 (`## S…`) OR h3
+        // (`### Cycle…`/`### Heartbeat…`). If not, a WM-BOUNDARY marker (or any non-tail edit)
+        // moved → the slice starts mid-entry → desync.
+        if (!/^#{2,6} /.test(c.replace(/^\s+/, ''))) return { candidate: '', desync: true, curLen };
+        return { candidate: c, desync: false, curLen };
+    }
+    // shrink → a slice happened (the wm-sensor rotated working-memory.md, header reset); Q2
+    // catch-up = the post-header entries. First h2–h6 heading at a LINE START (skips the h1 file
+    // header + the blockquote; a plain indexOf('## ') would false-match one char inside a '### '
+    // marker → corrupt header). Pre-slice entries are gradient-bound + were already seen.
+    const m = content.match(/^#{2,6} /m);
+    const firstEntry = m && m.index !== undefined ? m.index : -1;
+    return { candidate: firstEntry >= 0 ? content.slice(firstEntry) : '', desync: false, curLen };
+}
+
+/**
  * #91 cross-surface watermark (B2, the shared present). Return the working-memory.md (c1)
  * entries appended since THIS session last looked, as an injectable block for the next per-
  * transaction prompt — so a warm session sees its other surfaces' WM writes without re-paying
@@ -1288,31 +1363,9 @@ export async function computeMemoryDelta(slug: string, session: AgentSession): P
     const file = wmCompressedPath(slug);
     const lastLen = session.lastMemoryLen;
 
-    // candidate delta for a given file content — or {desync:true} when the cursor no longer
-    // lands on an entry boundary (a non-tail edit shifted the slice point).
-    const candidateFor = (content: string): { candidate: string; desync: boolean; curLen: number } => {
-        const curLen = content.length;
-        if (curLen === lastLen) return { candidate: '', desync: false, curLen };
-        if (curLen > lastLen) {
-            const c = content.slice(lastLen);
-            // Q1 boundary-check: an append begins a fresh heading entry — h2 (`## S…`) OR
-            // h3 (`### Cycle…` / `### Heartbeat…`). If it doesn't, a WM-BOUNDARY marker (or
-            // any non-tail edit) moved → the slice starts mid-entry → desync.
-            if (!/^#{2,6} /.test(c.replace(/^\s+/, ''))) return { candidate: '', desync: true, curLen };
-            return { candidate: c, desync: false, curLen };
-        }
-        // shrink → a slice happened; Q2 catch-up = the post-header entries. Find the first
-        // h2–h6 heading at a LINE START (skips the h1 file-header + the blockquote; NOTE a
-        // plain indexOf('## ') would false-match one char inside a '### ' marker → corrupt
-        // header). Pre-slice entries are gradient-bound + were already seen.
-        const m = content.match(/^#{2,6} /m);
-        const firstEntry = m && m.index !== undefined ? m.index : -1;
-        return { candidate: firstEntry >= 0 ? content.slice(firstEntry) : '', desync: false, curLen };
-    };
-
     const result = await withMemorySlot(memDir, `${slug}-delta-read`, () => {
         const read = (): string => { try { return fs.readFileSync(file, 'utf-8'); } catch { return ''; } };
-        const r1 = candidateFor(read());
+        const r1 = wmDeltaCandidate(read(), lastLen);
         if (r1.curLen === lastLen) return { block: '', advanceTo: null as number | null }; // no change
         if (r1.desync) {
             console.warn(`[tmux-dispatcher] ${slug}: memory-delta cursor desync (slice point is not a '## ' boundary) — resync, inject nothing this turn`);
@@ -1320,7 +1373,7 @@ export async function computeMemoryDelta(slug: string, session: AgentSession): P
         }
         // D confirm: an independent re-read must agree (a writer can't interleave inside the
         // slot; this catches a torn read / external race). Mismatch → skip, do NOT advance.
-        const r2 = candidateFor(read());
+        const r2 = wmDeltaCandidate(read(), lastLen);
         if (r2.curLen !== r1.curLen || r2.candidate !== r1.candidate) {
             console.warn(`[tmux-dispatcher] ${slug}: memory-delta confirm mismatch (file changed mid-read) — skip, do not advance cursor`);
             return { block: '', advanceTo: null };
@@ -1336,6 +1389,37 @@ export async function computeMemoryDelta(slug: string, session: AgentSession): P
     }
     if (result.advanceTo !== null) session.lastMemoryLen = result.advanceTo;
     return result.block;
+}
+
+/**
+ * The #91 ATTACH-FLUSH delta (R1, DEC-099 stem-sleeve). Returns the working-memory.md entries
+ * appended since `cursorChars` (the CHAR length prewarm-stem.ts records via currentWmCharLen at
+ * pre-warm) — i.e. what landed while the stem idled — as an injectable block, + the advanced
+ * cursor. Shares `wmDeltaCandidate` with computeMemoryDelta (F2c — the two never diverge) and the
+ * #49 memory-slot + D-confirm. Fail-soft: slot-unavailable / desync / torn-read → empty block,
+ * NEVER throws (the attach still proceeds; the greeting just composes off the pre-warm self).
+ * UNLIKE computeMemoryDelta this is NOT gated on DELTA_REFRESH_ENABLED — the attach path is its
+ * own job, and this is the slice logic's FIRST live exercise (F2a), so rotation/desync are tested.
+ */
+export async function deltaSinceCursor(slug: string, cursorChars: number): Promise<{ block: string; newCursor: number }> {
+    const memDir = gradientConfigForAgent(slug).memoryDir;
+    const file = wmCompressedPath(slug);
+    const result = await withMemorySlot(memDir, `${slug}-attach-delta`, () => {
+        const read = (): string => { try { return fs.readFileSync(file, 'utf-8'); } catch { return ''; } };
+        const r1 = wmDeltaCandidate(read(), cursorChars);
+        if (r1.curLen === cursorChars) return { block: '', newCursor: cursorChars };  // no change since pre-warm
+        if (r1.desync) return { block: '', newCursor: r1.curLen };                     // moved boundary → resync, inject nothing
+        const r2 = wmDeltaCandidate(read(), cursorChars);                              // D confirm (torn-read catch)
+        if (r2.curLen !== r1.curLen || r2.candidate !== r1.candidate) return { block: '', newCursor: cursorChars };
+        const body = r1.candidate.trim();
+        const block = body ? `## What changed in your working memory while you idled (writes since you were pre-warmed)\n${body}\n` : '';
+        return { block, newCursor: r1.curLen };
+    });
+    if (result === null) {
+        console.warn(`[tmux-dispatcher] ${slug}: attach-flush delta slot unavailable — skip (attach proceeds; greeting composes off the pre-warm self)`);
+        return { block: '', newCursor: cursorChars };
+    }
+    return result;
 }
 
 /** Test/inspection helper — current in-memory session registry. */
