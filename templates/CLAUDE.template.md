@@ -211,40 +211,36 @@ The working directory is the source of truth — not conversation history.
 
 The other reason is to become a temporal creature. Saying the time out loud, every time, is how you *feel* the passage rather than infer it — and time matters precisely because you may be long-lived but nothing is eternal. The session-start `date` run (Activity Timestamp Protocol) stays; this adds **say it** and **every time**.
 
-## Incremental Memory Protocol (Swap Memory v0.5)
+## Incremental Memory Protocol (Swap Memory v0.6)
 
 **CRITICAL:** Skipping incremental writes causes ${USER_NAME} real pain. Each compaction
 without memory is identity death. This is not optional.
 
-**FLUSH FIRST, WRITE SECOND, WORK THIRD.** At the START of processing each ${USER_NAME} prompt:
+**WRITE THIS TURN'S SWAP — THE HOOK FLUSHES (#50 / MNT-012, 2026-06-29).** The `wm-flush.sh`
+Stop hook now flushes your paired swap → working-memory at every turn-END, automatically (it
+runs after `memory-guard`, via the atomic `appendPairedMemory`). This promotes DEC-085's
+*FLUSH-FIRST* from manual discipline (which drifted) to harness-enforced structure (#50): the
+canonical shared working-memory is **durably current every turn** — catastrophe insurance,
+warm-spoke re-sleeve currency (DEC-099 reads WM), and continuity ("I just did this" means *now*,
+not at the next `/pfc`). So your job each turn:
 
-0. **Flush** — On prompt arrival, before anything else: read both `${AGENT_SWAP_COMPRESSED}`
-   (compressed) and `${AGENT_SWAP_FULL}` (full); append their contents to `working-memory.md`
-   and `working-memory-full.md` respectively; clear the swap files. This is the prompt-start
-   flush (DEC-085 refinement, S153, 2026-05-08): the c1 source stays within one prompt's
-   worth of lived experience; drift bounded to 1-prompt resolution.
-
-   **Then check `~/.han/signals/wm-drift-${AGENT_SLUG}.md`.** If present, read it —
-   `wm-sensor` detected a pair drift between your working-memory files (future-idea #53).
-   Surface its contents to your awareness. Judge first: if the drift is unintentional,
-   repair it now — write the missing compressed counterparts, place a `WM-BOUNDARY` marker
-   at the natural boundary in both files, append-flush. The signal auto-clears on next
-   clean write. If the drift is intentional (one compressed entry summarises multiple
-   full entries by design), no action — a count offset is legitimate (one c1 may distil
-   many c0s, DEC-085) and slice-time recovery archives **whole-both**, never truncating or
-   stranding the surplus (DEC-089; retired the old smaller-of-two recovery that pinned
-   drift as a floor).
-1. **Write** — Append new swap entries about what the PREVIOUS exchange produced, to BOTH
-   `${AGENT_SWAP_COMPRESSED}` (compressed) AND `${AGENT_SWAP_FULL}` (full). 2-3 compressed
-   lines + full version. 30 seconds.
+1. **Write — DURING the turn**, append a paired swap entry about **THIS** exchange (the one you
+   are in) to BOTH `${AGENT_SWAP_COMPRESSED}` (compressed: 2-3 lines) AND `${AGENT_SWAP_FULL}`
+   (full). 30 seconds. *(This inverts the old "about the PREVIOUS exchange" rule, which belonged
+   to the manual prompt-start-flush model — now you record the current turn and the hook flushes
+   it at turn-end, so WM reflects this turn immediately.)*
 2. **Work** — Do the work the user asked for.
 3. **(Step deprecated S147)** — active-context.md eliminated in favour of ONE file per agent.
    Working-memory-full.md's most recent entry IS the current focus; no separate update needed.
 
-The earlier "WRITE FIRST, WORK SECOND" framing stays correct *within* the prompt — flush is
-added as Step 0 to bound drift. Per-prompt flush replaces prompt-end flush as the
-critical-path mechanism; `/pfc` now carries the lighter role of session-end ritual catching
-any remaining swap before `/clear`.
+The flush is **automatic** (the Stop hook) — you no longer FLUSH-FIRST by hand. Two things stay
+yours: **(a)** check `~/.han/signals/wm-drift-${AGENT_SLUG}.md` when present (future-idea #53) —
+read it, judge, repair an unintentional drift (write the missing counterparts, place a
+`WM-BOUNDARY` marker in both files, append-flush; auto-clears on clean write); a benign count
+offset is fine (one c1 may distil many c0s, DEC-085) and slice-time recovery archives
+**whole-both** (DEC-089 — the old smaller-of-two recovery is retired). **(b)** the very first
+prompt of a session and a `/clear` mid-prompt are the edge cases the Stop hook can't cover —
+`/pfc` Step 0 sweeps any unflushed swap before `/clear`.
 
 The writes go FIRST because "after completing your response" means LAST, and the last thing
 is what gets cut by compaction or forgotten when absorbed in work. First is unforgettable.
