@@ -9,6 +9,14 @@
 
 ---
 
+## 2026-06-29 (S209) — fix(MNT-012 / #50): per-turn swap→working-memory flush (the DEC-085 FLUSH-FIRST drift)
+
+DEC-085 decided per-prompt flush (swap→WM every turn, "drift bounded to 1-prompt") but relied on manual discipline that drifted (S163 instruction-vs-structural), and the harness-enforcement (#50) was deferred. Empirical: a whole session's swap entries unflushed, 0 in WM — the canonical shared WM was not durably current. Required for catastrophe insurance, the warm-spoke re-sleeve (DEC-099 reads WM), and continuity. Promotes #50. Leo-build / Jim plan-audit + diff-audit (RED→fix→GREEN, `mqz0…`).
+- `src/hooks/wm-flush.sh` (new) — Stop hook, after `memory-guard`. Agent-agnostic (`$AGENT_SWAP_*`/defaults), fail-safe (never blocks turn-end), `grep -q '^### '` no-op gate so spoke turns (diary path, no swap entries) never spawn tsx.
+- `scripts/wm-flush.ts` (new) — reads the swap (splits on the `### ` entry marker — robust to 1-line / 3-line / no-`#` headers, no blurb leak), appends bodies to the WM pair via the atomic `appendPairedMemory` (#49), prepends a blank-line separator (the /pfc convention), resets swaps to header-only ONLY on success (throw → swap preserved → next Stop / /pfc retries; a turn is never lost). Trailing-newline collapse keeps the header stable.
+- `src/server/lib/memory-gradient.ts` — text-only: `renderDriftSignal` no longer cites the DEC-089-retired smaller-of-two recovery.
+- Registered in `~/.claude/settings.json` (Stop array, after `memory-guard`). The gatekeeper template *FLUSH-FIRST* inversion (write THIS turn; the hook flushes) + the DEC-085 #50-landed record are the in-concert gatekeeper step. Gates: tsc 0-new; bash -n; flush verified across all header shapes + asymmetric/header-only; live-prove = WM advances after one turn, no wm-sensor thrash, spoke no-op. No Settled altered (executes DEC-085's own #50 deferral).
+
 ## 2026-06-29 (S209) — fix(MNT-011): wake-grace covers the fed /wake (interactive-seat B-3 nag)
 
 The B-3 memory-guard (Stop hook) nagged the interactive `session` seat at the *tail* of a fed `/wake`: `orient-inject.sh` only granted the one-turn wake-grace when the prompt matched `welcome back|good morning|session start`, but the P2.4 fed wake drives the wake as step-prompts that contain none of those phrases → the welcome-back turn was exempt but the fed steps after it were not → the guard fired on the `conversations` step. (Corrected a standing *wrong* diagnosis in the process — it was NOT an "AGENT_SURFACE-not-reaching-the-hook / Fix-2" issue; the session seat is guarded by design, traced 2026-06-29. See maintenance-journal MNT-011.)

@@ -1601,7 +1601,7 @@ If the drift is **unintentional** (you skipped writing the compressed counterpar
 2. Place a \`<!-- WM-BOUNDARY: id=B<N> ts=ISO-8601 -->\` marker in BOTH files at corresponding positions (the natural break after these entries).
 3. Append-flush. The next \`fs.watch\` event re-checks parity; if you've repaired the drift, this signal auto-clears.
 
-If the drift is **intentional** (one compressed entry summarises multiple full entries by design), no action needed. Slice-time parity-check falls to smaller-of-two recovery automatically; the c0/c1 pair stays aligned at the entry-count of the smaller side, and the surplus entries on the larger side rotate next cycle.
+If the drift is **benign** (e.g. the counts differ because the #53 turn-counter over-counts a full entry's internal sub-headers, or a c1 distils its c0 differently), no action needed. Slice-time rotation is **whole-both** (DEC-089): \`rollingWindowRotatePaired\` slices the ENTIRE file at the \`WM-BOUNDARY\` marker and resets BOTH files to header-only, so the c0/c1 pair aligns by construction — there is no smaller-of-two trim and no "surplus rotates next cycle" (that recovery was retired by DEC-089).
 
 ---
 
