@@ -17,7 +17,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import { writeFileSync, rmSync } from 'fs';
-import { feedWakeSteps, WAKE_STEPS, MAX_WAKE_RESUBMITS, __setTestHooks, DispatchTimeoutError, type WakeStep } from '../src/server/lib/tmux-dispatcher';
+import { feedWakeSteps, ensureSubmitted, WAKE_STEPS, MAX_WAKE_RESUBMITS, __setTestHooks, DispatchTimeoutError, type WakeStep } from '../src/server/lib/tmux-dispatcher';
 import { mostRecentC0Id } from '../src/server/lib/memory-gradient';
 
 let failures = 0;
@@ -143,6 +143,29 @@ async function main() {
     });
     await feedWakeSteps(SLUG, SURFACE, [{ id: 'r8', prompt: 'do r8', ack: { kind: 'marker' } }], { perStepTimeoutMs: 5000 });
     ok(presses8 === 0, 'chrome (turn running) latched submitted across >GRACE polls → no re-press; waited for the ack');
+
+    // ── MNT-010 (b) extended to the WORK-dispatch: the SHARED `ensureSubmitted` proven on the
+    // submitTurn shape (chrome predicate — there is no STEP-OK ack on a work turn). Tests 6-8 cover
+    // the feedWakeSteps shape (ack-or-chrome predicate); these cover submitTurn's (chrome only). The
+    // submitTurn fail-safe itself (DispatchTimeoutError → needs-reconcile) is the EXISTING
+    // waitForCaptureWithRateLimitRetry path, covered by test-rate-limit-retry.ts.
+    console.log('[9] (b) ensureSubmitted (work-dispatch / chrome predicate) — a LOST submit self-recovers on a re-press');
+    let presses9 = 0;
+    __setTestHooks({ sleep: () => {}, pressEnter: () => { presses9++; }, capturePaneTail: () => presses9 >= 1 ? 'esc to interrupt' : '' });
+    const rc9 = await ensureSubmitted('sess', (tail) => /esc to interrupt/i.test(tail));
+    ok(presses9 >= 1 && presses9 <= MAX_WAKE_RESUBMITS && rc9 === presses9, `lost work-dispatch submit → bounded re-press (${presses9}) → turn started (the MNT-010 fix)`);
+
+    console.log('[10] (b) ensureSubmitted never starts → exactly MAX re-presses, then hands to the caller fail-safe');
+    let presses10 = 0;
+    __setTestHooks({ sleep: () => {}, pressEnter: () => { presses10++; }, capturePaneTail: () => '' });
+    const rc10 = await ensureSubmitted('sess', (tail) => /esc to interrupt/i.test(tail));
+    ok(presses10 === MAX_WAKE_RESUBMITS && rc10 === MAX_WAKE_RESUBMITS, `never-starts → bounded to exactly MAX_WAKE_RESUBMITS (${presses10}); caller's capture-waitFor then fail-safes (needs-reconcile, only after genuinely trying)`);
+
+    console.log('[11] (b) ensureSubmitted — turn already running (chrome up) → 0 re-press (never double-submit a live work turn)');
+    let presses11 = 0;
+    __setTestHooks({ sleep: () => {}, pressEnter: () => { presses11++; }, capturePaneTail: () => 'esc to interrupt' });
+    const rc11 = await ensureSubmitted('sess', (tail) => /esc to interrupt/i.test(tail));
+    ok(presses11 === 0 && rc11 === 0, 'turn already running → ensureSubmitted returns immediately, no re-press');
 
     clearSentinel();
     __setTestHooks(null);

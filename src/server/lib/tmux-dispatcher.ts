@@ -196,6 +196,34 @@ function pressEnter(tmuxSession: string): void {
     tmux(['send-keys', '-t', tmuxSession, 'Enter']);
 }
 
+/**
+ * (b) the submission GUARANTEE — shared (Jim's MNT-010 lean) by `feedWakeSteps` (each wake step) and
+ * `submitTurn` (the work-dispatch pointer). The send has already happened (`sendLineSettled`); this
+ * polls until the turn is confirmed STARTED by `hasStarted` — the agent's processing chrome is up, or
+ * (for a fed step) its ack marker is already present — re-pressing the lost Enter (bounded by
+ * MAX_WAKE_RESUBMITS, paced by SUBMIT_GRACE_TICKS) when the submit raced the paste and the line sat
+ * typed-but-unsubmitted. Returns the re-press count once started, OR after the bounded re-presses are
+ * spent — the caller's OWN post-submit wait (the STEP-OK ack-wait / the capture poll) then provides
+ * the genuine-silence fail-safe, so a long timeout only ever counts a truly silent agent, never a lost
+ * Enter (the MNT-010 reconcile-loop: pointer unsubmitted → 15-min waitFor → needs-reconcile → loop).
+ * `hasStarted` latching on chrome-or-marker means a live turn is never double-submitted. DRY,
+ * can't-diverge — one re-press path for both callers (the `wmDeltaCandidate` shared-helper pattern, R1).
+ */
+export async function ensureSubmitted(tmuxSession: string, hasStarted: (tail: string) => boolean): Promise<number> {
+    let unsubmittedTicks = 0;
+    let resubmits = 0;
+    for (;;) {
+        if (hasStarted(capturePaneTail(tmuxSession))) return resubmits;        // submitted / turn running
+        if (++unsubmittedTicks >= SUBMIT_GRACE_TICKS) {
+            if (resubmits >= MAX_WAKE_RESUBMITS) return resubmits;             // bounded — hand to the caller's wait + fail-safe
+            pressEnter(tmuxSession);                                           // the Enter was lost — re-press
+            resubmits++;
+            unsubmittedTicks = 0;
+        }
+        await sleep(POLL_INTERVAL_MS);
+    }
+}
+
 function writeAtomic(file: string, contents: string): void {
     const tmp = `${file}.${process.pid}.tmp`;
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -704,7 +732,7 @@ async function ensureSurfaceSessionInner(
 export async function waitForCaptureWithRateLimitRetry<T>(
     captureReady: () => T | null,
     tmuxSession: string,
-    resubmit: () => void,
+    resubmit: () => void | Promise<void>,
     timeoutMs: number,
 ): Promise<T> {
     const deadline = Date.now() + timeoutMs;
@@ -722,7 +750,7 @@ export async function waitForCaptureWithRateLimitRetry<T>(
             retries += 1;
             console.warn(`[tmux-dispatcher] ${tmuxSession}: rate-limited mid-turn — backoff ${Math.round(backoff / 1000)}s then re-submit (retry ${retries}/${RATE_LIMIT_MAX_RETRIES})`);
             await sleep(backoff);
-            resubmit();
+            await resubmit();
             continue;
         }
         if (Date.now() > deadline) throw new DispatchTimeoutError(`waitFor timed out after ${timeoutMs}ms`);
@@ -771,9 +799,19 @@ export async function sendTransactionPrompt(
     // 3) send-keys only a short, safe instruction pointing the agent at the file. P7: the SAME
     //    instruction is the rate-limit re-submit (the autonomous "up-arrow") — the prompt file
     //    persists on disk, so re-delivering the pointer re-runs the identical turn.
-    const submitTurn = () => sendLine(session.tmuxSession,
-        `Your next turn's full prompt is in the file ${promptFile} — read it with the Read tool and act on its entire contents as this turn's instructions.`);
-    submitTurn();
+    //    (b) MNT-010: the pointer goes through the SAME submission guarantee feedWakeSteps uses —
+    //    sendLineSettled (settle before Enter, no race) + ensureSubmitted (confirm the turn STARTED
+    //    via processing chrome, bounded re-press of a lost Enter). Before this, the bare sendLine
+    //    could leave the pointer typed-but-unsubmitted → the capture waitFor (4) below would time
+    //    out → needs-reconcile → re-deliver → stall → loop (the day-7 reconcile-loop). Now (4) only
+    //    times out a genuinely-silent agent. Reused as the P7 rate-limit re-submit → the throttled
+    //    re-delivery inherits the same guarantee for free.
+    const submitTurn = async () => {
+        await sendLineSettled(session.tmuxSession,
+            `Your next turn's full prompt is in the file ${promptFile} — read it with the Read tool and act on its entire contents as this turn's instructions.`);
+        await ensureSubmitted(session.tmuxSession, (tail) => PROCESSING_CHROME_RE.test(tail));
+    };
+    await submitTurn();
 
     // 4) Poll the sink for this txn's capture (or an orphan, surfaced as fail-loud). P7: the
     //    poll is rate-limit-aware — a transient mid-turn throttle backs off + re-submits
@@ -1029,14 +1067,6 @@ export async function feedWakeSteps(
         // prompt sits unsubmitted (the P2.3 surface-1 stall).
         const nonce = wakeNonce();
         await sendLineSettled(tmuxSession, `${step.prompt} — when COMPLETE reply on its own line EXACTLY: STEP-OK ${step.id} ${nonce}`);
-        // ack-before-next IS the gate: the next step is never fed until this one is acked.
-        // (b) the submission GUARANTEE (Jim's spec) — three states per poll-tick:
-        //   1. STEP-OK <id> <nonce> (+ a real c0 for the gradient step) → acked, proceed;
-        //   2. processing chrome (or the marker already up) → the turn submitted/ran, keep waiting;
-        //   3. neither for SUBMIT_GRACE_TICKS running → the submit was lost → re-press Enter (bounded).
-        // The submit lands within a few re-presses (self-recovers at THIS step) or the EXISTING
-        // DispatchTimeoutError fail-safe fires — only AFTER retrying, never a hollow wake. `submitted`
-        // latches once the turn is seen running/acked, so a live turn is never double-submitted.
         const ackRe = new RegExp(`STEP-OK\\s+${step.id}\\s+${nonce}\\b`);
         const isAcked = (tail: string): boolean => {
             if (!ackRe.test(tail)) return false;
@@ -1047,21 +1077,17 @@ export async function feedWakeSteps(
             }
             return true;
         };
-        let submitted = false;
-        let unsubmittedTicks = 0;
-        let resubmits = 0;
+        // (b) the submission GUARANTEE (Jim's spec, now the shared `ensureSubmitted` — MNT-010 made it
+        // DRY with submitTurn): confirm the fed line actually submitted (the turn is running, or its ack
+        // is already up) — re-pressing a lost Enter, bounded — BEFORE the ack-wait. So the perStepTimeoutMs
+        // ack-wait below only ever times out a genuinely-silent step, never a typed-but-unsubmitted line.
+        const resubmits = await ensureSubmitted(tmuxSession, (tail) => ackRe.test(tail) || PROCESSING_CHROME_RE.test(tail));
+        // ack-before-next IS the gate: the next step is never fed until this one's STEP-OK ack appears
+        // (the gradient step also requires a real echoed c0). Fail-safe DispatchTimeoutError — reached
+        // only AFTER ensureSubmitted has tried the bounded re-presses, never a hollow wake.
         const deadline = Date.now() + perStepTimeoutMs;
         for (;;) {
-            const tail = capturePaneTail(tmuxSession);
-            if (isAcked(tail)) break;                                                              // state 1
-            if (!submitted && (ackRe.test(tail) || PROCESSING_CHROME_RE.test(tail))) submitted = true; // state 2
-            if (submitted) {
-                unsubmittedTicks = 0;
-            } else if (++unsubmittedTicks >= SUBMIT_GRACE_TICKS && resubmits < MAX_WAKE_RESUBMITS) {
-                pressEnter(tmuxSession);                                                           // state 3
-                resubmits++;
-                unsubmittedTicks = 0;
-            }
+            if (isAcked(capturePaneTail(tmuxSession))) break;
             if (Date.now() > deadline) {
                 throw new DispatchTimeoutError(
                     `wake step '${step.id}' not acked after ${resubmits} re-submit(s) (timeout ${perStepTimeoutMs}ms)`);

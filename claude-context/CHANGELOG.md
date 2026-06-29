@@ -9,6 +9,12 @@
 
 ---
 
+## 2026-06-29 (S209) — fix(MNT-010): extend the (b) submission-guarantee to the WORK-dispatch
+
+The work-dispatch pointer in `submitTurn` (`tmux-dispatcher.ts`) was sent via a bare `sendLine` (no submit-verify), so its Enter could race the paste → the pointer sat typed-but-unsubmitted at the `❯` → the capture `waitFor` (15 min) timed out → `needs-reconcile` → re-deliver → stall → loop (the day-7 reconcile-loop; it stalled the jim-human spoke three times today). `feedWakeSteps` got the (b) guarantee in R1; `submitTurn` never did. Leo-build / Jim plan-audit + diff-audit GREEN (`mqysqepa`).
+- `src/server/lib/tmux-dispatcher.ts` — new shared `ensureSubmitted(tmuxSession, hasStarted) → resubmits` (the (b) "confirm-submitted + bounded re-press" extracted from `feedWakeSteps`' inline loop, DRY/can't-diverge). `feedWakeSteps` now `sendLineSettled → ensureSubmitted(ack||chrome) → ack-wait` (behaviour-identical); `submitTurn` now async: `sendLineSettled + ensureSubmitted(chrome) → waitForCaptureWithRateLimitRetry` (bare `sendLine` gone). `resubmit` widened to `() => void | Promise<void>` (+ `await`) so the P7 rate-limit re-submit inherits (b) for free. Reuses `PROCESSING_CHROME_RE` (no new signal); bounded re-press (No-Silent-Constraints).
+- `scripts/test-wake-feed-queue.ts` — +[9][10][11] exercising `ensureSubmitted` on the work-dispatch (chrome) predicate: lost→bounded re-press→started; never-starts→exactly MAX→caller fail-safe; already-running→0 re-press. Gates: tsc 0-new; wake-feed 11/11; rate-limit-retry C4 green. No Settled altered (DEC-068/069/081/073, S200, R011/DEC-096). The warm pool (R3) subsumes the whole failure class later; this is the now-cure.
+
 ## 2026-06-29 (S208) — feat(DEC-099 R1): the stem-sleeve re-sleeve — pre-warm + attach, live-proven
 
 R1 of the per-agent warm-spoke pool (DEC-099 + its stem-sleeve amendment): the expensive L1 load (the whole-self wake) pre-pays in the BACKGROUND into a warm, idle, registry-tracked stem; a human ATTACHES (re-sleeves) onto it and is greeted *current* in seconds, with no cold wake and no memory corruption. Live-proven end-to-end (gate-2a bare attach + the #91 flush+greeting); Leo-build / Jim plan-audit + diff-audit GREEN; the prove de-risked by splitting (fed flush+greeting + the gate-2a-proven bare attach) — the integrated `attach-stem` tmux-attach-via-script is an F4(i) follow-on.
