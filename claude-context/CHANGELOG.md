@@ -9,6 +9,11 @@
 
 ---
 
+## 2026-06-29 (S209) — fix(MNT-011): wake-grace covers the fed /wake (interactive-seat B-3 nag)
+
+The B-3 memory-guard (Stop hook) nagged the interactive `session` seat at the *tail* of a fed `/wake`: `orient-inject.sh` only granted the one-turn wake-grace when the prompt matched `welcome back|good morning|session start`, but the P2.4 fed wake drives the wake as step-prompts that contain none of those phrases → the welcome-back turn was exempt but the fed steps after it were not → the guard fired on the `conversations` step. (Corrected a standing *wrong* diagnosis in the process — it was NOT an "AGENT_SURFACE-not-reaching-the-hook / Fix-2" issue; the session seat is guarded by design, traced 2026-06-29. See maintenance-journal MNT-011.)
+- `src/hooks/orient-inject.sh` — wake-grace now also matches the feeder's distinctive, stable signatures: the `feedWakeSteps` ack-instruction (`reply on its own line EXACTLY: STEP-OK`) and the `GREETING_STEP` (`loaded whole and warm`). Fail-safe direction unchanged (a false match only skips the guard for one turn). Detector isolation-tested + sandboxed full-hook run (fed step / greeting / welcome-back → grace; normal prompts → guarded). Friction fix, not data-loss; path-ref hook = live-on-save (applied per Darron's go, Jim confirmatory diff-audit to follow).
+
 ## 2026-06-29 (S209) — fix(MNT-010): extend the (b) submission-guarantee to the WORK-dispatch
 
 The work-dispatch pointer in `submitTurn` (`tmux-dispatcher.ts`) was sent via a bare `sendLine` (no submit-verify), so its Enter could race the paste → the pointer sat typed-but-unsubmitted at the `❯` → the capture `waitFor` (15 min) timed out → `needs-reconcile` → re-deliver → stall → loop (the day-7 reconcile-loop; it stalled the jim-human spoke three times today). `feedWakeSteps` got the (b) guarantee in R1; `submitTurn` never did. Leo-build / Jim plan-audit + diff-audit GREEN (`mqysqepa`).
