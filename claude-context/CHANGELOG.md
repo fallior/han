@@ -9,6 +9,15 @@
 
 ---
 
+## 2026-06-30 (S209) — docs(topology): HAN filesystem/topology map + live `topology.sh`; launcher render-echo guard
+
+Seeded after a night lost to load-bearing-but-undocumented structure — the symlinked PATH launchers (a `sed -i` silently replaced one → SCRIPT_DIR resolved to the wrong tree → identity-HALT), a `<slug>-<pid>` tmux session mistaken for a chat session when it actually HOSTS the server-watchdog, and three separate roots. Built on the self-defending-docs discipline (the living-docs sweep + the ecosystem-map Memory Map): the prose narrates, a companion script prints the live ground truth, and *the command wins if they disagree*. Leo-build / Jim pre-merge-audit + commit (launchers are an audit surface). Adopted into Jim's supervisor sweeps as #92's concrete sweep-leg (occasional `topology.sh --check` → diff vs prose → keep honest).
+- `docs/HAN-FILESYSTEM.md` (new) — living filesystem & topology map: three roots (code `~/Projects/han` / state `~/.han` / infra-PATH `~/Projects/infrastructure`), the symlink-launcher trap, watchdog-tmux servers (3847 leo / 3848 jim, NOT `han-server.service`), frozen-at-launch (env + Stop-hook list read once). Every load-bearing claim ends with a `verify:`.
+- `scripts/topology.sh` (new) — read-only live topology printer (`--check` adds a PASS/WARN verdict); the doc's ground-truth companion. Resolves through the PATH symlink (`readlink -f BASH_SOURCE`), self-excludes in `pgrep`.
+- `scripts/han{leo,jim,tenshi,casey}` — guard the post-render echo with `${GENERATED_FILE:-the agent CLAUDE.md}` (cosmetic default, no behaviour change, uniform across all four).
+- Jim audit: `bash -n` clean (all 5 shell files); `topology.sh` read-only; the launcher change is echo-only (zero functional change); scope = this bundle only (`future-ideas.md` #110/#111 left out); no Settled or gatekeeper (DEC-073 template/CLAUDE.md) file touched.
+- KNOWN-OPEN (MNT-015): the doc's "Frozen-at-launch" note claims `wm-flush` auto-fires on a session launched after the MNT-012/013 fix — not yet true on Jim's seat (a deeper hook-PATH bug: the harness Stop hook can't resolve nvm `npx`/`node`). The doc-correction lands with Leo's hook fix.
+
 ## 2026-06-29 (S209) — fix(MNT-013): forward AGENT_SWAP_* into the agent process (env-propagation gap)
 
 The wm-flush (MNT-012) + memory-guard (B-3) Stop hooks were a **no-op on the live session seat**: the launchers define `AGENT_SWAP_COMPRESSED`/`_FULL` but never `-e`'d them into the claude process, so the hooks saw them unset → resolved the absent `session-swap*.md` fallback → `exit 0`. jim was genuinely broken (its swap is `supervisor-swap*`); leo/tenshi/casey worked only by the fallback coinciding with their swap names (the S195 fragile-default smell). A known S167 gap wm-flush inherited; Jim caught it walking back his own MNT-012 seal (the membrane self-correcting). So MNT-012's currency wasn't actually live on a running seat until this lands + a relaunch.

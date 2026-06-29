@@ -203,7 +203,7 @@ start_session() {
     # CLAUDE.md via the agent working directory (-c below) — identity from the generated
     # agent-dir file, not the repo root.
     generate_claude_md
-    echo -e "${BLUE}Rendered CLAUDE.md: ${GREEN}$GENERATED_FILE${NC} from template"
+    echo -e "${BLUE}Rendered CLAUDE.md: ${GREEN}${GENERATED_FILE:-the agent CLAUDE.md}${NC} from template"
 
     # All AGENT_* vars forwarded via -e so they're visible inside the tmux session
     # regardless of tmux server state. -c sets the session cwd to Leo's agent dir so the

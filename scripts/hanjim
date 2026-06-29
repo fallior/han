@@ -192,7 +192,7 @@ start_session() {
     # (DEC-073). Claude Code picks up the generated file as the project CLAUDE.md via the
     # agent working directory — no --append-system-prompt needed.
     generate_claude_md
-    echo -e "${BLUE}Rendered CLAUDE.md: ${GREEN}$GENERATED_FILE${NC} from template"
+    echo -e "${BLUE}Rendered CLAUDE.md: ${GREEN}${GENERATED_FILE:-the agent CLAUDE.md}${NC} from template"
 
     # All AGENT_* vars forwarded via -e so they're visible inside the tmux
     # session regardless of tmux server state. Required for /pfc and any future
