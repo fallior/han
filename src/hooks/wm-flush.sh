@@ -18,7 +18,9 @@
 # NOTE (R2, MNT-012↔R2 intersection): this is a surface-keyed swap consumer — when R2 lands the
 # sleeve-state resolver, wm-flush folds onto it (P-R2.2) alongside the sentinel/guard/swap rows.
 
-REPO="${HAN_REPO:-/home/darron/Projects/han}"
+# Derive the repo root from this script's own location (src/hooks/ → ../.. = root) — portable, no
+# hardcoded path (#101; Jim's MNT-013 fold-in), so it works for any garden ($HOME), not just this one.
+REPO="${HAN_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 MEM="${AGENT_MEMORY_DIR:-}"
 FULL_SWAP="${MEM}/${AGENT_SWAP_FULL:-session-swap-full.md}"
 COMP_SWAP="${MEM}/${AGENT_SWAP_COMPRESSED:-session-swap.md}"

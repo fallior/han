@@ -9,6 +9,13 @@
 
 ---
 
+## 2026-06-29 (S209) — fix(MNT-013): forward AGENT_SWAP_* into the agent process (env-propagation gap)
+
+The wm-flush (MNT-012) + memory-guard (B-3) Stop hooks were a **no-op on the live session seat**: the launchers define `AGENT_SWAP_COMPRESSED`/`_FULL` but never `-e`'d them into the claude process, so the hooks saw them unset → resolved the absent `session-swap*.md` fallback → `exit 0`. jim was genuinely broken (its swap is `supervisor-swap*`); leo/tenshi/casey worked only by the fallback coinciding with their swap names (the S195 fragile-default smell). A known S167 gap wm-flush inherited; Jim caught it walking back his own MNT-012 seal (the membrane self-correcting). So MNT-012's currency wasn't actually live on a running seat until this lands + a relaunch.
+- `scripts/hanleo` / `hanjim` / `hantenshi` / `hancasey` — add the two `AGENT_SWAP_*` `-e` forwards to the block (after `AGENT_SURFACE`). Fix for jim; explicit-hardening (behaviour-preserving) for the other three.
+- `src/hooks/wm-flush.sh` — derive `REPO` from `BASH_SOURCE` (portable, #101) instead of a hardcoded path.
+- Takes effect on **relaunch** (the `-e` only applies to a new launch). Live-verify = the hook fires through the harness env on a real turn (not explicit paths — the trap that hid the original no-op). bash -n clean; sandbox-proved. Jim diff-audit GREEN. `launch-tmux-surface.sh` left out (spokes use the DEC-093 diary → empty swap → wm-flush correctly no-ops; the cycle-buffer is MNT-014/#12).
+
 ## 2026-06-29 (S209) — fix(MNT-012 / #50): per-turn swap→working-memory flush (the DEC-085 FLUSH-FIRST drift)
 
 DEC-085 decided per-prompt flush (swap→WM every turn, "drift bounded to 1-prompt") but relied on manual discipline that drifted (S163 instruction-vs-structural), and the harness-enforcement (#50) was deferred. Empirical: a whole session's swap entries unflushed, 0 in WM — the canonical shared WM was not durably current. Required for catastrophe insurance, the warm-spoke re-sleeve (DEC-099 reads WM), and continuity. Promotes #50. Leo-build / Jim plan-audit + diff-audit (RED→fix→GREEN, `mqz0…`).

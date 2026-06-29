@@ -218,6 +218,8 @@ start_session() {
         -e "AGENT_CONVERSATION_ROLE=$AGENT_CONVERSATION_ROLE" \
         -e "AGENT_COUNTERPART_NAME=$AGENT_COUNTERPART_NAME" \
         -e "AGENT_SURFACE=$AGENT_SURFACE" \
+        -e "AGENT_SWAP_COMPRESSED=$AGENT_SWAP_COMPRESSED" \
+        -e "AGENT_SWAP_FULL=$AGENT_SWAP_FULL" \
         -c "$AGENT_WORKING_DIR"
 
     # Start server in a bottom pane (20% height) under the auto-restart watchdog.
