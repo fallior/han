@@ -9,7 +9,7 @@
 import * as fs from 'fs';
 import { execFileSync } from 'child_process';
 import * as path from 'path';
-import { sleeveSurface, sleeveSlug, writeSleeveState, sleevesDir } from '../src/server/lib/sleeve-state';
+import { sleeveSurface, sleeveSlug, sleeveSwapPrefix, writeSleeveState, sleevesDir } from '../src/server/lib/sleeve-state';
 
 const SH = path.resolve(__dirname, '..', 'src', 'hooks', 'sleeve-surface.sh');
 const SESSION = `__sleevetest__${process.pid}`;
@@ -21,6 +21,15 @@ const ok = (n: string, c: boolean) => { c ? (pass++, console.log(`  ✓ ${n}`)) 
 function shSurface(hanSession: string, fallback: string): string {
     return execFileSync('bash', [SH], {
         env: { ...process.env, HAN_SESSION: hanSession, AGENT_SURFACE: fallback },
+        encoding: 'utf-8',
+    }).trim();
+}
+
+const SH_SWAP = path.resolve(__dirname, '..', 'src', 'hooks', 'sleeve-swap.sh');
+/** Run the .sh swap-prefix accessor (P-R2.2b) with a controlled HAN_SESSION. */
+function shSwap(hanSession: string): string {
+    return execFileSync('bash', [SH_SWAP], {
+        env: { ...process.env, HAN_SESSION: hanSession },
         encoding: 'utf-8',
     }).trim();
 }
@@ -42,6 +51,15 @@ try {
     ok('.ts fallback to "session" when absent + no fallback', sleeveSurface(ABSENT, undefined) === 'session');
     // 4b. .sh twin agrees on sleeve-ABSENT
     ok('.sh twin agrees (absent → fallback)', shSurface(ABSENT, 'human-response') === 'human-response');
+
+    // 5. swapPrefix (P-R2.2b): written when given, absent when omitted; .ts + .sh agree; absent → ''
+    writeSleeveState(SESSION, 'leo', 'human-response', 'human-swap');
+    ok('sleeveSwapPrefix reads written swapPrefix', sleeveSwapPrefix(SESSION) === 'human-swap');
+    ok('.sh sleeve-swap agrees (present → human-swap)', shSwap(SESSION) === 'human-swap');
+    writeSleeveState(SESSION, 'leo', 'session'); // omit swapPrefix
+    ok('sleeveSwapPrefix "" when omitted (→ hook keeps $AGENT_SWAP_* fallback)', sleeveSwapPrefix(SESSION) === '');
+    ok('.sh sleeve-swap "" when omitted', shSwap(SESSION) === '');
+    ok('sleeveSwapPrefix "" when absent', sleeveSwapPrefix(ABSENT) === '');
 
     // 3. malformed file → fallback (fail-soft), both halves
     fs.writeFileSync(filePath, 'not json {{{', 'utf-8');

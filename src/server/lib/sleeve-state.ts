@@ -71,16 +71,37 @@ export function sleeveSlug(
 }
 
 /**
+ * Resolve the swap-buffer prefix the same way (sleeve-state `swapPrefix`, else `''` → the caller
+ * falls back to `$AGENT_SWAP_*`). Carried in sleeve-state because the `.sh` memory hooks can't call
+ * the `.ts` `swapPrefixFor(slug,surface)` on the hot path (P-R2.2b). Fail-soft. The `.sh` twin is
+ * `src/hooks/sleeve-swap.sh` (keep in lockstep). Returns `''` when absent so the hook keeps its
+ * `$AGENT_SWAP_*` fallback (inert).
+ */
+export function sleeveSwapPrefix(hanSession: string | undefined = process.env.HAN_SESSION): string {
+    if (!hanSession) return '';
+    try {
+        const sp = JSON.parse(fs.readFileSync(sleevePath(hanSession), 'utf-8'))?.swapPrefix;
+        return (typeof sp === 'string' && sp) ? sp : '';
+    } catch {
+        return '';
+    }
+}
+
+/**
  * Write the sleeve-state for a session ATOMICALLY (temp + rename — a concurrent reader never
  * sees a half-file; the no-split-brain requirement). Called by the dispatcher at sleeve-time
- * (today: launch-time). Fail-soft: a write problem is logged by the caller, never throws a turn
- * down — an absent file just means the resolver falls back to `$AGENT_SURFACE`.
+ * (today: launch-time). `swapPrefix` (P-R2.2b) lets the `.sh` hooks resolve their swap pair off the
+ * sleeve instead of the frozen `$AGENT_SWAP_*`; omitted → not written → hooks keep the fallback.
+ * Fail-soft: a write problem is logged by the caller, never throws a turn down — an absent file just
+ * means the resolvers fall back to `$AGENT_SURFACE` / `$AGENT_SWAP_*`.
  */
-export function writeSleeveState(hanSession: string, slug: string, surface: string): void {
+export function writeSleeveState(hanSession: string, slug: string, surface: string, swapPrefix?: string): void {
     const dir = sleevesDir();
     fs.mkdirSync(dir, { recursive: true });
     const dest = sleevePath(hanSession);
     const tmp = `${dest}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify({ slug, surface }) + '\n', 'utf-8');
+    const payload: Record<string, string> = { slug, surface };
+    if (swapPrefix) payload.swapPrefix = swapPrefix;
+    fs.writeFileSync(tmp, JSON.stringify(payload) + '\n', 'utf-8');
     fs.renameSync(tmp, dest); // atomic on the same filesystem
 }

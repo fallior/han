@@ -18,8 +18,10 @@ SIGNALS_DIR="${HOME}/.han/signals"
 SLUG="${AGENT_SLUG:-unknown}"
 STATE="${SIGNALS_DIR}/memory-guard-${SLUG}.state"
 MEM="${AGENT_MEMORY_DIR:-}"
-FULL_SWAP="${MEM}/${AGENT_SWAP_FULL:-session-swap-full.md}"
-COMP_SWAP="${MEM}/${AGENT_SWAP_COMPRESSED:-session-swap.md}"
+# R2 P-R2.2b (Fork A): resolve the swap pair off the sleeve (sleeved surface's prefix), fallback $AGENT_SWAP_* (inert today).
+_sp="$(bash "$(dirname "${BASH_SOURCE[0]}")/sleeve-swap.sh" 2>/dev/null)"
+if [ -n "$_sp" ]; then FULL_SWAP="${MEM}/${_sp}-full.md"; COMP_SWAP="${MEM}/${_sp}.md"
+else FULL_SWAP="${MEM}/${AGENT_SWAP_FULL:-session-swap-full.md}"; COMP_SWAP="${MEM}/${AGENT_SWAP_COMPRESSED:-session-swap.md}"; fi
 
 allow() { exit 0; }
 
@@ -30,7 +32,9 @@ allow() { exit 0; }
 # entry to satisfy the block — the double-write that drifted WM full-side 24 entries in one
 # night. Exempt non-session surfaces structurally (not by an action-block instruction). The
 # interactive session (AGENT_SURFACE unset or 'session') stays fully guarded.
-[ -n "$AGENT_SURFACE" ] && [ "$AGENT_SURFACE" != "session" ] && allow
+# R2 P-R2.2b: exemption follows the SLEEVE surface (a stem sleeved onto a spoke is exempt), fallback $AGENT_SURFACE.
+_surface="$(bash "$(dirname "${BASH_SOURCE[0]}")/sleeve-surface.sh" 2>/dev/null)"; _surface="${_surface:-${AGENT_SURFACE:-session}}"
+[ "$_surface" != "session" ] && allow
 
 # R1 (DEC-099 stem-sleeve): a PRE-WARM session-stem runs AGENT_SURFACE=session but has NO human
 # client attached — it is INERT (fed its load, never asked to PRODUCE a turn-record until a human

@@ -22,8 +22,10 @@
 # hardcoded path (#101; Jim's MNT-013 fold-in), so it works for any garden ($HOME), not just this one.
 REPO="${HAN_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 MEM="${AGENT_MEMORY_DIR:-}"
-FULL_SWAP="${MEM}/${AGENT_SWAP_FULL:-session-swap-full.md}"
-COMP_SWAP="${MEM}/${AGENT_SWAP_COMPRESSED:-session-swap.md}"
+# R2 P-R2.2b (Fork A): resolve the swap pair off the sleeve (sleeved surface's prefix), fallback $AGENT_SWAP_* (inert today).
+_sp="$(bash "$(dirname "${BASH_SOURCE[0]}")/sleeve-swap.sh" 2>/dev/null)"
+if [ -n "$_sp" ]; then FULL_SWAP="${MEM}/${_sp}-full.md"; COMP_SWAP="${MEM}/${_sp}.md"
+else FULL_SWAP="${MEM}/${AGENT_SWAP_FULL:-session-swap-full.md}"; COMP_SWAP="${MEM}/${AGENT_SWAP_COMPRESSED:-session-swap.md}"; fi
 SLUG="${AGENT_SLUG:-unknown}"
 
 [ -z "$MEM" ] && exit 0

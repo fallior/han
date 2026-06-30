@@ -9,6 +9,15 @@
 
 ---
 
+## 2026-06-30 (S210) — feat(R2 P-R2.2b): swap-pair + memory-guard + wm-flush onto the sleeve resolver (the memory-integrity core)
+
+The protected second slice of P-R2.2 (DEC-099 / Fork A) — migrate the memory-integrity hooks that resolve the swap pair off `$AGENT_SWAP_*` (and memory-guard's surface exemption off `$AGENT_SURFACE`) onto the sleeve resolver, so a sleeved stem reads/guards its **sleeve** surface's swap, not the frozen launch one. Inert by belt-fallback (no sleeve-state today → empty → falls back to `$AGENT_SWAP_*` / `$AGENT_SURFACE` → byte-identical; proven: `swapPrefixFor(jim,session)='supervisor-swap'` builds the same files as the fallback). Leo-build / Jim diff-audit GREEN (`mr04...`). B-3 `### `-presence tweak deliberately SEPARATE (the failed-reset false-pass edge earns its own audit).
+- `src/server/lib/sleeve-state.ts` — `writeSleeveState(…, swapPrefix?)` (optional; omitted → not written → hooks keep `$AGENT_SWAP_*`); new `sleeveSwapPrefix()` resolver (fail-soft → `''`).
+- `src/server/lib/tmux-dispatcher.ts` — coldLaunch passes `swapPrefixFor(slug,surface)` into the sleeve-state at sleeve-time.
+- `src/hooks/sleeve-swap.sh` (new, `+x`) — jq-only, no-tsx (the MNT-015 hot-path lesson), fail-soft → empty → caller falls back.
+- `src/hooks/memory-guard.sh` / `wm-flush.sh` — swap-pair (`FULL_SWAP`/`COMP_SWAP`) resolves off `sleeve-swap.sh`; memory-guard's exemption resolves off `sleeve-surface.sh`; both fall back. `wm-flush.sh` stays `100755`.
+- Proof: `bash -n` all; `tsc` 0-new (11 baseline); `test-sleeve-surface` 14/14; `sleeve-swap.sh` returns empty (inert); applied-tree == held (no drift).
+
 ## 2026-06-30 (S210) — feat(R2 P-R2.2a): cli-active/idle + statusline ctx-sidecar onto the sleeve resolver
 
 The low-stakes first slice of P-R2.2 (DEC-099 / Fork A) — migrate the surface-keyed `.sh` hooks that read `$AGENT_SURFACE` onto the resolver (`sleeve-surface.sh`), so a sleeved stem follows its **sleeve** surface, not the frozen launch one. Inert by belt-fallback to `$AGENT_SURFACE` (byte-identical until a stem is sleeved onto a different surface). Leo-build / Jim diff-audit GREEN (`mr02k2bb`).

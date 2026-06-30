@@ -35,7 +35,7 @@ import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
-import { spokeLifecycleFor, wakeFeedFor } from './garden-manifest';
+import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor } from './garden-manifest';
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
 
@@ -648,8 +648,8 @@ async function ensureSurfaceSessionInner(
         // launch env. Inert today (written surface == the launched $AGENT_SURFACE → resolvers
         // byte-identical); load-bearing once R2 sleeves a stem onto a surface. Fail-soft — a write
         // miss just means the resolver falls back to $AGENT_SURFACE.
-        try { writeSleeveState(tmuxSession, slug, surface); }
-        catch (e) { console.warn(`[tmux-dispatcher] ${slug}/${surface}: sleeve-state write failed (resolver falls back to $AGENT_SURFACE)`, e); }
+        try { writeSleeveState(tmuxSession, slug, surface, swapPrefixFor(slug, surface)); }
+        catch (e) { console.warn(`[tmux-dispatcher] ${slug}/${surface}: sleeve-state write failed (resolvers fall back to $AGENT_SURFACE/$AGENT_SWAP_*)`, e); }
         // Wait for the claude prompt chrome before the wake (send-keys fired too early
         // lands in bash, not claude). awaitChromeOrDescend also auto-descends the model-
         // failover ladder if the launch model is unavailable (S173); any OTHER stuck
