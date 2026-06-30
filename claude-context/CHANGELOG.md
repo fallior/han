@@ -9,6 +9,11 @@
 
 ---
 
+## 2026-06-30 (S210) — fix(MNT-012): wm-flush.sh `+x` — the Stop hook was never executable (the REAL root)
+
+The actual root of the wm-flush no-op, run to ground by Jim: `src/hooks/wm-flush.sh` was committed `100644` (not executable). The harness execs a `command` Stop hook **directly**, so a non-`+x` file fails *permission denied* before bash reads the shebang — wm-flush never started (no trace, ever), while its `+x` siblings (`memory-guard`/`wake-ctx-log`) ran. Seat-independent (it's the file mode, not env). **Why MNT-015's node/PATH arc fooled us:** every "mechanism-proof" ran the script THROUGH an interpreter (`npx tsx`/`node tsx wm-flush.ts`), which reads the file regardless of the exec bit — so they passed while the real direct-exec hook silently failed. The lesson (permanent gate): a `command` hook must be `+x`, verified by a **real-turn trace**, never an interpreter-invoked proxy.
+- `chmod +x src/hooks/wm-flush.sh` (mode 100644→100755). `d7c3fbb` (nvm-aware node resolution) **STAYS** — correct hardening that now matters once the file can exec (else it'd hit the original npx-PATH bug); `+x` is the missing piece *on top of* it, not instead. Truly-closes on the witnessed next-turn auto-flush (live-on-save + in the seat's frozen Stop array → no relaunch).
+
 ## 2026-06-30 (S210) — fix(MNT-015): wm-flush Stop hook resolves node nvm-aware (the harness Stop-hook PATH gap)
 
 Closes the KNOWN-OPEN flagged in the S209 topology entry below. After MNT-013 (env-forwarding) landed, `wm-flush` *still* silently no-op'd on a live seat — Jim traced it and handed it over: the harness spawns Stop hooks with a **PATH that lacks nvm's node bin**, so the hook's bare `npx tsx` is not-found → swallowed by `>/dev/null 2>&1; exit 0`. (Discriminator: the sibling Stop hooks `memory-guard`/`wake-ctx` fire because they shell only standard-PATH `grep`/`jq`.) Confirmed + sharpened to **two** failure modes: even resolving `npx`, the local tsx's `#!/usr/bin/env node` shebang would pick up the system `/usr/bin/node` v12 under the stripped PATH and crash on tsx's modern ESM. Leo-build / Jim diff-audit GREEN (`mqzge0bs` → `mqzglne6`, both modes reproduced by his hand under the stripped PATH).
