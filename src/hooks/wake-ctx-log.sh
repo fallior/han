@@ -18,7 +18,11 @@ EVENT="${1:-prompt}"
 STDIN="$(cat 2>/dev/null)"   # the hook JSON (UserPromptSubmit carries .prompt); consumed either way
 {
   SLUG="${AGENT_SLUG:-unknown}"
-  SURFACE="${AGENT_SURFACE:-session}"
+  # R2 P-R2.1 (Fork A): resolve the surface via the sleeve-state resolver (sleeve-surface.sh) — it
+  # reads ~/.han/sleeves/$HAN_SESSION.json and falls back to $AGENT_SURFACE when absent, so today's
+  # behaviour is byte-identical (inert). First consumer of the resolver; P-R2.2 migrates the rest.
+  SURFACE="$(bash "$(dirname "${BASH_SOURCE[0]}")/sleeve-surface.sh" 2>/dev/null)"
+  [ -z "$SURFACE" ] && SURFACE="${AGENT_SURFACE:-session}"
   H="${HAN_HEALTH_DIR:-$HOME/.han/health}"
   SIDE="$H/${SLUG}-${SURFACE}-ctx.json"
   LOG="$H/wake-ctx-${SLUG}-${SURFACE}.jsonl"

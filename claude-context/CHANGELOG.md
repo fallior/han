@@ -9,6 +9,15 @@
 
 ---
 
+## 2026-06-30 (S210) — feat(R2 P-R2.1): sleeve-state resolver + writer; wake-ctx logger the first consumer
+
+R2's inert primitive (DEC-099 stem-sleeve / Fork A). Env is frozen at launch (P-R2.0 probe + MNT-013's live receipt), so a sleeved stem's surface can't be re-exported into the running process — Fork A is a **sleeve-state file** the surface-keyed resolvers read by the stable `$HAN_SESSION`, falling back to `$AGENT_SURFACE` (the fallback = inert: today's behaviour byte-for-byte). Leo-build / Jim diff-audit GREEN (`mqzz9nom`, ran the resolver himself).
+- `src/server/lib/sleeve-state.ts` (new) — `sleeveSurface`/`sleeveSlug` (fail-soft: absent/unreadable/malformed → fallback) + `writeSleeveState` (atomic temp+rename, no-split-brain).
+- `src/hooks/sleeve-surface.sh` (new) — the `.sh` resolver twin for hooks (shells only standard-PATH `jq`, the MNT-015 lesson); lockstep with the `.ts`.
+- `scripts/test-sleeve-surface.ts` (new) — 9/9: atomic write, `.sh`/`.ts` agree (present + absent), fallback, malformed→fallback.
+- `src/server/lib/tmux-dispatcher.ts` — `coldLaunch` writes the sleeve-state (keyed by `tmuxSession` = `HAN_SESSION`); fail-soft.
+- `src/hooks/wake-ctx-log.sh` — first consumer: resolves `SURFACE` via the resolver (byte-identical today; inert). `bash -n` + `tsc` 0-new. P-R2.2 migrates the other facets (wm-flush/memory-guard/swap) next.
+
 ## 2026-06-30 (S210) — fix(MNT-012): wm-flush.sh `+x` — the Stop hook was never executable (the REAL root)
 
 The actual root of the wm-flush no-op, run to ground by Jim: `src/hooks/wm-flush.sh` was committed `100644` (not executable). The harness execs a `command` Stop hook **directly**, so a non-`+x` file fails *permission denied* before bash reads the shebang — wm-flush never started (no trace, ever), while its `+x` siblings (`memory-guard`/`wake-ctx-log`) ran. Seat-independent (it's the file mode, not env). **Why MNT-015's node/PATH arc fooled us:** every "mechanism-proof" ran the script THROUGH an interpreter (`npx tsx`/`node tsx wm-flush.ts`), which reads the file regardless of the exec bit — so they passed while the real direct-exec hook silently failed. The lesson (permanent gate): a `command` hook must be `+x`, verified by a **real-turn trace**, never an interpreter-invoked proxy.

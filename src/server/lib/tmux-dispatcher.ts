@@ -37,6 +37,7 @@ import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
 import { spokeLifecycleFor, wakeFeedFor } from './garden-manifest';
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
+import { writeSleeveState } from './sleeve-state';
 
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
 const PIPES_DIR = process.env.HAN_PIPES_DIR || path.join(os.homedir(), '.han', 'agent-pipes');
@@ -642,6 +643,13 @@ async function ensureSurfaceSessionInner(
         try { fs.unlinkSync(readyPath(slug, surface)); } catch { /* none */ }
         console.log(`[tmux-dispatcher] ${slug}/${surface}: launching ${tmuxSession} via launch-tmux-surface.sh`);
         execFileSync('bash', [LAUNCH_SURFACE_SCRIPT, slug, surface], { stdio: 'inherit' });
+        // R2 P-R2.1 (Fork A, DEC-099): record the sleeve-state keyed by HAN_SESSION (= tmuxSession)
+        // so surface-keyed resolvers (sleeve-surface.sh/.ts) read the real surface off the FROZEN
+        // launch env. Inert today (written surface == the launched $AGENT_SURFACE → resolvers
+        // byte-identical); load-bearing once R2 sleeves a stem onto a surface. Fail-soft — a write
+        // miss just means the resolver falls back to $AGENT_SURFACE.
+        try { writeSleeveState(tmuxSession, slug, surface); }
+        catch (e) { console.warn(`[tmux-dispatcher] ${slug}/${surface}: sleeve-state write failed (resolver falls back to $AGENT_SURFACE)`, e); }
         // Wait for the claude prompt chrome before the wake (send-keys fired too early
         // lands in bash, not claude). awaitChromeOrDescend also auto-descends the model-
         // failover ladder if the launch model is unavailable (S173); any OTHER stuck
