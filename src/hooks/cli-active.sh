@@ -15,5 +15,7 @@ mkdir -p "$SIGNALS_DIR"
 # the heartbeat yield to its own beats — and it is keyed per-agent so e.g. Leo's heartbeat
 # yields to Leo's session, never to Jim's activity (the cross-agent global-cli-busy bug, live
 # on beat #17).
-[ "${AGENT_SURFACE:-session}" = "session" ] || exit 0
+# R2 P-R2.2a (Fork A): resolve via sleeve-state (sleeved surface), fallback $AGENT_SURFACE (inert today).
+_surface="$(bash "$(dirname "${BASH_SOURCE[0]}")/sleeve-surface.sh" 2>/dev/null)"; _surface="${_surface:-${AGENT_SURFACE:-session}}"
+[ "$_surface" = "session" ] || exit 0
 date -Iseconds > "${SIGNALS_DIR}/cli-busy-${AGENT_SLUG:-leo}"

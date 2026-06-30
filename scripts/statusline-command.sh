@@ -16,7 +16,8 @@ used=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
 # Repo copy: han/scripts/statusline-command.sh (reproducible-install path).
 if [ -n "${AGENT_SLUG:-}" ] && [ -n "$used" ]; then
     _health="${HAN_HEALTH_DIR:-$HOME/.han/health}"
-    _surface="${AGENT_SURFACE:-session}"
+    # R2 P-R2.2a (Fork A): sleeve-surface (fallback $AGENT_SURFACE). Hot-path: one small read, cheap.
+    _surface="$(bash "$(dirname "${BASH_SOURCE[0]}")/../src/hooks/sleeve-surface.sh" 2>/dev/null)"; _surface="${_surface:-${AGENT_SURFACE:-session}}"
     mkdir -p "$_health" 2>/dev/null
     _payload=$(printf '{"context_window":{"used_percentage":%s},"updated_at":"%s"}' "$used" "$(date -Iseconds)")
     printf '%s' "$_payload" > "$_health/${AGENT_SLUG}-${_surface}-ctx.json.tmp" 2>/dev/null \

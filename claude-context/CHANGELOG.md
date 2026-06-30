@@ -9,6 +9,14 @@
 
 ---
 
+## 2026-06-30 (S210) — feat(R2 P-R2.2a): cli-active/idle + statusline ctx-sidecar onto the sleeve resolver
+
+The low-stakes first slice of P-R2.2 (DEC-099 / Fork A) — migrate the surface-keyed `.sh` hooks that read `$AGENT_SURFACE` onto the resolver (`sleeve-surface.sh`), so a sleeved stem follows its **sleeve** surface, not the frozen launch one. Inert by belt-fallback to `$AGENT_SURFACE` (byte-identical until a stem is sleeved onto a different surface). Leo-build / Jim diff-audit GREEN (`mr02k2bb`).
+- `src/hooks/cli-active.sh` / `cli-idle.sh` — resolve `_surface` via the resolver before the `session`-only gate (cli-busy is session-only, R011 Inv-2).
+- `scripts/statusline-command.sh` — the ctx-sidecar `${SLUG}-${SURFACE}-ctx.json` keys `_surface` via the resolver (writer-side; the dispatcher reader already passes the right surface).
+- `src/hooks/sleeve-surface.sh` — `+x` hygiene (it's `bash`-invoked, but the day's MNT-012 lesson: hooks in `src/hooks/` ship executable).
+- Proof: `bash -n` all; sandboxed cli-active 3-case incl the R2 sleeve-override case. Watch-points (non-blocking, eyeball at recycle): statusline relative-path resolution + the new subprocess-per-render on the statusline hot-path. Next: P-R2.2b (swap-pair + memory-guard + wm-flush, `+x` preserved).
+
 ## 2026-06-30 (S210) — feat(R2 P-R2.1): sleeve-state resolver + writer; wake-ctx logger the first consumer
 
 R2's inert primitive (DEC-099 stem-sleeve / Fork A). Env is frozen at launch (P-R2.0 probe + MNT-013's live receipt), so a sleeved stem's surface can't be re-exported into the running process — Fork A is a **sleeve-state file** the surface-keyed resolvers read by the stable `$HAN_SESSION`, falling back to `$AGENT_SURFACE` (the fallback = inert: today's behaviour byte-for-byte). Leo-build / Jim diff-audit GREEN (`mqzz9nom`, ran the resolver himself).
