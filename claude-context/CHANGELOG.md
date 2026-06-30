@@ -9,6 +9,13 @@
 
 ---
 
+## 2026-06-30 (S210) — feat(R2 P-R2.2c): readiness sentinel keys the sleeve surface (R2 DONE)
+
+The last R2 facet (DEC-099 / Fork A) — the spoke-side readiness sentinel. The dispatcher waits on `readyPath(slug, <sleeve-surface>)`; the template step-10 write keyed the **frozen launch** `$AGENT_SURFACE` → matches for a dispatched spoke, but a sleeved stem (launched `session`, sleeved onto e.g. `heartbeat`) would write `leo-session-ready` while the dispatcher waits `leo-heartbeat-ready` → `waitForReady` timeout. Now the sentinel keys the **sleeve** surface (inline `jq` read of `~/.han/sleeves/$HAN_SESSION.json`, fallback `$AGENT_SURFACE` — fork B, hook-path-independent because the template runs in the agent dir). Inert today (no sleeve-state → fallback → byte-identical), load-bearing at R3. Leo-build / Jim plan-audit GREEN (fork B; A/C rejected). **Gatekeeper edit applied in-concert (DEC-073, Darron's hand).**
+- `templates/CLAUDE.template.md` step 10 — `_sf` resolves the sleeve surface + cross-reference comment (template ↔ `sleeve-surface.sh` ↔ `sleeveSurface()`, the 3rd lockstep copy kept aligned) + prose note.
+- Regenerated all 4 per-agent CLAUDE.md (leo/jim/tenshi/casey) via `generate-agent-claude-md.ts` — confirmed inline-B in each (the spoke wakes on the *generated* file, not the template — Jim's S165 validity-hole flag).
+- **R2 (P-R2.2a + P-R2.2b + P-R2.2c) is complete** — every surface-keyed facet (cli-busy, ctx-sidecar, swap-pair, memory-guard exemption, wm-flush, readiness sentinel) resolves off the sleeve. Next: R3 — the pool.
+
 ## 2026-06-30 (S210) — feat(R2 P-R2.2b): swap-pair + memory-guard + wm-flush onto the sleeve resolver (the memory-integrity core)
 
 The protected second slice of P-R2.2 (DEC-099 / Fork A) — migrate the memory-integrity hooks that resolve the swap pair off `$AGENT_SWAP_*` (and memory-guard's surface exemption off `$AGENT_SURFACE`) onto the sleeve resolver, so a sleeved stem reads/guards its **sleeve** surface's swap, not the frozen launch one. Inert by belt-fallback (no sleeve-state today → empty → falls back to `$AGENT_SWAP_*` / `$AGENT_SURFACE` → byte-identical; proven: `swapPrefixFor(jim,session)='supervisor-swap'` builds the same files as the fallback). Leo-build / Jim diff-audit GREEN (`mr04...`). B-3 `### `-presence tweak deliberately SEPARATE (the failed-reset false-pass edge earns its own audit).

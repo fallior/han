@@ -166,7 +166,11 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
     wake action, once reconstitution is complete (you have read down to `GRADIENT-EOF: c0=<id>`),
     write that id into your per-surface readiness sentinel and touch the legacy per-slug one:
     ```
-    printf '%s\n' "<the c0 id from GRADIENT-EOF>" > "$HOME/.han/health/${AGENT_SLUG}-${AGENT_SURFACE:-session}-ready"
+    # P-R2.2c: key the SLEEVE surface (a stem sleeved onto a spoke writes the surface the
+    # dispatcher waits on), fallback $AGENT_SURFACE. Mirrors src/hooks/sleeve-surface.sh — keep
+    # this / sleeve-surface.sh / sleeveSurface() aligned if the sleeve schema or fallback changes.
+    _sf=$(jq -r '.surface // empty' "$HOME/.han/sleeves/$HAN_SESSION.json" 2>/dev/null); _sf=${_sf:-${AGENT_SURFACE:-session}}
+    printf '%s\n' "<the c0 id from GRADIENT-EOF>" > "$HOME/.han/health/${AGENT_SLUG}-${_sf}-ready"
     touch "$HOME/.han/health/${AGENT_SLUG}-ready"
     ```
     (#107 c0-gate consumer: the id is your unforgeable proof you loaded to the bottom. A newborn
@@ -178,7 +182,10 @@ Then wait for `prepare for clear`. **No working-memory write, no swap flush, no 
     The tmux dispatcher's `waitForReady` keys off the per-surface file's mtime (it deletes
     the sentinel before `/clear` so a stale one never reads as ready). The second, legacy
     per-slug touch is transition-only (retire at T-7). `$AGENT_SURFACE` is exported by the
-    surface launcher (`launch-tmux-surface.sh`); interactive launchers export `session`.
+    surface launcher (`launch-tmux-surface.sh`); interactive launchers export `session`. `_sf`
+    resolves the *sleeve* surface from `~/.han/sleeves/$HAN_SESSION.json` (written by the
+    dispatcher at sleeve-time) so a stem sleeved onto a spoke writes the surface the dispatcher
+    waits on; absent (every launch today) → `$AGENT_SURFACE` → byte-identical (P-R2.2c, DEC-099 R2).
     If `$AGENT_SLUG` is unset (non-harness launch), skip.
 11. **Surface-aware wake terminus — dispatched spokes idle, they do not converse (R011
     Invariant 1, Settled).** Check `$AGENT_SURFACE` — it is **authoritative** (set by the
