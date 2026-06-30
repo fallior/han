@@ -176,23 +176,19 @@ surface-unset); the surface becomes a **sleeve-param applied at sleeve-time**, n
 | readiness sentinel | `~/.han/health/${SLUG}-${SURFACE}-ready` | written under the sleeve-surface |
 | swap files | `${SLUG} session/heartbeat/human-swap{,-full}.md` | the sleeve picks the swap pair |
 | diary-sink | `diary-mcp-server.ts` CaptureRecord sinkDir | sleeve-keyed sink |
-| **wake-ctx logger (#0)** | `wake-ctx-log.sh` → `wake-ctx-${SLUG}-${SURFACE}.jsonl` | **the logger I shipped — re-point with the rest** |
+| **wake-ctx logger (#0)** | `wake-ctx-log.sh` → `wake-ctx-${SLUG}-${SURFACE}.jsonl` | **the logger I shipped — re-point with the rest** (first consumer migrated in P-R2.1) |
+| **wm-flush hook (MNT-012)** | `wm-flush.sh` resolves `$AGENT_SWAP_*` (surface-keyed swap) | ships surface-keyed in MNT-012 FIRST; **P-R2.2 migrates it onto the resolver** with `memory-guard` |
 
-**The mechanism:** `AGENT_SURFACE` must be **settable at sleeve-time** — re-exported into the
-running stem's session env (so the path-ref hooks read the new value) **and** every keyed path
-above re-pointed. This is a real env-mutation in a live session; design it explicitly (likely a
-sleeve-apply step the dispatcher runs that `tmux send-keys`/`set-environment`s the new surface +
-re-points, then applies the hat). Honour S193 (path-ref hooks are live-on-save — sequence the
-re-point so there's no split-brain window).
+**The mechanism — Fork A (a sleeve-state FILE), NOT env-mutation** *(decided in the R2 plan-audit `mqz04g3f`; the sketch's earlier "re-export `AGENT_SURFACE` into the running env" is **RETIRED as infeasible**).* A running session's env is **frozen at launch** — harness-spawned hooks never see a re-exported var (`tmux set-environment` only touches *newly* spawned procs; `send-keys "export …"` types the REPL, not a shell). This is no longer a hypothesis: **MNT-013 is the live receipt** (the `AGENT_SWAP_*` forwards only reached the hooks via a *relaunch*, never a running session) and `docs/HAN-FILESYSTEM.md` records it ("Frozen-at-launch"). So the surface moves in a **file**, not the env:
+- The dispatcher writes `~/.han/sleeves/<HAN_SESSION>.json = {slug, surface}` at sleeve-time (checkout). `HAN_SESSION` (the tmux session name) is in the frozen env and **stable** — the readable handle the hooks already have.
+- A **shared resolver** (`.sh` + `.ts` twin with a cross-ref comment — NOT shelling to tsx on the hot path) reads the sleeve-surface from that file by `HAN_SESSION`, **falling back to `$AGENT_SURFACE`** when the file is absent → legacy per-surface launches and non-pooled stems are byte-unchanged. **Both sides use it** (the dispatcher AND the spoke's own wake scripts) — else a heartbeat-sleeved stem writes `-session-ready` while the dispatcher waits on `-heartbeat-ready` (the load-bearing spoke-side catch).
 
-**R2's live-prove gate (its own "3 catches", per Jim's sharpening):** the live-env mutation is
-R2's riskiest move — setting `AGENT_SURFACE` in a *running* session and re-pointing the path-ref
-hooks (cli-active/idle, memory-guard, the wake-ctx logger — all live-on-save, S193) **without a
-split-brain window** where a hook reads a half-updated surface mid-sleeve. Name it explicitly as
-R2's live-prove gate: sequence the re-point atomically (or quiesce the hooks across the swap),
-prove a sleeve-change live with the logger + a Stop-hook firing on the *new* surface and never the
-old. This is the R2 analogue of R1's attach/retire/freshness gates — prove-live, not unit-test
-alone.
+**Sub-steps:**
+- **P-R2.0 — the probe (cheap, FIRST; verify-not-assume):** `tmux set-environment` a new `AGENT_SURFACE` on a running stem, fire a Stop hook, observe old-vs-new. Expected: old → Fork A. *Largely pre-confirmed by the MNT-013 frozen-at-launch receipt — run it as a ~10-min belt on the specific `set-environment` path, not a blocker.*
+- **P-R2.1 — the inert primitive:** the `~/.han/sleeves/<HAN_SESSION>.json` writer (dispatcher side) + the shared `.sh`/`.ts` resolver (fallback `$AGENT_SURFACE`) + migrate the **wake-ctx logger** as the first/safest consumer. INERT for every other surface (resolver falls back = today's behaviour, zero change) — built-then-flipped, the P2.1 pattern.
+- **P-R2.2 — migrate the rest of the keyed table** onto the resolver (`memory-guard.sh`, `wm-flush.sh` [MNT-012], the swap-pair, sentinel, ctx-sidecar, diary-sink), least-facing-first (heartbeat → human-response → supervisor-cycle), recycle-verify each.
+
+**R2's live-prove gate (the Fork-A analogue of R1's attach/retire/freshness gates — prove-live, not unit-test alone):** the risk is no longer env-mutation (there is none) but the **sleeve-state file** itself — write-atomicity + the both-sides resolver agreeing + **no split-brain** (a hook firing mid-write must read a complete old-or-new value, never half → write to a temp + atomic rename). Prove a sleeve-change live: the dispatcher writes the file, the resolver (both sides) reads the new surface, a Stop hook (the wake-ctx logger) keys its jsonl under the **new** surface and never the old, with the file-absent fallback still byte-equivalent to today.
 
 **Migration:** incremental — flip one dispatched surface at a time from "launch-per-surface" to
 "checkout + sleeve", recycle-verify each (the P2.3 rhythm). The fed-wake stays in shared
