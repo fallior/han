@@ -2,8 +2,12 @@
 
 > The buildable detail beneath **DEC-099** (and its 2026-06-27 stem-sleeve amendment). This doc is
 > the implementation map; the DEC is the North Star it builds toward. Leo-writes / **Jim
-> blocking-audit before each landing**. Status: **R1 not started** (P2.4a primitives held at
-> HEAD `1457445`). Thread: `mqvs3r6l-dk71d2`.
+> blocking-audit before each landing**. Status (2026-06-30): **R1 banked** (`26ed739`, re-sleeve
+> proven live) · **R2 complete** (`2b0b172` — all surface-keyed facets resolve off the sleeve) ·
+> **R3 grounded** (pool-checkout = the head-of-line cure; PR-R3a.0 atomic memory-slot + PR-R3a.1
+> per-stem re-key) · the **WM-rotation rectification** (DEC-085 re-amendment, cut-at-marker + kept-head)
+> built held — it reduces R3a's rotation-staleness (keep-delta over retire-on-stale, re-eval once the
+> head lands). Thread: `mqvs3r6l-dk71d2`.
 
 ---
 

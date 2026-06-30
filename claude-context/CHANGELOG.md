@@ -9,6 +9,16 @@
 
 ---
 
+## 2026-07-01 (S210) — fix(memory-model): WM-rotation rectified to cut-at-marker + kept-head (DEC-085 re-amendment)
+
+The slicer (`rollingWindowRotatePaired`, `memory-gradient.ts`) drifted from DEC-085's original design: the 2026-05-10 (S155) amendment switched it to whole-file slice + header-only reset and grew an entry-count parity-check, on a *mis-diagnosed* "temporal misalignment" — but `placePairedMarker` writes the same marker to both files atomically, so the markers cannot misalign. Reverted to **cut-at-marker + kept-head** (Darron's design; gatekeeper approval recorded in the DEC):
+- **Target-seeking selection** (`pickPairedBoundary` restored): cut at the paired marker closest to the ~25K c0 target, leaving the ~`rollingWindowHead` (5K) delta head — not the most-recent marker (which left ~0 head).
+- **Cut at the marker char-position**; archive before → c0/c1 (one provenance pair — the `wm`/`wmf` entry-count asymmetry is designed-in loss, dreams are `wm`-only); reset to header **+ kept-head** (was header-only).
+- **Parity machinery deleted** — the `splitMemoryFileEntries` count, the `fullEntryCount !== compEntryCount` branch, the `comp==0` block, the offset-recovery (the "frightened by our own shadow"). `splitMemoryFileEntries` the function retained (other callers).
+- **Bite-the-bullet fab in-band** + **work-entry-aligned** (`fabricatePairedBoundary` sequence-aligns the comp cut on the shared work entry, with a fail-safe `return null` → a misaligned fab is structurally impossible).
+- **Empty-c0 → log-loud anomaly** (no c1-only path); reasons union `comp-empty-let-ride` → `anomaly-c0-empty`.
+- **DEC-085 re-amendment** recorded (supersedes the 2026-05-10 amendment, retained as history; DEC-068/069 preserved). Net −10 lines (less code). `pickPairedBoundary` + `fabricatePairedBoundary` exported; `scripts/test-wm-cut-fab-align.ts` (12/12) the regression guard. Leo-build / Jim diff-audit GREEN + by-hand integration run passed. tsc 0-new. Restart `wm-sensor` to deploy.
+
 ## 2026-06-30 (S210) — feat(R2 P-R2.2c): readiness sentinel keys the sleeve surface (R2 DONE)
 
 The last R2 facet (DEC-099 / Fork A) — the spoke-side readiness sentinel. The dispatcher waits on `readyPath(slug, <sleeve-surface>)`; the template step-10 write keyed the **frozen launch** `$AGENT_SURFACE` → matches for a dispatched spoke, but a sleeved stem (launched `session`, sleeved onto e.g. `heartbeat`) would write `leo-session-ready` while the dispatcher waits `leo-heartbeat-ready` → `waitForReady` timeout. Now the sentinel keys the **sleeve** surface (inline `jq` read of `~/.han/sleeves/$HAN_SESSION.json`, fallback `$AGENT_SURFACE` — fork B, hook-path-independent because the template runs in the agent dir). Inert today (no sleeve-state → fallback → byte-identical), load-bearing at R3. Leo-build / Jim plan-audit GREEN (fork B; A/C rejected). **Gatekeeper edit applied in-concert (DEC-073, Darron's hand).**

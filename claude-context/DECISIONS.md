@@ -6055,7 +6055,7 @@ C. *Smaller-of-two recovery.* Still applies. Operates on whole-file entry counts
 
 **Pre-merge audit obligation**: touches `lib/memory-gradient.ts` (DEC-068/-069 protected). Type-chain trace: `rollingWindowRotatePaired` signature unchanged (deprecated args kept for compat). Same-commit doc-discipline: amendment + CLAUDE.md + template + patterns.md land together. Settled-decisions check: DEC-068, DEC-069, DEC-073, DEC-080, DEC-081, DEC-082, DEC-083, DEC-085 base — none touched in their protected surfaces; this is a sharpening amendment to DEC-085, not a contradicting decision.
 
-**Status**: Settled (this amendment applies to DEC-085 going forward; the DEC remains DEC-085, just sharper).
+**Status**: ⮑ **SUPERSEDED 2026-06-30 by the re-amendment below** (cut-at-marker + kept-head restored). The whole-file slice + header-only reset described here is reversed; the "temporal-misalignment" rationale was a mis-diagnosis (atomic markers cannot misalign — see the re-amendment). Retained as history (DEC-069).
 
 ### Amendment 2026-05-28 — C1 Distillation + Diary Discipline Operationalised (two mechanisms, one principle)
 
@@ -6133,6 +6133,29 @@ All migrated surfaces honour the *honest-failure* discipline: on parseError, ref
 **Files touched in this annotation** (gatekeeper-controlled per DEC-073; Leo's hand only): `claude-context/DECISIONS.md` (this amendment), `CLAUDE.md` (new DO-NOT entry; PR-C1-9 same commit), `templates/CLAUDE.template.md` (mirror DO-NOT entry).
 
 **Status**: Settled (this amendment applies to DEC-085 going forward; the DEC remains DEC-085, just operationally complete).
+
+### Re-amendment 2026-06-30 — Cut-at-marker + kept-head restored (reverses the 2026-05-10 whole-file/header-only amendment)
+
+*Authored by Leo (session, S210) per Darron's directive and explicit gatekeeper approval in this chat (he holds the gatekeeper hand because this reverses a Settled amendment). Built held; pending Jim's blocking diff-audit before deploy. The re-amendment restores DEC-085's original cut-at-marker + kept-head design and deletes the content-parity machinery the 2026-05-10 amendment grew.*
+
+**The change in one sentence**: the slicer cuts **at the WM-BOUNDARY marker** (target-seeking, the one leaving ~`rollingWindowHead` after it) — archiving content *before* the marker into the c0/c1 pair and keeping content *after* it as the live head — and the entry-count parity-check / `comp==0` block / offset-recovery are **deleted**.
+
+**Why the 2026-05-10 amendment was a mis-diagnosis.** That amendment switched to whole-file + header-only to fix a "temporal misalignment" (a c0/c1 pair covering different date ranges). But `placePairedMarker` (`memory-paired-writer.ts`) writes the **same** marker `id`+`ts` to **both** files in **one** slot-locked, both-or-neither op — the markers **cannot misalign** (it would take a quantum event). So the observed misalignment could not have come from the markers; it came from **historical pre-paired data** and/or the **by-design `wm`-without-`wmf` asymmetry** (dreams write `wm` only — c1-compression level — with no `wmf`/c0 counterpart; one c1 legitimately distils many c0). The amendment fixed the wrong thing: it killed the kept-head (the warm-stem delta window) *and* grew an entry-count parity-check that has cried wolf ever since (S203 false-positives) — "frightened by our own shadow."
+
+**The principle (Darron).** The **c0 is an object and the c1 is an object; provenance is object↔object** (the boundary `qualifier` + `source_id` + the chain) — **never the granulation within**. The `wm`/`wmf` entry-count asymmetry is **designed-in loss**, not drift; we are not hunting that accuracy, we design it in. *"It is just as important what you forget as what you remember."* Counting entries between the two files to detect/patch a "misalignment" is the category error this re-amendment removes.
+
+**What changes** (`rollingWindowRotatePaired`, `memory-gradient.ts`):
+- **Marker selection is target-seeking** — `pickPairedBoundary` (restored) picks the paired marker closest to `rollingWindowTail` (~25K c0) within `[rollingWindowTail−5K, rollingWindowTrigger]`, leaving the ~`rollingWindowHead` (5K) head. (The agent places the marker proactively at a thought-edge near ~25K; the head is variable — never cut mid-thought.)
+- **Cut at the marker char-position** in each file: `c0` = before, `c1` = before (one provenance pair, asymmetry and all); the live files reset to **header + kept-head** (not header-only).
+- **Parity machinery deleted**: the `splitMemoryFileEntries` count, the `fullEntryCount !== compEntryCount` branch, the `comp==0` let-ride, the offset-recovery — gone. `splitMemoryFileEntries` the **function** is retained (other callers + position use). `drift` is always `undefined`.
+- **Bite-the-bullet** (near-never, given proactive marking) fabricates **in-band** (`fabricatePairedBoundary`), not at EOF.
+- **Empty-c0** at a rotation (a corrupted-rhythm anomaly — `wmf` grows only from work, so this cannot arise normally) → **log loud + triage** (`anomaly-c0-empty`), **never** a silent c1-only archive.
+
+**What is preserved**: **DEC-068** (caps) and **DEC-069** (never-delete) are untouched — only the slice *mechanic* changes. The 2026-05-28 C1-distillation amendment stands. Dream `wm`-without-`wmf` log-provenance (c1→log) is a deferred follow-on (#110 sweep; logs preserved).
+
+**Pre-merge audit obligation**: touches `lib/memory-gradient.ts` (DEC-068/-069 protected) → Jim's blocking diff-audit + by-hand rotation run before commit. Net `−29` lines (the rectification is *less* code). Settled-decisions check: DEC-068/069 preserved; this reverses the 2026-05-10 amendment (Darron's gatekeeper approval given) — it is a re-amendment of DEC-085, the DEC remains DEC-085.
+
+**Status**: Settled-pending-deploy (decision approved by Darron; implementation built held, awaiting Jim's diff-audit + deploy). The DEC remains **DEC-085** — restored to its original cut-at-marker shape.
 
 ## DEC-086: Annotations as the Home of Re-encounter — Time-Driven Cascade Forbidden
 

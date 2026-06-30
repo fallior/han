@@ -1413,7 +1413,7 @@ interface PairedBoundaryChoice {
  * sits within the acceptable tail-token range. Preference: closest to
  * targetTailTokens (so the c0 size is consistent across rotations).
  */
-function pickPairedBoundary(
+export function pickPairedBoundary(
     fullBoundaries: WmBoundaryMarker[],
     compBoundaries: WmBoundaryMarker[],
     targetTailTokens: number,
@@ -1448,7 +1448,7 @@ function pickPairedBoundary(
  * by the caller via writeFileSync). Returns the modified content for
  * both files plus the boundary metadata.
  */
-function fabricatePairedBoundary(
+export function fabricatePairedBoundary(
     fullContent: string,
     compContent: string,
     minTailTokens: number,
@@ -1470,23 +1470,42 @@ function fabricatePairedBoundary(
         accumTokens = nextAccum;
     }
     if (fabricationIndex < 0 || fabricationIndex >= fullEntries.length) return null;
-    if (fabricationIndex >= compEntries.length) return null; // compressed has fewer
+
+    // Must-fix (Jim, S210): align the comp cut on the SAME WORK ENTRY, not the index.
+    // wm (comp) has MORE entries than wmf (full) — dreams are wm-only — so slicing comp at
+    // the full index cuts the two files at different work-times → a misaligned c0/c1 (the
+    // exact bug this refactor exists to kill). Full entries are all work, in order; comp =
+    // work + dreams in the same order. Walk comp, matching full's work entries in sequence
+    // (by ### heading + date); cut comp right AFTER the fabricationIndex-th matched work
+    // entry — the dreams interleaved before it fall into c1 (the designed asymmetry).
+    // FAIL-SAFE: if the work entries can't be aligned, return null (→ let-ride) — NEVER
+    // fabricate a misaligned pair.
+    const entryKey = (e: MemoryFileEntry) => `${e.header}::${e.date ?? ''}`;
+    let matchedWork = 0;
+    let compCutIndex = -1;
+    for (let j = 0; j < compEntries.length && matchedWork < fabricationIndex; j++) {
+        const fw = fullEntries[matchedWork];
+        if (fw && fw.header && entryKey(compEntries[j]) === entryKey(fw)) {
+            matchedWork++;
+            if (matchedWork === fabricationIndex) { compCutIndex = j + 1; break; }
+        }
+    }
+    if (compCutIndex < 0 || matchedWork < fabricationIndex) return null; // can't align → let-ride
 
     const fabId = `BF-${Date.now()}`;
     const fabTs = new Date().toISOString();
     const fabMarker = `\n\n<!-- WM-BOUNDARY: id=${fabId} ts=${fabTs} fabricated=true -->\n\n`;
 
-    // Reconstruct file: header + first N entries + marker + remaining entries.
-    // Use the position fields from splitMemoryFileEntries (DEC-085 audit fix —
-    // replaces indexOf which was brittle if the first entry's text appeared
-    // earlier in the file header).
+    // Reconstruct each file: header + before-entries + marker + after-entries. Full cuts at
+    // fabricationIndex (work entries); comp cuts at compCutIndex — the SAME work entry's
+    // position, with dreams-before included in c1. Positions from splitMemoryFileEntries.
     const fullHeader = fullContent.substring(0, fullEntries[0].charStart);
     const compHeader = compContent.substring(0, compEntries[0].charStart);
 
     const fullBefore = fullEntries.slice(0, fabricationIndex).map(e => e.content).join('\n\n');
     const fullAfter = fullEntries.slice(fabricationIndex).map(e => e.content).join('\n\n');
-    const compBefore = compEntries.slice(0, fabricationIndex).map(e => e.content).join('\n\n');
-    const compAfter = compEntries.slice(fabricationIndex).map(e => e.content).join('\n\n');
+    const compBefore = compEntries.slice(0, compCutIndex).map(e => e.content).join('\n\n');
+    const compAfter = compEntries.slice(compCutIndex).map(e => e.content).join('\n\n');
 
     const fullModified = fullHeader + fullBefore + fabMarker + fullAfter;
     const compModified = compHeader + compBefore + fabMarker + compAfter;
@@ -1681,7 +1700,7 @@ export interface PairedRotationResult {
     reason:
         | 'below-trigger'
         | 'no-marker-let-ride'
-        | 'comp-empty-let-ride'
+        | 'anomaly-c0-empty'
         | 'fabrication-failed'
         | 'paired-file-missing'
         | 'paired-insert-failed'
@@ -1771,8 +1790,8 @@ export function rollingWindowRotatePaired(
     compressedFileHeader: string,
     triggerTokens: number,
     biteTheBulletTokens: number,
-    _targetTailTokens: number, // RETIRED in amendment — kept for signature compat
-    _minTailTokens: number,    // RETIRED in amendment — kept for signature compat
+    targetTailTokens: number,  // DEC-085 re-amendment (2026-06-30): target c0 size (~rollingWindowTail) — restored
+    minTailTokens: number,     // DEC-085 re-amendment (2026-06-30): min acceptable c0 size for marker selection — restored
     agent: string,
 ): PairedRotationResult {
     const fullExists = fs.existsSync(fullFilePath);
@@ -1795,28 +1814,27 @@ export function rollingWindowRotatePaired(
         return { rotated: false, reason: 'below-trigger' };
     }
 
-    // Find markers — used only for ID-handshake + metadata, not slice position.
+    // ── Cut at the marker (DEC-085 re-amendment, 2026-06-30) ──────────────────────────
+    // Reverses S155 (whole-file) + B-1 (header-only reset) back to the original
+    // cut-at-marker + kept-head design. The marker is the SAME id in both files
+    // (placePairedMarker writes both atomically, both-or-neither) → it CANNOT misalign →
+    // no content-parity is needed or wanted. Select the target-seeking marker (closest to
+    // the ~targetTailTokens c0 size, leaving the ~rollingWindowHead delta head), cut at its
+    // char-position in EACH file, archive BEFORE it (c0/c1 = one provenance pair; any
+    // wm/wmf asymmetry is DESIGNED-IN loss — dreams are wm-without-wmf, one c1 distils many
+    // c0), keep AFTER it as the continuing head.
     const fullBoundaries = findWmBoundaries(fullContent);
     const compBoundaries = findWmBoundaries(compContent);
 
-    // Pick a paired marker (matching id) — ANY pair will do since slicer takes
-    // whole file. Prefer the most recent marker for metadata. If none matched,
-    // fall through to bite-the-bullet fabrication at end-of-file.
-    let chosenMarker: { id: string; timestamp: string; fabricated: boolean } | null = null;
-    const compById = new Map(compBoundaries.map(b => [b.id, b]));
-    for (let i = fullBoundaries.length - 1; i >= 0; i--) {
-        const fb = fullBoundaries[i];
-        if (compById.has(fb.id)) {
-            chosenMarker = { id: fb.id, timestamp: fb.timestamp, fabricated: fb.fabricated };
-            break;
-        }
-    }
-
-    let fullToUse = fullContent;
-    let compToUse = compContent;
     let trigger: 'slicer' | 'bite-the-bullet' = 'slicer';
+    let fullCut = fullContent;
+    let compCut = compContent;
 
-    if (!chosenMarker) {
+    // Catch A — target-seeking selection (NOT most-recent, which leaves ~0 head): the
+    // paired marker closest to targetTailTokens within [minTailTokens, triggerTokens].
+    let choice = pickPairedBoundary(fullBoundaries, compBoundaries, targetTailTokens, minTailTokens, triggerTokens);
+
+    if (!choice) {
         if (fullTokens < biteTheBulletTokens) {
             logRotationEvent({
                 kind: 'no-marker-let-ride',
@@ -1827,81 +1845,56 @@ export function rollingWindowRotatePaired(
             });
             return { rotated: false, reason: 'no-marker-let-ride' };
         }
-        // Bite-the-bullet: fabricate at END-OF-FILE in both files (whole-file
-        // slice means marker position is irrelevant; just need a paired ID).
-        const fabId = `BF-${Date.now()}`;
-        const fabTs = new Date().toISOString();
-        const fabMarker = `\n\n<!-- WM-BOUNDARY: id=${fabId} ts=${fabTs} fabricated=true -->\n`;
-        fullToUse = fullContent.replace(/\n+$/, '') + fabMarker;
-        compToUse = compContent.replace(/\n+$/, '') + fabMarker;
-        // Persist the fabricated markers BEFORE slicing — audit trail
-        fs.writeFileSync(fullFilePath, fullToUse, 'utf8');
-        fs.writeFileSync(compressedFilePath, compToUse, 'utf8');
-        chosenMarker = { id: fabId, timestamp: fabTs, fabricated: true };
+        // Bite-the-bullet (near-never with proactive ~25K marking): fabricate IN THE BAND
+        // (flag 1 — not at EOF, which would keep ~0 head). fabricatePairedBoundary targets
+        // the most-recent entry boundary in [minTail, trigger].
+        const fab = fabricatePairedBoundary(fullContent, compContent, minTailTokens, triggerTokens);
+        if (!fab) {
+            logRotationEvent({
+                kind: 'bite-the-bullet-fab-failed',
+                agent,
+                wmf_tail_size_tokens: fullTokens,
+                trigger,
+                note: 'no fabrication boundary in band — let ride for triage',
+            });
+            return { rotated: false, reason: 'fabrication-failed' };
+        }
+        fs.writeFileSync(fullFilePath, fab.fullModified, 'utf8');
+        fs.writeFileSync(compressedFilePath, fab.compModified, 'utf8');
+        fullCut = fab.fullModified;
+        compCut = fab.compModified;
+        choice = fab.boundary;
         trigger = 'bite-the-bullet';
     }
 
-    // Parity-check on WHOLE-FILE entry counts (the slice now takes everything;
-    // entry-count drift between files is informational + recovery shrinks both
-    // archives to the smaller-side count).
-    const fullEntries = splitMemoryFileEntries(fullToUse);
-    const compEntries = splitMemoryFileEntries(compToUse);
-    const fullEntryCount = fullEntries.length;
-    const compEntryCount = compEntries.length;
+    // Downstream metadata (qualifier, rotation-success log) reads the chosen full marker.
+    const chosenMarker = { id: choice.full.id, timestamp: choice.full.timestamp, fabricated: choice.full.fabricated };
 
-    let drift: { fullEntries: number; compEntries: number } | undefined;
-    let fullArchive: string;
-    let compArchive: string;
+    // Cut at the marker char-position in each file. Same id in both (atomic placement) →
+    // aligned by construction. NO entry-count parity, NO comp==0 patch, NO offset-recovery
+    // (Catch B — the deleted parity branch): the asymmetry is designed-in loss, provenance
+    // is object↔object (the boundary qualifier + source_id), not granulation within.
+    const fullArchive = stripMarkers(fullCut.slice(0, choice.full.charPos)).trim();
+    const compArchive = stripMarkers(compCut.slice(0, choice.compressed.charPos)).trim();
+    const fullHeadKept = stripMarkers(fullCut.slice(choice.full.charPos)).trim();
+    const compHeadKept = stripMarkers(compCut.slice(choice.compressed.charPos)).trim();
+    const drift: { fullEntries: number; compEntries: number } | undefined = undefined; // parity retired
 
-    if (fullEntryCount !== compEntryCount) {
-        // B-1 (DEC pending Jim's diff-audit, 2026-06-06): a count offset between
-        // c0(full) and c1(compressed) is LEGITIMATE, not an error — one c1 may
-        // distil many c0 beats (DEC-085), so full > comp is the normal raw-vs-
-        // distilled shape. The RETIRED smaller-of-two recovery truncated to min()
-        // and left the surplus RESIDENT, which pinned drift as a permanent floor
-        // (it never drained) and stranded lived beats in limbo. New behaviour:
-        // archive the WHOLE of both files and reset both clean — the offset is
-        // informational, nothing is stranded, the residue drains into one lossless
-        // c0. (Jim Q3) When comp under-distils a redundant cluster (comp>0 but
-        // <full), the proper c1 resolution is the agent's in-voice consolidation
-        // authored BEFORE the slice; whole-both then archives a proper pair. The
-        // c0 is lossless and reachable regardless.
-        drift = { fullEntries: fullEntryCount, compEntries: compEntryCount };
-        // comp==0 guard (Jim Q4): NEVER archive an empty c1 (an empty c1 is the
-        // unreachable-once-displaced problem). Let it ride; the agent must author
-        // the c1 (consolidation) first. NOTE for diff-audit: the full bite-backstop
-        // (at-bite-comp==0 → consolidation-signal + fallback archive-c0+enqueue-
-        // c0→c1-repair) is NOT built here — it needs a c0-only-insert path for an
-        // edge that paired-writing (B-3) makes ~unreachable; flagged for Jim's call.
-        if (compEntryCount === 0) {
-            logRotationEvent({
-                kind: 'offset-comp-empty-let-ride',
-                agent,
-                full_entries: fullEntryCount,
-                compressed_entries: 0,
-                wmf_tail_size_tokens: fullTokens,
-                trigger,
-                boundary_id: chosenMarker.id,
-                note: 'comp side empty — never archive empty c1; awaiting in-voice consolidation',
-            });
-            return { rotated: false, reason: 'comp-empty-let-ride' };
-        }
+    // Empty-c0 anomaly (flag 2, Jim's addendum): the trigger is wmf size and wmf grows ONLY
+    // from work (dreams are wm-only), so c0-before-marker is always substantial in normal
+    // operation. Empty c0 = corrupted rhythm (wm bloat while wmf stays small) → log LOUD +
+    // triage; NEVER a silent c1-only archive.
+    if (!fullArchive) {
         logRotationEvent({
-            kind: 'paired_write_offset',
+            kind: 'anomaly-c0-empty',
             agent,
-            full_entries: fullEntryCount,
-            compressed_entries: compEntryCount,
             wmf_tail_size_tokens: fullTokens,
             trigger,
-            recovery: 'archive-whole-both-offset-ok',
             boundary_id: chosenMarker.id,
+            note: 'c0-before-marker empty at rotation — corrupted rhythm (wm bloat w/o wmf); triage, not a c1-only archive',
         });
+        return { rotated: false, reason: 'anomaly-c0-empty' };
     }
-    // Whole-file slice in ALL cases (offset-ok or clean parity): c0 = lossless
-    // raw, c1 = distillation at the agent's chosen resolution. No truncation,
-    // no stranding (B-1, 2026-06-06).
-    fullArchive = stripMarkers(fullToUse);
-    compArchive = stripMarkers(compToUse);
 
     const fullArchivedTokens = countTokens(fullArchive);
     const compressedArchivedTokens = countTokens(compArchive);
@@ -1958,18 +1951,15 @@ export function rollingWindowRotatePaired(
         return { rotated: false, reason: 'paired-insert-failed' };
     }
 
-    // RESET both files to header-only (Amendment 2026-05-10: no kept-head).
-    // The drift-recovery branch leaves surplus entries in the live file; the
-    // clean-parity branch resets to just the header. Either way, no overlap
-    // between live and gradient.
-    // B-1 (2026-06-06): ALWAYS reset both files to header-only. whole-both archives
-    // EVERYTHING, so there is never surplus to leave resident (RETIRED: the drift
-    // branch that stranded surplus entries and pinned the drift floor). `drift` is
-    // still set above for the rotation-success log, but no longer changes the reset.
+    // RESET both files to header + the KEPT HEAD (DEC-085 re-amendment, 2026-06-30:
+    // restore cut-at-marker's kept-head; reverses S155/B-1's header-only reset). The head
+    // is whatever sat AFTER the chosen marker — the ~rollingWindowHead delta window the
+    // warm stem keeps live. The marker itself is stripped, so the next cycle places a fresh
+    // one at the next thought-edge ~targetTail later.
     const fullHead = fullFileHeader || `# ${path.basename(fullFilePath, '.md')}\n`;
     const compHead = compressedFileHeader || `# ${path.basename(compressedFilePath, '.md')}\n`;
-    fs.writeFileSync(fullFilePath, fullHead + '\n', 'utf8');
-    fs.writeFileSync(compressedFilePath, compHead + '\n', 'utf8');
+    fs.writeFileSync(fullFilePath, fullHead + '\n' + (fullHeadKept ? fullHeadKept + '\n' : ''), 'utf8');
+    fs.writeFileSync(compressedFilePath, compHead + '\n' + (compHeadKept ? compHeadKept + '\n' : ''), 'utf8');
 
     // Cascade c1→c2+ (NOT c0→c1 — c1 already inserted directly).
     void bumpOnInsert(agent, 'c1').catch((err: Error) => {
@@ -1983,8 +1973,8 @@ export function rollingWindowRotatePaired(
         c1_id: c1Id,
         full_archived_tokens: fullArchivedTokens,
         compressed_archived_tokens: compressedArchivedTokens,
-        full_kept_tokens: 0,         // Amendment: no kept-head
-        compressed_kept_tokens: 0,   // Amendment: no kept-head
+        full_kept_tokens: countTokens(fullHeadKept),         // DEC-085 re-amendment: kept-head restored
+        compressed_kept_tokens: countTokens(compHeadKept),   // DEC-085 re-amendment: kept-head restored
         wmf_tail_size_tokens: fullTokens,
         trigger,
         boundary_id: chosenMarker.id,
