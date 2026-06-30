@@ -85,6 +85,17 @@ resets the *conversation*, not the *process*. (This is why MNT-012/013's per-tur
 only auto-fires on a session launched *after* the fix; an older session must manual-flush until
 relaunch.)
 
+> ⚠ **Hook-PATH caveat (MNT-015) — a post-fix launch was necessary but not sufficient.** Being
+> launched after the env+hook-list fix did NOT make `wm-flush` auto-fire on its own: the
+> harness spawns Stop hooks with a **PATH that lacks nvm's node bin**, so the hook's `npx tsx`
+> was not-found and silently no-op'd (swallowed by `>/dev/null 2>&1; exit 0`) — independent of
+> launch-freshness. The sibling Stop hooks (`memory-guard`/`wake-ctx`) never hit this because
+> they shell only standard-PATH tools (`grep`/`jq`). Fixed by resolving node explicitly +
+> nvm-aware and invoking the local `node_modules/.bin/tsx` (the systemd units' pattern).
+> So **auto-fire requires three things**, not two: a post-fix launch (env + hook list) AND the
+> hook resolving node off the interactive PATH (MNT-015). `verify:` a Stop hook that shells
+> `node`/`npx` must resolve it absolutely, never bare.
+
 `verify (inside a session):` `echo "$AGENT_SWAP_FULL"` — empty ⇒ launched before the MNT-013 env fix.
 
 ---

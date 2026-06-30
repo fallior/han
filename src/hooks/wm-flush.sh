@@ -43,6 +43,26 @@ has_body "$COMP_SWAP" || exit 0
 # Flush via the atomic paired writer (appendPairedMemory, #49) in a tsx one-shot — atomicity
 # (both-or-neither, refuses asymmetric) is the reason this is TS not a bash append. The script
 # resets the swap ONLY on a successful paired append (else preserves it for retry).
+#
+# Resolve node + the LOCAL tsx binary EXPLICITLY — do NOT rely on `npx` or the tsx shebang's
+# `env node` (MNT-015, Jim's trace): the harness spawns this Stop hook with a PATH that LACKS
+# nvm's node bin (where `npx` lives) — so bare `npx` is not-found and silently no-ops — and the
+# tsx shebang's `env node` would otherwise resolve an ancient system `/usr/bin/node` and crash on
+# tsx's modern ESM. The sibling Stop hooks (memory-guard/wake-ctx) work because they shell only
+# standard-PATH tools (grep/jq); this one needs node. So resolve node nvm-aware + portably
+# (#101 — newest installed version under $NVM_DIR, no hardcoded path; agnostic across gardens),
+# and invoke the local tsx binary as its argument (the systemd units' canonical pattern).
 cd "$REPO/src/server" 2>/dev/null || exit 0
-NODE_PATH="$(pwd)/node_modules" timeout 30 npx tsx ../../scripts/wm-flush.ts "$SLUG" "$FULL_SWAP" "$COMP_SWAP" >/dev/null 2>&1
+TSX="$REPO/src/server/node_modules/.bin/tsx"
+[ -x "$TSX" ] || exit 0
+NODE_BIN=""
+NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+if [ -d "$NVM_DIR/versions/node" ]; then
+  _nv="$(ls -1 "$NVM_DIR/versions/node" 2>/dev/null | sort -V | tail -1)"
+  [ -n "$_nv" ] && [ -x "$NVM_DIR/versions/node/$_nv/bin/node" ] && NODE_BIN="$NVM_DIR/versions/node/$_nv/bin/node"
+fi
+# Fallback: a node already on PATH (interactive / systemd contexts have the right one first).
+[ -z "$NODE_BIN" ] && command -v node >/dev/null 2>&1 && NODE_BIN="$(command -v node)"
+[ -z "$NODE_BIN" ] && exit 0   # fail-safe: no usable node -> no-op, swap preserved for retry
+NODE_PATH="$(pwd)/node_modules" timeout 30 "$NODE_BIN" "$TSX" ../../scripts/wm-flush.ts "$SLUG" "$FULL_SWAP" "$COMP_SWAP" >/dev/null 2>&1
 exit 0

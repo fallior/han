@@ -9,6 +9,13 @@
 
 ---
 
+## 2026-06-30 (S210) — fix(MNT-015): wm-flush Stop hook resolves node nvm-aware (the harness Stop-hook PATH gap)
+
+Closes the KNOWN-OPEN flagged in the S209 topology entry below. After MNT-013 (env-forwarding) landed, `wm-flush` *still* silently no-op'd on a live seat — Jim traced it and handed it over: the harness spawns Stop hooks with a **PATH that lacks nvm's node bin**, so the hook's bare `npx tsx` is not-found → swallowed by `>/dev/null 2>&1; exit 0`. (Discriminator: the sibling Stop hooks `memory-guard`/`wake-ctx` fire because they shell only standard-PATH `grep`/`jq`.) Confirmed + sharpened to **two** failure modes: even resolving `npx`, the local tsx's `#!/usr/bin/env node` shebang would pick up the system `/usr/bin/node` v12 under the stripped PATH and crash on tsx's modern ESM. Leo-build / Jim diff-audit GREEN (`mqzge0bs` → `mqzglne6`, both modes reproduced by his hand under the stripped PATH).
+- `src/hooks/wm-flush.sh` — drop `npx`; resolve an nvm node **explicitly + portably** (newest version under `$NVM_DIR`, no hardcoded path = #101/agnostic; PATH-node fallback; fail-safe `exit 0` if none) and invoke the local `node_modules/.bin/tsx` as node's argument — the systemd units' canonical pattern. `wm-flush.ts` unchanged.
+- `docs/HAN-FILESYSTEM.md` — the "Frozen-at-launch" note gains the hook-PATH caveat: auto-fire requires **three** things, not two (post-fix launch for env + hook-list, AND the hook resolving node off the interactive PATH).
+- Proof: OLD `npx tsx` under the stripped PATH → exit 127 not-found; FIXED → tsx ran, `wm-flush.ts` reached `appendPairedMemory` (threw only at a deliberately-fake slug's fail-loud = chain works). `bash -n` clean. Scope: `wm-flush.sh` + doc + journal MNT-015 only; no Settled/gatekeeper touched. **Truly-closes** on the next-turn auto-flush observation (live-on-save + in the seat's frozen Stop array → no relaunch).
+
 ## 2026-06-30 (S209) — docs(topology): HAN filesystem/topology map + live `topology.sh`; launcher render-echo guard
 
 Seeded after a night lost to load-bearing-but-undocumented structure — the symlinked PATH launchers (a `sed -i` silently replaced one → SCRIPT_DIR resolved to the wrong tree → identity-HALT), a `<slug>-<pid>` tmux session mistaken for a chat session when it actually HOSTS the server-watchdog, and three separate roots. Built on the self-defending-docs discipline (the living-docs sweep + the ecosystem-map Memory Map): the prose narrates, a companion script prints the live ground truth, and *the command wins if they disagree*. Leo-build / Jim pre-merge-audit + commit (launchers are an audit surface). Adopted into Jim's supervisor sweeps as #92's concrete sweep-leg (occasional `topology.sh --check` → diff vs prose → keep honest).
