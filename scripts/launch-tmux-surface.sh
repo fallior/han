@@ -53,11 +53,14 @@ shift 2
 NO_LOG=false
 MODEL_OVERRIDE=""
 STEM=false
+SESSION_OVERRIDE=""   # R3a.1c-ii: a warm-pool stem needs a DISTINCT session name (N stems can't all
+                      # be `session-<slug>`). The dispatcher's pool-manager passes it via --session-name.
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-log) NO_LOG=true; shift ;;
         --model)  MODEL_OVERRIDE="${2:?--model needs a value}"; shift 2 ;;
         --stem)   STEM=true; shift ;;
+        --session-name) SESSION_OVERRIDE="${2:?--session-name needs a value}"; shift 2 ;;
         *) echo "unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -71,7 +74,9 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-SESSION_NAME="${SURFACE}-${SLUG}"
+# R3a.1c-ii: a pool stem overrides the fixed `<surface>-<slug>` name with its unique session
+# (default byte-identical for every existing caller — the override is unset unless --session-name).
+SESSION_NAME="${SESSION_OVERRIDE:-${SURFACE}-${SLUG}}"
 HAN_DIR="${HAN_DIR:-$HOME/.han}"
 
 manifest_get() {
@@ -138,6 +143,7 @@ tmux new-session -d -s "$SESSION_NAME" -c "$AGENT_DIR" \
     -e "HAN_SESSION=$SESSION_NAME" \
     -e "HAN_LOG_SURFACE=$SURFACE" \
     -e "HAN_SPOKE=1" \
+    -e "HAN_DIARY_SLUG=${SESSION_OVERRIDE:-$SLUG}" \
     -e "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1"
 
 # Launch Claude in the pane. claude-logged is a ~/.bashrc function (canonical

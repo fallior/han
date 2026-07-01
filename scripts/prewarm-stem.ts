@@ -24,16 +24,34 @@ import { manifestModelLadder } from '../src/server/lib/garden-manifest';
 
 const slug = process.argv[2];
 if (!slug) {
-    console.error('usage: prewarm-stem.ts <slug>   (R1 pre-warmer — DEC-099 stem-sleeve)');
+    console.error('usage: prewarm-stem.ts <slug> [--pool --session <name>]   (DEC-099 stem-sleeve)');
     process.exit(2);
 }
 
-const SURFACE = 'session'; // R1 AS-session (sidesteps R2's surface-param crux; keying already right)
-const tmuxSession = `${SURFACE}-${slug}`; // distinct from the human's `han-$$` seat (no collision)
+// R3a.1c-ii POOL MODE (`--pool --session <name>`): warm one of N pool stems under a DISTINCT tmux
+// session (the dispatcher's pool-manager owns the session name + the pool registry — single-writer,
+// Jim's cond-3). In pool mode this script LAUNCHES + WARMS + EMITS the stem's metadata JSON to
+// stdout (marker-delimited) and does NOT write `pool-<slug>.json` cross-process; the dispatcher
+// (`prewarmAndRegister`) parses the metadata + `upsertStem`s it. Default (no flags) = R1: warm the
+// single `session-<slug>` stem + write `stem-<slug>.json` (the attach source-of-truth), unchanged.
+const POOL = process.argv.includes('--pool');
+const sessionArgIdx = process.argv.indexOf('--session');
+const SESSION_OVERRIDE = sessionArgIdx >= 0 ? process.argv[sessionArgIdx + 1] : '';
+if (POOL && !SESSION_OVERRIDE) {
+    console.error('prewarm-stem: --pool requires --session <name> (the dispatcher assigns the unique stem session)');
+    process.exit(2);
+}
+
+const SURFACE = 'session'; // AS-session (sidesteps R2's surface-param crux; keying already right)
+const tmuxSession = POOL ? SESSION_OVERRIDE : `${SURFACE}-${slug}`; // pool: the assigned unique name
 const HOME = process.env.HOME!;
 const HEALTH = `${HOME}/.han/health`;
-const SENTINEL = `${HEALTH}/${slug}-${SURFACE}-ready`; // the gradient step writes the reached c0 here
-const REGISTRY = `${HEALTH}/stem-${slug}.json`;        // the stem-pool registry (attach source-of-truth)
+// The wake writes the reached c0 to `<slug>-session-ready` (surface-keyed). NB (pool): pool stems
+// AS-session SHARE this sentinel — pre-warm must be SEQUENTIAL (the pool-manager warms one at a
+// time, reading the c0 immediately after each warm). Per-stem sentinels = a concurrent-prewarm
+// refinement (flagged for R3a.1d).
+const SENTINEL = `${HEALTH}/${slug}-${SURFACE}-ready`;
+const REGISTRY = `${HEALTH}/stem-${slug}.json`;        // R1 single-stem registry (attach source-of-truth)
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const LAUNCH = path.join(here, 'launch-tmux-surface.sh');
@@ -46,9 +64,12 @@ async function main(): Promise<void> {
     // the stem-registry is the attach source-of-truth; pool-of-1 replaces, doesn't parallel.)
     try { unlinkSync(SENTINEL); } catch { /* absent = fine */ }
 
-    // 1) launch the stem via the shared contract (--stem bypasses only the launchable-surface check)
+    // 1) launch the stem via the shared contract (--stem bypasses only the launchable-surface check).
+    //    Pool mode passes --session-name so the stem gets its own distinct tmux session.
+    const launchArgs = POOL ? [LAUNCH, slug, SURFACE, '--stem', '--session-name', tmuxSession]
+                            : [LAUNCH, slug, SURFACE, '--stem'];
     console.log(`[prewarm] launching stem '${tmuxSession}' via launch-tmux-surface.sh --stem …`);
-    execFileSync('bash', [LAUNCH, slug, SURFACE, '--stem'], { stdio: 'inherit' });
+    execFileSync('bash', launchArgs, { stdio: 'inherit' });
 
     // 2) wait for claude chrome (bash→claude ready; auto-descends the model if the launch model is
     //    dead) — the failover ladder derived the same single-source way the dispatcher does
@@ -58,20 +79,35 @@ async function main(): Promise<void> {
     //    step traverses to GRADIENT-EOF and writes the reached c0 to the sentinel (the c0-ack reads it).
     await feedWakeSteps(slug, SURFACE, wakeStepsFor(slug, SURFACE, { greet: false }), { tmuxTarget: tmuxSession });
 
-    // 4) record the warm stem — the ATTACH source-of-truth (gate 2 reads this to find a warm stem)
+    // 4) the warm stem's metadata. `wm_cursor` is the working-memory.md CHAR length at pre-warm (the
+    //    #91 freshen cursor — deltaSinceCursor compares content.length, so CHARS not statSync bytes).
     const c0 = readFileSync(SENTINEL, 'utf8').trim();
-    const registry = {
-        slug,
-        surface: SURFACE,
-        tmux_session: tmuxSession,
-        c0,
-        // #91 attach-flush cursor (F2): the working-memory.md CHAR length at pre-warm. attach-stem
-        // computes deltaSinceCursor(slug, wm_len) = what landed while the stem idled. CHARS (not
-        // currentWmLen's bytes) — the slice helper compares content.length (F2b unit-match).
-        wm_len: currentWmCharLen(slug),
-        model: observeActiveModel(slug, SURFACE),
-        warm_at: new Date().toISOString(),
-    };
+    const nowIso = new Date().toISOString();
+    const model = observeActiveModel(slug, SURFACE);
+    const wmCursor = currentWmCharLen(slug);
+
+    if (POOL) {
+        // Pool mode: EMIT the stem metadata for the dispatcher to `upsertStem` (single-writer,
+        // cond-3). Marker-delimited so the dispatcher parses it cleanly out of the launch-log noise.
+        // Shape = the PoolStem the dispatcher's stem-pool registry expects (state assigned by the
+        // dispatcher on upsert). Does NOT write pool-<slug>.json (the pre-warmer never writes it).
+        const meta = {
+            stem_id: tmuxSession,      // F-b: the per-stem key IS the tmux session name
+            tmux_session: tmuxSession,
+            c0,
+            wm_cursor: wmCursor,
+            cursor_set_ts: nowIso,
+            model,
+            warm_at: nowIso,
+        };
+        console.log(`[prewarm] pool stem WARM: ${tmuxSession}  c0=${c0}  (emitting metadata for the dispatcher)`);
+        // The parse marker the dispatcher greps for.
+        process.stdout.write(`\nPREWARM_STEM_META ${JSON.stringify(meta)}\n`);
+        return;
+    }
+
+    // R1 mode (unchanged): write the single-stem registry — the attach source-of-truth.
+    const registry = { slug, surface: SURFACE, tmux_session: tmuxSession, c0, wm_len: wmCursor, model, warm_at: nowIso };
     writeFileSync(REGISTRY, JSON.stringify(registry, null, 2) + '\n');
     console.log(`[prewarm] stem WARM: ${tmuxSession}  c0=${c0}  → ${REGISTRY}`);
 }

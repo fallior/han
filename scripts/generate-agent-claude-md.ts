@@ -68,8 +68,11 @@ if (stdout) {
     // Provision the agent-dir .mcp.json (S199 P4 step 4 — the HARD GATE prerequisite for step 5).
     // A spoke cd'd into the agent dir discovers han-diary (the submit_response tool) from THIS
     // .mcp.json, not the repo root's. Copied verbatim from the repo .mcp.json — its content is
-    // already agent-agnostic (HAN_DIARY_SLUG=${AGENT_SLUG} is env-expanded by Claude Code at
-    // session launch, where the spoke sets AGENT_SLUG), so one copy serves every agent.
+    // already agent-agnostic (HAN_DIARY_SLUG=${HAN_DIARY_SLUG} is env-expanded by Claude Code at
+    // session launch from the launcher's -e HAN_DIARY_SLUG — = the slug for a normal spoke [→
+    // sinkDir(slug), byte-identical to the prior ${AGENT_SLUG}], = the stem's OWN session for a
+    // pooled stem [R3a.1c-ii: per-stem diary sink; verified 2026-07-02 the expansion fires from the
+    // -e env], with the diary-server's ||AGENT_SLUG fallback covering an unset value), one copy serves every agent.
     // (The absolute repo paths inside it are an export-genericisation item for the close sweep.)
     const repoMcp = path.join(vars.PROJECT_PATH, '.mcp.json');
     if (fs.existsSync(repoMcp)) {

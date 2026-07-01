@@ -79,6 +79,15 @@ export interface SurfaceManifest {
      *  the per-surface roll-out is a manifest flip, not a code constant. P2.1b sets it on heartbeat
      *  first (no human backstop); human-response + cycle follow at P2.3. Default falsy. */
     wakeFeed?: boolean;
+    /** #MNT-009 / DEC-099 R3a.1c: does this surface dispatch via the WARM-STEM POOL (checkout of
+     *  one of N pre-warmed stems) instead of the fixed single `<surface>-<slug>` session? When
+     *  true, `dispatchToSpoke` checks out a free stem (per-stem FIFO → concurrent stems = the
+     *  head-of-line cure) and falls back to `ensureSurfaceSession` on an empty pool. No-hidden-
+     *  globals: the per-surface roll-out is a manifest flip. Scope: human-response first (the MNT-
+     *  009 victim); heartbeat/supervisor-cycle stay unpooled (scheduled, non-overlapping). The
+     *  activation flip (set this true + populate the pool) pairs with the coordinated live-prove.
+     *  Default falsy. */
+    pooled?: boolean;
 }
 
 /**
@@ -565,6 +574,13 @@ export function spokeLifecycleFor(slug: string, surface: string): SpokeLifecycle
  *  Registry-gated roll-out (no-hidden-globals) — true only where the manifest sets `wakeFeed`. */
 export function wakeFeedFor(slug: string, surface: string): boolean {
     return GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(x => x.name === surface)?.wakeFeed === true;
+}
+
+/** #MNT-009 / DEC-099 R3a.1c: does this (slug, surface) dispatch via the warm-stem pool?
+ *  Registry-gated roll-out (no-hidden-globals) — true only where the manifest sets `pooled`.
+ *  Agent-agnostic (DEC-081): a 4th agent's pooled surface joins for free. */
+export function pooledFor(slug: string, surface: string): boolean {
+    return GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(x => x.name === surface)?.pooled === true;
 }
 
 /**

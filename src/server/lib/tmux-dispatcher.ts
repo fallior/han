@@ -28,16 +28,18 @@
  * pre-merge audit rhythm). Author-time scope: NEW files only (this + diary-mcp-server.ts).
  */
 
-import { execFileSync } from 'child_process';
+import { execFileSync, execFile } from 'child_process';
+import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
-import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor } from './garden-manifest';
+import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, pooledFor } from './garden-manifest';
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
+import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, type PoolStem } from './stem-pool';
 
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
 const PIPES_DIR = process.env.HAN_PIPES_DIR || path.join(os.homedir(), '.han', 'agent-pipes');
@@ -116,6 +118,17 @@ export interface AgentSession {
 /** Registry keyed per (slug, surface) — many sessions per agent under T-2+. */
 const sessions = new Map<string, AgentSession>();
 function sessionKey(slug: string, surface: string): string { return `${slug}/${surface}`; }
+/**
+ * R3a.1c — the per-stem session-map key (Jim's keystone: thread the SAME `stemKey` through the
+ * session lookup, the diary sink, the queue, and HAN_DIARY_SLUG). The NON-pooled path passes
+ * `stemKey === slug` (the default), resolving to the fixed `slug/surface` session — byte-identical
+ * to the pre-pool model. The POOLED path passes the leased stem's `tmux_session` (never equal to a
+ * bare slug), so each concurrent stem resolves its OWN adopted session in the `sessions` map (keyed
+ * by that tmux_session), which is exactly how the per-stem FIFO + per-stem `current.json` stay
+ * paired with the right pane. */
+function sessionMapKey(slug: string, surface: string, stemKey: string): string {
+    return stemKey === slug ? sessionKey(slug, surface) : stemKey;
+}
 
 // ── path helpers (mirror the diary-mcp-server runtime contract) ──────────────────────
 // Sink + pipes stay per-SLUG: the per-agent FIFO serialises to one live txn per
@@ -615,7 +628,10 @@ export async function ensureSurfaceSession(
 ): Promise<void> {
     // P1: serialise on the per-slug session lock — the wake must never run concurrently with
     // an in-flight clearSession on the same pane (the clear↔wake race → 20-min wedge).
-    return withSlugLock(slug, () => ensureSurfaceSessionInner(slug, surface, opts));
+    // R3a.1b: the clear↔wake race is per-PANE (a wake re-adopting the SAME session mid-clear),
+    // so the S196 lock is keyed per-SESSION, not per-slug — correct + safer (different sessions'
+    // /stems' lifecycle ops genuinely don't race), and the granularity the pool requires.
+    return withSlugLock(sessionKey(slug, surface), () => ensureSurfaceSessionInner(slug, surface, opts));
 }
 async function ensureSurfaceSessionInner(
     slug: string, surface: string,
@@ -780,9 +796,15 @@ export async function sendTransactionPrompt(
     slug: string,
     surface: string,
     prompt: string,
-    opts: { timeoutMs?: number } = {}
+    opts: { timeoutMs?: number } = {},
+    // R3a.1b: the diary-sink key. Defaults to `slug` (byte-identical to today). The pooled path
+    // (R3a.1c) passes the leased stem's key so its `current.json` is per-stem — "one live txn per
+    // STEM keeps the per-stem current.json safe" generalises the per-slug single-live-txn invariant
+    // (the queue is re-keyed by the same stemKey in enqueueForAgent, so they stay paired).
+    stemKey: string = slug
 ): Promise<CaptureRecord> {
-    const session = sessions.get(sessionKey(slug, surface));
+    // R3a.1c: resolve the session per-stem (pooled) or per-surface (non-pooled, stemKey===slug).
+    const session = sessions.get(sessionMapKey(slug, surface, stemKey));
     if (!session || !session.ready) throw new SessionNotReadyError(`${slug}/${surface}: no ready session; call spawnAgentSession first`);
     // Idle precondition (#5): dispatching into a busy or unreconciled session is
     // exactly the interleaving/misattribution hole the reconcile design closes.
@@ -795,7 +817,7 @@ export async function sendTransactionPrompt(
     session.turnState = 'busy';
 
     // 1) Point the diary sink at this transaction BEFORE the prompt can be answered.
-    writeAtomic(currentPtrPath(slug), JSON.stringify({ txnId, startedAt: new Date().toISOString() }));
+    writeAtomic(currentPtrPath(stemKey), JSON.stringify({ txnId, startedAt: new Date().toISOString() }));
     // 2) Deliver the (possibly hostile/large) prompt via file, not send-keys (A3).
     //    #91: prepend the cross-surface memory delta (other surfaces' WM writes since this
     //    session last looked). GATED OFF (DELTA_REFRESH_ENABLED=false) → computeMemoryDelta
@@ -825,7 +847,7 @@ export async function sendTransactionPrompt(
     //    poll is rate-limit-aware — a transient mid-turn throttle backs off + re-submits
     //    (bounded) rather than burning the full 12-min timeout then a wasteful reconcile.
     const cap = await waitForCaptureWithRateLimitRetry<CaptureRecord>(() => {
-        const exact = capturePath(slug, txnId);
+        const exact = capturePath(stemKey, txnId);
         if (fs.existsSync(exact)) return JSON.parse(fs.readFileSync(exact, 'utf-8')) as CaptureRecord;
         // Orphan capture (pointer was missing when the tool fired) — accept newest orphan
         // created after we started, so the payload is never silently dropped. The
@@ -833,9 +855,9 @@ export async function sendTransactionPrompt(
         // abandoned (reconciled) transaction out of this window — reconcileSession
         // bumps lastTransactionTs precisely so pre-reconcile orphans can't be
         // misattributed to the next transaction.
-        const orphans = fs.readdirSync(sinkDir(slug))
+        const orphans = fs.readdirSync(sinkDir(stemKey))
             .filter((f) => f.startsWith('orphan-') && f.endsWith('.json'))
-            .map((f) => path.join(sinkDir(slug), f))
+            .map((f) => path.join(sinkDir(stemKey), f))
             .filter((p) => fs.statSync(p).mtimeMs >= session.lastTransactionTs);
         if (orphans.length) {
             console.warn(`[tmux-dispatcher] ${slug}: ORPHAN capture for ${txnId} — txn pointer was missing when submit_response fired`);
@@ -888,7 +910,7 @@ export function getContextPct(slug: string, surface: string): number | null {
  */
 export async function clearSession(slug: string, surface: string, opts: { welcomeBack?: string } = {}): Promise<void> {
     // P1: serialise on the per-slug session lock so a clear never overlaps a wake on the same pane.
-    return withSlugLock(slug, () => clearSessionInner(slug, surface, opts));
+    return withSlugLock(sessionKey(slug, surface), () => clearSessionInner(slug, surface, opts)); // R3a.1b: per-SESSION (per-pane race)
 }
 async function clearSessionInner(slug: string, surface: string, opts: { welcomeBack?: string } = {}): Promise<void> {
     const session = sessions.get(sessionKey(slug, surface));
@@ -1174,6 +1196,165 @@ async function wakeViaFeedOrTrigger(slug: string, surface: string, tmuxSession: 
     }
 }
 
+// ── R3a.1c: warm-stem pool dispatch (MNT-009 / BUG-001 head-of-line cure, DEC-099 R3) ──
+// A POOLED surface (manifest `pooled` leaf) dispatches by CHECKING OUT one of N pre-warmed stems
+// instead of targeting the single fixed `<surface>-<slug>` session — so a busy stem never blocks
+// a queued dispatch (each stem has its OWN FIFO, so concurrent stems ARE the cure). The pool is
+// populated by the pre-warmer (R3a.1c-ii); until then / on an empty pool / a dead stem,
+// dispatchToSpoke falls back to the `ensureSurfaceSession` floor — byte-identical to the pre-pool
+// model. INERT until the `pooled` leaf is flipped on AND the pool has stems (the activation, paired
+// with the coordinated live-prove).
+
+const ROTATION_EVENTS_LOG = path.join(HEALTH_DIR, 'wm-rotation-events.jsonl');
+
+/** Latest `rotation-success` timestamp for an agent (the SHARED forensic log, filtered by agent),
+ *  or null if none — Jim's sharpening 3: "no rotation observed since warm" / empty log ⇒ FRESH,
+ *  never stale. (A bounded tail-read is a 1d nicety; the log is small today.) Exported for the
+ *  R3a.1c freshness-reader unit test. */
+export function latestRotationSuccessTs(slug: string): string | null {
+    try {
+        let latest: string | null = null;
+        for (const line of fs.readFileSync(ROTATION_EVENTS_LOG, 'utf-8').split('\n')) {
+            if (!line) continue;
+            try {
+                const e = JSON.parse(line);
+                if (e.kind === 'rotation-success' && e.agent === slug && typeof e.timestamp === 'string'
+                    && (!latest || e.timestamp > latest)) latest = e.timestamp;
+            } catch { /* skip a malformed line */ }
+        }
+        return latest;
+    } catch { return null; } // absent log ⇒ no rotation ⇒ FRESH
+}
+
+/**
+ * Adopt a leased pool stem as a live session in the `sessions` map, keyed by the stem's
+ * `tmux_session` (the cross-process ADOPTION bridge: the stem was launched + warmed by a SEPARATE
+ * process — the pre-warmer — and lives in the pool FILE; the dispatcher adopts it into memory here).
+ * LEASE-IS-READINESS (Jim's 5th re-key point): a free stem already wrote its own readiness sentinel
+ * + reached-c0 at pre-warm, so we do NOT `waitForReady` on the shared per-surface sentinel (which
+ * two concurrent human-response checkouts would collide on) — the lease itself is the readiness
+ * proof, and the dispatch targets the stem's session DIRECTLY. Returns false if the stem's tmux
+ * session has died since pre-warm (→ the caller retires it + falls back to the floor).
+ */
+function adoptPooledStem(slug: string, surface: string, stem: PoolStem): boolean {
+    if (!tmuxSessionExists(stem.tmux_session)) return false; // stem died since pre-warm → floor
+    fs.mkdirSync(sinkDir(stem.tmux_session), { recursive: true }); // per-stem diary sink (= stemKey)
+    fs.mkdirSync(path.join(PIPES_DIR, slug), { recursive: true });
+    // R2: sleeve the stem onto the target surface so its surface-keyed facets follow (fail-soft).
+    try { writeSleeveState(stem.tmux_session, slug, surface, swapPrefixFor(slug, surface)); }
+    catch (e) { console.warn(`[tmux-dispatcher] ${slug}/${surface}: pooled sleeve-state write failed`, e); }
+    const session: AgentSession = {
+        slug, surface, tmuxSession: stem.tmux_session,
+        launchCommand: `(pre-warmed stem ${stem.stem_id})`,
+        ready: true, turnState: 'idle', lastTransactionTs: Date.now(),
+        // lastMemoryLen = current WM so the per-turn #91 watermark (computeMemoryDelta) is a no-op;
+        // the stem's OWN staleness (its pre-warm cursor) is handled by the freshen-at-checkout below.
+        lastMemoryLen: currentWmLen(slug),
+    };
+    sessions.set(stem.tmux_session, session);
+    return true;
+}
+
+/**
+ * Freshen-at-checkout (warm-stem-freshness-plan §3a, SETTLED): if the stem's WM snapshot desynced
+ * across a rotation (or its cursor points past a truncated WM — the D3 belt), compute the WM delta
+ * since the stem's pre-warm cursor and PREPEND it to this dispatch's prompt (it "rides the checkout
+ * dispatch" — no idle wake), then re-point the stem's cursor. Returns the (possibly delta-prefixed)
+ * prompt. Minimal (D1/D2): WM-tail delta only; the deep-gradient-substrate staleness is the 24h
+ * reload's job (R3a.1d). `deltaSinceCursor` is the shared #91 slice helper (char-unit-matched).
+ */
+async function freshenPooledStem(slug: string, stem: PoolStem, promptDoc: string): Promise<string> {
+    const currentWmChars = currentWmCharLen(slug);
+    if (!isStemStale(stem, latestRotationSuccessTs(slug), currentWmChars)) return promptDoc;
+    const { block, newCursor } = await deltaSinceCursor(slug, stem.wm_cursor);
+    setStemCursor(slug, stem.stem_id, newCursor, new Date().toISOString());
+    if (!block) return promptDoc; // stale-by-rotation but no textual delta (whole-both reset) → nothing to prepend
+    console.log(`[tmux-dispatcher] ${slug}: freshened pooled stem ${stem.stem_id} at checkout (WM delta ${block.length} chars, cursor→${newCursor})`);
+    return `${block}\n\n${promptDoc}`;
+}
+
+/**
+ * Dispatch via the warm-stem pool: check out a free stem, adopt it, freshen if stale, and enqueue
+ * the transaction on the STEM's own FIFO (concurrent stems = the head-of-line cure). Returns the
+ * capture, or null when the pool is empty / the checked-out stem is dead — the caller falls back to
+ * the `ensureSurfaceSession` floor (never blocks). The stem is RETURNED to the pool on completion
+ * (eager replenish to maintain N is the pool-manager's job, R3a.1d). Deferred to R3a.1d/R3b: a
+ * pooled stem does NOT ctx-pressure self-clear in place — it is retired + replaced at threshold.
+ */
+async function dispatchToPooledStem(
+    slug: string, surface: string, promptDoc: string, opts: { timeoutMs?: number },
+): Promise<CaptureRecord | null> {
+    const stem = checkoutStem(slug, new Date().toISOString());
+    if (!stem) return null; // empty pool → floor
+    if (!adoptPooledStem(slug, surface, stem)) {
+        removeStem(slug, stem.stem_id); // stem died since pre-warm → retire + fall back to the floor
+        console.warn(`[tmux-dispatcher] ${slug}/${surface}: leased stem ${stem.stem_id} (${stem.tmux_session}) is dead — retired; falling back to ensureSurfaceSession`);
+        return null;
+    }
+    let cap: CaptureRecord;
+    try {
+        const freshenedPrompt = await freshenPooledStem(slug, stem, promptDoc);
+        // lease-is-readiness: NO verifyWarmOrNudge; the stem's session key threads through as stemKey.
+        cap = await enqueueForAgent(slug, surface, freshenedPrompt, { timeoutMs: opts.timeoutMs }, stem.tmux_session);
+    } catch (err) {
+        // Jim's cond-1: a FAILED pooled dispatch leaves the stem wedged / needs-reconcile — RETIRE
+        // it, do NOT return it to the pool. `adoptPooledStem` rebuilds a fresh `turnState:'idle'`
+        // session each checkout, so a returned-but-wedged stem would be re-checked-out and dispatched
+        // into a non-idle pane (the #5 idle-precondition hole). Retiring removes it from the registry;
+        // the pool-manager replenishes to N + owns the tmux/sink cleanup on retire (R3a.1d).
+        removeStem(slug, stem.stem_id);
+        console.warn(`[tmux-dispatcher] ${slug}/${surface}: pooled dispatch on stem ${stem.stem_id} FAILED — retired (not returned); pool-manager replenishes — ${(err as Error).message}`);
+        throw err;
+    }
+    returnStem(slug, stem.stem_id); // CLEAN completion only → back to the pool (eager replenish = R3a.1d)
+    return cap;
+}
+
+const execFileP = promisify(execFile);
+const PREWARM_STEM_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'prewarm-stem.ts');
+const TSX_BIN = path.resolve(__dirname, '..', 'node_modules', '.bin', 'tsx');
+const SERVER_DIR = path.resolve(__dirname, '..');
+const PREWARM_TIMEOUT_MS = 5 * 60_000; // a greet-less full wake is ~1min; generous ceiling
+
+/**
+ * R3a.1c-ii — warm ONE new pool stem and register it (the SINGLE-WRITER populate, Jim's cond-3).
+ * The dispatcher (this process) owns `pool-<slug>.json`: it assigns the stem a unique session name,
+ * spawns the pre-warmer as a CHILD (which launches + greet-less-warms + EMITS the stem metadata on
+ * stdout — but NEVER writes the pool cross-process), parses the metadata, and `upsertStem`s it as
+ * `free`. Only this dispatcher process writes the pool (so `stem-pool`'s sync RMW is race-free).
+ * Called by the pool-manager (R3a.1d) to reach/maintain N; INERT until then.
+ *
+ * Async (a pre-warm is ~a minute — never block the dispatcher loop). Pool stems SHARE the
+ * `<slug>-session-ready` sentinel, so callers must warm SEQUENTIALLY (per-stem sentinels = an
+ * R3a.1d refinement). ⚠ ACTIVATION-GATED on the diary-key (cond-2, deferred): until each pooled
+ * stem launches with `HAN_DIARY_SLUG=<its session>`, its captures land in `sinkDir(slug)` not
+ * `sinkDir(stem)`, so `dispatchToPooledStem`'s capture-read finds nothing → retire. Safe while inert.
+ */
+export async function prewarmAndRegister(slug: string): Promise<PoolStem | null> {
+    const stemSession = `stem-${slug}-${Date.now().toString(36)}`;
+    try {
+        const { stdout } = await execFileP(
+            TSX_BIN, [PREWARM_STEM_SCRIPT, slug, '--pool', '--session', stemSession],
+            { cwd: SERVER_DIR, env: { ...process.env, NODE_PATH: path.join(SERVER_DIR, 'node_modules') },
+              timeout: PREWARM_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
+        );
+        const line = stdout.split('\n').find(l => l.startsWith('PREWARM_STEM_META '));
+        if (!line) {
+            console.error(`[tmux-dispatcher] prewarmAndRegister(${slug}): pre-warmer emitted no metadata (${stemSession}) — not registered`);
+            try { tmux(['kill-session', '-t', stemSession]); } catch { /* none */ }
+            return null;
+        }
+        const stem: PoolStem = { ...(JSON.parse(line.slice('PREWARM_STEM_META '.length)) as Omit<PoolStem, 'state'>), state: 'free' };
+        upsertStem(slug, stem); // SINGLE WRITER: only the dispatcher writes pool-<slug>.json
+        console.log(`[tmux-dispatcher] prewarmAndRegister(${slug}): registered warm stem ${stem.stem_id} (c0=${stem.c0})`);
+        return stem;
+    } catch (err) {
+        console.error(`[tmux-dispatcher] prewarmAndRegister(${slug}): pre-warm FAILED (${stemSession}) — ${(err as Error).message}`);
+        try { tmux(['kill-session', '-t', stemSession]); } catch { /* half-launched stem, best-effort cleanup */ }
+        return null;
+    }
+}
+
 /**
  * The GENERIC SPOKE MONITOR (S200, Darron's "all spokes equal / one path") — the shared
  * spoke-LIFECYCLE primitive every dispatched spoke (cycle, human-response, future compression)
@@ -1203,6 +1384,14 @@ export async function dispatchToSpoke(
     const life = spokeLifecycleFor(slug, surface);
     let cap: CaptureRecord;
     try {
+        // R3a.1c: a POOLED surface dispatches via a warm-stem checkout (the head-of-line cure).
+        // An empty pool / a dead leased stem returns null → fall through to the fixed-session floor
+        // below. A pooled stem is recycled by the pool-manager (R3a.1d), NOT the ctx-pressure block
+        // after this try — so a successful pooled dispatch returns early.
+        if (pooledFor(slug, surface)) {
+            const pooledCap = await dispatchToPooledStem(slug, surface, promptDoc, { timeoutMs: opts.timeoutMs });
+            if (pooledCap !== null) return pooledCap;
+        }
         await ensureSurfaceSession(slug, surface, { ladder: opts.ladder, welcomeBack: opts.welcomeBack });
         await verifyWarmOrNudge(slug, surface, life.warmFloorPct, life.maxWarmNudges);
         cap = await enqueueForAgent(slug, surface, promptDoc, { timeoutMs: opts.timeoutMs });
@@ -1283,20 +1472,25 @@ const queueTails = new Map<string, Promise<unknown>>();
  * clearSession from OUTSIDE this lock; the wake never touches queueTails, so no lock cycle.
  */
 const slugLockTail = new Map<string, Promise<unknown>>();
-function withSlugLock<T>(slug: string, fn: () => Promise<T>): Promise<T> {
-    const prior = slugLockTail.get(slug) ?? Promise.resolve();
+function withSlugLock<T>(lockKey: string, fn: () => Promise<T>): Promise<T> {
+    // lockKey is the SESSION key (R3a.1b) — the clear↔wake race is per-pane. (Name kept for
+    // git-blame continuity with the S196 origin; it is a lock key, not a slug.)
+    const prior = slugLockTail.get(lockKey) ?? Promise.resolve();
     const run = prior.catch(() => undefined).then(fn);
-    slugLockTail.set(slug, run.catch(() => undefined));
+    slugLockTail.set(lockKey, run.catch(() => undefined));
     return run;
 }
 
-/** NOTE (T-2 re-key): the queue stays keyed per-SLUG even though readiness/ctx
- *  went per-surface — one live transaction per AGENT across all its surface
- *  sessions is the invariant that keeps the single per-slug current.json (and
- *  the memory-slot write serialisation) safe. `surface` only routes the prompt
- *  to the right session. */
-export function enqueueForAgent(slug: string, surface: string, prompt: string, opts: { timeoutMs?: number } = {}): Promise<CaptureRecord> {
-    const prior = queueTails.get(slug) ?? Promise.resolve();
+/** NOTE (R3a.1b re-key): the queue is keyed by `stemKey`, which DEFAULTS to `slug` — so the
+ *  non-pooled path is byte-identical to the T-2 model (one live transaction per AGENT keeps the
+ *  single per-slug current.json + the memory-slot writes safe, as before). The pooled path
+ *  (R3a.1c) passes the leased stem's key, so each stem gets its OWN FIFO (concurrent stems = the
+ *  head-of-line cure) paired with its OWN per-stem current.json — sendTransactionPrompt writes the
+ *  diary sink under the SAME stemKey, so the invariant generalises to "one live txn per STEM". The
+ *  atomic memory-slot (R3a.0) now guards the same-agent shared-WM writes the per-slug FIFO used to
+ *  serialise. `surface` still routes the prompt to the right session. */
+export function enqueueForAgent(slug: string, surface: string, prompt: string, opts: { timeoutMs?: number } = {}, stemKey: string = slug): Promise<CaptureRecord> {
+    const prior = queueTails.get(stemKey) ?? Promise.resolve();
     // Chain regardless of the prior transaction's outcome so one failure can't wedge
     // the queue — but reconcile FIRST when the target session needs it (#5): the
     // queue must never dispatch into a needs-reconcile session (idle precondition).
@@ -1305,9 +1499,9 @@ export function enqueueForAgent(slug: string, surface: string, prompt: string, o
         if (session && session.turnState === 'needs-reconcile') {
             await reconcileSession(slug, surface);
         }
-        return sendTransactionPrompt(slug, surface, prompt, opts);
+        return sendTransactionPrompt(slug, surface, prompt, opts, stemKey);
     });
-    queueTails.set(slug, run.catch(() => undefined));
+    queueTails.set(stemKey, run.catch(() => undefined));
     return run;
 }
 
