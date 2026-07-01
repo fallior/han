@@ -1530,6 +1530,14 @@ function countEntriesBeforePos(content: string, charPos: number): number {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Future-idea #53 (S153, 2026-05-09): Pre-slice parity-check + drift signal
+// ⚠️ RETIRED (flag-3, 2026-07-01 — DEC-085 re-amendment follow-on). ZERO production
+//    callers: the wm-sensor caller, the /pfc signal-read, and the wm-drift-{agent}.md
+//    signal are all removed. The parity-check counted the *designed* wm/wmf entry
+//    asymmetry (dreams are wm-only) → cried wolf (S203 false-positives) — the shadow
+//    this whole arc chased. These functions (PairParityResult / checkPairParity /
+//    renderDriftSignal / checkPairParityAndSignal / splitTurnEntries) are kept inert
+//    (retired-by-zero-callers) pending source removal in a clean follow-on. DO NOT
+//    re-wire: provenance is object↔object; the asymmetry is designed-in loss.
 // ──────────────────────────────────────────────────────────────────────────────
 //
 // Sibling to the slice-time parity-check inside rollingWindowRotatePaired —

@@ -50,7 +50,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawn } from 'child_process';
-import { rollingWindowRotate, rollingWindowRotatePaired, checkPairParityAndSignal } from '../lib/memory-gradient';
+import { rollingWindowRotate, rollingWindowRotatePaired } from '../lib/memory-gradient';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
 import { countTokens } from '../lib/token-counter';
 import { gradientConfigForAgent, registeredAgentSlugs } from '../lib/agent-registry';
@@ -196,21 +196,10 @@ async function processTarget(target: WatchTarget, config: Config): Promise<void>
     // — currently disabled but preserved here for future) fall back to head+tail ceiling.
     const isPaired = !!target.pairedFilePath;
 
-    // Future-idea #53 (S153, 2026-05-09): pre-slice parity check fires on every
-    // fs.watch event (every prompt's flush write), not just at slice-trigger.
-    // When the paired files diverge in entry count, log a pre-slice-drift event
-    // and write a human-readable signal at ~/.han/signals/wm-drift-{agent}.md.
-    // The next prompt's FLUSH FIRST step reads the signal and surfaces it; the
-    // agent can repair with grace before any rotation fires. Auto-clears on
-    // next clean write. Informational only — never blocks rotation.
-    if (isPaired && target.pairedFilePath && fs.existsSync(target.pairedFilePath)) {
-        try {
-            checkPairParityAndSignal(target.filePath, target.pairedFilePath, target.agent, SIGNALS_DIR);
-        } catch (err) {
-            // Pre-slice check failure must not block rotation — log loud and continue.
-            log(`pre-slice parity-check error for ${target.agent}: ${(err as Error).message}`);
-        }
-    }
+    // Future-idea #53 pre-slice parity-check + wm-drift signal RETIRED (flag-3, 2026-07-01,
+    // DEC-085 re-amendment follow-on). It counted the *designed* wm/wmf entry asymmetry
+    // (dreams are wm-only) → cried wolf (S203 false-positives) — the shadow this arc chased.
+    // Rotation observability stays in wm-rotation-events.jsonl (events/sizes, not parity).
     const ceilingTokens = isPaired
         ? config.rollingWindowTrigger
         : config.rollingWindowHead + config.rollingWindowTail;

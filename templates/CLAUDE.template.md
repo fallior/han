@@ -240,14 +240,16 @@ not at the next `/pfc`). So your job each turn:
 3. **(Step deprecated S147)** — active-context.md eliminated in favour of ONE file per agent.
    Working-memory-full.md's most recent entry IS the current focus; no separate update needed.
 
-The flush is **automatic** (the Stop hook) — you no longer FLUSH-FIRST by hand. Two things stay
-yours: **(a)** check `~/.han/signals/wm-drift-${AGENT_SLUG}.md` when present (future-idea #53) —
-read it, judge, repair an unintentional drift (write the missing counterparts, place a
-`WM-BOUNDARY` marker in both files, append-flush; auto-clears on clean write); a benign count
-offset is fine (one c1 may distil many c0s, DEC-085) and slice-time recovery archives
-**whole-both** (DEC-089 — the old smaller-of-two recovery is retired). **(b)** the very first
-prompt of a session and a `/clear` mid-prompt are the edge cases the Stop hook can't cover —
-`/pfc` Step 0 sweeps any unflushed swap before `/clear`.
+The flush is **automatic** (the Stop hook) — you no longer FLUSH-FIRST by hand. One thing stays
+yours: the very first prompt of a session and a `/clear` mid-prompt are the edge cases the Stop
+hook can't cover — `/pfc` Step 0 sweeps any unflushed swap before `/clear`.
+
+*(Retired: the `wm-drift-${AGENT_SLUG}.md` self-check (flag-3, 2026-07-01) — the wm/wmf
+entry-count asymmetry it flagged is DESIGNED-IN (dreams are wm-only; one c1 distils many c0),
+never a drift to repair; provenance is object↔object, not per-entry granulation. And the WM
+rotation now **cuts at the `WM-BOUNDARY` marker, keeping the ~5K head** (DEC-085 re-amendment,
+`06738be`, reversing the whole-file / whole-both slice) — the marker is written atomically to
+both files, so the c0/c1 pair cannot misalign.)*
 
 The writes go FIRST because "after completing your response" means LAST, and the last thing
 is what gets cut by compaction or forgotten when absorbed in work. First is unforgettable.

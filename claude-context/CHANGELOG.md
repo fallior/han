@@ -9,6 +9,15 @@
 
 ---
 
+## 2026-07-01 (S210) — chore(memory-model): retire the #53 pre-slice parity count-alarm (flag-3)
+
+Follow-on to the DEC-085 re-amendment: the future-idea-#53 pre-slice parity-check + `wm-drift-{agent}.md` signal counted the *designed* `wm`/`wmf` entry asymmetry (dreams are `wm`-only) → it cried wolf (S203 false-positives), the "frightened by our own shadow" alarm. **Retired the alarm** (it was actively firing `pre-slice-drift` false-positives on jim):
+- `wm-sensor.ts` — removed the pre-slice `checkPairParityAndSignal` call + import (the producer). No more `pre-slice-drift` events / `wm-drift-{agent}.md` signal writes.
+- `~/.claude/skills/pfc/SKILL.md` — removed the "check `wm-drift` signal" step (the consumer; the signal is no longer written).
+- Removed the stale `~/.han/signals/wm-drift-jim.md` artifact.
+- `templates/CLAUDE.template.md` (DEC-073 gatekeeper, in-concert on Darron's authorisation) — removed the wake-protocol's *"check the `wm-drift` signal"* step (the **third** consumer, Jim's lockstep catch; the signal is now never written) **and** reconciled the same paragraph's stale *"slice-time recovery archives whole-both (DEC-089)"* → *"cuts at the `WM-BOUNDARY` marker, keeping the ~5K head"* (the `06738be` DEC-085 re-amendment's own doc-lockstep — the self-contradicting-doc shape that started this arc, retired from the wake itself). Regenerated the 4 per-agent CLAUDE.md (S165).
+- The #53 functions (`checkPairParity` / `renderDriftSignal` / `checkPairParityAndSignal` / `splitTurnEntries` / `PairParityResult`) are marked **retired-inert** (zero production callers) pending source removal in a clean follow-on. `wm-rotation-events.jsonl` stays as pure observability (rotation events/sizes, not parity). tsc 0-new. Leo-build / Jim diff-audit GREEN (+ the gatekeeper lockstep).
+
 ## 2026-07-01 (S210) — fix(memory-model): WM-rotation rectified to cut-at-marker + kept-head (DEC-085 re-amendment)
 
 The slicer (`rollingWindowRotatePaired`, `memory-gradient.ts`) drifted from DEC-085's original design: the 2026-05-10 (S155) amendment switched it to whole-file slice + header-only reset and grew an entry-count parity-check, on a *mis-diagnosed* "temporal misalignment" — but `placePairedMarker` writes the same marker to both files atomically, so the markers cannot misalign. Reverted to **cut-at-marker + kept-head** (Darron's design; gatekeeper approval recorded in the DEC):
