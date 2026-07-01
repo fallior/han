@@ -304,11 +304,14 @@ to guarantee uniqueness across agents and time.
 aligned. Markers create a structural map between the two files. Per DEC-085, your in-situ
 compression in `working-memory.md` IS the c1 — not reconstructed afterward by an SDK call.
 
-**Skipping the compressed write under volume pressure** is the failure mode that produces
-silent c0/c1 misalignment at the identity-richest layer. The slicer parity-check detects
-drift and recovers via **whole-both archival** (DEC-089 — never truncates or strands; the
-count offset is legitimate, one c1 may distil many c0s per DEC-085); observability lives in
-`~/.han/health/wm-rotation-events.jsonl`.
+**Skipping the compressed write under volume pressure** is prevented structurally by the atomic
+paired write (`appendPairedMemory`, both-or-neither, #49) — and even so, the c0/c1 pair **cannot
+misalign**: the `WM-BOUNDARY` marker is written to both files atomically (`placePairedMarker`), and
+the slice cuts at that same marker in each. A wm/wmf entry-count offset is legitimate and
+designed-in (dreams are wm-only; one c1 may distil many c0s per DEC-085) — provenance is
+object↔object, not per-entry, never a "drift" to detect and recover. (The old slice-time
+parity-check + whole-both recovery were retired — DEC-085 re-amendment `06738be` + flag-3.)
+Rotation observability lives in `~/.han/health/wm-rotation-events.jsonl`.
 
 **Contention is prevented by two mechanisms:**
 1. **cli-busy/cli-free signal system** — when you're processing a prompt, background
