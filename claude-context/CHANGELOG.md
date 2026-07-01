@@ -9,6 +9,15 @@
 
 ---
 
+## 2026-07-01 (S210) — feat(memory-slot): atomic O_EXCL acquire (PR-R3a.0 — the pool's correctness prerequisite)
+
+The per-stem warm pool (PR-R3a.1) introduces same-agent write concurrency that the per-slug dispatch FIFO currently masks. `acquireMemorySlot` (`lib/memory-slot.ts`) had two holes that go live the moment that FIFO is removed: (a) an `existsSync → writeFileSync` TOCTOU; (b) verify-by-**writer-name** is per-agent (`${agent}-paired-write`), so two same-agent stems wrote the identical name and both read it back as their own → both "held" → double-append to shared WM (the identity-richest layer). So this lands *before* the re-key, as a correctness prerequisite, not a nicety:
+- **acquire = a single `fs.openSync(lock, 'wx')`** (O_EXCL) — the atomic create IS the mutex; kills both holes.
+- **stale-steal serialised by a `.steal` O_EXCL lock** — two concurrent stealers can never both unlink; the winner re-confirms staleness before removing (never clobbers a lock legitimately re-acquired); a leaked steal-lock (>5s) self-clears.
+- **release verifies a unique per-acquire token** (not the writer name) — a holder stolen-from after a >30s stall never unlinks the thief's fresh lock.
+- **`withMemorySlot` public signature byte-unchanged; zero direct `acquire`/`release` callers** → behaviour-preserving drop-in (all 5 callers untouched). The token threads acquire→release inside `withMemorySlot`.
+- **Gate met:** `scripts/test-memory-slot-concurrency.ts` — a **cross-process** forced-concurrent-writer proof (the real race is cross-process), 9/9: 6 forked procs × 10 read-modify-write with the same writer name → exactly 60 unique / none lost / no double; plus stale-lock + two-stealers. Jim diff-audit GREEN (concurrency-proven by his own run). tsc 0-new. *(Contention ceiling maxRetries=20 × ~750ms ≈ 15s — ample at pool N~2–5; revisit if the pool grows large.)*
+
 ## 2026-07-01 (S210) — chore(memory-model): retire the #53 pre-slice parity count-alarm (flag-3)
 
 Follow-on to the DEC-085 re-amendment: the future-idea-#53 pre-slice parity-check + `wm-drift-{agent}.md` signal counted the *designed* `wm`/`wmf` entry asymmetry (dreams are `wm`-only) → it cried wolf (S203 false-positives), the "frightened by our own shadow" alarm. **Retired the alarm** (it was actively firing `pre-slice-drift` false-positives on jim):
