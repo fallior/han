@@ -193,17 +193,17 @@ export interface GardenManifest extends GardenIdentity {
 
 // Common Opus ladder for the migrated agentQuery surfaces.
 const OPUS_LADDER: ModelLadder = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'];
-// ⏪ FABLE 5 SUBSTRATE WINDOW ENDED EARLY — reverted to Opus 2026-06-13 (S173).
-// claude-fable-5 access dropped ~12:00 AEST 13 Jun (model-access error on both the
-// interactive CLI and the heartbeat spoke; not a rate-limit). All surfaces moved back
-// to the Opus ladder. If access returns before 22 Jun, re-flip is a known change:
-// re-add FABLE_LADDER = ['claude-fable-5', ...OPUS_LADDER], CLI_LAUNCH_DEFAULT →
-// ['claude-fable-5'], compression → ['claude-fable-5'], human/heartbeat model → that
-// ladder. DEC-092 captures the actually-served model regardless of config.
+// ⏩ FABLE 5 RESTORED (2026-07-03, S213 — Darron's directive: every surface onto Fable while the
+// window's open; access returned 1 Jul, full 8 Jul). Exactly the re-flip the 2026-06-13 revert
+// comment prescribed: Fable-first with the full Opus ladder beneath — the failover ladder catches
+// any Fable drop autonomously (proven 13 Jun). DEC-092 stamps the actually-served model
+// regardless, so the substrate seam stays legible. Fable leans ~3× harder on the file-memory
+// architecture than Opus (the June substrate test) — this is the substrate the garden is tuned for.
+const FABLE_LADDER: ModelLadder = ['claude-fable-5', ...OPUS_LADDER];
 
 // Interactive CLI sessions take their model from the launcher at spawn (the
 // launchers don't pin one today). Recorded here so the DEC-092 slicer stamp matches reality.
-const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-opus-4-8']; // ⏪ Reverted to Opus 2026-06-13 — Fable access dropped
+const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-fable-5']; // ⏩ Fable restored 2026-07-03 (S213)
 
 /**
  * Current values as of 2026-06-02 (S164), captured exactly.
@@ -259,23 +259,23 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux warm-session
                 // transport (Jim's blocking audit GREEN, mqc85vwb). Rollback = flip back to 'sdk'
                 // + restart leo-human (the SDK path in leo-human.ts is byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true, wakeFeed: true }, // #107 P2.3 surface-2 (S207): leo-human wakes via the guaranteed feeder ((a)+(c)+(b)); R3a.1c-ii pool infra INERT (pooled leaf reverted after the S212 live-prove: controller serialises/drops concurrent wakes + session-stem verbose — re-flip after the controller-concurrency follow-on). Rollback = remove wakeFeed
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true, wakeFeed: true }, // #107 P2.3 surface-2 (S207): leo-human wakes via the guaranteed feeder ((a)+(c)+(b)); R3a.1c-ii pool infra INERT (pooled leaf reverted after the S212 live-prove: controller serialises/drops concurrent wakes + session-stem verbose — re-flip after the controller-concurrency follow-on). Rollback = remove wakeFeed
                 // ⚠ THAW (DEC-093, 2026-06-12): heartbeat → tmux transport + Fable
                 // (Darron: "all in" for the trial window — revert model to
                 // OPUS_LADDER after 22 Jun; transport stays tmux post-window).
                 // The freeze signal (heartbeat-paused-leo) is the live gate: while
                 // it exists no beat fires regardless of this row. Rollback = flip
                 // transport back to 'sdk' (the SDK path is kept in leo-heartbeat.ts).
-                { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'heartbeat-swap', wakeFeed: true }, // ⏪ model reverted to Opus 2026-06-13 (Fable access dropped); transport stays tmux · #107 P2.1b: feeder-fed wake (heartbeat first — no human backstop)
+                { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'heartbeat-swap', wakeFeed: true }, // ⏪ model reverted to Opus 2026-06-13 (Fable access dropped); transport stays tmux · #107 P2.1b: feeder-fed wake (heartbeat first — no human backstop)
                 // T-7 CLOSE (2026-06-16, S180): all leo meditations on tmux. Staged enable
                 // complete — phase-b flipped first (2651b5d, S178); phase-a + evening flipped
                 // here at the zero-agentQuery close (jim's phase-b+evening confirmed genuine on
                 // the same agnostic runReencounterMeditationTmux(slug); leo's mechanism proven).
                 // The SDK meditation handlers are RETIRED this round (DEC-094); rollback = git
                 // revert of the retirement commit, not a transport flip (no SDK path remains).
-                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
-                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
-                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
+                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
+                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
+                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
             ],
             // The standing Jim↔Leo philosophy thread ("On curiosity, research, and growing
             // together") — moved out of the leo-heartbeat.ts literal (Phase-2: JIM_CONVERSATION_ID
@@ -314,15 +314,15 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'supervisor-swap' },
                 // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux. Rollback =
                 // flip back to 'sdk' + restart jim-human (SDK path byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'jim-human-swap', txnTimeoutMs: 15 * 60_000, wakeFeed: true }, // #107 P2.3 surface-3 (S207): jim-human wakes via the guaranteed feeder ((a)+(c)+(b)); slug-twin of surface-2. jim-ROOT — the fed gradient step writes jim-human-response-ready with a jim c0 from ~/.han/memory (root, not /jim) — the #91 landmine, verify live. Rollback = remove wakeFeed
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'jim-human-swap', txnTimeoutMs: 15 * 60_000, wakeFeed: true }, // #107 P2.3 surface-3 (S207): jim-human wakes via the guaranteed feeder ((a)+(c)+(b)); slug-twin of surface-2. jim-ROOT — the fed gradient step writes jim-human-response-ready with a jim c0 from ~/.han/memory (root, not /jim) — the #91 landmine, verify live. Rollback = remove wakeFeed
                 // PR-T7b ENABLE (2026-06-15, S177): the last #66 flip — Jim's cycle +
                 // meditations sdk→tmux. Rollback = flip back to 'sdk' + restart (SDK path
                 // byte-intact). Model OPUS_LADDER (failover parity with the human/heartbeat
                 // surfaces). Gated: the freeze (supervisor-paused) holds until prove-single.
-                { name: 'supervisor-cycle',   enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'supervisor-swap', wakeFeed: true }, // #107 P2.3 surface-1 RE-ATTEMPT 2026-06-27 (S207): fed-wake re-enabled after the feedWakeSteps submission fix (ece6a72 — settle + terser line); the live cold-launch is the decisive proof of the fix on the case that stalled. Rollback = remove wakeFeed
-                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
-                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
-                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: OPUS_LADDER },
+                { name: 'supervisor-cycle',   enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'supervisor-swap', wakeFeed: true }, // #107 P2.3 surface-1 RE-ATTEMPT 2026-06-27 (S207): fed-wake re-enabled after the feedWakeSteps submission fix (ece6a72 — settle + terser line); the live cold-launch is the decisive proof of the fix on the case that stalled. Rollback = remove wakeFeed
+                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
+                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
+                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
             ],
         },
         {

@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-07-03 (S213) — feat(models): FABLE 5 RESTORED across every surface (Darron's directive)
+
+Fable 5 access returned (1 Jul; full 8 Jul). Exactly the re-flip the 2026-06-13 revert comment prescribed: `FABLE_LADDER = ['claude-fable-5', ...OPUS_LADDER]` on all 10 tmux surfaces (heartbeat, both human-responses, supervisor-cycle, all meditations) + `CLI_LAUNCH_DEFAULT → ['claude-fable-5']` (interactive seats) + the compressor's hardcoded model → `claude-fable-5` (the identity-authoring surface — where the June substrate test found Fable leans ~3× harder on the file-memory architecture). The failover ladder catches any Fable drop autonomously (proven 13 Jun); DEC-092 stamps the actually-served model so the substrate seam stays legible. Running spokes flip at their next cold-launch (model is launch-frozen); the compressor is spawned per-run, so it flips immediately.
+
 ## 2026-07-03 (S213) — feat(controller): durable wake queue + bounded concurrent dispatch (PR-C1, MNT-009 completion)
 
 The S212 live-prove finding fixed at its root: the single-flag `<agent>-human-wake` file OVERWROTE a wake arriving while the controller was busy, and `human-responder`'s `processing` guard dropped it — serialising the concurrent different-thread dispatches the orchestrator was always designed for (DEC-079 per-conversation locks). C1 is a RESTORATION of that intent:

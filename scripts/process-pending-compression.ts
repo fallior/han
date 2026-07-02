@@ -383,7 +383,7 @@ async function runSDK(systemPrompt: string, userPrompt: string): Promise<string>
     const q = agentQuery({
         prompt: userPrompt,
         options: {
-            model: 'claude-opus-4-8', // S173: aligned to highest Opus (was 4-7; reverted from Fable 2026-06-13). DEC-092 still captures the actually-served model.
+            model: 'claude-fable-5', // ⏩ Fable restored 2026-07-03 (S213, Darron's directive) — the identity-authoring surface, where the Mythos tier matters most. Was Opus 4-8 (the 2026-06-13 revert). DEC-092 still captures the actually-served model, so any Fable drop is legible; the SDK falls back per its own ladder behaviour.
             maxTurns: 1,
             cwd: process.env.HOME || '/root',
             permissionMode: 'bypassPermissions',
