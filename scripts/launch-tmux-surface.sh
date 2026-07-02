@@ -65,12 +65,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# --stem is R1-AS-session only: a stem pre-warms the interactive `session` self. Guard against
-# misuse on a real (launchable) surface — those go through normal validation, not the bypass.
-if [[ "$STEM" == true && "$SURFACE" != "session" ]]; then
-    echo "launch-tmux-surface: --stem is for the 'session' surface only (got '$SURFACE')" >&2
-    exit 1
-fi
+# --stem pre-warms a warm stem. R1 was session-only; PR-C2 (native-per-surface pools) widens it
+# to ANY surface — a pool stem is born AS its surface (`AGENT_SURFACE=<surface>`, no sleeve).
+# The bypass below stays scoped to ONLY the launchable-surface check (the interactive `session`
+# is deliberately not in the launchable set); a non-session pool surface (e.g. human-response)
+# validates against the manifest normally when launched without --stem, and the single-manager
+# has-session check applies to every launch regardless (pool stems dodge collisions via their
+# unique --session-name).
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"

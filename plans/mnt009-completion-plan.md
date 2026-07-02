@@ -144,3 +144,18 @@ per-surface sentinel is never touched by pool pre-warms. Bonus: retires the sequ
    registry-remove only) — closes Jim's 1c-i "CLEAR side" flag.
 4. The live-prove keeps the **WM-intact check explicit** (the R3a.0 slot's first genuinely-live
    same-agent concurrency exercise).
+
+## Build progress (S213)
+- **PR-C1 DEPLOYED LIVE** (`010dfd3`) — queue-watch confirmed on both responders; drop-fix active.
+- **Fable restored garden-wide** (`3ae52d3`, work-order item 0).
+- **PR-C2 BUILT held** — per-surface registries (`pool-<slug>-<surface>.json`), `pooled`→`poolSize`
+  collapse (no dangling readers), launcher `--stem` widened (bypass unchanged: launchable-check only),
+  native pre-warm `--surface` + **PER-STEM sentinels** via launch-time sleeve-state (the spoke's
+  step-10 resolver echoes sleeve.surface → `<slug>-<stem-session>-ready`; floor sentinel untouched;
+  concurrent pre-warm unlocked), `feedWakeSteps` `sentinelKey` (c0-ack reads the per-stem path),
+  `adoptPooledStem` drops the sleeve write. Gates: tsc 0-new; stem-pool 23/23 (3 per-surface
+  isolation checks); wake-queue 10/10; freshness 6/6; bash -n.
+- **⚠ FLAGGED for C3/live-prove:** `flushSwapToWorkingMemory` (human-responder:165) is
+  read→append→reset on the SHARED per-surface swap buffer — two concurrent completions can
+  interleave (B's buffer content lost at A's reset). The append is slot-guarded; the buffer
+  round-trip isn't. Surfaced as a design point (DEC-085 write-shape territory), not silently fixed.

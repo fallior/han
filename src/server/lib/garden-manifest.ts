@@ -79,21 +79,15 @@ export interface SurfaceManifest {
      *  the per-surface roll-out is a manifest flip, not a code constant. P2.1b sets it on heartbeat
      *  first (no human backstop); human-response + cycle follow at P2.3. Default falsy. */
     wakeFeed?: boolean;
-    /** #MNT-009 / DEC-099 R3a.1c: does this surface dispatch via the WARM-STEM POOL (checkout of
-     *  one of N pre-warmed stems) instead of the fixed single `<surface>-<slug>` session? When
-     *  true, `dispatchToSpoke` checks out a free stem (per-stem FIFO → concurrent stems = the
-     *  head-of-line cure) and falls back to `ensureSurfaceSession` on an empty pool. No-hidden-
-     *  globals: the per-surface roll-out is a manifest flip. Scope: human-response first (the MNT-
-     *  009 victim); heartbeat/supervisor-cycle stay unpooled (scheduled, non-overlapping). The
-     *  activation flip (set this true + populate the pool) pairs with the coordinated live-prove.
-     *  Default falsy. ⚠ Being COLLAPSED into `poolSize` (PR-C2, MNT-009 completion plan, F2 settled
-     *  — zero users): poolSize>0 will mean pooled. Kept through C1 so the dispatcher's pooledFor
-     *  reads stay untouched until C2's one collapse commit. */
-    pooled?: boolean;
-    /** PR-C1 (MNT-009 completion): the warm-stem pool size for this surface — ALSO the controller's
-     *  max concurrent dispatches (the semaphore reads this same leaf, so pool capacity and dispatch
-     *  concurrency can never drift apart). 0/unset = no pool + one-at-a-time dispatch (today's exact
-     *  behaviour — C1 is byte-equivalent until a poolSize is set). No-hidden-globals. */
+    /** MNT-009 / DEC-099 R3: the warm-stem pool size for this surface — poolSize>0 means the
+     *  surface dispatches via the NATIVE-per-surface warm pool (checkout of one of N pre-warmed
+     *  stems; per-stem FIFO → concurrent stems = the head-of-line cure; empty pool →
+     *  `ensureSurfaceSession` floor). It is ALSO the controller's max concurrent dispatches (the
+     *  PR-C1 semaphore reads this same leaf, so pool capacity and dispatch concurrency can never
+     *  drift apart). 0/unset = no pool + one-at-a-time dispatch. No-hidden-globals; scope:
+     *  human-response first (the MNT-009 victim); heartbeat/supervisor-cycle stay unpooled
+     *  (scheduled, non-overlapping). (PR-C2 collapsed the short-lived `pooled?: boolean` into
+     *  this — F2, zero users at collapse.) */
     poolSize?: number;
 }
 
@@ -259,7 +253,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux warm-session
                 // transport (Jim's blocking audit GREEN, mqc85vwb). Rollback = flip back to 'sdk'
                 // + restart leo-human (the SDK path in leo-human.ts is byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true, wakeFeed: true }, // #107 P2.3 surface-2 (S207): leo-human wakes via the guaranteed feeder ((a)+(c)+(b)); R3a.1c-ii pool infra INERT (pooled leaf reverted after the S212 live-prove: controller serialises/drops concurrent wakes + session-stem verbose — re-flip after the controller-concurrency follow-on). Rollback = remove wakeFeed
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true, wakeFeed: true }, // #107 P2.3 surface-2 (S207): leo-human wakes via the guaranteed feeder ((a)+(c)+(b)). MNT-009 R3c: pool infra ready + INERT (poolSize unset ⇒ floor); activation = set poolSize:2 here after C3 lands (the swap-flush fix gates it). Rollback = remove poolSize/wakeFeed
                 // ⚠ THAW (DEC-093, 2026-06-12): heartbeat → tmux transport + Fable
                 // (Darron: "all in" for the trial window — revert model to
                 // OPUS_LADDER after 22 Jun; transport stays tmux post-window).
@@ -583,14 +577,7 @@ export function wakeFeedFor(slug: string, surface: string): boolean {
     return GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(x => x.name === surface)?.wakeFeed === true;
 }
 
-/** #MNT-009 / DEC-099 R3a.1c: does this (slug, surface) dispatch via the warm-stem pool?
- *  Registry-gated roll-out (no-hidden-globals) — true only where the manifest sets `pooled`.
- *  Agent-agnostic (DEC-081): a 4th agent's pooled surface joins for free. */
-export function pooledFor(slug: string, surface: string): boolean {
-    return GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(x => x.name === surface)?.pooled === true;
-}
-
-/** PR-C1 (MNT-009 completion): the warm-stem pool size for (slug, surface) — doubles as the
+/** MNT-009 / DEC-099 R3: the warm-stem pool size for (slug, surface) — doubles as the
  *  controller's max-concurrent-dispatch bound (one leaf, both readers, can't drift). 0 = unpooled /
  *  one-at-a-time (the semaphore floor). Agent-agnostic (DEC-081). */
 export function poolSizeFor(slug: string, surface: string): number {

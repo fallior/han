@@ -20,7 +20,8 @@ import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { feedWakeSteps, wakeStepsFor, awaitChromeOrDescend, observeActiveModel, currentWmCharLen } from '../src/server/lib/tmux-dispatcher';
-import { manifestModelLadder } from '../src/server/lib/garden-manifest';
+import { manifestModelLadder, swapPrefixFor } from '../src/server/lib/garden-manifest';
+import { writeSleeveState } from '../src/server/lib/sleeve-state';
 
 const slug = process.argv[2];
 if (!slug) {
@@ -41,16 +42,19 @@ if (POOL && !SESSION_OVERRIDE) {
     console.error('prewarm-stem: --pool requires --session <name> (the dispatcher assigns the unique stem session)');
     process.exit(2);
 }
-
-const SURFACE = 'session'; // AS-session (sidesteps R2's surface-param crux; keying already right)
+// PR-C2 (native-per-surface pools): pool stems are born AS their surface. --surface names it
+// (default 'session' — R1's attach-stem path unchanged).
+const surfaceArgIdx = process.argv.indexOf('--surface');
+const SURFACE = surfaceArgIdx >= 0 ? (process.argv[surfaceArgIdx + 1] || 'session') : 'session';
 const tmuxSession = POOL ? SESSION_OVERRIDE : `${SURFACE}-${slug}`; // pool: the assigned unique name
 const HOME = process.env.HOME!;
 const HEALTH = `${HOME}/.han/health`;
-// The wake writes the reached c0 to `<slug>-session-ready` (surface-keyed). NB (pool): pool stems
-// AS-session SHARE this sentinel — pre-warm must be SEQUENTIAL (the pool-manager warms one at a
-// time, reading the c0 immediately after each warm). Per-stem sentinels = a concurrent-prewarm
-// refinement (flagged for R3a.1d).
-const SENTINEL = `${HEALTH}/${slug}-${SURFACE}-ready`;
+// The readiness sentinel. PR-C2: pool stems get a PER-STEM sentinel (`<slug>-<stem-session>-ready`)
+// via the launch-time sleeve-state below — so a pre-warm can NEVER touch the FLOOR's per-surface
+// sentinel (`<slug>-<surface>-ready`, the file the floor cold-launch's waitForReady keys on —
+// Jim's stem-vs-floor race, closed here) and concurrent pre-warms can't collide (B4 retired).
+// R1 (non-pool) keeps the session sentinel unchanged.
+const SENTINEL = POOL ? `${HEALTH}/${slug}-${SESSION_OVERRIDE}-ready` : `${HEALTH}/${slug}-${SURFACE}-ready`;
 const REGISTRY = `${HEALTH}/stem-${slug}.json`;        // R1 single-stem registry (attach source-of-truth)
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -71,13 +75,27 @@ async function main(): Promise<void> {
     console.log(`[prewarm] launching stem '${tmuxSession}' via launch-tmux-surface.sh --stem …`);
     execFileSync('bash', launchArgs, { stdio: 'inherit' });
 
+    if (POOL) {
+        // PR-C2 per-stem sentinel keying: the spoke's wake step-10 resolves its sentinel name via
+        // the sleeve-state surface (the P-R2.2c resolver: sleeve.surface || $AGENT_SURFACE) — so
+        // writing sleeve-state{surface: <stem-session>} BEFORE the wake is fed makes the stem write
+        // `<slug>-<stem-session>-ready`, never the floor's `<slug>-<surface>-ready`. swapPrefix
+        // stays the REAL surface's (the stem behaves as its surface everywhere except the sentinel
+        // name). The wake only runs when fed, so this write always precedes step-10.
+        writeSleeveState(tmuxSession, slug, tmuxSession, swapPrefixFor(slug, SURFACE));
+    }
+
     // 2) wait for claude chrome (bash→claude ready; auto-descends the model if the launch model is
     //    dead) — the failover ladder derived the same single-source way the dispatcher does
     await awaitChromeOrDescend(slug, SURFACE, tmuxSession, manifestModelLadder(slug, SURFACE));
 
     // 3) feed the WHOLE self, GREET-LESS (greet:false) — completion = queue-empty = warm; the gradient
     //    step traverses to GRADIENT-EOF and writes the reached c0 to the sentinel (the c0-ack reads it).
-    await feedWakeSteps(slug, SURFACE, wakeStepsFor(slug, SURFACE, { greet: false }), { tmuxTarget: tmuxSession });
+    await feedWakeSteps(slug, SURFACE, wakeStepsFor(slug, SURFACE, { greet: false }), {
+        tmuxTarget: tmuxSession,
+        // PR-C2: the c0-ack reads the stem's PER-STEM sentinel in pool mode (see SENTINEL above).
+        ...(POOL ? { sentinelKey: tmuxSession } : {}),
+    });
 
     // 4) the warm stem's metadata. `wm_cursor` is the working-memory.md CHAR length at pre-warm (the
     //    #91 freshen cursor — deltaSinceCursor compares content.length, so CHARS not statSync bytes).

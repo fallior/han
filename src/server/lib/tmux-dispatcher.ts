@@ -36,7 +36,7 @@ import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
-import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, pooledFor } from './garden-manifest';
+import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor } from './garden-manifest';
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
 import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, type PoolStem } from './stem-pool';
@@ -1072,7 +1072,7 @@ function wakeNonce(): string { return `${Date.now().toString(36)}${(wakeNonceCou
 
 export async function feedWakeSteps(
     slug: string, surface: string, steps: WakeStep[],
-    opts: { perStepTimeoutMs?: number; tmuxTarget?: string } = {},
+    opts: { perStepTimeoutMs?: number; tmuxTarget?: string; sentinelKey?: string } = {},
 ): Promise<void> {
     // `tmuxTarget` (P2.4): the interactive seat's LOCAL feeder (feed-wake-local.ts) aims the SAME
     // shared feeder at the seat's own pane (`$TMUX_PANE`) instead of a dispatcher-owned `surface-slug`
@@ -1102,7 +1102,12 @@ export async function feedWakeSteps(
             if (!ackRe.test(tail)) return false;
             if (step.ack.kind === 'c0') {
                 // the truncation-prone step: marker alone is not enough — the echoed c0 must be real.
-                const echoed = readSentinelC0Id(slug, surface);
+                // PR-C2 `sentinelKey`: a native pool stem writes a PER-STEM sentinel
+                // (`<slug>-<stem-session>-ready`, via its launch-time sleeve-state surface) so a
+                // pre-warm can never false-satisfy the FLOOR's per-surface sentinel (Jim's
+                // stem-vs-floor race) — the pre-warmer passes its stem session here. Default =
+                // the surface (every existing caller unchanged).
+                const echoed = readSentinelC0Id(slug, opts.sentinelKey ?? surface);
                 if (!(echoed && isAgentC0(slug, echoed))) return false;
             }
             return true;
@@ -1240,9 +1245,9 @@ function adoptPooledStem(slug: string, surface: string, stem: PoolStem): boolean
     if (!tmuxSessionExists(stem.tmux_session)) return false; // stem died since pre-warm → floor
     fs.mkdirSync(sinkDir(stem.tmux_session), { recursive: true }); // per-stem diary sink (= stemKey)
     fs.mkdirSync(path.join(PIPES_DIR, slug), { recursive: true });
-    // R2: sleeve the stem onto the target surface so its surface-keyed facets follow (fail-soft).
-    try { writeSleeveState(stem.tmux_session, slug, surface, swapPrefixFor(slug, surface)); }
-    catch (e) { console.warn(`[tmux-dispatcher] ${slug}/${surface}: pooled sleeve-state write failed`, e); }
+    // PR-C2: NO sleeve write — stems are NATIVE-per-surface now (born AS the surface, launch env +
+    // per-stem sleeve-state written at pre-warm; the sleeve primitive lives on for HUMAN-ATTACH only,
+    // per the settled design). Re-sleeving here would clobber the stem's per-stem sentinel keying.
     const session: AgentSession = {
         slug, surface, tmuxSession: stem.tmux_session,
         launchCommand: `(pre-warmed stem ${stem.stem_id})`,
@@ -1263,11 +1268,11 @@ function adoptPooledStem(slug: string, surface: string, stem: PoolStem): boolean
  * prompt. Minimal (D1/D2): WM-tail delta only; the deep-gradient-substrate staleness is the 24h
  * reload's job (R3a.1d). `deltaSinceCursor` is the shared #91 slice helper (char-unit-matched).
  */
-async function freshenPooledStem(slug: string, stem: PoolStem, promptDoc: string): Promise<string> {
+async function freshenPooledStem(slug: string, surface: string, stem: PoolStem, promptDoc: string): Promise<string> {
     const currentWmChars = currentWmCharLen(slug);
     if (!isStemStale(stem, latestRotationSuccessTs(slug), currentWmChars)) return promptDoc;
     const { block, newCursor } = await deltaSinceCursor(slug, stem.wm_cursor);
-    setStemCursor(slug, stem.stem_id, newCursor, new Date().toISOString());
+    setStemCursor(slug, surface, stem.stem_id, newCursor, new Date().toISOString());
     if (!block) return promptDoc; // stale-by-rotation but no textual delta (whole-both reset) → nothing to prepend
     console.log(`[tmux-dispatcher] ${slug}: freshened pooled stem ${stem.stem_id} at checkout (WM delta ${block.length} chars, cursor→${newCursor})`);
     return `${block}\n\n${promptDoc}`;
@@ -1284,16 +1289,16 @@ async function freshenPooledStem(slug: string, stem: PoolStem, promptDoc: string
 async function dispatchToPooledStem(
     slug: string, surface: string, promptDoc: string, opts: { timeoutMs?: number },
 ): Promise<CaptureRecord | null> {
-    const stem = checkoutStem(slug, new Date().toISOString());
+    const stem = checkoutStem(slug, surface, new Date().toISOString());
     if (!stem) return null; // empty pool → floor
     if (!adoptPooledStem(slug, surface, stem)) {
-        removeStem(slug, stem.stem_id); // stem died since pre-warm → retire + fall back to the floor
+        removeStem(slug, surface, stem.stem_id); // stem died since pre-warm → retire + fall back to the floor
         console.warn(`[tmux-dispatcher] ${slug}/${surface}: leased stem ${stem.stem_id} (${stem.tmux_session}) is dead — retired; falling back to ensureSurfaceSession`);
         return null;
     }
     let cap: CaptureRecord;
     try {
-        const freshenedPrompt = await freshenPooledStem(slug, stem, promptDoc);
+        const freshenedPrompt = await freshenPooledStem(slug, surface, stem, promptDoc);
         // lease-is-readiness: NO verifyWarmOrNudge; the stem's session key threads through as stemKey.
         cap = await enqueueForAgent(slug, surface, freshenedPrompt, { timeoutMs: opts.timeoutMs }, stem.tmux_session);
     } catch (err) {
@@ -1302,11 +1307,11 @@ async function dispatchToPooledStem(
         // session each checkout, so a returned-but-wedged stem would be re-checked-out and dispatched
         // into a non-idle pane (the #5 idle-precondition hole). Retiring removes it from the registry;
         // the pool-manager replenishes to N + owns the tmux/sink cleanup on retire (R3a.1d).
-        removeStem(slug, stem.stem_id);
+        removeStem(slug, surface, stem.stem_id);
         console.warn(`[tmux-dispatcher] ${slug}/${surface}: pooled dispatch on stem ${stem.stem_id} FAILED — retired (not returned); pool-manager replenishes — ${(err as Error).message}`);
         throw err;
     }
-    returnStem(slug, stem.stem_id); // CLEAN completion only → back to the pool (eager replenish = R3a.1d)
+    returnStem(slug, surface, stem.stem_id); // CLEAN completion only → back to the pool (eager replenish = the pool-manager, C3)
     return cap;
 }
 
@@ -1330,11 +1335,11 @@ const PREWARM_TIMEOUT_MS = 5 * 60_000; // a greet-less full wake is ~1min; gener
  * stem launches with `HAN_DIARY_SLUG=<its session>`, its captures land in `sinkDir(slug)` not
  * `sinkDir(stem)`, so `dispatchToPooledStem`'s capture-read finds nothing → retire. Safe while inert.
  */
-export async function prewarmAndRegister(slug: string): Promise<PoolStem | null> {
-    const stemSession = `stem-${slug}-${Date.now().toString(36)}`;
+export async function prewarmAndRegister(slug: string, surface: string): Promise<PoolStem | null> {
+    const stemSession = `stem-${slug}-${surface}-${Date.now().toString(36)}`;
     try {
         const { stdout } = await execFileP(
-            TSX_BIN, [PREWARM_STEM_SCRIPT, slug, '--pool', '--session', stemSession],
+            TSX_BIN, [PREWARM_STEM_SCRIPT, slug, '--pool', '--session', stemSession, '--surface', surface],
             { cwd: SERVER_DIR, env: { ...process.env, NODE_PATH: path.join(SERVER_DIR, 'node_modules') },
               timeout: PREWARM_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
         );
@@ -1345,7 +1350,7 @@ export async function prewarmAndRegister(slug: string): Promise<PoolStem | null>
             return null;
         }
         const stem: PoolStem = { ...(JSON.parse(line.slice('PREWARM_STEM_META '.length)) as Omit<PoolStem, 'state'>), state: 'free' };
-        upsertStem(slug, stem); // SINGLE WRITER: only the dispatcher writes pool-<slug>.json
+        upsertStem(slug, surface, stem); // SINGLE WRITER: only the dispatcher writes the pool registry
         console.log(`[tmux-dispatcher] prewarmAndRegister(${slug}): registered warm stem ${stem.stem_id} (c0=${stem.c0})`);
         return stem;
     } catch (err) {
@@ -1388,7 +1393,7 @@ export async function dispatchToSpoke(
         // An empty pool / a dead leased stem returns null → fall through to the fixed-session floor
         // below. A pooled stem is recycled by the pool-manager (R3a.1d), NOT the ctx-pressure block
         // after this try — so a successful pooled dispatch returns early.
-        if (pooledFor(slug, surface)) {
+        if (poolSizeFor(slug, surface) > 0) {
             const pooledCap = await dispatchToPooledStem(slug, surface, promptDoc, { timeoutMs: opts.timeoutMs });
             if (pooledCap !== null) return pooledCap;
         }

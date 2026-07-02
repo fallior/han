@@ -4,9 +4,11 @@
  * Generalises R1's single-stem `stem-<slug>.json` (prewarm-stem.ts) to a pool of N warm stems
  * per agent — the substrate for the head-of-line cure (MNT-009 / BUG-001): a dispatch checks out
  * a FREE stem instead of targeting one fixed surface session, so a busy stem never blocks a
- * queued dispatch. Fork leans settled by Jim's plan-audit: registry is a FILE at
- * `~/.han/pool/pool-<slug>.json` (F-a — survives the #74 restart-bounce, inspectable); the
- * per-stem key is the `tmux_session` / HAN_SESSION (F-b — survives pool re-indexing).
+ * queued dispatch. Fork leans settled by Jim's plan-audit: registry is a FILE (F-a — survives the
+ * #74 restart-bounce, inspectable); the per-stem key is the `tmux_session` / HAN_SESSION (F-b —
+ * survives pool re-indexing). PR-C2 (MNT-009 completion): pools are per (slug, SURFACE) —
+ * `~/.han/pool/pool-<slug>-<surface>.json` — because stems are NATIVE-per-surface now (born as
+ * their surface, no sleeve; independent demand profiles per surface).
  *
  * SCOPE — INERT. This module is the registry DATA + operations ONLY. It does NOT create stems,
  * does NOT wire into the dispatcher, does NOT do IO beyond the registry file. R3a.1b re-keys the
@@ -47,6 +49,7 @@ export interface PoolStem {
 
 export interface Pool {
     slug: string;
+    surface: string;
     stems: PoolStem[];
 }
 
@@ -60,26 +63,26 @@ function poolDir(): string {
     return process.env.HAN_POOL_DIR || path.join(process.env.HOME || '/home/darron', '.han', 'pool');
 }
 
-export function poolPath(slug: string): string {
-    return path.join(poolDir(), `pool-${slug}.json`);
+export function poolPath(slug: string, surface: string): string {
+    return path.join(poolDir(), `pool-${slug}-${surface}.json`);
 }
 
 /** Read the pool. A missing or malformed registry reads as an empty pool (never throws). */
-export function readPool(slug: string): Pool {
+export function readPool(slug: string, surface: string): Pool {
     try {
-        const data = JSON.parse(fs.readFileSync(poolPath(slug), 'utf8'));
+        const data = JSON.parse(fs.readFileSync(poolPath(slug, surface), 'utf8'));
         if (data && typeof data === 'object' && Array.isArray(data.stems)) {
-            return { slug, stems: data.stems as PoolStem[] };
+            return { slug, surface, stems: data.stems as PoolStem[] };
         }
     } catch { /* absent / malformed → empty pool */ }
-    return { slug, stems: [] };
+    return { slug, surface, stems: [] };
 }
 
 /** Persist the pool atomically (write-temp-rename — a reader never sees a half-written file). */
-export function writePool(slug: string, pool: Pool): void {
+export function writePool(slug: string, surface: string, pool: Pool): void {
     const dir = poolDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const target = poolPath(slug);
+    const target = poolPath(slug, surface);
     const tmp = `${target}.tmp-${process.pid}`;
     fs.writeFileSync(tmp, JSON.stringify(pool, null, 2) + '\n');
     fs.renameSync(tmp, target);
@@ -91,53 +94,53 @@ export function writePool(slug: string, pool: Pool): void {
  * read→mutate→write is synchronous, so concurrent async dispatches in one process cannot both
  * lease the same stem.
  */
-export function checkoutStem(slug: string, nowIso: string): PoolStem | null {
-    const pool = readPool(slug);
+export function checkoutStem(slug: string, surface: string, nowIso: string): PoolStem | null {
+    const pool = readPool(slug, surface);
     const stem = pool.stems.find(s => s.state === 'free');
     if (!stem) return null;
     stem.state = 'leased';
     stem.leased_at = nowIso;
-    writePool(slug, pool);
+    writePool(slug, surface, pool);
     return { ...stem };
 }
 
 /** Return a leased stem to the pool (mark `free`). No-op if the stem is unknown. */
-export function returnStem(slug: string, stemId: string): void {
-    const pool = readPool(slug);
+export function returnStem(slug: string, surface: string, stemId: string): void {
+    const pool = readPool(slug, surface);
     const stem = pool.stems.find(s => s.stem_id === stemId);
     if (!stem) return;
     stem.state = 'free';
     delete stem.leased_at;
-    writePool(slug, pool);
+    writePool(slug, surface, pool);
 }
 
 /** Add or replace a stem (by stem_id) — pre-warm / replenish / post-freshen cursor update. */
-export function upsertStem(slug: string, stem: PoolStem): void {
-    const pool = readPool(slug);
+export function upsertStem(slug: string, surface: string, stem: PoolStem): void {
+    const pool = readPool(slug, surface);
     const i = pool.stems.findIndex(s => s.stem_id === stem.stem_id);
     if (i >= 0) pool.stems[i] = stem; else pool.stems.push(stem);
-    writePool(slug, pool);
+    writePool(slug, surface, pool);
 }
 
 /** Remove a stem (retire — the convergent backstop / 24h sweep). No-op if unknown. */
-export function removeStem(slug: string, stemId: string): void {
-    const pool = readPool(slug);
+export function removeStem(slug: string, surface: string, stemId: string): void {
+    const pool = readPool(slug, surface);
     const next = pool.stems.filter(s => s.stem_id !== stemId);
-    if (next.length !== pool.stems.length) writePool(slug, { slug, stems: next });
+    if (next.length !== pool.stems.length) writePool(slug, surface, { slug, surface, stems: next });
 }
 
 /** Update a stem's #91 cursor after a checkout-time freshen (mark it fresh again). */
-export function setStemCursor(slug: string, stemId: string, wmCursor: number, cursorSetTs: string): void {
-    const pool = readPool(slug);
+export function setStemCursor(slug: string, surface: string, stemId: string, wmCursor: number, cursorSetTs: string): void {
+    const pool = readPool(slug, surface);
     const stem = pool.stems.find(s => s.stem_id === stemId);
     if (!stem) return;
     stem.wm_cursor = wmCursor;
     stem.cursor_set_ts = cursorSetTs;
-    writePool(slug, pool);
+    writePool(slug, surface, pool);
 }
 
-export function poolStatus(slug: string): PoolStatus {
-    const pool = readPool(slug);
+export function poolStatus(slug: string, surface: string): PoolStatus {
+    const pool = readPool(slug, surface);
     const leased = pool.stems.filter(s => s.state === 'leased').length;
     return { free: pool.stems.length - leased, leased, total: pool.stems.length };
 }
