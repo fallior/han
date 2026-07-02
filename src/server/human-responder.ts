@@ -46,7 +46,9 @@ import { dispatchToSpoke } from './lib/tmux-dispatcher';
 import {
     manifestModelLadder, conversationRoleFor, swapPrefixFor,
     humanResponderTxnTimeoutMs, humanResponderCommitmentScan, addressedToOtherResponderOnly,
+    poolSizeFor,
 } from './lib/garden-manifest';
+import { wakeQueueDir, claimWakeFiles, pickNextEligible } from './lib/wake-queue';
 import { gradientConfigForAgent } from './lib/agent-registry';
 import type { CaptureRecord } from './lib/diary-mcp-server';
 
@@ -603,39 +605,81 @@ async function main(): Promise<void> {
         console.log(`${LOG} Commitment scanner enabled (every ${COMMITMENT_SCAN_INTERVAL_MS / 60000}min)`);
     }
 
-    // Signal watcher. Guard against fs.watch firing multiple events for a single write
-    // (Linux inotify emits both IN_MODIFY and IN_CLOSE_WRITE).
-    let processing = false;
-    console.log(`${LOG} Watching ${SIGNALS_DIR} for ${SIGNAL_NAME}`);
+    // ── PR-C1 (MNT-009 completion): the durable wake QUEUE + bounded concurrent dispatch ──────
+    // Replaces the single-flag file + `processing` guard, which serialised the controller to one
+    // dispatch at a time and DROPPED a wake arriving mid-processing (the S212 live-prove finding).
+    // The orchestrator was always designed for concurrent different-thread dispatches (DEC-079's
+    // per-conversation locks) — this RESTORES that intent at the controller:
+    //  - jemma writes one queue FILE per dispatch (`<signal>.d/<ms>-<dispatchId>.json`, temp+rename)
+    //    → no overwrite-drop by construction; unclaimed files survive a controller restart.
+    //  - claim = read+unlink (subsumes the old guard's inotify double-event dedupe: the second
+    //    event finds no file). No settle-delay needed on the queue path (temp+rename = atomic).
+    //  - the semaphore bound = poolSizeFor(slug, surface) || 1 — the SAME leaf that sizes the warm
+    //    pool, so dispatch concurrency and pool capacity can never drift. Unset ⇒ 1 ⇒ exactly
+    //    today's one-at-a-time behaviour (C1 is behaviour-preserving until a poolSize is set).
+    //  - per-CONVERSATION exclusivity: a wake for an in-flight conversation stays queued (defer,
+    //    not drop — the deferred turn self-corrects: the spoke reads the live thread and stands
+    //    down if already answered). Different conversations dispatch concurrently.
+    const QUEUE_DIR = wakeQueueDir(SIGNALS_DIR, SIGNAL_NAME);
+    fs.mkdirSync(QUEUE_DIR, { recursive: true });
+    const pendingWakes: SignalData[] = [];
+    const inFlightConversations = new Set<string>();
+    let activeDispatches = 0;
+    const maxConcurrent = (): number => poolSizeFor(SLUG, HUMAN_SURFACE) || 1;
 
+    const runOne = (signal: SignalData): void => {
+        const conv = signal.conversationId;
+        if (conv) inFlightConversations.add(conv);
+        activeDispatches++;
+        void processSignal(signal)
+            .then(() => writeHealth())
+            .catch(err => {
+                console.error(`${LOG} Signal processing error:`, (err as Error).message);
+                writeHealth((err as Error).message);
+            })
+            .finally(() => {
+                activeDispatches--;
+                if (conv) inFlightConversations.delete(conv);
+                pump();
+            });
+    };
+
+    const pump = (): void => {
+        while (activeDispatches < maxConcurrent()) {
+            const i = pickNextEligible(pendingWakes, inFlightConversations);
+            if (i < 0) return;
+            runOne(pendingWakes.splice(i, 1)[0]);
+        }
+    };
+
+    const drainQueue = (): void => {
+        // Queue dir first (the canonical path)…
+        for (const w of claimWakeFiles<SignalData>(SIGNALS_DIR, SIGNAL_NAME)) pendingWakes.push(w);
+        // …then the LEGACY flat file (F4 both-read window — a wake written mid-deploy by a
+        // pre-C1 server is never stranded; retire this read once the fleet is on C1).
+        const legacy = readSignal();
+        if (legacy) pendingWakes.push(legacy);
+        pump();
+    };
+
+    console.log(`${LOG} Watching ${QUEUE_DIR} (wake queue) + legacy ${SIGNAL_NAME} (maxConcurrent=${maxConcurrent()})`);
+    // Startup sweep: unclaimed queue files from before a restart + any legacy flat wake.
+    drainQueue();
+    // Watch the queue dir for new wake files (inotify on the dir itself — files created inside a
+    // subdirectory do NOT fire events on the parent watch).
+    fs.watch(QUEUE_DIR, () => drainQueue());
+    // Legacy flat-file watch (both-read window). The 500ms settle stays ONLY here: the flat write
+    // is non-atomic; the queue path needs none (temp+rename).
     fs.watch(SIGNALS_DIR, async (event, filename) => {
         if (filename !== SIGNAL_NAME) return;
-        if (processing) return; // already handling a signal
-        processing = true;
-
-        // Small delay to let the file finish writing
         await new Promise(r => setTimeout(r, 500));
-
-        const signal = readSignal();
-        if (!signal) {
-            processing = false;
-            return;
-        }
-
-        try {
-            await processSignal(signal);
-            writeHealth();
-        } catch (err) {
-            console.error(`${LOG} Signal processing error:`, (err as Error).message);
-            writeHealth((err as Error).message);
-        } finally {
-            processing = false;
-        }
+        drainQueue();
     });
 
-    // DEC-079: fs.watch+poll race retired. With one-write-site discipline (DEC-080) and a single
-    // watch listener, missed inotify events are vanishingly rare; if one ever happens the message
-    // stays in the thread and Darron sees the missing response — failure-visible by design.
+    // DEC-079: fs.watch+poll race retired. With one-write-site discipline (DEC-080) and the
+    // startup sweep above, missed inotify events self-heal at the next event or restart; if one
+    // ever slips, the message stays in the thread and Darron sees the missing response —
+    // failure-visible by design.
 
     // Keep process alive
     await new Promise(() => {});

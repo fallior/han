@@ -9,6 +9,15 @@
 
 ---
 
+## 2026-07-03 (S213) — feat(controller): durable wake queue + bounded concurrent dispatch (PR-C1, MNT-009 completion)
+
+The S212 live-prove finding fixed at its root: the single-flag `<agent>-human-wake` file OVERWROTE a wake arriving while the controller was busy, and `human-responder`'s `processing` guard dropped it — serialising the concurrent different-thread dispatches the orchestrator was always designed for (DEC-079 per-conversation locks). C1 is a RESTORATION of that intent:
+- **`lib/wake-queue.ts` (new):** one queue file per dispatch (`<signal>.d/<ms>-<dispatchId>.json`, temp+rename — a claim never reads a half-written JSON); claim = read+unlink (subsumes the old guard's inotify-dedupe job); malformed files drop loud, never wedge.
+- **`jemma-dispatch`:** the human-wake delivery writes the queue dir (one-write-site holds; the flat helper stays for non-wake signals).
+- **`human-responder`:** the `processing` guard replaced by a semaphore pump — `maxConcurrent = poolSizeFor(slug,surface) || 1` (the SAME manifest leaf that sizes the warm pool, so concurrency and capacity can never drift); per-CONVERSATION exclusivity (same-conv wakes defer in order; the deferred turn self-corrects); startup sweep (crash-durable) + legacy flat-file both-read window (F4).
+- **Behaviour-preserving:** no `poolSize` set ⇒ semaphore=1 ⇒ today's serial dispatch; the one day-one change is the drop-fix (a second wake queues instead of vanishing).
+- Gates: tsc 0-new; `test-wake-queue-c1.ts` 10/10 (Jim re-ran); Jim diff-audit GREEN (failure-slot cleanup + pump re-entrancy + legacy double-dispatch all verified closed). Deploy restarts BOTH `human-responder@` services explicitly (S159).
+
 ## 2026-07-02 (S212) — revert(dispatcher): pooled leaf OFF on leo human-response (live-prove finding)
 
 The S212 live-prove showed the pool machinery is SOUND but the human-response head-of-line block is at the CONTROLLER (human-responder.ts:613 `if (processing) return` + single-flag wake = one-dispatch-at-a-time, drops concurrent wakes) — the pool is never called concurrently. Plus a pre-warmed `session`-stem responds verbosely (session-Leo identity, not a lean human-responder). So the flip is reverted to the proven non-pooled floor; ALL pool infra stays committed + inert (pooled leaf OFF). Re-flip after the follow-on: controller wake-queue + concurrent dispatch + the session-stem-identity question. Finding on thread mqvs3r6l.

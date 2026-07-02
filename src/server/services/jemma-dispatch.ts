@@ -12,6 +12,7 @@ import { broadcast } from '../ws';
 import { generateId } from './planning';
 import { ensureChannelWebhooks } from './discord';
 import { getPersona, getDeliveryConfig } from './village.js';
+import { writeWakeQueueFile } from '../lib/wake-queue';
 
 // ── Directories ──────────────────────────────────────────────
 
@@ -36,6 +37,14 @@ const HEALTH_DIR = path.join(HAN_DIR, 'health');
  * Should return exactly one match (this function). Note: `ws-broadcast` and
  * `jemma-ack-*` signals are NOT wake signals — they're WebSocket broadcasts and
  * orchestrator acks respectively; those have their own writers and audit paths.
+ *
+ * PR-C1 (MNT-009 completion): the human-wake delivery below now goes through the durable QUEUE
+ * DIR (`writeWakeQueueFile` in lib/wake-queue.ts → `<signal>.d/<ms>-<dispatchId>.json`,
+ * temp+rename) instead of this flat single-flag file — the flat form OVERWROTE a wake arriving
+ * while the controller was busy (the S212 live-prove finding), which is what serialised
+ * concurrent different-thread dispatches the orchestrator was designed to allow (DEC-079).
+ * One-write-site holds: the queue writer is called only from this module's wake delivery.
+ * This flat helper remains for any non-wake signal use.
  */
 function writeSignalFile(signalName: string, data?: Record<string, unknown>): void {
     const filepath = path.join(SIGNALS_DIR, signalName);
@@ -242,7 +251,8 @@ export async function deliverMessage(req: DeliveryRequest): Promise<DeliveryResu
                 ...(dispatchId ? { dispatchId } : {}),
                 ...(priorAgentFailed ? { priorAgentFailed } : {}),
             };
-            writeSignalFile(humanWakeSignal, signalData);
+            // PR-C1: durable per-dispatch queue file (no overwrite-drop; temp+rename).
+            writeWakeQueueFile(SIGNALS_DIR, humanWakeSignal, signalData);
 
             delivered = true;
         } else if (deliveryType === 'ntfy') {

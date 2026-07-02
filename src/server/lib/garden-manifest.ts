@@ -86,8 +86,15 @@ export interface SurfaceManifest {
      *  globals: the per-surface roll-out is a manifest flip. Scope: human-response first (the MNT-
      *  009 victim); heartbeat/supervisor-cycle stay unpooled (scheduled, non-overlapping). The
      *  activation flip (set this true + populate the pool) pairs with the coordinated live-prove.
-     *  Default falsy. */
+     *  Default falsy. ⚠ Being COLLAPSED into `poolSize` (PR-C2, MNT-009 completion plan, F2 settled
+     *  — zero users): poolSize>0 will mean pooled. Kept through C1 so the dispatcher's pooledFor
+     *  reads stay untouched until C2's one collapse commit. */
     pooled?: boolean;
+    /** PR-C1 (MNT-009 completion): the warm-stem pool size for this surface — ALSO the controller's
+     *  max concurrent dispatches (the semaphore reads this same leaf, so pool capacity and dispatch
+     *  concurrency can never drift apart). 0/unset = no pool + one-at-a-time dispatch (today's exact
+     *  behaviour — C1 is byte-equivalent until a poolSize is set). No-hidden-globals. */
+    poolSize?: number;
 }
 
 /**
@@ -581,6 +588,14 @@ export function wakeFeedFor(slug: string, surface: string): boolean {
  *  Agent-agnostic (DEC-081): a 4th agent's pooled surface joins for free. */
 export function pooledFor(slug: string, surface: string): boolean {
     return GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(x => x.name === surface)?.pooled === true;
+}
+
+/** PR-C1 (MNT-009 completion): the warm-stem pool size for (slug, surface) — doubles as the
+ *  controller's max-concurrent-dispatch bound (one leaf, both readers, can't drift). 0 = unpooled /
+ *  one-at-a-time (the semaphore floor). Agent-agnostic (DEC-081). */
+export function poolSizeFor(slug: string, surface: string): number {
+    const n = GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(x => x.name === surface)?.poolSize;
+    return typeof n === 'number' && n > 0 ? Math.floor(n) : 0;
 }
 
 /**
