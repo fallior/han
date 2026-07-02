@@ -252,7 +252,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux warm-session
                 // transport (Jim's blocking audit GREEN, mqc85vwb). Rollback = flip back to 'sdk'
                 // + restart leo-human (the SDK path in leo-human.ts is byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true, wakeFeed: true }, // #107 P2.3 surface-2 (S207): leo-human wakes via the guaranteed feeder ((a)+(c)+(b)); same proven pattern as surface-1; c0-gate guards meanwhile; rollback = remove wakeFeed
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true, wakeFeed: true, pooled: true }, // #107 P2.3 surface-2 (S207): leo-human wakes via the guaranteed feeder ((a)+(c)+(b)). R3a.1c-ii (S212): pooled:true — the MNT-009 head-of-line cure ACTIVATED; dispatches check out a warm stem, empty pool → ensureSurfaceSession floor (safe by construction). Rollback = remove pooled/wakeFeed
                 // ⚠ THAW (DEC-093, 2026-06-12): heartbeat → tmux transport + Fable
                 // (Darron: "all in" for the trial window — revert model to
                 // OPUS_LADDER after 22 Jun; transport stays tmux post-window).

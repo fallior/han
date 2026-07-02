@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-07-02 (S212) — feat(dispatcher): ACTIVATE the warm-stem pool on leo human-response (the MNT-009 flip)
+
+`leo` human-response `pooled: true` (garden-manifest). The head-of-line cure goes LIVE: a human-response dispatch now checks out one of N warm stems (concurrent stems don't block each other) instead of the single fixed session. **Safe by construction even before stems exist** — an empty pool → `checkoutStem` null → `ensureSurfaceSession` floor → byte-identical (the flip alone can't regress). Populate via `prewarmAndRegister ×N`; the coordinated live-prove (2 concurrent human-response dispatches, no head-of-line block, distinct leased stems, shared WM intact) is the milestone. Floor recycle-verify GREEN (diary-key byte-identical for a normal spoke, real end-to-end). Rollback = remove `pooled`. Jim-confirmed GO.
+
 ## 2026-07-02 (S212) — feat(dispatcher): the warm-stem pool — per-stem re-key + pooled-dispatch core + single-writer populate (PR-R3a.1b+1c, held-INERT)
 
 The MNT-009 / BUG-001 **head-of-line cure**: a busy dispatched spoke blocks queued dispatches because the per-slug FIFO serialises one live transaction per agent. R3a.1b+1c re-key that per-STEM and add a checkout-of-N warm-stem pool, so concurrent stems never block each other. **Everything here is INERT** — the `pooled` manifest leaf is OFF on every surface (non-pooled dispatch byte-identical), and the diary-key resolves to the slug for a normal spoke. Activation (flip + populate + the coordinated live-prove) is a separate step. Jim-audited GREEN (1b / 1c-i / 1c-ii / diary-key), tsc 0-new, `stem-pool` 20/20 + `stem-freshness-reader` 6/6.
