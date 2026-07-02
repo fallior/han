@@ -257,7 +257,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux warm-session
                 // transport (Jim's blocking audit GREEN, mqc85vwb). Rollback = flip back to 'sdk'
                 // + restart leo-human (the SDK path in leo-human.ts is byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true, wakeFeed: true }, // #107 P2.3 surface-2 (S207): leo-human wakes via the guaranteed feeder ((a)+(c)+(b)). MNT-009 R3c: pool infra ready + INERT (poolSize unset ⇒ floor); activation = set poolSize:2 here after C3 lands (the swap-flush fix gates it). Rollback = remove poolSize/wakeFeed
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true, wakeFeed: true, poolSize: 2 }, // #107 P2.3 surface-2 (S207): feeder-fed wake. MNT-009 R3c ACTIVATED (S213): poolSize:2 — 2 native warm stems + the C1 semaphore at 2 (one leaf, both readers); the pool-manager populates/replenishes; empty pool → ensureSurfaceSession floor. Rollback = remove poolSize
                 // ⚠ THAW (DEC-093, 2026-06-12): heartbeat → tmux transport + Fable
                 // (Darron: "all in" for the trial window — revert model to
                 // OPUS_LADDER after 22 Jun; transport stays tmux post-window).
