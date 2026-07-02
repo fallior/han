@@ -42,7 +42,7 @@ import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder';
 // ensureSurfaceSession + the warm-gate + enqueue + the ctx-pressure self-clear, and swallows
 // DispatchTimeoutError|SessionNotReadyError into a null return + onDispatchFail (no hollow
 // answers). Zero live agentQuery on this surface (the #66 / DEC-094 endgame for human-response).
-import { dispatchToSpoke } from './lib/tmux-dispatcher';
+import { dispatchToSpoke, startPoolManager } from './lib/tmux-dispatcher';
 import {
     manifestModelLadder, conversationRoleFor, swapPrefixFor,
     humanResponderTxnTimeoutMs, humanResponderCommitmentScan, addressedToOtherResponderOnly,
@@ -162,6 +162,35 @@ function notifyServer(conversationId: string, messageId: string, role: string, c
 
 // ── Memory ────────────────────────────────────────────────────
 
+/**
+ * PR-C3 (Jim's flag-(b) ruling): flush ONE dispatch's capture fields STRAIGHT to the atomic
+ * paired-write — no shared swap-buffer round-trip. Under C1's concurrent dispatches the old
+ * buffer path raced (A reads → B appends → A resets ⇒ B's paired content destroyed) and even
+ * slot-wrapped it would MERGE concurrent captures into one blurred write. Per-dispatch args
+ * eliminate loss AND blur. DEC-085-adjacent TRANSPORT change only — the write SHAPE is
+ * untouched (Mechanism-A capture fields → the atomic `appendPairedMemory` pair, #49
+ * both-or-neither preserved).
+ */
+async function flushCapturePairedMemory(compressed: string, full: string): Promise<void> {
+    const c = compressed.trim(), f = full.trim();
+    if (!c && !f) return;
+    if (!c || !f) {
+        // #49: asymmetric content must never write one side — skip-and-log (fail-loud).
+        console.warn(`${LOG} Asymmetric capture memory; skipping paired flush (compressed=${c.length}c, full=${f.length}c).`);
+        return;
+    }
+    try {
+        await appendPairedMemory(SLUG, '\n' + f + '\n', '\n' + c + '\n', { source: `${SLUG}-human-flush` });
+        console.log(`${LOG} Paired memory flushed (per-dispatch, ${c.length}c/${f.length}f chars)`);
+    } catch (err) {
+        // Fail-loud, never half-write; the capture file in the per-stem sink remains the forensic copy.
+        console.error(`${LOG} Per-dispatch paired flush FAILED (capture retained in sink): ${(err as Error).message}`);
+    }
+}
+
+/** LEGACY startup drain only (PR-C3): nothing writes the shared swap buffer on this seat any
+ *  more (captures flush per-dispatch above) — this sweeps pre-C3 residue / a crash's leftovers
+ *  once at boot, then the buffer stays empty. */
 async function flushSwapToWorkingMemory(): Promise<void> {
     const compressed = fs.readFileSync(SWAP_FILE, 'utf-8').trim();
     const full = fs.readFileSync(SWAP_FULL_FILE, 'utf-8').trim();
@@ -193,11 +222,6 @@ async function flushSwapToWorkingMemory(): Promise<void> {
         console.error(`${LOG} Flush failed; swap preserved for retry: ${(err as Error).message}`);
         // Swap NOT cleared — next call retries naturally.
     }
-}
-
-function appendSwap(compressed: string, full: string): void {
-    if (compressed) fs.appendFileSync(SWAP_FILE, compressed + '\n');
-    if (full) fs.appendFileSync(SWAP_FULL_FILE, full + '\n');
 }
 
 // ── Health ─────────────────────────────────────────────────────
@@ -337,7 +361,7 @@ async function respondToDiscord(signal: SignalData): Promise<void> {
  * scaffold), applies the self-recognition + already-responded + distinct-angle gates against live
  * state, self-posts via curl, and ends with submit_response (diary) or stand_down. We mirror the
  * cascade: stand-down → ack stood_down (NEVER paired-write — an empty c0/c1 pair is an identity-layer
- * bug, Jim's flag); diary → appendSwap + post-verification → ack done / SILENT-POST-FAILURE warn.
+ * bug, Jim's flag); diary → per-dispatch paired flush (PR-C3, flushCapturePairedMemory) + post-verification → ack done / SILENT-POST-FAILURE warn.
  */
 async function respondToConversationViaTmux(db: Database.Database, conversationId: string, signal?: SignalData): Promise<void> {
     const title = getConversationTitle(db, conversationId);
@@ -427,7 +451,7 @@ async function respondToConversationViaTmux(db: Database.Database, conversationI
     const sectionHeader = `### Response to "${title}" (${timestamp})`;
     const compressedSwap = `${sectionHeader}\n${cap.args.working_memory_compressed}`;
     const fullSwap = `${sectionHeader}\n[INPUT]\n${cap.args.input_quotes}\n\n[BODY]\n${cap.args.working_memory_full}`;
-    appendSwap(compressedSwap, fullSwap);
+    await flushCapturePairedMemory(compressedSwap, fullSwap); // PR-C3: per-dispatch, no shared buffer
     const memText = `paired memory: ${cap.args.working_memory_full.length}c body + ${cap.args.input_quotes.length}c input + ${cap.args.working_memory_compressed.length}c c1`;
     if (postRow) {
         console.log(`${LOG} (tmux) Self-posted via curl for "${title}" — ${postRef} (${memText})`);
@@ -508,7 +532,7 @@ async function respondToDiscordViaTmux(signal: SignalData): Promise<void> {
             } catch (err) { console.warn(`${LOG} (tmux) Failed to record Discord response in DB:`, (err as Error).message); }
             const timestamp = new Date().toISOString();
             const sectionHeader = `### Discord #${channelName} (${timestamp})`;
-            appendSwap(`${sectionHeader}\n${cap.args.working_memory_compressed}`, `${sectionHeader}\n[INPUT]\n${cap.args.input_quotes}\n\n[BODY]\n${cap.args.working_memory_full}`);
+            await flushCapturePairedMemory(`${sectionHeader}\n${cap.args.working_memory_compressed}`, `${sectionHeader}\n[INPUT]\n${cap.args.input_quotes}\n\n[BODY]\n${cap.args.working_memory_full}`); // PR-C3
         } else {
             console.error(`${LOG} (tmux) Failed to post to Discord #${channelName}`);
         }
@@ -575,12 +599,8 @@ async function processSignal(signal: SignalData): Promise<void> {
         }
     }
 
-    // Flush swap to working memory after each response
-    try {
-        await flushSwapToWorkingMemory();
-    } catch (err) {
-        console.error(`${LOG} Swap flush error:`, (err as Error).message);
-    }
+    // PR-C3: the per-dispatch paired flush happens AT the capture sites (flushCapturePairedMemory)
+    // — no shared-buffer flush here (the old read→append→reset raced under C1's concurrency).
 }
 
 // ── Main loop ─────────────────────────────────────────────────
@@ -592,6 +612,17 @@ async function main(): Promise<void> {
     console.log(`${LOG} Starting (PID ${process.pid}, slug=${SLUG}, role=${CONVERSATION_ROLE}, commitmentScan=${COMMITMENT_SCAN_ENABLED})`);
     ensureDirectories();
     writeHealth();
+
+    // PR-C3: drain any LEGACY swap-buffer residue once at boot (pre-C3 code / a crash mid-write) —
+    // captures now flush per-dispatch (flushCapturePairedMemory), so nothing writes the buffer live.
+    try { await flushSwapToWorkingMemory(); } catch (err) {
+        console.error(`${LOG} Startup legacy swap drain failed (residue preserved):`, (err as Error).message);
+    }
+
+    // PR-C3: this driver process OWNS its surface's warm-stem pool (single-writer, cond-3) —
+    // populate + replenish + chrome-guarded retire sweep + the 24h substrate reload. No-op when
+    // poolSize is unset (the floor model, today's behaviour).
+    if (poolSizeFor(SLUG, HUMAN_SURFACE) > 0) startPoolManager(SLUG, HUMAN_SURFACE);
 
     // Health writer interval
     setInterval(() => writeHealth(), HEALTH_WRITE_INTERVAL_MS);

@@ -39,7 +39,7 @@ import { gradientConfigForAgent } from './agent-registry';
 import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor } from './garden-manifest';
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
-import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, type PoolStem } from './stem-pool';
+import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, readPool, poolStatus, type PoolStem } from './stem-pool';
 
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
 const PIPES_DIR = process.env.HAN_PIPES_DIR || path.join(os.homedir(), '.han', 'agent-pipes');
@@ -446,8 +446,11 @@ const MODEL_DISPLAY_TO_ID: Record<string, string> = {
  * (caller falls back to manifestModelHead). Best-effort by design: the display→id map is
  * version-sensitive, so an unknown chrome string degrades to the manifest head, never throws.
  */
-export function observeActiveModel(slug: string, surface: string): string | null {
-    const tail = capturePaneTail(`${surface}-${slug}`, 8);
+export function observeActiveModel(slug: string, surface: string, tmuxTarget?: string): string | null {
+    // C3 model-stamp fix: a pool stem's session is its own stem name, not `<surface>-<slug>` —
+    // the pre-warmer passes it (the `model: null` registry bug was this default reading a
+    // non-existent pane).
+    const tail = capturePaneTail(tmuxTarget ?? `${surface}-${slug}`, 8);
     if (!tail) return null;
     // Direct api-id form, if a chrome version prints it: "claude-opus-4-8".
     const idMatch = tail.match(/claude-[a-z]+-[0-9][0-9-]*/i);
@@ -1289,13 +1292,17 @@ async function freshenPooledStem(slug: string, surface: string, stem: PoolStem, 
 async function dispatchToPooledStem(
     slug: string, surface: string, promptDoc: string, opts: { timeoutMs?: number },
 ): Promise<CaptureRecord | null> {
-    const stem = checkoutStem(slug, surface, new Date().toISOString());
-    if (!stem) return null; // empty pool → floor
-    if (!adoptPooledStem(slug, surface, stem)) {
-        removeStem(slug, surface, stem.stem_id); // stem died since pre-warm → retire + fall back to the floor
-        console.warn(`[tmux-dispatcher] ${slug}/${surface}: leased stem ${stem.stem_id} (${stem.tmux_session}) is dead — retired; falling back to ensureSurfaceSession`);
-        return null;
+    // C3 dead-stem retry: a dead leased stem retires and the NEXT free stem is tried (bounded by
+    // the pool size — no loop; the pool-manager replenishes the retired ones).
+    let stem: PoolStem | null = null;
+    for (let attempt = 0; attempt < Math.max(1, poolSizeFor(slug, surface)); attempt++) {
+        const candidate = checkoutStem(slug, surface, new Date().toISOString());
+        if (!candidate) return null; // empty pool → floor
+        if (adoptPooledStem(slug, surface, candidate)) { stem = candidate; break; }
+        retireStem(slug, surface, candidate, 'dead-at-adopt'); // died since pre-warm → sweep cleans up
+        console.warn(`[tmux-dispatcher] ${slug}/${surface}: leased stem ${candidate.stem_id} is dead — retired; trying next free stem`);
     }
+    if (!stem) return null; // every candidate dead → floor
     let cap: CaptureRecord;
     try {
         const freshenedPrompt = await freshenPooledStem(slug, surface, stem, promptDoc);
@@ -1307,8 +1314,7 @@ async function dispatchToPooledStem(
         // session each checkout, so a returned-but-wedged stem would be re-checked-out and dispatched
         // into a non-idle pane (the #5 idle-precondition hole). Retiring removes it from the registry;
         // the pool-manager replenishes to N + owns the tmux/sink cleanup on retire (R3a.1d).
-        removeStem(slug, surface, stem.stem_id);
-        console.warn(`[tmux-dispatcher] ${slug}/${surface}: pooled dispatch on stem ${stem.stem_id} FAILED — retired (not returned); pool-manager replenishes — ${(err as Error).message}`);
+        retireStem(slug, surface, stem, `dispatch-failed: ${(err as Error).message.slice(0, 80)}`);
         throw err;
     }
     returnStem(slug, surface, stem.stem_id); // CLEAN completion only → back to the pool (eager replenish = the pool-manager, C3)
@@ -1358,6 +1364,106 @@ export async function prewarmAndRegister(slug: string, surface: string): Promise
         try { tmux(['kill-session', '-t', stemSession]); } catch { /* half-launched stem, best-effort cleanup */ }
         return null;
     }
+}
+
+// ── PR-C3: the pool-manager (a dispatcher ROLE owned by the surface's driver process, NOT a
+// daemon — #109 trajectory). SINGLE-OWNER model: the process that dispatches to a (slug,surface)
+// pool (e.g. human-responder@<slug>) calls `startPoolManager` for it, so every pool mutation
+// (checkout/return/retire/replenish) happens in ONE process — the stem-pool sync-RMW stays
+// race-free (cond-3 generalised). ──────────────────────────────────────────────────────────
+
+/** Stems retired from the registry but whose tmux session awaits a SAFE kill (the R011/S181
+ *  never-kill-a-thinker invariant): the sweep kills only a chrome-idle pane, then cleans the
+ *  per-stem diary sink. Keyed by tmux session. */
+const pendingStemKills = new Map<string, { slug: string; reason: string }>();
+
+/**
+ * Retire a stem: remove it from the registry NOW (never re-leased) and queue its tmux session
+ * for the chrome-guarded kill sweep (+ sink cleanup after the kill). Jim's C3 items: retire must
+ * clean the sink AND cover the dispatch-failure path — both routed through here.
+ */
+function retireStem(slug: string, surface: string, stem: PoolStem, reason: string): void {
+    removeStem(slug, surface, stem.stem_id);
+    pendingStemKills.set(stem.tmux_session, { slug, reason });
+    console.warn(`[pool-manager] ${slug}/${surface}: retired stem ${stem.stem_id} (${reason}) — kill queued for the chrome-guarded sweep`);
+}
+
+/** The chrome-guarded kill sweep: kill a retired stem's session ONLY when its pane shows no
+ *  processing chrome (a timed-out stem may still be composing — never kill a thinker), then
+ *  clean its per-stem diary sink. A session already gone → clean the sink + forget. */
+function sweepRetiredStems(): void {
+    for (const [session, meta] of pendingStemKills) {
+        try {
+            if (tmuxSessionExists(session)) {
+                if (PROCESSING_CHROME_RE.test(capturePaneTail(session))) continue; // still thinking — next sweep
+                try { tmux(['kill-session', '-t', session]); } catch { /* raced its own death */ }
+            }
+            try { fs.rmSync(sinkDir(session), { recursive: true, force: true }); } catch { /* best-effort */ }
+            pendingStemKills.delete(session);
+            console.log(`[pool-manager] swept retired stem session ${session} (${meta.reason}) — killed idle + sink cleaned`);
+        } catch (err) {
+            console.warn(`[pool-manager] sweep of ${session} failed (retry next tick): ${(err as Error).message}`);
+        }
+    }
+}
+
+/** Pure age check for the 24h substrate reload (identity-substrate staleness — the deep gradient
+ *  drifts under a long-lived stem; no WM-freshen touches it). Exported for the unit test. */
+export function stemNeedsReload(stem: PoolStem, maxAgeMs: number, nowMs: number): boolean {
+    const warm = Date.parse(stem.warm_at);
+    return Number.isFinite(warm) && nowMs - warm >= maxAgeMs;
+}
+
+const POOL_MANAGER_TICK_MS = 60_000;
+const poolManagersStarted = new Set<string>();
+const replenishInFlight = new Set<string>();
+
+/** Replenish a pool to its manifest poolSize — sequential warms (simple; per-stem sentinels make
+ *  concurrency SAFE but sequential stays gentle), one loop in flight per pool. */
+async function replenishPool(slug: string, surface: string): Promise<void> {
+    const key = sessionKey(slug, surface);
+    if (replenishInFlight.has(key)) return;
+    replenishInFlight.add(key);
+    try {
+        const target = poolSizeFor(slug, surface);
+        while (poolStatus(slug, surface).total < target) {
+            const stem = await prewarmAndRegister(slug, surface);
+            if (!stem) { console.warn(`[pool-manager] ${slug}/${surface}: replenish warm failed — retry next tick`); break; }
+        }
+    } finally {
+        replenishInFlight.delete(key);
+    }
+}
+
+/**
+ * Start the pool-manager for one (slug, surface) — called by the surface's DRIVER process (e.g.
+ * the human-responder) when `poolSizeFor > 0`. Owns: the initial populate, eager replenish back
+ * to N, the chrome-guarded retire sweep, and the ~24h substrate reload (stemReloadHours, a
+ * registry leaf). Idempotent per process.
+ */
+export function startPoolManager(slug: string, surface: string): void {
+    const key = sessionKey(slug, surface);
+    if (poolManagersStarted.has(key)) return;
+    poolManagersStarted.add(key);
+    const life = spokeLifecycleFor(slug, surface);
+    const maxAgeMs = (life.stemReloadHours ?? 24) * 3600_000;
+    console.log(`[pool-manager] ${slug}/${surface}: started (poolSize=${poolSizeFor(slug, surface)}, reload=${life.stemReloadHours ?? 24}h)`);
+    void replenishPool(slug, surface); // initial populate (async — never blocks the caller)
+    setInterval(() => {
+        try {
+            sweepRetiredStems();
+            // 24h substrate reload: retire FREE over-age stems (a leased one retires on return/next tick).
+            const now = Date.now();
+            for (const stem of readPool(slug, surface).stems) {
+                if (stem.state === 'free' && stemNeedsReload(stem, maxAgeMs, now)) {
+                    retireStem(slug, surface, stem, 'substrate-reload (24h)');
+                }
+            }
+            void replenishPool(slug, surface);
+        } catch (err) {
+            console.warn(`[pool-manager] ${slug}/${surface} tick failed: ${(err as Error).message}`);
+        }
+    }, POOL_MANAGER_TICK_MS).unref();
 }
 
 /**

@@ -113,6 +113,10 @@ export interface SpokeLifecycle {
     /** Bounded full-load nudges before failing safe (no hollow answers; the message stays
      *  queued and retries next cadence — never a tight loop, S74). */
     maxWarmNudges: number;
+    /** PR-C3 (MNT-009): hours before a warm pool stem is retired + re-warmed — the ~24h substrate
+     *  reload (the deep-gradient/identity staleness no WM-freshen touches; freshness plan §3c —
+     *  identity-load-bearing, DO-NOT-optimise-away). Optional; the pool-manager defaults 24. */
+    stemReloadHours?: number;
 }
 
 export interface AgentManifest {

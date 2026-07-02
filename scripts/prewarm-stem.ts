@@ -101,7 +101,7 @@ async function main(): Promise<void> {
     //    #91 freshen cursor — deltaSinceCursor compares content.length, so CHARS not statSync bytes).
     const c0 = readFileSync(SENTINEL, 'utf8').trim();
     const nowIso = new Date().toISOString();
-    const model = observeActiveModel(slug, SURFACE);
+    const model = observeActiveModel(slug, SURFACE, tmuxSession); // C3 model-stamp fix: read the STEM's own pane (the `${surface}-${slug}` default was a wrong/absent pane in pool mode → the model:null bug)
     const wmCursor = currentWmCharLen(slug);
 
     if (POOL) {
