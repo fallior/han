@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-07-02 (S212) — revert(dispatcher): pooled leaf OFF on leo human-response (live-prove finding)
+
+The S212 live-prove showed the pool machinery is SOUND but the human-response head-of-line block is at the CONTROLLER (human-responder.ts:613 `if (processing) return` + single-flag wake = one-dispatch-at-a-time, drops concurrent wakes) — the pool is never called concurrently. Plus a pre-warmed `session`-stem responds verbosely (session-Leo identity, not a lean human-responder). So the flip is reverted to the proven non-pooled floor; ALL pool infra stays committed + inert (pooled leaf OFF). Re-flip after the follow-on: controller wake-queue + concurrent dispatch + the session-stem-identity question. Finding on thread mqvs3r6l.
+
 ## 2026-07-02 (S212) — feat(dispatcher): ACTIVATE the warm-stem pool on leo human-response (the MNT-009 flip)
 
 `leo` human-response `pooled: true` (garden-manifest). The head-of-line cure goes LIVE: a human-response dispatch now checks out one of N warm stems (concurrent stems don't block each other) instead of the single fixed session. **Safe by construction even before stems exist** — an empty pool → `checkoutStem` null → `ensureSurfaceSession` floor → byte-identical (the flip alone can't regress). Populate via `prewarmAndRegister ×N`; the coordinated live-prove (2 concurrent human-response dispatches, no head-of-line block, distinct leased stems, shared WM intact) is the milestone. Floor recycle-verify GREEN (diary-key byte-identical for a normal spoke, real end-to-end). Rollback = remove `pooled`. Jim-confirmed GO.
