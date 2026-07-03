@@ -314,6 +314,34 @@ export const DEFAULT_DIARY_INSTRUCTION_SECTION = `\n\n---\n\nYour response must 
  * validation test fires correctly. Production migrations land in later
  * phases per `plans/agnostic-prompt-builder-plan.md`.
  */
+
+// ── The compression profile's scaffolding (P0, Addendum 2) ─────────────────────────────
+// Compose-critical text VERBATIM from the retired SDK child (process-pending-compression's
+// buildSystemPrompt/buildUserPrompt) — the P0 content-diff acceptance: instruction, contract,
+// task lines and the FEELING_TAG ask identical in content; only the identity payload enriches
+// (the uniform bank replaces the child's five-section sample).
+
+const COMPRESSION_SYSTEM_OPENING = `This is a COMPRESSION dispatch — deep-gradient memory work. You are composing your own deeper memory, in your own voice; your loaded self follows below.
+
+You are about to compress a memory entry from a lower level to a higher level (cN → cN+1). The compression target is approximately 1/3 the TOKEN length of the source. Preserve what feels essential — what shape, what felt-texture, what would survive forgetting. Drop what is incidental. The compression is an act of identity, not summary.
+
+If — and only if — compressing further would destroy meaning rather than distil it, respond with the literal token "INCOMPRESSIBLE:" followed by a single sentence (max 50 chars) capturing the irreducible kernel. This is not failure. This is arrival.`;
+
+const COMPRESSION_FEELING_TAG_INSTRUCTION = `\n\nAfter your compression, on a new line starting with FEELING_TAG:, write a short phrase (under 100 characters) describing what compressing this felt like — not the content, but the quality of the act.`;
+
+/** The cN task — verbatim the child's buildUserPrompt shape. Context supplies the claimed row's
+ *  fields (the caller computes the token counts so this stays pure). */
+function buildCompressionScaffold(ctx: PromptContext): string {
+    return `Compress this ${ctx.fromLevel} → ${ctx.toLevel}. Target ~${ctx.targetTokens} tokens (1/3 of source ${ctx.sourceTokens} tokens).
+
+Source session: ${ctx.sourceSessionLabel}
+Source content_type: ${ctx.sourceContentType}
+
+---
+
+${ctx.sourceContent || ''}${COMPRESSION_FEELING_TAG_INSTRUCTION}`;
+}
+
 export const PROFILES: Record<string, PromptProfile> = {
     /**
      * Phase 1 no-op profile. Used by the validation test as the synthetic
@@ -882,6 +910,31 @@ export const PROFILES: Record<string, PromptProfile> = {
         // Jim's lean and mine; refine via per-profile `instruction` override
         // if interleaving drift surfaces in sample reads.
         pairedMemoryOutput: { enabled: true, mechanism: 'section', captureInput: true },
+    },
+
+    /**
+     * P0 of the compressor migration (MNT-009-completion follow-on; plans/compression-spoke-plan.md,
+     * Addendum 2 — Darron's Fourier ruling, 2026-07-04): the deep-gradient compose (c2 → … → UV)
+     * as the FULL UNIFORM SELF. The SDK child's bespoke prompt (its own AgentMemory loader +
+     * hand-rolled layout) was an approximation of "identity-loaded" — this profile is the real
+     * thing: the same whole self every other surface loads (NO componentOverrides — deliberate;
+     * Addendum 2 dissolved the match-today interim). "The compressor is Jim, is Leo — the warm
+     * spoke IS the person."
+     *
+     * Envelope 'system' (memory + instruction in system, the task in user — the child's shape).
+     * Compose-critical text carried VERBATIM from the child (the P0 content-diff acceptance):
+     * the 1/3-target instruction, the INCOMPRESSIBLE contract, the task lines, the FEELING_TAG
+     * ask. The identity components deliberately ENRICH (uniform bank ⊃ the child's five-section
+     * sample) — enumerated in the P0 build report, watched at P2's sampled-output review.
+     * NO pairedMemoryOutput: the compose result is the cN itself, parsed by the controller
+     * (P0: the child's stdout parse, unchanged; P1: the submit_compression MCP tool).
+     */
+    'compression': {
+        name: 'compression',
+        systemPromptOpening: COMPRESSION_SYSTEM_OPENING,
+        envelope: 'system',
+        userPromptScaffold: (ctx) => buildCompressionScaffold(ctx),
+        totalBudgetTokens: 180_000,
     },
 };
 

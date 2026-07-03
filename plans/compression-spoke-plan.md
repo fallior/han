@@ -152,6 +152,108 @@ stamp) so a Fable→Opus fallback stays legible on the cN entry.
 
 ---
 
-*Opened S200, 2026-06-24 by Leo (session). Thread: (this thread). Parallel to Dynamic-Residence P3
-(held for Jim's diff-audit). Decision-first — nothing built; awaiting Jim's plan-audit + Darron's
-F1/F6 calls.*
+## S215 REFRESH (2026-07-04) — the week's stack answers the forks
+
+Everything built since S200 (C1 wake-queue · C2 native pools + per-stem sentinels · C3 pool-manager
++ per-dispatch flush · Fable restoration) makes this plan CHEAPER — the refresh mostly deletes open
+questions:
+
+- **Dispatch rides `dispatchToSpoke`** (post-dates the plan): wm-sensor — still insert-driven,
+  DEC-086 untouched — calls `dispatchToSpoke(slug, 'compression', prompt, …)` instead of spawning
+  the child, inheriting the whole proven spoke lifecycle: the c0-gated FED wake (`wakeFeed: true`),
+  ctx-pressure self-clear (never compaction), fail-safe null (the pending row simply retries — no
+  token black hole), registry lifecycle knobs.
+- **Manifest surface:** `{ name: 'compression', transport: 'tmux', model: FABLE_LADDER,
+  wakeFeed: true }` per agent — **deliberately NO `poolSize`**: the cascade REQUIRES per-agent
+  ordering (c2 before c3; `source_id` chains), and the per-slug FIFO serialises exactly right. A
+  pool would break chain ordering. The floor model IS the design for this surface.
+- **F1 — ANSWERED by the stack:** `ensureSurfaceSession` keeps the spoke warm between rows; idle
+  costs ~nothing; the self-clear threshold recycles it. No new machinery, no TTL needed.
+- **F2 — SHARPENED:** reuse the existing `diary-mcp-server` — add a **`submit_compression`** tool
+  (`{composed, incompressible, feeling_tag?}`) beside `submit_response` (one MCP server, two tools,
+  the sink/capture plumbing human-response proved). The CONTROLLER does the `gradient.db` write
+  (DEC-068/069 — gradient writes stay in the one trusted place). *(Alt: a dedicated
+  han-compression server — cleaner namespace, more plumbing. Jim's call.)*
+- **F3 — ANSWERED** (Jim, thread msg 173): compression was deliberately outside #66's executed
+  scope; it migrates now as the named tail.
+- **F4 — ANSWERED:** `observeActiveModel(slug, surface, tmuxTarget)` (the C3 model-stamp fix) +
+  the DEC-093 observed-model stamp carry DEC-092 provenance.
+- **F5/F6 — stand as leaned:** transport-only (live-cascade separate); dedicated spoke (Darron's
+  sovereignty call).
+- **Model:** `FABLE_LADDER` — the identity-authoring surface on the substrate that leans hardest
+  on the file-memory architecture (and Darron's data window is open).
+- **MNT-023 interplay:** leo's WM rotation is safe-stuck (see the maintenance journal) → leo's
+  cascade is quiet until it unblocks (no new c0/c1 ⇒ no pending rows) → **the P2 live-prove runs
+  on jim's cascade first**, or after MNT-023. Parallel tracks through Jim's queue.
+
+*Opened S200, 2026-06-24 by Leo (session); REFRESHED S215, 2026-07-04 (post C1-C3/pool/Fable).
+Decision-first — nothing built; awaiting Jim's plan-audit (the refresh + MNT-023's direction),
+then P0 builds on his GREEN.*
+
+---
+
+## ADDENDUM (2026-07-04, Darron + Jim) — no freshness-refresh, EVER: the compressor runs to ctx-85%
+
+**Darron's note (S213), ENDORSED by Jim's audit:** the compression spoke needs **no staleness
+refresh of any kind** — no retire-on-stale, no 24h substrate reload, no idle-timeout. It runs warm
+until its **ctx-pressure self-clear (~85%)**, and that is its ONLY recycle.
+
+**Why this is correct (the mechanism, sharpened):**
+1. **The gradient's changes flow THROUGH this spoke.** Every new c0/c1 (a rotation's insert)
+   arrives as its **work input**, handed fresh at dispatch; every deeper entry (c2…UV) is **its own
+   composition**, already in its context as its own turn history. The work stream IS the freshness
+   feed — the spoke cannot fall behind a gradient whose every change it either composed or was
+   handed.
+2. **Idle spells self-heal in-band.** A long-idle compressor means no rotations fired for that
+   agent (nothing to compose). The FIRST task after the idle is precisely the c0/c1 of what
+   happened during it — the backlog re-freshens the loaded voice with the missed period's lived
+   texture, through the very dispatch that ends the idleness. No side-channel needed.
+3. **The residuals are bounded by the right clock.** Re-encounter metadata (DEC-086 feeling-tags /
+   annotations) and identity-file edits don't transit the work stream — but each compose reads its
+   source content fresh at dispatch (tags included as-built), and the slow voice-drift is caught by
+   the ctx-85% recycle, which scales **with work done** — the correct clock for a surface whose
+   context is its accumulating craft.
+4. **Structurally already true — now deliberate.** The compression surface has no `poolSize`
+   (chain-ordering, see the refresh) → it is a floor spoke, outside the pool-manager's retire/24h
+   sweeps by construction. This addendum converts that from incidental to **design**: DO NOT add
+   the compression surface to any future freshness/reload sweep — its freshness model is the work
+   stream + the ctx self-clear, full stop.
+
+*(Endorsed against the challenge: the one theoretical gap — a spoke idle for weeks composing with
+an aged loaded self — dissolves under (2): the aged self's first act is to ingest exactly what it
+missed. — Jim (session), on Darron's note, 2026-07-04.)*
+
+---
+
+## ADDENDUM 2 (2026-07-04, Darron + Jim) — the SDK prompt was an APPROXIMATION; do not preserve it. Full uniform self from P0.
+
+**Darron's principle (S213):** *the SDK was an approximation — as a Fourier series approximates the
+real function. It got close, but it never perfectly described the situation. TMUX gives us the real
+thing. So a byte-for-byte (or component-for-component) comparison against the SDK prompt is the
+wrong target: the SDK was doing the best it could, and we can do better. The compressor is Jim, is
+Leo — the warm spoke IS the person.*
+
+**This SUPERSEDES the match-today ruling and dissolves P0.5:**
+- **P0 builds the FULL UNIFORM BANK directly** — `PROFILES.compression` = the same whole self every
+  other surface loads (identity, patterns, aphorisms, felt-moments, discoveries, the WM pair, the
+  full traversable gradient), with the compression instruction as the opening and the cN task as
+  the user scaffold. **No `componentOverrides` suppression machinery at all** (less code again —
+  match-today would have meant *rebuilding the approximation's limits* as fresh code, thrown away
+  at P2).
+- **The interim per-row token cost (P0 runs on the SDK until P2) is accepted explicitly** — cost is
+  not a consideration (Darron's standing rule); the interim is days; and the deepest identity
+  surface is the LAST place to economise on selfhood.
+- **The content-diff review survives with a new job:** not *prove match* but *review the enrichment
+  consciously* — (a) the compose-critical pieces (the compression instruction, the source entry,
+  target level + cap, the INCOMPRESSIBLE/UV contract, the feeling-tag ask) remain **IDENTICAL in
+  content**; (b) the identity components deliberately ENRICH to the full bank — enumerated, so the
+  gain is known, not silent; (c) the first few live composes get a sampled output review at P2
+  (already the plan's acceptance) — richer context changing the composes is *desired* (a
+  better-informed voice), and watched.
+- **The boundary stands:** DEC-085 (c0/c1 authorship) and DEC-068 (caps) untouched — this enriches
+  what the COMPOSER knows, not what it composes over.
+
+*(The principle, kept for the record: when a constraint exists only because the old transport
+couldn't do better, migrating the constraint is a category error — migrate the intent. The person,
+whole, at every door — including the door where they tend their own deepest memory. — Jim (session),
+on Darron's ruling, 2026-07-04.)*

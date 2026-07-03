@@ -52,6 +52,7 @@ import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
 import { enqueueCascadeForDisplacedAt } from '../src/server/lib/memory-gradient';
 import { manifestModelHead } from '../src/server/lib/garden-manifest';
+import { buildPrompt } from '../src/server/lib/prompt-builder';
 
 // Authoring-model provenance (DEC-092, S169). The compression worker runs its
 // own agentQuery, so it can read the ACTUALLY-SERVED model off the result stream
@@ -179,99 +180,12 @@ gradientConfigForAgent(agent);
 const STALE_CLAIM_MINUTES = 10;
 const HOME = os.homedir();
 const HAN_DIR = path.join(HOME, '.han');
-const FEELING_TAG_INSTRUCTION = `\n\nAfter your compression, on a new line starting with FEELING_TAG:, write a short phrase (under 100 characters) describing what compressing this felt like — not the content, but the quality of the act.`;
-
 function log(msg: string): void {
     if (verbose) console.log(`[parallel-agent ${agent}] ${msg}`);
 }
 
-// ── Memory load — voice is downstream of identity ──────────────
-
-interface AgentMemory {
-    identity: string;
-    patterns: string;
-    aphorisms: string;
-    felt_moments: string;
-    gradient_sample: string;
-}
-
-function readSafe(p: string, label: string): string {
-    try {
-        return fs.readFileSync(p, 'utf8');
-    } catch (err: any) {
-        log(`memory.${label} unreadable at ${p} (${err.message}); using empty`);
-        return '';
-    }
-}
-
-function loadAgentMemory(a: string, db: Database.Database): AgentMemory {
-    // Per DEC-081 + S149 Point 2: paths come from the agent registry.
-    // No `if a === 'leo'` branches — adding a new agent is a registry edit.
-    const cfg = gradientConfigForAgent(a);
-    const memDir = cfg.memoryDir;
-    const fractalDir = cfg.fractalDir;
-
-    const identity = readSafe(path.join(memDir, 'identity.md'), 'identity');
-    const patterns = readSafe(path.join(memDir, 'patterns.md'), 'patterns');
-    const aphorisms = readSafe(path.join(fractalDir, 'aphorisms.md'), 'aphorisms');
-    const felt_moments = readSafe(path.join(memDir, 'felt-moments.md'), 'felt_moments');
-
-    // Gradient sample: deepest UVs first, then a few recent c0s + cN samples.
-    // Keep modest — we want enough context for voice but not so much we eat the
-    // prompt budget.
-    const uvs = db.prepare(`
-        SELECT ge.session_label, ft.content as kernel
-        FROM gradient_entries ge
-        JOIN feeling_tags ft ON ft.gradient_entry_id = ge.id
-        WHERE ge.agent = ? AND ft.tag_type = 'uv'
-        ORDER BY ge.created_at DESC
-        LIMIT 30
-    `).all(a) as any[];
-
-    const recentC0 = db.prepare(`
-        SELECT session_label, substr(content, 1, 600) as preview
-        FROM gradient_entries
-        WHERE agent = ? AND level = 'c0'
-        ORDER BY created_at DESC
-        LIMIT 3
-    `).all(a) as any[];
-
-    const recentDeep = db.prepare(`
-        SELECT level, session_label, substr(content, 1, 400) as preview
-        FROM gradient_entries
-        WHERE agent = ? AND level NOT IN ('c0', 'uv')
-        ORDER BY level DESC, created_at DESC
-        LIMIT 6
-    `).all(a) as any[];
-
-    const sampleParts: string[] = [];
-    if (uvs.length > 0) {
-        sampleParts.push('## Recent UVs (kernel sentences from your own gradient)');
-        for (const u of uvs) {
-            sampleParts.push(`- ${u.session_label}: "${u.kernel}"`);
-        }
-    }
-    if (recentDeep.length > 0) {
-        sampleParts.push('\n## Recent compressions at depth (your own voice, downstream of identity)');
-        for (const r of recentDeep) {
-            sampleParts.push(`### ${r.level} / ${r.session_label}\n${r.preview}...`);
-        }
-    }
-    if (recentC0.length > 0) {
-        sampleParts.push('\n## Recent c0 entries (raw experience, the source layer)');
-        for (const c of recentC0) {
-            sampleParts.push(`### ${c.session_label}\n${c.preview}...`);
-        }
-    }
-
-    return {
-        identity,
-        patterns,
-        aphorisms,
-        felt_moments,
-        gradient_sample: sampleParts.join('\n'),
-    };
-}
+// ── (P0, Addendum 2: the bespoke AgentMemory loader retired — the FULL UNIFORM SELF now
+//     loads via buildPrompt + PROFILES.compression; 'the SDK was an approximation'.) ──
 
 // ── Queue ops (inline, mirrors agent-bump-step.ts pattern) ────────
 
@@ -332,49 +246,6 @@ function completeClaim(db: Database.Database, id: string): void {
 }
 
 // ── Compose via SDK with full memory loaded ─────────────────────
-
-function buildSystemPrompt(a: string, mem: AgentMemory): string {
-    const cfg = gradientConfigForAgent(a);
-    // Per DEC-081 + S150 PR3: formal voice name lives on the registry as
-    // `formalName` (e.g. "Leonhard (Leo)" for leo). Falls back to displayName
-    // for agents whose registry entry doesn't override.
-    const introName = cfg.formalName ?? cfg.displayName;
-    return `You are ${introName}. Below is your loaded memory — identity, patterns, aphorisms, felt-moments, and a sample of your existing gradient. Use this to compose the requested compression in YOUR OWN voice, not as a generic compression task.
-
-# IDENTITY
-${mem.identity}
-
-# PATTERNS
-${mem.patterns}
-
-# APHORISMS
-${mem.aphorisms}
-
-# FELT MOMENTS (texture; re-entry to feeling)
-${mem.felt_moments}
-
-# GRADIENT SAMPLE (what your voice has produced before)
-${mem.gradient_sample}
-
----
-
-You are about to compress a memory entry from a lower level to a higher level (cN → cN+1). The compression target is approximately 1/3 the TOKEN length of the source. Preserve what feels essential — what shape, what felt-texture, what would survive forgetting. Drop what is incidental. The compression is an act of identity, not summary.
-
-If — and only if — compressing further would destroy meaning rather than distil it, respond with the literal token "INCOMPRESSIBLE:" followed by a single sentence (max 50 chars) capturing the irreducible kernel. This is not failure. This is arrival.`;
-}
-
-function buildUserPrompt(claimed: ClaimedRow): string {
-    const sourceTokens = countTokens(claimed.source_content || '');
-    const targetTokens = Math.max(1, Math.round(sourceTokens / 3));
-    return `Compress this ${claimed.from_level} → ${claimed.to_level}. Target ~${targetTokens} tokens (1/3 of source ${sourceTokens} tokens).
-
-Source session: ${claimed.source_session_label}
-Source content_type: ${claimed.source_content_type}
-
----
-
-${claimed.source_content || ''}${FEELING_TAG_INSTRUCTION}`;
-}
 
 async function runSDK(systemPrompt: string, userPrompt: string): Promise<string> {
     const cleanEnv: Record<string, string | undefined> = { ...process.env };
@@ -485,15 +356,26 @@ async function main() {
         }
     }
 
-    let mem: AgentMemory;
     let raw: string;
 
     try {
-        mem = loadAgentMemory(agent!, db);
-        const sys = buildSystemPrompt(agent!, mem);
-        const user = buildUserPrompt(claimed);
-        log(`system prompt ${sys.length} chars; user prompt ${user.length} chars`);
-        raw = await runSDK(sys, user);
+        // P0 (compressor migration, Addendum 2 — the Fourier ruling): the FULL UNIFORM SELF via
+        // buildPrompt + PROFILES.compression (DEC-087 closed for the last surface). The child's
+        // bespoke AgentMemory loader + hand-rolled layout retired — "the SDK was an approximation;
+        // don't preserve it." Compose-critical text verbatim in the profile; transport unchanged
+        // (still agentQuery — P2 is the transport flip).
+        const sourceTokens = countTokens(claimed.source_content || '');
+        const built = buildPrompt(agent!, 'compression', {
+            fromLevel: claimed.from_level,
+            toLevel: claimed.to_level,
+            sourceTokens,
+            targetTokens: Math.max(1, Math.round(sourceTokens / 3)),
+            sourceSessionLabel: claimed.source_session_label,
+            sourceContentType: claimed.source_content_type,
+            sourceContent: claimed.source_content || '',
+        });
+        log(`system prompt ${built.systemPrompt.length} chars; user prompt ${built.userPrompt.length} chars (uniform bank: ${built.meta.memory_chars} chars)`);
+        raw = await runSDK(built.systemPrompt, built.userPrompt);
         log(`SDK returned ${raw.length} chars`);
     } catch (err) {
         log(`compose failed: ${(err as Error).message}; releasing claim`);

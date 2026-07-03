@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-07-04 (S215) — feat(compressor): P0 — the deep-gradient compose as the FULL UNIFORM SELF (Addendum 2)
+
+The compressor migration's first brick (plans/compression-spoke-plan.md + Addendums; Darron's Fourier ruling: "the SDK was an approximation — don't preserve it; the compressor IS the person"). `process-pending-compression`'s compose now assembles via `buildPrompt(agent, 'compression')` + the new `PROFILES.compression` — the FULL uniform bank (no componentOverrides; the same whole self every surface loads), closing the DEC-087 gap on the last bespoke surface. Compose-critical text byte-verbatim (the 1/3-target instruction, the INCOMPRESSIBLE contract, the task lines, the FEELING_TAG ask — test 12/12); the identity payload deliberately ENRICHES (child's 5-section sample → the full self incl. discoveries, the WM pair, the full traversable gradient — enumerated, conscious). The bespoke `AgentMemory` loader/layout RETIRED (net −120/+40 — the enrichment cost negative code). Transport untouched (agentQuery until P2); DEC-092 served-model read untouched; DEC-085/068 boundaries clean. Budget-watch (Jim): ~174K/200K — per-component tail-trim + `truncation_events` degrade gracefully; watch the first live composes' BuildMeta; P2 dissolves the per-row prompt. Jim diff-audit GREEN.
+
 ## 2026-07-03 (S213) — feat(pool): ACTIVATE — poolSize:2 on JIM human-response (MNT-021/022 cure)
 
 The agnostic stack pays off (DEC-081): jim's pool is a ONE-LEAF flip — 2 native warm stems on his human-response, erasing the cold-path latency Darron felt today (a dead spoke → cold-launch → ~8min to answer, 17:12→17:20; the C1 queue held so nothing dropped — the pool now removes the wait). Jim-ROOT watch-items (registry memoryDir; jim-human-swap prefix) ride the same registry-resolved paths the leo pool proved. Jim's own GO + build-order (msg 173).
