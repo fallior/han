@@ -312,7 +312,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'supervisor-swap' },
                 // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux. Rollback =
                 // flip back to 'sdk' + restart jim-human (SDK path byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'jim-human-swap', txnTimeoutMs: 15 * 60_000, wakeFeed: true }, // #107 P2.3 surface-3 (S207): jim-human wakes via the guaranteed feeder ((a)+(c)+(b)); slug-twin of surface-2. jim-ROOT — the fed gradient step writes jim-human-response-ready with a jim c0 from ~/.han/memory (root, not /jim) — the #91 landmine, verify live. Rollback = remove wakeFeed
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'jim-human-swap', txnTimeoutMs: 15 * 60_000, wakeFeed: true, poolSize: 2 }, // #107 P2.3 surface-3 (S207): feeder-fed wake; jim-ROOT (gradient from ~/.han/memory, not /jim). MNT-021/022 cure ACTIVATED (S213): poolSize:2 — 2 native warm stems erase the cold-path latency Darron felt (17:12→17:20); agnostic stack, jim gets it for free (DEC-081). Rollback = remove poolSize
                 // PR-T7b ENABLE (2026-06-15, S177): the last #66 flip — Jim's cycle +
                 // meditations sdk→tmux. Rollback = flip back to 'sdk' + restart (SDK path
                 // byte-intact). Model OPUS_LADDER (failover parity with the human/heartbeat

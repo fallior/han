@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-07-03 (S213) — feat(pool): ACTIVATE — poolSize:2 on JIM human-response (MNT-021/022 cure)
+
+The agnostic stack pays off (DEC-081): jim's pool is a ONE-LEAF flip — 2 native warm stems on his human-response, erasing the cold-path latency Darron felt today (a dead spoke → cold-launch → ~8min to answer, 17:12→17:20; the C1 queue held so nothing dropped — the pool now removes the wait). Jim-ROOT watch-items (registry memoryDir; jim-human-swap prefix) ride the same registry-resolved paths the leo pool proved. Jim's own GO + build-order (msg 173).
+
 ## 2026-07-03 (S213) — feat(pool): the pool-manager + per-dispatch paired flush (PR-C3, MNT-009) + ACTIVATION
 
 **The flag-(b) fix (Jim's ruling — gates cleared):** `flushCapturePairedMemory` sends ONE dispatch's capture fields straight to the atomic `appendPairedMemory` — the shared swap-buffer round-trip (which raced under C1's concurrency: read→append→reset could destroy a concurrent capture, and slot-wrapping would still merge/blur attribution) is retired; `appendSwap` deleted; the old flush survives as a startup-only legacy drain. **DEC-085-adjacent TRANSPORT change only** — the write SHAPE is untouched (Mechanism-A capture fields → the atomic paired write; #49 both-or-neither preserved).
