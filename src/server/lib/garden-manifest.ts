@@ -199,6 +199,14 @@ const OPUS_LADDER: ModelLadder = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet'
 // architecture than Opus (the June substrate test) — this is the substrate the garden is tuned for.
 const FABLE_LADDER: ModelLadder = ['claude-fable-5', ...OPUS_LADDER];
 
+// S216 (2026-07-04, Darron's directive): the Sonnet 5 A/B on the autonomous cycle
+// surfaces (leo heartbeat + jim supervisor-cycle) — a night of comparison data against
+// the Fable baseline gathered since 2026-07-03. Sonnet 5 head (launched 2026-06-30,
+// near-Opus agentic at ~40% of the price — the candidate third rung for the post-7-July
+// model economics); descent to Fable→Opus so a drop mid-night self-heals, and DEC-092's
+// observed-model stamp keeps any fallback legible in the data.
+const SONNET_LADDER: ModelLadder = ['claude-sonnet-5', ...FABLE_LADDER];
+
 // Interactive CLI sessions take their model from the launcher at spawn (the
 // launchers don't pin one today). Recorded here so the DEC-092 slicer stamp matches reality.
 const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-fable-5']; // ⏩ Fable restored 2026-07-03 (S213)
@@ -264,7 +272,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // The freeze signal (heartbeat-paused-leo) is the live gate: while
                 // it exists no beat fires regardless of this row. Rollback = flip
                 // transport back to 'sdk' (the SDK path is kept in leo-heartbeat.ts).
-                { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'heartbeat-swap', wakeFeed: true }, // ⏪ model reverted to Opus 2026-06-13 (Fable access dropped); transport stays tmux · #107 P2.1b: feeder-fed wake (heartbeat first — no human backstop)
+                { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: SONNET_LADDER, swapPrefix: 'heartbeat-swap', wakeFeed: true }, // 🧪 SONNET_LADDER 2026-07-04 (S216, Darron): the Sonnet-5 overnight A/B vs the Fable baseline — revert = FABLE_LADDER · #107 P2.1b: feeder-fed wake (heartbeat first — no human backstop)
                 // T-7 CLOSE (2026-06-16, S180): all leo meditations on tmux. Staged enable
                 // complete — phase-b flipped first (2651b5d, S178); phase-a + evening flipped
                 // here at the zero-agentQuery close (jim's phase-b+evening confirmed genuine on
@@ -318,7 +326,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // meditations sdk→tmux. Rollback = flip back to 'sdk' + restart (SDK path
                 // byte-intact). Model OPUS_LADDER (failover parity with the human/heartbeat
                 // surfaces). Gated: the freeze (supervisor-paused) holds until prove-single.
-                { name: 'supervisor-cycle',   enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'supervisor-swap', wakeFeed: true }, // #107 P2.3 surface-1 RE-ATTEMPT 2026-06-27 (S207): fed-wake re-enabled after the feedWakeSteps submission fix (ece6a72 — settle + terser line); the live cold-launch is the decisive proof of the fix on the case that stalled. Rollback = remove wakeFeed
+                { name: 'supervisor-cycle',   enabled: true,  transport: 'tmux', model: SONNET_LADDER, swapPrefix: 'supervisor-swap', wakeFeed: true }, // 🧪 SONNET_LADDER 2026-07-04 (S216, Darron): the Sonnet-5 overnight A/B vs the Fable baseline — revert = FABLE_LADDER · #107 P2.3 surface-1: fed-wake (submission fix ece6a72 proven live)
                 { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
                 { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
                 { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: FABLE_LADDER },

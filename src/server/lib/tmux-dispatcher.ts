@@ -435,6 +435,7 @@ export async function awaitChromeOrDescend(
 const MODEL_DISPLAY_TO_ID: Record<string, string> = {
     'opus 4.8': 'claude-opus-4-8', 'opus 4.7': 'claude-opus-4-7', 'opus 4.6': 'claude-opus-4-6',
     'sonnet 4.6': 'claude-sonnet-4-6', 'haiku 4.5': 'claude-haiku-4-5', 'fable 5': 'claude-fable-5',
+    'sonnet 5': 'claude-sonnet-5', // S216: the Sonnet-5 cycle A/B — absent, the overnight DEC-092 stamps would fall back to the manifest head and misreport the comparison
 };
 /**
  * Read the ACTUALLY-ACTIVE model from a surface's live pane chrome (the status line shows
