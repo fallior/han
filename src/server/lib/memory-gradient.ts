@@ -1003,7 +1003,7 @@ const ROLLING_WINDOW_TAIL_DEFAULT = 25_000; // tokens — archived for compressi
 // Legacy threshold — used by rotateMemoryFile (kept for backward compat)
 const MEMORY_FILE_SIZE_THRESHOLD = 50 * 1024; // 50KB
 
-interface MemoryFileEntry {
+export interface MemoryFileEntry { // exported for the MNT-023 heading-repair script (S216) — the repair must parse EXACTLY as the rotation does
     header: string;
     content: string;
     date: string | null; // Extracted date for grouping
@@ -1028,7 +1028,7 @@ interface MemoryFileMaintenanceResult {
  * trimmed content within the source string, eliminating `indexOf` lookups
  * by callers that need to slice/anchor at entry boundaries.
  */
-function splitMemoryFileEntries(content: string): MemoryFileEntry[] {
+export function splitMemoryFileEntries(content: string): MemoryFileEntry[] { // export: MNT-023 repair script (S216) — same splitter, no mirror-drift
     const entries: MemoryFileEntry[] = [];
 
     // Walk delimiters with position tracking. Split regex matches:

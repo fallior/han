@@ -55,6 +55,22 @@ export function stripMarkers(content: string): string {
     return content.replace(WM_BOUNDARY_REGEX_STRIP, '\n');
 }
 
+/**
+ * MNT-026 (S216): neutralise marker-shaped text in APPENDED CONTENT — the byte-stuffing
+ * cure at the single append chokepoint. The threat is QUOTATION, not collision: a WM
+ * entry that quotes a literal `<!-- WM-BOUNDARY: id=X ts=Y -->` (we discuss markers in
+ * memory constantly; the docs carry the exact syntax) would parse as a REAL boundary —
+ * and a quoted pair landing in both files could make `pickPairedBoundary` cut at prose;
+ * `stripMarkers` at archive would silently DELETE the quoted text from c0 content
+ * (lived-record mutation). The transform breaks the comment-open (`<!--` → `<!·--`)
+ * ONLY where it precedes `WM-BOUNDARY`, so no regex (strip/parse/find) can match it,
+ * while the mention stays human-legible in the record. Real markers are written only
+ * by `placePairedMarker` / the repair script — downstream of this sanitiser.
+ */
+export function sanitizeMarkerText(content: string): string {
+    return content.replace(/<!--(?=\s*WM-BOUNDARY)/g, '<!·--');
+}
+
 /** Parse all WM-BOUNDARY markers in a content string. */
 export function parseMarkers(content: string): { id: string; timestamp: string; fabricated: boolean }[] {
     const out: { id: string; timestamp: string; fabricated: boolean }[] = [];
@@ -107,6 +123,11 @@ export async function appendPairedMemory(
     const fullPath = path.join(cfg.memoryDir, 'working-memory-full.md');
     const compPath = path.join(cfg.memoryDir, 'working-memory.md');
     const source = opts.source ?? 'unknown';
+
+    // MNT-026: byte-stuff marker-shaped text in incoming content at the ONE chokepoint —
+    // quoted `<!-- WM-BOUNDARY …` prose can never parse as a real boundary downstream.
+    fullContent = sanitizeMarkerText(fullContent);
+    compressedContent = sanitizeMarkerText(compressedContent);
 
     const fullPresent = !!fullContent.trim();
     const compPresent = !!compressedContent.trim();
@@ -188,6 +209,14 @@ export interface PlacePairedMarkerOpts {
     source?: string;
     /** If true, marker carries `fabricated=true` flag. Default false. */
     fabricated?: boolean;
+    /**
+     * MNT-023 root-cure (S216): keep existing markers — markers ACCUMULATE as cut
+     * candidates (the recovered S210 design; the rotation consumes them by archiving
+     * + its kept-head strip-all). Default false = the legacy strip-others behaviour
+     * (semantic /pfc placements unchanged; flipping that default is a housekeeping
+     * design conversation, MNT-025-adjacent, not this diff).
+     */
+    accumulate?: boolean;
 }
 
 /**
@@ -224,9 +253,11 @@ export async function placePairedMarker(
         const fullContent = fs.readFileSync(fullPath, 'utf8');
         const compContent = fs.readFileSync(compPath, 'utf8');
 
-        // Strip any existing markers (one-marker-at-a-time)
-        const fullStripped = stripMarkers(fullContent);
-        const compStripped = stripMarkers(compContent);
+        // accumulate (MNT-023 root-cure): keep existing markers as cut candidates.
+        // Legacy default: strip-others (one-marker-at-a-time, S155 — reversed at 06738be;
+        // the auto-band placer passes accumulate:true; semantic /pfc callers unchanged).
+        const fullStripped = opts.accumulate ? fullContent : stripMarkers(fullContent);
+        const compStripped = opts.accumulate ? compContent : stripMarkers(compContent);
 
         // Append the new marker at end-of-file in both
         const fullSizeBefore = fs.statSync(fullPath).size;
@@ -253,27 +284,79 @@ export async function placePairedMarker(
 export interface EnsureMarkerOpts {
     source?: string;
     /**
-     * Token threshold above which auto-fabrication fires. Default 25000.
-     * Mirrors the legacy rollingWindowTail target — when WMF reaches ~25K
-     * tokens with no marker, auto-fabricate at end-of-file as a "ready-
-     * to-slice" baseline. Agent-placed semantic markers override this when
-     * placed (per the one-marker-at-a-time rule).
+     * DEPRECATED (MNT-023 root-cure, S216): superseded by the harvest-band gate —
+     * the band is read from live config (rollingWindowTail − rollingWindowHead …
+     * rollingWindowTrigger; derived, never a hardcoded 5000 — Jim's band-drift nit).
+     * Retained so pre-existing callers type-check; ignored.
      */
     autoFabricateAtTokens?: number;
 }
 
+/** The rotation's bands, from live config (fallback = the shipped defaults).
+ *  harvestMin..max = where the rotation ACCEPTS a marker for a cut (Tail−Head … Trigger);
+ *  placeMin = where PLACEMENT fires (Tail — Darron's design: "place the marker once we
+ *  hit ~25K", so harvested c0s land at ≈ the 25K target, not the 20K band floor). */
+function markerBands(): { harvestMin: number; placeMin: number; max: number } {
+    try {
+        const cfgJson = JSON.parse(fs.readFileSync(path.join(process.env.HOME ?? '', '.han', 'config.json'), 'utf8'));
+        const tail = cfgJson.memory?.rollingWindowTail ?? 25_000;
+        const head = cfgJson.memory?.rollingWindowHead ?? 5_000;
+        const trigger = cfgJson.memory?.rollingWindowTrigger ?? 30_000;
+        return { harvestMin: tail - head, placeMin: tail, max: trigger };
+    } catch {
+        return { harvestMin: 20_000, placeMin: 25_000, max: 30_000 };
+    }
+}
+
 /**
- * Check whether the agent's working-memory pair has a marker; if not AND
- * WMF has crossed the auto-fabricate threshold, place a fabricated marker
- * at end-of-file. Idempotent: if a marker already exists, no-op. If WMF
- * is below threshold, no-op.
+ * The MNT-023 root-cure gate, pure + unit-testable. Decides marker placement for a
+ * WMF content string (token positions from file start):
+ *   - 'in-band-exists' — a marker already sits inside the HARVEST band
+ *     [harvestMin, max]: the rotation's `pickPairedBoundary` will cut at it; place
+ *     nothing. ONLY harvest-band markers count as supply — a stranded below-band
+ *     marker (the 2026-07-02 stall: one at ~18.7K against a 20K floor, blocking
+ *     all placement for three days) must NOT block.
+ *   - 'out-of-band' — EOF below placeMin (wait for the ~Tail thought-edge —
+ *     Darron's design, so the harvested c0 lands at ≈25K, not the band floor) or
+ *     past max (an EOF marker would not be harvestable — dishonest; past-trigger
+ *     recovery belongs to the bite-fabricator / the repair script, not here).
+ *   - 'place' — EOF ∈ [placeMin, max] and no harvest-band marker exists: place NOW,
+ *     at this thought-edge — harvestable AND at the designed c0 size by
+ *     construction. (A chunky append leapfrogging placeMin→past-max gets no marker;
+ *     the bite-fabricator is the named net — Jim's residual #1.)
+ */
+export function chooseMarkerAction(
+    fullContent: string,
+    bands: { harvestMin: number; placeMin: number; max: number } = markerBands(),
+): 'in-band-exists' | 'out-of-band' | 'place' {
+    const re = new RegExp(WM_BOUNDARY_REGEX_PARSE.source, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(fullContent)) !== null) {
+        const tokenPos = countTokens(fullContent.substring(0, m.index));
+        if (tokenPos >= bands.harvestMin && tokenPos <= bands.max) return 'in-band-exists';
+    }
+    const eofTokens = countTokens(fullContent);
+    if (eofTokens < bands.placeMin || eofTokens > bands.max) return 'out-of-band';
+    return 'place';
+}
+
+/**
+ * The MNT-023 ROOT-CURE (S216, Jim's audit requirements from the stranded-marker
+ * forensics): keep the harvest band supplied. Whenever the WMF's EOF passes through
+ * the band [Tail−Head, Trigger] with no in-band marker, place a fresh ACCUMULATING
+ * paired marker at that thought-edge — so the rotation's primary path always has an
+ * in-band candidate, regardless of whether any ritual (/pfc) ever runs. Replaces the
+ * S155-relic any-marker-exists gate that starved the band (a stranded below-band
+ * marker blocked all placement — MNT-023's root; the /pfc close was the only
+ * accidental supply, retired by MNT-012).
  *
- * Called automatically after `appendPairedMemory` (via opts.ensureMarker,
- * default true). Can also be called directly from FLUSH FIRST agent-protocol
- * hooks.
+ * Called automatically after `appendPairedMemory` (via opts.ensureMarker, default
+ * true) — every paired write is the placement hook; the just-flushed entry is a
+ * genuine thought-edge.
  *
- * @returns 'fabricated' if a new marker was placed, 'exists' if one was
- *          already present, 'below-threshold' if WMF too small to need one,
+ * @returns 'fabricated' if a marker was placed, 'exists' if an in-band marker
+ *          already covers the band, 'below-threshold' if EOF is outside the band
+ *          (either side — the legacy name kept for callers' log strings),
  *          'paired-files-missing' if the files don't exist yet.
  */
 export async function ensureMarkerOrFabricate(
@@ -283,19 +366,15 @@ export async function ensureMarkerOrFabricate(
     const cfg = gradientConfigForAgent(agent);
     const fullPath = path.join(cfg.memoryDir, 'working-memory-full.md');
     const compPath = path.join(cfg.memoryDir, 'working-memory.md');
-    const threshold = opts.autoFabricateAtTokens ?? 25000;
 
     if (!fs.existsSync(fullPath) || !fs.existsSync(compPath)) return 'paired-files-missing';
 
     const fullContent = fs.readFileSync(fullPath, 'utf8');
-    const compContent = fs.readFileSync(compPath, 'utf8');
 
-    const existing = parseMarkers(fullContent);
-    if (existing.length > 0) return 'exists';
+    const action = chooseMarkerAction(fullContent);
+    if (action === 'in-band-exists') return 'exists';
+    if (action === 'out-of-band') return 'below-threshold';
 
-    const fullTokens = countTokens(fullContent);
-    if (fullTokens < threshold) return 'below-threshold';
-
-    await placePairedMarker(agent, { source: opts.source ?? 'auto-fab', fabricated: true });
+    await placePairedMarker(agent, { source: opts.source ?? 'auto-band', fabricated: true, accumulate: true });
     return 'fabricated';
 }
