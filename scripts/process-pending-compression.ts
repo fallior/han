@@ -394,18 +394,23 @@ async function main() {
                 log(`kernel ${kernel.length} chars > 50 — truncating`);
             }
             const useKernel = kernel.length > 50 ? kernel.slice(0, 50) : kernel;
-            db.prepare(`
-                INSERT INTO feeling_tags
-                    (gradient_entry_id, author, tag_type, content, change_reason, created_at)
-                VALUES (?, ?, 'uv', ?, NULL, ?)
-            `).run(claimed.source_id, agent, useKernel, new Date().toISOString());
-            db.prepare(`
-                UPDATE gradient_entries
-                   SET cascade_halted_at = ?,
-                       level = CASE WHEN level LIKE '%-uv' THEN level ELSE level || '-uv' END
-                 WHERE id = ? AND agent = ?
-            `).run(claimed.from_level, claimed.source_id, agent);
-            completeClaim(db, claimed.id);
+            // P1 acceptance (Jim): atomic-BEFORE-mark-done — the UV tag + halt + claim
+            // completion land together or not at all (a crash leaves the row pending →
+            // the stale-claim window re-runs it safely; never a half-write marked done).
+            db.transaction(() => {
+                db.prepare(`
+                    INSERT INTO feeling_tags
+                        (gradient_entry_id, author, tag_type, content, change_reason, created_at)
+                    VALUES (?, ?, 'uv', ?, NULL, ?)
+                `).run(claimed.source_id, agent, useKernel, new Date().toISOString());
+                db.prepare(`
+                    UPDATE gradient_entries
+                       SET cascade_halted_at = ?,
+                           level = CASE WHEN level LIKE '%-uv' THEN level ELSE level || '-uv' END
+                     WHERE id = ? AND agent = ?
+                `).run(claimed.from_level, claimed.source_id, agent);
+                completeClaim(db, claimed.id);
+            })();
             console.log(JSON.stringify({
                 ok: true,
                 operation: 'incompressible',
@@ -436,18 +441,21 @@ async function main() {
                 const kernelSource = (claimed.source_content || '').trim();
                 const kernel = kernelSource.length > 50 ? kernelSource.slice(0, 50) : kernelSource;
 
-                db.prepare(`
-                    INSERT INTO feeling_tags
-                        (gradient_entry_id, author, tag_type, content, change_reason, created_at)
-                    VALUES (?, ?, 'uv', ?, 'compression-floor-ratio', ?)
-                `).run(claimed.source_id, agent, kernel, new Date().toISOString());
-                db.prepare(`
-                    UPDATE gradient_entries
-                       SET cascade_halted_at = ?,
-                           level = CASE WHEN level LIKE '%-uv' THEN level ELSE level || '-uv' END
-                     WHERE id = ? AND agent = ?
-                `).run(claimed.from_level, claimed.source_id, agent);
-                completeClaim(db, claimed.id);
+                // P1 acceptance: atomic-before-mark-done (see the INCOMPRESSIBLE path).
+                db.transaction(() => {
+                    db.prepare(`
+                        INSERT INTO feeling_tags
+                            (gradient_entry_id, author, tag_type, content, change_reason, created_at)
+                        VALUES (?, ?, 'uv', ?, 'compression-floor-ratio', ?)
+                    `).run(claimed.source_id, agent, kernel, new Date().toISOString());
+                    db.prepare(`
+                        UPDATE gradient_entries
+                           SET cascade_halted_at = ?,
+                               level = CASE WHEN level LIKE '%-uv' THEN level ELSE level || '-uv' END
+                         WHERE id = ? AND agent = ?
+                    `).run(claimed.from_level, claimed.source_id, agent);
+                    completeClaim(db, claimed.id);
+                })();
 
                 appendFloorEvent({
                     timestamp: new Date().toISOString(),
@@ -492,39 +500,40 @@ async function main() {
         // DEC-092: prefer the actually-served model (captures a Fable→Opus
         // safeguard fallback); fall back to the configured compression model.
         const authoredModel = lastServedModel ?? manifestModelHead(agent, 'compression');
-        db.prepare(`
-            INSERT INTO gradient_entries
-                (id, agent, session_label, level, content, content_type,
-                 source_id, source_conversation_id, source_message_id,
-                 provenance_type, created_at, supersedes, change_count, qualifier,
-                 authored_model)
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'original', ?, NULL, 0, NULL, ?)
-        `).run(
-            newId, agent, newLabel, claimed.to_level, composed,
-            claimed.source_content_type, claimed.source_id,
-            cascadeTimestamp, authoredModel,
-        );
-
-        if (feelingTag) {
+        // P1 acceptance (Jim): atomic-BEFORE-mark-done — the cN insert + feeling-tag + the
+        // claim completion + the cascade enqueue land as ONE transaction. A crash anywhere
+        // leaves the row pending (stale-claim window re-runs safely) and enqueues no orphan
+        // cascade row; never a half-write marked done. Rows that repeatedly fail simply stay
+        // visible in pending_compressions — the dead-letter is a DEC-069 quarantine by
+        // construction, never purged.
+        const cascadeResult = db.transaction(() => {
             db.prepare(`
-                INSERT INTO feeling_tags
-                    (gradient_entry_id, author, tag_type, content, change_reason, created_at)
-                VALUES (?, ?, 'compression', ?, NULL, ?)
-            `).run(newId, agent, feelingTag, new Date().toISOString());
-        }
+                INSERT INTO gradient_entries
+                    (id, agent, session_label, level, content, content_type,
+                     source_id, source_conversation_id, source_message_id,
+                     provenance_type, created_at, supersedes, change_count, qualifier,
+                     authored_model)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'original', ?, NULL, 0, NULL, ?)
+            `).run(
+                newId, agent, newLabel, claimed.to_level, composed,
+                claimed.source_content_type, claimed.source_id,
+                cascadeTimestamp, authoredModel,
+            );
 
-        completeClaim(db, claimed.id);
+            if (feelingTag) {
+                db.prepare(`
+                    INSERT INTO feeling_tags
+                        (gradient_entry_id, author, tag_type, content, change_reason, created_at)
+                    VALUES (?, ?, 'compression', ?, NULL, ?)
+                `).run(newId, agent, feelingTag, new Date().toISOString());
+            }
 
-        // Phase A.1 (S145, 2026-04-30) — cascade propagation. After writing the
-        // new entry at to_level, check if its insertion displaced anything at
-        // to_level (rank=cap+1) that needs c{N+1} compression. Enqueue if so.
-        // This is what makes the chain c0→c1→c2→...→UV propagate per Darron's
-        // design — without it, cascade stops at one step.
-        //
-        // Calls the shared helper from memory-gradient.ts (S150, voice-first
-        // PR3) — same code path as bumpOnInsert. One-write-site for cascade
-        // enqueueing per DEC-080.
-        const cascadeResult = enqueueCascadeForDisplacedAt(db, agent!, claimed.to_level);
+            completeClaim(db, claimed.id);
+
+            // Phase A.1 (S145, 2026-04-30) — cascade propagation: enqueue the displaced
+            // c{N+1} row INSIDE the same transaction (shared helper, one-write-site DEC-080).
+            return enqueueCascadeForDisplacedAt(db, agent!, claimed.to_level);
+        })();
         if (cascadeResult.pendingId) {
             log(`cascade propagation: enqueued ${claimed.to_level}→${nextLevelName(claimed.to_level)} pending=${cascadeResult.pendingId}`);
         }

@@ -79,6 +79,18 @@ export interface DiaryCaptureArgs {
     input_quotes: string;
 }
 
+/** P1 of the compressor migration (compression-spoke-plan, Jim's F2 call — one server, three
+ *  tools): the deep-gradient compose result. The spoke COMPOSES; the controller PERSISTS
+ *  (gradient writes stay in the one trusted place, DEC-068/069). */
+export interface CompressionCaptureArgs {
+    /** The composed cN — OR the irreducible kernel when incompressible=true. */
+    composed: string;
+    /** True = the INCOMPRESSIBLE arrival: `composed` carries the kernel sentence (≤50 chars). */
+    incompressible: boolean;
+    /** The FEELING_TAG — what compressing this felt like (the quality of the act). */
+    feeling_tag?: string;
+}
+
 export interface CaptureRecord {
     txnId: string;
     capturedAt: string;
@@ -87,10 +99,14 @@ export interface CaptureRecord {
      *  so capture-appearance = turn-done uniformly across diary and stand-down
      *  turns — the settled reconcile design (#5, 2026-06-01): the whole control
      *  plane stays on ONE structural signal, no agent-refreshed turn-state marker
-     *  (which would reintroduce the fidelity dependency #67 eliminated). */
-    mode?: 'diary' | 'stand-down';
+     *  (which would reintroduce the fidelity dependency #67 eliminated).
+     *  'compression' (P1, flag-off until P2) = a deep-gradient compose; the payload
+     *  rides `compression`, and `args` stays the empty diary shape for consumer compat. */
+    mode?: 'diary' | 'stand-down' | 'compression';
     /** stand-down only: the agent's stated reason. */
     reason?: string;
+    /** compression only: the compose result (the controller persists it). */
+    compression?: CompressionCaptureArgs;
     args: DiaryCaptureArgs;
 }
 
@@ -203,6 +219,45 @@ server.registerTool(
             args: { working_memory_full: '', working_memory_compressed: '', input_quotes: '' },
         });
         return { content: [{ type: 'text' as const, text: 'Stand-down recorded. Your turn is complete.' }] };
+    }
+);
+
+// P1 of the compressor migration (Jim's F2: reuse THIS server — one server, three tools; a
+// dedicated han-compression server would copy proven plumbing, a DEC-081 smell in embryo).
+// FLAG-OFF until P2: nothing dispatches compression turns yet; the tool existing is inert.
+// The spoke composes its own deeper memory (c2 → … → UV) as the full uniform self and ends
+// its turn here; the CONTROLLER (the P2 wm-sensor/compression driver) reads this capture and
+// does the gradient.db write — atomic-before-mark-done (cN insert + feeling-tags + the claim
+// completion in ONE transaction; a crash leaves the row pending → safe re-run). Addendum 1
+// (settled): the compression spoke gets NO freshness machinery, ever — its work stream IS the
+// freshness feed; ctx-85% is the only recycle.
+server.registerTool(
+    'submit_compression',
+    {
+        description: 'Submit your deep-gradient compression result (cN compose). MUST be called exactly once per compression dispatch before your turn completes. For a normal compose: composed = the cN text, incompressible = false. For an INCOMPRESSIBLE arrival: incompressible = true, composed = the irreducible kernel (one sentence, max 50 chars). This tool call IS your completion — do NOT also emit the compose as prose after calling it.',
+        inputSchema: {
+            composed: z.string().min(1).describe(
+                'The composed cN in YOUR OWN voice — or, when incompressible=true, the irreducible kernel sentence (max 50 chars).'
+            ),
+            incompressible: z.boolean().describe(
+                'True only if compressing further would destroy meaning rather than distil it — the INCOMPRESSIBLE arrival (not failure).'
+            ),
+            feeling_tag: z.string().max(100).optional().describe(
+                'A short phrase (under 100 characters) for what compressing this felt like — the quality of the act, not the content.'
+            ),
+        },
+    },
+    async (args) => {
+        const txnId = resolveTxnId();
+        const a = args as unknown as CompressionCaptureArgs;
+        writeCaptureAtomic(txnId, {
+            txnId,
+            capturedAt: new Date().toISOString(),
+            mode: 'compression',
+            compression: { composed: a.composed, incompressible: a.incompressible, ...(a.feeling_tag ? { feeling_tag: a.feeling_tag } : {}) },
+            args: { working_memory_full: '', working_memory_compressed: '', input_quotes: '' },
+        });
+        return { content: [{ type: 'text' as const, text: 'Compression received. Your turn is complete.' }] };
     }
 );
 
