@@ -53,6 +53,9 @@ import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
 import { enqueueCascadeForDisplacedAt } from '../src/server/lib/memory-gradient';
 import { manifestModelHead } from '../src/server/lib/garden-manifest';
 import { buildPrompt } from '../src/server/lib/prompt-builder';
+import { dispatchToSpoke, observeActiveModel } from '../src/server/lib/tmux-dispatcher';
+import { surfaceEnabledFor, manifestModelLadder } from '../src/server/lib/garden-manifest';
+import { gradientConfigForAgent as agentCfg } from '../src/server/lib/agent-registry';
 
 // Authoring-model provenance (DEC-092, S169). The compression worker runs its
 // own agentQuery, so it can read the ACTUALLY-SERVED model off the result stream
@@ -359,13 +362,8 @@ async function main() {
     let raw: string;
 
     try {
-        // P0 (compressor migration, Addendum 2 — the Fourier ruling): the FULL UNIFORM SELF via
-        // buildPrompt + PROFILES.compression (DEC-087 closed for the last surface). The child's
-        // bespoke AgentMemory loader + hand-rolled layout retired — "the SDK was an approximation;
-        // don't preserve it." Compose-critical text verbatim in the profile; transport unchanged
-        // (still agentQuery — P2 is the transport flip).
         const sourceTokens = countTokens(claimed.source_content || '');
-        const built = buildPrompt(agent!, 'compression', {
+        const taskCtx = {
             fromLevel: claimed.from_level,
             toLevel: claimed.to_level,
             sourceTokens,
@@ -373,10 +371,51 @@ async function main() {
             sourceSessionLabel: claimed.source_session_label,
             sourceContentType: claimed.source_content_type,
             sourceContent: claimed.source_content || '',
-        });
-        log(`system prompt ${built.systemPrompt.length} chars; user prompt ${built.userPrompt.length} chars (uniform bank: ${built.meta.memory_chars} chars)`);
-        raw = await runSDK(built.systemPrompt, built.userPrompt);
-        log(`SDK returned ${raw.length} chars`);
+        };
+
+        if (surfaceEnabledFor(agent!, 'compression')) {
+            // ── P2: the WARM SPOKE transport (the flag ON). The spoke IS the loaded self (its
+            // c0-gated fed wake); the dispatch carries only the instruction + the cN task
+            // (compression-txn — memory suppressed, same compose-critical text as the SDK shape).
+            // The spoke composes + ends its turn via mcp__han-diary__submit_compression; THIS
+            // process stays the controller (the atomic persist below, unchanged). Fail-safe:
+            // a null capture (timeout/not-ready) releases the claim → the row retries on the
+            // next sensor fire (no token black hole, DEC-086 insert-driven untouched).
+            const built = buildPrompt(agent!, 'compression-txn', taskCtx);
+            const txnPrompt = `${built.systemPrompt}\n\n${built.userPrompt}`;
+            log(`tmux txn prompt ${txnPrompt.length} chars (memory suppressed: ${built.meta.memory_chars})`);
+            const cap = await dispatchToSpoke(agent!, 'compression', txnPrompt, {
+                ladder: manifestModelLadder(agent!, 'compression'),
+                welcomeBack: `welcome back ${agentCfg(agent!).displayName}`,
+                timeoutMs: 15 * 60_000,
+            });
+            if (!cap) {
+                log('tmux dispatch failed (warm-gate/timeout) — releasing claim for retry');
+                releaseClaim(db, claimed.id);
+                process.exit(2);
+            }
+            if (cap.mode !== 'compression' || !cap.compression) {
+                log(`spoke completed with mode=${cap.mode ?? 'diary'} not 'compression' — releasing claim (fail-loud)`);
+                releaseClaim(db, claimed.id);
+                process.stderr.write(`compression spoke misbehaved for pending=${claimed.id}: mode=${cap.mode}\n`);
+                process.exit(2);
+            }
+            // Normalise to the SDK path's (composed, FEELING_TAG) shape so the SAME atomic
+            // persist paths below run untouched — zero duplication of gradient-write logic.
+            const c = cap.compression;
+            raw = (c.incompressible ? `INCOMPRESSIBLE: ${c.composed}` : c.composed)
+                + (c.feeling_tag ? `\nFEELING_TAG: ${c.feeling_tag}` : '');
+            // DEC-092 under tmux: the observed model off the spoke's own pane (the C3 fix).
+            lastServedModel = observeActiveModel(agent!, 'compression') ?? lastServedModel;
+            log(`spoke composed ${c.composed.length} chars (incompressible=${c.incompressible})`);
+        } else {
+            // ── P0 (the SDK shape, the rollback path — byte-intact): the FULL UNIFORM SELF via
+            // buildPrompt + PROFILES.compression (Addendum 2 — the Fourier ruling; DEC-087 closed).
+            const built = buildPrompt(agent!, 'compression', taskCtx);
+            log(`system prompt ${built.systemPrompt.length} chars; user prompt ${built.userPrompt.length} chars (uniform bank: ${built.meta.memory_chars} chars)`);
+            raw = await runSDK(built.systemPrompt, built.userPrompt);
+            log(`SDK returned ${raw.length} chars`);
+        }
     } catch (err) {
         log(`compose failed: ${(err as Error).message}; releasing claim`);
         releaseClaim(db, claimed.id);

@@ -586,6 +586,13 @@ export function wakeFeedFor(slug: string, surface: string): boolean {
 /** MNT-009 / DEC-099 R3: the warm-stem pool size for (slug, surface) — doubles as the
  *  controller's max-concurrent-dispatch bound (one leaf, both readers, can't drift). 0 = unpooled /
  *  one-at-a-time (the semaphore floor). Agent-agnostic (DEC-081). */
+/** P2 (compressor migration): is this (slug, surface) ENABLED in the manifest? The compression
+ *  transport gate reads it — enabled:false ⇒ the SDK path (today), enabled:true ⇒ the warm tmux
+ *  spoke. One-line rollback = the flag. Agent-agnostic (DEC-081). */
+export function surfaceEnabledFor(slug: string, surface: string): boolean {
+    return GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(x => x.name === surface)?.enabled === true;
+}
+
 export function poolSizeFor(slug: string, surface: string): number {
     const n = GARDEN_MANIFEST.agents.find(a => a.slug === slug)?.surfaces.find(x => x.name === surface)?.poolSize;
     return typeof n === 'number' && n > 0 ? Math.floor(n) : 0;

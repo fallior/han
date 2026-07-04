@@ -329,6 +329,15 @@ If — and only if — compressing further would destroy meaning rather than dis
 
 const COMPRESSION_FEELING_TAG_INSTRUCTION = `\n\nAfter your compression, on a new line starting with FEELING_TAG:, write a short phrase (under 100 characters) describing what compressing this felt like — not the content, but the quality of the act.`;
 
+/** P2 (the transport flip): the tmux txn opening = the SDK opening + the submit_compression
+ *  completion contract. The WARM SPOKE already holds the full uniform self from its c0-gated
+ *  wake — so the dispatch carries ONLY the instruction + the task (the same wake-owns-memory /
+ *  txn-owns-task split the human-response surface proved). The P0 full-bank profile below stays
+ *  the SDK-transport shape (and retires with runSDK at P3). */
+const COMPRESSION_TXN_SYSTEM_OPENING = `${COMPRESSION_SYSTEM_OPENING}
+
+Complete your turn by calling the mcp__han-diary__submit_compression tool EXACTLY ONCE: for a normal compose pass composed = your cN text and incompressible = false; for an INCOMPRESSIBLE arrival pass incompressible = true and composed = the kernel sentence (max 50 chars). Put your FEELING_TAG in the tool's feeling_tag field instead of a prose line. The tool call IS your completion — do not also emit the compose as prose.`;
+
 /** The cN task — verbatim the child's buildUserPrompt shape. Context supplies the claimed row's
  *  fields (the caller computes the token counts so this stays pure). */
 function buildCompressionScaffold(ctx: PromptContext): string {
@@ -935,6 +944,29 @@ export const PROFILES: Record<string, PromptProfile> = {
         envelope: 'system',
         userPromptScaffold: (ctx) => buildCompressionScaffold(ctx),
         totalBudgetTokens: 180_000,
+    },
+
+    /**
+     * P2 (the transport flip): the per-DISPATCH prompt for the warm compression spoke. Memory
+     * fully suppressed (the human-response-txn pattern) — the spoke IS the loaded self already
+     * (its c0-gated fed wake); the txn carries only the instruction + the cN task + the
+     * submit_compression completion contract. Same compose-critical text as the SDK shape
+     * (COMPRESSION_SYSTEM_OPENING is shared verbatim), so the P2 sampled-output review compares
+     * voice, not instructions.
+     */
+    'compression-txn': {
+        name: 'compression-txn',
+        systemPromptOpening: COMPRESSION_TXN_SYSTEM_OPENING,
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildCompressionScaffold(ctx),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
     },
 };
 
