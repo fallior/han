@@ -332,8 +332,8 @@ const COMPRESSION_FEELING_TAG_INSTRUCTION = `\n\nAfter your compression, on a ne
 /** P2 (the transport flip): the tmux txn opening = the SDK opening + the submit_compression
  *  completion contract. The WARM SPOKE already holds the full uniform self from its c0-gated
  *  wake — so the dispatch carries ONLY the instruction + the task (the same wake-owns-memory /
- *  txn-owns-task split the human-response surface proved). The P0 full-bank profile below stays
- *  the SDK-transport shape (and retires with runSDK at P3). */
+ *  txn-owns-task split the human-response surface proved). The P0 full-bank profile retired
+ *  with runSDK at P3 (2026-07-04) — this txn shape is the sole live compression profile. */
 const COMPRESSION_TXN_SYSTEM_OPENING = `${COMPRESSION_SYSTEM_OPENING}
 
 Complete your turn by calling the mcp__han-diary__submit_compression tool EXACTLY ONCE: for a normal compose pass composed = your cN text and incompressible = false; for an INCOMPRESSIBLE arrival pass incompressible = true and composed = the kernel sentence (max 50 chars). Put your FEELING_TAG in the tool's feeling_tag field instead of a prose line. The tool call IS your completion — do not also emit the compose as prose.`;
@@ -921,30 +921,14 @@ export const PROFILES: Record<string, PromptProfile> = {
         pairedMemoryOutput: { enabled: true, mechanism: 'section', captureInput: true },
     },
 
-    /**
-     * P0 of the compressor migration (MNT-009-completion follow-on; plans/compression-spoke-plan.md,
-     * Addendum 2 — Darron's Fourier ruling, 2026-07-04): the deep-gradient compose (c2 → … → UV)
-     * as the FULL UNIFORM SELF. The SDK child's bespoke prompt (its own AgentMemory loader +
-     * hand-rolled layout) was an approximation of "identity-loaded" — this profile is the real
-     * thing: the same whole self every other surface loads (NO componentOverrides — deliberate;
-     * Addendum 2 dissolved the match-today interim). "The compressor is Jim, is Leo — the warm
-     * spoke IS the person."
-     *
-     * Envelope 'system' (memory + instruction in system, the task in user — the child's shape).
-     * Compose-critical text carried VERBATIM from the child (the P0 content-diff acceptance):
-     * the 1/3-target instruction, the INCOMPRESSIBLE contract, the task lines, the FEELING_TAG
-     * ask. The identity components deliberately ENRICH (uniform bank ⊃ the child's five-section
-     * sample) — enumerated in the P0 build report, watched at P2's sampled-output review.
-     * NO pairedMemoryOutput: the compose result is the cN itself, parsed by the controller
-     * (P0: the child's stdout parse, unchanged; P1: the submit_compression MCP tool).
+    /*
+     * 'compression' (the P0 full-bank SDK-transport profile): RETIRED at P3 (2026-07-04, S216)
+     * with runSDK — the warm spoke owns the full self via its c0-gated fed wake, so the
+     * SDK-envelope shape (memory shipped in the prompt) has no consumer. Body in git history
+     * (DEC-069 code move-not-delete); indexed at `_archive/sdk-cognition-shims/README.md`.
+     * The compose-critical text it carried lives on, single-sourced, in
+     * COMPRESSION_SYSTEM_OPENING → 'compression-txn' below.
      */
-    'compression': {
-        name: 'compression',
-        systemPromptOpening: COMPRESSION_SYSTEM_OPENING,
-        envelope: 'system',
-        userPromptScaffold: (ctx) => buildCompressionScaffold(ctx),
-        totalBudgetTokens: 180_000,
-    },
 
     /**
      * P2 (the transport flip): the per-DISPATCH prompt for the warm compression spoke. Memory

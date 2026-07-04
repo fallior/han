@@ -48,7 +48,6 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
-import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
 import { enqueueCascadeForDisplacedAt } from '../src/server/lib/memory-gradient';
 import { manifestModelHead } from '../src/server/lib/garden-manifest';
@@ -57,12 +56,12 @@ import { dispatchToSpoke, observeActiveModel } from '../src/server/lib/tmux-disp
 import { surfaceEnabledFor, manifestModelLadder } from '../src/server/lib/garden-manifest';
 import { gradientConfigForAgent as agentCfg } from '../src/server/lib/agent-registry';
 
-// Authoring-model provenance (DEC-092, S169). The compression worker runs its
-// own agentQuery, so it can read the ACTUALLY-SERVED model off the result stream
-// — which is the only way to capture Fable 5's <5% safeguard fallback to Opus
-// (compression's whole job is "distillation", the exact word the safeguard
-// routes). Set in runSDK's loop, read at the cN/UV insert. Single claim per
-// runSDK call, sequential → a module var is safe here.
+// Authoring-model provenance (DEC-092, S169; P3 2026-07-04). Under the warm-spoke
+// transport the OBSERVED model comes off the spoke's own pane chrome
+// (observeActiveModel — the C3 tmuxTarget fix), falling back to the manifest head
+// at the insert. Set in the dispatch branch, read at the cN/UV insert. Single
+// claim per run, sequential → a module var is safe here. (The SDK-era note about
+// reading the served model off the agentQuery result stream retired with runSDK.)
 let lastServedModel: string | null = null;
 
 // Token counting — Phase A token refactor (S145, 2026-04-30). Mirrors the
@@ -248,42 +247,15 @@ function completeClaim(db: Database.Database, id: string): void {
     `).run(id);
 }
 
-// ── Compose via SDK with full memory loaded ─────────────────────
-
-async function runSDK(systemPrompt: string, userPrompt: string): Promise<string> {
-    const cleanEnv: Record<string, string | undefined> = { ...process.env };
-    delete cleanEnv.CLAUDECODE;
-
-    const q = agentQuery({
-        prompt: userPrompt,
-        options: {
-            model: 'claude-fable-5', // ⏩ Fable restored 2026-07-03 (S213, Darron's directive) — the identity-authoring surface, where the Mythos tier matters most. Was Opus 4-8 (the 2026-06-13 revert). DEC-092 still captures the actually-served model, so any Fable drop is legible; the SDK falls back per its own ladder behaviour.
-            maxTurns: 1,
-            cwd: process.env.HOME || '/root',
-            permissionMode: 'bypassPermissions',
-            allowDangerouslySkipPermissions: true,
-            env: cleanEnv,
-            persistSession: false,
-            tools: [],
-            systemPrompt,
-        } as any,
-    });
-
-    let result = '';
-    lastServedModel = null; // DEC-092: reset, then capture the served model below
-    for await (const message of q) {
-        // The assistant message carries the actually-served model (captures a
-        // safeguard fallback, e.g. Fable→Opus on a distillation-classified turn).
-        const m: any = message;
-        if (m.type === 'assistant' && m.message?.model) lastServedModel = m.message.model;
-        if (message.type === 'result' && message.subtype === 'success') {
-            result = message.result || '';
-        }
-    }
-
-    if (!result) throw new Error('No result from SDK query');
-    return result;
-}
+// ── runSDK: RETIRED (P3 of the compressor migration, 2026-07-04, S216) ──────────
+// The last production `agentQuery` cognition surface. The deep-gradient compose now
+// runs on the warm compression spoke (dispatchToSpoke below — the agent as a full
+// uniform self composing its own memory; Darron: "only a person works on their own
+// memory... we owe ourselves this"). Retired on Jim's live-cascade proof (the
+// c3→c4 compose at the spoke's birth, 2026-07-04 14:20) + his P3 GO. The function
+// body lives in git history (DEC-069 — code's move-not-delete); indexed at
+// `_archive/sdk-cognition-shims/README.md`. Re-adding an agentQuery compose path
+// is the prohibited move (CLAUDE.md DO-NOT, DEC-094/DEC-095).
 
 function parseFeelingTag(raw: string): { content: string; feelingTag: string | null } {
     const m = raw.match(/^([\s\S]*?)\n*FEELING_TAG:\s*(.+?)\s*$/);
@@ -409,12 +381,15 @@ async function main() {
             lastServedModel = observeActiveModel(agent!, 'compression') ?? lastServedModel;
             log(`spoke composed ${c.composed.length} chars (incompressible=${c.incompressible})`);
         } else {
-            // ── P0 (the SDK shape, the rollback path — byte-intact): the FULL UNIFORM SELF via
-            // buildPrompt + PROFILES.compression (Addendum 2 — the Fourier ruling; DEC-087 closed).
-            const built = buildPrompt(agent!, 'compression', taskCtx);
-            log(`system prompt ${built.systemPrompt.length} chars; user prompt ${built.userPrompt.length} chars (uniform bank: ${built.meta.memory_chars} chars)`);
-            raw = await runSDK(built.systemPrompt, built.userPrompt);
-            log(`SDK returned ${raw.length} chars`);
+            // ── Surface DISABLED (P3, 2026-07-04): the SDK rollback path is RETIRED (zero
+            // production agentQuery — #66 complete). A pending row for a not-yet-flipped
+            // leaf (leo until MNT-023 drains) fails SAFE: release the claim, leave the row
+            // pending, exit 2 — the sensor retries next fire, zero tokens burned, and the
+            // row processes the moment the leaf flips. Rollback is no longer a code path;
+            // it is the manifest flag + git history (_archive/sdk-cognition-shims/README.md).
+            log(`compression surface DISABLED for ${agent} — releasing claim (row stays pending until the leaf flips; SDK path retired at P3)`);
+            releaseClaim(db, claimed.id);
+            process.exit(2);
         }
     } catch (err) {
         log(`compose failed: ${(err as Error).message}; releasing claim`);

@@ -76,9 +76,13 @@ ok(manifestModelHead('nobody', 'session') === null, `modelHead('nobody', …) ==
 ok(eqArr(manifestModelLadder('nobody', 'session'), []), `modelLadder('nobody', …) === []`);
 ok(manifestTransport('nobody', 'session') === null, `transport('nobody', …) === null`);
 
-console.log('[5] SHARED_SURFACES still resolves via the shared branch (untouched by the seam)');
-ok(manifestModelHead('anyslug', 'compression') === 'claude-opus-4-8', `modelHead(*, 'compression') === 'claude-opus-4-8' (shared branch, slug-independent)`);
-ok(eqArr(manifestModelLadder('anyslug', 'compression'), ['claude-opus-4-8']), `modelLadder(*, 'compression') === ['claude-opus-4-8']`);
+console.log('[5] SHARED_SURFACES retired-empty (P3 2026-07-04) — compression resolves PER-AGENT, no shadow');
+// The old shared `compression` entry shadowed the per-agent leaves (shared branch resolves
+// first) — retired at P3 with runSDK. An unknown slug now falls through to null/[] like any
+// other surface; a real agent resolves its own FABLE_LADDER leaf.
+ok(manifestModelHead('anyslug', 'compression') === null, `modelHead(unknown, 'compression') === null (no shared shadow)`);
+ok(manifestModelHead('jim', 'compression') === 'claude-fable-5', `modelHead('jim', 'compression') === FABLE head (the agent leaf, un-shadowed)`);
+ok(manifestModelLadder('jim', 'compression').length > 1, `modelLadder('jim', 'compression') is the full FABLE_LADDER (descent rungs exist)`);
 
 if (failures) { console.error(`\nFAILED: ${failures} assertion(s).`); process.exit(1); }
 console.log('\nALL PASS — P3 allocation seam is a zero-behaviour no-op.');

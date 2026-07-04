@@ -27,10 +27,11 @@ check("CaptureRecord mode grows 'compression'", server.includes("'diary' | 'stan
 check('CompressionCaptureArgs exported', server.includes('export interface CompressionCaptureArgs'));
 check('capture writes mode:compression + payload', server.includes("mode: 'compression'") && server.includes('compression: { composed:'));
 
-// 2) Flag-off state: the manifest surface exists but is NOT launchable/dispatched.
+// 2) Manifest state: the compression surface exists per agent (P2 flipped jim ON 2026-07-04;
+//    leo follows post-MNT-023 — enabled-state asserted in test-compression-p2, not here).
 const manifest = fs.readFileSync(path.join(ROOT, 'src/server/lib/garden-manifest.ts'), 'utf-8');
-const compressionSurfaces = (manifest.match(/name: 'compression',\s+enabled: false/g) || []).length;
-check('compression surface present for 2 agents, enabled:false (flag-off)', compressionSurfaces === 2);
+const compressionSurfaces = (manifest.match(/name: 'compression',\s+enabled: (true|false)/g) || []).length;
+check('compression surface present for 2 agents', compressionSurfaces === 2);
 check('NO poolSize FIELD on the compression surface (cascade ordering — deliberate)', !/name: 'compression'[^\n]*poolSize:\s*\d/.test(manifest));
 check('poolSizeFor(leo, compression) === 0 (the floor/serial model)', poolSizeFor('leo', 'compression') === 0);
 check('wakeFeedFor(leo, compression) === true (the guaranteed fed wake at P2)', wakeFeedFor('leo', 'compression') === true);

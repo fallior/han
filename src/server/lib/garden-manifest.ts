@@ -599,13 +599,18 @@ export function poolSizeFor(slug: string, surface: string): number {
 }
 
 /**
- * Shared (non-agent-scoped) surface: the wm-sensor → pending-compression cascade
- * (scripts/process-pending-compression.ts:377). Identity-loaded SDK Opus, runs
- * for whichever agent's entry is being compressed. S173: aligned to 4-8.
+ * Shared (non-agent-scoped) surface ladders. EMPTY since P3 of the compressor
+ * migration (2026-07-04, S216): the `compression` entry — the old SDK-child era's
+ * shared ladder — was found to SHADOW the per-agent compression leaves in
+ * manifestModelHead/manifestModelLadder (the shared branch resolves FIRST), so the
+ * P2 warm spoke launched and descended on a single-rung Opus ladder instead of the
+ * FABLE_LADDER its manifest leaf declares. Retired with runSDK; compression now
+ * resolves per-agent like every other surface (DEC-081 — one path, many agents).
+ * The mechanism (and the shared-first resolution order) is kept for a future
+ * genuinely-shared surface; an entry that duplicates a per-agent surface name is
+ * the prohibited move (it silently shadows the agent's leaf).
  */
-export const SHARED_SURFACES: Record<string, ModelLadder> = {
-    compression: ['claude-opus-4-8'], // S173: aligned to highest Opus (was 4-7 holdout; reverted from Fable 2026-06-13)
-};
+export const SHARED_SURFACES: Record<string, ModelLadder> = {};
 
 /**
  * Interim head-read resolver (DEC-092, S169) — returns the HEAD (active / most-
