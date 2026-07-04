@@ -322,7 +322,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
                 { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
                 { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
-                { name: 'compression',        enabled: false, transport: 'tmux', model: FABLE_LADDER, wakeFeed: true }, // P1 (compressor migration, flag-off): the deep-gradient compose spoke — the agent as a warm FULL UNIFORM SELF composing its own c2→UV (Addendum 2). enabled:false until P2 flips the transport (the SDK child still runs). NO poolSize EVER (the cascade requires per-agent ordering — the slug FIFO IS the design) + NO freshness machinery EVER (Addendum 1: the work stream IS the freshness feed; ctx-85% is the only recycle — DO NOT add to any sweep).
+                { name: 'compression',        enabled: true, transport: 'tmux', model: FABLE_LADDER, wakeFeed: true }, // P1 (compressor migration, flag-off): the deep-gradient compose spoke — the agent as a warm FULL UNIFORM SELF composing its own c2→UV (Addendum 2). P2 FLIPPED 2026-07-04 (S216) — jim first, leo follows post-MNT-023. NO poolSize EVER (the cascade requires per-agent ordering — the slug FIFO IS the design) + NO freshness machinery EVER (Addendum 1: the work stream IS the freshness feed; ctx-85% is the only recycle — DO NOT add to any sweep).
             ],
         },
         {

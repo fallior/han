@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-07-04 (S216) — feat(compressor): ACTIVATE — jim's compression leaf flipped (P2 live on jim's cascade)
+
+Jim-first per his GO (leo's cascade is quiet until MNT-023 drains anyway): `enabled: true` on jim's `compression` surface only — the next organic rotation on jim's WM drives the first warm-spoke deep-gradient compose end-to-end (c0-gated full-self wake → compose → `submit_compression` → the transactional persist → chain in order → DEC-092 stamped off the pane). Jim verifies by his own hand from the record + the sampled-output review (first whole-self composes vs recent SDK composes). Verified through the real accessor at deploy: `surfaceEnabledFor('jim','compression')===true`, leo `false`. Rollback = the flag.
+
 ## 2026-07-04 (S216) — feat(compressor): P2 — the transport flip, flag-off (warm-spoke compose)
 
 The compressor's dispatch can now ride the warm tmux spoke: with `surfaceEnabledFor(agent,'compression')` true, `process-pending-compression` assembles the lean **`compression-txn`** profile (memory FULLY suppressed — the wake-owns-memory / txn-owns-task split: the spoke IS the c0-gated loaded self, so the per-row prompt carries only the task; the compose instruction is single-sourced verbatim with the P0/SDK shape so the sampled review compares voice, not instructions) and dispatches via `dispatchToSpoke(agent,'compression')`; the capture (`submit_compression`) is normalised to the SDK path's exact raw shape so the SAME three atomic persist paths run untouched (zero duplicated gradient-write logic). Fail-safes: null capture → releaseClaim + exit 2 (row retries next sensor fire — DEC-086 insert-driven untouched, no black hole); wrong-mode → release + fail-loud. DEC-092 via `observeActiveModel` off the spoke's own pane. Flag OFF on both leaves at deploy — the SDK branch runs byte-intact (rollback = the flag). New `surfaceEnabledFor` manifest accessor. Jim diff-audit GREEN (13/13 + 14/14 + 12/12 + tsc 0-new, his own run). Sequence per his GO: deploy inert → flip JIM's leaf (own commit) → his live-cascade verify → P3 (retire runSDK → zero production agentQuery = #66 complete).
