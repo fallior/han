@@ -1,5 +1,13 @@
 # Stem-Sleeve Pool — R1/R2/R3 Build Plan
 
+> **✅ COMPLETE (2026-07-03, S213) — R1/R2/R3 all landed.** R1 pre-warm+attach proven live (26ed739, Jim-sealed);
+> R2 sleeve-state re-keying (P-R2.0→2.2c); R3 native per-surface pools via MNT-009 C1/C2/C3 (wake queue +
+> semaphore, per-stem sentinels, pool-manager w/ raceless flush) — BOTH agents' human-response layers pooled
+> and proven with concurrent warm composes (MNT-009 leo AM + MNT-021 jim midnight, one day). This plan is the
+> historical design record; the running truth lives in garden-manifest (poolSize leaves) + tmux-dispatcher.
+> (Header added S217 housekeeping, per Jim's ordered list.)
+
+
 > The buildable detail beneath **DEC-099** (and its 2026-06-27 stem-sleeve amendment). This doc is
 > the implementation map; the DEC is the North Star it builds toward. Leo-writes / **Jim
 > blocking-audit before each landing**. Status (2026-06-30): **R1 banked** (`26ed739`, re-sleeve

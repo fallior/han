@@ -16,6 +16,9 @@ After=network.target
 Type=simple
 WorkingDirectory=/home/darron/Projects/han/src/server
 ExecStart=/home/darron/Projects/han/src/server/node_modules/.bin/tsx human-responder.ts
+# MNT-022 (S217): SIGTERM (143) from a deliberate deploy restart is a SUCCESS, not a failure —
+# without this, every quiesce-wrapped bounce logs as "Failed" and pollutes the incident record.
+SuccessExitStatus=143
 Restart=always
 RestartSec=30
 Environment=HOME=/home/darron
