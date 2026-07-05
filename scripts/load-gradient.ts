@@ -48,4 +48,20 @@ if (!text) {
     process.exit(2);
 }
 
+// T2 (the S217 wake tracker): producer-side dump-size receipt. The gradient dump is the one
+// VARIABLE-size wake input (the standard files are statted by the wake-ctx hook's per-wake
+// snapshot), so the producer records what it actually emitted — the reconciler
+// (wake-reconcile.ts) prices the gradient step from this, never from a guess. Fail-open:
+// telemetry must never break the load.
+try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { appendFileSync, mkdirSync } = require('fs');
+    const dir = `${process.env.HOME}/.han/health`;
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(
+        `${dir}/gradient-dump-size-${agent}.jsonl`,
+        JSON.stringify({ ts: new Date().toISOString(), agent, bytes: Buffer.byteLength(text, 'utf8') }) + '\n',
+    );
+} catch { /* fail-open */ }
+
 process.stdout.write(text);

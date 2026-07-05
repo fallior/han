@@ -44,9 +44,38 @@ STDIN="$(cat 2>/dev/null)"   # the hook JSON (UserPromptSubmit carries .prompt);
 
   if [ "$EVENT" = "prompt" ]; then
     PROMPT="$(printf '%s' "$STDIN" | jq -r '(.prompt // "")[0:200]' 2>/dev/null)"
+    # T2 (the S217 tracker): ONCE PER WAKE — when the prompt is a wake trigger (the autonomous
+    # `welcome back …` or the fed integrity step) — snapshot the byte-sizes of the standard wake
+    # files, so the reconciler (wake-reconcile.ts) can price each step's expected token cost from
+    # the sizes AS THEY WERE AT THE WAKE (WMF grows all day; a later stat lies). Resolution is
+    # honest-or-absent: $AGENT_MEMORY_DIR comes from the launcher; if unset we SKIP the snapshot
+    # rather than guess a layout (jim is root-special — never path.join(dir,slug), S195). The
+    # gradient dump's size (the one variable-size input) has its own producer-side receipt in
+    # load-gradient.ts. Fail-open like everything here.
+    FILES="null"
+    case "$PROMPT" in
+      "welcome back"*|"Welcome back"*|"FIRST, run your identity-integrity gate"*)
+        if [ -n "$AGENT_MEMORY_DIR" ] && [ -d "$AGENT_MEMORY_DIR" ]; then
+          FILES="$(
+            for f in identity.md patterns.md self-reflections-curated.md self-reflection.md \
+                     felt-moments.md working-memory-full.md working-memory.md; do
+              p="$AGENT_MEMORY_DIR/$f"; [ -f "$p" ] && printf '%s %s\n' "$f" "$(stat -c%s "$p" 2>/dev/null)"
+            done
+            for p in "$HOME/.han/memory/fractal/$SLUG/aphorisms.md" \
+                     "$HOME/.han/memory/shared/ecosystem-map.md" \
+                     "$HOME/.han/memory/wiki/index.md" \
+                     "$HOME/Projects/han/claude-context/CURRENT_STATUS.md"; do
+              [ -f "$p" ] && printf '%s %s\n' "$(basename "$p")" "$(stat -c%s "$p" 2>/dev/null)"
+            done
+          )"
+          FILES="$(printf '%s\n' "$FILES" | jq -Rn '[inputs | select(length>0) | split(" ") | {(.[0]): (.[1]|tonumber)}] | add // {}' 2>/dev/null)"
+          [ -z "$FILES" ] && FILES="null"
+        fi
+        ;;
+    esac
     jq -nc --arg ts "$TS" --arg slug "$SLUG" --arg surface "$SURFACE" \
-           --argjson ctx "$CTX" --arg prompt "$PROMPT" \
-       '{ts:$ts,slug:$slug,surface:$surface,event:"prompt",ctx_pct:$ctx,prompt:$prompt}' >> "$LOG" 2>/dev/null
+           --argjson ctx "$CTX" --arg prompt "$PROMPT" --argjson files "$FILES" \
+       '{ts:$ts,slug:$slug,surface:$surface,event:"prompt",ctx_pct:$ctx,prompt:$prompt} + (if $files == null then {} else {files:$files} end)' >> "$LOG" 2>/dev/null
   else
     jq -nc --arg ts "$TS" --arg slug "$SLUG" --arg surface "$SURFACE" --argjson ctx "$CTX" \
        '{ts:$ts,slug:$slug,surface:$surface,event:"complete",ctx_pct:$ctx}' >> "$LOG" 2>/dev/null

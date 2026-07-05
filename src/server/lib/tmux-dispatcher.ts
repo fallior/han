@@ -1100,8 +1100,19 @@ export async function feedWakeSteps(
         // line is long, so it settles before the Enter — else the Enter races the paste and the
         // prompt sits unsubmitted (the P2.3 surface-1 stall).
         const nonce = wakeNonce();
-        await sendLineSettled(tmuxSession, `${step.prompt} — when COMPLETE reply on its own line EXACTLY: STEP-OK ${step.id} ${nonce}`);
-        const ackRe = new RegExp(`STEP-OK\\s+${step.id}\\s+${nonce}\\b`);
+        // T1 (the S217 tracker, echo-proof ack): the OLD form appended the bare literal
+        // `STEP-OK <id> <nonce>` to the fed prompt — and the submitted prompt's own ECHO (the
+        // rendered user message, inside capturePaneTail's 14-line window) contained that exact
+        // contiguous string, so a wrap-dependent false-match could satisfy the gate INSTANTLY and
+        // the feeder rushed every step into one queued turn (the 8-in-one-turn batch, S217) —
+        // collapsing the wake-ctx logger's per-step granularity to one coarse delta. The cure is
+        // MNT-026's byte-stuffing insight applied to the feeder: show the agent the exact literal
+        // (deterministic compliance) but wrapped in backticks WITH a trailing parenthetical, and
+        // anchor the ack regex to an OWN-LINE match. Under ANY terminal wrap, the echo's display
+        // line carries a backtick or trailing text — the anchored regex is structurally
+        // unmatchable against the instruction's own echo; only the agent's bare reply line matches.
+        await sendLineSettled(tmuxSession, `${step.prompt} — when COMPLETE reply on its own line EXACTLY: \`STEP-OK ${step.id} ${nonce}\` (without the backticks)`);
+        const ackRe = new RegExp(`^[ \\t]*STEP-OK[ \\t]+${step.id}[ \\t]+${nonce}[ \\t]*$`, 'm');
         const isAcked = (tail: string): boolean => {
             if (!ackRe.test(tail)) return false;
             if (step.ack.kind === 'c0') {
