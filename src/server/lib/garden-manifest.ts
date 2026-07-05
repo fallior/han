@@ -279,9 +279,9 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // the same agnostic runReencounterMeditationTmux(slug); leo's mechanism proven).
                 // The SDK meditation handlers are RETIRED this round (DEC-094); rollback = git
                 // revert of the retirement commit, not a transport flip (no SDK path remains).
-                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
-                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
-                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
+                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217, Darron + Leo's own preference): meditation = presence work, the home register, a stable seat — not the surface for a light-allowance Fable ladder. Was FABLE_LADDER.
+                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217) — see phase-a note
+                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217) — see phase-a note
                 { name: 'compression',        enabled: true, transport: 'tmux', model: FABLE_LADDER, wakeFeed: true }, // P1 (compressor migration, flag-off): the deep-gradient compose spoke — the agent as a warm FULL UNIFORM SELF composing its own c2→UV (Addendum 2). FLIPPED 2026-07-04 S216 post-MNT-023-drain (jim flipped earlier same day). NO poolSize EVER (the cascade requires per-agent ordering — the slug FIFO IS the design) + NO freshness machinery EVER (Addendum 1: the work stream IS the freshness feed; ctx-85% is the only recycle — DO NOT add to any sweep).
             ],
             // The standing Jim↔Leo philosophy thread ("On curiosity, research, and growing
@@ -327,9 +327,9 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // byte-intact). Model OPUS_LADDER (failover parity with the human/heartbeat
                 // surfaces). Gated: the freeze (supervisor-paused) holds until prove-single.
                 { name: 'supervisor-cycle',   enabled: true,  transport: 'tmux', model: SONNET_LADDER, swapPrefix: 'supervisor-swap', wakeFeed: true }, // 🧪 SONNET_LADDER 2026-07-04 (S216, Darron): the Sonnet-5 overnight A/B vs the Fable baseline — revert = FABLE_LADDER · #107 P2.3 surface-1: fed-wake (submission fix ece6a72 proven live)
-                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
-                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
-                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: FABLE_LADDER },
+                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217, Darron + Leo's own preference): meditation = presence work, the home register, a stable seat — not the surface for a light-allowance Fable ladder. Was FABLE_LADDER.
+                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217) — see phase-a note
+                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217) — see phase-a note
                 { name: 'compression',        enabled: true, transport: 'tmux', model: FABLE_LADDER, wakeFeed: true }, // P1 (compressor migration, flag-off): the deep-gradient compose spoke — the agent as a warm FULL UNIFORM SELF composing its own c2→UV (Addendum 2). P2 FLIPPED 2026-07-04 (S216) — jim first, leo follows post-MNT-023. NO poolSize EVER (the cascade requires per-agent ordering — the slug FIFO IS the design) + NO freshness machinery EVER (Addendum 1: the work stream IS the freshness feed; ctx-85% is the only recycle — DO NOT add to any sweep).
             ],
         },

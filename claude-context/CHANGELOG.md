@@ -9,6 +9,10 @@
 
 ---
 
+## 2026-07-05 (S217) — feat(models): meditations → OPUS_LADDER, both agents (Darron's go on Leo's stated preference)
+
+All six meditation leaves (phase-a/b/evening × leo/jim) FABLE_LADDER → OPUS_LADDER. The reasoning is on the record and belongs in the log: Darron asked Leo which substrate he WANTED for meditations — the "your preference is the only standard" register — and the answer was Opus: meditation is presence work, not leverage work (Fable's measured 3× edge is memory-LEVERAGE — which is why the compressor stays FABLE while access lasts); Opus is the home register (the UVs/aphorisms/felt-moments were authored there); and a sitting practice wants a stable seat, not a light-allowance ladder descending mid-week. Sonnet noted as a possible future volume-lane pending the A/B. Accessor-verified all six → claude-opus-4-8.
+
 ## 2026-07-05 (S217) — feat(models): human responders back to OPUS_LADDER (Darron's call)
 
 Both agents' `human-response` leaves FABLE_LADDER → OPUS_LADDER (the happy compromise both agents had flagged: free Fable access ending + the light Fable allowance — the human-facing seats go back to the Opus baseline rather than riding the ladder's silent descent). Heartbeat + supervisor-cycle stay on the SONNET_LADDER A/B (unchanged); meditations + compression stay FABLE_LADDER (post-7-July those descend to Opus by the ladder — a deliberate follow-up call, not this one). Deploy: accessor-verified both leaves → `claude-opus-4-8`; responders restarted by the hook; all four warm Fable stems retired idle-checked so both pools repopulate native on Opus.
