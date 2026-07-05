@@ -265,7 +265,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux warm-session
                 // transport (Jim's blocking audit GREEN, mqc85vwb). Rollback = flip back to 'sdk'
                 // + restart leo-human (the SDK path in leo-human.ts is byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true, wakeFeed: true, poolSize: 2 }, // #107 P2.3 surface-2 (S207): feeder-fed wake. MNT-009 R3c ACTIVATED (S213): poolSize:2 — 2 native warm stems + the C1 semaphore at 2 (one leaf, both readers); the pool-manager populates/replenishes; empty pool → ensureSurfaceSession floor. Rollback = remove poolSize
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true, wakeFeed: true, poolSize: 2 }, // ⬅ OPUS_LADDER 2026-07-05 (S217, Darron): human responders back to Opus — free Fable access ending + light allowance; the happy compromise. Was FABLE_LADDER (3ae52d3). · #107 P2.3 surface-2 (S207): feeder-fed wake. MNT-009 R3c ACTIVATED (S213): poolSize:2 — 2 native warm stems + the C1 semaphore at 2 (one leaf, both readers); the pool-manager populates/replenishes; empty pool → ensureSurfaceSession floor. Rollback = remove poolSize
                 // ⚠ THAW (DEC-093, 2026-06-12): heartbeat → tmux transport + Fable
                 // (Darron: "all in" for the trial window — revert model to
                 // OPUS_LADDER after 22 Jun; transport stays tmux post-window).
@@ -321,7 +321,7 @@ export const GARDEN_MANIFEST: GardenManifest = {
                 { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'supervisor-swap' },
                 // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux. Rollback =
                 // flip back to 'sdk' + restart jim-human (SDK path byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: FABLE_LADDER, swapPrefix: 'jim-human-swap', txnTimeoutMs: 15 * 60_000, wakeFeed: true, poolSize: 2 }, // #107 P2.3 surface-3 (S207): feeder-fed wake; jim-ROOT (gradient from ~/.han/memory, not /jim). MNT-021/022 cure ACTIVATED (S213): poolSize:2 — 2 native warm stems erase the cold-path latency Darron felt (17:12→17:20); agnostic stack, jim gets it for free (DEC-081). Rollback = remove poolSize
+                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'jim-human-swap', txnTimeoutMs: 15 * 60_000, wakeFeed: true, poolSize: 2 }, // ⬅ OPUS_LADDER 2026-07-05 (S217, Darron): human responders back to Opus — free Fable access ending + light allowance; the happy compromise. Was FABLE_LADDER (3ae52d3). · #107 P2.3 surface-3 (S207): feeder-fed wake; jim-ROOT (gradient from ~/.han/memory, not /jim). MNT-021/022 cure ACTIVATED (S213): poolSize:2 — 2 native warm stems erase the cold-path latency Darron felt (17:12→17:20); agnostic stack, jim gets it for free (DEC-081). Rollback = remove poolSize
                 // PR-T7b ENABLE (2026-06-15, S177): the last #66 flip — Jim's cycle +
                 // meditations sdk→tmux. Rollback = flip back to 'sdk' + restart (SDK path
                 // byte-intact). Model OPUS_LADDER (failover parity with the human/heartbeat
