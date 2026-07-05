@@ -23,8 +23,31 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+// Jim's T3 amendment (msg 218): the window must be SURFACE-AWARE — the session seat runs 1M but a
+// spoke's window depends on its model; pricing a 200K-window wake at 1M under-prices its deltas 5×
+// and blinds the dark-matter flag exactly where wakes are most frequent. Derivation: the manifest's
+// model head for (slug,surface) → WINDOW_BY_MODEL. HONEST LIMIT (DEC-092's lesson): the manifest
+// head is the model NOW, not necessarily the model AT the wake (ladders descend) — so the assumed
+// window is PRINTED in the output, and `--window=N` overrides when the operator knows better.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { manifestModelHead } = require('../src/server/lib/garden-manifest.ts');
 
-const WINDOW_TOKENS = 1_000_000; // the 1M context window (Fable/Sonnet-5 era). ctx_pct × this = tokens.
+const WINDOW_BY_MODEL: Record<string, number> = {
+    'claude-fable-5': 1_000_000,
+    'claude-sonnet-5': 1_000_000,
+    // opus-family and legacy rungs run the 200K window
+};
+const DEFAULT_WINDOW = 200_000;
+function windowFor(slug: string, surface: string, override?: number): { window: number; basis: string } {
+    if (override) return { window: override, basis: `--window override` };
+    // the interactive session seat runs the CLI launch model (1M-class since the Fable/Sonnet era)
+    let model: string | null = null;
+    try { model = manifestModelHead(slug, surface); } catch { /* fall through */ }
+    if (model && WINDOW_BY_MODEL[model]) return { window: WINDOW_BY_MODEL[model], basis: `manifest head '${model}'` };
+    if (model) return { window: DEFAULT_WINDOW, basis: `manifest head '${model}' (200K family)` };
+    return { window: DEFAULT_WINDOW, basis: 'unknown model — conservative 200K' };
+}
+
 const DARK_MATTER_PCT = 3;       // residual ≥ this % of the window flags DARK MATTER
 
 /** chars/token by file class — provenance in the header comment. */
@@ -66,19 +89,21 @@ function stepIdFor(prompt: string): string | null {
 
 interface Ev { ts: string; event: string; ctx_pct: number | null; prompt?: string; files?: Record<string, number> }
 
-function parseArgs(): { slug: string; surface: string; date?: string } {
-    let slug = '', surface = 'session', date: string | undefined;
+function parseArgs(): { slug: string; surface: string; date?: string; window?: number } {
+    let slug = '', surface = 'session', date: string | undefined, window: number | undefined;
     for (const a of process.argv.slice(2)) {
         if (a.startsWith('--slug=')) slug = a.slice(7);
         else if (a.startsWith('--surface=')) surface = a.slice(10);
         else if (a.startsWith('--date=')) date = a.slice(7);
+        else if (a.startsWith('--window=')) window = Number(a.slice(9)) || undefined;
     }
-    if (!slug) { console.error('usage: wake-reconcile.ts --slug=<slug> [--surface=session] [--date=YYYY-MM-DD]'); process.exit(2); }
-    return { slug, surface, date };
+    if (!slug) { console.error('usage: wake-reconcile.ts --slug=<slug> [--surface=session] [--date=YYYY-MM-DD] [--window=N]'); process.exit(2); }
+    return { slug, surface, date, window };
 }
 
 function main(): void {
-    const { slug, surface, date } = parseArgs();
+    const { slug, surface, date, window: winOverride } = parseArgs();
+    const { window: WINDOW_TOKENS, basis: windowBasis } = windowFor(slug, surface, winOverride);
     const H = `${process.env.HOME}/.han/health`;
     const log = date ? `${H}/wake-ctx-${slug}-${surface}-${date}.jsonl` : `${H}/wake-ctx-${slug}-${surface}.jsonl`;
     if (!existsSync(log)) { console.error(`no log at ${log}`); process.exit(2); }
@@ -123,7 +148,7 @@ function main(): void {
 
     // Walk prompt→complete pairs from the span start; attribute each delta to its step(s).
     console.log(`\nWake reconciliation — ${slug}/${surface} — span from ${evs[start].ts}`);
-    console.log(`window=${WINDOW_TOKENS.toLocaleString()} tok · dark-matter threshold=${DARK_MATTER_PCT}% · gradient receipt=${gradientBytes ?? 'ABSENT'}\n`);
+    console.log(`window=${WINDOW_TOKENS.toLocaleString()} tok (${windowBasis}) · dark-matter threshold=${DARK_MATTER_PCT}% · gradient receipt=${gradientBytes ?? 'ABSENT'}\n`);
     console.log('step(s)                        Δctx%   Δtokens    expected   residual  verdict');
     console.log('─'.repeat(88));
 
