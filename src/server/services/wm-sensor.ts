@@ -229,7 +229,10 @@ async function processTarget(target: WatchTarget, config: Config): Promise<void>
                 config.rollingWindowTrigger,
                 config.rollingWindowBiteTheBullet,
                 config.rollingWindowTail,
-                config.rollingWindowTail - 5_000, // minTail = target - 5K wiggle room
+                // Jim's S216 nit (aligned S217): minTail derives from CONFIG (Tail − Head), never a
+                // bare 5_000 — the writer's markerBands() uses the same derivation, so the sensor's
+                // harvest floor and the placement gate can no longer drift apart if Head is retuned.
+                config.rollingWindowTail - config.rollingWindowHead,
                 target.agent,
             );
             if (!rot.rotated) {

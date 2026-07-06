@@ -455,6 +455,13 @@ export function buildPrompt(
 ): BuiltPrompt {
     const profile = profileByName(profileName);
 
+    // MNT-001 (S217): every scaffold sees the slug it's building for. The Phase-A meditation
+    // scaffold hardcoded `Agent: leo` for every agent (Jim's root-trace, journal 2026-07-03) —
+    // a DEC-081 violation in miniature that tag-primed Jim into declining his OWN memories.
+    // buildPrompt has always known the slug; scaffolds never did. Injected authoritatively here
+    // (overwrites any caller-passed ctx.slug so a stale caller literal can't re-do MNT-001).
+    context = { ...context, slug };
+
     // Resolve scaffolding (the orientation sentence + optional user-side framing)
     let opening = resolveScaffold(profile.systemPromptOpening, context);
     const userScaffold = resolveScaffold(profile.userPromptScaffold, context);

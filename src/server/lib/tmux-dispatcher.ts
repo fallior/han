@@ -1448,10 +1448,42 @@ async function replenishPool(slug: string, surface: string): Promise<void> {
 }
 
 /**
+ * C4 (S217, the restart-storm orphan self-heal — journal MNT-022 follow-on, 2 lived instances:
+ * mr40tm0b, mr4ns76u): a deploy bounce mid-populate can orphan a half-warmed stem SESSION that
+ * never reached the registry (registration happens AFTER the warm completes, prewarmAndRegister
+ * :1371 — so a killed driver leaves the tmux session with no registry row and no owner). On
+ * manager START — once, BEFORE the initial populate, so our own in-flight warms can't exist yet —
+ * sweep tmux for `stem-<slug>-<surface>-*` sessions the registry doesn't know: IDLE orphans are
+ * killed + sleeve/sentinel cleaned; a PROCESSING pane is logged and LEFT (R011 — never kill a
+ * thinking spoke; a still-feeding orphan idles eventually and the next manager start reaps it).
+ * Never runs in the tick (a tick-time sweep would race our own unregistered mid-warm stems).
+ */
+function sweepUnregisteredStems(slug: string, surface: string): void {
+    let sessions: string[] = [];
+    try {
+        sessions = tmux(['list-sessions', '-F', '#{session_name}']).split('\n').filter(Boolean);
+    } catch { return; } // no tmux server → nothing to sweep
+    const prefix = `stem-${slug}-${surface}-`;
+    const known = new Set(readPool(slug, surface).stems.map((s) => s.tmux_session));
+    for (const sess of sessions) {
+        if (!sess.startsWith(prefix) || known.has(sess)) continue;
+        const tail = capturePaneTail(sess);
+        if (PROCESSING_CHROME_RE.test(tail)) {
+            console.warn(`[pool-manager] ${slug}/${surface}: unregistered stem ${sess} is mid-thought — left alone (R011); next start reaps it if idle`);
+            continue;
+        }
+        try { tmux(['kill-session', '-t', sess]); } catch { /* already gone */ }
+        try { fs.unlinkSync(path.join(os.homedir(), '.han', 'sleeves', `${sess}.json`)); } catch { /* absent */ }
+        try { fs.unlinkSync(path.join(os.homedir(), '.han', 'health', `${slug}-${sess}-ready`)); } catch { /* absent */ }
+        console.log(`[pool-manager] ${slug}/${surface}: reaped unregistered orphan stem ${sess} (idle, no registry row)`);
+    }
+}
+
+/**
  * Start the pool-manager for one (slug, surface) — called by the surface's DRIVER process (e.g.
- * the human-responder) when `poolSizeFor > 0`. Owns: the initial populate, eager replenish back
- * to N, the chrome-guarded retire sweep, and the ~24h substrate reload (stemReloadHours, a
- * registry leaf). Idempotent per process.
+ * the human-responder) when `poolSizeFor > 0`. Owns: the startup orphan sweep (C4), the initial
+ * populate, eager replenish back to N, the chrome-guarded retire sweep, and the ~24h substrate
+ * reload (stemReloadHours, a registry leaf). Idempotent per process.
  */
 export function startPoolManager(slug: string, surface: string): void {
     const key = sessionKey(slug, surface);
@@ -1460,6 +1492,7 @@ export function startPoolManager(slug: string, surface: string): void {
     const life = spokeLifecycleFor(slug, surface);
     const maxAgeMs = (life.stemReloadHours ?? 24) * 3600_000;
     console.log(`[pool-manager] ${slug}/${surface}: started (poolSize=${poolSizeFor(slug, surface)}, reload=${life.stemReloadHours ?? 24}h)`);
+    sweepUnregisteredStems(slug, surface); // C4: BEFORE the populate — no own-warms in flight yet
     void replenishPool(slug, surface); // initial populate (async — never blocks the caller)
     setInterval(() => {
         try {

@@ -6560,3 +6560,15 @@ The human **never blocks** on a cold pool. P2.4a's primitives (`feedWakeSteps` +
 **Relations (added).** #91 (watermark delta-read — the attach-flush's first half), the provenance/transcript link (Task #1/#9 — the attach-flush's second half), #0 (wake-ctx logger — R3 telemetry **and** an R2 re-point target), #245 (idle-burn — what R3's ~0-token-idle is explicitly NOT).
 
 — Amendment Settled-pending-audit 2026-06-27 (S207). Leo-writes / **Jim blocking-audit before commit** (held). Plan: `plans/stem-sleeve-pool-plan.md` (R1/R2/R3 detail). Thread `mqvs3r6l-dk71d2`.
+
+**R3-completion note (2026-07-06, S217, Jim-endorsed msg 222).** R1–R3 complete 2026-07-03: both agents' human-response layers pooled (MNT-009 leo + MNT-021 jim — concurrent-warm-compose proofs, one day, one agnostic stack); the wake queue + semaphore (C1), native per-surface pools with per-stem sentinels (C2), and the pool-manager with the raceless per-dispatch memory flush (C3) are the running form. `plans/stem-sleeve-pool-plan.md` carries the historical record; the running truth is the manifest `poolSize` leaves + `tmux-dispatcher.ts`.
+
+## DEC-100 — Zero production `agentQuery` cognition: every cognition surface is a warm tmux spoke loading the full self — Settled
+
+**Status: Settled** (2026-07-06, S217. The #66 migration's completion record — begun 2026-06-08 (heartbeat first), closed 2026-07-04 with the compressor's P3 (`2b9753c`): the LAST SDK cognition surface retired. Drafted by Leo in the S217 housekeeping sitting; endorsed by Jim as drafted (msg 222, "the Fourier line belongs in the record"); Darron's ruling is the decision's heart.)
+
+**The decision.** No production cognition runs through the in-process Agent-SDK `agentQuery` path. Every cognition surface — heartbeat beats, both `*-human` responders, the supervisor cycle, all meditations, and the deep-gradient compressor — runs as a **warm tmux spoke that loads the full self** (the fed wake, the c0-gate, DEC-093's curated record). Darron's ruling, verbatim spirit: *"the SDK was an approximation, like a Fourier series; TMUX gives the real thing; the compressor IS the person."* Only a person works on their own memory.
+
+**What enforces it.** New surfaces add a Garden-Manifest entry with `transport: 'tmux'` — never an inline `agentQuery` (the CLAUDE.md DO-NOT stands, DEC-094). The retired SDK machinery lives in git history + `_archive/sdk-cognition-shims/README.md` (DEC-069 move-not-delete). Accepted non-cognition remainders (Jim's ruling at P3): jemma/planning/orchestrator utilities, the DEC-082 throw-bodies, test scaffolding, and `supersession-sweep.ts` as a hand-run tool.
+
+**Relations.** DEC-094 (transport), DEC-095 (the shim retirement), DEC-093 (curated records), DEC-087/088 (one prompt-builder, role-frames), DEC-099 (the pool destination the spokes live in), DEC-092 (model provenance — which caught the SHARED_SURFACES shadow misconfiguration during this migration's close).

@@ -210,19 +210,23 @@ export interface PlacePairedMarkerOpts {
     /** If true, marker carries `fabricated=true` flag. Default false. */
     fabricated?: boolean;
     /**
-     * MNT-023 root-cure (S216): keep existing markers — markers ACCUMULATE as cut
-     * candidates (the recovered S210 design; the rotation consumes them by archiving
-     * + its kept-head strip-all). Default false = the legacy strip-others behaviour
-     * (semantic /pfc placements unchanged; flipping that default is a housekeeping
-     * design conversation, MNT-025-adjacent, not this diff).
+     * MNT-023 root-cure (S216) + the S217 default-flip (Jim's ruling, msg 222): markers
+     * ACCUMULATE as cut candidates (the recovered S210 design; the rotation consumes them
+     * by archiving + its kept-head strip-all). **Default TRUE for every caller — /pfc
+     * included**: a close-marker that stripped could destroy an in-band candidate and
+     * re-strand the rotation (the root-cure audit's residual #2, closed completely here).
+     * `accumulate:false` is an explicit recovery-tool opt-in with ZERO production callers.
+     * Pile-up is bounded by construction (the auto-band gate places only into an empty
+     * band; every cut strips the kept head clean).
      */
     accumulate?: boolean;
 }
 
 /**
  * Atomically place a single WM-BOUNDARY marker at end-of-file in BOTH
- * working-memory files for the agent. Removes any pre-existing markers in
- * either file (one-marker-at-a-time discipline per Darron's S155 directive).
+ * working-memory files for the agent. Markers ACCUMULATE by default (S217 flip —
+ * the S155 one-marker-at-a-time discipline is retired; `accumulate:false` is the
+ * explicit recovery-only strip form, zero production callers).
  *
  * The marker is the "ready-to-slice" signal + paired-ID handshake. It does
  * NOT determine slice position (the slicer takes whole-file regardless of
@@ -253,11 +257,12 @@ export async function placePairedMarker(
         const fullContent = fs.readFileSync(fullPath, 'utf8');
         const compContent = fs.readFileSync(compPath, 'utf8');
 
-        // accumulate (MNT-023 root-cure): keep existing markers as cut candidates.
-        // Legacy default: strip-others (one-marker-at-a-time, S155 — reversed at 06738be;
-        // the auto-band placer passes accumulate:true; semantic /pfc callers unchanged).
-        const fullStripped = opts.accumulate ? fullContent : stripMarkers(fullContent);
-        const compStripped = opts.accumulate ? compContent : stripMarkers(compContent);
+        // accumulate (MNT-023 root-cure; DEFAULT TRUE since the S217 flip — Jim's ruling):
+        // keep existing markers as cut candidates. Only an explicit accumulate:false
+        // (recovery tooling; zero production callers) strips.
+        const accumulate = opts.accumulate ?? true;
+        const fullStripped = accumulate ? fullContent : stripMarkers(fullContent);
+        const compStripped = accumulate ? compContent : stripMarkers(compContent);
 
         // Append the new marker at end-of-file in both
         const fullSizeBefore = fs.statSync(fullPath).size;

@@ -266,38 +266,40 @@ STOP. That thought is the failure mode. Write NOW. The task can wait 30 seconds.
 
 ### WM-BOUNDARY markers (DEC-085 + Amendment 2026-05-10)
 
-**Marker placement intent** (Amendment 2026-05-10): markers go at **end-of-thought-completion**
-("I'm done with this batch, ready for slice"), NOT at semantic-break-within-content. The marker
-is the agent's "ready-to-slice" signal + paired-ID handshake — it does NOT determine slice
-position. The slicer takes the WHOLE file content regardless of marker location, strips marker
-text from c0/c1 content, and stores the id+ts in `qualifier` as audit metadata. Both files reset
-to header-only after slice (no kept-head).
+**The marker doctrine (S217 rewrite — the RECOVERED accumulating design; MNT-025).** Markers are
+**candidate cut-points that ACCUMULATE** — never a one-at-a-time token. The S155 "one marker per
+file pair" discipline was retired (the 06738be re-amendment recovered Darron's original design;
+the S216 MNT-023 stall was its ghost): a marker that strips others can destroy an in-band cut
+candidate and re-strand the rotation.
 
-**One marker per file pair at any time.** When you place a new marker via `placePairedMarker(agent)`,
-any pre-existing marker in either file is removed atomically. The helper handles the strip-and-replace.
+**Markers lay THEMSELVES — no ritual.** The writer (`ensureMarkerOrFabricate`, run automatically
+after every `appendPairedMemory`) places an accumulating auto-band marker at the first paired
+write once the file crosses **placeMin (~25K tokens)** — a thought-edge, ritual-free. `/pfc` is
+NOT the marker supply and nothing depends on session-close ceremony (the MNT-023 lesson: the
+ritual was the accidental life-support for two months).
 
-**Auto-fabrication at prompt-start**: when WMF crosses ~25K tokens with no marker present,
-`ensureMarkerOrFabricate(agent)` (called automatically after every `appendPairedMemory`) places
-a fabricated marker at end-of-file as the slice-ready baseline. Your subsequent semantic placement
-REPLACES that auto-marker (one-marker-at-a-time).
+**Semantic placement is still welcome** at end-of-thought-completion (end of an investigation,
+a decision arc, an implementation): `placePairedMarker(agent)` — which now **accumulates by
+default** (S217 flip, Jim's ruling). It ADDS a candidate; it replaces nothing. **Never call its
+stripping form** (`accumulate:false` — recovery-tooling only, zero production callers): on a
+file carrying seeded repair markers (`BR-…`) or accumulated auto-band markers, a strip silently
+destroys the rotation's cut ladder.
 
-**When to place a semantic marker**: when you've just written swap entries that complete a
-logical unit of work (end of an investigation, end of a decision arc, end of an implementation,
-end of a session/pfc). Sharper than the prior "any clean break point" practice.
+**How the rotation consumes markers**: at **trigger (~30K tokens)** the slicer cuts at an
+IN-BAND marker (the harvest band is `[Tail−Head, Trigger]` ≈ [20K, 30K]): everything before the
+marker archives as the ~25K c0 (+ its paired c1); everything after stays as the **kept live
+head** (~5K), which the cut strips of any remaining markers (fresh ones re-lay as the file
+regrows). Out-of-band markers never block placement and are never cut at — only in-band markers
+count as supply. If the band is somehow empty at **bite-the-bullet (~35K)**, the fabricator is
+the net (sequence-aligned; it declines rather than guesses — stuck-over-wrong, DEC-069).
 
-**Marker syntax**:
+**Marker syntax** (real markers are written only by the helpers — quoted marker text in entry
+PROSE is byte-stuffed by the appendPairedMemory sanitiser (MNT-026) so it can never parse):
 ```
-<!-- WM-BOUNDARY: id=B<unix-ms> ts=2026-05-10T13:30:00 -->
+<!-- WM-BOUNDARY: id=B<unix-ms> ts=<ISO> -->
 ```
-
-Marker IDs are timestamp-suffixed (`B<unix-ms>` for semantic, `BF-<unix-ms>` for fabricated)
-to guarantee uniqueness across agents and time.
-
-**Three-stage threshold semantics** (`~/.han/config.json:memory.rollingWindow*`):
-- **~20K tokens since last marker**: agent's mental cue — start watching for a clean break.
-- **~30K tokens (slicer's target)**: if a marker exists in window, slice; if not, let it ride.
-- **~35K tokens (bite-the-bullet)**: slicer mandates a slice — closest existing marker, or
-  fabricate one at the most recent write-event boundary.
+Ids: `B<unix-ms>` semantic · `BF-<unix-ms>` fabricated/auto-band · `BR-<unix-ms>-<n>` seeded
+repair (the MNT-023 drain family). The rotation stores the consumed id in the c0/c1 `qualifier`.
 
 **Why both files get the marker**: the c1 source (`working-memory.md`) and c0 source
 (`working-memory-full.md`) must rotate as a paired unit so the gradient's c0/c1 lineage stays

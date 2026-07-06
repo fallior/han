@@ -1054,9 +1054,13 @@ function buildMeditationPhaseAScaffold(ctx: PromptContext): string {
     const fileContentType = (ctx.fileContentType as string | undefined) ?? '';
     const fileContent = (ctx.fileContent as string | undefined) ?? '';
 
+    // MNT-001 (S217): the agent line renders the BUILDER-INJECTED slug — never a literal.
+    // (This exact line hardcoded `Agent: leo` for every agent; Jim's root-trace 2026-07-03.)
+    const slug = (ctx.slug as string | undefined) ?? 'unknown';
+
     return `Re-encounter this file-based memory:
 
-Agent: leo
+Agent: ${slug}
 Level: ${fileLevel}
 Type: ${fileContentType}
 Label: ${fileLabel}

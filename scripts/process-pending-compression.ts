@@ -356,6 +356,21 @@ async function main() {
             const built = buildPrompt(agent!, 'compression-txn', taskCtx);
             const txnPrompt = `${built.systemPrompt}\n\n${built.userPrompt}`;
             log(`tmux txn prompt ${txnPrompt.length} chars (memory suppressed: ${built.meta.memory_chars})`);
+            // MNT-024 (S217, Jim's trace): BuildMeta.truncation_events previously had NO landing
+            // surface — the child's stdout is discarded by the sensor on success, so a tail-trim
+            // (e.g. a huge source_content pressing the txn budget) would silently cost the compose
+            // fidelity with no forensic trace. Persist the events to health (survives the child);
+            // fail-open — telemetry never blocks a compose.
+            if (built.meta.truncation_events?.length) {
+                try {
+                    const { appendFileSync, mkdirSync } = require('fs');
+                    const hdir = `${process.env.HOME}/.han/health`;
+                    mkdirSync(hdir, { recursive: true });
+                    appendFileSync(`${hdir}/compression-truncation.jsonl`,
+                        JSON.stringify({ ts: new Date().toISOString(), agent, claim: row.id, events: built.meta.truncation_events }) + '\n');
+                    log(`⚠ truncation_events persisted: ${built.meta.truncation_events.length} (compression-truncation.jsonl)`);
+                } catch { /* fail-open */ }
+            }
             const cap = await dispatchToSpoke(agent!, 'compression', txnPrompt, {
                 ladder: manifestModelLadder(agent!, 'compression'),
                 welcomeBack: `welcome back ${agentCfg(agent!).displayName}`,
