@@ -1120,7 +1120,13 @@ export async function feedWakeSteps(
         // Echo-safety holds: a false echo-match now needs BOTH wrap boundaries to land exactly at
         // the token's edges (one width, two positional congruences) — the same essentially-
         // impossible class as the sealed sub-31-column footnote. Wrap-fuzz re-proven: 0 false.
-        const ackRe = new RegExp(`^[ \\t]*\`?STEP-OK[ \\t]+${step.id}[ \\t]+${nonce}\`?[.!]?[ \\t]*$`, 'm');
+        // MNT-032 (S218, the bullet class): Claude Code renders the FIRST line of an assistant
+        // message with a `● ` prefix — so the MOST compliant reply (the ack alone, message-initial)
+        // rendered as `● STEP-OK …` and could never match. Accept an optional leading bullet glyph
+        // (● / ⏺ / •). Echo-safety unchanged: the instruction's echo is a user-line (never
+        // bullet-rendered) and contains no bullet glyphs. The bullet class stays [ \t]-bound to the
+        // ack's own line (not \s*) so the own-line anchor never reaches across a newline.
+        const ackRe = new RegExp(`^[ \\t]*(?:[●⏺•][ \\t]*)?\`?STEP-OK[ \\t]+${step.id}[ \\t]+${nonce}\`?[.!]?[ \\t]*$`, 'm');
         const isAcked = (tail: string): boolean => {
             if (!ackRe.test(tail)) return false;
             if (step.ack.kind === 'c0') {
@@ -1131,7 +1137,14 @@ export async function feedWakeSteps(
                 // stem-vs-floor race) — the pre-warmer passes its stem session here. Default =
                 // the surface (every existing caller unchanged).
                 const echoed = readSentinelC0Id(slug, opts.sentinelKey ?? surface);
-                if (!(echoed && isAgentC0(slug, echoed))) return false;
+                // MNT-033 (the newborn carve-out — mirrors verifyWarmOrNudge's F4 branch above): an
+                // agent with NO c0 yet writes the protocol's literal `none` (its producer half is
+                // load-gradient.ts's genesis path). Accept `none` ONLY while mostRecentC0Id is null —
+                // an agent with a real c0 keeps the strict isAgentC0 gate byte-identical, so a
+                // shallow wake can never hide behind the newborn literal.
+                if (mostRecentC0Id(slug) === null) {
+                    if (echoed !== 'none') return false;
+                } else if (!(echoed && isAgentC0(slug, echoed))) return false;
             }
             return true;
         };

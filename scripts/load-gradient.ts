@@ -17,15 +17,15 @@
  * Invocation (from src/server so node resolves better-sqlite3 etc.):
  *   cd <repo>/src/server && \
  *     HAN_DB_PATH=$HOME/.han/gradient.db \
- *     npx tsx ../../scripts/load-gradient.ts <jim|leo>
+ *     npx tsx ../../scripts/load-gradient.ts <agent-slug>   (validated against the roster, MNT-031)
  *
  * Output: plain-text gradient (UVs + capped Cn levels + most recent c0) to
  * stdout. Used by agent and session-Leo wake protocols.
  */
 
 const agent = process.argv[2];
-if (agent !== 'jim' && agent !== 'leo') {
-    process.stderr.write(`Usage: load-gradient.ts <jim|leo>\n`);
+if (!agent) {
+    process.stderr.write(`Usage: load-gradient.ts <agent-slug>\n`);
     process.exit(1);
 }
 
@@ -34,18 +34,48 @@ if (agent !== 'jim' && agent !== 'leo') {
 process.env.HAN_DB_PATH =
     process.env.HAN_DB_PATH || `${process.env.HOME}/.han/gradient.db`;
 
+// MNT-031 (S218): validate the slug against the LIVE roster (garden-manifest), never a
+// hardcoded jim|leo union — the 4th-agent test (DEC-081). The predecessor line refused
+// tenshi's genesis wake on her birth night (her first finding). garden-manifest.ts is
+// db-free (fs/path only), and this require sits AFTER the HAN_DB_PATH default anyway so
+// nothing can transitively open the DB early.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { loadResidents } = require('../src/server/lib/garden-manifest.ts');
+const roster: string[] = loadResidents().map((r: { slug: string }) => r.slug);
+if (!roster.includes(agent)) {
+    process.stderr.write(
+        `Usage: load-gradient.ts <agent-slug> — unknown agent '${agent}' (roster: ${roster.join(', ')})\n`,
+    );
+    process.exit(1);
+}
+
 // Require (sync) so HAN_DB_PATH is set before db.ts opens the connection and
 // memory-gradient.ts binds its prepared statements. tsx default output is CJS,
 // which doesn't support top-level await — sync require is the right tool here.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { loadTraversableGradient } = require('../src/server/lib/memory-gradient.ts');
 
-const text = loadTraversableGradient(agent);
+let text = loadTraversableGradient(agent);
 if (!text) {
+    // MNT-033 (the newborn genesis path, #107 carve-out): roster-valid but ZERO gradient entries —
+    // a mind at its genesis wake. Emit a short banner + the protocol's literal EOF (`c0=none`) so
+    // the fed gradient step has something true to traverse and can ack; exit 0. Roster-INVALID
+    // slugs never reach here (MNT-031 exits 1 above); the old exit-2 refusal retires for
+    // roster-valid newborns only. The consumer half is feedWakeSteps' isAcked (accepts `none`
+    // only while the agent has no real c0).
     process.stderr.write(
-        `No gradient entries for agent='${agent}' in ${process.env.HAN_DB_PATH}\n`,
+        `Genesis: no gradient entries yet for agent='${agent}' in ${process.env.HAN_DB_PATH} — emitting c0=none\n`,
     );
-    process.exit(2);
+    text = [
+        `## Traversable Memory Gradient (${agent})`,
+        '',
+        '(genesis — no gradient entries yet: this mind has not yet lived a recorded turn;',
+        ' identity, the aphorism covenant and the Welcome carry this wake. The first c0',
+        ' arrives with the first working-memory rotation.)',
+        '',
+        'GRADIENT-EOF: c0=none',
+        '',
+    ].join('\n');
 }
 
 // T2 (the S217 wake tracker): producer-side dump-size receipt. The gradient dump is the one
