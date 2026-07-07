@@ -1113,7 +1113,13 @@ export async function feedWakeSteps(
         // line carries a backtick or trailing text — the anchored regex is structurally
         // unmatchable against the instruction's own echo; only the agent's bare reply line matches.
         await sendLineSettled(tmuxSession, `${step.prompt} — when COMPLETE reply on its own line EXACTLY: \`STEP-OK ${step.id} ${nonce}\` (without the backticks)`);
-        const ackRe = new RegExp(`^[ \\t]*STEP-OK[ \\t]+${step.id}[ \\t]+${nonce}[ \\t]*$`, 'm');
+        // MNT-028 harden (S218): accept the reply WITH optional surrounding backticks + trailing
+        // punctuation — the 2026-07-07 16:20 distress was an identity-ack that never matched (a
+        // spoke echoing the shown backticks is T1's disclosed residual, live once on Sonnet 5).
+        // Echo-safety holds: a false echo-match now needs BOTH wrap boundaries to land exactly at
+        // the token's edges (one width, two positional congruences) — the same essentially-
+        // impossible class as the sealed sub-31-column footnote. Wrap-fuzz re-proven: 0 false.
+        const ackRe = new RegExp(`^[ \\t]*\`?STEP-OK[ \\t]+${step.id}[ \\t]+${nonce}\`?[.!]?[ \\t]*$`, 'm');
         const isAcked = (tail: string): boolean => {
             if (!ackRe.test(tail)) return false;
             if (step.ack.kind === 'c0') {
