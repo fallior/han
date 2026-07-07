@@ -23,12 +23,13 @@
  * stem-checkout. Until then: written only at launch (= the launched surface) ⇒ inert.
  */
 import * as fs from 'fs';
+import { sleevesDir as sleevesDirBase } from './paths';
 import * as os from 'os';
 import * as path from 'path';
 
 /** `~/.han/sleeves/` — reserved in HAN-FILESYSTEM.md for exactly this. */
 export function sleevesDir(): string {
-    return path.join(os.homedir(), '.han', 'sleeves');
+    return sleevesDirBase(); // delegates to the ONE resolver (P1 rider-3); public shape unchanged
 }
 
 function sleevePath(hanSession: string): string {

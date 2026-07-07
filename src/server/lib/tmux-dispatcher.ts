@@ -29,6 +29,7 @@
  */
 
 import { execFileSync, execFile } from 'child_process';
+import { healthDir, hanHome, sleevesDir } from './paths';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -42,8 +43,8 @@ import { writeSleeveState } from './sleeve-state';
 import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, readPool, poolStatus, type PoolStem } from './stem-pool';
 import { serverDir } from './paths';
 
-const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
-const PIPES_DIR = process.env.HAN_PIPES_DIR || path.join(os.homedir(), '.han', 'agent-pipes');
+const HEALTH_DIR = process.env.HAN_HEALTH_DIR || healthDir();
+const PIPES_DIR = process.env.HAN_PIPES_DIR || path.join(hanHome(), 'agent-pipes');
 
 /**
  * Q-V2-4 GATE. The dispatcher-computed memory-delta (#91 the watermark) is the warm-session
@@ -1480,8 +1481,8 @@ function sweepUnregisteredStems(slug: string, surface: string): void {
             continue;
         }
         try { tmux(['kill-session', '-t', sess]); } catch { /* already gone */ }
-        try { fs.unlinkSync(path.join(os.homedir(), '.han', 'sleeves', `${sess}.json`)); } catch { /* absent */ }
-        try { fs.unlinkSync(path.join(os.homedir(), '.han', 'health', `${slug}-${sess}-ready`)); } catch { /* absent */ }
+        try { fs.unlinkSync(path.join(sleevesDir(), `${sess}.json`)); } catch { /* absent */ }
+        try { fs.unlinkSync(path.join(healthDir(), `${slug}-${sess}-ready`)); } catch { /* absent */ }
         console.log(`[pool-manager] ${slug}/${surface}: reaped unregistered orphan stem ${sess} (idle, no registry row)`);
     }
 }

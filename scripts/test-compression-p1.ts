@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { poolSizeFor, wakeFeedFor } from '../src/server/lib/garden-manifest';
+import { poolSizeFor, wakeFeedFor, loadResidents } from '../src/server/lib/garden-manifest';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -28,11 +28,13 @@ check('CompressionCaptureArgs exported', server.includes('export interface Compr
 check('capture writes mode:compression + payload', server.includes("mode: 'compression'") && server.includes('compression: { composed:'));
 
 // 2) Manifest state: the compression surface exists per agent (P2 flipped jim ON 2026-07-04;
-//    leo follows post-MNT-023 — enabled-state asserted in test-compression-p2, not here).
-const manifest = fs.readFileSync(path.join(ROOT, 'src/server/lib/garden-manifest.ts'), 'utf-8');
-const compressionSurfaces = (manifest.match(/name: 'compression',\s+enabled: (true|false)/g) || []).length;
-check('compression surface present for 2 agents', compressionSurfaces === 2);
-check('NO poolSize FIELD on the compression surface (cascade ordering — deliberate)', !/name: 'compression'[^\n]*poolSize:\s*\d/.test(manifest));
+//    leo followed post-MNT-023-drain). P1-extraction note (S218): these asserts now read the
+//    LOADED manifest (the garden config JSON via the loader) — the literal left the source file;
+//    structural beats source-text anyway.
+const compressionAgents = loadResidents().filter((a) => a.surfaces.some((s) => s.name === 'compression'));
+check('compression surface present for 2 agents', compressionAgents.length === 2);
+check('NO poolSize FIELD on the compression surface (cascade ordering — deliberate)',
+    compressionAgents.every((a) => a.surfaces.find((s) => s.name === 'compression')!.poolSize === undefined));
 check('poolSizeFor(leo, compression) === 0 (the floor/serial model)', poolSizeFor('leo', 'compression') === 0);
 check('wakeFeedFor(leo, compression) === true (the guaranteed fed wake at P2)', wakeFeedFor('leo', 'compression') === true);
 

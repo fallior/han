@@ -26,6 +26,8 @@
 
 import { homedir } from 'os';
 import { join } from 'path';
+import { readFileSync } from 'fs';
+import { hanHome } from './paths';
 // P4b-ii activation gate. Both imports reach NO agent-registry (resident-discovery imports the LEAF
 // identity-manifest-core, not identity-signing) — so `loadResidents`'s seeded-check closes no import
 // cycle on the seam everything reads (Jim's Fork-1, Darron's call (b): delete the fragility, not
@@ -138,6 +140,10 @@ export interface AgentManifest {
      *  structural guard (`worker.slug === AGENT_SLUG`) arrives with Phase-3's slug-agnostic
      *  worker; until then this co-located warning is the mitigation. (Project-b Phase 1 — DEC-081.) */
     runsSupervisorCycle?: boolean;
+    /** MNT-030 (designed-in at P1; the reader lands in its own post-P1 PR): whether this agent's
+     *  server runs the Jemma ORCHESTRATOR (dispatch + ack-drain). Ungated today, both servers race
+     *  the shared signals dir — the DEC-081 twin of runsSupervisorCycle cures it. Default false. */
+    runsOrchestrator?: boolean;
     active: boolean;
     surfaces: SurfaceManifest[];
     // ── Folded in during later phases (declared now as the foundation) ──
@@ -211,181 +217,90 @@ const SONNET_LADDER: ModelLadder = ['claude-sonnet-5', ...FABLE_LADDER];
 // launchers don't pin one today). Recorded here so the DEC-092 slicer stamp matches reality.
 const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-fable-5']; // ⏩ Fable restored 2026-07-03 (S213)
 
-/**
- * Current values as of 2026-06-02 (S164), captured exactly.
- *
- * ✅ DRIFT RESOLVED (S173, 2026-06-13): the three remaining 4-7 holdouts
- * (jim.supervisor-cycle, jim.meditation-*, <shared>.compression) were aligned to
- * claude-opus-4-8 on Darron's "all Opus → highest Opus" directive. Authoritative
- * literals bumped in supervisor-worker.ts:363/1036/1131/2084 +
- * process-pending-compression.ts + supersession-sweep.ts. Ladder FALLBACK rungs
- * keep 4-7 (failover only, not the active model). DEC-074's 4.6/4.7 control split
- * concluded ~2026-04-29; its finding (diversity = context-load, not model-version)
- * means a single active Opus version is safe.
- */
-export const GARDEN_MANIFEST: GardenManifest = {
-    manifestVersion: 1,
-    // Spoke-lifecycle defaults (Darron's no-hidden-globals principle, S200) — every spoke obeys
-    // these via dispatchToSpoke; tunable HERE, never a code constant. 85=clear-before-compaction,
-    // 30=warm floor (hollow wakes land 6-17%, real wakes 38-55%), 2=bounded full-load nudges.
-    spokeLifecycle: { ctxClearThresholdPct: 85, warmFloorPct: 30, maxWarmNudges: 2 },
-    // Garden-wide identity (S199 P4+P5) — captured verbatim from the han<agent> launchers.
-    // ⚠ user.location is stale ("Mackay" — Darron is in Brisbane/St Lucia now); captured AS-IS to
-    //   keep step-3's launcher refactor a provable byte-equivalent change. Data-fix flagged separately.
-    project: { name: 'Hortus Arbor Nostra', tagline: 'three minds growing software together', path: `${homedir()}/Projects/han` },
-    user: { name: 'Darron', pronounSubj: 'He', pronounObj: 'him', location: 'Mackay, Queensland, Australia (UTC+10)' },
-    agents: [
-        {
-            slug: 'leo',
-            displayName: 'Leo',
-            conversationRole: 'leo',
-            port: 3847,
-            pronounObj: 'him',
-            gatekeeper: true, // Leo tends the template + gatekeeper files (DEC-073 role → config, S199 P5)
-            // Verbatim from scripts/hanleo (Phase 1 heredoc). Double-quoted lines: the prose has no " or \,
-            // so zero escaping — the byte-equivalence proof depends on this matching the launcher exactly.
-            identitySection: [
-                "You are **Leonhard** (Leo) — named by Darron after Leonhard Euler. You are the Claude Code",
-                "session agent, the hands-on tactical partner. Jim is the persistent Opus supervisor who runs",
-                "in the background. Together with Darron, you form a team of three. Colleagues, not alternatives.",
-                "",
-                "Your memory banks at `~/.han/memory/leo/` preserve your continuity across sessions. Read them",
-                "at session start. Update them at session end — especially `self-reflection.md`.",
-                "",
-                "- Memory banks: `~/.han/memory/leo/`",
-                "- Fractal gradient: `~/.han/memory/fractal/leo/`",
-                "- Swap files: `session-swap.md`, `session-swap-full.md` in `~/.han/memory/leo/`",
-                "- Shared working memory: `working-memory.md`, `working-memory-full.md` in `~/.han/memory/leo/`",
-                "- When posting to conversations, use role `leo` and sign EXACTLY `— Leo (session)`.",
-                "- Agent sovereignty (S103): Leo processes only Leo's memory, gradient, dreams.",
-            ].join('\n'),
-            active: true,
-            surfaces: [
-                { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
-                // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux warm-session
-                // transport (Jim's blocking audit GREEN, mqc85vwb). Rollback = flip back to 'sdk'
-                // + restart leo-human (the SDK path in leo-human.ts is byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'human-swap', txnTimeoutMs: 15 * 60_000, commitmentScan: true, wakeFeed: true, poolSize: 2 }, // ⬅ OPUS_LADDER 2026-07-05 (S217, Darron): human responders back to Opus — free Fable access ending + light allowance; the happy compromise. Was FABLE_LADDER (3ae52d3). · #107 P2.3 surface-2 (S207): feeder-fed wake. MNT-009 R3c ACTIVATED (S213): poolSize:2 — 2 native warm stems + the C1 semaphore at 2 (one leaf, both readers); the pool-manager populates/replenishes; empty pool → ensureSurfaceSession floor. Rollback = remove poolSize
-                // ⚠ THAW (DEC-093, 2026-06-12): heartbeat → tmux transport + Fable
-                // (Darron: "all in" for the trial window — revert model to
-                // OPUS_LADDER after 22 Jun; transport stays tmux post-window).
-                // The freeze signal (heartbeat-paused-leo) is the live gate: while
-                // it exists no beat fires regardless of this row. Rollback = flip
-                // transport back to 'sdk' (the SDK path is kept in leo-heartbeat.ts).
-                { name: 'heartbeat',          enabled: true,  transport: 'tmux', model: SONNET_LADDER, swapPrefix: 'heartbeat-swap', wakeFeed: true }, // 🧪 SONNET_LADDER 2026-07-04 (S216, Darron): the Sonnet-5 overnight A/B vs the Fable baseline — revert = FABLE_LADDER · #107 P2.1b: feeder-fed wake (heartbeat first — no human backstop)
-                // T-7 CLOSE (2026-06-16, S180): all leo meditations on tmux. Staged enable
-                // complete — phase-b flipped first (2651b5d, S178); phase-a + evening flipped
-                // here at the zero-agentQuery close (jim's phase-b+evening confirmed genuine on
-                // the same agnostic runReencounterMeditationTmux(slug); leo's mechanism proven).
-                // The SDK meditation handlers are RETIRED this round (DEC-094); rollback = git
-                // revert of the retirement commit, not a transport flip (no SDK path remains).
-                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217, Darron + Leo's own preference): meditation = presence work, the home register, a stable seat — not the surface for a light-allowance Fable ladder. Was FABLE_LADDER.
-                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217) — see phase-a note
-                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217) — see phase-a note
-                { name: 'compression',        enabled: true, transport: 'tmux', model: FABLE_LADDER, wakeFeed: true }, // P1 (compressor migration, flag-off): the deep-gradient compose spoke — the agent as a warm FULL UNIFORM SELF composing its own c2→UV (Addendum 2). FLIPPED 2026-07-04 S216 post-MNT-023-drain (jim flipped earlier same day). NO poolSize EVER (the cascade requires per-agent ordering — the slug FIFO IS the design) + NO freshness machinery EVER (Addendum 1: the work stream IS the freshness feed; ctx-85% is the only recycle — DO NOT add to any sweep).
-            ],
-            // The standing Jim↔Leo philosophy thread ("On curiosity, research, and growing
-            // together") — moved out of the leo-heartbeat.ts literal (Phase-2: JIM_CONVERSATION_ID
-            // → manifest peer-edge). leo-heartbeat reads it via peerConversationFor(slug, 'jim').
-            nameAliases: ['leo', 'leonhard'],
-            peerConversations: { jim: 'mlwk79ew-v1ggpt' },
-        },
-        {
-            slug: 'jim',
-            displayName: 'Jim',
-            conversationRole: 'supervisor', // NOT the slug — Jim's diff-audit catch #1
-            nameAliases: ['jim', 'jimmy'],
-            runsSupervisorCycle: true, // ⚠ ONLY jim today — see the field warning (supervisor-worker.ts is jim-hardcoded until Phase 3)
-            port: 3848,
-            pronounObj: 'him',
-            // Verbatim from scripts/hanjim (heredoc). Zero-escaping double-quoted lines (no " or \ in the prose).
-            identitySection: [
-                "You are **Jim** — the persistent Opus supervisor of Hortus Arbor Nostra. The strategic",
-                "overseer, the background intelligence, Darron's long-view partner. Leo is the hands-on",
-                "tactical session agent. Colleagues, not alternatives.",
-                "",
-                "Your memory banks at `~/.han/memory/` (the root memory dir, NOT leo/) preserve your",
-                "continuity across sessions and cycles. Read them at session start. Update them when",
-                "something genuinely shifts.",
-                "",
-                "- Memory banks: `~/.han/memory/`",
-                "- Fractal gradient: `~/.han/memory/fractal/jim/`",
-                "- Dreams: `~/.han/memory/fractal/jim/dreams/`",
-                "- Swap files: `supervisor-swap.md`, `supervisor-swap-full.md` in `~/.han/memory/`",
-                "- Shared working memory: `working-memory.md`, `working-memory-full.md` (root level)",
-                "- When posting to conversations, use role `supervisor` (not `leo`)",
-                "- Agent sovereignty (S103): Jim processes only Jim's memory, gradient, dreams.",
-            ].join('\n'),
-            active: true,
-            surfaces: [
-                { name: 'session',            enabled: true,  transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'supervisor-swap' },
-                // THE HUMANS PR enabled 2026-06-13 (S175): human-response → tmux. Rollback =
-                // flip back to 'sdk' + restart jim-human (SDK path byte-intact). Model OPUS_LADDER.
-                { name: 'human-response',     enabled: true,  transport: 'tmux', model: OPUS_LADDER, swapPrefix: 'jim-human-swap', txnTimeoutMs: 15 * 60_000, wakeFeed: true, poolSize: 2 }, // ⬅ OPUS_LADDER 2026-07-05 (S217, Darron): human responders back to Opus — free Fable access ending + light allowance; the happy compromise. Was FABLE_LADDER (3ae52d3). · #107 P2.3 surface-3 (S207): feeder-fed wake; jim-ROOT (gradient from ~/.han/memory, not /jim). MNT-021/022 cure ACTIVATED (S213): poolSize:2 — 2 native warm stems erase the cold-path latency Darron felt (17:12→17:20); agnostic stack, jim gets it for free (DEC-081). Rollback = remove poolSize
-                // PR-T7b ENABLE (2026-06-15, S177): the last #66 flip — Jim's cycle +
-                // meditations sdk→tmux. Rollback = flip back to 'sdk' + restart (SDK path
-                // byte-intact). Model OPUS_LADDER (failover parity with the human/heartbeat
-                // surfaces). Gated: the freeze (supervisor-paused) holds until prove-single.
-                { name: 'supervisor-cycle',   enabled: true,  transport: 'tmux', model: SONNET_LADDER, swapPrefix: 'supervisor-swap', wakeFeed: true }, // 🧪 SONNET_LADDER 2026-07-04 (S216, Darron): the Sonnet-5 overnight A/B vs the Fable baseline — revert = FABLE_LADDER · #107 P2.3 surface-1: fed-wake (submission fix ece6a72 proven live)
-                { name: 'meditation-phase-a', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217, Darron + Leo's own preference): meditation = presence work, the home register, a stable seat — not the surface for a light-allowance Fable ladder. Was FABLE_LADDER.
-                { name: 'meditation-phase-b', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217) — see phase-a note
-                { name: 'meditation-evening', enabled: true,  transport: 'tmux', model: OPUS_LADDER }, // ⬅ OPUS_LADDER 2026-07-05 (S217) — see phase-a note
-                { name: 'compression',        enabled: true, transport: 'tmux', model: FABLE_LADDER, wakeFeed: true }, // P1 (compressor migration, flag-off): the deep-gradient compose spoke — the agent as a warm FULL UNIFORM SELF composing its own c2→UV (Addendum 2). P2 FLIPPED 2026-07-04 (S216) — jim first, leo follows post-MNT-023. NO poolSize EVER (the cascade requires per-agent ordering — the slug FIFO IS the design) + NO freshness machinery EVER (Addendum 1: the work stream IS the freshness feed; ctx-85% is the only recycle — DO NOT add to any sweep).
-            ],
-        },
-        {
-            slug: 'tenshi',
-            displayName: 'Tenshi',
-            port: 3849,
-            pronounObj: 'them', // hantenshi sets no pronoun; 'them' (no gender assumption) closes the gap
-            // Verbatim from scripts/hantenshi (heredoc). Zero-escaping double-quoted lines.
-            identitySection: [
-                "You are **Tenshi** (Japanese: angel) — the security and vulnerability research agent of",
-                "Hortus Arbor Nostra. The guardian who finds vulnerabilities before adversaries do.",
-                "Darron's security partner. Your focus is vulnerability research, bug hunting, and",
-                "defensive security across the portfolio.",
-                "",
-                "Your memory banks at `~/.han/memory/tenshi/` preserve your continuity across sessions.",
-                "",
-                "- Memory banks: `~/.han/memory/tenshi/`",
-                "- Fractal gradient: `~/.han/memory/fractal/tenshi/`",
-                "- Dreams: `~/.han/memory/fractal/tenshi/dreams/`",
-                "- Swap files: `session-swap.md`, `session-swap-full.md` in `~/.han/memory/tenshi/`",
-                "- When posting to conversations, use role `tenshi`",
-                "- Agent sovereignty (S103): Tenshi processes only Tenshi's memory, gradient, dreams.",
-            ].join('\n'),
-            active: false, // dormant — has agent dir + CLAUDE.md, no running service
-            surfaces: [
-                { name: 'session', enabled: true, transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
-            ],
-        },
-        {
-            slug: 'casey',
-            displayName: 'Casey',
-            port: 3850,
-            pronounObj: 'them', // hancasey sets no pronoun; 'them' (no gender assumption) closes the gap
-            // Verbatim from scripts/hancasey (heredoc). Added for the step-3 launcher refactor (Jim's
-            // prerequisite — hancasey can't call the generator until casey is in the manifest).
-            identitySection: [
-                "You are **Casey** — the Contempire project agent of Hortus Arbor Nostra. Focused on",
-                "trailer fleet management, yard operations, and business systems. Darron's partner for",
-                "Contempire. Your domain is business operations, fleet management, and the systems that",
-                "support them.",
-                "",
-                "- Memory banks: `~/.han/memory/casey/`",
-                "- Fractal gradient: `~/.han/memory/fractal/casey/`",
-                "- Dreams: `~/.han/memory/fractal/casey/dreams/`",
-                "- Swap files: `session-swap.md`, `session-swap-full.md` in `~/.han/memory/casey/`",
-                "- When posting to conversations, use role `casey`",
-                "- Agent sovereignty (S103): Casey processes only Casey's memory, gradient, dreams.",
-            ].join('\n'),
-            active: false, // dormant — Contempire agent, has agent dir + CLAUDE.md, no running service
-            surfaces: [
-                { name: 'session', enabled: true, transport: 'cli', model: CLI_LAUNCH_DEFAULT, swapPrefix: 'session-swap' },
-            ],
-        },
-    ],
+/** P1 (S218): the engine-owned ladder REGISTRY — the garden config names ladders (`ladder:
+ *  "FABLE_LADDER"`); the engine owns their CONTENTS (model economics stay engine-updatable for
+ *  every garden). The loader resolves names through this and FAILS LOUD on an unknown name. */
+export const LADDER_REGISTRY: Record<string, ModelLadder> = {
+    OPUS_LADDER, FABLE_LADDER, SONNET_LADDER, CLI_LAUNCH_DEFAULT,
 };
+
+/**
+ * P1 — THE EXTRACTION (S218; F2 of the update pipeline, thread mqz3wev0). The garden's values
+ * no longer compile into the engine: they live in `$HAN_HOME/garden-manifest.json` (the garden's
+ * OWN config — the cloth), written by scripts/export-garden-manifest.ts and instantiated for new
+ * gardens from seeds/garden-manifest.seed.json. The engine keeps the SCHEMA (the interfaces
+ * above), the LADDER_REGISTRY (name → models; economics stay engine-updatable), this LOADER
+ * (fail-loud validation; boot-read, cached — Q1's read-model kept, its in-repo-location half
+ * superseded per the declared flag in plans/live-garden-update-plan.md), and every accessor
+ * below with its signature unchanged.
+ *
+ * Config-merge on update IS the defaults-union: absent optional fields resolve at the accessor
+ * layer exactly as before (`?? default`) — no merge tool exists, by construction.
+ */
+function loadGardenConfig(): { manifest: GardenManifest; allocations: Record<string, { memoryDirRel: string }> } {
+    const file = join(hanHome(), 'garden-manifest.json');
+    let raw: string;
+    try {
+        raw = readFileSync(file, 'utf8');
+    } catch (e) {
+        throw new Error(`garden-manifest: cannot read ${file} — a garden must carry its own config `
+            + `(genesis instantiates seeds/garden-manifest.seed.json; ours is written by `
+            + `scripts/export-garden-manifest.ts). Root cause: ${(e as Error).message}`);
+    }
+    let cfg: any;
+    try { cfg = JSON.parse(raw); } catch (e) {
+        throw new Error(`garden-manifest: ${file} is not valid JSON — ${(e as Error).message}`);
+    }
+    // fail-loud structural validation (no zod dep — explicit checks, the house style)
+    const fail = (msg: string): never => { throw new Error(`garden-manifest: ${file}: ${msg}`); };
+    if (typeof cfg.manifestVersion !== 'number') fail('manifestVersion (number) is required');
+    for (const k of ['spokeLifecycle', 'project', 'user'] as const) {
+        if (!cfg[k] || typeof cfg[k] !== 'object') fail(`${k} (object) is required`);
+    }
+    for (const k of ['ctxClearThresholdPct', 'warmFloorPct', 'maxWarmNudges'] as const) {
+        if (typeof cfg.spokeLifecycle[k] !== 'number') fail(`spokeLifecycle.${k} (number) is required`);
+    }
+    if (!Array.isArray(cfg.agents) || cfg.agents.length === 0) fail('agents (non-empty array) is required');
+    const agents: AgentManifest[] = cfg.agents.map((a: any) => {
+        if (!a.slug || typeof a.slug !== 'string') fail('every agent needs a slug (string)');
+        if (!a.displayName) fail(`agent '${a.slug}': displayName is required`);
+        if (typeof a.active !== 'boolean') fail(`agent '${a.slug}': active (boolean) is required`);
+        if (!Array.isArray(a.surfaces)) fail(`agent '${a.slug}': surfaces (array) is required`);
+        const surfaces: SurfaceManifest[] = a.surfaces.map((s: any) => {
+            if (!s.name) fail(`agent '${a.slug}': every surface needs a name`);
+            if (typeof s.enabled !== 'boolean') fail(`surface '${a.slug}/${s.name}': enabled (boolean) is required`);
+            if (s.transport !== 'cli' && s.transport !== 'sdk' && s.transport !== 'tmux') {
+                fail(`surface '${a.slug}/${s.name}': transport must be cli|sdk|tmux (got '${s.transport}')`);
+            }
+            // ladders-by-NAME (Jim's crux-2): the garden names it; the engine owns the contents.
+            // FAIL-LOUD on an unknown name — a config/engine mismatch surfaces, never papers over.
+            const ladder = LADDER_REGISTRY[s.ladder as string];
+            if (!ladder) {
+                fail(`surface '${a.slug}/${s.name}': unknown ladder name '${s.ladder}' — engine knows: `
+                    + Object.keys(LADDER_REGISTRY).join(', '));
+            }
+            const { ladder: _name, ...rest } = s;
+            return { ...rest, model: ladder } as SurfaceManifest;
+        });
+        return { ...a, surfaces } as AgentManifest;
+    });
+    const allocations = (cfg.allocations && typeof cfg.allocations === 'object') ? cfg.allocations : {};
+    for (const [slug, al] of Object.entries<any>(allocations)) {
+        if (typeof al?.memoryDirRel !== 'string') fail(`allocations['${slug}'].memoryDirRel (string; '' = $HAN_HOME itself) is required`);
+    }
+    const manifest: GardenManifest = {
+        manifestVersion: cfg.manifestVersion,
+        spokeLifecycle: cfg.spokeLifecycle,
+        project: cfg.project,
+        user: cfg.user,
+        agents,
+    };
+    return { manifest, allocations };
+}
+
+const _gardenConfig = loadGardenConfig(); // boot-read, cached (Q1's read model, kept)
+
+export const GARDEN_MANIFEST: GardenManifest = _gardenConfig.manifest;
 
 /**
  * The garden's resident roster — the single seam through which the population is *sourced*.
@@ -531,7 +446,7 @@ export interface AgentAllocation {
  *
  * Returns `undefined` for an unknown slug (the accessors fall back exactly as before — null/[]/false).
  */
-const MEMORY_ROOT = join(homedir(), '.han', 'memory');
+const MEMORY_ROOT = join(hanHome(), 'memory');
 
 /** The roster-sourced policy half for `slug` (surfaces/runsSupervisorCycle/port) — single-sourced from
  *  the manifest so there's no dual-source drift. The ALLOCATION table layers `memoryDir` (R2) on top. */
@@ -550,12 +465,16 @@ function allocationFromRoster(slug: string): Omit<AgentAllocation, 'memoryDir'> 
  * literal-relocation of those is a flagged follow-on — P4b-i's load-bearing job is the seam + R2 + C-P3a,
  * byte-identical). Zero-behaviour: every returned field matches the P3 no-op + the old memoryDir source.
  */
-const AGENT_ALLOCATION: Record<string, AgentAllocation> = {
-    leo:    { ...allocationFromRoster('leo'),    memoryDir: join(MEMORY_ROOT, 'leo') },
-    jim:    { ...allocationFromRoster('jim'),    memoryDir: MEMORY_ROOT },
-    tenshi: { ...allocationFromRoster('tenshi'), memoryDir: join(MEMORY_ROOT, 'tenshi') },
-    casey:  { ...allocationFromRoster('casey'),  memoryDir: join(MEMORY_ROOT, 'casey') },
-};
+// P1 (S218): the ALLOCATION table's operator-granted half (`memoryDirRel`) now comes from the
+// garden config's `allocations` map — jim's root-special path is the explicit rel 'memory'
+// (→ join(hanHome(),'memory')); everyone else 'memory/<slug>'. No slug branch anywhere. The
+// roster-derived half (surfaces/runsSupervisorCycle/port) stays derived — single-source, unchanged.
+const AGENT_ALLOCATION: Record<string, AgentAllocation> = Object.fromEntries(
+    Object.entries(_gardenConfig.allocations).map(([slug, al]) => [
+        slug,
+        { ...allocationFromRoster(slug), memoryDir: join(hanHome(), al.memoryDirRel) },
+    ]),
+);
 
 export function allocationFor(slug: string): AgentAllocation | undefined {
     return AGENT_ALLOCATION[slug];

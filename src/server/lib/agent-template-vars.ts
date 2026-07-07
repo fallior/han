@@ -14,6 +14,8 @@
  */
 
 import { homedir } from 'os';
+import { join } from 'path';
+import { agentsDir } from './paths';
 import { GARDEN_MANIFEST, allocationFor } from './garden-manifest';
 import { gradientConfigForAgent } from './agent-registry';
 
@@ -51,7 +53,7 @@ export function agentTemplateVars(slug: string, surface = 'session'): Record<str
     // for EVERY agent including jim (verified: hanjim:25 is ~/.han/agents/Jim, not root, unlike
     // his root-special memoryDir). So derivation is safe here (cf. the S195 jim-at-root caveat:
     // that applies to memoryDir, which we correctly take from the registry, not derive).
-    const workingDir = `${homedir()}/.han/agents/${a.displayName}`;
+    const workingDir = join(agentsDir(), a.displayName);
 
     return {
         AGENT_NAME: a.displayName,

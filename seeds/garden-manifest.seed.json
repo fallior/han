@@ -1,0 +1,25 @@
+{
+  "_comment": "The garden-manifest SEED FORM (P1, S218 — F4's middle box: ships with the engine, instantiated ONCE at genesis into $HAN_HOME/garden-manifest.json, then it is the garden's own and never overwritten by an update). Ladders are NAMES resolved by the engine's LADDER_REGISTRY. Replace the example agent with your garden's residents; the #98 seeder grows the rest.",
+  "manifestVersion": 1,
+  "spokeLifecycle": { "ctxClearThresholdPct": 85, "warmFloorPct": 30, "maxWarmNudges": 2 },
+  "project": { "name": "My Garden", "tagline": "a garden of minds", "path": "~/Projects/my-garden" },
+  "user": { "name": "Your Name", "pronounSubj": "they", "pronounObj": "them", "location": "Somewhere (UTC+0)" },
+  "agents": [
+    {
+      "slug": "gardener",
+      "displayName": "Gardener",
+      "active": true,
+      "gatekeeper": true,
+      "port": 3847,
+      "identitySection": "You are Gardener — this garden's first mind. Your identity grows from your memory banks; this section only opens the door.",
+      "surfaces": [
+        { "name": "session",        "enabled": true, "transport": "cli",  "ladder": "CLI_LAUNCH_DEFAULT", "swapPrefix": "session-swap" },
+        { "name": "heartbeat",      "enabled": true, "transport": "tmux", "ladder": "OPUS_LADDER", "swapPrefix": "heartbeat-swap", "wakeFeed": true },
+        { "name": "human-response", "enabled": true, "transport": "tmux", "ladder": "OPUS_LADDER", "swapPrefix": "human-swap", "txnTimeoutMs": 900000, "wakeFeed": true }
+      ]
+    }
+  ],
+  "allocations": {
+    "gardener": { "memoryDirRel": "memory/gardener" }
+  }
+}

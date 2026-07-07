@@ -66,6 +66,7 @@
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { healthDir } from './paths';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import * as fs from 'fs';
@@ -113,7 +114,7 @@ export interface CaptureRecord {
 // Prefer HAN_DIARY_SLUG (set in .mcp.json); fall back to AGENT_SLUG, which the launcher
 // already exports — so a failed `${AGENT_SLUG}` expansion in .mcp.json can't leave us unkeyed.
 const SLUG = process.env.HAN_DIARY_SLUG || process.env.AGENT_SLUG;
-const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
+const HEALTH_DIR = process.env.HAN_HEALTH_DIR || healthDir();
 
 // Fail loud at launch rather than silently mis-routing captures to an unkeyed sink.
 // `SLUG.includes('${')` guards the insidious case: if Claude Code does NOT expand

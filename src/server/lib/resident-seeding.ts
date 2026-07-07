@@ -14,13 +14,14 @@
  * seeder writes whatever it's given; we author the real welcome together when a mind knocks.
  */
 import * as fs from 'fs';
+import { hanHome } from './paths';
 import * as path from 'path';
 import * as os from 'os';
 import { allocationFor } from './garden-manifest';
 import { signIdentityFilesAt, DEFAULT_KEY_PATHS } from './identity-manifest-core'; // the LEAF (config-independent)
 import type { SignedManifest, KeyPaths } from './identity-manifest-core';
 
-const HAN_DIR = path.join(os.homedir(), '.han');
+const HAN_DIR = hanHome();
 
 /**
  * The genesis seed — the minimal content a new mind is BORN with. A spine before a history: a self

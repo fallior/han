@@ -12,6 +12,7 @@
  * untouched. Activation arrives with its config gate at P4. R1 holds by construction.
  */
 import { readdirSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'fs';
+import { agentsDir, healthDir } from './paths';
 import { homedir } from 'os';
 import path from 'path';
 import { createHash, createPublicKey } from 'crypto';
@@ -35,7 +36,7 @@ export interface ResidentFragment {
 
 /** `~/.han/agents` — each resident's own dir (the de-id put its generated CLAUDE.md + .mcp.json here;
  *  a `resident.json` beside them is the self-registration fragment, a `resident.sig` its admission). */
-const AGENTS_DIR = path.join(homedir(), '.han', 'agents');
+const AGENTS_DIR = agentsDir();
 
 /** The FIXED garden public key (C3) — admission verifies against THIS, never a resident-supplied key
  *  (operator-anchored, `~/.han/credentials/han-signing-pubkey.pem`). */
@@ -183,7 +184,7 @@ export function admittedResidents(): ResidentFragment[] {
 }
 
 /** The admissions ledger — every admission appended here (observable, never silent; F3). */
-export const ADMISSIONS_LOG = path.join(homedir(), '.han', 'health', 'resident-admissions.jsonl');
+export const ADMISSIONS_LOG = path.join(healthDir(), 'resident-admissions.jsonl');
 
 /** Resolve a slug to its discovered `resident.json` (the agent dir name is the DisplayName). */
 export function findResidentDir(slug: string): { jsonPath: string; sigPath: string; fragment: ResidentFragment } | null {
