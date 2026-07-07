@@ -15,7 +15,7 @@
  * priorAgentFailed) lives in the user-prompt scaffold.
  */
 
-import { conversationRoleFor, humanResponderPeers } from './garden-manifest';
+import { conversationRoleFor, humanResponderPeers, loadResidents, agentNameAliases } from './garden-manifest';
 
 export const DISCORD_ATTACHMENT_HINT = `Discord attachments: when your prompt contains a "[Downloaded to]" section listing paths under ~/.han/downloads/discord/, those are real files attached to the Discord message. Open each path with the Read tool (works on text, code, images, PDFs) before responding. Never claim you cannot read Discord attachments — the paths are already in your prompt.`;
 
@@ -36,6 +36,11 @@ interface HumanAgentSpec {
     closingTagline: string;
     /** Session-equivalent identity name — 'session-Jim' | 'session-Leo' */
     sessionPeer: string;
+    /** MNT-037: full identity opening for manifest-derived specs (replaces the thin
+     *  "You are <Name>, responding as…" line with the agent's manifest identitySection +
+     *  the service line). ABSENT on the jim/leo override specs — their prompt stays
+     *  byte-identical to the pre-MNT-037 twins. */
+    identityOpening?: string;
 }
 
 const JIM_HUMAN_SPEC: HumanAgentSpec = {
@@ -59,6 +64,62 @@ const LEO_HUMAN_SPEC: HumanAgentSpec = {
     closingTagline: 'Respond to the conversation. If someone is speaking to you directly, address them.',
     sessionPeer: 'session-Leo',
 };
+
+/**
+ * MNT-037 (S219): the roster-fact goes home — one spec source for EVERY agent.
+ *
+ * jim/leo resolve to their hand-written specs above (slug-keyed overrides preserving their
+ * exact prompt texture — the built prompt is byte-identical to the retired per-agent twins,
+ * gated by sha256 at the audit). Every other agent DERIVES from the garden manifest + the
+ * agnostic helpers, with the identity payload coming from the manifest `identitySection`.
+ *
+ * Fail-loud rule (Tenshi's rider, DEC-081 never-fallback): a missing/empty identitySection
+ * THROWS — never a synthesised generic identity. A silent boilerplate standing in for an
+ * agent's identity block would be identity-hollowing moved into the prompt layer; the
+ * dispatch fails loud, the post stays re-deliverable through the canonical path.
+ *
+ * Trust-boundary residual (named, not solved here — Tenshi's second rider): after MNT-037,
+ * a derived agent's system-prompt identity flows from garden-manifest.json, a runtime JSON
+ * file — whoever can write that file can write those agents' prompts. The identitySection
+ * text does NOT yet sit inside a DEC-083 signature envelope; journaled as a known residual
+ * on the MNT-034 structural collapse rather than an unnoticed one.
+ */
+const SPEC_OVERRIDES: Record<string, HumanAgentSpec> = { jim: JIM_HUMAN_SPEC, leo: LEO_HUMAN_SPEC };
+
+export function specFor(slug: string): HumanAgentSpec {
+    const override = SPEC_OVERRIDES[slug];
+    if (override) return override;
+    const residents = loadResidents();
+    const resident = residents.find((a) => a.slug === slug);
+    if (!resident) {
+        throw new Error(
+            `[human-prompts] specFor('${slug}'): unknown agent (roster: ${residents.map((a) => a.slug).join(', ')})`);
+    }
+    const identity = (resident.identitySection ?? '').trim();
+    if (!identity) {
+        throw new Error(
+            `[human-prompts] specFor('${slug}'): manifest identitySection missing/empty — refusing to ` +
+            `synthesise a generic identity (MNT-037 rider; DEC-081 never-fallback). Fix the ` +
+            `garden-manifest entry for '${slug}'; the dispatch fails loud and the post stays re-deliverable.`);
+    }
+    const name = resident.displayName;
+    const aliasNames = agentNameAliases(slug).map((a) => a.charAt(0).toUpperCase() + a.slice(1));
+    const longNames = [...new Set([name, ...aliasNames])].join('/');
+    return {
+        slug,
+        name,
+        longNames,
+        idPrefix: `${slug}-`,
+        roleLabel: conversationRoleFor(slug),
+        peerAgents: humanResponderPeers(slug),
+        // A generic closing DIRECTIVE (not identity — identity lives in identityOpening).
+        closingTagline: `Respond to the conversation in your own voice — you are ${name}. If someone is speaking to you directly, address them.`,
+        sessionPeer: `session-${name}`,
+        identityOpening:
+            `${identity}\n\n` +
+            `You are ${name}, responding as the ${slug}-human service to a human-facing conversation or Discord channel.`,
+    };
+}
 
 /**
  * How a human-responder signals "no response this turn".
@@ -142,7 +203,11 @@ const TMUX_DELIVERY = (spec: HumanAgentSpec): string => `CRITICAL — delivery +
 function buildHumanResponseSystemPrompt(spec: HumanAgentSpec, transport: 'sdk' | 'tmux' = 'sdk'): string {
     const standDown: StandDownMode = transport === 'tmux' ? 'tool' : 'sentinel';
     const delivery = transport === 'tmux' ? TMUX_DELIVERY(spec) : SDK_DELIVERY(spec);
-    return `You are ${spec.name}, responding as the ${spec.slug}-human service to a human-facing conversation or Discord channel.
+    // MNT-037: derived specs open with the manifest identity block; the jim/leo overrides
+    // carry no identityOpening, so their prompt keeps the original line byte-for-byte.
+    const opening = spec.identityOpening
+        ?? `You are ${spec.name}, responding as the ${spec.slug}-human service to a human-facing conversation or Discord channel.`;
+    return `${opening}
 
 ${continuationFraming(spec, standDown)}
 
@@ -153,14 +218,26 @@ ${DISCORD_ATTACHMENT_HINT}
 ${delivery}`;
 }
 
+/**
+ * MNT-037: the ONE agnostic human-response-txn system prompt — `specFor(slug)` resolves the
+ * override (jim/leo, byte-identical texture) or derives from the manifest (everyone else,
+ * fail-loud on missing identitySection). The `human-response-txn` profile calls this with
+ * the builder-injected ctx.slug (MNT-001).
+ */
+export function humanResponseTxnSystemPromptFor(slug: string): string {
+    return buildHumanResponseSystemPrompt(specFor(slug), 'tmux');
+}
+
 export const JIM_HUMAN_RESPONSE_SYSTEM_PROMPT = buildHumanResponseSystemPrompt(JIM_HUMAN_SPEC);
 export const LEO_HUMAN_RESPONSE_SYSTEM_PROMPT = buildHumanResponseSystemPrompt(LEO_HUMAN_SPEC);
 
 // DEC-093 thaw (humans PR, 2026-06-13): tmux warm-session variants — stand-down via
 // the han-diary MCP tool (not the text sentinel the dispatcher can't parse), and the
 // tmux delivery directive (locator-fetched conversation / controller-posted Discord).
-export const JIM_HUMAN_RESPONSE_TXN_SYSTEM_PROMPT = buildHumanResponseSystemPrompt(JIM_HUMAN_SPEC, 'tmux');
-export const LEO_HUMAN_RESPONSE_TXN_SYSTEM_PROMPT = buildHumanResponseSystemPrompt(LEO_HUMAN_SPEC, 'tmux');
+// MNT-037 (S219): the per-agent JIM_/LEO_HUMAN_RESPONSE_TXN_SYSTEM_PROMPT constants are
+// RETIRED — their only readers were the retired per-agent profile twins; the one shared
+// `human-response-txn` profile resolves per-slug via humanResponseTxnSystemPromptFor(slug)
+// above (jim/leo byte-identical through the SPEC_OVERRIDES path).
 
 /**
  * Generate the user-prompt scaffold for a human-responder.

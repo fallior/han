@@ -388,12 +388,12 @@ async function respondToConversationViaTmux(db: Database.Database, conversationI
     // LOCATOR txn prompt — the spoke fetches the thread itself (no embedded tail).
     let txnPrompt: string;
     try {
-        const built = buildPrompt(SLUG, `${SLUG}-human-response-txn`, {
+        const built = buildPrompt(SLUG, 'human-response-txn', {
             source: 'conversation', title, conversationId,
             roleLabel: CONVERSATION_ROLE, priorAgentFailed,
         });
         txnPrompt = `${built.systemPrompt}\n\n${built.userPrompt}`;
-        console.log(`${LOG} (tmux) ${SLUG}-human-response-txn: ~${built.meta.est_total_tokens_chars_div_4} tokens (memory suppressed: ${built.meta.memory_chars} chars)`);
+        console.log(`${LOG} (tmux) human-response-txn: ~${built.meta.est_total_tokens_chars_div_4} tokens (memory suppressed: ${built.meta.memory_chars} chars)`);
     } catch (err) {
         if (err instanceof PromptOverbudgetError) {
             console.log(`${LOG} (tmux) Prompt over budget for "${title}" — skipping`);
@@ -484,11 +484,11 @@ async function respondToDiscordViaTmux(signal: SignalData): Promise<void> {
 
     let txnPrompt: string;
     try {
-        const built = buildPrompt(SLUG, `${SLUG}-human-response-txn`, {
+        const built = buildPrompt(SLUG, 'human-response-txn', {
             source: 'discord', channelName, conversationContext: contextBlock, roleLabel: CONVERSATION_ROLE,
         });
         txnPrompt = `${built.systemPrompt}\n\n${built.userPrompt}`;
-        console.log(`${LOG} (tmux) ${SLUG}-human-response-txn (discord): ~${built.meta.est_total_tokens_chars_div_4} tokens`);
+        console.log(`${LOG} (tmux) human-response-txn (discord): ~${built.meta.est_total_tokens_chars_div_4} tokens`);
     } catch (err) {
         if (err instanceof PromptOverbudgetError) { console.log(`${LOG} (tmux) Discord prompt over budget for #${channelName} — skipping`); return; }
         throw err;

@@ -132,9 +132,14 @@ const REMOTE_HEALTH_INTERVAL_MS = 60_000; // check every 60s
 const PENDING_MESSAGES_DIR = path.join(HAN_DIR, 'health', 'jemma-pending');
 
 // Track delivery statistics
+// MNT-034 census P0 (Tenshi's deliveryStats finding, S219): tenshi/casey were absent, so the
+// `in`-guard at updateDeliveryStats silently declined to count the newest residents' deliveries
+// — the false-telemetry class. Keys added; the derive-from-roster cure rides 034-structural.
 const deliveryStats: Record<string, number> = {
   jim: 0,
   leo: 0,
+  tenshi: 0,
+  casey: 0,
   darron: 0,
   sevn: 0,
   six: 0,

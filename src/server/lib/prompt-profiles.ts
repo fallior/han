@@ -46,8 +46,7 @@ import {
 import {
     JIM_HUMAN_RESPONSE_SYSTEM_PROMPT,
     LEO_HUMAN_RESPONSE_SYSTEM_PROMPT,
-    JIM_HUMAN_RESPONSE_TXN_SYSTEM_PROMPT,
-    LEO_HUMAN_RESPONSE_TXN_SYSTEM_PROMPT,
+    humanResponseTxnSystemPromptFor,
     buildHumanResponseScaffold,
     buildHumanResponseTxnScaffold,
 } from './human-prompts';
@@ -856,25 +855,18 @@ export const PROFILES: Record<string, PromptProfile> = {
      * Budget 120K: no memory loads; pure scaffold headroom (Discord embeds up to
      * 60 messages of channel context; conversation is a tiny locator).
      */
-    'leo-human-response-txn': {
-        name: 'leo-human-response-txn',
-        systemPromptOpening: LEO_HUMAN_RESPONSE_TXN_SYSTEM_PROMPT,
-        envelope: 'user',
-        userPromptScaffold: (ctx) => buildHumanResponseTxnScaffold(ctx as any),
-        totalBudgetTokens: 120_000,
-        componentOverrides: {
-            'identity': false, 'aphorisms': false, 'gradient': false,
-            'patterns': false, 'discoveries': false,
-            'working-memory-compressed': false, 'working-memory-full-tail': false,
-            'felt-moments-tail': false, 'self-reflection-tail': false,
-            'failures': false, 'project-memory': false,
-        },
-        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true, instruction: '' },
-    },
-
-    'jim-human-response-txn': {
-        name: 'jim-human-response-txn',
-        systemPromptOpening: JIM_HUMAN_RESPONSE_TXN_SYSTEM_PROMPT,
+    /**
+     * MNT-037 (S219): ONE shared human-response-txn profile for EVERY agent — the sixth
+     * roster-copy of the night (the per-agent `jim-`/`leo-human-response-txn` twins) retired.
+     * The system opening resolves per-slug at build time via `humanResponseTxnSystemPromptFor`
+     * (builder-injected ctx.slug, MNT-001): jim/leo through their byte-identical SPEC_OVERRIDES,
+     * every other agent DERIVED from the manifest identitySection — fail-loud on missing/empty
+     * (Tenshi's rider; never a synthesised generic identity). Everything else (scaffold, budget,
+     * overrides, diary discipline) was already byte-identical between the twins.
+     */
+    'human-response-txn': {
+        name: 'human-response-txn',
+        systemPromptOpening: (ctx) => humanResponseTxnSystemPromptFor(String((ctx as any).slug ?? '')),
         envelope: 'user',
         userPromptScaffold: (ctx) => buildHumanResponseTxnScaffold(ctx as any),
         totalBudgetTokens: 120_000,
