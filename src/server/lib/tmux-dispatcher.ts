@@ -1142,6 +1142,9 @@ export async function feedWakeSteps(
                 // load-gradient.ts's genesis path). Accept `none` ONLY while mostRecentC0Id is null —
                 // an agent with a real c0 keeps the strict isAgentC0 gate byte-identical, so a
                 // shallow wake can never hide behind the newborn literal.
+                // Tenshi's disclosed residual (benign, priced at the MNT-033 audit): if an agent's
+                // FIRST c0 lands mid-wake, an honest `none` is rejected and the wake cold-relaunches
+                // once, then self-heals on the next attempt — a comment, not engineering.
                 if (mostRecentC0Id(slug) === null) {
                     if (echoed !== 'none') return false;
                 } else if (!(echoed && isAgentC0(slug, echoed))) return false;
