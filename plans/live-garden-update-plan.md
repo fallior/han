@@ -161,3 +161,33 @@ carry settled-decision/gatekeeper declarations by name.
 (identity-as-config — P1 is its endpoint) · #98 Dynamic Residence (genesis consumes the seeds) ·
 DEC-080 (the lived migration precedent) · DEC-069/S103 (the cloth, untouchable) · the starter
 plans (`han-starter-*`) · MNT-025 (the regen/re-sign chain P3 automates).
+
+---
+
+## P1 build-notes (S218 ground survey — the pre-build artifact; Jim's riders folded)
+
+**The arity-complete accessor inventory** (garden-manifest.ts, 801 lines, 23 public accessors — the
+equivalence matrix must cover ALL five arities × the full roster; anything less lets a config class
+drift silent, Jim's crux-1):
+
+| Arity | Accessors |
+|---|---|
+| **(slug, surface)** ×8 | `spokeLifecycleFor` · `wakeFeedFor` · `surfaceEnabledFor` · `poolSizeFor` · `manifestModelHead` · `manifestModelLadder` · `manifestTransport` · `swapPrefixFor` |
+| **(slug)** ×8 | `allocationFor` · `conversationRoleFor` · `agentNameAliases` · `humanResponderPeers` · `humanResponderTxnTimeoutMs` · `humanResponderCommitmentScan` · `runsSupervisorCycle` · `conversationRolesExcept` |
+| **(slug, peerSlug)** ×1 | `peerConversationFor` (the pair-arity one — enumerate the full peer matrix) |
+| **(role)** ×2 | `displayNameForRole` · `slugForConversationRole` |
+| **garden-wide** | `loadResidents()` (the roster itself — order byte-asserted, the P0-roster-seam precedent) · `SHARED_SURFACES` (assert STAYS EMPTY — the P3-compressor shadow lesson) · the `GardenIdentity` fields · the ladder registry (`OPUS_LADDER`/`SONNET_LADDER`/`FABLE_LADDER`/`CLI_LAUNCH_DEFAULT` name→models resolution, per name) |
+| **behavioural** ×1 | `addressedToOtherResponderOnly(slug, text)` — derived from aliases; prove via a fixed text-fixture set per slug |
+
+**The proof shape**: one script (`scripts/test-p1-equivalence.ts`) snapshots every cell of the matrix
+against the PRE-extraction TS literal (imported from a frozen copy), then loads the extracted
+`$HAN_HOME/garden-manifest.json` through the new loader and re-reads every cell — `deepEqual` per
+cell, every mismatch listed, zero tolerance. Run pre-commit AND in the P5 scratch-garden.
+
+**Schema notes**: `runsOrchestrator` (MNT-030's leaf) is DESIGNED-IN as an optional per-agent field
+now (default: derives false; 3847's owner sets true post-P1) so MNT-030's PR is a leaf-flip, not a
+schema change. Test-only exports (`__reset…`/`__set…`) stay engine-side, not config.
+
+**Rider-3 checklist** (the os.homedir() convergence): tmux-dispatcher `HEALTH_DIR`/`PIPES_DIR` +
+every `os.homedir()/.han` local found by `grep -rn "homedir().*\.han\|homedir(), '\.han"` →
+`paths.ts` accessors, same commit.
