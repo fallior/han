@@ -33,7 +33,7 @@ import { checkWeeklyReportSchedule } from './services/reports';
 // Maintenance removed — autonomous agents with unrestricted shell access are too dangerous
 import { advancePipeline, setCreateGoalFn, setBroadcastFn as setProductsBroadcastFn, setLoadConfigFn } from './services/products';
 import { initSupervisor, scheduleSupervisorCycle, stopSupervisor, setSupervisorBroadcastFn } from './services/supervisor';
-import { runsSupervisorCycle } from './lib/garden-manifest';
+import { runsSupervisorCycle, runsOrchestrator } from './lib/garden-manifest';
 
 // Route modules
 import promptsRouter from './routes/prompts';
@@ -372,10 +372,19 @@ server.listen(Number(PORT), '0.0.0.0', () => {
 
     // Start Jemma orchestrator ack watcher (Phase 1, DEC-077 follow-on).
     // No-op when config.orchestration.enabled === false.
-    try {
-        startJemmaOrchestratorWatcher();
-    } catch (err) {
-        console.error('[Server] Failed to start Jemma orchestrator watcher:', (err as Error).message);
+    // MNT-030 (S218): slug-gated — the exact DEC-081 twin of the supervisor gate above (:345).
+    // Ungated, BOTH per-agent servers ran the orchestrator and raced the shared signals dir
+    // (unlink-first-wins ack-drain): the "Ack for complete dispatch — ignoring" flood + the
+    // eaten-heartbeat premature watchdog force-close (journal MNT-030). One server owns dispatch;
+    // the flag is garden CONFIG (runsOrchestrator on the agent's garden-manifest.json entry).
+    if (runsOrchestrator(process.env.AGENT_SLUG)) {
+        try {
+            startJemmaOrchestratorWatcher();
+        } catch (err) {
+            console.error('[Server] Failed to start Jemma orchestrator watcher:', (err as Error).message);
+        }
+    } else {
+        console.log(`[Orchestrator] Not started — this server is AGENT_SLUG=${process.env.AGENT_SLUG ?? '(unset)'}; no manifest agent with this slug sets runsOrchestrator (MNT-030 gate, DEC-081).`);
     }
 });
 

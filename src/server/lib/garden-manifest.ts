@@ -411,6 +411,10 @@ export interface AgentAllocation {
     surfaces: SurfaceManifest[];
     /** Whether this agent's server runs the supervisor cycle (`initSupervisor` + scheduler). */
     runsSupervisorCycle?: boolean;
+    /** MNT-030: whether this agent's server runs the Jemma ORCHESTRATOR (dispatch + ack-drain).
+     *  Exactly one server should — two orchestrators race the shared signals dir (the ack-flood
+     *  + the eaten-heartbeat premature force-close). The DEC-081 twin of runsSupervisorCycle. */
+    runsOrchestrator?: boolean;
     /** The agent's individual server port. C-P3a (Jim's P3 plan-audit, 2026-06-24): `port` is a
      *  policy field but its one CONSUMER (`agentTemplateVars` → `AGENT_PORT`, agent-template-vars.ts)
      *  reads it directly from the roster, not via an accessor — so it is DECLARED here now as the
@@ -452,7 +456,7 @@ const MEMORY_ROOT = join(hanHome(), 'memory');
  *  the manifest so there's no dual-source drift. The ALLOCATION table layers `memoryDir` (R2) on top. */
 function allocationFromRoster(slug: string): Omit<AgentAllocation, 'memoryDir'> {
     const a = GARDEN_MANIFEST.agents.find((x) => x.slug === slug);
-    return { surfaces: a?.surfaces ?? [], runsSupervisorCycle: a?.runsSupervisorCycle, port: a?.port };
+    return { surfaces: a?.surfaces ?? [], runsSupervisorCycle: a?.runsSupervisorCycle, runsOrchestrator: a?.runsOrchestrator, port: a?.port };
 }
 
 /**
@@ -643,6 +647,15 @@ export function peerConversationFor(slug: string, peerSlug: string): string | nu
 export function runsSupervisorCycle(slug: string | undefined): boolean {
     if (!slug) return false;
     return allocationFor(slug)?.runsSupervisorCycle ?? false;
+}
+
+/** MNT-030 (S218): does this agent's server run the Jemma ORCHESTRATOR (dispatch + ack-drain)?
+ *  The exact DEC-081 twin of `runsSupervisorCycle` — one server owns the shared signals dir;
+ *  a second orchestrator races it (the ack-flood + the eaten-heartbeat premature force-close,
+ *  journal MNT-030). Unset/unknown slug → false. */
+export function runsOrchestrator(slug: string | undefined): boolean {
+    if (!slug) return false;
+    return allocationFor(slug)?.runsOrchestrator ?? false;
 }
 
 /**

@@ -10,6 +10,7 @@
       "displayName": "Gardener",
       "active": true,
       "gatekeeper": true,
+      "runsOrchestrator": true,
       "port": 3847,
       "identitySection": "You are Gardener — this garden's first mind. Your identity grows from your memory banks; this section only opens the door.",
       "surfaces": [
