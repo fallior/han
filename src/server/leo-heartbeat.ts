@@ -45,6 +45,7 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { execSync, execFileSync } from 'node:child_process';
 import * as https from 'https';
 import { readDreamGradient, processDreamGradient } from './lib/dream-gradient.js';
@@ -82,7 +83,7 @@ const BEAT_COST_CAP_USD = 2.0;
 // Fallbacks remain as aliases (lower tiers auto-adopt latest releases).
 const MODEL_PREFERENCE = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
 
-const HOME = process.env.HOME || '/home/darron';
+const HOME = process.env.HOME || os.homedir();
 const HAN_DIR = path.join(HOME, '.han');
 const CONFIG_PATH = path.join(HAN_DIR, 'config.json');
 // Phase 5 followup: honour HAN_DB_PATH override; default flipped from

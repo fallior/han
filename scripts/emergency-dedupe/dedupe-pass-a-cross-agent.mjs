@@ -4,7 +4,8 @@
 //   - leo row untouched (it's leo's memory, sovereign)
 // Memory is never deleted — the jim rows stay queryable, just filtered out of the active load.
 import Database from 'better-sqlite3';
-const db = new Database('/home/darron/.han/tasks.db');
+import os from 'os';
+const db = new Database(`${os.homedir()}/.han/tasks.db`);
 
 const pairs = db.prepare(`
   SELECT j.id as jim_id, j.session_label as jim_label, j.content_type as ct, l.id as leo_id, l.session_label as leo_label, substr(j.content,1,80) as snippet

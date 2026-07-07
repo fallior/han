@@ -28,7 +28,7 @@ check('txn: the INCOMPRESSIBLE contract present', txn.systemPrompt.includes('Thi
 check('txn: the submit_compression completion contract', txn.systemPrompt.includes('mcp__han-diary__submit_compression') && txn.systemPrompt.includes('EXACTLY ONCE'));
 check('txn: FEELING_TAG routed to the tool field', txn.systemPrompt.includes("feeling_tag field"));
 check('txn: the cN task scaffold carries the source', txn.userPrompt.includes('SYNTH-MARKER') && txn.userPrompt.includes('c2') && txn.userPrompt.includes('c3'));
-check('flags: jim ON (P2 flipped), leo OFF (until MNT-023 drains)', surfaceEnabledFor('jim', 'compression') && !surfaceEnabledFor('leo', 'compression'));
+check('flags: BOTH agents ON (jim P2-flipped; leo flipped post-MNT-023-drain, 78be76a)', surfaceEnabledFor('jim', 'compression') && surfaceEnabledFor('leo', 'compression'));
 check('P3: the retired P0 full-bank profile throws (no SDK-shape consumer)', (() => { try { buildPrompt('leo', 'compression', ctx); return false; } catch { return true; } })());
 check('P3: compression resolves the per-agent FABLE_LADDER (shared shadow retired)', manifestModelLadder('jim', 'compression')[0] === 'claude-fable-5' && manifestModelLadder('jim', 'compression').length > 1);
 

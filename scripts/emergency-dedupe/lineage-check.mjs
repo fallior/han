@@ -1,7 +1,8 @@
 // Lineage invariant check: every UV must trace to a unique c0.
 // At most c0_count UVs can be active.
 import Database from 'better-sqlite3';
-const db = new Database('/home/darron/.han/tasks.db');
+import os from 'os';
+const db = new Database(`${os.homedir()}/.han/tasks.db`);
 
 const c0Count = db.prepare("SELECT COUNT(*) as n FROM gradient_entries WHERE agent='jim' AND level='c0'").get();
 const activeUV = db.prepare("SELECT COUNT(*) as n FROM gradient_entries WHERE agent='jim' AND level='uv' AND (superseded_by IS NULL OR superseded_by = '')").get();

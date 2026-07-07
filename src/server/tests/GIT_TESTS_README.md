@@ -377,7 +377,7 @@ The test patterns follow the existing **smoke.test.ts** structure:
 
 ## Related Files
 
-- **Implementation:** `/home/darron/Projects/clauderemote/src/server/services/git.ts` (lines 224-266)
+- **Implementation:** `~/Projects/clauderemote/src/server/services/git.ts` (lines 224-266)
 - **Smoke tests:** `src/server/tests/smoke.test.ts`
 - **Git service:** `src/server/services/git.ts`
 

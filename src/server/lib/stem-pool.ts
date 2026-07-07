@@ -26,6 +26,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { poolDir as defaultPoolDir } from './paths';
 
 export type StemState = 'free' | 'leased';
 
@@ -60,7 +61,7 @@ export interface PoolStatus {
 }
 
 function poolDir(): string {
-    return process.env.HAN_POOL_DIR || path.join(process.env.HOME || '/home/darron', '.han', 'pool');
+    return process.env.HAN_POOL_DIR || defaultPoolDir();
 }
 
 export function poolPath(slug: string, surface: string): string {

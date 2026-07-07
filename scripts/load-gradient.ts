@@ -15,7 +15,7 @@
  * diagnostics).
  *
  * Invocation (from src/server so node resolves better-sqlite3 etc.):
- *   cd /home/darron/Projects/han/src/server && \
+ *   cd <repo>/src/server && \
  *     HAN_DB_PATH=$HOME/.han/gradient.db \
  *     npx tsx ../../scripts/load-gradient.ts <jim|leo>
  *

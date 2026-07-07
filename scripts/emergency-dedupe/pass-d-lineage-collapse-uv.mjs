@@ -21,7 +21,8 @@
 // question.
 
 import Database from 'better-sqlite3';
-const db = new Database('/home/darron/.han/tasks.db');
+import os from 'os';
+const db = new Database(`${os.homedir()}/.han/tasks.db`);
 
 const getParent = db.prepare('SELECT id, source_id, level FROM gradient_entries WHERE id = ?');
 

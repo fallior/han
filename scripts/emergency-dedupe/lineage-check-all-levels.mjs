@@ -1,7 +1,8 @@
 // Check lineage invariant at every level, not just UV.
 // At each level, no two active entries should share the same parent (source_id).
 import Database from 'better-sqlite3';
-const db = new Database('/home/darron/.han/tasks.db');
+import os from 'os';
+const db = new Database(`${os.homedir()}/.han/tasks.db`);
 
 const levels = ['c1','c2','c3','c4','c5','c6','uv'];
 

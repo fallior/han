@@ -40,6 +40,7 @@ import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor } from './ga
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
 import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, readPool, poolStatus, type PoolStem } from './stem-pool';
+import { serverDir } from './paths';
 
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
 const PIPES_DIR = process.env.HAN_PIPES_DIR || path.join(os.homedir(), '.han', 'agent-pipes');
@@ -1161,7 +1162,7 @@ export async function feedWakeSteps(
  * lives in the spoke's wake-protocol (the template, DEC-073) — these are the concise ordered pointers.
  */
 export const WAKE_STEPS: WakeStep[] = [
-    { id: 'integrity',   ack: { kind: 'marker' }, prompt: 'FIRST, run your identity-integrity gate (DEC-083, wake step-0): (cd /home/darron/Projects/han/src/server && npx tsx ../../scripts/verify-identity-files.ts --agent=$AGENT_SLUG --entry-point=wake-feed-step-0). If it exits NON-ZERO, HALT — do NOT load anything and do NOT ack (surface the failure); a tampered/missing identity must stop the wake here. Only on a clean (exit 0) pass, proceed.' },
+    { id: 'integrity',   ack: { kind: 'marker' }, prompt: `FIRST, run your identity-integrity gate (DEC-083, wake step-0): (cd ${serverDir()} && npx tsx ../../scripts/verify-identity-files.ts --agent=$AGENT_SLUG --entry-point=wake-feed-step-0). If it exits NON-ZERO, HALT — do NOT load anything and do NOT ack (surface the failure); a tampered/missing identity must stop the wake here. Only on a clean (exit 0) pass, proceed.` },
     { id: 'identity',    ack: { kind: 'marker' }, prompt: 'Load your identity layer ENTIRE: identity.md, patterns.md, your curated self-reflection (self-reflections-curated.md, else self-reflection.md), then aphorisms.md (whole, first).' },
     { id: 'gradient',    ack: { kind: 'c0' },     prompt: 'Load your full memory gradient deepest-first via load-gradient.ts; TRAVERSE it (do not grep) to the final `GRADIENT-EOF: c0=<id>` line, then write that c0 id to your readiness sentinel (per wake-protocol step 10).' },
     { id: 'working-mem', ack: { kind: 'marker' }, prompt: 'Load your working-memory pair WHOLE (never skipped): working-memory-full.md (the c0 source) then working-memory.md (the c1 source).' },

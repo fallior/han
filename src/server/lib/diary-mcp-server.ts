@@ -51,7 +51,7 @@
  *       "han-diary": {
  *         "command": "npx",
  *         "args": ["tsx", "<repo>/src/server/lib/diary-mcp-server.ts"],
- *         "env": { "HAN_DIARY_SLUG": "leo", "HAN_HEALTH_DIR": "/home/darron/.han/health" }
+ *         "env": { "HAN_DIARY_SLUG": "leo", "HAN_HEALTH_DIR": "<han-home>/health" }
  *       }
  *     }
  *   }

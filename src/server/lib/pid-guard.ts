@@ -25,9 +25,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { healthDir } from './paths';
 
-const HOME = process.env.HOME || '/home/darron';
-const HEALTH_DIR = path.join(HOME, '.han', 'health');
+const HEALTH_DIR = healthDir();
 
 function isProcessAlive(pid: number): boolean {
     try {

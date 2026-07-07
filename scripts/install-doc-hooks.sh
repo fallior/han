@@ -67,13 +67,17 @@ else
     echo "Installed: $PRE_HOOK (appended doc-discipline check)"
 fi
 
-# commit-msg: CREATE / OVERWRITE — this hook is single-purpose for #69
+# commit-msg: CREATE / OVERWRITE — doc-discipline (#69) + the path-portability lint (P0, S218 — #101)
 MSG_HOOK="$HOOKS_DIR/commit-msg"
+PATHS_CHECK="$REPO_ROOT/scripts/check-path-portability.sh"
+chmod +x "$PATHS_CHECK" 2>/dev/null || true
 {
     echo "#!/bin/bash"
     echo "# Auto-installed by scripts/install-doc-hooks.sh"
     echo "$MARKER"
     echo "\"$MSG_CHECK\" \"\$1\""
+    echo "# PATH-PORTABILITY LINT (P0, S218 — #101)"
+    echo "\"$PATHS_CHECK\" \"\$1\""
 } > "$MSG_HOOK"
 chmod +x "$MSG_HOOK"
 echo "Installed: $MSG_HOOK (doc-discipline message validation)"

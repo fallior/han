@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
-const db = new Database('/home/darron/.han/tasks.db');
+import os from 'os';
+const db = new Database(`${os.homedir()}/.han/tasks.db`);
 
 // Identify supersessions made before my work today.
 // My Pass A used qualifier='not-own' (1 row).

@@ -34,6 +34,7 @@ import Database from 'better-sqlite3';
 import https from 'node:https';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { resolveChannelName, fetchDiscordContext, postToDiscord } from './services/discord';
 import { appendPairedMemory } from './lib/memory-paired-writer';
 import { ensureSingleInstance } from './lib/pid-guard';
@@ -68,7 +69,7 @@ const LOG = `[${DISPLAY_NAME}/Human]`;
 
 // ── Config ────────────────────────────────────────────────────
 
-const HOME = process.env.HOME || '/home/darron';
+const HOME = process.env.HOME || os.homedir();
 const HAN_DIR = path.join(HOME, '.han');
 // Phase 5 followup: honour HAN_DB_PATH override; default gradient.db per DEC-080 (db.ts:32 pattern).
 const DB_PATH = process.env.HAN_DB_PATH || path.join(HAN_DIR, 'gradient.db');

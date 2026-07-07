@@ -20,7 +20,8 @@
 // (Leo set up bi-directional pointers for those).
 
 import Database from 'better-sqlite3';
-const db = new Database('/home/darron/.han/tasks.db');
+import os from 'os';
+const db = new Database(`${os.homedir()}/.han/tasks.db`);
 
 function jaccard(a, b) {
   const aw = new Set(a.toLowerCase().split(/\W+/).filter(w => w.length > 3));

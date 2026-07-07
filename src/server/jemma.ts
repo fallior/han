@@ -34,6 +34,7 @@
 import WebSocket from 'ws';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { execSync, execFileSync } from 'node:child_process';
 import { query as agentQuery } from '@anthropic-ai/claude-agent-sdk';
 import { ensureSingleInstance } from './lib/pid-guard';
@@ -45,7 +46,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 // ── Configuration ─────────────────────────────────────────────────
 
-const HOME = process.env.HOME || '/home/darron';
+const HOME = process.env.HOME || os.homedir();
 const HAN_DIR = path.join(HOME, '.han');
 const CONFIG_PATH = path.join(HAN_DIR, 'config.json');
 const SIGNALS_DIR = path.join(HAN_DIR, 'signals');

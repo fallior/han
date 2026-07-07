@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
-const db = new Database('/home/darron/.han/tasks.db');
+import os from 'os';
+const db = new Database(`${os.homedir()}/.han/tasks.db`);
 
 console.log('=== Active jim UVs by content_type ===');
 const byCt = db.prepare("SELECT content_type, COUNT(*) as n FROM gradient_entries WHERE agent='jim' AND level='uv' AND (superseded_by IS NULL OR superseded_by = '') GROUP BY content_type ORDER BY n DESC").all();

@@ -1,6 +1,7 @@
 // Read 50 random pairs from each Leo qualifier — assess accuracy
 import Database from 'better-sqlite3';
-const db = new Database('/home/darron/.han/tasks.db');
+import os from 'os';
+const db = new Database(`${os.homedir()}/.han/tasks.db`);
 
 function sample(qualifier, n) {
   console.log(`\n========================================`);

@@ -13,13 +13,17 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import os from 'node:os';
+import { hanRepo } from './lib/paths';
 
-const HOME = process.env.HOME || '/home/darron';
+const HOME = process.env.HOME || os.homedir();
 // Mirrors db.ts:37 pattern. Post-cutover (DEC-080 Phase 5, 2026-04-29) the
 // canonical store is gradient.db; HAN_DB_PATH override supports diagnostics
 // against checkpoint snapshots.
 const DB_PATH = process.env.HAN_DB_PATH || path.join(HOME, '.han', 'gradient.db');
-const SESSIONS_DIR = path.join(HOME, '.claude', 'projects', '-home-darron-Projects-han');
+// Claude Code munges the project dir into a dashed slug (Jim's P0 rider — the lint can't see
+// this form, so it must not linger as invisible debt): derive it from the real repo path.
+const SESSIONS_DIR = path.join(HOME, '.claude', 'projects', hanRepo().replace(/\//g, '-'));
 
 const dryRun = process.argv.includes('--dry-run');
 const specificSession = process.argv.find(a => !a.startsWith('-') && a !== process.argv[0] && a !== process.argv[1]);

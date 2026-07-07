@@ -28,9 +28,9 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { hanHome } from '../src/server/lib/paths';
 
-const HOME = process.env.HOME || '/home/darron';
-const DB_PATH = process.env.HAN_DB_PATH || path.join(HOME, '.han', 'gradient.db');
+const DB_PATH = process.env.HAN_DB_PATH || path.join(hanHome(), 'gradient.db');
 
 const args = process.argv.slice(2);
 const N = Number(args.find((a) => /^\d+$/.test(a))) || 3;
@@ -44,7 +44,7 @@ const SEATS: Seat[] = [
 
 function ntfy(msg: string): void {
     try {
-        const cfg = JSON.parse(fs.readFileSync(path.join(HOME, '.han', 'config.json'), 'utf-8'));
+        const cfg = JSON.parse(fs.readFileSync(path.join(hanHome(), 'config.json'), 'utf-8'));
         const topic = cfg?.ntfy_topic;
         if (!topic) return;
         execFileSync('curl', ['-sS', '-m', '8', '-H', 'Title: HAN human-signature check', '-d', msg, `https://ntfy.sh/${topic}`], { stdio: 'ignore' });

@@ -11,7 +11,8 @@
 // canonical. If not, point at the newest depth-0 UV in the same content_type
 // (last-resort fallback). Memory is never deleted.
 import Database from 'better-sqlite3';
-const db = new Database('/home/darron/.han/tasks.db');
+import os from 'os';
+const db = new Database(`${os.homedir()}/.han/tasks.db`);
 
 const targets = db.prepare(`
   SELECT id, session_label, content_type, source_id, content, created_at

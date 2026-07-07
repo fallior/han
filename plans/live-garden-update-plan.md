@@ -1,7 +1,7 @@
 # Live-Garden Update Pipeline — the build plan (S217)
 
 > The concrete design under thread `mqz3wev0` (Jim's F1–F5 opener, 2026-06-29; Darron's steers
-> 2026-07-02). **The last Mike-handover blocker.** Leo-writes / **Jim plan-audit before any build**;
+> 2026-07-02). **The last UPDATE-PIPELINE blocker** (the biggest handover chunk — launcher-collapse, the #12 scour tail, #18 per-seat OAuth and #109 port-authority still gate the full handover; Jim's scope rider, msg mr9ttexp). Leo-writes / **Jim plan-audit before any build**;
 > every phase lands through the standing rhythm (build held → diff-audit → quiesce-deploy).
 >
 > The sovereignty principle the whole design serves (Jim's line, Darron-endorsed):

@@ -12,8 +12,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { hanHome } from '../lib/paths';
 
-const CONFIG_PATH = path.join(process.env.HOME || '/home/darron', '.han', 'config.json');
+const CONFIG_PATH = path.join(hanHome(), 'config.json');
 const AVATARS_DIR = path.join(__dirname, '..', '..', '..', '_screenshots');
 
 interface DiscordConfig {
