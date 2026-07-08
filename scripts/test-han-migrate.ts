@@ -6,7 +6,7 @@
  * separate live-prove (quiesced, no force, full smoke).
  */
 import Database from 'better-sqlite3';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { mkdtempSync, existsSync, readdirSync, writeFileSync, mkdirSync, readFileSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
@@ -142,6 +142,38 @@ function run(home: string, db: string, args: string[]): { out: string; code: num
     const mode = (p: string) => statSync(p).mode & 0o777;
     check('fold-2: pre-copy exists and is 0600', r.code === 0 && !!preName && mode(path.join(dir, preName)) === 0o600);
     check('fold-2: swapped-in live DB is 0600 (born under umask)', mode(db) === 0o600);
+}
+
+// 10) S219 lesson #3: stale live-DB sidecars are re-paired with the pre-copy at swap —
+//     the new live must never start beside an old WAL/shm (the "v0 after apply" poison).
+{
+    const { home, db } = scratchGarden();
+    writeFileSync(db + '-wal', '');  // zero-byte sidecars: harmless to SQLite, present on disk
+    writeFileSync(db + '-shm', '');
+    const r = run(home, db, ['--apply', '--force', '--skip-smoke']);
+    const dir = path.dirname(db);
+    const preName = readdirSync(dir).find((f) => f.includes('.pre-v') && !f.endsWith('-wal') && !f.endsWith('-shm'));
+    check('sidecar re-pair: apply succeeds with stale sidecars present', r.code === 0 && !!preName);
+    check('sidecar re-pair: no stale -wal/-shm beside the NEW live', !existsSync(db + '-wal') && !existsSync(db + '-shm'));
+    check('sidecar re-pair: the sidecars moved to the pre-copy name', !!preName && existsSync(path.join(dir, preName + '-wal')));
+}
+// 11) S219 lesson #2: the swap REFUSES under open handles (not --force-bypassable) — a live
+//     holder process means writers would split-brain onto the old inode.
+{
+    const { home, db } = scratchGarden();
+    const holder = spawn(TSX, ['-e',
+        `const D = require('better-sqlite3'); const d = new D(process.argv[1]); setTimeout(() => { d.close(); }, 15000);`, db],
+        { cwd: path.join(hanRepo(), 'src', 'server'), env: { ...process.env, NODE_PATH: path.join(hanRepo(), 'src', 'server', 'node_modules') }, stdio: 'ignore' });
+    try {
+        execFileSync('sleep', ['2.5']); // let the holder open its handle
+        const r = run(home, db, ['--apply', '--force', '--skip-smoke']);
+        check('fd-guard: swap refuses under an open handle (even with --force)',
+            r.code !== 0 && r.out.includes('OPEN HANDLES'));
+        const d = new Database(db, { readonly: true });
+        const has = d.prepare(`SELECT name FROM sqlite_master WHERE name='schema_meta'`).get();
+        d.close();
+        check('fd-guard: live DB untouched by the refused swap', !has);
+    } finally { holder.kill('SIGKILL'); }
 }
 
 console.log(`\nhan-migrate: ${pass} passed, ${failn} failed`);

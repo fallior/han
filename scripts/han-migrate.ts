@@ -204,6 +204,18 @@ async function main(): Promise<void> {
     }
     integritySweep(copyPath, pre);
 
+    // S219 genesis live-prove lesson #1: the stamp lives in the COPY's WAL until checkpointed —
+    // a rename-swap moves only the main file, so the copy must be made SELF-CONTAINED first.
+    // TRUNCATE folds every frame into the main file and empties the sidecars.
+    {
+        const db = new Database(copyPath);
+        try { db.pragma('wal_checkpoint(TRUNCATE)'); } finally { db.close(); }
+        for (const side of ['-wal', '-shm']) {
+            const p = copyPath + side;
+            if (fs.existsSync(p) && fs.statSync(p).size === 0) fs.unlinkSync(p);
+        }
+    }
+
     if (!APPLY) {
         // Fold-2: a SUCCESSFUL dry-run leaves nothing behind — the verified copy is deleted
         // (it was scratch, never memory-canon; DEC-069 untouched). A FAILED run exits via
@@ -212,9 +224,35 @@ async function main(): Promise<void> {
         log(`DRY-RUN COMPLETE — copy verified + removed; live untouched. Re-run with --apply to swap.`);
         return;
     }
+    // S219 genesis live-prove lesson #2: NEVER swap under open handles. A long-running process
+    // holding a better-sqlite3 fd keeps writing the OLD inode after the rename — a silent
+    // split-brain (2 UVs + 2 feeling-tags diverged in ~90s at the genesis prove, hand-recovered).
+    // fuser exit 0 = in use → ABORT naming the holders. NOT --force-bypassable (the same class
+    // as the downgrade guards: the lawful path is stopping the services, not a flag).
+    {
+        let holders: string | null = null; // null = could not verify
+        try {
+            holders = execSync(`fuser ${DB_LIVE} 2>/dev/null`).toString().trim(); // exit 0 → in use
+        } catch (e) {
+            const status = (e as { status?: unknown }).status;
+            if (typeof status === 'number' && status > 0) holders = ''; // clean "not in use"
+        }
+        if (holders === null) fail('cannot verify open handles on the live DB (fuser unavailable/failed) — refusing to swap (fail-closed)');
+        if (holders) {
+            fail(`live DB has OPEN HANDLES (pids:${holders}) — stop the DB-writing services before --apply; ` +
+                `a swap under open fds split-brains writers onto the old inode (S219 genesis lesson)`);
+        }
+    }
     // atomic swap + retention
     const preCopy = `${DB_LIVE}.pre-v${EXPECTED_SCHEMA_VERSION}-${ts}`;
     fs.renameSync(DB_LIVE, preCopy);
+    // S219 lesson #3: the LIVE db's sidecars belong to the OLD inode — re-pair them with their
+    // true owner (the pre-copy) so the new live never starts beside a stale WAL/shm (which
+    // poisons readers into resolving the old generation — the "v0 after apply" symptom).
+    for (const side of ['-wal', '-shm']) {
+        const p = DB_LIVE + side;
+        if (fs.existsSync(p)) fs.renameSync(p, preCopy + side);
+    }
     // Fold-2: rename PRESERVES the old live file's mode (644 today — the SEC-09 source-mode
     // issue), so the rollback pre-copy needs an explicit 0600; the swapped-in live (the copy)
     // was born 0600 under the umask — the first apply hardens the live DB as a side-effect.
@@ -227,14 +265,22 @@ async function main(): Promise<void> {
         fs.writeFileSync(smPath, JSON.stringify({ formatVersions: EXPECTED_FORMAT_VERSIONS }, null, 2) + '\n');
         log('state-meta.json written (formatVersions v1)');
     }
-    // retention: keep newest 2 pre-copies; archive older (move, never delete — DEC-069)
+    // retention: keep newest 2 pre-copies; archive older (move, never delete — DEC-069).
+    // Sidecars (-wal/-shm, re-paired at the swap) are NOT pre-copies — exclude them from the
+    // count (else they push the real pre-copy over the keep-2 line — the S219 suite catch) and
+    // move them WITH their owner when it archives.
     const dir = path.dirname(DB_LIVE);
-    const pres = fs.readdirSync(dir).filter((f) => f.startsWith(path.basename(DB_LIVE) + '.pre-v')).sort().reverse();
+    const pres = fs.readdirSync(dir)
+        .filter((f) => f.startsWith(path.basename(DB_LIVE) + '.pre-v') && !f.endsWith('-wal') && !f.endsWith('-shm'))
+        .sort().reverse();
     const archiveDir = path.join(hanHome(), 'archives', 'db');
     for (const old of pres.slice(2)) {
         fs.mkdirSync(archiveDir, { recursive: true });
         fs.renameSync(path.join(dir, old), path.join(archiveDir, old));
-        log(`retention: archived ${old} → archives/db/`);
+        for (const side of ['-wal', '-shm']) {
+            if (fs.existsSync(path.join(dir, old + side))) fs.renameSync(path.join(dir, old + side), path.join(archiveDir, old + side));
+        }
+        log(`retention: archived ${old} (+sidecars if any) → archives/db/`);
     }
 }
 
