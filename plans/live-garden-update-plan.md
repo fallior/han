@@ -119,6 +119,36 @@ han update [--to vYYYY.MM.DD] [--check] [--rollback]
    Leo-build/Jim-audit rhythm protects tip; **the tag IS the audit Mike's garden inherits** —
    safety by construction, F5 answered.
 
+### P3-SEC — the trust-root legs (DEC-102, rung by Darron 2026-07-08; builds in the P3 sitting)
+
+*The audit thread `mrb8ap4y-e9cdtv` + tracker `update-pipeline-security-audit.md` are the origin;
+DEC-102 carries the full ruling + the invariant verbatim. The legs, in build order:*
+
+1. **The key ceremony (SEC-01, Ring 1 = Fork 1(a))** — Darron generates the garden-release
+   keypair OFF-BOX (his hands; signing a tag is his deliberate act). Engine + seed ship only the
+   pinned pubkey. The key-ceremony doc names BOTH rotation paths from day one: routine =
+   old-key-signs-new (continuity from the pinned root); compromise = out-of-band hand-delivered
+   pubkey. **This leg's first act needs Darron's hands, not code.**
+2. **Verify-before-checkout** — step 3 gains a step 0: verify the tag signature against the
+   pinned pubkey → resolve to the tag's EXACT COMMIT HASH and check out that hash (never a
+   moveable ref — TOCTOU). Hard-fail on mismatch. Documented property: the signed tree's
+   lockfile pins `npm ci` transitively (per-package integrity hashes) — do not alter lockfile
+   handling without re-proving this.
+3. **Downgrade rejection (both axes)** — monotonic ordering enforced at the update layer AND
+   in `han-migrate` (landed in the held runner: schema_version + per-key formatVersions
+   aborts, force-proof — Jim's state-half + Tenshi's SEC-10 twin). Explicit signed rollback
+   (`--rollback` to a named tag) is the only lawful reverse.
+4. **The authorship split + ceremony (SEC-02, Ring 2 = Fork 2(c′))** — step 3's "regenerate +
+   re-sign" splits: template-GENERATED files auto-re-sign (transitively release-signed), every
+   update-driven re-sign logs its pre/post diff; AUTHORED identity (incl. manifest
+   `identitySection`, content-keyed) → **abort undeclared**; a `touchesState`-declared migration
+   triggers the SEMANTIC-diff ceremony (content-preserving ⇒ EMPTY content delta or red flag;
+   schema-moving ⇒ always human eyes). **The ceremony lives INSIDE the quiesce window** — the
+   step-2 quiesce spans the deliberation (a designed, visible "garden paused pending your ring"
+   freeze); the swap stays the last act, so nothing unapproved ever touches the live garden.
+5. **P5 additions** — poisoned-TAG rejection + downgrade-attempt tests beside the
+   poisoned-migration one; Tenshi re-audits as the acceptance gate before the first real tag.
+
 ## P4 — AXIOMS.md + the seed forms (F4)
 
 1. **`AXIOMS.md` ships with the engine** — the rules a garden ceases to be itself without
