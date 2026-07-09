@@ -243,7 +243,10 @@ async function main(): Promise<void> {
                 `a swap under open fds split-brains writers onto the old inode (S219 genesis lesson)`);
         }
     }
-    // atomic swap + retention
+    // atomic swap + retention. Named residual (Jim's P2 audit, comment-not-engineering): the
+    // swap is TWO renames — a crash between them leaves no gradient.db for a few milliseconds
+    // under quiesce. Recovery is obvious and safe: the verified copy AND the pre-copy are both
+    // on disk; one rename completes it. True atomic file-exchange isn't portably available.
     const preCopy = `${DB_LIVE}.pre-v${EXPECTED_SCHEMA_VERSION}-${ts}`;
     fs.renameSync(DB_LIVE, preCopy);
     // S219 lesson #3: the LIVE db's sidecars belong to the OLD inode — re-pair them with their
