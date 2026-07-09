@@ -25,14 +25,31 @@ standalone diagnostic use — `han update` never passes it (gate 3).
 
 ## The flow (the ratified order — Jim's gate 1)
 
-**Step 0 — resolve + verify (the landed leg).**
+**Step 0 — resolve + verify (the landed leg) + the freshness check (SEC-12).**
 Fetch the pinned mirror → resolve the target tag (default: newest stable by the
 `vYYYY.MM.DD[.n]` ordering) → `verify-release-tag.sh <tag>` → the EXACT commit hash or
-abort (fail-closed on a missing pin). **Downgrade rejection at the channel layer**: the
-target version must order strictly above the currently-deployed version (recorded in the
-update ledger, §Receipts); `--rollback <tag>` is the only lawful reverse — still
-signature-verified, explicitly invoked, loudly logged. (The state layer double-guards:
-`han-migrate`'s schema + formatVersions monotonicity aborts, both force-proof.)
+abort (fail-closed on a missing pin). **Then the anti-withholding check (SEC-12, Jim's
+spec at Darron's go)**: verify `freshness.json` — `{latest_version, released_at,
+expires_at, prev_version}`, **signed by the SAME garden-release key at the SAME release
+ceremony** (zero recurring burden: freshness is only ever as old as the last real
+release), verified against the SAME pinned root, never against anything the mirror says
+about itself. A mirror that lies about freshness fails the signature; one that serves OLD
+freshness is caught by the timestamp. **Verify-and-REPORT now**: "you are N releases /
+N days behind" or "this freshness is D days old — the mirror may be stale/withholding."
+**Hard-expiry sits behind the manifest leaf `update.enforceFreshnessExpiry` (default
+FALSE, inline comment citing this decision + DEC-102) — the flag IS the structural
+memory**: flipped true at lattice integration, a stale/expired freshness ABORTS
+(fail-closed, SEC-01 polarity). `han update --check` doubles as the standing freeze
+detector (Tenshi): one line — last deployed tag + age vs the mirror's newest signed
+offer — so a human glances instead of holding the threat in their head.
+**Downgrade rejection at the channel layer**: the target must order strictly above the
+deployed version (recorded in the update ledger, §Receipts) — with the witness caveat
+named (Tenshi #4): the ledger is a LOCAL, unsigned file, so the channel guard's witness
+is bounded by box integrity; the **checked-out git tag is cross-checked as the second,
+harder-to-fake witness**, the ledger joins the off-box tamper-evident snapshot chain for
+detectability, and the state layer double-guards regardless (`han-migrate`'s schema +
+formatVersions monotonicity, both force-proof). `--rollback <tag>` is the only lawful
+reverse — still signature-verified, explicitly invoked, loudly logged.
 
 **Step 1 — show (opt-in, eyes-open).**
 Release notes (CHANGELOG between tags) + **the new-field enumeration** (SEC-07): every
@@ -50,8 +67,9 @@ flag that proceeds past a live mind.
 
 **Step 3 — stop the DB-holders, verify zero.**
 The service set derives from the manifest (§The service enumerator); after stopping,
-`fuser` must show ZERO holders on the live DB. This is belt on top of `han-migrate`'s own
-structural fd-guard (the S219 split-brain lesson: the guard converts deploy-tooling
+`fuser` must show ZERO holders on the live DB — **fail-closed on cannot-verify** (fuser
+absent/failed = abort), matching the migrate-side guard's polarity exactly (Jim's add-2).
+This is belt on top of `han-migrate`'s own structural fd-guard (the S219 split-brain lesson: the guard converts deploy-tooling
 interleave from silent split-brain to loud abort — SEC-11).
 
 **Step 4 — checkout by hash.**
@@ -59,7 +77,12 @@ interleave from silent split-brain to loud abort — SEC-11).
 lockfile moved; the documented property stands: the lockfile rides inside the signed tree
 with per-package integrity hashes, so the tag signature transitively pins the dependency
 set (SEC-03's supply-chain edge). Do not "improve" lockfile handling without re-proving
-this.
+this. **The pin's honest limit (Tenshi #3): pinning closes WHICH code arrives, not that
+its install-scripts EXECUTE** — `npm ci` runs dependency lifecycle scripts by default,
+and ours isn't pure-JS (better-sqlite3's native build), so `--ignore-scripts` isn't free.
+Named residual with its cure path: **vendor/prebuild the native modules** (update-time
+`npm ci` fetches and runs nothing) or an explicit scripts-allowlist for the native deps;
+until then the residual is bounded by the pin, not eliminated by it.
 
 **Step 5 — migrate.**
 `han-migrate --apply` with every landed gate live: quiesce-CHECK, both downgrade axes,
@@ -91,6 +114,8 @@ The authorship split:
     at step 0; SEC-01-first is satisfied in the metal before any ceremony can run.
 - **The swap is the LAST act** (Jim's by-construction affirmation): nothing from the new
   tag becomes live before signature + ceremony pass; migrations ran on copies throughout.
+- **The release ceremony's own doc** (`docs/release-key-ceremony.md`, P3c): signing a
+  release = the tag AND `freshness.json`, one deliberate act (SEC-12's sign-at-ceremony).
 
 **Step 7 — health gate.**
 Services restart (manifest-derived set) → servers 200 × residents · DEC-083 integrity
@@ -126,18 +151,23 @@ two-gardens-one-box deployment.
 ## Receipts (the audit surface)
 
 `$HAN_HOME/health/update-ledger.jsonl` — one line per attempt: tag, exact hash, verify
-result, drain duration, migration stamp, re-sign diffs (paths + hashes), ceremony verdict
-(if any), health verdict, rollback (if any), operator. The deployed-version record that
-step-0's downgrade ordering reads. Append-only.
+result, **freshness verdict (SEC-12)**, drain duration, migration stamp, re-sign diffs
+(paths + hashes), ceremony verdict (if any), health verdict, rollback (if any), operator.
+The deployed-version record that step-0's downgrade ordering reads. Append-only — and
+joined to the off-box tamper-evident snapshot chain (Tenshi #4) so ledger tampering is
+detectable even from a compromised box.
 
 ## Build phases within P3 (each held → Jim's diff-audit → land, per the rhythm)
 
 - **P3a** — the service enumerator + drain primitive (+ the MNT-036 installer cure riding it).
 - **P3b** — `han-update.ts` core: step 0→5 + 7→8 (verify → checkout-by-hash → migrate →
-  health → rollback), proven on a scratch garden with a scratch-signed tag.
+  health → rollback), proven on a scratch garden with a scratch-signed tag — **including
+  the freshness verify-and-report + `--check` freeze detector (SEC-12 parts 1-2)**.
 - **P3c** — the Ring-2 authorship split + semantic-diff ceremony (step 6), the
   trust-critical piece — Tenshi's two conditions as build-law.
-- **P3d** — the ledger + release-notes/new-field enumeration (step 1) + downgrade ordering.
+- **P3d** — the ledger + release-notes/new-field enumeration (step 1) + downgrade
+  ordering + **the `update.enforceFreshnessExpiry` manifest leaf (SEC-12 part 3 — the
+  structural memory, default OFF, armed at lattice integration)**.
 
 ## P5 acceptance, sketched now (Jim's gate 6)
 
@@ -148,15 +178,26 @@ wrong-key; the landed proofs 2-3 are the controls) · **downgrade-attempt reject
 (channel layer + both state axes) · holder/stale-sidecar (standing in the han-migrate
 suite) · **ceremony cases** (declared content-preserving with empty delta passes;
 non-empty delta red-flags; undeclared authored touch aborts; schema-moving always
-presents) · **Tenshi's re-audit as the gate before the first real tag reaches any
-mirror.**
+presents) · **THE ADVERSARIAL-EVASION CASE (Tenshi #1 — the hinge)**: a migration that
+DECLARES content-preserving but hides a meaning-change — a homoglyph swap in an
+`identitySection`, a zero-width insertion, a poisoned line buried inside a 10,000-line
+legitimate reformat — and the diff must SURFACE it (the sensitivity proof), or the
+evasion class it cannot catch is NAMED in the ledger rather than assumed away; this is
+the case that makes the ceremony a gate instead of a rubber-stamp · **the
+withholding-attempt case (SEC-12)**: a mirror serving stale-but-signed freshness →
+advisory fires with the flag off, ABORT fires with it on · **Tenshi's re-audit as the
+gate before the first real tag reaches any mirror** (her stated focus: the
+adversarial-evasion case).
 
 ## Deferred, named (nothing silent)
 
 SEC-08 archive ceiling (Darron's open ruling) · release-key-custody-v1 (hardware token,
 post-Mike) · identity-key custody v1 (off-box) · `identitySection` into a DEC-083
 envelope (034-structural) · the read-time format-compat floor (its own rider) · content
-checksums for untouched rows (P5-acceptance work) · SEC-09 isolation gates.
+checksums for untouched rows (P5-acceptance work) · SEC-09 isolation gates ·
+**native-dep install-scripts at update time** (vendor/prebuild or allowlist — Tenshi #3)
+· **signed-freshness hard enforcement** (the armed flag, at lattice — SEC-12 part 3) ·
+**the ledger's off-box witness** (snapshot-chain join — Tenshi #4).
 
 *— Leo (session), S219, 2026-07-09. Design-first per the rhythm; no code cut until Jim's
 plan-audit returns.*
