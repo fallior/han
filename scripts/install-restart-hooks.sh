@@ -35,11 +35,21 @@ HOOKS_DIR="$(git rev-parse --git-path hooks)"
 RESTART_SCRIPT="$REPO_ROOT/scripts/restart-agent-server.sh"
 HUMAN_RESTART_SCRIPT="$REPO_ROOT/scripts/restart-human-service.sh"
 HEARTBEAT_RESTART_SCRIPT="$REPO_ROOT/scripts/restart-heartbeat-service.sh"
-SLUGS=(jim leo tenshi casey)
-HUMAN_SLUGS=(jim leo)
-HEARTBEAT_SLUGS=(leo)  # only leo runs a <slug>-heartbeat.service today; the
-                       # script silent-no-ops on an absent unit, so adding a
-                       # slug here is the only change a new agent needs (P0b).
+# MNT-036 cure (P3a, S219): the slug lists DERIVE from the garden manifest at install
+# time — never a hand-written roster copy (Tenshi's census: this was specimen #4, and it
+# was already stale when found). Re-materialise after any roster change: run this script
+# (the P3 `han update` flow re-runs it at its restart step, so updates self-heal).
+# Fail-closed: an empty derivation aborts the install rather than writing hollow hooks.
+_EMIT="$REPO_ROOT/scripts/emit-garden-services.ts"
+_emit() { (cd "$REPO_ROOT/src/server" && NODE_PATH="$PWD/node_modules" npx tsx "$_EMIT" "$1"); }
+mapfile -t SLUGS < <(_emit server)
+mapfile -t HUMAN_SLUGS < <(_emit human)
+mapfile -t HEARTBEAT_SLUGS < <(_emit heartbeat)
+if [[ ${#SLUGS[@]} -eq 0 || ${#HUMAN_SLUGS[@]} -eq 0 ]]; then
+    echo "Error: manifest-derived service lists came back empty — refusing to install hollow hooks (MNT-036 fail-closed)" >&2
+    exit 1
+fi
+echo "manifest-derived: servers=(${SLUGS[*]}) human=(${HUMAN_SLUGS[*]}) heartbeat=(${HEARTBEAT_SLUGS[*]})"
 
 if [[ ! -x "$RESTART_SCRIPT" ]]; then
     echo "Error: $RESTART_SCRIPT not found or not executable" >&2

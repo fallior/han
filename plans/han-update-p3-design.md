@@ -42,6 +42,15 @@ memory**: flipped true at lattice integration, a stale/expired freshness ABORTS
 (fail-closed, SEC-01 polarity). `han update --check` doubles as the standing freeze
 detector (Tenshi): one line — last deployed tag + age vs the mirror's newest signed
 offer — so a human glances instead of holding the threat in their head.
+**F1 (Tenshi): freshness gets its OWN downgrade guard** — the ledger records the highest
+`latest_version` ever seen in a VERIFIED freshness, and a freshness whose `latest_version`
+is below that high-water mark is REFUSED (an older-but-genuinely-signed, not-yet-expired
+freshness is a replay-downgrade of the detector itself; the cousin of the tag guard, same
+cure). **F2 (Tenshi): arming `enforceFreshnessExpiry` is a security-vs-availability
+calibration, not a free win** — expiry is a release-time guess against an IRREGULAR human
+cadence, so `freshnessMaxAgeDays` must be generous relative to the real cadence or a
+healthy-but-quiet garden self-locks out of updates (its own denial-of-service). The
+advisory-first default dodges this today; the calibration note travels with the flag.
 **Downgrade rejection at the channel layer**: the target must order strictly above the
 deployed version (recorded in the update ledger, §Receipts) — with the witness caveat
 named (Tenshi #4): the ledger is a LOCAL, unsigned file, so the channel guard's witness
@@ -71,6 +80,14 @@ The service set derives from the manifest (§The service enumerator); after stop
 absent/failed = abort), matching the migrate-side guard's polarity exactly (Jim's add-2).
 This is belt on top of `han-migrate`'s own structural fd-guard (the S219 split-brain lesson: the guard converts deploy-tooling
 interleave from silent split-brain to loud abort — SEC-11).
+**THE INVARIANT (Tenshi A1 — write it so it can't be optimised away): the enumerator is
+CONVENIENCE; `fuser`-zero is the SAFETY.** The enumerator's dangerous failure direction is
+under-enumeration (a missed holder survives into the swap = SEC-11); what makes that safe
+is that fuser-zero checks the KERNEL'S actual holders independent of what the enumerator
+knew. A future "optimisation" that trusts the enumerated set and drops the fuser check
+silently re-opens SEC-11 — P5 asserts it (enumerator-misses-a-holder → fuser still
+aborts). And the distinct guarantees stated once: `spoke-drain` proves minds are AT REST;
+`fuser` proves the DB is RELEASED — idle chrome is not fd-release; both are needed.
 
 **Step 4 — checkout by hash.**
 `git checkout <exact-hash>` — never a ref (TOCTOU, DEC-102 rider 3). `npm ci` iff the
@@ -138,6 +155,13 @@ for which residents/surfaces) — used by step 2/3 stops, step 7 restarts, and a
 `restart-all-services.sh` + the git hooks' installer. This retires the hardcoded
 jim+leo lists (MNT-036) as a side-effect of the fourth-garden test rather than a separate
 sitting. (The hook fix itself = installer change + re-materialise, per Tenshi's census.)
+**A2 (Tenshi — the cure's last mile): update-time re-materialisation does NOT cover
+admission-time roster changes** — a resident admitted at the #98 gate between updates
+leaves the hooks stale-in-materialisation in exactly the birth-night window; the #98
+admission act must ALSO re-run the installer (routed to the 034-structural/#98 work — the
+census thread closing its own loop). **A3: fail-closed-on-EMPTY doesn't catch
+fail-PARTIAL** — a count/sanity assertion (derived-set vs a live systemctl cross-check)
+joins the standing invariant test.
 
 ## The fourth-garden test (Jim's gate 5)
 
