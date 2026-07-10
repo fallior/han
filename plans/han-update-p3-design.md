@@ -42,7 +42,12 @@ memory**: flipped true at lattice integration, a stale/expired freshness ABORTS
 (fail-closed, SEC-01 polarity). `han update --check` doubles as the standing freeze
 detector (Tenshi): one line — last deployed tag + age vs the mirror's newest signed
 offer — so a human glances instead of holding the threat in their head.
-**F1 (Tenshi): freshness gets its OWN downgrade guard** — the ledger records the highest
+**THE FATAL-vs-ADVISORY SPLIT (Jim's audit affirmation — named here so no 'consolidation'
+softens F1)**: `BAD-SIGNATURE` and `REPLAYED` are HARD-FATAL — a forged or replayed
+freshness is a detected attack, same class as the tag-downgrade guard, never flag- or
+force-bypassable; `EXPIRED` is the flag-gated advisory (F2's availability calibration);
+`ABSENT` is the honest advisory. P3c types this dispatch structurally (Tenshi #2) and P5
+asserts REPLAYED aborts with the flag OFF. **F1 (Tenshi): freshness gets its OWN downgrade guard** — the ledger records the highest
 `latest_version` ever seen in a VERIFIED freshness, and a freshness whose `latest_version`
 is below that high-water mark is REFUSED (an older-but-genuinely-signed, not-yet-expired
 freshness is a replay-downgrade of the detector itself; the cousin of the tag guard, same
@@ -212,6 +217,13 @@ withholding-attempt case (SEC-12)**: a mirror serving stale-but-signed freshness
 advisory fires with the flag off, ABORT fires with it on · **Tenshi's re-audit as the
 gate before the first real tag reaches any mirror** (her stated focus: the
 adversarial-evasion case).
+
+**Routed from the P3b audits (Tenshi mreb3qqc)**: the ROLLBACK-QUARANTINE gap — a rollback
+records the abandoned tag in a ledger quarantine set; `--check` reports "available but
+rolled back on <date>"; apply REFUSES a quarantined tag without an explicit override
+(P3d's ledger work + a P5 case). Ceremony-MANDATORY freshness signing — the release
+process refuses to publish a tag without a co-signed freshness (P3c's release doc); an
+absent freshness must be a loud ceremony failure, never a silent detection-loss.
 
 ## Deferred, named (nothing silent)
 

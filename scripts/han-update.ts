@@ -29,6 +29,13 @@ const TO = argvRest.includes('--to') ? argvRest[argvRest.indexOf('--to') + 1] : 
 const ROLLBACK = argvRest.includes('--rollback') ? argvRest[argvRest.indexOf('--rollback') + 1] : null;
 const SCRATCH = argvRest.includes('--scratch') ? argvRest[argvRest.indexOf('--scratch') + 1] : null;
 
+// The --scratch belt (Jim's non-blocker + Tenshi #4): a TEST affordance must never reach
+// production — refuse a scratch path resolving into the real HAN home, and note it is
+// explicit-ARG-only by construction (argv, never an env var a shell could leak in).
+if (SCRATCH && path.resolve(path.join(SCRATCH, 'han')) === path.resolve(hanHome())) {
+    console.error('[han-update] ABORT: --scratch resolves to the REAL HAN home — refusing (test affordance, production-proof)');
+    process.exit(1);
+}
 const REPO = SCRATCH ? path.join(SCRATCH, 'repo') : hanRepo();
 const HOME_DIR = SCRATCH ? path.join(SCRATCH, 'han') : hanHome();
 const LEDGER = path.join(HOME_DIR, 'health', 'update-ledger.jsonl');
