@@ -74,8 +74,9 @@ for event in post-commit post-merge; do
         for slug in "${SLUGS[@]}"; do
             echo "\"$RESTART_SCRIPT\" $slug"
         done
-        echo "# Layer 2: restart human-responder@<slug> systemd services (human-responder@jim,"
-        echo "# human-responder@leo) when their source changes. No-op when unchanged or inactive."
+        echo "# Layer 2: restart human-responder@<slug> systemd services ($(printf 'human-responder@%s ' "${HUMAN_SLUGS[@]}"| sed 's/ $//; s/ /, /g'))"
+        echo "# when their source changes. No-op when unchanged or inactive. (Comment DERIVED with"
+        echo "# the calls — a frozen roster in a comment is a quiet lie a future mind trusts.)"
         echo "# The event name ($event) routes the diff range — post-commit checks"
         echo "# HEAD~1..HEAD; post-merge checks ORIG_HEAD..HEAD. Avoids stale-ORIG_HEAD"
         echo "# over-firing on post-commit (S156 fix)."

@@ -17,11 +17,14 @@
 set -euo pipefail
 
 TAG="${1:-}"
-[ -n "$TAG" ] || { echo "usage: verify-release-tag.sh <tag>" >&2; exit 1; }
+[ -n "$TAG" ] || { echo "usage: verify-release-tag.sh <tag> [repo-dir]" >&2; exit 1; }
 
 HAN_HOME="${HAN_HOME:-$HOME/.han}"
 PIN="$HAN_HOME/credentials/release-allowed-signers"
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Optional arg2 (P3b): the repo whose tag is verified — defaults to the engine repo this
+# script lives in. han-update passes its target repo explicitly (scratch proofs, and any
+# future non-self layout); the PIN stays $HAN_HOME-resolved either way, outside every repo.
+REPO_DIR="${2:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 # Fail-closed: no pinned root, no verification, no update. (Bootstrap: instantiate the pin
 # from seeds/release-allowed-signers at genesis — a deliberate act, not an auto-copy here.)
