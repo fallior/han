@@ -193,7 +193,32 @@ detectable even from a compromised box.
   health → rollback), proven on a scratch garden with a scratch-signed tag — **including
   the freshness verify-and-report + `--check` freeze detector (SEC-12 parts 1-2)**.
 - **P3c** — the Ring-2 authorship split + semantic-diff ceremony (step 6), the
-  trust-critical piece — Tenshi's two conditions as build-law.
+  trust-critical piece — Tenshi's two conditions as build-law. **BUILT S220** (held →
+  audit): `lib/ring2-ceremony.ts` (snapshot/compare authored identity incl the manifest
+  `identitySection`; the semantic renderer naming every invisible codepoint + flagging
+  renders-identical confusable substitutions; the digest-bound ceremony decision —
+  TTY ring or a go-file quoting THIS rendering's digest, timeout = decline, fail-closed);
+  `lib/migration-loader.ts` (ONE shared discovery/validation path — `stateChangeKind`
+  REQUIRED iff `touchesState`, refused at load); the TYPED freshness dispatch (fatal in
+  the type — BAD-SIGNATURE/REPLAYED/unverifiable-pin; `expired` is the only flag-gatable
+  outcome); `scripts/publish-release.sh` (ceremony-MANDATORY freshness — a tag cannot
+  reach the mirror without a co-signed, unexpired freshness naming it);
+  `docs/release-key-ceremony.md` (the ceremony doc, both rings + rotation).
+  **Declared deltas found/fixed during the build:** (1) rollback's DB-restore is now
+  RUN-SCOPED via the timestamp in the pre-copy's NAME (the P3b form restored the newest
+  pre-copy unconditionally — an abort BEFORE the swap would have restored a STALE pre-copy
+  over an intact live DB; and mtime cannot scope it: the pre-copy is the renamed old live
+  file, rename preserves mtime); (2) the abort/decline paths RESTORE authored files from
+  the snapshot (without it the poison survives on disk and the next wake's DEC-083
+  auto-resign would launder it into a signed manifest — proven at the E2E); (3) the
+  `--scratch` belt compares REALPATHS against the DEFAULT `~/.han` (the P3b compare was
+  structurally unable to fire — `<scratch>/han` can never literally equal a `.han` path —
+  and refused the legitimate env-aligned E2E shape instead; symlinks are the real route);
+  (4) a state-touching migration is REFUSED post-checkout (rollback) until P3d's
+  state-copy leg exists — the ceremony machinery is built and red-suite-proven for the day
+  it opens (24/24 `test-ring2-ceremony.ts`), and the abort-undeclared NET is live today
+  (E2E: a rogue migration silently poisoning `identity.md` was detected, the file restored,
+  the DB restored from this run's pre-copy, the tree rolled back, all ledgered).
 - **P3d** — the ledger + release-notes/new-field enumeration (step 1) + downgrade
   ordering + **the `update.enforceFreshnessExpiry` manifest leaf (SEC-12 part 3 — the
   structural memory, default OFF, armed at lattice integration)**.

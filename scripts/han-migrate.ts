@@ -74,18 +74,14 @@ function quiesceGate(): void {
     log('quiesce gate: clear (supervisor paused, sensor stopped, no rotation locks)');
 }
 
-// ── migrations discovery ─────────────────────────────────────────────────
+// ── migrations discovery — the ONE shared loader (P3c: han-update's ceremony pre-flight
+// validates the SAME contract, incl. stateChangeKind-required-iff-touchesState) ──────────
 function loadMigrations(): Migration[] {
-    const dir = path.join(hanRepo(), 'migrations');
-    const files = fs.readdirSync(dir).filter((f) => /^\d{3}-.*\.ts$/.test(f)).sort();
-    const migs = files.map((f) => {
+    try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const m = require(path.join(dir, f)).default as Migration;
-        if (!m || typeof m.id !== 'number' || !m.up || !m.verify) fail(`${f}: not a valid Migration export`);
-        return m;
-    });
-    migs.forEach((m, i) => { if (m.id !== i + 1) fail(`migration ids must be 1..N with no gaps (found ${m.id} at position ${i + 1})`); });
-    return migs;
+        const { loadMigrationsFrom } = require('../src/server/lib/migration-loader');
+        return loadMigrationsFrom(path.join(hanRepo(), 'migrations'));
+    } catch (e) { return fail((e as Error).message); }
 }
 
 function currentVersion(dbPath: string): number {

@@ -50,6 +50,12 @@ export interface Migration {
     /** Memory trees (relative to $HAN_HOME) this migration transforms; the runner copies them
      *  first and swaps them with the DB atomically. Empty/omitted = DB-only. */
     touchesState?: string[];
+    /** REQUIRED when `touchesState` is non-empty (P3c, DEC-102 Ring 2) — the ceremony's typed
+     *  dispatch. 'content-preserving' MUST render an EMPTY authored content delta (any
+     *  non-empty delta is the one red flag the gardener's eyes land on); 'schema-moving' is
+     *  NEVER auto-passed — always human eyes. Enforced at load (lib/migration-loader.ts):
+     *  an authored-state migration without a valid kind does not load at all. */
+    stateChangeKind?: 'content-preserving' | 'schema-moving';
     /** Runs against the COPY only. Non-destructive: transform/supersede/quarantine — never
      *  DROP/DELETE (DEC-069). Throwing aborts the whole run; the live state is untouched. */
     up(ctx: MigrationCtx): void | Promise<void>;

@@ -54,18 +54,24 @@ check('byte-fidelity: genuine signed freshness verifies ok through --check', /fr
     sh(`git -C ${S}/repo add . && git -C ${S}/repo -c user.email=t@s -c user.name=s commit -q -m flip && git -C ${S}/repo push -q origin main`);
     check('byte-fidelity: ONE flipped signature byte → BAD-SIGNATURE', /BAD-SIGNATURE/.test(runCheck()));
 }
-// 3) the --scratch production belt: pointing --scratch at the real HAN home is refused
+// 3) the --scratch production belt: a scratch whose garden home RESOLVES (symlink-aware —
+//    the actual route to production) to the box's real ~/.han is refused BEFORE any I/O.
+//    (P3c sharpened the compare: DEFAULT home, realpaths — an env-aligned scratch is the
+//    legitimate E2E shape and must pass; see han-update.ts.)
 {
-    const fakeReal = mkdtempSync(path.join(tmpdir(), 'hu-belt-'));
+    const world = mkdtempSync(path.join(tmpdir(), 'hu-belt-'));
+    const fakeHome = path.join(world, 'home');
+    const realHan = path.join(fakeHome, '.han');
+    execSync(`mkdir -p ${realHan} ${world}/scratch && ln -s ${realHan} ${world}/scratch/han`);
     let out = '';
     try {
         out = execFileSync(path.join(hanRepo(), 'src', 'server', 'node_modules', '.bin', 'tsx'),
-            [path.join(hanRepo(), 'scripts', 'han-update.ts'), '--check', '--scratch', fakeReal],
+            [path.join(hanRepo(), 'scripts', 'han-update.ts'), '--check', '--scratch', path.join(world, 'scratch')],
             { cwd: path.join(hanRepo(), 'src', 'server'), stdio: ['ignore', 'pipe', 'pipe'],
-              env: { ...process.env, HAN_HOME: path.join(fakeReal, 'han'), NODE_PATH: path.join(hanRepo(), 'src', 'server', 'node_modules') } }).toString();
+              env: { ...process.env, HOME: fakeHome, NODE_PATH: path.join(hanRepo(), 'src', 'server', 'node_modules') } }).toString();
     } catch (e: any) { out = String(e.stdout ?? '') + String(e.stderr ?? ''); }
-    check('--scratch belt: refuses when it resolves to the real HAN home', /refusing \(test affordance/.test(out));
-    rmSync(fakeReal, { recursive: true, force: true });
+    check('--scratch belt: refuses when the scratch garden home resolves to the real ~/.han', /refusing \(test affordance/.test(out));
+    rmSync(world, { recursive: true, force: true });
 }
 rmSync(S, { recursive: true, force: true });
 console.log(`\nhan-update byte-fidelity: ${pass} passed, ${failn} failed`);
