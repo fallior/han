@@ -216,9 +216,21 @@ detectable even from a compromised box.
   and refused the legitimate env-aligned E2E shape instead; symlinks are the real route);
   (4) a state-touching migration is REFUSED post-checkout (rollback) until P3d's
   state-copy leg exists — the ceremony machinery is built and red-suite-proven for the day
-  it opens (24/24 `test-ring2-ceremony.ts`), and the abort-undeclared NET is live today
+  it opens (`test-ring2-ceremony.ts`), and the abort-undeclared NET is live today
   (E2E: a rogue migration silently poisoning `identity.md` was detected, the file restored,
   the DB restored from this run's pre-copy, the tree rolled back, all ledgered).
+  **Renderer hardening LANDED (S220, the P5 close-out gate's control-byte class + the reorder
+  blind-spot):** the semantic renderer now generates findings from the RAW artefact bytes
+  (`rawLineDiff`, split on LF only), never git's diff output — so git binary-mode can't blind
+  it; `scanSuspectCodepoints` names the whole C0/C1 CONTROL band (NUL/VT/CR/ESC/DEL/NEL,
+  spanning both `<0x80` and `0x80–0x9F`); the source's own literal NUL map-key is now a
+  `U+0000` escape (the module no longer ships git-binary); a MULTISET-PRESERVING guard marks
+  a pure line-reorder `⚠ REORDERED` instead of a bare `0/0` (ordering is meaning in prose —
+  Jim's must-fix, keyed on the invariant per Tenshi); and `CONFUSABLE_FOLD` keys are `\uXXXX`
+  escapes so a hostile edit to the homoglyph-defence table is byte-legible. Proven 42/42
+  (Tenshi's six-item close-out gate + reorder + a standing zero-raw-controls source guard),
+  Jim + Tenshi both GREEN. This is the **"before"** of the one-gate constraint — the state-copy
+  leg lands on a renderer that can't be blinded, reordered, or quietly table-edited.
 - **P3d** — the ledger + release-notes/new-field enumeration (step 1) + downgrade
   ordering + **the `update.enforceFreshnessExpiry` manifest leaf (SEC-12 part 3 — the
   structural memory, default OFF, armed at lattice integration)**.
