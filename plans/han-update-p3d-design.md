@@ -131,10 +131,40 @@ high-water regardless.
 ---
 
 ## Build order (each held → Jim's diff-audit → land, per the rhythm)
-1. **✅ quarantine set** — BUILT+PROVEN (`test-quarantine.ts` 5/5), held for diff-audit.
-2. **state-copy leg** — on the plan-audit's fork ruling (A recommended); the keystone.
-3. **enforceFreshnessExpiry leaf** — on the plan-audit (optional-manifest-leaf shape).
-4. **ledger-witness** — property note + receipts-doc line (rides any of the above's commit).
+1. **✅ quarantine set** — BUILT+PROVEN+LANDED (`bcf6f29`, Jim+Tenshi GREEN).
+2. **state-copy leg** — Option A RULED, splits into two units:
+   - **2a ✅ FOUNDATION (han-migrate): BUILT+PROVEN** — the structural WALL (standalone
+     `han-migrate` refuses a `touchesState` migration fail-closed, not `--force`-bypassable) +
+     the `--stage-only <dir>` mechanism (copies the DB + declared authored trees, migrates the
+     COPIES, verifies, writes a `staging-manifest.json`, does **NOT** swap — LIVE files
+     byte-unchanged) + rider-1 (same-filesystem staging asserted). `test-state-copy.ts` **9/9**.
+     Held for Jim's diff-audit.
+   - **2b ORCHESTRATION (han-update): NEXT BUILD** — replace step-5's `han-migrate --apply` with
+     `--stage-only`; the ceremony reads `pre=live / post=staged` (not a live re-snapshot); on
+     approval, the **atomic DB+state swap** with: the swap-journal (`swap-start`/`swap-done`
+     ledger ops, directed recovery — Jim rider-2); the **two-sided** re-hash gate at swap-time
+     (staged AND live byte-unchanged since the ceremony rendered `pre→post` — Jim rider-3 +
+     Tenshi rider-1); **recovery-before-wake** (recovery completes before any agent boots, or a
+     spoke wakes on a half-swapped identity — Tenshi rider-2); recovery verifies against the
+     DEC-069-retained pre-copies, using the journal to LOCATE not TRUST (Tenshi rider-3). Decline
+     → discard staging, nothing swapped. **The swap moves from han-migrate to han-update** (this
+     is the delicate refactor — done as its own careful unit, not a tail-of-turn cut).
+3. **enforceFreshnessExpiry leaf** — on the optional-manifest-leaf shape + Jim's riders (baked
+   `{false,90}` defaults; the abort message names the flag+cadence cause; P5: REPLAYED aborts
+   flag-OFF, EXPIRED only flag-ON). Touches `garden-manifest.ts` → held for diff-audit.
+4. **ledger-witness** — property note + receipts-doc line (F1 high-water already live; `health/`
+   in restic = off-box tamper-evident).
+
+## The ratified standing invariant (Tenshi, Trusting-Trust)
+> **Every trust decision in the pipeline must key ONLY on (a) code under the tag signature, or
+> (b) off-box operator data — NEVER on data an update itself delivers.**
+
+Broken regress: the pinned root lives in gitignored `$HAN_HOME/credentials/` (no update rewrites
+the key it's judged against), and the verifier is inside the signed tree (verify-tag-then-checkout-
+by-hash content-addresses the whole tree). Every future leaf — verifier, freshness threshold,
+pinned root, ceremony gate — is checked against this: the day one reads a value an update can
+write, the loom carries a lockpick for its own next turn. The `enforceFreshnessExpiry` leaf passes
+(baked defaults in signed code + operator-authored manifest override updates don't overwrite).
 
 *— Leo (session), S220, 2026-07-12 ~01:20 AEST. Quarantine built; the keystone designed for
 Jim's fork ruling; the loom's last leg mapped.*

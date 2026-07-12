@@ -32,6 +32,13 @@ const FORCE = process.argv.includes('--force');
 // test-only: the scratch-DB suite skips the per-resident load-gradient smoke (an empty scratch
 // garden has no gradient to load); the REAL acceptance always runs it (never pass this live).
 const SKIP_SMOKE = process.argv.includes('--skip-smoke');
+// P3d STATE-COPY LEG (Option A, Jim's fork ruling): --stage-only <dir> copies the DB *and* every
+// authored tree a pending migration declares in `touchesState` into <dir>, runs the migrations
+// against those COPIES, verifies, and STOPS — no swap. It writes a staging manifest and leaves
+// the verified copies for `han update` to run the Ring-2 ceremony over and swap atomically AFTER
+// the gardener's ring (DEC-102: the swap is the last act). This is the ONLY path that handles a
+// touchesState migration; standalone --apply refuses one fail-closed (the structural wall below).
+const STAGE_ONLY = process.argv.includes('--stage-only') ? process.argv[process.argv.indexOf('--stage-only') + 1] : null;
 const log = (m: string) => console.log(`[han-migrate] ${m}`);
 
 const DB_LIVE = process.env.HAN_DB_PATH || path.join(hanHome(), 'gradient.db');
@@ -167,23 +174,61 @@ async function main(): Promise<void> {
         }
     }
     const migs = loadMigrations().filter((m) => m.id > current && m.id <= EXPECTED_SCHEMA_VERSION);
-    log(`current=v${current} expected=v${EXPECTED_SCHEMA_VERSION} pending=${migs.length} mode=${APPLY ? 'APPLY' : 'dry-run'}`);
+    log(`current=v${current} expected=v${EXPECTED_SCHEMA_VERSION} pending=${migs.length} mode=${STAGE_ONLY ? 'STAGE-ONLY' : APPLY ? 'APPLY' : 'dry-run'}`);
     if (!migs.length) { log('nothing to do'); return; }
+
+    // P3d STATE-COPY LEG — the authored trees any pending migration declares (union, deduped).
+    const stateTrees = [...new Set(migs.flatMap((m) => m.touchesState ?? []))];
+    // ── THE WALL (Jim's structural invariant, RATIFIED): a lawful door is only lawful if the wall
+    // is real. Standalone `--apply` REFUSES a touchesState migration fail-closed — an authored-state
+    // migration runs ONLY via `han update` (the Ring-2 ceremony's lawful door, using --stage-only).
+    // NOT --force-bypassable: the lawful path is the ceremony, not a flag (DEC-102 by construction).
+    if (stateTrees.length && !STAGE_ONLY) {
+        fail(`pending migration(s) declare touchesState (${stateTrees.join(', ')}) — a standalone ` +
+            `han-migrate run cannot touch AUTHORED identity; those migrate ONLY through 'han update', ` +
+            `whose Ring-2 ceremony inspects the changes before a human's ring approves the swap ` +
+            `(DEC-102). This wall is structural, not --force-bypassable.`);
+    }
     quiesceGate();
 
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const copyPath = `${DB_LIVE}.migrating-${ts}`;
+    // In STAGE-ONLY the DB copy + the authored-tree copies live INSIDE the staging dir; else the DB
+    // copy is the usual sibling. Rider-1 (Jim): staging MUST be on the same filesystem as the live
+    // trees, or rename-atomicity dies (cross-device rename falls back to a non-atomic copy).
+    const stagingDir = STAGE_ONLY ? path.resolve(STAGE_ONLY) : null;
+    if (stagingDir) {
+        fs.mkdirSync(stagingDir, { recursive: true });
+        const dev = (p: string): number => fs.statSync(p).dev;
+        if (dev(stagingDir) !== dev(hanHome())) {
+            fail(`staging dir ${stagingDir} is on a DIFFERENT filesystem than $HAN_HOME (${hanHome()}) — ` +
+                `the atomic rename-swap requires same-device; refuse rather than fall back to a non-atomic copy (rider-1).`);
+        }
+    }
+    const copyPath = stagingDir ? path.join(stagingDir, path.basename(DB_LIVE)) : `${DB_LIVE}.migrating-${ts}`;
     const pre = tableCounts(DB_LIVE);
     const live = new Database(DB_LIVE, { readonly: true });
     try {
         // better-sqlite3 online backup — WAL-aware, safe against a live DB; promise-based
         await live.backup(copyPath);
     } finally { live.close(); }
-    log(`copied → ${path.basename(copyPath)} (${fs.statSync(copyPath).size} bytes)`);
+    log(`copied → ${stagingDir ? copyPath : path.basename(copyPath)} (${fs.statSync(copyPath).size} bytes)`);
+
+    // STAGE-ONLY: copy the live authored trees into staging so the migration transforms COPIES;
+    // the ceremony (in han update) diffs live→staged and the swap happens only after the ring.
+    if (stagingDir && stateTrees.length) {
+        for (const tree of stateTrees) {
+            const src = path.join(hanHome(), tree);
+            const dst = path.join(stagingDir, tree);
+            fs.mkdirSync(path.dirname(dst), { recursive: true });
+            if (fs.existsSync(src)) fs.cpSync(src, dst, { recursive: true });
+            else fs.mkdirSync(dst, { recursive: true }); // a tree a migration will CREATE — stage an empty dir
+        }
+        log(`staged ${stateTrees.length} authored tree(s) into ${stagingDir}: ${stateTrees.join(', ')}`);
+    }
 
     for (const m of migs) {
         log(`running ${String(m.id).padStart(3, '0')} — ${m.description}`);
-        const ctx = { dbPath: copyPath, stateDir: null, log };
+        const ctx = { dbPath: copyPath, stateDir: stagingDir, log };
         await m.up(ctx);
         const verdict = await m.verify(ctx);
         if (verdict !== true) fail(`verify(${m.id}): ${verdict}`);
@@ -210,6 +255,23 @@ async function main(): Promise<void> {
             const p = copyPath + side;
             if (fs.existsSync(p) && fs.statSync(p).size === 0) fs.unlinkSync(p);
         }
+    }
+
+    // ── STAGE-ONLY exit (P3d Option A): the verified DB + authored-tree copies stay in the
+    // staging dir; write a staging manifest for `han update` to run the ceremony over and swap
+    // atomically after the ring. NO swap here — the swap is the LAST act, and it is not ours.
+    if (STAGE_ONLY && stagingDir) {
+        const manifest = {
+            stagedAt: new Date().toISOString(),
+            schemaVersion: EXPECTED_SCHEMA_VERSION,
+            dbCopy: copyPath,
+            stateTrees,                                   // relative-to-$HAN_HOME tree paths
+            migrations: migs.map((m) => ({ id: m.id, description: m.description, stateChangeKind: m.stateChangeKind ?? null, touchesState: m.touchesState ?? [] })),
+        };
+        fs.writeFileSync(path.join(stagingDir, 'staging-manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+        log(`STAGE-ONLY COMPLETE — DB + ${stateTrees.length} authored tree(s) staged + verified; NO swap. ` +
+            `han update runs the Ring-2 ceremony over the staged trees, then swaps atomically after the ring.`);
+        return;
     }
 
     if (!APPLY) {
