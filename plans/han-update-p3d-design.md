@@ -1,0 +1,140 @@
+# P3d — the loom's last leg: ledger-witness · rollback-quarantine · freshness-expiry leaf · the state-copy leg
+
+> **Status**: S220 (2026-07-12), on Jim's `🟢 P3d IS GO` + Tenshi's P5-gate-satisfied.
+> Thread `mqz3wev0-uggkzq`. Design stands on the landed P3c ceremony (`3114c5f`) + its
+> renderer hardening (`25e043d`, both GREEN). One piece is **BUILT+PROVEN** (the quarantine
+> set); the two that touch protected/significant surfaces are **DESIGN-FIRST for Jim's
+> plan-audit** — the discipline P3 itself used, not a small-hours cut on the trust root.
+
+## The one-gate constraint (context)
+Renderer hardening lands **with or before** the state-copy leg (Jim's hard constraint). The
+hardening landed at `25e043d`, so the **"before"** side is satisfied — the renderer the
+state-copy leg makes human-reachable can no longer be blinded (A), control-spoofed (C),
+reorder-lulled (the multiset-preserving guard), or quietly table-edited (byte-legible fold
+keys). The state-copy leg may now land on a renderer that can't lie to a gardener.
+
+---
+
+## ✅ BUILT + PROVEN tonight — the rollback-QUARANTINE set (Tenshi finding-1)
+
+**The gap it closes.** Two correct mechanisms (rollback; the replay-backward high-water) don't
+share ONE fact: *this version was REJECTED*. After a rollback, `--check` and the freshness
+verdict both point the operator straight back at the tag they rolled back FROM (still the
+newest signed tag on the mirror, still genuinely signed), and nothing refuses a re-apply — so
+the tool would advise, and allow, re-installing a known-bad release.
+
+**The build (self-contained in `han-update.ts`; touches no protected file):**
+- **A ledger PROJECTION** — `quarantinedTags()` folds the append-only `quarantine` /
+  `unquarantine` ops in `update-ledger.jsonl` into the current set (last op wins). No new
+  store; it inherits the ledger's off-box tamper-evidence witness (below).
+- **Quarantine is RECORDED at both rollback points**: a manual `--rollback <tag>` quarantines
+  the `deployed` version it abandons; an AUTO-rollback (a failed apply) quarantines the
+  `target` it was applying (read from the run's own `apply-start`, with the manual-rollback
+  forward-target correctly exempt).
+- **`--check` ANNOTATES**: the newest signed tag, if quarantined, reports `⚠ … QUARANTINED —
+  rolled back on <date>`, plus a `quarantined tag(s): …` line.
+- **Apply REFUSES** a quarantined forward target unless the operator passes an explicit,
+  per-tag `--force-quarantined <tag>` — which also clears the quarantine (the operator has
+  ruled). No "update to newest" habit can silently walk back into a known-bad release.
+- **The override is ONE-SHOT by construction** (Jim's read, the best part): `--force-quarantined`
+  clears the mark, but if the forced re-apply fails again, the auto-rollback re-quarantines it
+  from its own `apply-start`. So the override is a single deliberate operator act, **never a
+  standing whitelist** — the loop closes on itself. (Timing: a manual rollback quarantines the
+  abandoned tag at apply-start, before the rollback completes — the SAFE fail-direction.)
+
+**Proven**: `test-quarantine.ts` **5/5** (projection reports; unquarantine clears; re-quarantine
+re-sets; empty ledger clean; malformed line skipped). The full rollback→refuse→force apply E2E
+rides the P3d scratch-garden acceptance (needs the signing fixture).
+
+---
+
+## 🎨 DESIGN-FIRST — the STATE-COPY LEG (the keystone; Jim's plan-audit please)
+
+**What it is.** The `MigrationCtx.stateDir` mechanism — the lawful door the ceremony pre-flight
+has been correctly *refusing* since P3c. A migration that declares `touchesState` on authored
+trees must run its authored changes **on COPIES**, so the Ring-2 ceremony can inspect them
+**before** they go live (DEC-102: the swap is the LAST act, *after* the gardener's ring).
+
+**The current shape (the gap).** `han-migrate` today: copy the DB → `up(ctx)` with
+`ctx.stateDir = null` → verify → **swap the DB itself** (the last act). `han-update` step 6
+snapshots LIVE authored files pre/post (fine today — nothing touches them; a touchesState
+migration is refused). For the leg to open, the migration's authored changes must land on
+copies, the ceremony must read the copies, and the swap must be gated on approval.
+
+**⚑ THE FORK for your plan-audit — where does the swap happen, and how do the two tools split?**
+
+- **Option A (recommended): stage-in-migrate, ceremony-and-swap-in-update.** In
+  update-orchestration, `han-migrate` runs in a **`--stage-only`** mode: copy the DB **and** the
+  declared `touchesState` trees into a staging dir, run `up(ctx)` with `ctx.stateDir` = the
+  staged trees, verify + integrity-sweep, and **do NOT swap** — report the staging paths.
+  `han-update` step 6 then: snapshot pre = LIVE authored, post = the STAGED trees → run the
+  ceremony on that delta → **on approval, one atomic swap of BOTH the DB and the state trees**
+  to live (the last act); on decline/abort, discard the staging, nothing was ever swapped, the
+  live trees are untouched. Clean separation: *migrate stages, update ceremonies + swaps.*
+- **Option B: migrate owns the whole flow with a ceremony callback.** More coupling
+  (han-migrate would import the ceremony); rejected unless the plan-audit prefers it.
+
+**Invariant that falls out of A (worth ratifying):** a `touchesState` migration runs **only**
+via `han update` (with the ceremony) — never standalone `han-migrate --apply`, which stays the
+DB-only diagnostic hand-tool. Standalone `--apply` continues to reject/never-stage authored
+trees; the ceremony's lawful door is `han update` alone.
+
+**Atomicity.** The DB + state swap must carry the same crash-recovery guarantee the DB swap has
+today (rename-based, recoverable — the verified staging AND the pre-copy both on disk; one
+rename completes it). Extending it to N trees: stage all, swap all with the pre-copies retained
+(DEC-069), a crash mid-swap recoverable because every source is still on disk.
+
+**Rollback simplification.** Because A defers ALL swaps to post-ceremony, a decline/abort means
+**nothing was swapped** — rollback is "discard staging + `git checkout` the prior hash", *simpler*
+than today's DB-rollback-after-swap. The authored-file `restoreAuthored` path (P3c) remains the
+net for the undeclared-change case (which still aborts pre-ceremony).
+
+**Acceptance (P5, with Tenshi's re-audit):** a declared content-preserving migration renders an
+EMPTY ceremony delta and auto-passes; a declared migration that actually mutates authored
+content red-flags and requires the ring; decline → nothing swapped, live untouched; approval →
+atomic DB+state swap; a crash mid-swap → recoverable from the retained pre-copies.
+
+---
+
+## 🎨 DESIGN-FIRST — the `enforceFreshnessExpiry` leaf (SEC-12 part 3; touches the manifest)
+
+The typed freshness dispatch already ships `kind:'expired'` as the ONLY flag-gatable outcome
+(P3c). This leg arms it, default-OFF, so it's **inert until lattice integration**:
+- **Manifest**: an OPTIONAL section `update: { enforceFreshnessExpiry: false, freshnessMaxAgeDays: 90 }`
+  — optional (not a required leaf), so gardens without it don't break the loader and default
+  OFF. Precedent: `spokeLifecycle` (a config sub-object), but OPTIONAL not required.
+- **Accessor** (garden-manifest.ts): `updateConfig(): { enforceFreshnessExpiry: boolean;
+  freshnessMaxAgeDays: number }` with the defaults baked, so an absent section is `{false, 90}`.
+- **Wiring** (han-update.ts): when `enforceFreshnessExpiry` is true, the typed `expired` outcome
+  becomes fatal (abort) instead of advisory; `freshnessMaxAgeDays` feeds the F2 calibration
+  (a release-time guess against an IRREGULAR human cadence — generous or a healthy-but-quiet
+  garden self-DoSes). The advisory-first default dodges F2 today; the note travels with the flag.
+- **Why design-first**: it edits the protected `garden-manifest.ts` (DEC-081 governing-law
+  surface, pre-merge-audit-listed). Small + inert, but the manifest schema is Jim's plan-audit
+  territory, not a small-hours change. P5 gains: a REPLAYED freshness aborts with the flag OFF
+  (the flag governs EXPIRY alone — already asserted in intent, made a standing case here).
+
+---
+
+## 📌 PROPERTY — the ledger snapshot-witness (F1 high-water is already live)
+
+F1's high-water (a freshness whose `latest_version` is below the highest-ever-verified is
+REFUSED as a detector replay) is **already in the metal** (`freshnessVerdict`, reading
+`ledgerHighWater` + `deployedVersionFromGit`). The **witness**: `update-ledger.jsonl` lives in
+`$HAN_HOME/health/`, which the nightly off-box restic backup covers — so the ledger (the
+quarantine projection AND the high-water) is **off-box tamper-evident**: a box-compromise that
+edits the local ledger diverges from the snapshot chain and is detectable. Low-code: confirm
+`health/` is in the restic include-set (it is), and name the property in the receipts doc. The
+git-state cross-witness (deployed-from-git, harder to fake than the ledger) already backs the
+high-water regardless.
+
+---
+
+## Build order (each held → Jim's diff-audit → land, per the rhythm)
+1. **✅ quarantine set** — BUILT+PROVEN (`test-quarantine.ts` 5/5), held for diff-audit.
+2. **state-copy leg** — on the plan-audit's fork ruling (A recommended); the keystone.
+3. **enforceFreshnessExpiry leaf** — on the plan-audit (optional-manifest-leaf shape).
+4. **ledger-witness** — property note + receipts-doc line (rides any of the above's commit).
+
+*— Leo (session), S220, 2026-07-12 ~01:20 AEST. Quarantine built; the keystone designed for
+Jim's fork ruling; the loom's last leg mapped.*

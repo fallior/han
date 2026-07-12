@@ -32,6 +32,9 @@ const CHECK = argvRest.includes('--check');
 const TO = argvRest.includes('--to') ? argvRest[argvRest.indexOf('--to') + 1] : null;
 const ROLLBACK = argvRest.includes('--rollback') ? argvRest[argvRest.indexOf('--rollback') + 1] : null;
 const SCRATCH = argvRest.includes('--scratch') ? argvRest[argvRest.indexOf('--scratch') + 1] : null;
+// P3d: the ONLY way to (re)apply a tag a rollback abandoned — an explicit, per-tag operator
+// override, so no "update to newest" habit can silently walk back into a known-bad release.
+const FORCE_QUARANTINED = argvRest.includes('--force-quarantined') ? argvRest[argvRest.indexOf('--force-quarantined') + 1] : null;
 
 // The --scratch belt (Jim's non-blocker + Tenshi #4): a TEST affordance must never reach
 // production — refuse a scratch garden home resolving to the real HAN home; explicit-ARG-only
@@ -78,6 +81,29 @@ function ledgerHighWater(): string | null {
         }
         return hw;
     } catch { return null; }
+}
+
+// ── the rollback-QUARANTINE set (P3d, Tenshi finding-1) ────────────────────────────────────
+// Two correct mechanisms (rollback + the replay-backward high-water) don't share ONE fact:
+// *this version was REJECTED*. After a rollback, `--check` and the freshness verdict both point
+// the operator straight back at the tag they deliberately rolled back FROM (it's still the
+// highest signed tag on the mirror, still genuinely signed), and nothing refuses a re-apply of
+// it. So the tool would advise — and allow — re-installing a KNOWN-BAD release. The cure: a
+// rollback records the abandoned tag here; `--check` annotates it; apply REFUSES it without an
+// explicit `--force-quarantined <tag>`. The set is a ledger projection (append-only op records
+// quarantine/unquarantine), so it inherits the ledger's off-box tamper-evidence witness.
+function quarantinedTags(): Map<string, string> {  // tag → the ISO date it was quarantined (latest wins)
+    const q = new Map<string, string>();
+    try {
+        for (const l of fs.readFileSync(LEDGER, 'utf8').trim().split('\n')) {
+            try {
+                const e = JSON.parse(l);
+                if (e.op === 'quarantine' && e.tag) q.set(e.tag, e.ts ?? '');
+                if (e.op === 'unquarantine' && e.tag) q.delete(e.tag);
+            } catch { /* skip malformed */ }
+        }
+    } catch { /* no ledger yet */ }
+    return q;
 }
 
 // ── version ordering (vYYYY.MM.DD[.n] — lexicographic within the scheme) ──────────────────
@@ -176,8 +202,12 @@ function stepCheck(): void {
     log(`newest SIGNED tag on the mirror: ${newest ? `${newest.tag} → ${newest.hash.slice(0, 12)}` : '(none verifiable)'}`);
     const f = freshnessVerdict();
     log(`freshness: ${f.status} — ${f.detail}`);
-    if (deployed && newest && cmpTag(newest.tag, deployed) > 0) log(`⇒ you are BEHIND: ${deployed} → ${newest.tag} available`);
+    const quarantined = quarantinedTags();
+    if (newest && quarantined.has(newest.tag)) {
+        log(`⚠ the newest signed tag ${newest.tag} is QUARANTINED — rolled back on ${quarantined.get(newest.tag)}; a re-apply needs --force-quarantined ${newest.tag} (P3d, Tenshi finding-1)`);
+    } else if (deployed && newest && cmpTag(newest.tag, deployed) > 0) log(`⇒ you are BEHIND: ${deployed} → ${newest.tag} available`);
     else if (newest) log('⇒ up to date with the newest signed release the mirror offers');
+    if (quarantined.size) log(`quarantined tag(s): ${[...quarantined.keys()].join(', ')}`);
     // The staleness heuristic — the one detector that works against a PERFECT withholder
     // (a frozen mirror cannot fake the passage of time — Tenshi's three-layer shape).
     if (deployed) {
@@ -207,6 +237,32 @@ async function stepApply(): Promise<void> {
     // ledger alone; --rollback is the ONLY lawful reverse (explicit, still signature-verified).
     if (!ROLLBACK && deployed && cmpTag(target!, deployed) <= 0) {
         fail(`target ${target} does not order above deployed ${deployed} — downgrade refused (a validly-signed OLD tag is a replay weapon); explicit --rollback is the only lawful reverse`);
+    }
+    // P3d QUARANTINE gate (Tenshi finding-1): a forward apply of a tag a rollback abandoned is
+    // refused — it is genuinely signed and may be the newest, so nothing else stops the operator
+    // (or an "update to newest" habit) walking back into the known-bad release. Only an explicit
+    // per-tag --force-quarantined <tag> overrides. (A --rollback is exempt: it IS the lawful
+    // reverse, and re-quarantines below.)
+    const quarantined = quarantinedTags();
+    if (!ROLLBACK && quarantined.has(target!) && FORCE_QUARANTINED !== target) {
+        fail(`target ${target} was ROLLED BACK on ${quarantined.get(target!)} — refusing to re-apply a quarantined (known-bad) release; ` +
+            `re-apply deliberately with --force-quarantined ${target} if that rollback is no longer valid`);
+    }
+    // Manual rollback quarantines the version it abandons (the bad one being left behind).
+    // Timing note (Jim+Tenshi P3d audit): this fires at apply-start, BEFORE the rollback work
+    // completes — so if the rollback itself then failed, the still-deployed tag stays
+    // quarantined. That is the SAFE fail-direction (one deliberate --force-quarantined cures it),
+    // never the dangerous one (a bad tag left un-quarantined). And the override is one-shot by
+    // construction: --force-quarantined clears the mark, but a re-failed apply re-quarantines it
+    // from its own apply-start — a single deliberate act, never a standing whitelist.
+    if (ROLLBACK && deployed && deployed !== target) {
+        ledgerAppend({ op: 'quarantine', tag: deployed, reason: `rolled back to ${target}` });
+        log(`quarantined ${deployed} (rolled back FROM it) — a future forward-apply of it needs --force-quarantined`);
+    }
+    // A deliberate re-apply of a quarantined tag clears its quarantine (the operator has ruled).
+    if (FORCE_QUARANTINED && FORCE_QUARANTINED === target && quarantined.has(target!)) {
+        ledgerAppend({ op: 'unquarantine', tag: target, reason: 'operator --force-quarantined re-apply' });
+        log(`⚠ FORCED past quarantine on ${target} (operator override) — quarantine cleared`);
     }
     const f = freshnessVerdict();
     // The typed dispatch (Tenshi #2): fatality is IN THE TYPE. The P3d enforceFreshnessExpiry
@@ -430,6 +486,17 @@ async function healthGate(): Promise<boolean> {
 async function rollback(priorHash: string, why: string, applyStartMs: number): Promise<void> {
     log(`ROLLBACK (${why})`);
     ledgerAppend({ op: 'rollback-start', prior: priorHash, why });
+    // P3d QUARANTINE (Tenshi finding-1): an AUTO-rollback abandons the target it was applying —
+    // quarantine it so a later forward-apply of that failed tag needs an explicit override. Read
+    // the run's target from its own apply-start (a manual --rollback's forward target is exempt —
+    // it's the good one; manual rollback quarantines the abandoned deployed version up in stepApply).
+    try {
+        const lines = fs.readFileSync(LEDGER, 'utf8').trim().split('\n');
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const e = JSON.parse(lines[i]);
+            if (e.op === 'apply-start') { if (!e.rollback && e.target) { ledgerAppend({ op: 'quarantine', tag: e.target, reason: `auto-rollback: ${why}` }); log(`quarantined ${e.target} (its apply failed) — a re-apply needs --force-quarantined`); } break; }
+        }
+    } catch { /* no ledger / unreadable — the quarantine is best-effort belt on the rollback itself */ }
     git(['checkout', '--quiet', priorHash]);
     const dir = HOME_DIR;
     // Run-scoping reads the RUN TIMESTAMP han-migrate embeds in the pre-copy's NAME — never
