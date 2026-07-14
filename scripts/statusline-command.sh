@@ -22,6 +22,13 @@ if [ -n "${AGENT_SLUG:-}" ] && [ -n "$used" ]; then
     _payload=$(printf '{"context_window":{"used_percentage":%s},"updated_at":"%s"}' "$used" "$(date -Iseconds)")
     printf '%s' "$_payload" > "$_health/${AGENT_SLUG}-${_surface}-ctx.json.tmp" 2>/dev/null \
         && mv -f "$_health/${AGENT_SLUG}-${_surface}-ctx.json.tmp" "$_health/${AGENT_SLUG}-${_surface}-ctx.json" 2>/dev/null
+    # DEC-101 persist-as-spoke: ALSO write a per-SESSION ctx sink (keyed by HAN_SESSION = the tmux
+    # session name) so the dispatcher's getContextPctForSession can read a SPECIFIC spoke's ctx for
+    # the reap — the per-surface file above collides across concurrent spokes on one surface.
+    if [ -n "${HAN_SESSION:-}" ]; then
+        printf '%s' "$_payload" > "$_health/${AGENT_SLUG}-${_surface}-${HAN_SESSION}-ctx.json.tmp" 2>/dev/null \
+            && mv -f "$_health/${AGENT_SLUG}-${_surface}-${HAN_SESSION}-ctx.json.tmp" "$_health/${AGENT_SLUG}-${_surface}-${HAN_SESSION}-ctx.json" 2>/dev/null
+    fi
     # legacy per-slug file (transition only — readers re-keyed at T-2; remove at T-7)
     printf '%s' "$_payload" > "$_health/${AGENT_SLUG}-ctx.json.tmp" 2>/dev/null \
         && mv -f "$_health/${AGENT_SLUG}-ctx.json.tmp" "$_health/${AGENT_SLUG}-ctx.json" 2>/dev/null

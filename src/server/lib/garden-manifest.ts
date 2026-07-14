@@ -119,6 +119,14 @@ export interface SpokeLifecycle {
      *  reload (the deep-gradient/identity staleness no WM-freshen touches; freshness plan §3c —
      *  identity-load-bearing, DO-NOT-optimise-away). Optional; the pool-manager defaults 24. */
     stemReloadHours?: number;
+    /** DEC-101 persist-as-spoke: when true, a pooled checkout BINDS the stem to its conversation as a
+     *  spoke that serves the thread across turns (no per-dispatch return) and is reaped at
+     *  ctxReapThresholdPct/thread-resolve. Default OFF (the legacy per-dispatch checkout→return). */
+    spokePersist?: boolean;
+    /** DEC-101: the ctx% at/above which a bound spoke is REAPED at idle (retire + replace with a fresh
+     *  sonnet stem) — distinct from ctxClearThresholdPct (which /clears a floor session in place).
+     *  Default 92 (Darron, 2026-07-14). */
+    ctxReapThresholdPct?: number;
 }
 
 export interface AgentManifest {
@@ -213,6 +221,16 @@ const FABLE_LADDER: ModelLadder = ['claude-fable-5', ...OPUS_LADDER];
 // observed-model stamp keeps any fallback legible in the data.
 const SONNET_LADDER: ModelLadder = ['claude-sonnet-5', ...FABLE_LADDER];
 
+// STEM_WARM_LADDER (DEC-101, the warm-map/serve-map split — MNT-054): the model a pool stem is
+// PRE-WARMED on, decoupled from the model its surface SERVES. Warm cheap (sonnet-5 head — proven
+// to pass the #107 c0-gate on the heartbeat/supervisor/compression lanes and today's own live
+// fills), then cast to the surface's serve model at checkout (`dispatchToPooledStem`). The
+// descent tail exists only for a sonnet-drop; a warm load never touches Fable (the MNT-42
+// depletion trap that made human-response prewarm hang-loop). All pools warm here — one warm-map.
+// NB (Jim G-audit must-fix): must NOT spread SONNET_LADDER — that descends sonnet→FABLE→opus,
+// re-arming the exact MNT-42 trap. Spread OPUS_LADDER so the tail is sonnet→opus→haiku, never Fable.
+const STEM_WARM_LADDER: ModelLadder = ['claude-sonnet-5', ...OPUS_LADDER];
+
 // Interactive CLI sessions take their model from the launcher at spawn (the
 // launchers don't pin one today). Recorded here so the DEC-092 slicer stamp matches reality.
 const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-fable-5']; // ⏩ Fable restored 2026-07-03 (S213)
@@ -221,7 +239,7 @@ const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-fable-5']; // ⏩ Fable restore
  *  "FABLE_LADDER"`); the engine owns their CONTENTS (model economics stay engine-updatable for
  *  every garden). The loader resolves names through this and FAILS LOUD on an unknown name. */
 export const LADDER_REGISTRY: Record<string, ModelLadder> = {
-    OPUS_LADDER, FABLE_LADDER, SONNET_LADDER, CLI_LAUNCH_DEFAULT,
+    OPUS_LADDER, FABLE_LADDER, SONNET_LADDER, CLI_LAUNCH_DEFAULT, STEM_WARM_LADDER,
 };
 
 /**
@@ -508,6 +526,16 @@ export function spokeLifecycleFor(slug: string, surface: string): SpokeLifecycle
     return { ...base, ...(s?.lifecycle ?? {}) };
 }
 
+/** DEC-101: is the persist-as-spoke lifecycle enabled for this surface? Default OFF (safe rollout). */
+export function spokePersistFor(slug: string, surface: string): boolean {
+    return spokeLifecycleFor(slug, surface).spokePersist ?? false;
+}
+
+/** DEC-101: the ctx% at which a bound spoke is reaped at idle. Registry leaf; default 92. */
+export function ctxReapThresholdFor(slug: string, surface: string): number {
+    return spokeLifecycleFor(slug, surface).ctxReapThresholdPct ?? 92;
+}
+
 /** #107 Phase-2 P2.1b: does this (slug, surface) wake via the feeder (the wake-feed queue)?
  *  Registry-gated roll-out (no-hidden-globals) — true only where the manifest sets `wakeFeed`. */
 export function wakeFeedFor(slug: string, surface: string): boolean {
@@ -570,6 +598,27 @@ export function manifestModelLadder(slug: string, surface: string): string[] {
     if (shared && shared.length) return [...shared];
     const s = allocationFor(slug)?.surfaces.find(x => x.name === surface);
     return s?.model ? [...s.model] : [];
+}
+
+/**
+ * DEC-101 warm-map (MNT-054): the ladder a pool stem is PRE-WARMED on — sonnet-headed, decoupled
+ * from `manifestModelLadder` (the SERVE ladder). One warm-map for all pools today; kept a per-
+ * (slug,surface) accessor so a future garden can vary it without touching callers. Used by
+ * `scripts/prewarm-stem.ts`; the serve model is cast on at checkout.
+ */
+export function stemWarmLadder(_slug: string, _surface: string): string[] {
+    return [...STEM_WARM_LADDER];
+}
+
+/**
+ * DEC-101 serve-map (MNT-054): the model a checked-out stem should SERVE on for this surface —
+ * the head (rung 0) of the surface's `manifestModelLadder`. The stem is warmed on the warm-map
+ * (sonnet) and cast to THIS at checkout; the full serve ladder is the descent tail if the cast
+ * hits a dead/depleted serve model. `null` when the surface has no configured ladder (a shared
+ * surface with no model, or unknown) — the caller then skips the cast (serve == warm).
+ */
+export function serveModelFor(slug: string, surface: string): string | null {
+    return manifestModelLadder(slug, surface)[0] ?? null;
 }
 
 /**

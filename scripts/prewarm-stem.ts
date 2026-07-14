@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { feedWakeSteps, wakeStepsFor, awaitChromeOrDescend, observeActiveModel, currentWmCharLen } from '../src/server/lib/tmux-dispatcher';
-import { manifestModelLadder, swapPrefixFor } from '../src/server/lib/garden-manifest';
+import { stemWarmLadder, swapPrefixFor } from '../src/server/lib/garden-manifest';
 import { writeSleeveState } from '../src/server/lib/sleeve-state';
 
 const slug = process.argv[2];
@@ -87,7 +87,10 @@ async function main(): Promise<void> {
 
     // 2) wait for claude chrome (bash→claude ready; auto-descends the model if the launch model is
     //    dead) — the failover ladder derived the same single-source way the dispatcher does
-    await awaitChromeOrDescend(slug, SURFACE, tmuxSession, manifestModelLadder(slug, SURFACE));
+    // DEC-101 warm-map (MNT-054): warm on the sonnet-headed warm ladder, NOT the surface's serve
+    // ladder — the serve model is cast on at checkout (dispatchToPooledStem). Warming on the serve
+    // ladder is what let a depleted Fable hang the prewarm (MNT-42); the warm-map never touches Fable.
+    await awaitChromeOrDescend(slug, SURFACE, tmuxSession, stemWarmLadder(slug, SURFACE));
 
     // 3) feed the WHOLE self, GREET-LESS (greet:false) — completion = queue-empty = warm; the gradient
     //    step traverses to GRADIENT-EOF and writes the reached c0 to the sentinel (the c0-ack reads it).

@@ -28,7 +28,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { poolDir as defaultPoolDir } from './paths';
 
-export type StemState = 'free' | 'leased';
+// DEC-101 persist-as-spoke: 'free' = waiting in the pool; 'leased' = the atomic single-writer grab
+// during checkout (transient); 'spoke' = bound to a conversation, serving it across turns until reaped.
+export type StemState = 'free' | 'leased' | 'spoke';
 
 export interface PoolStem {
     /** The per-stem key = the stem's tmux session name (HAN_SESSION). F-b. */
@@ -46,6 +48,11 @@ export interface PoolStem {
     model: string;
     warm_at: string;
     leased_at?: string;
+    /** DEC-101: the conversation this stem is bound to as a spoke (set on bindSpoke). A spoke serves
+     *  only its own thread until reaped; used by findSpokeForThread to route a thread's dispatches. */
+    conversation_id?: string;
+    /** DEC-101: when the stem was bound to its thread (spoke birth) — for LRU/dormancy (future). */
+    bound_at?: string;
 }
 
 export interface Pool {
@@ -55,8 +62,12 @@ export interface Pool {
 }
 
 export interface PoolStatus {
+    /** DEC-101: WAITING stems only (state==='free') — what replenishPool targets (bound spokes must
+     *  NOT count toward the pool, else the first checkout stalls replenish forever, Jim gate 1). */
     free: number;
     leased: number;
+    /** DEC-101: stems bound to a conversation as spokes (state==='spoke'). */
+    spokes: number;
     total: number;
 }
 
@@ -105,14 +116,39 @@ export function checkoutStem(slug: string, surface: string, nowIso: string): Poo
     return { ...stem };
 }
 
-/** Return a leased stem to the pool (mark `free`). No-op if the stem is unknown. */
+/** Return a leased stem to the pool (mark `free`). No-op if the stem is unknown.
+ *  DEC-101: NOT used by the persist-as-spoke pooled flow (a checked-out stem becomes a spoke and is
+ *  retired, never returned). Retained for the non-persist path / rollback + tests. */
 export function returnStem(slug: string, surface: string, stemId: string): void {
     const pool = readPool(slug, surface);
     const stem = pool.stems.find(s => s.stem_id === stemId);
     if (!stem) return;
     stem.state = 'free';
     delete stem.leased_at;
+    delete stem.conversation_id;
+    delete stem.bound_at;
     writePool(slug, surface, pool);
+}
+
+/** DEC-101: bind a just-leased stem to a conversation as a spoke (leased → spoke). No-op if unknown.
+ *  The spoke thereafter serves ONLY this thread (findSpokeForThread routes to it) until reaped. */
+export function bindSpoke(slug: string, surface: string, stemId: string, conversationId: string, nowIso: string): void {
+    const pool = readPool(slug, surface);
+    const stem = pool.stems.find(s => s.stem_id === stemId);
+    if (!stem) return;
+    stem.state = 'spoke';
+    stem.conversation_id = conversationId;
+    stem.bound_at = nowIso;
+    delete stem.leased_at;
+    writePool(slug, surface, pool);
+}
+
+/** DEC-101: the live spoke bound to this thread, or null. The affinity map IS the registry (file-backed,
+ *  so it survives a controller restart). Returns a copy; the caller verifies the tmux session is alive. */
+export function findSpokeForThread(slug: string, surface: string, conversationId: string): PoolStem | null {
+    const pool = readPool(slug, surface);
+    const stem = pool.stems.find(s => s.state === 'spoke' && s.conversation_id === conversationId);
+    return stem ? { ...stem } : null;
 }
 
 /** Add or replace a stem (by stem_id) — pre-warm / replenish / post-freshen cursor update. */
@@ -142,8 +178,10 @@ export function setStemCursor(slug: string, surface: string, stemId: string, wmC
 
 export function poolStatus(slug: string, surface: string): PoolStatus {
     const pool = readPool(slug, surface);
+    const free = pool.stems.filter(s => s.state === 'free').length;
     const leased = pool.stems.filter(s => s.state === 'leased').length;
-    return { free: pool.stems.length - leased, leased, total: pool.stems.length };
+    const spokes = pool.stems.filter(s => s.state === 'spoke').length;
+    return { free, leased, spokes, total: pool.stems.length };
 }
 
 /**

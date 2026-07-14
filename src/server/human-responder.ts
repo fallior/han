@@ -43,7 +43,7 @@ import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder';
 // ensureSurfaceSession + the warm-gate + enqueue + the ctx-pressure self-clear, and swallows
 // DispatchTimeoutError|SessionNotReadyError into a null return + onDispatchFail (no hollow
 // answers). Zero live agentQuery on this surface (the #66 / DEC-094 endgame for human-response).
-import { dispatchToSpoke, startPoolManager } from './lib/tmux-dispatcher';
+import { dispatchToSpoke, startPoolManager, reapThreadSpoke } from './lib/tmux-dispatcher';
 import {
     manifestModelLadder, conversationRoleFor, swapPrefixFor,
     humanResponderTxnTimeoutMs, humanResponderCommitmentScan, addressedToOtherResponderOnly,
@@ -414,6 +414,7 @@ async function respondToConversationViaTmux(db: Database.Database, conversationI
             ladder: manifestModelLadder(SLUG, HUMAN_SURFACE),
             welcomeBack: WELCOME_BACK,
             timeoutMs: HUMAN_TXN_TIMEOUT_MS,
+            conversationId, // DEC-101: bind/route this thread's spoke (persist-as-spoke, flag-gated)
             // Per-site fail closure: the conversation path HAS an orchestrator ack channel.
             onDispatchFail: (err) => {
                 heartbeat.stop();
@@ -707,6 +708,23 @@ async function main(): Promise<void> {
         await new Promise(r => setTimeout(r, 500));
         drainQueue();
     });
+
+    // DEC-101 (C5): thread-resolve reap. The server drops `<slug>-reap-thread/<conversation_id>` when
+    // a thread resolves/archives; reap THIS agent's spoke bound to that thread (no-op if it has none).
+    // A spoke's life IS its thread's life (Darron). Inert while spokePersist is OFF (no spokes exist).
+    const REAP_DIR = path.join(SIGNALS_DIR, `${SLUG}-reap-thread`);
+    try { fs.mkdirSync(REAP_DIR, { recursive: true }); } catch { /* exists */ }
+    const drainReaps = (): void => {
+        let files: string[]; try { files = fs.readdirSync(REAP_DIR); } catch { return; }
+        for (const f of files) {
+            if (f.startsWith('.')) continue;
+            try { reapThreadSpoke(SLUG, HUMAN_SURFACE, f); } // filename = conversation_id
+            catch (err) { console.warn(`${LOG} reap-thread ${f} failed: ${(err as Error).message}`); }
+            try { fs.unlinkSync(path.join(REAP_DIR, f)); } catch { /* already gone */ }
+        }
+    };
+    drainReaps(); // startup sweep: reaps queued before a restart
+    fs.watch(REAP_DIR, () => drainReaps());
 
     // DEC-079: fs.watch+poll race retired. With one-write-site discipline (DEC-080) and the
     // startup sweep above, missed inotify events self-heal at the next event or restart; if one

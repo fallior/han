@@ -9,6 +9,7 @@ import { catalogueConversation, catalogueAllUncatalogued } from '../services/cat
 import { autoGenerateTts, autoTagLoop } from './voice';
 import { callLLM } from '../orchestrator';
 import { registeredAgentSlugs } from '../lib/agent-registry';
+import { signalsDir } from '../lib/paths';
 import { slugForConversationRole } from '../lib/garden-manifest';
 import { orchestrate } from '../services/jemma-orchestrator';
 import { getPersonas, getAgentPersonas, getMentionPatterns } from '../services/village.js';
@@ -620,6 +621,24 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
  * POST /:id/resolve -- Mark a conversation as resolved
  * Triggers automatic cataloguing (fire and forget)
  */
+/**
+ * DEC-101 (C5): thread-resolve reap — a resolved/archived thread's spoke should be reaped ("the
+ * spoke's life IS the thread's life", Darron). The pool registries are owned by the per-agent
+ * human-responder processes, so we signal cross-process: drop `<slug>-reap-thread/<conversation_id>`
+ * in every agent's signal dir; each responder reaps its own spoke for that thread (no-op if none).
+ * DEC-081: fanned out over registeredAgentSlugs() — a 5th agent gets it free. Inert while
+ * spokePersist is OFF (no spokes exist to reap).
+ */
+function signalReapThread(conversationId: string): void {
+    for (const slug of registeredAgentSlugs()) {
+        try {
+            const dir = path.join(signalsDir(), `${slug}-reap-thread`);
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, conversationId), '');
+        } catch { /* best-effort; the ctx-reap is the primary lifecycle bound */ }
+    }
+}
+
 router.post('/:id/resolve', (req: Request<{ id: string }>, res: Response) => {
     try {
         const conversation = conversationStmts.get.get(req.params.id);
@@ -627,6 +646,7 @@ router.post('/:id/resolve', (req: Request<{ id: string }>, res: Response) => {
 
         const now = new Date().toISOString();
         conversationStmts.updateStatus.run('resolved', now, req.params.id);
+        signalReapThread(req.params.id); // DEC-101 C5
 
         const updated = conversationStmts.get.get(req.params.id);
         res.json({ success: true, conversation: updated });
@@ -690,6 +710,7 @@ router.post('/:id/archive', (req: Request<{ id: string }>, res: Response) => {
 
         const now = new Date().toISOString();
         conversationStmts.archive.run(now, now, req.params.id);
+        signalReapThread(req.params.id); // DEC-101 C5
 
         const updated = conversationStmts.get.get(req.params.id);
         res.json({ success: true, conversation: updated });

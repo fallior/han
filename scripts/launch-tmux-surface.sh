@@ -138,7 +138,15 @@ fi
 # pollutes the pane and could wedge an autonomous seat that can't answer TUI chrome;
 # (2) PRIVACY — we do not want autonomous spokes auto-consenting to data-use on the
 # experiment's content; suppressed = no per-session consent, posture stays account-default.
-tmux new-session -d -s "$SESSION_NAME" -c "$AGENT_DIR" \
+# MNT-052 (Jim G4 / Artifact 3): if no tmux server exists yet (han-tmux.service down or not-yet-up),
+# birth it inside a transient user scope so the server does NOT inherit THIS caller's systemd service
+# cgroup — the garden-wide-kill root. When a server already exists (the normal path) new-session just
+# attaches and SERVER_SCOPE is empty → byte-identical to before.
+SERVER_SCOPE=()
+if ! tmux info >/dev/null 2>&1; then
+    SERVER_SCOPE=(systemd-run --user --scope --quiet --unit="han-tmux-fallback-$$")
+fi
+"${SERVER_SCOPE[@]}" tmux new-session -d -s "$SESSION_NAME" -c "$AGENT_DIR" \
     "${ENV_ARGS[@]}" \
     -e "AGENT_SURFACE=$SURFACE" \
     -e "HAN_SESSION=$SESSION_NAME" \

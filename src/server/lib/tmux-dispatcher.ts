@@ -37,10 +37,10 @@ import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
-import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor } from './garden-manifest';
+import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, spokePersistFor, ctxReapThresholdFor } from './garden-manifest';
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
-import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, readPool, poolStatus, type PoolStem } from './stem-pool';
+import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, readPool, poolStatus, findSpokeForThread, bindSpoke, type PoolStem } from './stem-pool';
 import { serverDir } from './paths';
 
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || healthDir();
@@ -1325,9 +1325,84 @@ async function freshenPooledStem(slug: string, surface: string, stem: PoolStem, 
  * (eager replenish to maintain N is the pool-manager's job, R3a.1d). Deferred to R3a.1d/R3b: a
  * pooled stem does NOT ctx-pressure self-clear in place — it is retired + replaced at threshold.
  */
+/**
+ * DEC-101 cast-at-checkout (MNT-054): a pool stem is warmed on the sonnet warm-map; at checkout it
+ * is cast to the surface's SERVE model (`/model <serve>`) so the expensive wake stays cheap and only
+ * a served turn pays the premium model. No-op when the stem is already on the serve model (a persistted
+ * spoke, or a returned-and-still-cast stem) or the surface has no serve ladder. Reuses the launch
+ * failover machinery: `/model` to the serve head, then `awaitChromeOrDescend` probes it and descends
+ * the SURFACE ladder if the serve model is dead/depleted — throwing `ModelLadderExhaustedError` if
+ * every rung fails, which the caller turns into a retire (never serve on / return a half-cast stem,
+ * Jim cond-1). The registry row is updated to the actually-active model (DEC-092 truth stays honest).
+ */
+async function castStemToServeModel(slug: string, surface: string, stem: PoolStem): Promise<void> {
+    const serve = serveModelFor(slug, surface);
+    if (!serve || stem.model === serve) return; // already on the serve model (or no serve ladder) → no cast
+    sendLine(stem.tmux_session, `/model ${serve}`);
+    await sleep(DESCEND_COOLDOWN_MS);
+    // Probe the serve head; descend the SURFACE ladder on unavailable (throws if every rung dead).
+    await awaitChromeOrDescend(slug, surface, stem.tmux_session, manifestModelLadder(slug, surface));
+    const active = observeActiveModel(slug, surface, stem.tmux_session);
+    if (active && active !== stem.model) {
+        upsertStem(slug, surface, { ...stem, model: active });
+        stem.model = active; // keep the in-memory row truthful for this dispatch's return/retire path
+        console.log(`[tmux-dispatcher] ${slug}/${surface}: cast stem ${stem.stem_id} warm→serve model=${active}`);
+    }
+}
+
+/** DEC-101: read a specific SPOKE's ctx% from its per-SESSION statusline sidecar. The per-surface
+ *  `getContextPct` file collides across concurrent spokes, so the reap needs a per-session read
+ *  (gate 3: "the stem's own sidecar"). Null if the sidecar isn't present yet — e.g. the statusline
+ *  hook hasn't been taught the per-session write (C4 wiring) — and the reap then safely no-ops. */
+function getContextPctForSession(slug: string, surface: string, tmuxSession: string): number | null {
+    try {
+        const p = path.join(HEALTH_DIR, `${slug}-${surface}-${tmuxSession}-ctx.json`);
+        const pct = JSON.parse(fs.readFileSync(p, 'utf-8'))?.context_window?.used_percentage;
+        return typeof pct === 'number' ? pct : null;
+    } catch { return null; }
+}
+
+/** DEC-101 reap-at-idle (gate 3): a bound spoke just finished its dispatch (so it is IDLE now, the
+ *  R011 precondition). If its OWN ctx has reached the reap threshold, retire it (kill + cleanup,
+ *  NEVER compaction) and top the pool back up — the thread's next message checks out a fresh sonnet
+ *  stem and re-casts (gate 5). Null ctx (per-session sidecar absent) → skip: safe degradation, no
+ *  reap until the per-session ctx is being written. */
+async function reapSpokeIfOverCtx(slug: string, surface: string, stem: PoolStem): Promise<void> {
+    const pct = getContextPctForSession(slug, surface, stem.tmux_session);
+    if (pct === null) return; // per-session ctx not available yet → cannot target this spoke → skip
+    const threshold = ctxReapThresholdFor(slug, surface);
+    if (pct >= threshold) {
+        console.log(`[tmux-dispatcher] ${slug}/${surface}: reaping spoke ${stem.stem_id} at ${pct}% ctx (≥${threshold}%, thread ${stem.conversation_id}) — next turn gets a fresh stem`);
+        retireStem(slug, surface, stem, `ctx-reap ${pct}%`);
+        void replenishPool(slug, surface); // keep N free
+    }
+}
+
+/** DEC-101 (C5): reap the spoke bound to a resolved/archived thread — "the spoke's life IS the
+ *  thread's life" (Darron). Called by the human-responder on a reap-thread signal. No-op if this
+ *  agent has no spoke bound to the thread. Returns whether a spoke was reaped. */
+export function reapThreadSpoke(slug: string, surface: string, conversationId: string): boolean {
+    const spoke = findSpokeForThread(slug, surface, conversationId);
+    if (!spoke) return false;
+    console.log(`[tmux-dispatcher] ${slug}/${surface}: reaping spoke ${spoke.stem_id} — thread ${conversationId} resolved/archived`);
+    retireStem(slug, surface, spoke, `thread-resolved (${conversationId})`);
+    void replenishPool(slug, surface);
+    return true;
+}
+
 async function dispatchToPooledStem(
-    slug: string, surface: string, promptDoc: string, opts: { timeoutMs?: number },
+    slug: string, surface: string, promptDoc: string, opts: { timeoutMs?: number; conversationId?: string },
 ): Promise<CaptureRecord | null> {
+    // DEC-101 persist-as-spoke (Darron's model, Jim's ruling) — gated behind the default-OFF
+    // `spokePersist` lifecycle flag so this whole branch is inert until the combined PR lands +
+    // Jim-audits + the flag flips. When ON: route a thread's dispatches to ITS bound spoke (or check
+    // out+bind+cast a fresh one); no return path — the spoke lives until reaped (ctx≥threshold at idle,
+    // or thread-resolve). When OFF: the legacy per-dispatch checkout→serve→return below (unchanged).
+    if (spokePersistFor(slug, surface) && opts.conversationId) {
+        return dispatchToBoundSpoke(slug, surface, promptDoc, opts.conversationId, opts);
+    }
+
+    // ── legacy path (spokePersist OFF): per-dispatch checkout → serve → return ──────────────────
     // C3 dead-stem retry: a dead leased stem retires and the NEXT free stem is tried (bounded by
     // the pool size — no loop; the pool-manager replenishes the retired ones).
     let stem: PoolStem | null = null;
@@ -1341,6 +1416,7 @@ async function dispatchToPooledStem(
     if (!stem) return null; // every candidate dead → floor
     let cap: CaptureRecord;
     try {
+        await castStemToServeModel(slug, surface, stem); // DEC-101: warm(sonnet) → serve model at checkout
         const freshenedPrompt = await freshenPooledStem(slug, surface, stem, promptDoc);
         // lease-is-readiness: NO verifyWarmOrNudge; the stem's session key threads through as stemKey.
         cap = await enqueueForAgent(slug, surface, freshenedPrompt, { timeoutMs: opts.timeoutMs }, stem.tmux_session);
@@ -1354,6 +1430,53 @@ async function dispatchToPooledStem(
         throw err;
     }
     returnStem(slug, surface, stem.stem_id); // CLEAN completion only → back to the pool (eager replenish = the pool-manager, C3)
+    return cap;
+}
+
+/**
+ * DEC-101 persist-as-spoke dispatch (spokePersist ON). Route the thread's dispatch to its live bound
+ * spoke, or check out a free stem, bind it to the thread, and cast it. No return path: the spoke
+ * serves this thread across turns until reaped (ctx≥threshold at idle — checked here post-dispatch —
+ * or thread-resolve, C5). Eager-replenishes the pool the moment a free stem becomes a spoke (gate 1).
+ */
+async function dispatchToBoundSpoke(
+    slug: string, surface: string, promptDoc: string, conversationId: string, opts: { timeoutMs?: number },
+): Promise<CaptureRecord | null> {
+    let stem: PoolStem | null = null;
+    // 1) route to the thread's existing live spoke
+    const existing = findSpokeForThread(slug, surface, conversationId);
+    if (existing) {
+        if (adoptPooledStem(slug, surface, existing)) stem = existing;
+        else { retireStem(slug, surface, existing, 'bound-spoke-dead'); // died since last turn → fresh checkout
+            console.warn(`[tmux-dispatcher] ${slug}/${surface}: thread ${conversationId} spoke ${existing.stem_id} dead — retired; fresh checkout`); }
+    }
+    // 2) no live spoke → check out a free stem, bind it to the thread, cast at checkout (once)
+    const isNewSpoke = !stem;
+    if (!stem) {
+        for (let attempt = 0; attempt < Math.max(1, poolSizeFor(slug, surface)); attempt++) {
+            const candidate = checkoutStem(slug, surface, new Date().toISOString());
+            if (!candidate) return null; // empty pool → floor
+            if (adoptPooledStem(slug, surface, candidate)) { stem = candidate; break; }
+            retireStem(slug, surface, candidate, 'dead-at-adopt');
+            console.warn(`[tmux-dispatcher] ${slug}/${surface}: leased stem ${candidate.stem_id} is dead — trying next`);
+        }
+        if (!stem) return null; // every candidate dead → floor
+        bindSpoke(slug, surface, stem.stem_id, conversationId, new Date().toISOString());
+        stem.state = 'spoke'; stem.conversation_id = conversationId; // keep the in-memory row truthful
+        void replenishPool(slug, surface); // gate 1: a free stem just became a spoke → refill to N free
+    }
+    let cap: CaptureRecord;
+    try {
+        if (isNewSpoke) await castStemToServeModel(slug, surface, stem); // cast once at first checkout (gate 5)
+        // gate 4: freshen EVERY dispatch — the spoke idled while other seats wrote WM; carry the #91 delta since ITS cursor
+        const freshenedPrompt = await freshenPooledStem(slug, surface, stem, promptDoc);
+        cap = await enqueueForAgent(slug, surface, freshenedPrompt, { timeoutMs: opts.timeoutMs }, stem.tmux_session);
+    } catch (err) {
+        retireStem(slug, surface, stem, `dispatch-failed: ${(err as Error).message.slice(0, 80)}`); // Jim cond-1: never keep a wedged spoke
+        throw err;
+    }
+    // NO return. The spoke stays bound. Reap at idle if over the ctx threshold (C4).
+    await reapSpokeIfOverCtx(slug, surface, stem);
     return cap;
 }
 
@@ -1462,7 +1585,9 @@ async function replenishPool(slug: string, surface: string): Promise<void> {
     replenishInFlight.add(key);
     try {
         const target = poolSizeFor(slug, surface);
-        while (poolStatus(slug, surface).total < target) {
+        // DEC-101 (Jim gate 1): target FREE/waiting stems, NOT total — a bound spoke has left the
+        // waiting pool, so counting it would stall replenish at `poolSize` after the first checkout.
+        while (poolStatus(slug, surface).free < target) {
             const stem = await prewarmAndRegister(slug, surface);
             if (!stem) { console.warn(`[pool-manager] ${slug}/${surface}: replenish warm failed — retry next tick`); break; }
         }
@@ -1559,6 +1684,9 @@ export async function dispatchToSpoke(
         timeoutMs?: number;
         onDispatchFail?: (err: Error) => void;
         onCtxClearFail?: (err: Error) => void;
+        /** DEC-101: the conversation this dispatch belongs to — routes to (or binds) a thread's spoke
+         *  in the pooled path. Absent for non-thread surfaces (they never pool human-response). */
+        conversationId?: string;
     },
 ): Promise<CaptureRecord | null> {
     const life = spokeLifecycleFor(slug, surface);
@@ -1569,7 +1697,7 @@ export async function dispatchToSpoke(
         // below. A pooled stem is recycled by the pool-manager (R3a.1d), NOT the ctx-pressure block
         // after this try — so a successful pooled dispatch returns early.
         if (poolSizeFor(slug, surface) > 0) {
-            const pooledCap = await dispatchToPooledStem(slug, surface, promptDoc, { timeoutMs: opts.timeoutMs });
+            const pooledCap = await dispatchToPooledStem(slug, surface, promptDoc, { timeoutMs: opts.timeoutMs, conversationId: opts.conversationId });
             if (pooledCap !== null) return pooledCap;
         }
         await ensureSurfaceSession(slug, surface, { ladder: opts.ladder, welcomeBack: opts.welcomeBack });
