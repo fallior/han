@@ -1631,8 +1631,19 @@ export async function prewarmAndRegister(slug: string, surface: string): Promise
 
 /** Stems retired from the registry but whose tmux session awaits a SAFE kill (the R011/S181
  *  never-kill-a-thinker invariant): the sweep kills only a chrome-idle pane, then cleans the
- *  per-stem diary sink. Keyed by tmux session. */
-const pendingStemKills = new Map<string, { slug: string; reason: string }>();
+ *  per-stem diary sink. Keyed by tmux session. `exitSentAt` (Darron, 2026-07-15 — the graceful
+ *  reap interim): once idle, the sweep first sends `/exit` so the claude-logged wrapper closes
+ *  its transcript FILE cleanly, then kills only on a LATER sweep ≥ GRACEFUL_KILL_LAG_MS after —
+ *  the lag costs nothing on an already-retired session and stops the reap shredding provenance. */
+const pendingStemKills = new Map<string, { slug: string; reason: string; exitSentAt?: number }>();
+
+/** The graceful-reap lag (Darron, 2026-07-15): time between sending `/exit` and the tmux kill.
+ *  DEC-103 §2 pricing: bounds NOTHING that is running — the session is already retired and
+ *  chrome-idle when `/exit` is sent; the lag only delays reclaiming a dead pane's memory. At the
+ *  limit: the pane is killed (claude has long exited; the wrapper's file is closed). Worst case
+ *  the number can manufacture: a retired pane lingers one extra minute. Interim until the proper
+ *  exit-watch (poll for the claude process actually gone) — registered on Odd Jobs. */
+const GRACEFUL_KILL_LAG_MS = 60_000;
 
 /**
  * Retire a stem: remove it from the registry NOW (never re-leased) and queue its tmux session
@@ -1645,19 +1656,37 @@ function retireStem(slug: string, surface: string, stem: PoolStem, reason: strin
     console.warn(`[pool-manager] ${slug}/${surface}: retired stem ${stem.stem_id} (${reason}) — kill queued for the chrome-guarded sweep`);
 }
 
-/** The chrome-guarded kill sweep: kill a retired stem's session ONLY when its pane shows no
- *  processing chrome (a timed-out stem may still be composing — never kill a thinker), then
- *  clean its per-stem diary sink. A session already gone → clean the sink + forget. */
+/** The chrome-guarded GRACEFUL kill sweep (two-stage since 2026-07-15, Darron's graceful-reap):
+ *  Stage 1 — a retired session whose pane shows no processing chrome (never kill a thinker) is
+ *  sent `/exit`, so claude exits cleanly and the claude-logged wrapper CLOSES ITS TRANSCRIPT —
+ *  the provenance file a hard kill used to shred. Stage 2 — a LATER sweep (≥ the graceful lag;
+ *  the tick is 60s so one tick suffices) kills the now-bare pane + cleans the per-stem sink.
+ *  A session already gone at any stage → clean the sink + forget. If chrome REAPPEARS after the
+ *  `/exit` was sent (it raced a turn-start), the kill still waits for idle — the lag clock stands
+ *  but the chrome guard re-checks at stage 2. */
 function sweepRetiredStems(): void {
     for (const [session, meta] of pendingStemKills) {
         try {
-            if (tmuxSessionExists(session)) {
-                if (PROCESSING_CHROME_RE.test(capturePaneTail(session))) continue; // still thinking — next sweep
-                try { tmux(['kill-session', '-t', session]); } catch { /* raced its own death */ }
+            if (!tmuxSessionExists(session)) {
+                try { fs.rmSync(sinkDir(session), { recursive: true, force: true }); } catch { /* best-effort */ }
+                pendingStemKills.delete(session);
+                console.log(`[pool-manager] swept retired stem session ${session} (${meta.reason}) — already gone, sink cleaned`);
+                continue;
             }
+            if (PROCESSING_CHROME_RE.test(capturePaneTail(session))) continue; // still thinking — next sweep
+            if (meta.exitSentAt === undefined) {
+                // Stage 1: graceful close — let claude-logged write its file. Kill comes next sweep.
+                sendLine(session, '/exit');
+                meta.exitSentAt = Date.now();
+                console.log(`[pool-manager] retired stem ${session} (${meta.reason}) — /exit sent (graceful close; kill in ≥${GRACEFUL_KILL_LAG_MS / 1000}s)`);
+                continue;
+            }
+            if (Date.now() - meta.exitSentAt < GRACEFUL_KILL_LAG_MS) continue; // lag running — next sweep
+            // Stage 2: the wrapper has had its minute; reclaim the pane.
+            try { tmux(['kill-session', '-t', session]); } catch { /* raced its own death */ }
             try { fs.rmSync(sinkDir(session), { recursive: true, force: true }); } catch { /* best-effort */ }
             pendingStemKills.delete(session);
-            console.log(`[pool-manager] swept retired stem session ${session} (${meta.reason}) — killed idle + sink cleaned`);
+            console.log(`[pool-manager] swept retired stem session ${session} (${meta.reason}) — /exit'd, lag honoured, killed + sink cleaned`);
         } catch (err) {
             console.warn(`[pool-manager] sweep of ${session} failed (retry next tick): ${(err as Error).message}`);
         }
@@ -1719,10 +1748,41 @@ function sweepUnregisteredStems(slug: string, surface: string): void {
             console.warn(`[pool-manager] ${slug}/${surface}: unregistered stem ${sess} is mid-thought — left alone (R011); next start reaps it if idle`);
             continue;
         }
-        try { tmux(['kill-session', '-t', sess]); } catch { /* already gone */ }
+        // Graceful reap (Darron, 2026-07-15): route the orphan through the two-stage sweep
+        // (`/exit` → lag → kill) instead of a hard kill, so its claude-logged transcript closes
+        // cleanly too. The sleeve/sentinel residue is cleaned NOW (registry hygiene doesn't wait).
+        pendingStemKills.set(sess, { slug, reason: 'unregistered-orphan (idle, no registry row)' });
         try { fs.unlinkSync(path.join(sleevesDir(), `${sess}.json`)); } catch { /* absent */ }
         try { fs.unlinkSync(path.join(healthDir(), `${slug}-${sess}-ready`)); } catch { /* absent */ }
-        console.log(`[pool-manager] ${slug}/${surface}: reaped unregistered orphan stem ${sess} (idle, no registry row)`);
+        console.log(`[pool-manager] ${slug}/${surface}: unregistered orphan stem ${sess} queued for the graceful sweep (/exit → kill)`);
+    }
+}
+
+/**
+ * MNT-056 — the MIRROR of sweepUnregisteredStems: drop registry rows whose tmux session is DEAD.
+ * A stem is registered (upsertStem) only AFTER the pre-warmer emits PREWARM_STEM_META, so a
+ * registered stem's session was live at registration; if it is now gone, a reboot OR an
+ * MNT-052-style cgroup kill took the tmux server but left the registry FILE behind. Without this,
+ * poolStatus().free keeps reading the stale count (== poolSize) → replenishPool's deficit is 0 →
+ * the pool never self-heals (it stays empty until the registry is rewritten by hand). This is the
+ * gap sweepUnregisteredStems does NOT cover — it reaps live-but-unregistered orphans (the reverse
+ * direction). Bails if the tmux server is unreachable (ambiguous — never nuke the registry on a
+ * transient), exactly like sweepUnregisteredStems. Called at startPoolManager (the
+ * reboot→responder-restart path) AND every tick (the cgroup-kill-WITHOUT-responder-restart path,
+ * where startPoolManager does not re-run). No kill is queued — the session is already gone; only
+ * the registry row and its sleeve/sentinel residue are cleaned.
+ */
+function sweepDeadRegisteredStems(slug: string, surface: string): void {
+    let live: Set<string>;
+    try {
+        live = new Set(tmux(['list-sessions', '-F', '#{session_name}']).split('\n').filter(Boolean));
+    } catch { return; } // no tmux server → don't touch the registry (mirror sweepUnregisteredStems)
+    for (const stem of readPool(slug, surface).stems) {
+        if (live.has(stem.tmux_session)) continue;
+        removeStem(slug, surface, stem.stem_id);
+        try { fs.unlinkSync(path.join(sleevesDir(), `${stem.tmux_session}.json`)); } catch { /* absent */ }
+        try { fs.unlinkSync(path.join(healthDir(), `${slug}-${stem.tmux_session}-ready`)); } catch { /* absent */ }
+        console.warn(`[pool-manager] ${slug}/${surface}: dropped dead-registered stem ${stem.stem_id} (session ${stem.tmux_session} gone — reboot/cgroup-kill; MNT-056)`);
     }
 }
 
@@ -1740,10 +1800,12 @@ export function startPoolManager(slug: string, surface: string): void {
     const maxAgeMs = (life.stemReloadHours ?? 24) * 3600_000;
     console.log(`[pool-manager] ${slug}/${surface}: started (poolSize=${poolSizeFor(slug, surface)}, reload=${life.stemReloadHours ?? 24}h)`);
     sweepUnregisteredStems(slug, surface); // C4: BEFORE the populate — no own-warms in flight yet
+    sweepDeadRegisteredStems(slug, surface); // MNT-056: drop dead-registered rows so the deficit is real
     void replenishPool(slug, surface); // initial populate (async — never blocks the caller)
     setInterval(() => {
         try {
             sweepRetiredStems();
+            sweepDeadRegisteredStems(slug, surface); // MNT-056: heal the cgroup-kill-without-restart case before replenish
             // 24h substrate reload: retire FREE over-age stems (a leased one retires on return/next tick).
             const now = Date.now();
             for (const stem of readPool(slug, surface).stems) {
