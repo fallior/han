@@ -1451,7 +1451,6 @@ async function dispatchToBoundSpoke(
             console.warn(`[tmux-dispatcher] ${slug}/${surface}: thread ${conversationId} spoke ${existing.stem_id} dead — retired; fresh checkout`); }
     }
     // 2) no live spoke → check out a free stem, bind it to the thread, cast at checkout (once)
-    const isNewSpoke = !stem;
     if (!stem) {
         for (let attempt = 0; attempt < Math.max(1, poolSizeFor(slug, surface)); attempt++) {
             const candidate = checkoutStem(slug, surface, new Date().toISOString());
@@ -1467,7 +1466,13 @@ async function dispatchToBoundSpoke(
     }
     let cap: CaptureRecord;
     try {
-        if (isNewSpoke) await castStemToServeModel(slug, surface, stem); // cast once at first checkout (gate 5)
+        // DEC-101 cast-when-different (gate 5, revised 2026-07-15 per Darron): cast on EVERY dispatch,
+        // NOT just first checkout. castStemToServeModel no-ops unless the stem's model differs from the
+        // surface's serve model — so a serve-ladder FLIP (e.g. SONNET→FABLE) propagates to EXISTING
+        // spokes on their next turn (switching the session AND updating the registry truthfully via
+        // observeActiveModel+upsertStem), instead of leaving them on the old model until reap. Common
+        // case (already on serve model) returns in one comparison — no /model, no cooldown.
+        await castStemToServeModel(slug, surface, stem);
         // gate 4: freshen EVERY dispatch — the spoke idled while other seats wrote WM; carry the #91 delta since ITS cursor
         const freshenedPrompt = await freshenPooledStem(slug, surface, stem, promptDoc);
         cap = await enqueueForAgent(slug, surface, freshenedPrompt, { timeoutMs: opts.timeoutMs }, stem.tmux_session);
@@ -1484,7 +1489,12 @@ const execFileP = promisify(execFile);
 const PREWARM_STEM_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'prewarm-stem.ts');
 const TSX_BIN = path.resolve(__dirname, '..', 'node_modules', '.bin', 'tsx');
 const SERVER_DIR = path.resolve(__dirname, '..');
-const PREWARM_TIMEOUT_MS = 5 * 60_000; // a greet-less full wake is ~1min; generous ceiling
+const PREWARM_TIMEOUT_MS = 5 * 3600_000; // 5 HOURS (Darron, 2026-07-15, MNT-055): a wake is never
+// killed for slowness — the old 5-MIN "generous ceiling" assumed a ~1min sonnet wake, then jim's
+// heavier wake on a Fable launch (the MNT-055 launch-model gap) exceeded it → kill → 5-min tick
+// retry → a full Fable wake burned every 5 minutes. Effectively never-kill now (R011's spirit at
+// the prewarm layer); the trade — a genuinely-wedged warm blocks the SERIAL replenish loop for up
+// to 5h — is accepted until the stuck-leased/age reaper lands (Odd-Jobs register).
 
 /**
  * R3a.1c-ii — warm ONE new pool stem and register it (the SINGLE-WRITER populate, Jim's cond-3).

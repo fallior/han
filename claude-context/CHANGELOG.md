@@ -9,6 +9,9 @@
 
 ---
 
+## 2026-07-15 (S220) — 🚱 MNT-055: the Fable-window leak — prewarm timeout 5min→5h + cast-when-different land (Jim commit, Darron's order)
+- The warm-map never controlled the stem LAUNCH model (launcher reads the surface ladder; prewarm passed no --model) — exposed by the serve-flip: all pool wakes ran ON FABLE, and jim's heavy wake exceeded the 5-min prewarm ceiling → kill → 5-min retry = a full Fable wake burned every 5 min (Darron's observed 16%). This commit: PREWARM_TIMEOUT_MS → 5h (never kill a wake for slowness) + Leo's gate-5 cast-when-different (Jim GREEN). Root `--model` fix = Leo, tracked in the leak-plan thread + MNT-055.
+
 ## 2026-07-15 (S220) — 🧬 DEC-101 LANDS + LIVE: persist-as-spoke lifecycle, warm/serve model split, cast-at-checkout (Jim GREEN mrkkeiwx · sealed mrksb1z9)
 - `8a297b7` — Darron's model running: 2 sonnet-warm stems per pooled surface; checkout binds a THREAD-DEDICATED spoke, casts to the serve model; no return path; reaps at ctx≥92 (idle-only) + thread-resolve. Gate-5 revised same-day to cast-when-different (serve-flips propagate; Jim GREEN). Human-response serve → FABLE_LADDER while the window runs. DEC-101 written to DECISIONS.md.
 
