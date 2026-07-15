@@ -9,6 +9,9 @@
 
 ---
 
+## 2026-07-15 (S222) — 🚱 MNT-055 P0-final + P1: the surfacing protocol replaces every prewarm kill clock; the leak's root closed (Leo build, Jim GREEN — DEC-103's first PR)
+- `prewarmAndRegister` has NO timeout (DEC-103 §1); the 5h tourniquet (e1f046d) retired with its lineage kept in-comment. `startPrewarmSurfacingTimer`: ntfy invite at `prewarmAlertMins` (new SpokeLifecycle registry leaf, default 12 = ~2× measured p95 of n=178 T2 wake-feeds; §2-priced), DOUBLING re-alerts, alerts-never-acts; writes/clears `~/.han/health/trouble/<session>.json` — the **`hantrouble`** handshake (new script in `infrastructure/scripts`: bare=list w/ stale-prune, `-a`=attach; Darron's one-short-command ask). Probe `scripts/test-prewarm-surfacing.ts` fired the real wire GREEN. Sibling sweep: `feedWakeSteps` ack deadline made CHROME-AWARE (clocks silence, not work — a slow-but-thinking step was scrapped at 20min); both prewarm failure-branch kills → the chrome-guarded sweep; `TRANSACTION_TIMEOUT_MS` abandon-semantics named (discarded-output residual → register). P1: `prewarm-stem.ts` launches `--model` warm-map head, both modes (the leak's root); floor no-cast named deliberate. Same afternoon (Darron's direct call, 14:46): human-response serve ladders SONNET→**OPUS** in the live manifest (Fable stays off; the sonnet register subtleties — the look-up/look-down poles — read as lost).
+
 ## 2026-07-15 (S220) — ⚖️ DEC-103 RATIFIED: no destructive limits; fail-state CBA on every limit; surfacing over scrapping (Darron's law, from MNT-055)
 - Killing paid-for cognition on a clock is prohibited garden-wide; every limit ships with its worst case priced; too-long guards become ntfy surface-and-wait. Leo builds the surfacing protocol (prewarm first).
 

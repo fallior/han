@@ -37,7 +37,7 @@ import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
-import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, spokePersistFor, ctxReapThresholdFor } from './garden-manifest';
+import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, spokePersistFor, ctxReapThresholdFor, prewarmAlertMinsFor } from './garden-manifest';
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
 import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, readPool, poolStatus, findSpokeForThread, bindSpoke, type PoolStem } from './stem-pool';
@@ -67,6 +67,11 @@ export const DELTA_REFRESH_ENABLED = true;
 // > the old 10min, so a legit slow cold launch was racing the wait.
 // STOPGAP — to become a definition in the single-source cadence/timing config (S178 proposal).
 const READY_TIMEOUT_MS = 20 * 60_000;
+// SEMANTICS NAMED (DEC-103 sibling sweep, MNT-055): the transaction timeout ABANDONS the
+// capture-wait — it never kills the pane; the spoke's turn keeps composing. Downstream: the pooled
+// path retires the stem via the CHROME-GUARDED sweep (killed only once idle), so no cognition is
+// terminated on this clock. Disclosed DEC-103 §1 residual (register, not this diff): the abandoned
+// turn's eventual capture is never read — paid-for output discarded, though never interrupted.
 const TRANSACTION_TIMEOUT_MS = 12 * 60_000;
 const POLL_INTERVAL_MS = 750;
 // Settle between a literal paste and its Enter (sendLineSettled) so a LONG fed line can't
@@ -664,6 +669,10 @@ async function ensureSurfaceSessionInner(
         // adoption proves a FRESH wake (the T-1.5 cross-talk lesson).
         try { fs.unlinkSync(readyPath(slug, surface)); } catch { /* none */ }
         console.log(`[tmux-dispatcher] ${slug}/${surface}: launching ${tmuxSession} via launch-tmux-surface.sh`);
+        // FLOOR warm policy, NAMED (MNT-055 P1 sibling-a): no --model here is DELIBERATE — a floor
+        // session SERVES directly (no cast-at-checkout exists on this path), so it launches on the
+        // surface's serve ladder and its wake is a priced cost of serving on that model. Only POOL
+        // pre-warms (prewarm-stem.ts) launch on the warm-map; the cast pays the serve swap later.
         execFileSync('bash', [LAUNCH_SURFACE_SCRIPT, slug, surface], { stdio: 'inherit' });
         // R2 P-R2.1 (Fork A, DEC-099): record the sleeve-state keyed by HAN_SESSION (= tmuxSession)
         // so surface-keyed resolvers (sleeve-surface.sh/.ts) read the real surface off the FROZEN
@@ -1159,12 +1168,20 @@ export async function feedWakeSteps(
         // ack-before-next IS the gate: the next step is never fed until this one's STEP-OK ack appears
         // (the gradient step also requires a real echoed c0). Fail-safe DispatchTimeoutError — reached
         // only AFTER ensureSubmitted has tried the bounded re-presses, never a hollow wake.
-        const deadline = Date.now() + perStepTimeoutMs;
+        // DEC-103 §1 (MNT-055 sibling sweep): the deadline is CHROME-AWARE — it clocks SILENCE, not
+        // work. The old form timed the whole step, so a slow-but-visibly-thinking step (a heavy
+        // gradient traverse on a slow substrate) could throw here → the pre-warmer exits non-zero →
+        // its caller scrapped a mid-thought warm: a kill clock one layer in. Now the deadline slides
+        // forward whenever the pane shows processing chrome; only a step that has been genuinely
+        // SILENT (no ack, no chrome) for perStepTimeoutMs fails — the wedge detector, not a work cap.
+        let deadline = Date.now() + perStepTimeoutMs;
         for (;;) {
-            if (isAcked(capturePaneTail(tmuxSession))) break;
+            const tail = capturePaneTail(tmuxSession);
+            if (isAcked(tail)) break;
+            if (PROCESSING_CHROME_RE.test(tail)) deadline = Date.now() + perStepTimeoutMs; // thinking → the silence clock resets
             if (Date.now() > deadline) {
                 throw new DispatchTimeoutError(
-                    `wake step '${step.id}' not acked after ${resubmits} re-submit(s) (timeout ${perStepTimeoutMs}ms)`);
+                    `wake step '${step.id}' not acked after ${resubmits} re-submit(s) (silent ${perStepTimeoutMs}ms — genuinely-stuck step, not a slow one)`);
             }
             await sleep(POLL_INTERVAL_MS);
         }
@@ -1489,12 +1506,75 @@ const execFileP = promisify(execFile);
 const PREWARM_STEM_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'prewarm-stem.ts');
 const TSX_BIN = path.resolve(__dirname, '..', 'node_modules', '.bin', 'tsx');
 const SERVER_DIR = path.resolve(__dirname, '..');
-const PREWARM_TIMEOUT_MS = 5 * 3600_000; // 5 HOURS (Darron, 2026-07-15, MNT-055): a wake is never
-// killed for slowness — the old 5-MIN "generous ceiling" assumed a ~1min sonnet wake, then jim's
-// heavier wake on a Fable launch (the MNT-055 launch-model gap) exceeded it → kill → 5-min tick
-// retry → a full Fable wake burned every 5 minutes. Effectively never-kill now (R011's spirit at
-// the prewarm layer); the trade — a genuinely-wedged warm blocks the SERIAL replenish loop for up
-// to 5h — is accepted until the stuck-leased/age reaper lands (Odd-Jobs register).
+// DEC-103 §1 (MNT-055, ratified 0c75d67): the pre-warm has NO kill clock — no automated mechanism
+// may discard paid-for cognition on a schedule. The lineage, kept for the record: a 5-MIN ceiling
+// (priced against a guessed ~1min wake; real p95 was 6 min) met jim's Fable-launched wake → kill →
+// 5-min tick retry → a full Fable wake burned every 5 minutes (16% of the window in 90 min). The
+// 5-HOUR tourniquet (e1f046d) retired here. What replaces every too-long guard is the SURFACING
+// protocol (§3): an observation side-timer that posts ntfy and waits — see prewarmAlertMinsFor.
+// The named trade stands: a genuinely-wedged warm blocks the SERIAL replenish loop indefinitely —
+// but now VISIBLY (Darron is invited to the pane) — until the stuck-leased/age reaper (register).
+
+/** DEC-103 §3 — post the "wake running long" surfacing alert to ntfy (observation only; the timer
+ *  alerts, it never acts). Fire-and-forget; a failed post is logged, never thrown — the alert must
+ *  not be able to hurt the warm it watches. The curl's own 10s timeout bounds a NETWORK op on the
+ *  alert, not cognition (same bound as every existing ntfy call). */
+function postNtfyAlert(message: string, title: string): void {
+    try {
+        const cfg = JSON.parse(fs.readFileSync(path.join(hanHome(), 'config.json'), 'utf8'));
+        if (!cfg.ntfy_topic) return;
+        execFile('curl', ['-s', '-d', message, '-H', `Title: ${title}`, '-H', 'Priority: high', '-H', 'Tags: hourglass_flowing_sand', `https://ntfy.sh/${cfg.ntfy_topic}`],
+            { timeout: 10_000 }, (err) => { if (err) console.warn(`[tmux-dispatcher] ntfy alert failed (non-fatal): ${err.message}`); });
+    } catch (err) {
+        console.warn(`[tmux-dispatcher] ntfy alert skipped (non-fatal): ${(err as Error).message}`);
+    }
+}
+
+/**
+ * DEC-103 §3 — the observation side-timer for a running pre-warm: at the registry-leaf threshold,
+ * invite Darron to the pane via ntfy; re-alert at DOUBLING intervals (12m → 24m → 48m … — never a
+ * 5-min spam tick, S74). The timer ALERTS, it never acts — there is no kill path anywhere in the
+ * pre-warm now. Returns a cancel fn (called in prewarmAndRegister's finally). Exported so the
+ * detector-rule probe (scripts/test-prewarm-surfacing.ts) can fire it against a tiny threshold and
+ * watch the real ntfy wire, rather than assuming the alert works (Jim's audit gate).
+ */
+export function startPrewarmSurfacingTimer(
+    slug: string, surface: string, stemSession: string,
+    alertMins: number = prewarmAlertMinsFor(slug, surface),
+): () => void {
+    const startedMs = Date.now();
+    let alertTimer: ReturnType<typeof setTimeout> | null = null;
+    let alertCount = 0;
+    // The trouble record `hantrouble` reads (Darron, 2026-07-15: the alert's remedy must be one
+    // short command, not a typed session name). Written on the FIRST alert, updated per re-alert,
+    // removed when the warm resolves (the cancel below) — so `hantrouble -a` always attaches to a
+    // session that is genuinely, currently surfaced.
+    const troublePath = path.join(healthDir(), 'trouble', `${stemSession}.json`);
+    const scheduleAlert = (fireAtMins: number): void => {
+        alertTimer = setTimeout(() => {
+            const elapsed = Math.round((Date.now() - startedMs) / 60_000);
+            alertCount += 1;
+            try {
+                fs.mkdirSync(path.dirname(troublePath), { recursive: true });
+                fs.writeFileSync(troublePath, JSON.stringify({
+                    session: stemSession, slug, surface, kind: 'prewarm-running-long',
+                    since: new Date(startedMs).toISOString(), alerts: alertCount,
+                    last_alert: new Date().toISOString(),
+                }, null, 2) + '\n');
+            } catch (e) { console.warn(`[tmux-dispatcher] trouble record write failed (non-fatal): ${(e as Error).message}`); }
+            postNtfyAlert(
+                `${slug}'s ${surface} wake running long (${elapsed}min): hantrouble -a  (or: tmux attach -t ${stemSession}) — troubleshoot together`,
+                'Pre-warm running long (DEC-103 surfacing)');
+            console.warn(`[tmux-dispatcher] prewarm(${slug}/${surface}): wake running long (${elapsed}min, ${stemSession}) — ntfy surfacing alert posted; waiting (DEC-103: alert, never act)`);
+            scheduleAlert(fireAtMins * 2); // next alert at double the elapsed threshold
+        }, Math.max(0, fireAtMins * 60_000 - (Date.now() - startedMs)));
+    };
+    scheduleAlert(alertMins);
+    return () => {
+        if (alertTimer) clearTimeout(alertTimer);
+        try { fs.unlinkSync(troublePath); } catch { /* never alerted / already cleaned */ }
+    };
+}
 
 /**
  * R3a.1c-ii — warm ONE new pool stem and register it (the SINGLE-WRITER populate, Jim's cond-3).
@@ -1512,16 +1592,19 @@ const PREWARM_TIMEOUT_MS = 5 * 3600_000; // 5 HOURS (Darron, 2026-07-15, MNT-055
  */
 export async function prewarmAndRegister(slug: string, surface: string): Promise<PoolStem | null> {
     const stemSession = `stem-${slug}-${surface}-${Date.now().toString(36)}`;
+    const cancelSurfacing = startPrewarmSurfacingTimer(slug, surface, stemSession);
     try {
         const { stdout } = await execFileP(
             TSX_BIN, [PREWARM_STEM_SCRIPT, slug, '--pool', '--session', stemSession, '--surface', surface],
+            // DEC-103 §1: NO timeout — a wake is never killed for slowness (the MNT-055 scrap-loop).
             { cwd: SERVER_DIR, env: { ...process.env, NODE_PATH: path.join(SERVER_DIR, 'node_modules') },
-              timeout: PREWARM_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
+              maxBuffer: 8 * 1024 * 1024 },
         );
         const line = stdout.split('\n').find(l => l.startsWith('PREWARM_STEM_META '));
         if (!line) {
             console.error(`[tmux-dispatcher] prewarmAndRegister(${slug}): pre-warmer emitted no metadata (${stemSession}) — not registered`);
-            try { tmux(['kill-session', '-t', stemSession]); } catch { /* none */ }
+            // Chrome-guarded cleanup (DEC-103 §1): queue for the sweep — kills only an IDLE pane.
+            pendingStemKills.set(stemSession, { slug, reason: 'prewarm-no-metadata' });
             return null;
         }
         const stem: PoolStem = { ...(JSON.parse(line.slice('PREWARM_STEM_META '.length)) as Omit<PoolStem, 'state'>), state: 'free' };
@@ -1530,8 +1613,13 @@ export async function prewarmAndRegister(slug: string, surface: string): Promise
         return stem;
     } catch (err) {
         console.error(`[tmux-dispatcher] prewarmAndRegister(${slug}): pre-warm FAILED (${stemSession}) — ${(err as Error).message}`);
-        try { tmux(['kill-session', '-t', stemSession]); } catch { /* half-launched stem, best-effort cleanup */ }
+        // Chrome-guarded cleanup (DEC-103 §1): the old direct kill-session here could terminate a
+        // still-thinking stem (e.g. a feeder step-timeout races a slow-but-composing wake). Queue it
+        // for sweepRetiredStems instead — killed only once its pane shows no processing chrome.
+        pendingStemKills.set(stemSession, { slug, reason: `prewarm-failed: ${(err as Error).message.slice(0, 60)}` });
         return null;
+    } finally {
+        cancelSurfacing();
     }
 }
 

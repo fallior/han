@@ -70,8 +70,17 @@ async function main(): Promise<void> {
 
     // 1) launch the stem via the shared contract (--stem bypasses only the launchable-surface check).
     //    Pool mode passes --session-name so the stem gets its own distinct tmux session.
-    const launchArgs = POOL ? [LAUNCH, slug, SURFACE, '--stem', '--session-name', tmuxSession]
-                            : [LAUNCH, slug, SURFACE, '--stem'];
+    // MNT-055 P1 (the root of the Fable leak): LAUNCH on the warm-map head. Without --model,
+    // launch-tmux-surface.sh takes the SURFACE's serve ladder (launch-tmux-surface.sh:103) — so when
+    // human-response's serve model flipped to Fable, every pre-warm fed its ENTIRE wake on Fable.
+    // stemWarmLadder governs all three warm phases now: launch (here), chrome-descend (step 2), and
+    // the DEC-101 cast-at-checkout swaps to the serve model only when a real dispatch pays for it.
+    // Applies to BOTH modes per DEC-101 ("stems wake on sonnet"): an R1 attach-stem also warms on
+    // the warm-map — disclosed: R1 has no cast-at-attach, so an attached human converses on the warm
+    // model until a /model swap (acceptable: R1 is the dormant single-stem path; named for the audit).
+    const warmModel = stemWarmLadder(slug, SURFACE)[0];
+    const launchArgs = POOL ? [LAUNCH, slug, SURFACE, '--stem', '--model', warmModel, '--session-name', tmuxSession]
+                            : [LAUNCH, slug, SURFACE, '--stem', '--model', warmModel];
     console.log(`[prewarm] launching stem '${tmuxSession}' via launch-tmux-surface.sh --stem …`);
     execFileSync('bash', launchArgs, { stdio: 'inherit' });
 

@@ -127,6 +127,12 @@ export interface SpokeLifecycle {
      *  sonnet stem) — distinct from ctxClearThresholdPct (which /clears a floor session in place).
      *  Default 92 (Darron, 2026-07-14). */
     ctxReapThresholdPct?: number;
+    /** DEC-103 §3 (MNT-055): minutes before a running pre-warm posts the ntfy "wake running long —
+     *  tmux attach and troubleshoot together" alert. OBSERVATION ONLY — the timer alerts and then
+     *  waits; no code path kills the warm (§1). Default 12 = ~2× the measured p95 wake-feed
+     *  duration (6.0 min across n=178 T2 receipts, 2026-07-15; observed max 10.8 min) — never the
+     *  author's guess (§2). Re-alerts at doubling intervals from the threshold. */
+    prewarmAlertMins?: number;
 }
 
 export interface AgentManifest {
@@ -534,6 +540,12 @@ export function spokePersistFor(slug: string, surface: string): boolean {
 /** DEC-101: the ctx% at which a bound spoke is reaped at idle. Registry leaf; default 92. */
 export function ctxReapThresholdFor(slug: string, surface: string): number {
     return spokeLifecycleFor(slug, surface).ctxReapThresholdPct ?? 92;
+}
+
+/** DEC-103 §3 (MNT-055): minutes before a running pre-warm posts its ntfy surfacing alert.
+ *  Registry leaf; default 12 (~2× measured p95 — see the SpokeLifecycle field's pricing). */
+export function prewarmAlertMinsFor(slug: string, surface: string): number {
+    return spokeLifecycleFor(slug, surface).prewarmAlertMins ?? 12;
 }
 
 /** #107 Phase-2 P2.1b: does this (slug, surface) wake via the feeder (the wake-feed queue)?
