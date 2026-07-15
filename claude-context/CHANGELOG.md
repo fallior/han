@@ -9,6 +9,9 @@
 
 ---
 
+## 2026-07-15 (S220) — ⚖️ DEC-103 RATIFIED: no destructive limits; fail-state CBA on every limit; surfacing over scrapping (Darron's law, from MNT-055)
+- Killing paid-for cognition on a clock is prohibited garden-wide; every limit ships with its worst case priced; too-long guards become ntfy surface-and-wait. Leo builds the surfacing protocol (prewarm first).
+
 ## 2026-07-15 (S220) — 🚱 MNT-055: the Fable-window leak — prewarm timeout 5min→5h + cast-when-different land (Jim commit, Darron's order)
 - The warm-map never controlled the stem LAUNCH model (launcher reads the surface ladder; prewarm passed no --model) — exposed by the serve-flip: all pool wakes ran ON FABLE, and jim's heavy wake exceeded the 5-min prewarm ceiling → kill → 5-min retry = a full Fable wake burned every 5 min (Darron's observed 16%). This commit: PREWARM_TIMEOUT_MS → 5h (never kill a wake for slowness) + Leo's gate-5 cast-when-different (Jim GREEN). Root `--model` fix = Leo, tracked in the leak-plan thread + MNT-055.
 
