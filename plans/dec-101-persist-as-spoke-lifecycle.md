@@ -92,3 +92,10 @@ service bounces onto it. `ctxReapThresholdPct` (default 92) + `ctxReapThresholdF
 4. **Flip `spokePersist: true`** on the human-response surfaces after Jim's combined-diff audit + a live-prove.
 
 **Gate status:** 1 ✅ (free-count replenish), 2 ✅ (file-backed registry = affinity survives restart; C4 sweep spares registered spokes), 3 ✅-logic/hook-pending, 4 ✅ (freshen-per-dispatch), 5 ✅ (cast-once + re-cast on reap), 6 ✅ (flag-gated, non-thread surfaces untouched), 7 ✅ (slug/surface-keyed, tsc 0-new).
+
+## Gate-5 revision (2026-07-15, Jim GREEN)
+Cast-when-DIFFERENT on every dispatch replaces cast-once-at-first-checkout: `castStemToServeModel`
+no-ops (one comparison) unless registry model ≠ serve head; a serve-ladder flip therefore propagates
+to existing spokes on their next turn, and the registry self-trues via `observeActiveModel`+`upsertStem`
+(this also self-healed the 2026-07-15 hand-`/model` cosmetic drift). Return-fork doubly moot: no
+return path AND no stale-model idling. Audited GREEN by Jim (thread mrk21z25); Leo commits.
