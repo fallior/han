@@ -495,7 +495,27 @@ async function stepApply(): Promise<void> {
                 a.content = content; a.sha256 = content === null ? null : sha256hex(content);
             }
             const stagedDeltas = r2.compareAuthored(preSnapshot.snap, postStaged);
-            const verdict = r2.ring2Verdict(stagedDeltas, declarations);
+            // ── P5 ENUMERATION-SEAM FIX (Tenshi mrnd1cqj, Jim GREEN mrndq9k5): the verdict must
+            // see the WHOLE declared-tree move-set, not the fixed IDENTITY_FILES enumeration —
+            // else a "content-preserving" migration rides non-identity poison (working-memory,
+            // the gradient's own c0/c1 sources) to live through the auto-pass, unrendered.
+            // The exclusion set is the EXACT rel-paths the ceremony already rendered, from the
+            // snapshot artefacts' real absPaths (fold-1: never basenames — a fractal identity.md
+            // one directory deeper is NOT excluded). Computed at VERDICT time (pre-migration
+            // live vs post-migration staged); captureSwapHashes below stays the ring→swap
+            // TOCTOU integrity leg — different purpose, deliberately not conflated.
+            const renderedRels = new Set<string>();
+            for (const a of [...preSnapshot.snap.artefacts, ...postStaged.artefacts]) {
+                if (a.absPath) renderedRels.add(path.relative(HOME_DIR, a.absPath));
+            }
+            const nonIdentity: import('../src/server/lib/ring2-ceremony').AuthoredDelta[] = [];
+            for (const tree of moveSet) {
+                const treeDeltas = swap.declaredTreeFileDeltas(stagingDir, HOME_DIR, tree, renderedRels);
+                if (treeDeltas.length) nonIdentity.push(...r2.nonIdentityTreeDeltas(tree, treeDeltas));
+            }
+            if (nonIdentity.length) log(`Ring-2 6a-staged: ${nonIdentity.length} NON-IDENTITY file(s) under declared tree(s) differ — escalating to the ceremony (P5: rendered-set == swapped-set)`);
+            const mergedDeltas = [...stagedDeltas, ...nonIdentity];
+            const verdict = r2.ring2Verdict(mergedDeltas, declarations);
             const plan = {
                 hanHome: HOME_DIR, stagingDir, dbLive: path.join(HOME_DIR, 'gradient.db'),
                 moveSet, ledgerPath: LEDGER, schemaTo: EXPECTED_SCHEMA_VERSION, ts: runTs,
@@ -516,10 +536,11 @@ async function stepApply(): Promise<void> {
             });
             let approvedDigest: string | null = null;
             if (verdict.kind === 'unchanged') {
-                // A declared content-preserving migration rendering an EMPTY authored delta is
-                // the ONLY auto-pass (DEC-102) — the swap still runs (the DB + non-identity
-                // tree content moved; the declared boundary + verify() + re-hash govern those).
-                log('Ring-2 6a-staged: declared migration, EMPTY authored delta — content-preserving auto-pass (DEC-102)');
+                // The ONLY auto-pass (DEC-102, semantics NARROWED by the P5 fix): it now fires
+                // only when the WHOLE declared tree is byte-identical staged↔live (identity AND
+                // non-identity files — the merged delta set is empty). The swap still moves the
+                // DB, governed by the schema/verify/DB-rehash legs.
+                log('Ring-2 6a-staged: declared migration, whole declared tree(s) byte-identical — content-preserving auto-pass (DEC-102, P5-narrowed)');
                 ledgerAppend({ op: 'ring2-staged', verdict: 'unchanged-autopass', declarations: declarations.map((d) => d.migrationId) });
             } else {
                 // declarations.length > 0 ⇒ verdict.kind === 'ceremony' (abort-undeclared is

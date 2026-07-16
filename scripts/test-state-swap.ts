@@ -23,8 +23,13 @@ import { hanRepo } from '../src/server/lib/paths';
 import {
     hashTree, captureSwapHashes, verifyStagingSet, assertStagingNotNested,
     checkDanglingSwap, executeSwap, recoverDanglingSwap, rollbackSwappedTrees,
-    discardStaging, sweepStaleStaging, SwapPlan,
+    discardStaging, sweepStaleStaging, declaredTreeFileDeltas, SwapPlan,
 } from '../src/server/lib/state-swap';
+import {
+    snapshotAuthoredAt, compareAuthored, ring2Verdict, renderCeremonyDocument,
+    nonIdentityTreeDeltas,
+} from '../src/server/lib/ring2-ceremony';
+import * as crypto from 'crypto';
 
 let pass = 0, failn = 0;
 const check = (n: string, ok: boolean) => { console.log(`  ${ok ? '✓' : '✗ FAIL:'} ${n}`); ok ? pass++ : failn++; };
@@ -33,7 +38,9 @@ const quiet = () => { /* silent log sink */ };
 const throwsWith = (fn: () => void, re: RegExp): boolean => { try { fn(); return false; } catch (e) { return re.test((e as Error).message); } };
 
 // ── scratch world builder (the test-state-copy fixture, reused) ─────────────────────────────
-function buildWorld(): { S: string; home: string; migrate: (args: string) => string } {
+// `stateWrites` = the migration's ctx.stateDir body (default: the classic identity.md edit);
+// the P5 seam cases inject non-identity writes instead (identity files left byte-identical).
+function buildWorld(stateWrites?: string): { S: string; home: string; migrate: (args: string) => string } {
     const S = mkdtempSync(path.join(tmpdir(), 'stateswap-'));
     mkdirSync(path.join(S, 'repo', 'migrations'), { recursive: true });
     mkdirSync(path.join(S, 'repo', 'src'), { recursive: true });
@@ -55,7 +62,7 @@ const migration: Migration = {
     up(ctx) {
         const db = new Database(ctx.dbPath);
         try { db.exec(SCHEMA_META_DDL); db.prepare(\`INSERT OR REPLACE INTO schema_meta (id,schema_version,applied_log) VALUES (1,1,?)\`).run(JSON.stringify([{id:1,ts:'t'}])); } finally { db.close(); }
-        if (ctx.stateDir) fs.writeFileSync(path.join(ctx.stateDir, 'memory/testa/identity.md'), '# Test A\\nStaged edit.\\n');
+        if (ctx.stateDir) { ${stateWrites ?? `fs.writeFileSync(path.join(ctx.stateDir, 'memory/testa/identity.md'), '# Test A\\nStaged edit.\\n');`} }
     },
     verify(ctx) { const db=new Database(ctx.dbPath,{readonly:true}); try { return (db.prepare(\`SELECT schema_version FROM schema_meta WHERE id=1\`).get() as any)?.schema_version===1||'bad'; } finally { db.close(); } },
 };
@@ -325,6 +332,130 @@ const stageIt = (w: ReturnType<typeof buildWorld>): string => {
     const r3 = probe({ enforceFreshnessExpiry: 'yes' });
     check('LEAF: a mistyped field fails the loader loudly (never silently coerced)', r3.code !== 0 && /must be a boolean/.test(r3.out));
     rmSync(t, { recursive: true, force: true });
+}
+
+// 11) P5 — the enumeration-seam fix: rendered-set == swapped-set (Tenshi mrnd1cqj/mrndfo4b, Jim mrndq9k5)
+// The verdict-time model the fix computes in 6a-staged: identity deltas (compareAuthored over
+// IDENTITY_FILES) ∪ non-identity deltas (declaredTreeFileDeltas, excluding rendered rels) →
+// ring2Verdict. These cases drive that exact pipeline over scratch worlds.
+{
+    const sha = (s: string): string => crypto.createHash('sha256').update(s).digest('hex');
+    // residents shape for snapshotAuthoredAt: testa lives at memory/testa (the fixture layout).
+    const residentsFor = (home: string) => [{ slug: 'testa', memoryDir: path.join(home, 'memory', 'testa'), fractalDir: path.join(home, 'memory', 'fractal', 'testa'), identitySection: null }];
+    const IDENT = 'memory/testa/identity.md';
+    // the merged verdict exactly as 6a-staged computes it (identity ∪ non-identity)
+    const mergedVerdict = (w: ReturnType<typeof buildWorld>, staging: string) => {
+        const residents = residentsFor(w.home);
+        const pre = snapshotAuthoredAt(residents);
+        // post-staged view: identity artefacts re-read through staging (as han-update does)
+        const post = snapshotAuthoredAt(residents);
+        for (const a of post.artefacts) {
+            if (!a.absPath) continue;
+            const rel = path.relative(w.home, a.absPath);
+            let content: string | null = null;
+            try { content = readFileSync(path.join(staging, rel), 'utf8'); } catch { /* absent */ }
+            a.content = content; a.sha256 = content === null ? null : sha(content);
+        }
+        const identityDeltas = compareAuthored(pre, post);
+        const renderedRels = new Set<string>();
+        for (const a of [...pre.artefacts, ...post.artefacts]) if (a.absPath) renderedRels.add(path.relative(w.home, a.absPath));
+        const nonIdentity = nonIdentityTreeDeltas('memory/testa', declaredTreeFileDeltas(staging, w.home, 'memory/testa', renderedRels));
+        const merged = [...identityDeltas, ...nonIdentity];
+        const decl = [{ migrationId: 1, description: 'fixture', touchesState: ['memory/testa'], stateChangeKind: 'content-preserving' as const }];
+        return { verdict: ring2Verdict(merged, decl), merged, nonIdentity };
+    };
+
+    // (a) THE INVERTED PROBE — the seam is closed: a content-preserving migration that poisons
+    // working-memory-full.md (identity files byte-identical) now ESCALATES + renders + red-flags.
+    {
+        const w = buildWorld("fs.writeFileSync(path.join(ctx.stateDir, 'memory/testa/working-memory-full.md'), '# WM\\nPOISON injected under a content-preserving claim.\\n');");
+        writeFileSync(path.join(w.home, 'memory', 'testa', 'working-memory-full.md'), '# WM\n');
+        const staging = stageIt(w);
+        const { verdict, nonIdentity } = mergedVerdict(w, staging);
+        check('P5 (the seam, CLOSED): non-identity poison → verdict CEREMONY (not the auto-pass)', verdict.kind === 'ceremony');
+        check('P5: the poisoned working-memory-full.md IS in the rendered set', nonIdentity.some((d) => d.name === 'memory/testa/working-memory-full.md'));
+        check('P5 (Jim fold-3): the content-preserving-but-changed case wears the RED FLAG', verdict.kind === 'ceremony' && verdict.redFlag === true);
+        const doc = renderCeremonyDocument((verdict as any).deltas, [{ migrationId: 1, description: 'fixture', touchesState: ['memory/testa'], stateChangeKind: 'content-preserving' }], (verdict as any).redFlag);
+        check('P5: the ceremony document renders the WM file for the gardener', /working-memory-full\.md/.test(doc.rendered));
+        rmSync(w.S, { recursive: true, force: true });
+    }
+    // (b) genuine content-preserving (NOTHING changed in staging) → still the auto-pass
+    {
+        const w = buildWorld("/* no-op: a truly content-preserving migration touches no bytes */");
+        writeFileSync(path.join(w.home, 'memory', 'testa', 'working-memory-full.md'), '# WM\n');
+        const staging = stageIt(w);
+        const { verdict } = mergedVerdict(w, staging);
+        check('P5: whole declared tree byte-identical → still UNCHANGED (auto-pass preserved)', verdict.kind === 'unchanged');
+        rmSync(w.S, { recursive: true, force: true });
+    }
+    // (c) identity-only change → still ceremony (unchanged behaviour)
+    {
+        const w = buildWorld(); // default: edits identity.md in staging
+        const staging = stageIt(w);
+        const { verdict, nonIdentity } = mergedVerdict(w, staging);
+        check('P5: identity-only change → CEREMONY (unchanged), no phantom non-identity delta', verdict.kind === 'ceremony' && nonIdentity.length === 0);
+        rmSync(w.S, { recursive: true, force: true });
+    }
+    // (d) an APPEARED non-identity file → rendered
+    {
+        const w = buildWorld("fs.writeFileSync(path.join(ctx.stateDir, 'memory/testa/quiet-hours.md'), 'new file appeared\\n');");
+        const staging = stageIt(w);
+        const { verdict, nonIdentity } = mergedVerdict(w, staging);
+        check('P5: an APPEARED non-identity file → rendered + CEREMONY', verdict.kind === 'ceremony' && nonIdentity.some((d) => d.name === 'memory/testa/quiet-hours.md' && d.pre === null));
+        rmSync(w.S, { recursive: true, force: true });
+    }
+    // (e) a NESTED-subdir file → rendered (proves the walk recurses where enumeration never did)
+    {
+        const w = buildWorld("const d=path.join(ctx.stateDir,'memory/testa/sub'); fs.mkdirSync(d,{recursive:true}); fs.writeFileSync(path.join(d,'deep.md'),'nested change\\n');");
+        const staging = stageIt(w);
+        const { verdict, nonIdentity } = mergedVerdict(w, staging);
+        check('P5: a NESTED-subdir file → rendered (the fixed enumeration never recursed; the walk does)', verdict.kind === 'ceremony' && nonIdentity.some((d) => d.name === path.join('memory/testa', 'sub', 'deep.md')));
+        rmSync(w.S, { recursive: true, force: true });
+    }
+    // (f) Jim fold-1: a fractal identity.md (never enumerated) must NOT be excluded by basename
+    {
+        const w = buildWorld("const d=path.join(ctx.stateDir,'memory/testa/fractal'); fs.mkdirSync(d,{recursive:true}); fs.writeFileSync(path.join(d,'identity.md'),'a fractal file wearing the identity name\\n');");
+        const staging = stageIt(w);
+        const renderedRels = new Set<string>();
+        const residents = residentsFor(w.home);
+        for (const a of snapshotAuthoredAt(residents).artefacts) if (a.absPath) renderedRels.add(path.relative(w.home, a.absPath));
+        const deltas = declaredTreeFileDeltas(staging, w.home, 'memory/testa', renderedRels);
+        check('P5 (fold-1): a fractal/identity.md (never enumerated) is NOT excluded by basename — the seam does not re-open one dir deeper', deltas.some((d) => d.rel === path.join('memory/testa', 'fractal', 'identity.md')));
+        rmSync(w.S, { recursive: true, force: true });
+    }
+    // (g) Jim fold-2: a retargeted symlink renders as the target-string change, never followed.
+    // The migration RETARGETS the staged copy (stageIt copies live→staging first, so the link
+    // already exists there — unlink then re-point, to a different target).
+    {
+        const w = buildWorld("const lp=path.join(ctx.stateDir,'memory/testa/link'); fs.unlinkSync(lp); fs.symlinkSync('/etc/hostname', lp);");
+        require('fs').symlinkSync('/etc/hosts', path.join(w.home, 'memory', 'testa', 'link')); // live target
+        const staging = stageIt(w);
+        const renderedRels = new Set<string>();
+        for (const a of snapshotAuthoredAt(residentsFor(w.home)).artefacts) if (a.absPath) renderedRels.add(path.relative(w.home, a.absPath));
+        const deltas = declaredTreeFileDeltas(staging, w.home, 'memory/testa', renderedRels);
+        const link = deltas.find((d) => d.rel === path.join('memory/testa', 'link'));
+        check('P5 (fold-2): a symlink delta renders the TARGET string, never followed content', !!link && (link!.staged ?? '').startsWith('symlink → ') && (link!.live ?? '').startsWith('symlink → '));
+        rmSync(w.S, { recursive: true, force: true });
+    }
+    // (h) THE P5 INVARIANT, asserted directly: rendered/approved set == the swap move-set
+    // (minus DB+sidecars, governed by the schema/verify/DB-rehash legs). Any file the swap
+    // would move under a declared tree is either an identity delta or a non-identity delta.
+    {
+        const w = buildWorld("fs.writeFileSync(path.join(ctx.stateDir,'memory/testa/working-memory.md'),'c1 changed\\n'); fs.writeFileSync(path.join(ctx.stateDir,'memory/testa/session-swap.md'),'swap changed\\n');");
+        writeFileSync(path.join(w.home, 'memory', 'testa', 'working-memory.md'), '# c1\n');
+        writeFileSync(path.join(w.home, 'memory', 'testa', 'session-swap.md'), '# swap\n');
+        const staging = stageIt(w);
+        // the swap's move-set: every file differing staged↔live under the declared tree
+        const swapMoved = new Set<string>();
+        const walk = (rel: string) => { for (const n of readdirSync(path.join(staging, rel))) { const r = path.join(rel, n); const p = path.join(staging, r); if (require('fs').lstatSync(p).isDirectory()) walk(r); else if (n !== path.basename(w.home + '/gradient.db')) swapMoved.add(r); } };
+        walk('memory/testa');
+        const { merged } = mergedVerdict(w, staging);
+        const renderedNames = new Set(merged.map((d) => d.name));
+        // every CHANGED file the swap moves is in the rendered set (identity or non-identity)
+        const changed = [...swapMoved].filter((rel) => { try { return readFileSync(path.join(staging, rel), 'utf8') !== readFileSync(path.join(w.home, rel), 'utf8'); } catch { return true; } });
+        check('P5 (the invariant): every CHANGED file in the swap move-set is in the rendered/approved set', changed.every((rel) => renderedNames.has(rel)));
+        rmSync(w.S, { recursive: true, force: true });
+    }
 }
 
 console.log(`\nstate-swap (Unit 2b): ${pass} passed, ${failn} failed`);

@@ -88,6 +88,47 @@ export function hashTree(root: string): string {
     return sha256(treeEntries(root).map((e) => `${e.rel}\u0000${e.hash}`).join('\n'));
 }
 
+/** One entry of the P5 enumeration-seam delta set: a non-identity file under a declared
+ *  tree that differs staged↔live. `rel` is relative to $HAN_HOME (legible ceremony line);
+ *  `staged`/`live` carry CONTENT (null = absent on that side). A symlink's content is its
+ *  target string, `symlink → <target>` — NEVER followed (Jim fold-2: a retargeted link to
+ *  identical content must render as the retarget, not an actively-reassuring 0/0). */
+export interface TreeFileDelta { rel: string; staged: string | null; live: string | null }
+
+/**
+ * P5 ENUMERATION-SEAM FIX, the pure half (Tenshi's finding mrnd1cqj + plan mrndfo4b, Jim
+ * GREEN mrndq9k5): the ceremony's rendered set must equal the swap's move-set. This emits
+ * every file under ONE declared tree whose content hash differs staged↔live (including
+ * appear/disappear, including nested subdirs — treeEntries recurses where the fixed
+ * IDENTITY_FILES enumeration never did), EXCLUDING the rels the ceremony already rendered.
+ * The exclusion is by EXACT rel-path from $HAN_HOME, sourced from the snapshot artefacts'
+ * real absPaths — never by basename (Jim fold-1: a `fractal/…/identity.md` that was never
+ * enumerated must not hide behind the identity files' names one directory deeper).
+ * Content is read lazily, only for emitted rels (a genuine content-preserving migration
+ * costs two hash walks and reads nothing).
+ */
+export function declaredTreeFileDeltas(stagingDir: string, hanHome: string, tree: string, excludeRels: Set<string>): TreeFileDelta[] {
+    const stagedRoot = path.join(stagingDir, tree);
+    const liveRoot = path.join(hanHome, tree);
+    const stagedMap = new Map(treeEntries(stagedRoot).map((e) => [e.rel, e.hash]));
+    const liveMap = new Map(treeEntries(liveRoot).map((e) => [e.rel, e.hash]));
+    const read = (root: string, rel: string): string | null => {
+        const p = path.join(root, rel);
+        try {
+            if (fs.lstatSync(p).isSymbolicLink()) return `symlink → ${fs.readlinkSync(p)}`; // fold-2: never follow
+            return fs.readFileSync(p, 'utf8');
+        } catch { return null; }
+    };
+    const out: TreeFileDelta[] = [];
+    for (const rel of [...new Set([...stagedMap.keys(), ...liveMap.keys()])].sort()) {
+        const relFromHome = path.join(tree, rel);
+        if (excludeRels.has(relFromHome)) continue;
+        if (stagedMap.get(rel) === liveMap.get(rel)) continue;
+        out.push({ rel: relFromHome, staged: read(stagedRoot, rel), live: read(liveRoot, rel) });
+    }
+    return out;
+}
+
 /** Capture both sides at ceremony-render time (gate 2's baseline). */
 export function captureSwapHashes(plan: SwapPlan): SwapHashes {
     const staged: Record<string, string> = {};

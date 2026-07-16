@@ -164,12 +164,46 @@ export function compareAuthored(pre: AuthoredSnapshot, post: AuthoredSnapshot): 
  * Granularity note: pre-P3d the runner applies a run's migrations as one unit, so the
  * declarations arrive as the RUN's union; DEC-102's "the ceremony for that migration
  * alone" sharpens to per-migration scoping when P3d's state-copy leg lands.
+ *
+ * CALLER DUTY (P5, Casey mrne791x / Jim mrnep6k3): a verdict over a declared move-set is
+ * valid ONLY over the MERGED delta set — the identity deltas (compareAuthored over
+ * IDENTITY_FILES) UNIONED with the non-identity deltas (state-swap.declaredTreeFileDeltas /
+ * nonIdentityTreeDeltas) — see han-update 6a-staged. Handing this function identity deltas
+ * ALONE re-opens the enumeration seam (rendered-set ≠ swapped-set): it will return
+ * `unchanged` while non-identity files (working-memory, the c0/c1 gradient sources) ride to
+ * live unseen. The equality is guarded HERE by the caller's diligence and by the single-door
+ * Wall; the structural cure, if a SECOND caller ever appears, is to reshape this API so it
+ * cannot be invoked without the move-set. Recorded so the future finds it.
  */
 export function ring2Verdict(deltas: AuthoredDelta[], declarations: StateDeclaration[]): Ring2Verdict {
     if (deltas.length === 0) return { kind: 'unchanged' };
     if (declarations.length === 0) return { kind: 'abort-undeclared', deltas };
     const redFlag = declarations.every((d) => d.stateChangeKind === 'content-preserving');
     return { kind: 'ceremony', deltas, redFlag };
+}
+
+// ── P5 enumeration-seam adapter (Tenshi mrnd1cqj / plan mrndfo4b / Jim GREEN mrndq9k5) ─────
+
+/**
+ * Map a declared tree's NON-IDENTITY file deltas (state-swap.declaredTreeFileDeltas) into
+ * the ceremony's AuthoredDelta shape, so `ring2Verdict` + `renderCeremonyDocument` cover the
+ * WHOLE move-set (rendered-set == swapped-set — the P5 equality). The shape is generic by
+ * design: renderSemanticDiff keys only on pre/post content + resident/name, so the landed
+ * control-byte / homoglyph / reorder hardening applies to these deltas unchanged (verified
+ * at build — nothing in the renderer keys on IDENTITY_FILES). `resident` carries the
+ * declared tree, `name` the rel-from-$HAN_HOME, for a legible ceremony line. A delta whose
+ * content is a `symlink → <target>` string renders the RETARGET, never followed content
+ * (Jim fold-2, produced upstream in declaredTreeFileDeltas). DEC-102 note: this NARROWS the
+ * content-preserving auto-pass ("identity files unchanged" → "the whole declared tree
+ * unchanged") — it completes the human-eyes guarantee, named at land per the Settled rule.
+ */
+export function nonIdentityTreeDeltas(tree: string, deltas: Array<{ rel: string; staged: string | null; live: string | null }>): AuthoredDelta[] {
+    const art = (name: string, content: string | null): AuthoredArtefact | null => content === null ? null : {
+        resident: tree, name, kind: 'file', absPath: null, content, sha256: sha256(content),
+    };
+    return deltas.map(({ rel, staged, live }) => ({
+        resident: tree, name: rel, kind: 'file' as AuthoredKind, pre: art(rel, live), post: art(rel, staged),
+    }));
 }
 
 // ── the semantic renderer (the diff neither attacker nor noise can hide in) ───────────────

@@ -226,3 +226,30 @@ the bounded-strictness trade named in code and suite-proven both sides. Named re
 IO stays O(history) until the ledger earns a rotation (Jim's footnote); a closed latest
 swap vouches for nothing older — unreachable through the tool, reachable only by
 hand-editing the ledger. Suite 46/46.
+
+## ✅ P5 enumeration-seam fix LANDED (S224, 2026-07-16) — rendered-set == swapped-set
+
+Tenshi's P5 probe reproduced the seam (`mrnd1cqj`): `snapshotAuthoredAt` enumerates a FIXED
+`IDENTITY_FILES` list, not a directory walk — so a declared content-preserving migration that
+left the identity files byte-identical but rewrote a non-identity file (working-memory-full.md,
+the c0/c1 gradient source) produced an EMPTY authored delta → the content-preserving auto-pass
+fired → the poison rode to live unrendered. HIGH on DEC-102's guarantee, gated behind a signed
+release.
+
+**The fix (plan `p5-ceremony-enumeration-fix.md`; Jim GREEN `mrnep6k3`; Casey PROCEED `mrne791x`):**
+`state-swap.declaredTreeFileDeltas` emits every non-identity file under a declared tree that
+differs staged↔live (exact-rel exclusion of the rendered identity files; symlinks render as the
+target string, never followed; lazy read); `ring2-ceremony.nonIdentityTreeDeltas` maps them to
+`AuthoredDelta` (bounded additive adapter on the sealed surface — nothing keys on
+`IDENTITY_FILES`); han-update 6a-staged MERGES identity ∪ non-identity deltas into `ring2Verdict`.
+
+**DEC-102 SEMANTIC NARROWING (named for the record):** the content-preserving auto-pass now
+fires only when the WHOLE declared tree is byte-identical staged↔live — "identity files
+unchanged" → "the whole declared tree unchanged." This COMPLETES the human-eyes guarantee
+(rendered-set == swapped-set); it does not weaken DEC-102.
+
+**Folds carried:** Jim's 3 (exact-rel exclusion; symlink target-string; red-flag asserted) +
+2 comment-only at land (the `ring2Verdict` caller-duty docstring; the probe superseded
+DEC-069-way with a header naming suite case (a) its successor). test-state-swap 46→**57/57**
+(10 P5 cases incl. the inverted probe and the invariant asserted directly); ring2 42/42; tsc
+11-baseline; live wake exit 0.
