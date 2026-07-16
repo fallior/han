@@ -201,12 +201,27 @@ export interface GardenIdentity {
     user: { name: string; pronounSubj: string; pronounObj: string; location: string };
 }
 
+/** P3d Unit-2b (SEC-12 part 3): the update-channel calibration — OPTIONAL section, absent =
+ *  `{ enforceFreshnessExpiry: false, freshnessMaxAgeDays: 90 }` (defaults baked in the
+ *  accessor, advisory-only — inert until lattice integration arms it per-garden). The flag
+ *  gates ONLY the typed `expired` freshness outcome; `fatal` outcomes (BAD-SIGNATURE /
+ *  REPLAYED / unverifiable) are structurally unreachable by any flag (han-update's typed
+ *  dispatch). OPTIONAL not required: DEC-081's require-the-leaf rule targets per-AGENT
+ *  leaves; this is a garden-scoped feature flag (the `spokeLifecycle`-but-optional
+ *  precedent, ruled in Jim's P3d audit mrgi9dsd). */
+export interface UpdateConfig {
+    enforceFreshnessExpiry?: boolean;
+    freshnessMaxAgeDays?: number;
+}
+
 export interface GardenManifest extends GardenIdentity {
     manifestVersion: number;
     agents: AgentManifest[];
     /** Garden-wide spoke-lifecycle defaults (per-surface override via SurfaceManifest.lifecycle).
      *  Darron's no-hidden-globals principle: these tunable numbers live here, not in code. */
     spokeLifecycle: SpokeLifecycle;
+    /** Optional update-channel calibration (absent = advisory freshness, the safe default). */
+    update?: UpdateConfig;
 }
 
 // Common Opus ladder for the migrated agentQuery surfaces.
@@ -312,12 +327,19 @@ function loadGardenConfig(): { manifest: GardenManifest; allocations: Record<str
     for (const [slug, al] of Object.entries<any>(allocations)) {
         if (typeof al?.memoryDirRel !== 'string') fail(`allocations['${slug}'].memoryDirRel (string; '' = $HAN_HOME itself) is required`);
     }
+    // Optional update-channel section (2b): validate shape iff present; absence is the default.
+    if (cfg.update !== undefined) {
+        if (typeof cfg.update !== 'object' || cfg.update === null) fail('update (object) must be an object when present');
+        if (cfg.update.enforceFreshnessExpiry !== undefined && typeof cfg.update.enforceFreshnessExpiry !== 'boolean') fail('update.enforceFreshnessExpiry must be a boolean');
+        if (cfg.update.freshnessMaxAgeDays !== undefined && typeof cfg.update.freshnessMaxAgeDays !== 'number') fail('update.freshnessMaxAgeDays must be a number');
+    }
     const manifest: GardenManifest = {
         manifestVersion: cfg.manifestVersion,
         spokeLifecycle: cfg.spokeLifecycle,
         project: cfg.project,
         user: cfg.user,
         agents,
+        ...(cfg.update !== undefined ? { update: cfg.update as UpdateConfig } : {}),
     };
     return { manifest, allocations };
 }
@@ -325,6 +347,23 @@ function loadGardenConfig(): { manifest: GardenManifest; allocations: Record<str
 const _gardenConfig = loadGardenConfig(); // boot-read, cached (Q1's read model, kept)
 
 export const GARDEN_MANIFEST: GardenManifest = _gardenConfig.manifest;
+
+/** 2b: the update-channel calibration, defaults baked `{false, 90}` (an absent section is
+ *  the advisory-only safe default — fail-closed on ABSENCE, Tenshi F). The self-lockout
+ *  guard (SEC-07 family): arming expiry with a non-positive max-age would make EVERY
+ *  freshness expired — refuse loudly rather than let a garden brick its own update channel. */
+export function updateConfig(): { enforceFreshnessExpiry: boolean; freshnessMaxAgeDays: number } {
+    const u = GARDEN_MANIFEST.update ?? {};
+    const out = {
+        enforceFreshnessExpiry: u.enforceFreshnessExpiry ?? false,
+        freshnessMaxAgeDays: u.freshnessMaxAgeDays ?? 90,
+    };
+    if (out.enforceFreshnessExpiry && out.freshnessMaxAgeDays <= 0) {
+        throw new Error(`garden-manifest: update.enforceFreshnessExpiry=true with freshnessMaxAgeDays=${out.freshnessMaxAgeDays} `
+            + `would expire EVERY freshness (self-lockout) — set a positive max-age or disarm the flag`);
+    }
+    return out;
+}
 
 /**
  * The garden's resident roster — the single seam through which the population is *sourced*.

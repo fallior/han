@@ -168,3 +168,52 @@ write, the loom carries a lockpick for its own next turn. The `enforceFreshnessE
 
 *— Leo (session), S220, 2026-07-12 ~01:20 AEST. Quarantine built; the keystone designed for
 Jim's fork ruling; the loom's last leg mapped.*
+
+---
+
+## ✅ Unit 2b BUILT (S224, 2026-07-16) — the swap core + the boot gate + the freshness leaf
+
+Built on the consolidated gate list (`mrh9apbl`) + Tenshi's A–F (`mrmwuxvx`) + Jim's
+boot-gate polarities (`mrmxwrnw`). Suite: `scripts/test-state-swap.ts` (34 lib/tool cases in
+the held tree; 42 with the two held patches — the FULL suite at `scratchpad/2b/`).
+
+**The swap core (`src/server/lib/state-swap.ts`, NEW):** move-set derived ONLY from the
+checked-out signed tree's declarations (Tenshi A; `staging-manifest.json` demoted to a
+receipt); two-sided re-hash at swap time (gate 2); per-tree device assert at each rename
+(gate 5); wm-sensor re-assert at swap time (Tenshi D); trees first, **DB rename = the commit
+point** (Tenshi B); ledger journal `swap-start`/`swap-done` (gate 1); directed recovery
+rolls back below the commit point, forward past it, verifying every restore against the
+journal's recorded render-time hashes (gate 4 — the journal locates, never trusts).
+
+**han-update orchestration:** step-5 branches (`--stage-only` into
+`$HAN_HOME/staging/update-<ts>/` 0700 when `touchesState` pending; today's `--apply`
+byte-identical when not); step-6 runs 6a-live (the unchanged-live safety net, all modes) +
+6a-staged (ceremony `pre=live/post=staged`; approval IS the swap trigger; decline =
+discard-staging, nothing was ever swapped); `--recover` = the directed-recovery door;
+`rollback()` restores this run's swapped trees (run-scoped, hash-verified).
+
+**THE DISPOSAL SCHEDULE (staging artefacts — decided in advance, in writing; Casey's form):**
+| Artefact class | Fate | When |
+|---|---|---|
+| Current run's staging, ceremony APPROVED | consumed by the swap (trees renamed to live) | at the swap |
+| Current run's staging, DECLINED/ABORTED | quarantine-move → `$HAN_HOME/archives/staging/` | immediately, `finally` |
+| Empty staging (refused before population) | removed (nothing to retain) | immediately (gate 7a) |
+| Stale staging (crash leftovers) | quarantine-move → `archives/staging/` | at the next `han update` run, AFTER the dangling-swap gate |
+| `archives/staging/*` | retained indefinitely (DEC-069) | pruning = a future DEC by the named authority, never custodial discretion |
+
+**HELD PATCHES (the S193 live-on-save discipline — reverted from the tree for the hold,
+applied atomically at land on GREEN):**
+- **Patch A** (`scratchpad/2b/patchA-boot-gate.diff` + suite case 9): the
+  `verify-identity-files.ts` dangling-swap HALT (exit 3) — DEC-083-adjacent, additive,
+  fail-closed; polarity (i) absent ledger = genesis-clean, polarity (ii) corrupt = HALT.
+  Live-on-save at every wake, hence held out of the tree.
+- **Patch B** (`patchB-manifest-leaf.diff` + `patchB-han-update-wiring.diff` + suite case
+  10): the protected `garden-manifest.ts` optional `update:` section + `updateConfig()`
+  accessor (`{false, 90}` baked; self-lockout guard refuses enforce-with-maxAge≤0) + the
+  han-update expired-wiring (abort message names the flag AND the cadence cause).
+
+**P5 (Tenshi's set against the first real ceremony):** rendered-set == swapped-set;
+declared-content-preserving empty-delta auto-pass; declared mutation red-flags + ring;
+decline → nothing swapped; crash mid-swap → directed recovery both directions;
+REPLAYED-aborts-flag-OFF; EXPIRED-aborts-only-flag-ON; the standalone-refusal case (already
+standing, state-copy suite).

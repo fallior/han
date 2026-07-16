@@ -35,6 +35,10 @@ const SCRATCH = argvRest.includes('--scratch') ? argvRest[argvRest.indexOf('--sc
 // P3d: the ONLY way to (re)apply a tag a rollback abandoned — an explicit, per-tag operator
 // override, so no "update to newest" habit can silently walk back into a known-bad release.
 const FORCE_QUARANTINED = argvRest.includes('--force-quarantined') ? argvRest[argvRest.indexOf('--force-quarantined') + 1] : null;
+// 2b: directed recovery of a dangling swap (gate 3's operational door). The boot gate
+// (verify-identity-files.ts) HALTs wakes and names this flag; it is also run automatically
+// at the top of every apply (a new update never starts over a half-swapped garden).
+const RECOVER = argvRest.includes('--recover');
 
 // The --scratch belt (Jim's non-blocker + Tenshi #4): a TEST affordance must never reach
 // production — refuse a scratch garden home resolving to the real HAN home; explicit-ARG-only
@@ -220,8 +224,30 @@ function stepCheck(): void {
     ledgerAppend({ op: 'check', deployed, newest: newest?.tag ?? null, freshness: f.status, freshness_latest: f.latest ?? null });
 }
 
+// ── 2b: the dangling-swap gate + directed recovery (gates 1/3/4; Tenshi B/C) ───────────────
+async function stepRecover(): Promise<void> {
+    const { checkDanglingSwap, recoverDanglingSwap } = await import('../src/server/lib/state-swap');
+    const st = checkDanglingSwap(LEDGER);
+    if (st.state === 'clean' || st.state === 'genesis-clean') { log(`--recover: ${st.detail}`); return; }
+    if (st.state === 'corrupt') fail(`--recover cannot proceed: ${st.detail} — curate the ledger by hand (fail-closed; a corrupt trust-root journal wants a human)`);
+    const direction = recoverDanglingSwap(HOME_DIR, path.join(HOME_DIR, 'gradient.db'), LEDGER, log);
+    log(`RECOVERY COMPLETE — ${direction}. Wakes are unblocked; re-run the update whenever ready.`);
+}
+
 // ── the apply flow (steps 2–8) ─────────────────────────────────────────────────────────────
 async function stepApply(): Promise<void> {
+    // 2b pre-gate: a new update never starts over a dangling swap (gate 3, the tool-side half;
+    // the boot half lives in verify-identity-files.ts). Jim's polarities: absent ledger =
+    // genesis-clean = proceed; corrupt = HALT legibly.
+    {
+        const { checkDanglingSwap, sweepStaleStaging } = await import('../src/server/lib/state-swap');
+        const st = checkDanglingSwap(LEDGER);
+        if (st.state === 'dangling') fail(`${st.detail}`);
+        if (st.state === 'corrupt') fail(`${st.detail} — curate the ledger by hand (fail-closed)`);
+        // THE SCHEDULE (gate 6 + Casey's disposal-schedule form): stale staging archives now,
+        // in advance, by the written rule — never by custodial discretion at a full disk.
+        sweepStaleStaging(HOME_DIR, null, log);
+    }
     // step 0 — resolve + verify
     try { git(['fetch', '--tags', '--quiet', 'origin']); } catch { if (!SCRATCH) fail('cannot fetch the mirror'); }
     const deployed = deployedVersionFromGit();
@@ -265,15 +291,35 @@ async function stepApply(): Promise<void> {
         log(`⚠ FORCED past quarantine on ${target} (operator override) — quarantine cleared`);
     }
     const f = freshnessVerdict();
-    // The typed dispatch (Tenshi #2): fatality is IN THE TYPE. The P3d enforceFreshnessExpiry
-    // flag gates ONLY kind==='expired' — it can never reach a 'fatal' outcome by construction.
+    // The typed dispatch (Tenshi #2): fatality is IN THE TYPE. The 2b enforceFreshnessExpiry
+    // flag gates ONLY kind==='expired' — it can never reach a 'fatal' outcome by construction
+    // (P5 standing case: REPLAYED aborts with the flag OFF — the flag governs expiry alone).
     if (f.kind === 'fatal') fail(`freshness: ${f.detail}`);
+    if (f.kind === 'expired' && !SCRATCH) {
+        // 2b (SEC-12 part 3, armed): default-OFF manifest flag; when ON, a genuinely-expired
+        // freshness aborts — and the message names the FLAG and the CADENCE cause, so an F2
+        // self-DoS (a healthy-but-quiet garden outrunning its own max-age) is legible and
+        // curable in one read (Jim's rider b).
+        const { updateConfig } = await import('../src/server/lib/garden-manifest');
+        const uc = updateConfig();
+        if (uc.enforceFreshnessExpiry) {
+            fail(`freshness EXPIRED and update.enforceFreshnessExpiry=true — ${f.detail}. ` +
+                `Either the mirror is stale/withholding (the SEC-12 attack this flag exists to catch) OR the release ` +
+                `cadence outran freshnessMaxAgeDays=${uc.freshnessMaxAgeDays} (F2 — a healthy-but-quiet garden self-DoS). ` +
+                `If the garden is simply quiet: publish a fresh freshness.json, or raise update.freshnessMaxAgeDays, ` +
+                `or set update.enforceFreshnessExpiry=false in garden-manifest.json.`);
+        }
+    }
     log(`freshness: ${f.status} — ${f.detail}`);
     log(`target ${target} verified → ${hash}`);
     const priorHash = git(['rev-parse', 'HEAD']);
     ledgerAppend({ op: 'apply-start', target, hash, prior: priorHash, deployed, freshness: f.status, freshness_latest: f.latest ?? null, rollback: !!ROLLBACK });
 
     const applyStartMs = Date.now(); // run-scoping for rollback's DB-restore (see rollback())
+    // 2b: the run token — names this run's staging dir, tree pre-copies and swap journal id.
+    // Derived FROM applyStartMs so the rollback's run-scope filter (`t >= applyStartMs`)
+    // includes the pre-copies this token names (the P3c preCopyRunMs lesson, kept true).
+    const runTs = new Date(applyStartMs).toISOString().replace(/[:.]/g, '-');
 
     // steps 2–3 — quiesce + drain + stop + fuser-zero
     if (SCRATCH) {
@@ -349,10 +395,11 @@ async function stepApply(): Promise<void> {
     // migrations are not the ones step 5 executes). The shared loader (lib/migration-loader)
     // enforces the same contract han-migrate enforces — touchesState ⇒ a valid stateChangeKind —
     // so the ceremony can never meet an untyped change.
-    // FAIL-CLOSED GUARD: the runner's state-copy leg (MigrationCtx.stateDir mechanics) lands at
-    // P3d; until it exists, a state-touching migration has NO lawful way to run — abort +
-    // rollback rather than let one execute with nowhere to put its changes. Remove this guard
-    // when P3d wires stateDir (the ceremony below is already built for that day).
+    // 2b: this is ALSO the move-set's authoritative source (Tenshi A) — the declarations come
+    // from the checked-out SIGNED tree, so deriving the swap's move-set here (and only here)
+    // is what makes staging-manifest.json a receipt rather than an authority. The standing
+    // question, answered (Casey's Henry VIII discipline): who can write the thing this reads?
+    // — only a release signer.
     const declarations = await (async () => {
         try {
             const { pendingMigrations, currentSchemaVersion } = await import('../src/server/lib/migration-loader');
@@ -364,58 +411,155 @@ async function stepApply(): Promise<void> {
         } catch (e) { await rollback(priorHash, `Ring-2 pre-flight failed: ${(e as Error).message}`, applyStartMs); return null; }
     })();
     if (declarations === null) return;
+    // 2b (the lawful door, Option A): a state-touching run STAGES — han-migrate --stage-only
+    // copies the DB + declared trees, migrates the COPIES, verifies, and stops. The ceremony
+    // inspects the staged changes; the swap is the ring's last act. A DB-only run keeps
+    // today's --apply path byte-identical.
+    const moveSet = [...new Set(declarations.flatMap((d) => d.touchesState))];
+    let stagingDir: string | null = null;
     if (declarations.length > 0) {
-        await rollback(priorHash,
-            `pending migration(s) declare touchesState (${declarations.map((d) => `#${d.migrationId}`).join(', ')}) but the runner's ` +
-            `state-copy leg is not built until P3d — refusing whole (fail-closed; DEC-102 Ring 2: an authored-state ` +
-            `migration must run on copies the ceremony can inspect, and that machinery does not exist yet)`, applyStartMs);
-        return;
+        const { assertStagingNotNested } = await import('../src/server/lib/state-swap');
+        stagingDir = path.join(HOME_DIR, 'staging', `update-${runTs}`);
+        // gate 7b: a staging dir nested inside a declared tree would swap itself — refuse legibly.
+        const nested = assertStagingNotNested(stagingDir, moveSet, HOME_DIR);
+        if (nested) { await rollback(priorHash, nested, applyStartMs); return; }
+        // gate 6: staging holds cleartext identity copies — an exposure window, not housekeeping.
+        // 0700 explicitly (mkdir's mode is umask-subject). Honesty (Tenshi E): 0700 is an
+        // OTHER-user control on a SAME-user threat model — the real mitigations are the short
+        // window and that staging duplicates an already-same-user-readable exposure.
+        fs.mkdirSync(stagingDir, { recursive: true, mode: 0o700 });
+        fs.chmodSync(stagingDir, 0o700);
     }
 
-    // step 5 — migrate (every han-migrate gate live: downgrade axes, umask, checkpoint, fd-guard, sidecars)
+    // step 5 — migrate (every han-migrate gate live: downgrade axes, umask, checkpoint, fd-guard,
+    // sidecars). 2b: --stage-only when authored state is declared; --apply (unchanged) when not.
     try {
         execFileSync(path.join(REPO, 'src', 'server', 'node_modules', '.bin', 'tsx'),
-            [path.join(REPO, 'scripts', 'han-migrate.ts'), '--apply', ...(SCRATCH ? ['--force', '--skip-smoke'] : [])],
+            [path.join(REPO, 'scripts', 'han-migrate.ts'),
+             ...(stagingDir ? ['--stage-only', stagingDir] : ['--apply']),
+             ...(SCRATCH ? ['--force', '--skip-smoke'] : [])],
             { cwd: path.join(REPO, 'src', 'server'), stdio: 'inherit',
               env: { ...process.env, HAN_HOME: HOME_DIR, HAN_DB_PATH: path.join(HOME_DIR, 'gradient.db'), HAN_REPO: REPO, NODE_PATH: path.join(REPO, 'src', 'server', 'node_modules') } });
-    } catch { await rollback(priorHash, 'han-migrate failed', applyStartMs); return; }
+    } catch {
+        if (stagingDir) { const { discardStaging } = await import('../src/server/lib/state-swap'); discardStaging(stagingDir, HOME_DIR, 'migrate-failed', log); }
+        await rollback(priorHash, 'han-migrate failed', applyStartMs); return;
+    }
 
-    // ── step 6 — DEC-102 RING 2: the AUTHORSHIP SPLIT + semantic-diff ceremony (P3c), INSIDE
-    // the quiesce. 6a: AUTHORED identity — any undeclared change aborts + rolls back; a
-    // declared change (touchesState, typed) triggers the ceremony: the semantic diff, the
-    // designed visible freeze, the gardener's ring. 6b: template-GENERATED files auto-re-sign
-    // (transitively release-signed under Ring 1) with pre/post hashes ledgered UNCONDITIONALLY
-    // (detection-under-prevention). The swap already happened at step 5 for the DB — authored
-    // FILES have no state-leg until P3d, so 6a today is the live safety NET (any mutation of
-    // authored identity by ANY mechanism during the update window is caught here).
+    // ── step 6 — DEC-102 RING 2: the AUTHORSHIP SPLIT + semantic-diff ceremony (P3c+2b),
+    // INSIDE the quiesce. 6a-live: the safety NET — the LIVE authored identity must be
+    // byte-unchanged through the window regardless of mode (with 2b's staging, NOTHING
+    // lawfully writes live before the swap; any live delta = a rogue writer → restore+abort).
+    // 6a-staged (2b): the ceremony proper — pre=LIVE, post=STAGED; the gardener's ring
+    // approves the staged changes, and approval IS the swap trigger (DEC-102 by construction).
+    // 6b: template-GENERATED files auto-re-sign, pre/post hashes ledgered UNCONDITIONALLY.
+    if (stagingDir && !preSnapshot) {
+        // A declared-state migration with no Ring-2 residents to ceremony over has no lawful
+        // approver — fail-closed (a bare scratch world without a manifest cannot ring).
+        const { discardStaging } = await import('../src/server/lib/state-swap');
+        discardStaging(stagingDir, HOME_DIR, 'no-ring2-home', log);
+        await rollback(priorHash, 'declared-state migration but no garden manifest at this home — the Ring-2 ceremony has no residents to protect and no gardener to ring (fail-closed)', applyStartMs);
+        return;
+    }
     if (preSnapshot) {
         const r2 = await import('../src/server/lib/ring2-ceremony');
-        const post = r2.snapshotAuthoredAt(preSnapshot.residents);
-        const deltas = r2.compareAuthored(preSnapshot.snap, post);
-        const verdict = r2.ring2Verdict(deltas, declarations);
-        if (verdict.kind === 'unchanged') {
-            log(`Ring-2 6a: authored identity UNCHANGED (${preSnapshot.snap.artefacts.length} artefacts verified)`);
-            ledgerAppend({ op: 'ring2-authored', verdict: 'unchanged', artefacts: preSnapshot.snap.artefacts.length });
-        } else if (verdict.kind === 'abort-undeclared') {
-            ledgerAppend({ op: 'ring2-authored', verdict: 'ABORT-undeclared', changed: verdict.deltas.map((d) => `${d.resident}:${d.name}`) });
+        const swap = await import('../src/server/lib/state-swap');
+        // 6a-live — the net (all modes): live authored identity must not have moved.
+        const postLive = r2.snapshotAuthoredAt(preSnapshot.residents);
+        const liveDeltas = r2.compareAuthored(preSnapshot.snap, postLive);
+        if (liveDeltas.length > 0) {
+            ledgerAppend({ op: 'ring2-authored', verdict: 'ABORT-undeclared', changed: liveDeltas.map((d) => `${d.resident}:${d.name}`) });
             // restore the authored files FROM THE SNAPSHOT before the rollback — without this
             // the poison survives on disk and the next wake's auto-resign would launder it.
-            for (const note of r2.restoreAuthored(verdict.deltas)) { log(`Ring-2 restore: ${note}`); ledgerAppend({ op: 'ring2-restore', note }); }
-            await rollback(priorHash, `UNDECLARED authored-identity change (DEC-102 Ring 2): ${verdict.deltas.map((d) => `${d.resident}:${d.name}`).join(', ')}`, applyStartMs);
+            for (const note of r2.restoreAuthored(liveDeltas)) { log(`Ring-2 restore: ${note}`); ledgerAppend({ op: 'ring2-restore', note }); }
+            if (stagingDir) swap.discardStaging(stagingDir, HOME_DIR, 'live-mutated-in-window', log);
+            await rollback(priorHash, `UNDECLARED live authored-identity change during the update window (DEC-102 Ring 2): ${liveDeltas.map((d) => `${d.resident}:${d.name}`).join(', ')}`, applyStartMs);
             return;
-        } else {
-            // The ceremony — unreachable until P3d's state leg (the pre-flight refuses declared
-            // migrations), built and red-suite-proven for the day it opens.
-            const doc = r2.renderCeremonyDocument(verdict.deltas, declarations, verdict.redFlag);
-            ledgerAppend({ op: 'ring2-ceremony-open', digest: doc.digest, redFlag: verdict.redFlag, changed: verdict.deltas.map((d) => `${d.resident}:${d.name}`), findings: doc.findings.length });
-            const decision = await r2.ceremonyDecision(doc, { signalsDir: path.join(HOME_DIR, 'signals') });
-            ledgerAppend({ op: 'ring2-ceremony-verdict', digest: doc.digest, decision });
-            if (decision !== 'approved') {
-                for (const note of r2.restoreAuthored(verdict.deltas)) { log(`Ring-2 restore: ${note}`); ledgerAppend({ op: 'ring2-restore', note }); }
-                await rollback(priorHash, `ceremony DECLINED by the gardener (digest ${doc.digest.slice(0, 12)}) — the post stays re-deliverable`, applyStartMs);
+        }
+        log(`Ring-2 6a: live authored identity UNCHANGED through the window (${preSnapshot.snap.artefacts.length} artefacts verified)`);
+        ledgerAppend({ op: 'ring2-authored', verdict: 'unchanged', artefacts: preSnapshot.snap.artefacts.length });
+
+        // 6a-staged (2b) — the ceremony over pre=LIVE / post=STAGED, then the approved swap.
+        if (stagingDir) {
+            const { EXPECTED_SCHEMA_VERSION } = await import('../src/server/lib/state-schema');
+            // The staged post-view: live snapshot re-read through staging for every artefact
+            // whose path falls under a declared tree (the rest are live-and-unchanged, proven
+            // by the net above). Artefact granularity, no ring2-ceremony.ts change needed.
+            const postStaged = r2.snapshotAuthoredAt(preSnapshot.residents);
+            const sha256hex = (s: string): string => crypto.createHash('sha256').update(s).digest('hex');
+            for (const a of postStaged.artefacts) {
+                if (!a.absPath) continue;
+                const rel = path.relative(HOME_DIR, a.absPath);
+                if (!moveSet.some((t) => rel === t || rel.startsWith(t + path.sep))) continue;
+                let content: string | null = null;
+                try { content = fs.readFileSync(path.join(stagingDir, rel), 'utf8'); } catch { /* absent in staging */ }
+                a.content = content; a.sha256 = content === null ? null : sha256hex(content);
+            }
+            const stagedDeltas = r2.compareAuthored(preSnapshot.snap, postStaged);
+            const verdict = r2.ring2Verdict(stagedDeltas, declarations);
+            const plan = {
+                hanHome: HOME_DIR, stagingDir, dbLive: path.join(HOME_DIR, 'gradient.db'),
+                moveSet, ledgerPath: LEDGER, schemaTo: EXPECTED_SCHEMA_VERSION, ts: runTs,
+            };
+            // Tenshi D: the swap-time quiesce re-assert — the real check live, a disclosed
+            // no-op in scratch (no systemd there to ask).
+            const assertQuiesced = SCRATCH ? (() => null) : ((): string | null => {
+                try {
+                    const active = execSync('systemctl --user is-active wm-sensor.service || true').toString().trim();
+                    if (active === 'active') return 'wm-sensor is ACTIVE (it writes the very files being swapped — MNT-057 is the live proof)';
+                } catch { return 'cannot query wm-sensor state (fail-closed)'; }
+                // Jim's land-note 1 (mrmz0xyd): a missing signals/ dir must read as un-verifiable
+                // (fail-closed message), not throw raw into the swap-failure path.
+                try {
+                    const locks = fs.readdirSync(path.join(HOME_DIR, 'signals')).filter((f) => f.startsWith('wm-sensor-') && f.endsWith('-active'));
+                    return locks.length ? `rotation lock(s) held: ${locks.join(', ')}` : null;
+                } catch { return 'cannot read the signals dir for rotation locks (fail-closed)'; }
+            });
+            let approvedDigest: string | null = null;
+            if (verdict.kind === 'unchanged') {
+                // A declared content-preserving migration rendering an EMPTY authored delta is
+                // the ONLY auto-pass (DEC-102) — the swap still runs (the DB + non-identity
+                // tree content moved; the declared boundary + verify() + re-hash govern those).
+                log('Ring-2 6a-staged: declared migration, EMPTY authored delta — content-preserving auto-pass (DEC-102)');
+                ledgerAppend({ op: 'ring2-staged', verdict: 'unchanged-autopass', declarations: declarations.map((d) => d.migrationId) });
+            } else {
+                // declarations.length > 0 ⇒ verdict.kind === 'ceremony' (abort-undeclared is
+                // structurally unreachable here; the undeclared class is the net above + the
+                // move-set wall inside executeSwap).
+                const v = verdict as { kind: 'ceremony'; deltas: import('../src/server/lib/ring2-ceremony').AuthoredDelta[]; redFlag: boolean };
+                const doc = r2.renderCeremonyDocument(v.deltas, declarations, v.redFlag);
+                ledgerAppend({ op: 'ring2-ceremony-open', digest: doc.digest, redFlag: v.redFlag, changed: v.deltas.map((d) => `${d.resident}:${d.name}`), findings: doc.findings.length });
+                const decision = await r2.ceremonyDecision(doc, { signalsDir: path.join(HOME_DIR, 'signals') });
+                ledgerAppend({ op: 'ring2-ceremony-verdict', digest: doc.digest, decision });
+                if (decision !== 'approved') {
+                    // Decline: NOTHING was swapped — live is untouched by construction; the
+                    // whole "rollback" is discard-staging + prior checkout (Option A's gift).
+                    swap.discardStaging(stagingDir, HOME_DIR, 'ceremony-declined', log);
+                    await rollback(priorHash, `ceremony DECLINED by the gardener (digest ${doc.digest.slice(0, 12)}) — nothing was swapped; the post stays re-deliverable`, applyStartMs);
+                    return;
+                }
+                approvedDigest = doc.digest;
+                log(`Ring-2 ceremony APPROVED (digest ${doc.digest.slice(0, 12)}) — the ring IS the swap trigger`);
+            }
+            // Gate 2's baseline: hashes captured NOW — after the rendering/approval, before the
+            // swap — so nothing can touch either side between the ring and the renames.
+            const atRender = swap.captureSwapHashes(plan);
+            try {
+                swap.executeSwap(plan, atRender, { assertQuiesced }, log);
+                ledgerAppend({ op: 'state-swap-complete', swapId: `swap-${runTs}`, approvedDigest, trees: moveSet.length });
+            } catch (e) {
+                // A throw BEFORE the first rename = clean abort. A throw after = dangling
+                // journal → run the directed recovery HERE (gate 3's tool-side half), so the
+                // garden is whole before the rollback restarts anything.
+                log(`swap FAILED: ${(e as Error).message}`);
+                const st = swap.checkDanglingSwap(LEDGER);
+                if (st.state === 'dangling') {
+                    try { swap.recoverDanglingSwap(HOME_DIR, plan.dbLive, LEDGER, log); }
+                    catch (re) { fail(`swap failed AND recovery failed: ${(re as Error).message} — OPERATOR ATTENTION (han update --recover after curing the cause)`); }
+                }
+                swap.discardStaging(stagingDir, HOME_DIR, 'swap-failed', log);
+                await rollback(priorHash, `state swap failed: ${(e as Error).message}`, applyStartMs, runTs);
                 return;
             }
-            log(`Ring-2 ceremony APPROVED (digest ${doc.digest.slice(0, 12)}) — proceeding`);
         }
     } else log('Ring-2 6a: SKIPPED — no snapshot (DISCLOSED above)');
 
@@ -443,7 +587,7 @@ async function stepApply(): Promise<void> {
                     ledgerAppend({ op: 'ring2-generated-resign', resident: a.slug, file: path.basename(g), pre: pre[i], post: postH, changed: pre[i] !== postH });
                 });
             }
-        } catch { await rollback(priorHash, 're-sign chain failed', applyStartMs); return; }
+        } catch { await rollback(priorHash, 're-sign chain failed', applyStartMs, runTs); return; }
     }
 
     // step 7 — restart + health
@@ -452,7 +596,7 @@ async function stepApply(): Promise<void> {
         execSync(`bash ${path.join(REPO, 'scripts', 'install-restart-hooks.sh')}`, { stdio: 'inherit' }); // A2's update-time re-materialise
         execSync(`bash ${path.join(REPO, 'scripts', 'restart-all-services.sh')} 2>/dev/null || true`, { stdio: 'inherit' });
         const healthy = await healthGate();
-        if (!healthy) { await rollback(priorHash, 'health gate failed', applyStartMs); return; }
+        if (!healthy) { await rollback(priorHash, 'health gate failed', applyStartMs, runTs); return; }
     }
     ledgerAppend({ op: 'apply-done', target, hash, freshness_latest: f.latest ?? null });
     log(`UPDATE COMPLETE → ${target} (${hash.slice(0, 12)})`);
@@ -483,9 +627,19 @@ async function healthGate(): Promise<boolean> {
  *  kept per DEC-069, so recoverable — but a garden quietly booting on a stale DB is exactly
  *  the class this tool exists to prevent.) No same-run pre-copy = the swap never happened =
  *  the live DB is already correct. */
-async function rollback(priorHash: string, why: string, applyStartMs: number): Promise<void> {
+async function rollback(priorHash: string, why: string, applyStartMs: number, runTs?: string): Promise<void> {
     log(`ROLLBACK (${why})`);
     ledgerAppend({ op: 'rollback-start', prior: priorHash, why });
+    // 2b: if THIS RUN's state swap completed (or partially ran) before the failure, restore the
+    // swapped trees from their verified pre-copies first — the state half of the run-scoped
+    // restore. Verified against the journal's recorded render-time hashes (gate 4); a tree
+    // whose pre-copy fails verification HALTs inside the helper rather than restore blind.
+    if (runTs) {
+        try {
+            const { rollbackSwappedTrees } = await import('../src/server/lib/state-swap');
+            for (const note of rollbackSwappedTrees(HOME_DIR, LEDGER, `swap-${runTs}`, log)) ledgerAppend({ op: 'rollback-tree', note });
+        } catch (e) { fail(`tree rollback FAILED: ${(e as Error).message} — OPERATOR ATTENTION (pre-copies are on disk; verify by hand)`); }
+    }
     // P3d QUARANTINE (Tenshi finding-1): an AUTO-rollback abandons the target it was applying —
     // quarantine it so a later forward-apply of that failed tag needs an explicit override. Read
     // the run's target from its own apply-start (a manual --rollback's forward target is exempt —
@@ -535,4 +689,4 @@ async function rollback(priorHash: string, why: string, applyStartMs: number): P
     log('ROLLBACK COMPLETE — reported loudly, never silent');
 }
 
-(async () => { if (CHECK) stepCheck(); else await stepApply(); })();
+(async () => { if (RECOVER) await stepRecover(); else if (CHECK) stepCheck(); else await stepApply(); })();

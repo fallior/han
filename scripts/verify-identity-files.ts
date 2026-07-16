@@ -93,6 +93,37 @@ function strictVerify(agent: string, pubkeyPath: string): number {
 
 function main(): number {
     const args = parseArgs();
+    // ── P3d Unit-2b (gate 3, the BOOT half — Tenshi C, Jim's polarities mrmxwrnw): a dangling
+    // swap journal means the garden may be HALF-SWAPPED — no wake may proceed until recovery
+    // resolves (`han update --recover`). This gate is the one door every wake already passes
+    // (launcher pre-flight, fed-wake step 0, interactive step 0), which is why the check lives
+    // here. Polarity (i): an ABSENT ledger = no swap has ever run = clean — the genesis
+    // carve-out (a fresh garden must not halt on a file that doesn't exist yet). Polarity (ii):
+    // an UNREADABLE/CORRUPT ledger = HALT with a legible receipt (fail-closed — a corrupt
+    // trust-root journal is the moment you want a human, not a guess). Additive to DEC-083:
+    // the identity verify below is untouched.
+    {
+        const { checkDanglingSwap } = require('../src/server/lib/state-swap');
+        const { hanHome } = require('../src/server/lib/paths');
+        const path = require('path');
+        const st = checkDanglingSwap(path.join(hanHome(), 'health', 'update-ledger.jsonl'));
+        if (st.state === 'dangling' || st.state === 'corrupt') {
+            const receipt = {
+                ts: new Date().toISOString(), kind: `swap-journal-${st.state}`,
+                agent: args.agent ?? null, entryPoint: args.entryPoint, detail: st.detail,
+            };
+            try {
+                const fs = require('fs');
+                const rp = path.join(hanHome(), 'health', 'integrity-failures.jsonl');
+                fs.mkdirSync(path.dirname(rp), { recursive: true });
+                fs.appendFileSync(rp, JSON.stringify(receipt) + '\n');
+            } catch { /* the receipt is best-effort; the HALT is not */ }
+            process.stderr.write(`HALT: ${st.detail}\n`);
+            process.stderr.write(`No wake may proceed on a possibly half-swapped garden. Run 'han update --recover'.\n`);
+            process.stderr.write(`Halt-receipt at ~/.han/health/integrity-failures.jsonl.\n`);
+            return 3;
+        }
+    }
     if (!args.agent) {
         process.stderr.write(`Usage: verify-identity-files.ts --agent=<slug> [--entry-point=<name>] [--strict]\n`);
         return 1;
