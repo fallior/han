@@ -98,6 +98,34 @@ const stageIt = (w: ReturnType<typeof buildWorld>): string => {
     check('matched swap-done = clean again', checkDanglingSwap(lp).state === 'clean');
     appendFileSync(lp, 'NOT JSON AT ALL\n');
     check('polarity (ii): a malformed line = CORRUPT (fail-closed — it could hide a swap-start)', checkDanglingSwap(lp).state === 'corrupt');
+    // Tenshi's post-land hardenings 1+2 (mrn4e2jk): the backward-bounded, id-matched scan.
+    const lp2 = path.join(t, 'ledger2.jsonl');
+    writeFileSync(lp2, [
+        JSON.stringify({ ts: 't1', op: 'swap-start', swapId: 'A' }),
+        JSON.stringify({ ts: 't2', op: 'swap-start', swapId: 'B' }),
+        JSON.stringify({ ts: 't3', op: 'swap-done', swapId: 'B' }),
+    ].join('\n') + '\n');
+    check('HARDENING-2: start-A/start-B/done-B → latest start (B) closed → clean (bounded at B)', checkDanglingSwap(lp2).state === 'clean');
+    const lp3 = path.join(t, 'ledger3.jsonl');
+    writeFileSync(lp3, [
+        JSON.stringify({ ts: 't1', op: 'swap-start', swapId: 'A' }),
+        JSON.stringify({ ts: 't2', op: 'swap-start', swapId: 'B' }),
+        JSON.stringify({ ts: 't3', op: 'swap-done', swapId: 'A' }),
+    ].join('\n') + '\n');
+    check('HARDENING-2: start-A/start-B/done-A → B still DANGLING (id-matched, never masked by A closing)', checkDanglingSwap(lp3).state === 'dangling');
+    const lp4 = path.join(t, 'ledger4.jsonl');
+    writeFileSync(lp4, [
+        'ANCIENT GARBAGE LINE (beyond the last swap — deliberately unparsed, the bounded-cost trade)',
+        JSON.stringify({ ts: 't1', op: 'swap-start', swapId: 'C' }),
+        JSON.stringify({ ts: 't2', op: 'swap-done', swapId: 'C' }),
+    ].join('\n') + '\n');
+    check('HARDENING-1: the scan is BOUNDED — garbage beyond the latest completed swap is never parsed (clean)', checkDanglingSwap(lp4).state === 'clean');
+    const lp5 = path.join(t, 'ledger5.jsonl');
+    writeFileSync(lp5, [
+        JSON.stringify({ ts: 't1', op: 'swap-start', swapId: 'D' }),
+        'GARBAGE INSIDE THE AUTHORITATIVE TAIL',
+    ].join('\n') + '\n');
+    check('HARDENING-1: garbage INSIDE the authoritative tail (EOF→latest start) still = CORRUPT', checkDanglingSwap(lp5).state === 'corrupt');
     rmSync(t, { recursive: true, force: true });
 }
 

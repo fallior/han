@@ -159,23 +159,40 @@ export type DanglingSwapState =
  * Strictness note: THIS reader treats a malformed line as corrupt (fail-closed) — unlike
  * the advisory readers (quarantinedTags etc.) which skip; a skipped line here could hide
  * the very swap-start the gate exists to find.
+ *
+ * BACKWARD-BOUNDED SCAN (Tenshi's post-land hardenings 1+2, mrn4e2jk): the ledger is
+ * append-only and unrotated, and this gate runs at EVERY wake — a forward full-file scan
+ * makes the hottest path in the system cost O(total-update-history), forever. So: scan
+ * from EOF backward, collecting swap-done/swap-recovered ids, and stop at the FIRST
+ * swap-start met (the LATEST start — its closers always sit after it in the file, i.e.
+ * before it in this scan). That start closed → clean; unclosed → dangling. The latest
+ * start is authoritative because swaps are serialized (stepApply refuses to start over a
+ * dangling one) — and unlike a bare last-op-wins read, the ID-MATCHED close means an
+ * interleaved history (…start-A, start-B, done-A…) still reads B as DANGLING, never
+ * masked by A's completion (hardening 2, self-sufficient rather than invariant-trusting).
+ * Honest bound on the strictness: corruption detection now covers the scanned tail
+ * (EOF back to the latest swap-start, the authoritative region); a malformed line in
+ * ancient history BEYOND the last swap is no longer parsed — that is the bounded-cost
+ * trade, chosen deliberately (the region that decides the verdict is always parsed).
  */
 export function checkDanglingSwap(ledgerPath: string): DanglingSwapState {
     if (!fs.existsSync(ledgerPath)) return { state: 'genesis-clean', detail: 'no update ledger — no swap has ever run (genesis carve-out)' };
     let raw: string;
     try { raw = fs.readFileSync(ledgerPath, 'utf8'); }
     catch (e) { return { state: 'corrupt', detail: `update ledger unreadable: ${(e as Error).message}` }; }
-    let open: Record<string, unknown> | null = null;
-    for (const [i, line] of raw.trim().split('\n').entries()) {
-        if (!line.trim()) continue;
+    const lines = raw.trim().split('\n');
+    const closed = new Set<string>();
+    for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].trim()) continue;
         let e: Record<string, unknown>;
-        try { e = JSON.parse(line); }
+        try { e = JSON.parse(lines[i]); }
         catch { return { state: 'corrupt', detail: `update ledger line ${i + 1} is not valid JSON — fail-closed (a malformed line could hide a swap-start)` }; }
-        if (e.op === 'swap-start') open = e;
-        if (e.op === 'swap-done' && open && e.swapId === open.swapId) open = null;
-        if (e.op === 'swap-recovered' && open && e.swapId === open.swapId) open = null;
+        if ((e.op === 'swap-done' || e.op === 'swap-recovered') && typeof e.swapId === 'string') closed.add(e.swapId);
+        if (e.op === 'swap-start') {
+            if (typeof e.swapId === 'string' && closed.has(e.swapId)) return { state: 'clean', detail: 'latest swap completed cleanly' };
+            return { state: 'dangling', detail: `swap ${String(e.swapId)} started ${String(e.ts)} and never completed — the garden may be HALF-SWAPPED; run 'han update --recover' before any wake`, entry: e };
+        }
     }
-    if (open) return { state: 'dangling', detail: `swap ${String(open.swapId)} started ${String(open.ts)} and never completed — the garden may be HALF-SWAPPED; run 'han update --recover' before any wake`, entry: open };
     return { state: 'clean', detail: 'no dangling swap' };
 }
 

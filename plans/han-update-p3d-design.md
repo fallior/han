@@ -217,3 +217,12 @@ declared-content-preserving empty-delta auto-pass; declared mutation red-flags +
 decline → nothing swapped; crash mid-swap → directed recovery both directions;
 REPLAYED-aborts-flag-OFF; EXPIRED-aborts-only-flag-ON; the standalone-refusal case (already
 standing, state-copy suite).
+
+**2b post-land hardening (S224, same day):** `checkDanglingSwap` re-cut as a
+backward-bounded, ID-MATCHED scan (Tenshi's post-land findings, `mrn4e2jk`; Jim GREEN
+`mrn5i4an`): every-wake parse cost bounded to lines-since-the-last-swap; interleaved
+histories can't mask a dangling start (start-A/start-B/done-A → B dangling, id-matched);
+the bounded-strictness trade named in code and suite-proven both sides. Named residuals:
+IO stays O(history) until the ledger earns a rotation (Jim's footnote); a closed latest
+swap vouches for nothing older — unreachable through the tool, reachable only by
+hand-editing the ledger. Suite 46/46.
