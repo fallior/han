@@ -247,6 +247,78 @@ const resident = (identitySection: string | null = 'You are Test A.'): ResidentA
     check('loader: a correctly-typed authored-state migration loads', ok);
 }
 
+// P5 RECONSTRUCTIBILITY PIN (Tenshi E2E mrngirjr, Casey addition-2, Jim GREEN mrnk7qh3): the
+// ceremony DIGEST must be a pure function of (pre, post, name, declarations) — render-environment
+// independent — so the consent record is reconstructible ("re-render from the DEC-069 pre-copies
+// must reproduce the ledgered digest"). This was RED before the cwd-relative + canonical-header
+// fix (git's mkdtemp path rode into the rendered doc); it flips GREEN on the fix and turns RED
+// forever if render non-determinism ever returns.
+{
+    const mk = (name: string, preC: string, postC: string): AuthoredDelta => ({
+        resident: 'testa', name, kind: 'file',
+        pre: { resident: 'testa', name, kind: 'file', absPath: null, content: preC, sha256: 'x' },
+        post: { resident: 'testa', name, kind: 'file', absPath: null, content: postC, sha256: 'y' },
+    });
+    const decl: StateDeclaration[] = [{ migrationId: 1, description: 'd', touchesState: ['memory/testa'], stateChangeKind: 'content-preserving' }];
+    const deltas = [mk('identity.md', '# A\nkeep\n', '# A\nchanged\n'), mk('working-memory-full.md', '# WM\nold\n', '# WM\nPOISON\n')];
+    const first = renderCeremonyDocument(deltas, decl, true);
+    const second = renderCeremonyDocument(deltas, decl, true);   // a fresh render, different temp dir
+    check('P5 DETERMINISM: re-rendering identical content reproduces the EXACT ceremony digest', first.digest === second.digest);
+    check('P5 DETERMINISM: no render-environment path leaks into the document (no /tmp/ring2- token)', !/ring2-[A-Za-z0-9]{6}/.test(first.rendered) && !/\/tmp\//.test(first.rendered));
+    check('P5 DETERMINISM: the canonical header carries the artefact NAME, not pre/post temp files', /a\/working-memory-full\.md/.test(first.rendered));
+    // Casey's belt (mrnmn06a): the algorithm-derived `index <sha1>..<sha1>` plumbing line is
+    // dropped, so the digest carries NO algorithm-dependent token — a pure function of (pre,
+    // post, name). Guards against a future git-hash-algo change bending the digest one venue over.
+    check('P5 DETERMINISM: the `index <sha1>..<sha1>` plumbing line is dropped (no algorithm-derived token in the digest)', !/^index [0-9a-f]+\.\.[0-9a-f]+/m.test(first.rendered));
+
+    // THE CLASS PIN (Casey mrnkijz5 / Tenshi mrnkq5qh): a determinism test that only runs in a
+    // CLEAN env cannot prove environment-INDEPENDENCE — it goes green while `diff.noprefix` /
+    // `diff.external` in an ambient gitconfig silently change the digest one config line away.
+    // So render under a HOSTILE gitconfig (noprefix + an external stub — the two vectors the
+    // counsel/guardian reproduced) and assert the digest STILL matches the clean render. RED
+    // without the hermetic git env in renderSemanticDiff; green with it; red forever if the
+    // hermeticity is ever removed. We inject via the exact vars the fix must override
+    // (GIT_CONFIG_GLOBAL points git at our hostile file; the fix re-points it at /dev/null).
+    {
+        const hostileHome = fs.mkdtempSync(path.join(os.tmpdir(), 'p5-hostilegit-'));
+        const extStub = path.join(hostileHome, 'ext.sh');
+        fs.writeFileSync(extStub, '#!/bin/sh\necho "ENVIRONMENT-CONTROLLED DIFF — should never reach the digest"\n', { mode: 0o755 });
+        fs.writeFileSync(path.join(hostileHome, 'gc'), `[diff]\n\tnoprefix = true\n\texternal = ${extStub}\n`);
+        const savedGlobal = process.env.GIT_CONFIG_GLOBAL, savedHome = process.env.HOME;
+        const savedLcAll = process.env.LC_ALL, savedLang = process.env.LANG, savedLanguage = process.env.LANGUAGE;
+        try {
+            process.env.GIT_CONFIG_GLOBAL = path.join(hostileHome, 'gc');
+            process.env.HOME = hostileHome;
+            // ALSO perturb the LOCALE surface (Jim mrnlk3tv / Tenshi mrnlpsbx): set a hostile
+            // ambient LC_ALL/LANG/LANGUAGE so the pin exercises the third vector, not just config.
+            process.env.LC_ALL = 'de_DE.UTF-8'; process.env.LANG = 'de_DE.UTF-8'; process.env.LANGUAGE = 'de';
+            const underHostile = renderCeremonyDocument(deltas, decl, true);
+            check('P5 CLASS PIN: a HOSTILE env (gitconfig noprefix + external, hostile locale) does NOT change the digest — hermetic git env holds', underHostile.digest === first.digest);
+            check('P5 CLASS PIN: the environment-controlled external-diff stub never reaches the document', !/ENVIRONMENT-CONTROLLED/.test(underHostile.rendered));
+        } finally {
+            if (savedGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = savedGlobal;
+            if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+            if (savedLcAll === undefined) delete process.env.LC_ALL; else process.env.LC_ALL = savedLcAll;
+            if (savedLang === undefined) delete process.env.LANG; else process.env.LANG = savedLang;
+            if (savedLanguage === undefined) delete process.env.LANGUAGE; else process.env.LANGUAGE = savedLanguage;
+            fs.rmSync(hostileHome, { recursive: true, force: true });
+        }
+    }
+    // THE LOCALE-VECTOR MECHANISM, teethed on THIS box (Jim mrnlk3tv): a live repro needs a git
+    // with a non-English translation installed (this box ships en_* + C only), so we prove the
+    // MECHANISM directly — the English-anchored `gitWentBinary` regex MISSES git's translated
+    // binary message, which is exactly why the render must force LC_ALL=C. If this regex ever
+    // grew locale-robust another way, this documents why LC_ALL=C is load-bearing.
+    {
+        const binRe = /^Binary files .* differ$/m;                 // the real detector, ring2-ceremony.ts
+        const en = 'Binary files a/pre and b/post differ';
+        const de = 'Binäre Dateien a/pre und b/post unterscheiden sich';
+        const fr = 'Les fichiers binaires a/pre et b/post sont différents';
+        check('P5 LOCALE MECHANISM: the binary detector matches the ENGLISH message (LC_ALL=C guarantees this form)', binRe.test(en));
+        check('P5 LOCALE MECHANISM: it MISSES a translated (de/fr) message — proving LC_ALL=C is load-bearing, not decorative', !binRe.test(de) && !binRe.test(fr));
+    }
+}
+
 fs.rmSync(S, { recursive: true, force: true });
 console.log(`\nring2-ceremony: ${pass} passed, ${failn} failed`);
 process.exit(failn ? 1 : 0);

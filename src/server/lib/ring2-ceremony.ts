@@ -319,6 +319,34 @@ function rawLineDiff(pre: string, post: string): { added: string[]; removed: str
 }
 
 /**
+ * Reduce a `git diff --no-index` header (already `a/pre b/post` from the cwd-relative
+ * invocation) to a render-environment-independent CANONICAL form: the `pre`/`post` tokens
+ * become the artefact's own name, so the rendered document — and the ceremony digest that is
+ * its sha256 — is a pure function of (pre content, post content, name), never of the temp dir
+ * the diff was computed in. Named as the SHAPE (Jim mrnk7qh3): strip render-env to a canonical
+ * header, not "strip these two paths." Replacement via a function literal so a `$` in the name
+ * is never read as a String.replace backreference.
+ *
+ * Casey's belt (mrnmn06a): DROP the `index <sha1>..<sha1> <mode>` line entirely. It is the one
+ * git-output element that is BOTH invisible to the gardener AND carries an algorithm-derived
+ * value (git's blob SHA-1) — the sole remaining algorithm-dependent token in the digest. It is
+ * pure plumbing (a human reads the +/− lines, never the index line), so removing it takes the
+ * last non-content token out of the digest at zero human-facing cost: the digest becomes a
+ * pure function of (pre, post, name), full stop. (Casey reproduced NO divergence from it on
+ * current SHA-1 git — this is the tidy completion of the guarantee, not a reproduced gap; the
+ * residual TRUST BASE below it, the git binary's own format, is named in the design-doc.)
+ */
+function canonicalizeDiffHeader(unified: string, delta: AuthoredDelta): string {
+    const name = delta.name;  // legible + deterministic (already qualifies the artefact)
+    return unified
+        .replace(/^diff --git a\/pre b\/post$/m, () => `diff --git a/${name} b/${name}`)
+        .replace(/^index [0-9a-f]+\.\.[0-9a-f]+( [0-7]+)?\n/m, '')  // Casey's belt — drop the algorithm-derived plumbing line
+        .replace(/^--- a\/pre$/m, () => `--- a/${name}`)
+        .replace(/^\+\+\+ b\/post$/m, () => `+++ b/${name}`)
+        .replace(/^Binary files a\/pre and b\/post differ$/m, () => `Binary files a/${name} and b/${name} differ`);
+}
+
+/**
  * Render one artefact's semantic diff. THE FINDINGS COME FROM THE RAW BYTES, never git's
  * rendering (finding A, architectural — Tenshi P5): a safeguard that reads the rendering
  * inherits the rendering's blind spots (git binary-mode emits 0 lines on a NUL-poisoned file,
@@ -342,12 +370,56 @@ export function renderSemanticDiff(delta: AuthoredDelta): RenderedDiff {
         fs.writeFileSync(path.join(tmp, 'pre'), pre);
         fs.writeFileSync(path.join(tmp, 'post'), post);
         try {
-            execFileSync('git', ['diff', '--no-index', '--unified=3', '--', path.join(tmp, 'pre'), path.join(tmp, 'post')],
-                { stdio: ['ignore', 'pipe', 'pipe'] });
+            // RENDER-ENVIRONMENT DETERMINISM (Tenshi's E2E finding mrngirjr; the CLASS-fix,
+            // Casey mrnkijz5 + Tenshi mrnkq5qh). The rendered document's sha256 IS the ceremony
+            // digest; if it embeds anything the render ENVIRONMENT supplies, the consent record
+            // cannot be RECONSTRUCTED across boxes (re-rendering from the DEC-069 pre-copies on
+            // Mike's differently-configured machine, to answer "what exactly did I approve?",
+            // would yield a different fingerprint than the ledger holds — evidence law's
+            // self-authenticating-record principle: a record carries its own proof, not the
+            // venue's). Two environment vectors, both closed here:
+            //   (1) the random mkdtemp path — closed BY CONSTRUCTION by running git from INSIDE
+            //       the temp dir with RELATIVE paths, so the --no-index header is `a/pre b/post`,
+            //       never the absolute path;
+            //   (2) ambient git config (`diff.noprefix` emits bare `pre`/`post` and defeats the
+            //       canonicaliser; `diff.external` replaces the diff with arbitrary command
+            //       stdout) — closed by a HERMETIC git env. Tenshi's Trusting-Trust invariant
+            //       demands it: a trust artefact keys only on code under the tag signature or
+            //       off-box operator data, NEVER on unsigned data the environment supplies
+            //       (Casey's Henry VIII question — who writes what this reads? — ambient
+            //       ~/.gitconfig, denied here). GIT_CONFIG_GLOBAL/SYSTEM=/dev/null + NOSYSTEM=1
+            //       override any hostile value in process.env (explicit keys after the spread
+            //       win).
+            //   (3) process LOCALE (Jim mrnlk3tv, confirmed Tenshi mrnlpsbx). git's `Binary
+            //       files … differ` message is its ONE translatable line; on a non-English box
+            //       (Mike's German one) git emits it translated, the English-anchored
+            //       `gitWentBinary` regex (:~/Binary files .* differ/) MISSES → gitWentBinary
+            //       stays false → the translated line rides into `unified` → into the digest.
+            //       (Security detection HOLDS — controlOrNonText is also set by the raw-byte
+            //       CONTROL scan, byte-based and locale-proof — so this is a reconstructibility
+            //       break, not a detection break.) Closed by forcing the C locale: LC_ALL/LANG=C
+            //       + LANGUAGE='' (gettext consults LANGUAGE only when the locale is NOT C, so
+            //       LC_ALL=C neutralises it — cleared too, to deny the whole locale surface
+            //       rather than lean on that precedence subtlety).
+            // With path, config AND locale denied and the `index <sha1>..<sha1>`/`100644` lines
+            // content-derived, the header is a pure function of content. Don't enumerate which
+            // env keys perturb it — deny the whole ENVIRONMENT surface (path + config + locale)
+            // its influence (Jim's "shape, not instance", fully realised across three doors).
+            execFileSync('git', ['diff', '--no-index', '--unified=3', '--', 'pre', 'post'],
+                { cwd: tmp, stdio: ['ignore', 'pipe', 'pipe'],
+                  env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
+                         LC_ALL: 'C', LANG: 'C', LANGUAGE: '' } });
         } catch (e) {
             unified = String((e as { stdout?: Buffer }).stdout ?? '');  // git exits 1 when files differ — that IS the diff
         }
     } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+    // Canonical header (Jim's fold, mrnk7qh3): reduce the git tokens `pre`/`post` to the
+    // artefact's own name — the guarantee is the SHAPE (a render-environment-independent
+    // canonical header), not a one-off strip of two paths. Belt to the cwd-relative brace
+    // above: even were git to emit an unexpected token, the rendered doc carries only the
+    // artefact name. Replacement via a FUNCTION so a `$` in a filename can't be read as a
+    // backreference. The reconstructibility test pins the whole guarantee.
+    unified = canonicalizeDiffHeader(unified, delta);
     if (/^Binary files .* differ$/m.test(unified) || (unified === '' && pre !== post)) gitWentBinary = true;
 
     // FINDINGS — from the raw content, binary-mode-proof.

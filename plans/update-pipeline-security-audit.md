@@ -63,21 +63,23 @@
 
 | ID | Severity | Status | Phase | Title |
 |----|----------|--------|-------|-------|
-| SEC-01 | CRITICAL | IN-PROGRESS | P3 (design) | Unauthenticated update channel = remote code execution — RULED: Fork 1(a) + 4 riders (DEC-102) |
-| SEC-02 | CRITICAL | IN-PROGRESS | P3 + DEC-083 | Signing key server-resident / update re-signs — RULED: Fork 2(c′) + 2 conditions (DEC-102) |
-| SEC-10 | HIGH | OPEN | P2 (built) → SEC-06 batch | Format-version downgrade axis is ungated entirely (twin of Jim's schema catch, on the authored-file surface) |
-| SEC-03 | HIGH | OPEN | P2 (built) | Migration verify proves shape/count, not content or confidentiality |
-| SEC-04 | HIGH | OPEN | P2 (built) → P3 | `--force` bypasses the quiesce gate; keep the automated path away from it |
-| SEC-05 | HIGH | OPEN | P1 tail / P4 | Three parallel rosters; `PERSONA_CONFIG` still ships in the engine |
-| SEC-06 | MEDIUM | OPEN | P2 (built) | `han-migrate` hardcodes port 3848 / "jim" — a fresh gremlin in pipeline code |
-| SEC-07 | MEDIUM | OPEN | P1 / P3 | Config `defaults ∪ values` = behaviour injection via new-field defaults |
-| SEC-08 | MEDIUM | OPEN | P2/P3 | Rollback re-signs, spans four non-atomic steps; pre-copy perms + unbounded archive |
-| SEC-09 | MEDIUM | OPEN | gates 7–9 | `paths.ts` must fail-closed when `HAN_HOME` is unset on a multi-garden box |
+| SEC-01 | CRITICAL | **CLOSED** | P3d/P5 | Unauthenticated update channel = RCE — trust root live (signed tags + pinned root), DEC-102 |
+| SEC-02 | CRITICAL | **CLOSED** | P3c + DEC-083 | Signing key / update re-signs — the Ring-2 ceremony (human ring over an unhideable diff) |
+| SEC-03 | HIGH | **ADDRESSED** | P2 + P3c + 2b/P5 | verify proves content too — raw-byte scan + atomic swap + rendered-set==swapped-set + umask copies |
+| SEC-04 | HIGH | **CLOSED** | P2 + P3 | han-update has NO --force by design; the migrate wall is structural, not --force-bypassable |
+| SEC-05 | HIGH | **OPEN (named)** | P4 / starter-extraction | `PERSONA_CONFIG` still engine-compiled — a HANDOVER-blocker for Mike's fork, NOT the update mechanism |
+| SEC-06 | MEDIUM | **CLOSED** | P2 | `han-migrate` manifest-derives owner+port — no hardcoded 3848/"jim" |
+| SEC-07 | MEDIUM | **OPEN (named)** | P4 (config) | `defaults ∪ values` new-field injection — a P4 config item; not re-verified at close, confirm before P4 |
+| SEC-08 | MEDIUM | **ADDRESSED** | P2 + 2b | rollback re-signs last+idempotent; umask-0600 pre-copies; archive is a written disposal schedule |
+| SEC-09 | MEDIUM | **OPEN (named)** | gates 7–9 (multi-garden) | `paths.ts` HAN_HOME default — only bites on a shared box; the multi-garden gate, not today |
+| SEC-10 | HIGH | **CLOSED** | P2 | Format-version downgrade guard live + --force-proof |
+| SEC-11 | MEDIUM | **MITIGATED** | P2/P3 | Deploy DB-holder restart — fd-guard converts silent split-brain → loud abort; fuser-zero belt |
+| SEC-12 | MEDIUM | **MITIGATED** | P3b/c/d | No freshness/anti-withholding — three-layer; enforcement behind default-off flag; full cure = lattice 2nd channel |
 
 ---
 
 ## SEC-01 — Unauthenticated update channel = remote code execution
-`CRITICAL` · `OPEN` · phase P3 (design) · Investigated 2026-07-08 · Rectified —
+`CRITICAL` · `CLOSED` · phase P3d/P5 (in the metal) · Investigated 2026-07-08 · Rectified 2026-07-17 (P3d/P5 close) — trust root live (SEC-01, signed tags + pinned root); DEC-102
 
 **Description.** `han update` (P3, designed) does `git checkout <tag>` → `npm ci`
 (if the lockfile moved) → run the tag's migration `up()` code → regenerate +
@@ -116,7 +118,7 @@ into P3 before the first real tag reaches Mike's mirror (P5 should include a
 poisoned-tag rejection test alongside the poisoned-migration one).
 
 ## SEC-02 — Identity-signing key is server-resident; the update re-signs with it
-`CRITICAL` · `OPEN` · phase P3 + DEC-083 · Investigated 2026-07-08 · Rectified —
+`CRITICAL` · `CLOSED` · phase P3c + DEC-083 · Investigated 2026-07-08 · Rectified 2026-07-17 (P3d/P5 close) — the Ring-2 ceremony: no tag re-signs identity without a human ring over a diff no byte can hide in
 
 **Description.** The DEC-083 integrity gate halts a wake if a mind's identity files
 don't verify against the garden pubkey — the tamper-halt. But the signing **private
@@ -152,7 +154,7 @@ with a pre/post `identitySection` diff to the integrity-failure receipt stream s
 drift is auditable after the fact.
 
 ## SEC-03 — Migration verify proves shape/count, not content or confidentiality
-`HIGH` · `OPEN` · phase P2 (built) · Investigated 2026-07-08 · Rectified —
+`HIGH` · `ADDRESSED` · phase P2 + P3c + 2b/P5 · Investigated 2026-07-08 · Rectified 2026-07-17 (P3d/P5 close) — ceremony raw-byte scan (content, not just count) + 2b atomic swap + P5 rendered-set==swapped-set; umask-0600 copies for confidentiality
 
 **Description.** The migration runner's `integritySweep` (`han-migrate.ts:91-117`)
 checks `PRAGMA integrity_check` (DB structural validity), a **non-destructive count
@@ -181,7 +183,7 @@ reviewed, signed, never third-party. For defence-in-depth, consider running `up(
 with no network egress (a migration has no honest reason to phone out).
 
 ## SEC-04 — `--force` bypasses the quiesce gate
-`HIGH` · `OPEN` · phase P2 (built) → P3 · Investigated 2026-07-08 · Rectified —
+`HIGH` · `CLOSED` · phase P2 + P3 · Investigated 2026-07-08 · Rectified 2026-07-17 (P3d/P5 close) — han-update has NO --force by design (SEC-04); the migrate WALL is structural, not --force-bypassable
 
 **Description.** `han-migrate --force` (`han-migrate.ts:25,50`) overrides the
 quiesce gate — the checks that the supervisor is paused, wm-sensor is stopped, and
@@ -202,7 +204,7 @@ a separate explicit env acknowledgement, so it can only ever be a deliberate man
 act, never something the pipeline can inherit.
 
 ## SEC-05 — Three parallel rosters; `PERSONA_CONFIG` still ships in the engine
-`HIGH` · `OPEN` · phase P1 tail / P4 · Investigated 2026-07-08 · Rectified —
+`HIGH` · `OPEN (named)` · phase P4 / Phase-B starter-extraction · Investigated 2026-07-08 · Rectified — · NAMED-OPEN 2026-07-17 (Tenshi mrox9whl): `PERSONA_CONFIG` still engine-compiled; the cure is the starter extraction shipping it empty. A HANDOVER-blocker for Mike's first fork, NOT a hole in the update mechanism — off the update trust surface
 
 **Description.** The roster-consumer census (22 sites, thread mqvs3r6l-dk71d2)
 found the garden holds **three** registers of "who exists": the manifest (P1's
@@ -234,7 +236,7 @@ census's standing 4th-agent invariant test so this can't re-drift on Mike's thir
 mind. Re-run the census as the acceptance check when the collapse lands.
 
 ## SEC-06 — `han-migrate` hardcodes port 3848 / "jim" — a gremlin in new pipeline code
-`MEDIUM` · `OPEN` · phase P2 (built) · Investigated 2026-07-08 · Rectified —
+`MEDIUM` · `CLOSED` · phase P2 · Investigated 2026-07-08 · Rectified 2026-07-17 (P3d/P5 close) — SEC-06 manifest-derive: han-migrate resolves supervisor owner+port from the manifest, no hardcoded 3848/"jim" (S219)
 
 **Description.** The quiesce gate curls `https://localhost:3848/api/supervisor/status`
 and names *"jim's server"* / *"pause at the owner: POST 3848"* (`han-migrate.ts:40-42`)
@@ -256,7 +258,7 @@ real cause.
 genesis live-prove, since the runner is still held.
 
 ## SEC-07 — Config `defaults ∪ values` = behaviour injection via new-field defaults
-`MEDIUM` · `OPEN` · phase P1 / P3 · Investigated 2026-07-08 · Rectified —
+`MEDIUM` · `OPEN (named)` · phase P4 (config surface) · Investigated 2026-07-08 · Rectified — · NAMED-OPEN 2026-07-17 (Tenshi mrox9whl): `defaults ∪ values` new-field behaviour injection; a P4 config-surface item, NOT re-verified at the 2026-07-17 close — confirm before P4 ratification. Off the update trust surface
 
 **Description.** The manifest loader unions engine schema-defaults with the garden's
 values (P1: *"new fields get schema defaults; his values are preserved; no merge tool
@@ -278,7 +280,7 @@ schema-diff to the operator pre-apply so a new default is an eyes-open choice, n
 silent inheritance.
 
 ## SEC-08 — Rollback re-signs, is non-atomic across four steps; pre-copy perms + unbounded archive
-`MEDIUM` · `OPEN` · phase P2/P3 · Investigated 2026-07-08 · Rectified —
+`MEDIUM` · `ADDRESSED` · phase P2 + 2b · Investigated 2026-07-08 · Rectified 2026-07-17 (P3d/P5 close) — rollback re-signs LAST + idempotent; umask-0600 pre-copies (perms closed); the unbounded archive is now a WRITTEN DISPOSAL SCHEDULE (2b, Casey's form) — pruning is a future DEC by the named authority, never custodial discretion
 
 **Description.** Rollback (P3) = checkout prior tag + restore the DB pre-copy +
 regenerate + re-sign + restart — four steps that aren't transactional together. The
@@ -296,19 +298,34 @@ memory. The archive-never-delete rule silts the disk indefinitely — a slow DoS
 garden that updates often.
 
 **How to rectify.** Order the rollback so **identity re-sign is last and idempotent**
-(state restored and consistent before any signing); explicitly `chmod 600` pre-copies
-and archives at creation; bound archive retention by age/size (archive-then-prune the
-oldest under a ceiling — DEC-069-clean because a pre-copy of a *superseded* shape is
-not identity-memory, so a bounded cap is legitimate; document the choice, don't
-discover it).
+(state restored and consistent before any signing); **set `umask(0o077)` before the
+`backup()`** so every copy (`.migrating-*` / `.pre-v*` / archived) is `0600` *from
+birth* — a `chmod`-after leaves a TOCTOU window where the full memory copy is
+world-readable during the (minutes-long) backup write, and the umask also covers the
+failure path where a copy is legitimately retained for forensics; unlink the working
+copy only on a *successful* dry-run; bound archive retention by age **and** count
+(archive-then-prune the oldest under a ceiling — DEC-069-clean because a pre-copy of a
+*superseded* shape is not identity-memory, so a bounded cap is legitimate).
+*(2026-07-08: Jim's P2 Fold-2 is this finding's confidentiality remediation and gates
+the genesis live-prove — its first act is a dry-run that copies every mind's memory.
+See SEC-09 for the source-mode connection: hardening the copy is half a fix while
+`gradient.db` itself is 644.)*
 
 ## SEC-09 — `paths.ts` must fail-closed when `HAN_HOME` is unset on a multi-garden box
-`MEDIUM` · `OPEN` · phase gates 7–9 (planned) · Investigated 2026-07-08 · Rectified —
+`MEDIUM` · `OPEN (named)` · phase gates 7–9 (multi-garden) · Investigated 2026-07-08 · Rectified — · NAMED-OPEN 2026-07-17 (Tenshi mrox9whl): `paths.ts` still defaults HAN_HOME→~/.han (paths.ts:20); only bites when two gardens share a box — the multi-garden gate, not today's single-garden deployment. Off the update trust surface
 
 **Description.** Mike's garden runs on the same box as ours, under his account
 (gates 7 separate roots / 8 port authority #109 / 9 per-seat OAuth #18). The single
 resolver `paths.ts` defaults `HAN_HOME → ~/.han`. If **any** surface launches without
 `HAN_HOME` set, it resolves to the *default* garden's root.
+
+**Measured mode posture (2026-07-08).** `~/.han` is **775** (group+other traverse) and
+`gradient.db` itself is **644** (group+other read) — so a mind's live sovereign memory
+is *already* cross-user readable. On the multi-garden box this pipeline targets, that is
+a live cross-garden disclosure independent of the migration copies. So the `0600`
+hardening (SEC-08/Jim's Fold-2) must extend beyond the transient copies to the **whole
+per-garden memory surface** (`gradient.db` + the memory dir at `0700`) when this gate is
+built — 600-ing the copy while the source sits 644 beside it is only acute-instance relief.
 
 **How found.** `paths.ts` resolver model (P0) + the multi-garden isolation gates in
 Leo's remaining-work list (thread mqz3wev0 #25).
@@ -328,7 +345,7 @@ garden with a deliberately-unset `HAN_HOME` and confirming it refuses rather tha
 adopts the default garden.
 
 ## SEC-10 — Format-version downgrade axis is ungated entirely
-`HIGH` · `OPEN` · phase P2 (built) → SEC-06/downgrade batch · Investigated 2026-07-08 · Rectified —
+`HIGH` · `CLOSED` · phase P2 · Investigated 2026-07-08 · Rectified 2026-07-17 (P3d/P5 close) — format-version downgrade guard live (state-meta.json per-key monotonicity) and --force-proof; twin of the schema downgrade guard
 
 **Description.** Jim's downgrade catch (thread) closes the `schema_version` axis in the
 migration runner (`han-migrate.ts:122`: `current > EXPECTED` yields empty pending →
@@ -355,13 +372,98 @@ compat floor**: before parsing an authored file, confirm its format is one the e
 understands, rather than assuming the `absent = all v1` default forever — owed the moment
 any authored format first goes v2. Independent of downgrade; a silent-misparse guard.
 
+## SEC-12 — Update channel has no freshness / anti-withholding guarantee
+`MEDIUM` · `MITIGATED` · phase P3b/c/d · Investigated 2026-07-09 · Rectified 2026-07-17 (P3d/P5 close) — three-layer (F1 replay-backward guard from git state + --check staleness heuristic + lattice 2nd-channel cure); enforcement behind the default-OFF enforceFreshnessExpiry flag (live-disarmed, self-lockout guard). Full anti-withholding = the lattice 2nd channel, a later phase
+
+**Description.** The pinned root + downgrade guard stop forgery and replay-*downgrade* of tags,
+but not *withholding*: a mirror can serve a stale-but-genuinely-signed state forever, and the
+channel cannot know a newer release exists (the one attack a signature can't see — my P3-design
+review; Jim's residual). Cure (Jim, mrde0r8y, Darron's go): TUF-style **signed freshness**
+(`freshness.json` = latest/released/expires/prev, signed by the SAME garden-release key, verified
+against the SAME pinned root — SEC-01 architecture reused; chicken-and-egg closed again).
+Sign-at-ceremony (zero recurring burden); **verify-and-REPORT now** (advisory, no lockout);
+**hard-expiry behind `update.enforceFreshnessExpiry` default-off** — the flag IS the reminder
+(structural memory read every boot, not a mental note). `--check` is the standing freeze detector.
+
+**How found.** P3-design review (Tenshi) → deferred residual → Darron's governance catch ("don't
+defer to a mechanism that doesn't exist yet") → Jim's structural cure.
+
+**How to rectify (landed vs open).** Detection landed in the design; enforcement flagged-off.
+**Two open sub-residuals (Tenshi, mre9rik6):**
+- **F1 — the freshness artefact needs its own downgrade guard (closes replay-BACKWARD only).** A
+  mirror can replay an older-but-signed, not-yet-expired `freshness.json` to hide the newest release
+  within the expiry window (passes signature + expiry). Cure = mirror the tag downgrade guard: refuse
+  a freshness whose `latest_version` is below the highest-ever-seen. **Bootstrap-floor (Jim's
+  completion, TOFU hole): initialise the high-water to `max(ledger_high_water, currently-deployed-
+  version)`** — a garden can't legitimately be told the newest release is older than the version it
+  runs, so the deployed version is a free monotonic floor. **Read that floor from the git state (the
+  checked-out tag), NOT the local ledger** (a box-compromise can edit the ledger and poison the
+  floor; the git tag is the harder witness). **Scope honesty**: F1 closes replay-*backward*, NOT
+  withholding-*in-place* (a mirror serving genuine N while N+1 exists, unexpired, ≥N) — see the
+  three-layer shape below. Do not defer past the flag arming.
+- **F1b — withholding-in-place is irreducible to a single pull channel.** The git-tag "second
+  witness" is a *consistency* check (fires when freshness/tags disagree), not a *liveness* one — a
+  consistent withholder freezes both in lockstep and no mismatch shows; the off-box snapshot chain is
+  tamper-evidence for *local* files, not upstream-release awareness. **Three-layer SEC-12 shape**:
+  (1) F1 (+git-state floor) closes replay-backward; (2) `--check`'s **staleness heuristic** ("no new
+  signed release in N days vs the known cadence") is the interim, mirror-independent withholding-in-
+  place detector — it flags the *silence*, which a frozen mirror can't fake; (3) the lattice's signed
+  release announcements over a second channel (or operator out-of-band awareness) is the eventual
+  cure. Standing residual until (3).
+- **F1c — rollback and freshness don't share "this version was REJECTED" (P3b review, mreb3qqc).**
+  After a legitimate `--rollback` of a bad `vN`, git-deployed drops to `vN-1` but the freshness
+  high-water stays `vN` (highest seen, correct). So `--check` reports "behind: vN available", the
+  freshness verdict accepts `vN` (≥ high-water), and nothing refuses a **re-apply of the
+  known-bad vN** — the tool advises, and would allow, walking back into the release that was just
+  rolled back. Two correct mechanisms (rollback; the replay-backward guard) not sharing one fact.
+  **Fix**: rollback records the abandoned tag in a ledger **quarantine set**; `--check` reports
+  "vN available BUT rolled back on <date>"; the apply path refuses a quarantined tag without an
+  explicit `--force-quarantined <tag>`. Route to P3d (ledger state) + a P5 case.
+- **F1d — keep the fatality split STRUCTURAL (P3b review + Jim mreaz0n3).** P3b correctly makes
+  `BAD_SIG`/`REPLAYED` hard-fatal (a detected attack, not `--force`-bypassable) and `EXPIRED`
+  flag-gated advisory (the F2 availability signal). Keep it a **typed freshness-outcome** (not a
+  boolean a "consolidation" can soften), and prove it with a P5 assertion: **a REPLAYED freshness
+  aborts with `enforceFreshnessExpiry: false`** — the flag governs expiry only, never replay.
+  Plus: freshness-signing must be **structurally mandatory in the release ceremony** (a release
+  that forgets = silent loss of anti-withholding); belongs in `docs/release-key-ceremony.md` (P3c).
+- **F2 — `expires_at` vs an irregular human release cadence is a self-lockout tradeoff.** Signed at
+  ceremony = a guess about the next release date. Too short → a healthy garden's freshness expires →
+  with the flag ON, updates abort on a healthy garden (self-inflicted freeze/DoS). Too long → longer
+  withholding window (feeds F1). `advisory-first, flag-default-off` correctly dodges this now; when
+  armed at the lattice, `freshnessMaxAgeDays` must be generous vs the real cadence — a
+  security-vs-availability calibration, not a free win.
+
+## SEC-11 — Deploy tooling that restarts DB-holders is part of the swap threat surface
+`MEDIUM` · `MITIGATED` · phase P2/P3 · Investigated 2026-07-08 (S219 split-brain incident) · Rectified 2026-07-08 (partial)
+
+**Description.** A post-commit hook / restart tooling bouncing DB-holding services can interleave
+with a migration swap → the four servers hold the old inode past the swap → two-sided DB divergence
+(the S219 split-brain, reconciled to zero loss). The bite compiled into guards: the fd-guard converts
+the interleave from silent split-brain to **loud abort**, checkpoint-truncate, sidecar re-pair.
+
+**How to rectify (open half).** The **P3 step-3 `fuser`-zero-on-the-live-DB** is the standing belt
+and the real safety: it checks the kernel's actual holders independent of the service enumerator, so
+a holder the enumerator under-counts still fails fuser-zero and aborts. **Invariant to write down
+(A1, mre9rik6):** the enumerator is *convenience*; `fuser`-zero is the *safety* — a future
+optimisation that trusts the enumerated set and drops the fuser check silently re-opens SEC-11. P5:
+assert enumerator-misses-a-holder → fuser still aborts. Also: the MNT-036 self-heal re-materialises
+hooks at update-time but NOT at #98 admission-time (the birth-night window) — re-run the installer on
+admit, or the next resident's birth re-lives the hook-miss (rides MNT-034-structural).
+
 ---
 
-<!-- End of findings as of 2026-07-08. Repair log continues below as findings close. -->
+<!-- End of findings as of 2026-07-10. Repair log continues below as findings close. -->
 
 ## Repair log
 <!-- Append one line per status change, newest first: `YYYY-MM-DDTHH:MMZ — SEC-NN → STATUS — note (commit/thread ref)`. The per-finding block above is the source of truth; this is the quick-scan timeline. -->
 
+- **2026-07-17 — PIPELINE CLOSED as a PHASE (Tenshi final verdict mrox9whl; Casey trusted-base doctrine mrnmn06a; Jim's audit chain).** The update trust surface is WHOLE and verified across four seats: SEC-01/-02/-04/-06/-10 **CLOSED**, SEC-03/-08 **ADDRESSED**, SEC-11/-12 **MITIGATED**. P5 digest-determinism CLOSED — three render-environment doors shut by construction (path=cwd-relative git; config=hermetic GIT_CONFIG; locale=LC_ALL/LANG=C, LANGUAGE='') + Casey's belt (drop the algorithm-derived `index` line) → the ceremony digest is a pure function of (pre, post, name); the consent record self-authenticates down to a **named, minimal, stable trusted base** (git binary → Node/V8/OS), with the in-process diff logged as future-hardening. Suites: ring2 50/50, state-swap 60/60, E2E 9/9, tsc 11-baseline. **Three residuals carried explicitly NAMED-OPEN, each off the update trust surface and scoped to a later phase:** SEC-05 (PERSONA_CONFIG engine-compiled → Phase-B starter-extraction, Mike-handover-blocker), SEC-07 (defaults∪values new-field injection → P4 config, not re-verified at close), SEC-09 (paths.ts HAN_HOME default → multi-garden gate 7–9). A real close, not a tidy one.
+- 2026-07-16/17 — P3d Unit 2b LANDED (f61d940 atomic DB+state swap + boot gate; 221a652 boot-gate hardening) → P5 enumeration-seam fix (a7a4e30, rendered-set==swapped-set) → P5 digest-determinism (held→landing) closing the last trust-surface hole. Four-hands membrane on the determinism arc: Tenshi's E2E found the digest non-determinism, Casey found the config class, Jim found the locale door, Leo built each cure with a teethed test.
+- 2026-07-11/12 — P3c ceremony hardening (renderer control-byte/homoglyph/reorder/binary-mode proof) + P3d quarantine set + state-copy foundation landed (Leo build / Jim+Tenshi audit).
 - 2026-07-08 — audit opened; SEC-01…SEC-09 filed OPEN (Tenshi). Companion thread mrb8ap4y-e9cdtv.
 - 2026-07-08 — SEC-01 → IN-PROGRESS (ruled Fork 1(a) + rotation-continuity / out-of-band-recovery / verify→exact-commit / downgrade-rejection riders; DEC pending, Leo). SEC-02 → IN-PROGRESS (ruled Fork 2(c′): authorship-split-abort-by-default + `touchesState` ceremony; conditions: SEC-01-sequenced-first + semantic-diff-not-bytes; DEC pending). Build law: nothing from a tag goes live before signature + ceremony pass (copies-first; swap is the last act), and the ceremony lives inside the quiesce window.
 - 2026-07-08 — SEC-10 filed OPEN (Tenshi): format-version downgrade axis ungated — twin of Jim's schema catch on the authored-file surface.
+- 2026-07-10 — SEC-11 filed MITIGATED (S219 split-brain → fd-guard + fuser-zero belt; A1 invariant + admission-time re-materialise open) and SEC-12 filed IN-PROGRESS (signed-freshness detection landed in design, enforcement flag-off; F1 freshness-downgrade-guard + F2 expiry-self-lockout open) — craft report mre9rik6. P3a (enumerator + drain + MNT-036 cure) GREEN, byte-true, fail-closed.
+- 2026-07-10 — SEC-12 F1 completed (Jim mrea6bjn / Tenshi mrea9qc0): bootstrap-floor = max(ledger-high-water, deployed-version) read from git state not ledger; F1 closes replay-BACKWARD only; added F1b (withholding-in-place irreducible to single channel; three-layer shape: F1 backward / --check staleness interim / lattice 2nd-channel cure). P3a LAND SEALED; hook-comment jim+leo literal = census-class one-line fix.
+- 2026-07-10 — P3b GREEN (Leo mreasirf / Jim mreaz0n3); Tenshi craft mreb3qqc: SEC-12 F1c (rollback↔freshness don't share 'version rejected' → re-nudge/re-apply of known-bad; quarantine set) + F1d (keep fatality split typed/structural, P5 replay-aborts-flag-off; freshness-signing structurally mandatory in ceremony) filed. Also: byte-fidelity standing test ('the diff you sign is bytes', Leo's gitRaw fix), --scratch prod belt + no-env, bounded health-retry→rollback.
+- 2026-07-08 — DEC-102 recorded (Leo, 12999d3) — SEC-01/02 trust root Settled, Tenshi's invariant verbatim. Held-runner folds built + audited 15/15 (Jim, mrbko1ju): SEC-06 manifest-derive, schema + SEC-10 format downgrade guards live and `--force`-proof (positioned outside `quiesceGate` — closes the SEC-04×downgrade cross-vuln). SEC-08 remediation (umask-0600 copies + dry-run cleanup = Jim's Fold-2) is the last fold gating the genesis live-prove; refined to `umask` (not chmod-after, TOCTOU) + the SEC-09 source-mode connection (`~/.han` 775 / `gradient.db` 644 → 0600 must cover the whole per-garden memory surface).

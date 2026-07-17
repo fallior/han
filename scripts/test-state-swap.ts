@@ -456,6 +456,24 @@ const stageIt = (w: ReturnType<typeof buildWorld>): string => {
         check('P5 (the invariant): every CHANGED file in the swap move-set is in the rendered/approved set', changed.every((rel) => renderedNames.has(rel)));
         rmSync(w.S, { recursive: true, force: true });
     }
+    // (i) ADDITION-1 (Casey/Jim mrnfodkb/mrnfr2zs): the evasion-inheritance PINNED. Closing the
+    // seam makes a poisoned non-identity file APPEAR in the delta — but appearing isn't VISIBLE.
+    // This drives a NUL-poisoned working-memory-full.md through the FULL merged render path and
+    // asserts the renderer's raw-byte scan + non-text banner fire on the NON-IDENTITY delta, so
+    // the landed hardening's inheritance can't be silently severed by a future "summarise large
+    // WM before render" pass (all other suites would stay green). The one-layer-down sibling of
+    // Jim fold-3. NUL written via the   escape (never a literal byte — MNT-026 house rule).
+    {
+        const w = buildWorld("fs.writeFileSync(path.join(ctx.stateDir,'memory/testa/working-memory-full.md'),'# WM\\nclean\\u0000NUL-poisoned line\\n');");
+        writeFileSync(path.join(w.home, 'memory', 'testa', 'working-memory-full.md'), '# WM\nclean line\n');
+        const staging = stageIt(w);
+        const { verdict, nonIdentity } = mergedVerdict(w, staging);
+        check('P5 addition-1: a NUL-poisoned NON-identity file escalates to CEREMONY', verdict.kind === 'ceremony' && nonIdentity.some((d) => d.name === 'memory/testa/working-memory-full.md'));
+        const doc = renderCeremonyDocument((verdict as any).deltas, [{ migrationId: 1, description: 'fixture', touchesState: ['memory/testa'], stateChangeKind: 'content-preserving' }], (verdict as any).redFlag);
+        check('P5 addition-1: the NUL earns a NAMED finding through the merged render (hardening inherited)', /CONTROL|non-text|NON-TEXT/i.test(doc.rendered));
+        check('P5 addition-1: the 🔴 non-text banner fires on the non-identity delta (no blind 0/0)', /🔴 NON-TEXT \/ CONTROL/.test(doc.rendered));
+        rmSync(w.S, { recursive: true, force: true });
+    }
 }
 
 console.log(`\nstate-swap (Unit 2b): ${pass} passed, ${failn} failed`);

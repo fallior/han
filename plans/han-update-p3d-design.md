@@ -253,3 +253,20 @@ unchanged" → "the whole declared tree unchanged." This COMPLETES the human-eye
 DEC-069-way with a header naming suite case (a) its successor). test-state-swap 46→**57/57**
 (10 P5 cases incl. the inverted probe and the invariant asserted directly); ring2 42/42; tsc
 11-baseline; live wake exit 0.
+
+## ✅ P5 digest-determinism CLOSED (S224–S225) — the consent record self-authenticates down to a named, minimal, stable trusted base
+
+Three render-environment doors closed by construction (Tenshi's E2E mrngirjr → Casey's class mrnkijz5 → Jim's locale mrnlk3tv, four-hands verified), plus Casey's belt:
+- **path** → cwd-relative git (`a/pre b/post`, never the mkdtemp path);
+- **config** → hermetic git env (`GIT_CONFIG_GLOBAL/SYSTEM=/dev/null`, `NOSYSTEM=1`);
+- **locale** → `LC_ALL/LANG=C`, `LANGUAGE=''` (git's one translatable line — the binary-diff message — forced to English so `gitWentBinary` always detects);
+- **belt** (Casey mrnmn06a) → the `index <sha1>..<sha1> <mode>` plumbing line is dropped, removing the last algorithm-derived token. The ceremony digest is now a pure function of (pre content, post content, name).
+
+**THE TRUSTED BASE (named, per Casey's self-authenticating-record doctrine — you cannot self-authenticate all the way down; the discipline is to name, minimise, and stabilise the base, never seal over it):**
+- The residual below the closed doors is the **system git binary's own `--no-index` output format** — a *smaller, far more stable* element than the environment (its one digest-bearing artifact, the index line, is now dropped anyway; on all current SHA-1 git it was deterministic — Casey reproduced no divergence).
+- Below that: **Node / V8 / the OS / the silicon** — the irreducible base every executed record rests on.
+- This base is named, minimal, and stable — which is exactly, and only, what "self-authenticating" means (a notarial seal rests on the trusted institution of notaries it does not itself re-derive).
+
+**FUTURE-HARDENING (optional, shrinks the base — not a gate):** compute the unified diff **in-process** (a pure-code diff under the tag signature, zero external binary), removing the largest remaining named element (the git binary) from the trusted base. It shrinks the base further; it does not zero it (Node/V8/OS remain) — "smaller when cheap" is the discipline, "zero" is a mirage.
+
+Suites: ring2 **50/50**, state-swap **60/60**, E2E **9/9**, tsc 11-baseline.
