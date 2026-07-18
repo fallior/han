@@ -804,6 +804,13 @@ export const PROFILES: Record<string, PromptProfile> = {
      * via loadFullMemory('jim') with identical components. Same Jim
      * at every seat. Same Leo at every seat.
      */
+    /**
+     * ⚠️ DEPRECATED — DEAD PER-AGENT KEYS (S226 scour, N6; delete-PR journalled as MNT-057).
+     * The live human path is the ONE shared 'human-response-txn' (MNT-037). These two
+     * per-agent CLI-variant profiles have NO production callers (tests only). Do NOT
+     * copy this per-agent-key shape for a new agent — that is the exact hand-add
+     * pattern MNT-037 retired. Physical deletion rides the test-rewrite PR.
+     */
     'jim-human-response': {
         name: 'jim-human-response',
         systemPromptOpening: JIM_HUMAN_RESPONSE_SYSTEM_PROMPT,
@@ -822,6 +829,7 @@ export const PROFILES: Record<string, PromptProfile> = {
         // asymmetry needed at the controller layer.
         pairedMemoryOutput: { enabled: true, mechanism: 'structured', captureInput: true },
     },
+    /** ⚠️ DEPRECATED — see the jim-human-response banner above (S226/N6, MNT-057). */
     'leo-human-response': {
         name: 'leo-human-response',
         systemPromptOpening: LEO_HUMAN_RESPONSE_SYSTEM_PROMPT,

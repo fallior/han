@@ -18,4 +18,7 @@ mkdir -p "$SIGNALS_DIR"
 # R2 P-R2.2a (Fork A): resolve via sleeve-state (sleeved surface), fallback $AGENT_SURFACE (inert today).
 _surface="$(bash "$(dirname "${BASH_SOURCE[0]}")/sleeve-surface.sh" 2>/dev/null)"; _surface="${_surface:-${AGENT_SURFACE:-session}}"
 [ "$_surface" = "session" ] || exit 0
-date -Iseconds > "${SIGNALS_DIR}/cli-busy-${AGENT_SLUG:-leo}"
+# Guard-and-skip (S226 scour, DEC-103 CBA): a slug-less seat writes NOTHING rather than
+# defaulting to leo's signals (cross-agent corruption) or failing the turn (`:?`).
+[ -z "$AGENT_SLUG" ] && exit 0
+date -Iseconds > "${SIGNALS_DIR}/cli-busy-${AGENT_SLUG}"

@@ -20,11 +20,18 @@
 
 set -u
 
-# The canonical HAN service list. Update HAN-ECOSYSTEM-COMPLETE.md and this
-# list together — they are paired surfaces. New service → add here AND
-# in the doc's services table.
-# NOTE (S167): han-server is DELIBERATELY NOT in this list. The leo/jim API
-# servers (ports 3847/3848) are run by agent-server-watchdog.sh in tmux, NOT
+# The HAN service list DERIVES from the garden manifest at run time (S226 scour,
+# finding A — the MNT-036 cure applied to this script's hand-roster, matching its
+# sibling install-restart-hooks.sh). Never a hand-written roster copy: the old
+# HAN_SERVICES array silently skipped human-responder@tenshi/@casey after their
+# births, leaving them on stale code after every deploy.
+# ENABLEMENT GUARD: the manifest names the whole unit family, including units
+# that exist but are deliberately disabled (tenshi/casey heartbeats pend the
+# Ring-3a agnostic driver — MNT-001: leo-heartbeat.ts must not be re-slugged).
+# `systemctl restart` STARTS a stopped unit, so we restart only units that are
+# currently enabled or active; disabled units are listed as skipped, loudly.
+# NOTE (S167): han-server is DELIBERATELY NOT in this list. The agent API
+# servers (3847 leo / 3848 jim) are run by agent-server-watchdog.sh in tmux, NOT
 # systemd, and pick up fresh code via the post-commit hook's SIGTERM (the
 # watchdog relaunches them). The `han-server.service` systemd unit is a
 # DISABLED relic — `systemctl restart`-ing it starts a SECOND server that
@@ -32,13 +39,28 @@ set -u
 # ghost / S167 competing-server incident: 42 crash-restarts). NEVER add it
 # back here. To force-reload the agent-server without a commit, SIGTERM its
 # port listener (`ss -tlnp | grep :3847`) so the watchdog relaunches it.
-HAN_SERVICES=(
-    leo-heartbeat      # Leo's 20-min beats (work/sleep/dream/evening)
-    wm-sensor          # Working-memory file watcher → paired rotation → cascade enqueue
-    human-responder@jim   # Jim's conversation-thread responder (signal-driven)
-    human-responder@leo   # Leo's conversation-thread responder (signal-driven)
-    jemma              # Discord gateway / message dispatcher
-)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_EMIT="$SCRIPT_DIR/scripts/emit-garden-services.ts"
+mapfile -t ALL_UNITS < <(cd "$SCRIPT_DIR/src/server" && NODE_PATH="$PWD/node_modules" npx tsx "$_EMIT" units 2>/dev/null | sed 's/\.service$//')
+if [[ ${#ALL_UNITS[@]} -eq 0 ]]; then
+    echo "Error: manifest-derived unit list came back empty — refusing to run on a hollow roster (MNT-036 fail-closed)" >&2
+    exit 1
+fi
+HAN_SERVICES=()
+SKIPPED_DISABLED=()
+for _u in "${ALL_UNITS[@]}"; do
+    _en=$(systemctl --user is-enabled "${_u}.service" 2>/dev/null || true)
+    _ac=$(systemctl --user is-active "${_u}.service" 2>/dev/null || true)
+    if [[ "$_en" == "enabled" || "$_ac" == "active" ]]; then
+        HAN_SERVICES+=("$_u")
+    else
+        SKIPPED_DISABLED+=("$_u")
+    fi
+done
+echo "manifest-derived units: ${ALL_UNITS[*]}"
+if [[ ${#SKIPPED_DISABLED[@]} -gt 0 ]]; then
+    echo "SKIPPED (disabled — deliberate until their driver exists, see Ring-3a): ${SKIPPED_DISABLED[*]}"
+fi
 
 MODE="restart"
 for arg in "$@"; do

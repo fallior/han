@@ -28,6 +28,18 @@ const SESSIONS_DIR = path.join(HOME, '.claude', 'projects', hanRepo().replace(/\
 const dryRun = process.argv.includes('--dry-run');
 const specificSession = process.argv.find(a => !a.startsWith('-') && a !== process.argv[0] && a !== process.argv[1]);
 
+// S226 scour (N4): the agent label was hardwired 'session-leo' into both the read and the
+// write — any other agent's usage would be mislabelled as leo's. Slug now comes from
+// --agent=<slug> or AGENT_SLUG; fail-loud when absent (DEC-081 never-fallback — no
+// default-to-a-named-agent in a shared utility).
+const agentArg = process.argv.find(a => a.startsWith('--agent='))?.slice('--agent='.length);
+const AGENT_SLUG = agentArg || process.env.AGENT_SLUG;
+if (!AGENT_SLUG) {
+    console.error('extract-session-usage: no agent slug — pass --agent=<slug> or set AGENT_SLUG (refusing to default to a named agent)');
+    process.exit(1);
+}
+const USAGE_AGENT = `session-${AGENT_SLUG}`;
+
 interface SessionUsage {
     sessionId: string;
     startTime: string;
@@ -118,7 +130,7 @@ async function main() {
 
     // Get already-processed session IDs
     const processed = new Set(
-        (db.prepare("SELECT context FROM agent_usage WHERE agent = 'session-leo' AND context LIKE 'session:%'").all() as any[])
+        (db.prepare("SELECT context FROM agent_usage WHERE agent = ? AND context LIKE 'session:%'").all(USAGE_AGENT) as any[])
             .map(r => r.context.replace('session:', ''))
     );
 
@@ -175,7 +187,7 @@ async function main() {
             console.log(`    Messages: ${usage.messageCount}, Est cost: $${estimatedCost.toFixed(2)}`);
         } else {
             insert.run(
-                'session-leo',
+                USAGE_AGENT,
                 usage.startTime,
                 estimatedCost,
                 totalInput,

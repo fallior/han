@@ -13,5 +13,7 @@ mkdir -p "$SIGNALS_DIR"
 # R2 P-R2.2a (Fork A): resolve via sleeve-state (sleeved surface), fallback $AGENT_SURFACE (inert today).
 _surface="$(bash "$(dirname "${BASH_SOURCE[0]}")/sleeve-surface.sh" 2>/dev/null)"; _surface="${_surface:-${AGENT_SURFACE:-session}}"
 [ "$_surface" = "session" ] || exit 0
-rm -f "${SIGNALS_DIR}/cli-busy-${AGENT_SLUG:-leo}"
-date -Iseconds > "${SIGNALS_DIR}/cli-free-${AGENT_SLUG:-leo}"
+# Guard-and-skip (S226 scour, DEC-103 CBA): mirror cli-active.sh — no slug, no write, no leo-default.
+[ -z "$AGENT_SLUG" ] && exit 0
+rm -f "${SIGNALS_DIR}/cli-busy-${AGENT_SLUG}"
+date -Iseconds > "${SIGNALS_DIR}/cli-free-${AGENT_SLUG}"

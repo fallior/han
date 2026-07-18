@@ -165,6 +165,19 @@ start_session() {
         exit 1
     fi
 
+    # Phase A.5 (DEC-083): pre-flight identity-file integrity gate.
+    # Backfilled S226 (the scour, N1): hanleo/hanjim carried this; the tenshi/casey
+    # copies drifted without it. Aborts the launcher on structural verification
+    # failure; content-only edits auto-resign per option (iii).
+    echo -e "${BLUE}Verifying ${AGENT_SLUG} identity manifest...${NC}"
+    if ! ( cd "$SCRIPT_DIR/src/server" && npx tsx ../../scripts/verify-identity-files.ts --agent="$AGENT_SLUG" --entry-point=hantenshi-launcher ); then
+        echo -e "${RED}HALT: identity verification failed for agent ${AGENT_SLUG}.${NC}"
+        echo -e "${RED}See ~/.han/health/integrity-failures.jsonl for the receipt.${NC}"
+        echo -e "${YELLOW}If the change is intentional, re-sign with:${NC}"
+        echo -e "${YELLOW}  cd $SCRIPT_DIR/src/server && npx tsx ../../scripts/sign-identity-files.ts --agent=$AGENT_SLUG${NC}"
+        exit 1
+    fi
+
     echo -e "${BLUE}Waking Tenshi: ${GREEN}$session_name${NC}"
     echo -e "${BLUE}Server port: ${GREEN}${AGENT_PORT}${NC}"
 

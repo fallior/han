@@ -570,8 +570,11 @@ export async function processDreamGradient(agent: AgentName): Promise<DreamProce
                     null, 0, null
                 );
 
-                // Write a compression-time feeling tag from the compression_tag value
-                const tagContent = msg.compression_tag.replace(/^(jim|leo):/, '').trim();
+                // Write a compression-time feeling tag from the compression_tag value.
+                // Slug-prefix strip derives from the roster (S226 scour, finding D):
+                // the old literal /^(jim|leo):/ left tenshi/casey prefixes in content.
+                const slugPrefixRe = new RegExp(`^(${registeredAgentSlugs().join('|')}):`);
+                const tagContent = msg.compression_tag.replace(slugPrefixRe, '').trim();
                 if (tagContent) {
                     feelingTagStmts.insert.run(
                         entryId, tagAgent, 'compression', tagContent, null, new Date().toISOString()

@@ -61,6 +61,7 @@ import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRes
 // The manifest's transport field is the per-surface feature flag (rollback =
 // one-line manifest flip back to 'sdk'; the SDK paths below are kept intact).
 import { manifestTransport, manifestModelHead, manifestModelLadder, peerConversationFor } from './lib/garden-manifest';
+import { registeredAgentSlugs } from './lib/agent-registry';
 import { computeWallClockDelay } from './lib/agent-scheduler';
 import { ensureSurfaceSession, enqueueForAgent, observeActiveModel, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
 import type { CaptureRecord } from './lib/diary-mcp-server';
@@ -548,6 +549,47 @@ function checkJimHumanHealth(): void {
         console.error('[Robin Hood] Jim/Human health check error:', (err as Error).message);
     }
 }
+
+// ── B-nibble (S226 scour, finding B / Ring 1): ALERT-ONLY watch over every OTHER
+// agent's human-seat health file. The seats already WRITE ${slug}-human-health.json
+// agnostically (human-responder.ts:81) — until tonight nobody read tenshi's or
+// casey's (health broadcast into a void; Casey's constructive-knowledge argument).
+// READ + ALERT carries no authority (Tenshi: alert-all, resurrect-sparse) — the
+// resurrect edge stays the declared leo↔jim pair until Ring 3 generalises the mesh.
+// Roster-derived; leo/jim skipped (their dedicated watchers above resurrect too).
+const HEALTH_ALERTS_LOG = path.join(HEALTH_DIR, 'human-seat-alerts.jsonl');
+
+function checkOtherHumanSeatsHealth(): void {
+    let slugs: string[];
+    try {
+        slugs = registeredAgentSlugs();
+    } catch (err) {
+        console.error('[Robin Hood] roster read failed for human-seat watch:', (err as Error).message);
+        return;
+    }
+    for (const slug of slugs) {
+        if (slug === 'leo' || slug === 'jim') continue; // dedicated watchers above
+        try {
+            const file = path.join(HEALTH_DIR, `${slug}-human-health.json`);
+            if (!fs.existsSync(file)) continue; // seat may not have run yet — not an alert
+            const healthData = JSON.parse(fs.readFileSync(file, 'utf-8'));
+            const ageMin = Math.round((Date.now() - new Date(healthData.timestamp).getTime()) / 60000);
+            if (ageMin < 20) {
+                console.log(`[Robin Hood] ${slug}/Human OK (${ageMin}min ago)`);
+                continue;
+            }
+            // Stale/down: say it LOUD + append a durable alert line. No resurrection
+            // from this seat (authority stays sparse); a human or Ring-3 mesh acts.
+            console.warn(`[Robin Hood] ⚠ ${slug}/Human health STALE — last seen ${ageMin}min ago (alert-only; no resurrect authority from this seat)`);
+            fs.appendFileSync(HEALTH_ALERTS_LOG, JSON.stringify({
+                ts: new Date().toISOString(), seat: `${slug}-human`, ageMin, action: 'alert-only',
+            }) + '\n');
+        } catch (err) {
+            console.error(`[Robin Hood] ${slug}/Human health check error:`, (err as Error).message);
+        }
+    }
+}
+
 
 // ── Config loading ───────────────────────────────────────────
 
@@ -2147,6 +2189,7 @@ async function heartbeat(): Promise<void> {
     checkJemmaHealth();
     checkLeoHumanHealth();
     checkJimHumanHealth();
+    checkOtherHumanSeatsHealth();
 
     // Model resolution: the warm tmux session's model is a launch parameter
     // from the manifest (manifestModelLadder); no per-beat SDK model-ping.
