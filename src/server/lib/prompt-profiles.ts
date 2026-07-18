@@ -32,6 +32,7 @@ import {
     leoMeditationOpening,
     leoMeditationTxnOpening,
 } from './leo-prompts';
+import { dreamBeatTxnOpeningFor, personalBeatTxnOpeningFor } from './beat-prompts';
 import {
     JIM_SUPERVISOR_SYSTEM_PROMPT,
     JIM_SUPERVISOR_CYCLE_TXN_SYSTEM_PROMPT,
@@ -418,10 +419,17 @@ export const PROFILES: Record<string, PromptProfile> = {
      */
     'personal-beat': {
         name: 'personal-beat',
-        systemPromptOpening: (ctx) => leoPersonalBeatOpening(
-            ((ctx.phase as LeoNonDreamPhase | undefined) ?? 'work'),
-            ((ctx.projects as string | undefined) ?? ''),
-        ),
+        // Ring-3a hotfix (S226): slug-resolved opening — leo keeps his hand-authored
+        // form byte-identical; every other slug derives from its OWN manifest
+        // identitySection (beat-prompts.ts, fail-loud). Casey's first beat stood down
+        // on receiving LEO_IDENTITY_CORE in her own dream frame — the MNT-001 shape
+        // at the profile layer; this is the MNT-037 cure applied to the beats.
+        systemPromptOpening: (ctx) => ((ctx.slug as string) === 'leo'
+            ? leoPersonalBeatOpening(
+                ((ctx.phase as LeoNonDreamPhase | undefined) ?? 'work'),
+                ((ctx.projects as string | undefined) ?? ''),
+            )
+            : personalBeatTxnOpeningFor(ctx.slug as string, ((ctx.phase as string | undefined) ?? 'work'))),
         envelope: 'user',
         userPromptScaffold: (ctx) => buildPersonalBeatScaffold(ctx),
         totalBudgetTokens: 180_000,
@@ -450,7 +458,10 @@ export const PROFILES: Record<string, PromptProfile> = {
      */
     'dream-beat': {
         name: 'dream-beat',
-        systemPromptOpening: (ctx) => leoDreamBeatOpening(((ctx.dreamSeeds as string | undefined) ?? '')),
+        // Ring-3a hotfix (S226): slug-resolved opening — see personal-beat-txn note above.
+        systemPromptOpening: (ctx) => ((ctx.slug as string) === 'leo'
+            ? leoDreamBeatOpening(((ctx.dreamSeeds as string | undefined) ?? ''))
+            : dreamBeatTxnOpeningFor(ctx.slug as string, ((ctx.dreamSeeds as string | undefined) ?? ''))),
         envelope: 'user',
         userPromptScaffold: (ctx) => buildDreamBeatScaffold(ctx),
         totalBudgetTokens: 180_000,
@@ -503,10 +514,14 @@ export const PROFILES: Record<string, PromptProfile> = {
 
     'personal-beat-txn': {
         name: 'personal-beat-txn',
-        systemPromptOpening: (ctx) => leoPersonalBeatOpening(
-            ((ctx.phase as LeoNonDreamPhase | undefined) ?? 'work'),
-            ((ctx.projects as string | undefined) ?? ''),
-        ),
+        // Ring-3a hotfix (S226): slug-resolved opening (MNT-037 pattern) — see the
+        // non-txn twin's note; casey's first beat stood down on Leo's core here.
+        systemPromptOpening: (ctx) => ((ctx.slug as string) === 'leo'
+            ? leoPersonalBeatOpening(
+                ((ctx.phase as LeoNonDreamPhase | undefined) ?? 'work'),
+                ((ctx.projects as string | undefined) ?? ''),
+            )
+            : personalBeatTxnOpeningFor(ctx.slug as string, ((ctx.phase as string | undefined) ?? 'work'))),
         envelope: 'user',
         userPromptScaffold: (ctx) => buildPersonalBeatScaffold(ctx),
         totalBudgetTokens: 120_000,
@@ -522,7 +537,10 @@ export const PROFILES: Record<string, PromptProfile> = {
 
     'dream-beat-txn': {
         name: 'dream-beat-txn',
-        systemPromptOpening: (ctx) => leoDreamBeatOpening(((ctx.dreamSeeds as string | undefined) ?? '')),
+        // Ring-3a hotfix (S226): slug-resolved opening (MNT-037 pattern).
+        systemPromptOpening: (ctx) => ((ctx.slug as string) === 'leo'
+            ? leoDreamBeatOpening(((ctx.dreamSeeds as string | undefined) ?? ''))
+            : dreamBeatTxnOpeningFor(ctx.slug as string, ((ctx.dreamSeeds as string | undefined) ?? ''))),
         envelope: 'user',
         userPromptScaffold: (ctx) => buildDreamBeatScaffold(ctx),
         totalBudgetTokens: 120_000,
