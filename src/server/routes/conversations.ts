@@ -103,6 +103,19 @@ async function classifyAddressee(content: string, discussionType: string, conver
     const tabOwner = localAgents.find(p => discussionType.startsWith(p.name + '-'));
     const isHumanTab = humanPersonas.some(p => discussionType.startsWith(p.name + '-'));
 
+    // Collective address — "everyone" IS the register, by definition (Darron,
+    // S226 2026-07-19; closes the 07-15 "everyone is not an alias" miss where a
+    // lesson addressed to everyone reached only the named). DETERMINISTIC, before
+    // any model judgement — the structural-vs-instruction lesson: an alias this
+    // load-bearing is physics, not a classifier's opinion. The register is the
+    // same active-local filter every route uses (persona registry ∩ agents.active).
+    const COLLECTIVE_ADDRESS = /\b(everyone|everybody|y'?all|you all|all of you|all agents|all minds)\b/i;
+    if (COLLECTIVE_ADDRESS.test(content)) {
+        const allNames = localAgents.map(p => p.name);
+        console.log(`[Conversations] Collective address — waking the whole register: ${allNames.join(', ')}`);
+        return { recipients: allNames, reasoning: 'collective address ("everyone") — every agent in the register, by definition' };
+    }
+
     // Human's personal tabs always wake all local agents
     if (isHumanTab) {
         const allNames = localAgents.map(p => p.name);
@@ -134,6 +147,7 @@ Message: "${content.slice(0, 500)}"
 Who is being ASKED TO RESPOND? Set true for each person who should reply.
 
 IMPORTANT:
+- A collective address (everyone, everybody, you all, the team, the family) → set ALL to true
 - Addressing multiple people → set all mentioned to true
 - Talking ABOUT someone's past work without asking them → false
 - If no one is clearly addressed, default: ${defaultAgent}

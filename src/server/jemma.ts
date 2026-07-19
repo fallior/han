@@ -837,6 +837,22 @@ async function routeMessage(message: any): Promise<void> {
       alreadyNotified.add(persona.name);
     }
   }
+
+  // Collective address — "everyone" IS the register, by definition (Darron, S226
+  // 2026-07-19; the admin lane carries the same deterministic rule in
+  // routes/conversations.ts classifyAddressee). A human message addressed to the
+  // room wakes EVERY active agent persona — no model judgement in the loop.
+  const COLLECTIVE_ADDRESS = /\b(everyone|everybody|y'?all|you all|all of you|all agents|all minds)\b/i;
+  if (!message.author.bot && COLLECTIVE_ADDRESS.test(content)) {
+    for (const persona of agentPersonas) {
+      if (alreadyNotified.has(persona.name)) continue;
+      if (!persona.active) continue;
+      if (primaryPersonas && !primaryPersonas.includes(persona.name)) continue;
+      console.log(`[Jemma] Collective address — waking ${persona.display_name} (everyone = the register)`);
+      await deliverToPersona(persona, message, classification, channelName);
+      alreadyNotified.add(persona.name);
+    }
+  }
 }
 
 async function reconcileMessages(): Promise<void> {
