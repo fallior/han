@@ -38,7 +38,11 @@ export function ThreadDetailPanel({
   draftKeyPrefix = 'conversation'
 }: ThreadDetailPanelProps) {
   const [messageInput, setMessageInput] = useState('');
-  const [thinking, setThinking] = useState(false);
+  // MNT-035 fix (S226, option B): optimistic OWN message instead of the false
+  // Jim-thinking bubble — the only thing known at send-time is the sender's
+  // post; no respondent is named until Jemma classifies (roster-true indicators = C,
+  // the Ring-2 rider). `pending` holds the just-sent content until the server echo.
+  const [pending, setPending] = useState<string | null>(null);
   const [draftRecovered, setDraftRecovered] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -153,12 +157,12 @@ export function ThreadDetailPanel({
   // Auto-scroll to bottom on messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, thinking]);
+  }, [messages, pending]);
 
-  // Clear thinking indicator when new messages arrive
+  // Clear the pending optimistic message when the server echo arrives
   useEffect(() => {
-    if (messages.length > 0 && thinking) {
-      setThinking(false);
+    if (messages.length > 0 && pending) {
+      setPending(null);
     }
   }, [messages.length]);
 
@@ -172,7 +176,7 @@ export function ThreadDetailPanel({
     if (draftKey) {
       localStorage.removeItem(draftKey);
     }
-    setThinking(true);
+    setPending(content);
 
     // Focus textarea after sending
     setTimeout(() => {
@@ -200,6 +204,8 @@ export function ThreadDetailPanel({
     if (role === 'human') return 'Darron';
     if (role === 'supervisor') return 'Jim';
     if (role === 'leo') return 'Leo';
+    if (role === 'casey') return 'Casey';
+    if (role === 'tenshi') return 'Tenshi';
     return role;
   };
 
@@ -207,6 +213,8 @@ export function ThreadDetailPanel({
     if (role === 'human') return 'human';
     if (role === 'supervisor') return 'supervisor';
     if (role === 'leo') return 'leo';
+    if (role === 'casey') return 'casey';
+    if (role === 'tenshi') return 'tenshi';
     return '';
   };
 
@@ -314,14 +322,16 @@ export function ThreadDetailPanel({
               </div>
               </div>
             ))}
-            {thinking && (
-              <div className="message-bubble supervisor thinking">
+            {pending && (
+              <div className="message-bubble human pending" style={{ opacity: 0.6 }}>
                 <div className="message-header">
-                  <span className="message-role">Jim</span>
+                  <span className="message-role">{getRoleLabel('human')}</span>
+                  <span className="message-time">sending…</span>
                 </div>
-                <div className="message-content">
-                  <em>Thinking...</em>
-                </div>
+                <div
+                  className="message-content"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(pending) }}
+                />
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -386,7 +396,7 @@ export function ThreadDetailPanel({
         <button
           className="send-btn"
           onClick={handleSend}
-          disabled={!messageInput.trim() || thinking}
+          disabled={!messageInput.trim() || !!pending}
         >
           Send
         </button>

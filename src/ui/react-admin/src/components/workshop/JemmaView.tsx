@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useWorkshopStore } from '../../store/workshopStore';
+import { useStore } from '../../store';
 import { fetchJemmaStatus, type JemmaStatus, type JemmaMessage } from '../../lib/api';
 
 /**
@@ -172,6 +173,7 @@ interface StatsTabProps {
 }
 
 function StatsTab({ data }: StatsTabProps) {
+  const personaTabs = useStore((st) => st.personaTabs);
   const uptime = data.uptime_seconds ? Math.floor(data.uptime_seconds / 60) : 0;
   const lastReconciliation = data.last_reconciliation
     ? new Date(data.last_reconciliation).toLocaleString()
@@ -208,7 +210,7 @@ function StatsTab({ data }: StatsTabProps) {
           Delivery Statistics
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-          {[...Object.keys(useStore.getState().personaTabs).filter(n => n !== 'jemma'), 'ignored'].map((recipient) => {
+          {[...Object.keys(personaTabs).filter(n => n !== 'jemma'), 'ignored'].map((recipient) => {
             const count = stats[recipient] || 0;
             return (
               <div

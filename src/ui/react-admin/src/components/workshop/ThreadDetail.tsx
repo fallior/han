@@ -299,7 +299,6 @@ export function ThreadDetail({ onTogglePanel, onBack }: ThreadDetailProps) {
     if (agentNames.length === 1) {
       const owner = agentNames[0];
       // Human/gateway tabs → all non-human/non-gateway agents respond
-      const ownerInfo = personaTabs[owner];
       // Simple heuristic: if the tab key starts with a known agent name, that agent responds
       return [owner];
     }
