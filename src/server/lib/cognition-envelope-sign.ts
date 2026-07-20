@@ -153,8 +153,19 @@ export function batteryReport(label: string, oldV: string | null, newV: string):
         lines.push(`  🔴 NON-TEXT / CONTROL BYTES in ${label} at char ${controlIdx} — this is NOT a clean text leaf:`);
         lines.push(`     hexdump(local): ${slice.toString('hex').replace(/(..)/g, '$1 ').trim()}`);
     }
+    // Safe typographic set — legitimately all over authored identity prose
+    // (em/en dash, curly quotes, ellipsis, NBSP). Suppressing them keeps the
+    // ceremony from crying wolf on every sign (the desensitization Tenshi warned
+    // against) WITHOUT touching the dangerous classes: Cyrillic/Greek/fullwidth
+    // homoglyphs, zero-widths and bidi controls all still fire. Surfaced by the
+    // Ring-2 scratch-garden rehearsal — the net catching its own false alarm.
+    const SAFE_TYPOGRAPHY = /[–—‘’“”… ]/;
     for (const line of newV.split('\n')) {
-        for (const sc of scanSuspectCodepoints(line)) lines.push(`  ⚠ suspect codepoint: ${sc}`);
+        for (const sc of scanSuspectCodepoints(line)) {
+            const cpMatch = sc.match(/U\+([0-9A-Fa-f]+)/);
+            if (cpMatch && SAFE_TYPOGRAPHY.test(String.fromCodePoint(parseInt(cpMatch[1], 16)))) continue;
+            lines.push(`  ⚠ suspect codepoint: ${sc}`);
+        }
     }
     if (oldV !== null && oldV !== newV && confusableFold(oldV) === confusableFold(newV)) {
         lines.push(`  🔴 PROBABLE HOMOGLYPH SWAP in ${label}: the change disappears under confusable folding — the render can look identical while the bytes differ. Do NOT sign without reading the codepoint list above.`);

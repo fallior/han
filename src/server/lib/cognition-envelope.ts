@@ -188,6 +188,12 @@ const VERIFIERS: Record<number, Verifier> = {
  * envelope sidecar on an enforced garden fails CLOSED.
  */
 export function envelopeAdopted(): boolean {
+    // Rehearsal override (Ring 2 pre-init step, FAIL-CLOSED-ONLY by construction):
+    // HAN_ENVELOPE_ASSUME_ADOPTED=1 forces the ADOPTED (stricter) branch so a
+    // scratch garden can rehearse the fail-closed paths without touching the real
+    // signed sets. OR-logic only — the env can ADD enforcement, never remove it;
+    // there is no env that un-adopts (that would be the backdoor class).
+    if (process.env.HAN_ENVELOPE_ASSUME_ADOPTED === '1') return true;
     let slugs: string[];
     try { slugs = registeredAgentSlugs(); } catch { return false; }
     for (const slug of slugs) {
