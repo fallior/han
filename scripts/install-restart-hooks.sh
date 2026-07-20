@@ -69,10 +69,12 @@ for event in post-commit post-merge; do
     {
         echo "#!/bin/bash"
         echo "# Auto-installed by scripts/install-restart-hooks.sh"
-        echo "# Layer 1: restart agent servers (hanjim/hanleo/hantenshi/hancasey) on code change"
-        echo "# so they pick up fresh code. No-op when the corresponding server isn't running."
+        echo "# Layer 1: restart agent servers on SERVER-RUNTIME change (src/server/ minus"
+        echo "# tests/) so they pick up fresh code. Range-gated since S227 — docs/plans/UI"
+        echo "# commits no longer bounce the servers (the 3847 flapping Darron caught)."
+        echo "# No-op when the corresponding server isn't running."
         for slug in "${SLUGS[@]}"; do
-            echo "\"$RESTART_SCRIPT\" $slug"
+            echo "\"$RESTART_SCRIPT\" $slug $event"
         done
         echo "# Layer 2: restart human-responder@<slug> systemd services ($(printf 'human-responder@%s ' "${HUMAN_SLUGS[@]}"| sed 's/ $//; s/ /, /g'))"
         echo "# when their source changes. No-op when unchanged or inactive. (Comment DERIVED with"
@@ -98,7 +100,7 @@ done
 
 echo
 echo "Done. The following will auto-restart on git commit / pull / merge:"
-echo "  Agent servers (pidfile-based, no-op if not running):"
+echo "  Agent servers (range-gated on src/server/ changes; pidfile-based, no-op if not running):"
 echo "    hanjim, hanleo, hantenshi, hancasey"
 echo "  Human-responder systemd services (conditional on own .ts OR shared lib/ change):"
 echo "    human-responder@jim.service, human-responder@leo.service"
