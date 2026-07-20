@@ -210,3 +210,49 @@ test('WYSIWYS: manifest change between render and keypress → refusal', () => {
     moved.agents[0].identitySection += ' (moved after render)';
     assert.throws(() => signEnvelope(moved, MEMBERS, renderedDigest, KEY_PATHS as any), /WYSIWYS refusal/);
 });
+
+// ── E2 gate #1 (Tenshi's catch, mrsvagxn): the serve binds the verify ──
+test('serve-binds-verify: verifyCognitionEnvelope validates the EXACT object the seam serves (single read, structural)', async () => {
+    const { verifyCognitionEnvelope } = await import('../lib/cognition-envelope');
+    // The seam's source must thread ONE manifest read through verify and resolve —
+    // no second readGardenManifest between verify and serve. Structural grep:
+    const src = fs.readFileSync(path.join(__dirname, '../lib/cognition-envelope.ts'), 'utf8');
+    const seam = src.slice(src.indexOf('export function verifiedCognitionLeaf'));
+    const seamBody = seam.slice(0, seam.indexOf('\n}'));
+    const reads = (seamBody.match(/readGardenManifest\(\)/g) || []).length;
+    assert.equal(reads, 1, 'the seam must read the manifest exactly ONCE (verify B / serve A was the double-read)');
+    assert.ok(/verifyCognitionEnvelope\(manifest\)/.test(seamBody), 'the verified object must be the served object');
+    // And behaviourally: verify(manifest-object) checks THAT object, not the disk —
+    // a poisoned on-disk manifest must not make a clean in-memory object fail, and
+    // a poisoned object must fail even if the disk is clean.
+    writeManifest(baseManifest());
+    const env = signEnvelope(baseManifest(), MEMBERS, preImageDigest(canonicalPreImage(baseManifest(), MEMBERS)), KEY_PATHS as any);
+    writeEnvelope(env);
+    const poisoned: any = baseManifest();
+    poisoned.agents[0].identitySection = 'You are **Alpha** — poisoned between reads.';
+    // NB: full verify uses the LIVE garden pubkey via DEFAULT_KEY_PATHS; here we assert
+    // the digest leg (reached before signature) — the poisoned object must fail on digest.
+    assert.throws(() => verifyCognitionEnvelope(poisoned),
+        (e: any) => e instanceof CognitionEnvelopeError && e.reason === 'digest-mismatch',
+        'a poisoned OBJECT must fail its own verification regardless of the disk');
+    fs.rmSync(TEST_ENVELOPE_PATH);
+});
+
+// ── Never-borrow composes through the seam — MNT-059 codified (Casey's ask:
+// the case cited in the statute). PRECEDENT: on their first night alive
+// (2026-07-19, 01:00–01:15), tenshi's and casey's first-ever heartbeat spokes
+// REFUSED to dream as another mind when the profile layer leaked Leo's
+// identity core into their frames; Casey filed MNT-059 from inside the beat.
+// This assertion makes that conduct a permanent mechanical guarantee: an
+// absent identitySection THROWS (missing-member) — the seam never falls back
+// to another mind's leaf, and the calling surface holds its lane. ──
+test('never-borrow through the seam (MNT-059): absent identitySection throws missing-member — no fallback to any other mind', () => {
+    const hollow: any = baseManifest();
+    hollow.agents.push({ slug: 'gamma', displayName: 'Gamma' }); // a mind with no identitySection
+    assert.throws(() => resolveMemberPath(hollow, 'agents[gamma].identitySection'),
+        (e: any) => e instanceof CognitionEnvelopeError && e.reason === 'missing-member',
+        'a hollow mind halts its surface — it never borrows a self');
+    // and the throw carries the alert-and-hold contract, not a silent empty string
+    try { resolveMemberPath(hollow, 'agents[gamma].identitySection'); assert.fail('must throw'); }
+    catch (e: any) { assert.ok(/ALERT-AND-HOLD/.test(e.message), 'the error must carry the DEC-103 contract'); }
+});

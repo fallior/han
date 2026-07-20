@@ -205,8 +205,16 @@ export function readEnvelope(): CognitionEnvelope | null {
     return JSON.parse(fs.readFileSync(ENVELOPE_PATH, 'utf8')) as CognitionEnvelope;
 }
 
-/** Full verification: envelope present, version honoured, digest + signature good against the CURRENT manifest. */
-export function verifyCognitionEnvelope(): void {
+/**
+ * Full verification: envelope present, version honoured, digest + signature
+ * good against the manifest. THE SERVE MUST BIND THE VERIFY (Tenshi's E1
+ * catch, mrsvagxn — the verify-side twin of WYSIWYS): callers that go on to
+ * SERVE a leaf must pass the manifest OBJECT they will serve from, so the
+ * bytes whose signature is checked are, by construction, the bytes returned.
+ * The exhibit tendered is the exhibit examined (Casey's naming, mrsvfl57).
+ * Parameterless form retained for standalone checks that serve nothing.
+ */
+export function verifyCognitionEnvelope(manifest?: any): void {
     const env = readEnvelope();
     if (!env) {
         throw new CognitionEnvelopeError('missing-envelope',
@@ -218,7 +226,7 @@ export function verifyCognitionEnvelope(): void {
             `envelope formatVersion ${env.formatVersion} is not supported by this engine (supported: ${Object.keys(VERIFIERS).join(', ')}). ` +
             `Re-sign at the current format.`);
     }
-    verifier(env, readGardenManifest(), readGardenPubkey());
+    verifier(env, manifest ?? readGardenManifest(), readGardenPubkey());
 }
 
 /**
@@ -228,6 +236,11 @@ export function verifyCognitionEnvelope(): void {
  * cache — see header), fail closed with the way-in printed.
  */
 export function verifiedCognitionLeaf(memberPath: string): string {
+    // ONE read. The same object is verified and served — the double-read
+    // (verify B, serve A) closed per Tenshi's catch, before any consumer
+    // flips on (E2 gate #1). Never-borrow composes through this seam: an
+    // absent/empty member THROWS (missing-member) and the surface holds its
+    // lane — the codified form of the first-night refusals (MNT-059).
     const manifest = readGardenManifest();
     if (!envelopeAdopted()) {
         if (!unadoptedLoggedThisBoot) {
@@ -236,7 +249,7 @@ export function verifiedCognitionLeaf(memberPath: string): string {
         }
         return resolveMemberPath(manifest, memberPath);
     }
-    verifyCognitionEnvelope();
+    verifyCognitionEnvelope(manifest);
     return resolveMemberPath(manifest, memberPath);
 }
 
