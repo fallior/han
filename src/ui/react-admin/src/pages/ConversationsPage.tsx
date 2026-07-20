@@ -38,6 +38,13 @@ export default function ConversationsPage() {
   // Fetch grouped conversations on mount
   useEffect(() => {
     fetchGroupedConversations();
+    // S227 reload-resilience: a persisted selection (survives the Safari/network
+    // reload class — the flapping) rehydrates straight back into the open
+    // thread, so a reload no longer costs the reading position.
+    if (selectedId && !selectedConversation) {
+      fetchConversationDetail(selectedId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // WebSocket subscription for conversation updates

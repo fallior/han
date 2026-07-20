@@ -149,9 +149,11 @@ export const useStore = create<AppState>((set, get, api) => ({
 
   // Initial state
   wsConnected: false,
-  conversationsSelectedId: null,
+  // S227 reload-resilience: selections persist so a reload (Safari/network —
+  // the flapping class) lands back INSIDE the open thread, not at the list.
+  conversationsSelectedId: localStorage.getItem('han-conv-selected') || null,
   conversationsPeriod: 'all',
-  memorySelectedId: null,
+  memorySelectedId: localStorage.getItem('han-mem-selected') || null,
   memoryPeriod: 'all',
   wsListeners: new Map(),
   lastCycleAt: null,
@@ -192,11 +194,11 @@ export const useStore = create<AppState>((set, get, api) => ({
   selectedProduct: null,
 
   // Conversations actions
-  setConversationsSelectedId: (id) => set({ conversationsSelectedId: id }),
+  setConversationsSelectedId: (id) => { if (id) localStorage.setItem('han-conv-selected', id); else localStorage.removeItem('han-conv-selected'); set({ conversationsSelectedId: id }); },
   setConversationsPeriod: (period) => set({ conversationsPeriod: period }),
 
   // Memory Discussions actions
-  setMemorySelectedId: (id) => set({ memorySelectedId: id }),
+  setMemorySelectedId: (id) => { if (id) localStorage.setItem('han-mem-selected', id); else localStorage.removeItem('han-mem-selected'); set({ memorySelectedId: id }); },
   setMemoryPeriod: (period) => set({ memoryPeriod: period }),
 
   // WebSocket connection action
