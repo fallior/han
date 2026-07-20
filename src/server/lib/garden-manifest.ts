@@ -133,6 +133,14 @@ export interface SpokeLifecycle {
      *  duration (6.0 min across n=178 T2 receipts, 2026-07-15; observed max 10.8 min) — never the
      *  author's guess (§2). Re-alerts at doubling intervals from the threshold. */
     prewarmAlertMins?: number;
+    /** MNT-060 F3: the per-turn swap-flush backlog guard. A swap BODY over this many bytes is
+     *  never auto-flushed — the flush alerts (wm-flush-errors.jsonl) and preserves the swap for
+     *  a deliberate surgical drain (DEC-103 surfacing-over-scrapping; the guard is what made
+     *  landing the grammar fix safe ahead of the stranded seats' drains). Default 20000 —
+     *  stated-guess ≈ several turns' worth of entries (a measured 9.5K flush took ~2s, well
+     *  inside the hook's 30s ceiling); RAISE if legitimate long turns trip it, LOWER if dumps
+     *  sneak through. */
+    swapFlushMaxBytes?: number;
 }
 
 export interface AgentManifest {
@@ -585,6 +593,13 @@ export function ctxReapThresholdFor(slug: string, surface: string): number {
  *  Registry leaf; default 12 (~2× measured p95 — see the SpokeLifecycle field's pricing). */
 export function prewarmAlertMinsFor(slug: string, surface: string): number {
     return spokeLifecycleFor(slug, surface).prewarmAlertMins ?? 12;
+}
+
+/** MNT-060 F3: the swap-flush backlog-guard ceiling (bytes) for a seat. Registry leaf; default
+ *  20000 (see the SpokeLifecycle field's pricing). Surface defaults to 'session' — the seat the
+ *  Stop-hook flush serves; per-surface overrides ride the standard lifecycle merge. */
+export function swapFlushMaxBytesFor(slug: string, surface: string = 'session'): number {
+    return spokeLifecycleFor(slug, surface).swapFlushMaxBytes ?? 20000;
 }
 
 /** #107 Phase-2 P2.1b: does this (slug, surface) wake via the feeder (the wake-feed queue)?

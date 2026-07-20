@@ -32,13 +32,17 @@ SLUG="${AGENT_SLUG:-unknown}"
 [ ! -f "$FULL_SWAP" ] && exit 0
 [ ! -f "$COMP_SWAP" ] && exit 0
 
-# No-op unless BOTH swap files carry a real entry (a `### ` line = a paired turn-write). Keying on
-# the `### ` ENTRY marker — not "any non-header line" — is robust to every header shape (1-line,
-# 3-line `# …/blank/> blurb`, or no `#` line): a header-only swap has no `### ` → no-op. (Jim's
-# MNT-012 catch: the old "skip line 1, any non-blank = body" awk let a 3-line header's `> blurb`
-# trip the gate → spokes spawned tsx + flushed the blurb.) Cheap, so spoke turns (diary path, no
-# `### ` in swap) never spawn tsx.
-has_body() { grep -q '^### ' "$1"; }
+# No-op unless BOTH swap files carry a real entry. MNT-060 F1: the gate greps the IDENTICAL
+# entry-grammar FAMILY as wm-flush.ts's ENTRY_RE (`### ` canonical + `## ` legacy) — change one,
+# change both; a gate/parser mismatch recreates the MNT-060 outage inside the fix (the gate
+# declining bodies the parser could eat, or vice versa: the original defect was this gate + parser
+# both keying `### ` while every seat wrote `## ` — a garden-wide silent no-op for 13 days).
+# Keying on ENTRY markers — not "any non-header line" — stays robust to every header shape (Jim's
+# MNT-012 catch). Cheap, so spoke turns (diary path, no entry marker in swap) never spawn tsx.
+# TRANSITIONAL (MNT-060 addendum, Darron 2026-07-20 22:27): this content-shaped family is a
+# stopgap; the destination is the sentinel transport-frame (byte-stuffed, stripped at flush,
+# guard-checks-frame) — a named follow-on build.
+has_body() { grep -qE '^(### |## )' "$1"; }
 has_body "$FULL_SWAP" || exit 0
 has_body "$COMP_SWAP" || exit 0
 
@@ -66,5 +70,11 @@ fi
 # Fallback: a node already on PATH (interactive / systemd contexts have the right one first).
 [ -z "$NODE_BIN" ] && command -v node >/dev/null 2>&1 && NODE_BIN="$(command -v node)"
 [ -z "$NODE_BIN" ] && exit 0   # fail-safe: no usable node -> no-op, swap preserved for retry
+# MNT-060 F4 (DEC-103 fail-state CBA): `timeout 30` is sufficient BY CONSTRUCTION — F3 caps any
+# single flush body at swapFlushMaxBytes (~20K; a measured 9.5K flush took ~2s), and every larger
+# backlog is alert-and-preserve (never attempted here). Worst case on timeout: the tsx is killed,
+# the swap is PRESERVED (reset only happens after a successful append), and the next Stop retries
+# — alert-and-retry, not silent loss. Errors are legible via ~/.han/health/wm-flush-errors.jsonl
+# (F2, written by the tsx itself); the >/dev/null covers stdout noise only.
 NODE_PATH="$(pwd)/node_modules" timeout 30 "$NODE_BIN" "$TSX" ../../scripts/wm-flush.ts "$SLUG" "$FULL_SWAP" "$COMP_SWAP" >/dev/null 2>&1
 exit 0
