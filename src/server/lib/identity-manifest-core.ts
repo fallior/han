@@ -85,6 +85,10 @@ export interface IdentityManifest {
     signed_at: string;      // ISO 8601
     signing_key_id: string; // sha256 fingerprint of the pubkey (first 16 hex chars)
     files: ManifestFileEntry[];
+    /** Cognition-envelope adoption latch (E1, F3 (i)) — set/cleared ONLY by the
+     *  resign-manifest --init/--retire ceremony; carried across content resigns
+     *  by buildManifestAt. ANY agent's marker ⇒ envelope enforced garden-wide. */
+    cognition_envelope_adopted?: boolean;
 }
 
 export interface SignedManifest {
@@ -138,12 +142,22 @@ export function buildManifestAt(agent: string, memoryDir: string, fractalDir: st
         const { sha256, size_bytes } = sha256File(absPath);
         files.push({ path: absPath, sha256, size_bytes });
     }
+    // Cognition-envelope latch carry (E1, S227; Jim's F3 ruling (i), thread
+    // mqvs3r6l-dk71d2 mrrrrf91): the adoption marker lives INSIDE this signed
+    // manifest so it is tamper-evident — but this builder REBUILDS the manifest
+    // on every content resign, so without the carry the latch would silently
+    // drop on the next resign = fail-OPEN (traced before build, not after).
+    // Carried forward from the existing manifest at memoryDir; only the
+    // gatekeeper ceremony (resign-manifest --init/--retire) sets or clears it.
+    const prior = readSignedManifestAt(memoryDir);
+    const latch = (prior?.manifest as any)?.cognition_envelope_adopted === true;
     return {
         agent,
         agent_id: agent,
         signed_at: new Date().toISOString(),
         signing_key_id: pubkeyFingerprint(pubkeyPem),
         files,
+        ...(latch ? { cognition_envelope_adopted: true } : {}),
     };
 }
 
