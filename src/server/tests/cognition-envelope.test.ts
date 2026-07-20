@@ -256,3 +256,31 @@ test('never-borrow through the seam (MNT-059): absent identitySection throws mis
     try { resolveMemberPath(hollow, 'agents[gamma].identitySection'); assert.fail('must throw'); }
     catch (e: any) { assert.ok(/ALERT-AND-HOLD/.test(e.message), 'the error must carry the DEC-103 contract'); }
 });
+
+// ── Tenshi's forward note (via Casey's ratifying ask, mrswvg8w): the number that
+// certifies the seam is the END-TO-END cost — manifest read + envelope read +
+// verify math + resolve — per assembly, not the verify math alone. ──
+test('measured SEAM cost end-to-end: file reads + verify + resolve per assembly', () => {
+    const m: any = baseManifest();
+    m.agents[0].identitySection = m.agents[0].identitySection.padEnd(3000, ' x');
+    m.agents[1].identitySection = m.agents[1].identitySection.padEnd(3000, ' y');
+    writeManifest(m);
+    const members = defaultMemberPaths(m);
+    const env = signEnvelope(m, members, preImageDigest(canonicalPreImage(m, members)), KEY_PATHS as any);
+    writeEnvelope(env);
+    const N = 200;
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < N; i++) {
+        const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));   // read A (the ONE read)
+        const envDisk = JSON.parse(fs.readFileSync(TEST_ENVELOPE_PATH, 'utf8')); // envelope read
+        const preImage = canonicalPreImage(manifest, envDisk.memberPaths, envDisk.formatVersion);
+        assert.equal(preImageDigest(preImage), envDisk.digest);
+        assert.ok(crypto.verify(null, Buffer.from(preImage, 'utf8'), TEST_PUBLIC_KEY, Buffer.from(envDisk.signature, 'base64')));
+        resolveMemberPath(manifest, members[0]);
+    }
+    const perMs = Number(process.hrtime.bigint() - t0) / 1e6 / N;
+    console.log(`  [SEAM MEASUREMENT] end-to-end per assembly (reads+verify+resolve): ${perMs.toFixed(3)} ms (N=${N}) — vs a multi-second LLM assembly`);
+    assert.ok(perMs < 10, `the uncached seam must stay cheap end-to-end (got ${perMs.toFixed(3)}ms)`);
+    fs.rmSync(TEST_ENVELOPE_PATH);
+    writeManifest(baseManifest());
+});

@@ -48,6 +48,7 @@ import {
     manifestModelLadder, conversationRoleFor, swapPrefixFor,
     humanResponderTxnTimeoutMs, humanResponderCommitmentScan, addressedToOtherResponderOnly,
     poolSizeFor,
+    communityPort,
 } from './lib/garden-manifest';
 import { wakeQueueDir, claimWakeFiles, pickNextEligible } from './lib/wake-queue';
 import { gradientConfigForAgent } from './lib/agent-registry';
@@ -148,7 +149,7 @@ function notifyServer(conversationId: string, messageId: string, role: string, c
     const body = JSON.stringify({ conversation_id: conversationId, message_id: messageId, role, content, created_at: createdAt });
     const req = https.request({
         hostname: '127.0.0.1',
-        port: 3847,
+        port: communityPort(), // Ring 2 leaf — the community-convergence port (was a literal; Mike's box differs)
         path: '/api/conversations/internal/broadcast',
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },

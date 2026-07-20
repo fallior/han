@@ -27,6 +27,7 @@
  */
 
 import fs from 'node:fs';
+import { gardenerPersonaKey } from '../lib/garden-manifest';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
@@ -492,7 +493,7 @@ async function advanceQueue(
         messageId: row.message_id,
         recipients: states.map(s => s.agent),
         messageText: messageRow.content,
-        author: 'darron',
+        author: gardenerPersonaKey(), // Ring 2 (H4 write-site)
         source: row.source as 'admin' | 'discord',
         discussionType: convRow?.discussion_type,
     };

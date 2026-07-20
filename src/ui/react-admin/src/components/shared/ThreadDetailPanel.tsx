@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { ConversationThread, Message } from '../../types';
 import { timeSince, renderMarkdown } from '../../utils';
+import { useStore } from '../../store';
 import { apiFetch } from '../../api';
 import { useVoice } from '../../hooks/useVoice';
 import { LoopIndexPanel } from './LoopIndexPanel';
@@ -200,8 +201,14 @@ export function ThreadDetailPanel({
     }
   };
 
+  // Ring 2 (H3, the gardener class): the human's label derives from the persona
+  // registry (kind 'human' → capitalised name) — the literal 'Darron' made every
+  // garden's human render as Darron (Casey's scour). Agent-role ladder cleanup =
+  // deferred S4 (needs conversation_role on the personas API).
+  const roleMap = useStore((st: any) => st.roleMap ?? {});
+  const gardenerLabel = roleMap.human?.label ?? 'Human';
   const getRoleLabel = (role: string): string => {
-    if (role === 'human') return 'Darron';
+    if (role === 'human') return gardenerLabel;
     if (role === 'supervisor') return 'Jim';
     if (role === 'leo') return 'Leo';
     if (role === 'casey') return 'Casey';

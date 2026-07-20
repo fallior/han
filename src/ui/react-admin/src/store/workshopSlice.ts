@@ -144,8 +144,15 @@ export const createWorkshopSlice: StateCreator<WorkshopSlice, [], [], WorkshopSl
       personaTabs: Object.keys(tabs).length > 0 ? tabs : workshopPersonaTabs,
       nestedTabs: Object.keys(nested).length > 0 ? nested : workshopNestedTabs,
       roleMap: {
-        // Keep hardcoded human/supervisor role mappings as base
-        human: { label: 'Darron', color: 'blue' },
+        // Ring 2 (H3): the human label DERIVES from the registry (kind 'human' →
+        // capitalised name) — the 'Darron' literal made every garden's human
+        // render as Darron. Supervisor base stays until conversation_role ships
+        // on the personas API (deferred S4).
+        human: (() => {
+          const h = personas.find(p => p.kind === 'human');
+          const n = h?.name ?? '';
+          return { label: n ? n.charAt(0).toUpperCase() + n.slice(1) : 'Human', color: 'blue' };
+        })(),
         supervisor: { label: 'Jim', color: 'purple' },
         ...roles,
       },

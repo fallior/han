@@ -6,6 +6,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { humanSideRoles } from '../lib/persona-registry';
 import { db } from '../db';
 import { HAN_DIR } from '../db';
 import { loadConfig, generateId } from '../services/planning';
@@ -679,7 +680,7 @@ router.get('/loops/:conversationId', (req: Request, res: Response) => {
         // insert them. Handles legacy threads and threads populated via API
         // with non-'human' roles (which previously skipped loop creation).
         if (loops.length === 0) {
-            const HUMAN_SIDE_ROLES = ['human', 'darron'];
+            const HUMAN_SIDE_ROLES = humanSideRoles(); // Ring 2 (H4): derived from the registry — never a persona-key literal
             const placeholders = HUMAN_SIDE_ROLES.map(() => '?').join(',');
             const humanMsgs = db.prepare(
                 `SELECT id, role, created_at FROM conversation_messages
@@ -709,18 +710,18 @@ router.get('/loops/:conversationId', (req: Request, res: Response) => {
             if (nextLoop) {
                 msgs = db.prepare(
                     `SELECT id, role, listen_count FROM conversation_messages
-                     WHERE conversation_id = ? AND role NOT IN ('human', 'darron')
+                     WHERE conversation_id = ? AND role NOT IN (${humanSideRoles().map(() => '?').join(',')})
                      AND created_at >= (SELECT created_at FROM conversation_messages WHERE id = ?)
                      AND created_at < (SELECT created_at FROM conversation_messages WHERE id = ?)
                      ORDER BY created_at ASC`
-                ).all(loop.conversation_id, loop.human_message_id, nextLoop.human_message_id) as any[];
+                ).all(loop.conversation_id, ...humanSideRoles(), loop.human_message_id, nextLoop.human_message_id) as any[];
             } else {
                 msgs = db.prepare(
                     `SELECT id, role, listen_count FROM conversation_messages
-                     WHERE conversation_id = ? AND role NOT IN ('human', 'darron')
+                     WHERE conversation_id = ? AND role NOT IN (${humanSideRoles().map(() => '?').join(',')})
                      AND created_at >= (SELECT created_at FROM conversation_messages WHERE id = ?)
                      ORDER BY created_at ASC`
-                ).all(loop.conversation_id, loop.human_message_id) as any[];
+                ).all(loop.conversation_id, ...humanSideRoles(), loop.human_message_id) as any[];
             }
 
             const unlistenedCount = msgs.filter(m => (m.listen_count || 0) === 0).length;
@@ -753,18 +754,18 @@ router.get('/loops/:conversationId/:loopId/messages', (req: Request, res: Respon
         if (nextLoop) {
             msgs = db.prepare(
                 `SELECT * FROM conversation_messages
-                 WHERE conversation_id = ? AND role NOT IN ('human', 'darron')
+                 WHERE conversation_id = ? AND role NOT IN (${humanSideRoles().map(() => '?').join(',')})
                  AND created_at >= (SELECT created_at FROM conversation_messages WHERE id = ?)
                  AND created_at < (SELECT created_at FROM conversation_messages WHERE id = ?)
                  ORDER BY created_at ASC`
-            ).all(loop.conversation_id, loop.human_message_id, nextLoop.human_message_id) as any[];
+            ).all(loop.conversation_id, ...humanSideRoles(), loop.human_message_id, nextLoop.human_message_id) as any[];
         } else {
             msgs = db.prepare(
                 `SELECT * FROM conversation_messages
-                 WHERE conversation_id = ? AND role NOT IN ('human', 'darron')
+                 WHERE conversation_id = ? AND role NOT IN (${humanSideRoles().map(() => '?').join(',')})
                  AND created_at >= (SELECT created_at FROM conversation_messages WHERE id = ?)
                  ORDER BY created_at ASC`
-            ).all(loop.conversation_id, loop.human_message_id) as any[];
+            ).all(loop.conversation_id, ...humanSideRoles(), loop.human_message_id) as any[];
         }
 
         res.json({ loop, messages: msgs });

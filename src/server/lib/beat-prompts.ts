@@ -26,18 +26,15 @@
  * warm spoke carries full identity; these txn profiles suppress memory).
  */
 
-import { loadResidents } from './garden-manifest';
+import { verifiedCognitionLeaf } from './cognition-envelope';
 
+// Ring 2 (E2 flip): the identity core reads through THE SEAM — verified on an
+// adopted garden (alert-and-hold on failure), unverified-with-announce on a
+// genesis garden. The never-borrow property composes through it (MNT-059, the
+// statute in the suite): an absent identitySection THROWS missing-member and
+// the calling surface holds its lane — it never borrows another mind's.
 function identityCoreFor(slug: string): string {
-    const r = loadResidents().find(a => a.slug === slug) as any;
-    const section = r?.identitySection?.trim();
-    if (!section) {
-        throw new Error(
-            `beat-prompts: no manifest identitySection for '${slug}' — refusing to compose a beat opening ` +
-            `(DEC-081 never-fallback; a missing identity fails loud, never borrows another mind's)`,
-        );
-    }
-    return section;
+    return verifiedCognitionLeaf(`agents[${slug}].identitySection`).trim();
 }
 
 export function dreamBeatTxnOpeningFor(slug: string, dreamSeeds: string): string {

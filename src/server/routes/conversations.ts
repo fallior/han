@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { humanSideRoles } from '../lib/persona-registry';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { db, conversationStmts, conversationMessageStmts, conversationLoopStmts } from '../db';
@@ -10,7 +11,7 @@ import { autoGenerateTts, autoTagLoop } from './voice';
 import { callLLM } from '../orchestrator';
 import { registeredAgentSlugs } from '../lib/agent-registry';
 import { signalsDir } from '../lib/paths';
-import { slugForConversationRole } from '../lib/garden-manifest';
+import { slugForConversationRole, gardenerPersonaKey } from '../lib/garden-manifest';
 import { orchestrate } from '../services/jemma-orchestrator';
 import { getPersonas, getAgentPersonas, getMentionPatterns } from '../services/village.js';
 
@@ -250,7 +251,7 @@ function classifyAndDispatch(
                 messageId,
                 recipients,
                 messageText: content,
-                author: 'darron',
+                author: gardenerPersonaKey(), // Ring 2 (H4 write-site): the SINGULAR incumbent gardener key — never a literal
                 source: 'admin',
                 discussionType,
                 reasoning,
@@ -597,7 +598,7 @@ router.post('/:id/messages', (req: Request<{ id: string }>, res: Response) => {
         // A loop is bounded by user messages — each user message opens a new loop
         // and closes the prior one. Both 'human' (UI default) and 'darron' (API
         // posts) are user-side roles.
-        const HUMAN_SIDE_ROLES = ['human', 'darron'];
+        const HUMAN_SIDE_ROLES = humanSideRoles(); // Ring 2 (H4): derived from the registry — never a persona-key literal
         if (HUMAN_SIDE_ROLES.includes(finalRole)) {
             try {
                 const next = conversationLoopStmts.getNextLoopNumber.get(req.params.id) as any;

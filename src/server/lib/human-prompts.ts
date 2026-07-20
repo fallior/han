@@ -15,7 +15,8 @@
  * priorAgentFailed) lives in the user-prompt scaffold.
  */
 
-import { conversationRoleFor, humanResponderPeers, loadResidents, agentNameAliases } from './garden-manifest';
+import { conversationRoleFor, humanResponderPeers, loadResidents, agentNameAliases , communityPort } from './garden-manifest';
+import { verifiedCognitionLeaf } from './cognition-envelope';
 
 export const DISCORD_ATTACHMENT_HINT = `Discord attachments: when your prompt contains a "[Downloaded to]" section listing paths under ~/.han/downloads/discord/, those are real files attached to the Discord message. Open each path with the Read tool (works on text, code, images, PDFs) before responding. Never claim you cannot read Discord attachments — the paths are already in your prompt.`;
 
@@ -95,13 +96,11 @@ export function specFor(slug: string): HumanAgentSpec {
         throw new Error(
             `[human-prompts] specFor('${slug}'): unknown agent (roster: ${residents.map((a) => a.slug).join(', ')})`);
     }
-    const identity = (resident.identitySection ?? '').trim();
-    if (!identity) {
-        throw new Error(
-            `[human-prompts] specFor('${slug}'): manifest identitySection missing/empty — refusing to ` +
-            `synthesise a generic identity (MNT-037 rider; DEC-081 never-fallback). Fix the ` +
-            `garden-manifest entry for '${slug}'; the dispatch fails loud and the post stays re-deliverable.`);
-    }
+    // Ring 2 (E2 flip): the identity payload reads through THE SEAM — verified on
+    // an adopted garden, announce-once unverified on genesis. missing-member
+    // throws with the alert-and-hold contract; the dispatch fails loud and the
+    // post stays re-deliverable (the MNT-037 rider, now envelope-backed).
+    const identity = verifiedCognitionLeaf(`agents[${slug}].identitySection`).trim();
     const name = resident.displayName;
     const aliasNames = agentNameAliases(slug).map((a) => a.charAt(0).toUpperCase() + a.slice(1));
     const longNames = [...new Set([name, ...aliasNames])].join('/');
@@ -339,7 +338,7 @@ Respond to the latest message in the Discord channel. Keep it concise and conver
     return `Conversation: "${ctx.title ?? '(untitled)'}" (id: ${ctx.conversationId ?? ''})
 
 This is a CONVERSATION turn. FETCH the current thread yourself before composing — run via the Bash tool:
-  curl -sk "https://localhost:3847/api/conversations/${ctx.conversationId ?? ''}"
+  curl -sk "https://localhost:${communityPort()}/api/conversations/${ctx.conversationId ?? ''}"
 That returns the thread's recent messages. Apply the self-recognition + already-responded + distinct-angle gates above against what you fetch.
 
 If a gate says stand down, call \`mcp__han-diary__stand_down\` and stop. Otherwise compose your reply, then **POST it to this thread yourself** — the controller does NOT post on your behalf (S156), so if you skip this curl your reply is silently lost. The exact command is **self-contained here — do NOT rely on CLAUDE.md** (a light welcome-back may not have loaded its "Posting" section):
@@ -347,6 +346,6 @@ If a gate says stand down, call \`mcp__han-diary__stand_down\` and stop. Otherwi
   2. Build the JSON payload safely (this escapes a multi-paragraph body for you — NEVER hand-escape a body into \`-d\`):
      \`python3 -c "import json; print(json.dumps({'role':'${roleLabel}','content':open('/tmp/human-reply-${roleLabel}.txt').read()}))" > /tmp/human-payload-${roleLabel}.json\`
   3. POST it, and confirm the response JSON contains an \`"id"\` (that is proof it landed):
-     \`curl -sk -X POST "https://localhost:3847/api/conversations/${ctx.conversationId ?? ''}/messages" -H "Content-Type: application/json" --data @/tmp/human-payload-${roleLabel}.json\`
+     \`curl -sk -X POST "https://localhost:${communityPort()}/api/conversations/${ctx.conversationId ?? ''}/messages" -H "Content-Type: application/json" --data @/tmp/human-payload-${roleLabel}.json\`
 Then call \`mcp__han-diary__submit_response\` (with that same reply body as \`working_memory_full\`).${priorFailedBlock}`;
 }

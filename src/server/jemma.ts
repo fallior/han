@@ -32,6 +32,7 @@
  */
 
 import WebSocket from 'ws';
+import { communityPort } from './lib/garden-manifest';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -59,7 +60,7 @@ const DISCORD_GATEWAY = 'wss://gateway.discord.gg/?v=10&encoding=json';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b';
 
-const SERVER_URL = 'https://localhost:3847';
+const SERVER_URL = `https://localhost:${communityPort()}`; // Ring 2 leaf (was a literal)
 const RECONCILIATION_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const HEARTBEAT_JITTER_MS = 1000; // 1s jitter on heartbeat interval
 

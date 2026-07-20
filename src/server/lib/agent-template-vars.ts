@@ -37,7 +37,11 @@ export function agentTemplateVars(slug: string, surface = 'session'): Record<str
 
     const cfg = gradientConfigForAgent(slug);
     const allocated = allocationFor(slug); // C-P3a (P4b-i): port is allocation-sourced, not roster-sourced
-    const { project, user } = GARDEN_MANIFEST;
+    const { project } = GARDEN_MANIFEST;
+    // Ring 2 (Casey's transitional-provision): read gardener ?? user — the canonical
+    // key wins, the legacy alias serves a pre-rename manifest; writers write only
+    // `gardener` from here on. (USER_* placeholder names stay for template compat.)
+    const user = (GARDEN_MANIFEST as any).gardener ?? GARDEN_MANIFEST.user;
 
     // Per-seat swap prefix: this surface's, else the session seat's, else the agnostic
     // default (mirrors manifest-get.ts `env`). Filenames relative to AGENT_MEMORY_DIR.

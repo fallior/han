@@ -53,6 +53,7 @@ import { gradientConfigForAgent } from './lib/agent-registry';
 import { appendPairedMemory } from './lib/memory-paired-writer';
 import { observeActiveModel } from './lib/tmux-dispatcher';
 import { gradientStmts, feelingTagStmts } from './db';
+import { ENVELOPE_PATH } from './lib/cognition-envelope';
 import type { CaptureRecord } from './lib/diary-mcp-server';
 
 // ── Identity: fail-loud, never defaulted (Tenshi condition 1) ────────────────
@@ -239,11 +240,26 @@ function isCliBusy(): boolean {
     }
 }
 
+// ── Envelope hold-lane (Ring 2 fail map — Jim's condition 4, DEC-103): a failed
+// cognition-envelope verification HOLDS this lane (alert once, no retry storm)
+// until the envelope file's mtime changes (a re-sign auto-releases the hold).
+let envelopeHold: { alertedAt: string; envMtimeMs: number | null } | null = null;
+
+function envelopeMtimeMs(): number | null {
+    try { return fs.statSync(ENVELOPE_PATH).mtimeMs; } catch { return null; }
+}
+
 function scheduleNext(): void {
     const delay = computeWallClockDelay(SLUG);
     setTimeout(async () => {
         try {
-            if (isHeartbeatPaused(SLUG)) {
+            if (envelopeHold && envelopeMtimeMs() === envelopeHold.envMtimeMs) {
+                console.log(`[${SLUG}-heartbeat] lane HELD since ${envelopeHold.alertedAt} — cognition envelope failed verification; re-sign to release (alert-and-hold, DEC-103)`);
+            } else if (envelopeHold) {
+                console.log(`[${SLUG}-heartbeat] envelope changed on disk — releasing the held lane and retrying`);
+                envelopeHold = null;
+                await beat();
+            } else if (isHeartbeatPaused(SLUG)) {
                 console.log(`[${SLUG}-heartbeat] paused (signal) — skipping beat`);
             } else if (isCliBusy()) {
                 console.log(`[${SLUG}-heartbeat] cli-busy-${SLUG} fresh — yielding this beat (Gary model)`);
@@ -251,8 +267,14 @@ function scheduleNext(): void {
                 await beat();
             }
         } catch (err) {
-            console.error(`[${SLUG}-heartbeat] beat error:`, (err as Error).message);
-            writeHealthSignal((err as Error).message);
+            if ((err as Error).name === 'CognitionEnvelopeError' && !envelopeHold) {
+                envelopeHold = { alertedAt: new Date().toISOString(), envMtimeMs: envelopeMtimeMs() };
+                console.error(`[${SLUG}-heartbeat] 🔴 COGNITION ENVELOPE FAILED — holding the lane (one alert, no retry storm):`, (err as Error).message);
+                writeHealthSignal(`envelope-hold: ${(err as Error).message.split(String.fromCharCode(10))[0]}`);
+            } else if ((err as Error).name !== 'CognitionEnvelopeError') {
+                console.error(`[${SLUG}-heartbeat] beat error:`, (err as Error).message);
+                writeHealthSignal((err as Error).message);
+            }
         }
         scheduleNext();
     }, delay);

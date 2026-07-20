@@ -331,3 +331,20 @@ export function personaConfigOrUndefined(slug: string): PersonaConfig | undefine
 export function personasByKind(...kinds: PersonaKind[]): PersonaConfig[] {
     return Object.values(PERSONA_CONFIG).filter(p => kinds.includes(p.kind));
 }
+
+/**
+ * The human side of a conversation, as a ROLE/KEY SET (Ring 2, H4 read-sites;
+ * Jim's derive-never-re-literal ruling + Casey's corporation-sole contract).
+ * Returns the stable role 'human' plus the personaKey of every persona that
+ * holds — or has ever held — kind 'human' in this garden's registry.
+ * FORWARD CONVENTION (the corporation sole; history starts 2026-07-20): the
+ * registry NEVER deletes a former human persona — DEC-069 applied to people —
+ * so a garden whose gardener changes keeps its predecessor's messages on the
+ * human side of every query. The office persists; holders accumulate.
+ */
+export function humanSideRoles(): string[] {
+    const keys = Object.values(PERSONA_CONFIG)
+        .filter(p => p.kind === 'human')
+        .map(p => p.name);
+    return ['human', ...keys];
+}

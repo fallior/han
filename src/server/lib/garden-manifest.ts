@@ -705,9 +705,42 @@ export function conversationRolesExcept(selfSlug: string): string[] {
  * 'Tenshi', not 'Darron'). (Project-b Phase 1 — DEC-081.)
  */
 export function displayNameForRole(role: string): string {
-    if (role === 'human') return 'Darron';
+    if (role === 'human') {
+        // Ring 2 (H1, the gardener class): the human's name comes from the manifest's
+        // gardener leaf via the envelope seam — NEVER the literal that made every
+        // gardener render as "Darron" on a travelled garden (Casey's scour find).
+        // gardener ?? user ?? throw lives in the resolver; on a mid-transition
+        // manifest the legacy user block serves (announce-once). Fail-soft here
+        // ONLY for display (a render label, not cognition): a nameless garden
+        // shows the role, it never borrows a name.
+        try {
+            // Lazy import — a static import would close the cycle garden-manifest →
+            // cognition-envelope → agent-registry → garden-manifest (the loadResidents
+            // seam the Residence build made structurally acyclic; keep it that way).
+            const { verifiedCognitionLeaf } = require('./cognition-envelope');
+            return verifiedCognitionLeaf('gardener.name');
+        } catch {
+            return 'Human';
+        }
+    }
     const agent = GARDEN_MANIFEST.agents.find(a => (a.conversationRole ?? a.slug) === role);
     return agent?.displayName ?? (role.charAt(0).toUpperCase() + role.slice(1));
+}
+
+/** The community-convergence port (Ring 2 leaf) — ALL conversation reads/writes and
+ *  UI/WS traffic converge on ONE server so the admin stays real-time-coherent
+ *  (the settled S166-era design). Was a scattered literal in six files; now the
+ *  manifest's `communityPort`, defaulting 3847 only for a manifest that predates
+ *  the leaf. */
+export function communityPort(): number {
+    return (GARDEN_MANIFEST as any).communityPort ?? 3847;
+}
+
+/** The SINGULAR incumbent gardener's persona key (Ring 2, H4 write-sites — a write
+ *  stamps a specific author and needs the incumbent, never the historical set;
+ *  Tenshi's read/write split). gardener ?? legacy-'darron' during transition. */
+export function gardenerPersonaKey(): string {
+    return (GARDEN_MANIFEST as any).gardener?.personaKey ?? 'darron';
 }
 
 /** The conversation role for an agent slug — manifest `conversationRole`, defaulting to the slug
