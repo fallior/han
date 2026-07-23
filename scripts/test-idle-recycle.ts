@@ -170,8 +170,13 @@ async function main(): Promise<void> {
         // Casey's fold 6 — the single-chokepoint pin: the refusal's coverage is an INVARIANT,
         // not an accident of the call-graph. bindSpoke must have exactly ONE production
         // call-site (after all three checkout doors converge), and bindTierDecision's refusal
-        // must guard it (appear before it in the same function). A second bind door added
-        // anywhere fails this suite instead of silently growing a hole behind the partition.
+        // must guard it (appear before it in the same function). REPO-WIDE (Tenshi's post-land
+        // advisory, 2026-07-24): the walk covers every .ts under src/ + scripts/ — the threat
+        // Casey named was "a recovery path, a migration script", which would live OUTSIDE the
+        // two files the first pin grepped. Now the label matches the physics: a second bind
+        // door added anywhere in production code fails this suite instead of silently growing
+        // a hole behind the partition. Excluded, by name: stem-pool.ts (the definition itself)
+        // and test-*.ts (suites exercise bindSpoke legitimately; they are not doors).
         const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'server', 'lib', 'tmux-dispatcher.ts'), 'utf-8');
         const calls = src.match(/\bbindSpoke\(/g)?.length ?? 0; // the import names it WITHOUT a paren, so this counts call-sites exactly
         const importsIt = /import\s*\{[^}]*\bbindSpoke\b[^}]*\}\s*from/.test(src);
@@ -179,11 +184,24 @@ async function main(): Promise<void> {
         const refusalIdx = src.indexOf('bindTierDecision(stem.trust_tier');
         const bindIdx = src.indexOf('bindSpoke(slug, surface, stem.stem_id');
         check('the refusal GUARDS the chokepoint (decision precedes the bind at the one site)', refusalIdx !== -1 && bindIdx !== -1 && refusalIdx < bindIdx);
-        const grepOthers = ['stem-pool.ts'].every(f => {
-            const s = fs.readFileSync(path.join(__dirname, '..', 'src', 'server', 'lib', f), 'utf-8');
-            return (s.match(/\bbindSpoke\(/g)?.length ?? 0) === 1; // the definition itself, no self-calls
+        const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+            if (e.name === 'node_modules' || e.name.startsWith('.')) return [];
+            const p = path.join(dir, e.name);
+            if (e.isDirectory()) return walk(p);
+            return e.isFile() && e.name.endsWith('.ts') ? [p] : [];
         });
-        check('no second bind door elsewhere in the pool layer', grepOthers);
+        const repoRoot = path.join(__dirname, '..');
+        const offenders: string[] = [];
+        for (const f of [...walk(path.join(repoRoot, 'src')), ...walk(path.join(repoRoot, 'scripts'))]) {
+            const base = path.basename(f);
+            if (base.startsWith('test-')) continue;               // suites are not doors
+            const n = fs.readFileSync(f, 'utf-8').match(/\bbindSpoke\(/g)?.length ?? 0;
+            const allowed = base === 'stem-pool.ts' ? 1           // the definition itself
+                : base === 'tmux-dispatcher.ts' ? 1               // the one guarded chokepoint
+                : 0;
+            if (n > allowed) offenders.push(`${path.relative(repoRoot, f)}:${n}`);
+        }
+        check('no second bind door ANYWHERE in src/ + scripts/ (the label now matches the physics)', offenders.length === 0, offenders.join(', '));
     }
 
     console.log('— pool ops (temp registry) —');
