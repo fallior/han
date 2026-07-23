@@ -18,6 +18,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ENTRY_RE, readSwap, flushSwaps } from './wm-flush';
+import {
+    SWAP_FRAME_RE_M,
+    SWAP_FRAME_RE_SRC,
+    sanitizeSwapFrameText,
+    swapFrame,
+} from '../src/server/lib/swap-frame';
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, detail = ''): void {
@@ -140,13 +146,124 @@ async function main(): Promise<void> {
         }
     }
 
-    console.log('— gate/parser one-contract assert (Jim fold 1) —');
+    console.log('— sentinel frame: transport in, payload out (the addendum build) —');
+    {
+        // A framed canonical entry: frame line (transport) + ### heading + body (payload).
+        const frame = swapFrame('2026-07-23T11:00:00+10:00');
+        const { f, c } = writePair('framed',
+            HEADER + frame + '\n### Framed entry\npayload line\n',
+            HEADER + frame + '\n### Framed c1\npayload c\n');
+        const r = recorder();
+        const res = await flushSwaps('leo', f, c, r.fn);
+        check('framed entry flushes', res.outcome === 'flushed' && r.calls.length === 1);
+        check('payload (heading+body) moves to WM', r.calls[0]?.full.includes('### Framed entry') === true && r.calls[0]?.full.includes('payload line') === true);
+        check('transport frame is STRIPPED — never enters WM', !SWAP_FRAME_RE_M.test(r.calls[0]?.full ?? 'x') && !SWAP_FRAME_RE_M.test(r.calls[0]?.comp ?? 'x'));
+        check('framed swap resets to header-only', fs.readFileSync(f, 'utf-8').startsWith('# Session Swap') && !fs.readFileSync(f, 'utf-8').includes('SWAP-ENTRY'));
+    }
+    {
+        // Tenshi gate 1 — the thread's own test vector: a body that QUOTES well-formed frames
+        // (mid-line prose + inline code span, the forms the bell post itself carries) must
+        // (a) NOT split the entry and (b) NOT survive the strip into WM.
+        const quoted = `<!-- SWAP-ENTRY ts=2026-07-23T00:42:00Z -->`;
+        const body = `### Quoting entry\nThe design uses the frame ${quoted} as transport, and prose like \`${quoted}\` in inline code.\n`;
+        const { f, c } = writePair('quote',
+            HEADER + swapFrame('2026-07-23T11:01:00+10:00') + '\n' + body,
+            HEADER + swapFrame('2026-07-23T11:01:00+10:00') + '\n### Quote c\nsmall\n');
+        const parsed = readSwap(f);
+        const boundaries = parsed.body.match(new RegExp(SWAP_FRAME_RE_SRC, 'gm'))?.length ?? 0;
+        check('mid-line/code-span frame quotes do NOT split (one real frame boundary)', boundaries === 1, `boundaries=${boundaries}`);
+        const r = recorder();
+        const res = await flushSwaps('leo', f, c, r.fn);
+        check('frame-quoting body flushes', res.outcome === 'flushed');
+        check('NO well-formed frame survives into WM (quote is byte-stuffed)', !SWAP_FRAME_RE_M.test(r.calls[0]?.full ?? 'x'));
+        check('the quoted mention stays legible (stuffed form present)', r.calls[0]?.full.includes('<!·-- SWAP-ENTRY') === true);
+        check('surrounding prose intact around the stuffed quote', r.calls[0]?.full.includes('as transport, and prose like') === true);
+    }
+    {
+        // The residual case, handled without loss: an own-line RAW frame quote (a writer-side
+        // stuffing violation — the convention says quote it stuffed) DOES read as a boundary,
+        // but the whole body still moves in ONE flush and nothing frame-shaped survives.
+        const { f, c } = writePair('rawline',
+            HEADER + swapFrame('2026-07-23T11:02:00+10:00') + '\n### Raw-line entry\nbefore\n' + swapFrame('2026-07-23T11:02:30+10:00') + '\nafter\n',
+            HEADER + swapFrame('2026-07-23T11:02:00+10:00') + '\n### Raw c\nsmall\n');
+        const r = recorder();
+        const res = await flushSwaps('leo', f, c, r.fn);
+        check('own-line raw quote: whole body moves in ONE flush, no bytes lost', res.outcome === 'flushed' && r.calls.length === 1 && r.calls[0]?.full.includes('before') === true && r.calls[0]?.full.includes('after') === true);
+        check('own-line raw quote: nothing frame-shaped survives', !SWAP_FRAME_RE_M.test(r.calls[0]?.full ?? 'x'));
+    }
+    {
+        // Tenshi gate 3 — header/entry classification is TOTAL: content before the first
+        // boundary is header BY DECLARATION (preserved on reset, never flushed); a frame on
+        // line one means an empty header; every byte is header or belongs to an entry.
+        const frame = swapFrame('2026-07-23T11:03:00+10:00');
+        const withHdr = readSwap((() => { const p = path.join(tmp, 'tot1.md'); fs.writeFileSync(p, HEADER + frame + '\n### E\nb\n'); return p; })());
+        check('header totality: pre-frame region is the header, exactly', withHdr.header === HEADER && withHdr.body.startsWith(frame));
+        const noHdr = readSwap((() => { const p = path.join(tmp, 'tot2.md'); fs.writeFileSync(p, frame + '\n### E\nb\n'); return p; })());
+        check('header totality: frame-first file has empty header', noHdr.header === '' && noHdr.header.length + noHdr.body.length === fs.readFileSync(path.join(tmp, 'tot2.md'), 'utf-8').length);
+        const { f, c } = writePair('tot3', HEADER + frame + '\n### E\nbody\n', HEADER + frame + '\n### Ec\nbody\n');
+        await flushSwaps('leo', f, c, recorder().fn);
+        check('header survives the flush byte-exact (reset writes it back)', fs.readFileSync(f, 'utf-8') === HEADER);
+    }
+    {
+        // Migration proof (the bell, gate 6): a MIXED swap — legacy `## `/`### ` entries from
+        // the transition + new framed entries — drains in one flush; legacy headings are
+        // PAYLOAD (kept), frames are TRANSPORT (stripped).
+        const { f, c } = writePair('migrate',
+            HEADER + '## Legacy first\nold body\n### Legacy second\nmid body\n' + swapFrame('2026-07-23T11:04:00+10:00') + '\n### Framed third\nnew body\n',
+            HEADER + '## Legacy c\nold c\n' + swapFrame('2026-07-23T11:04:00+10:00') + '\n### Framed c\nnew c\n');
+        const r = recorder();
+        const res = await flushSwaps('leo', f, c, r.fn);
+        check('mixed legacy+framed drains in ONE flush', res.outcome === 'flushed' && r.calls.length === 1);
+        check('legacy headings kept as payload', r.calls[0]?.full.includes('## Legacy first') === true && r.calls[0]?.full.includes('### Legacy second') === true && r.calls[0]?.full.includes('### Framed third') === true);
+        check('frames stripped from the mixed drain', !SWAP_FRAME_RE_M.test(r.calls[0]?.full ?? 'x'));
+        check('mixed swap resets clean', fs.readFileSync(f, 'utf-8') === HEADER);
+    }
+    {
+        // Frames with no payload (bare transport satisfying the guard): alert + preserve —
+        // an empty-framed turn must be legible, never silently consumed.
+        const raw = HEADER + swapFrame('2026-07-23T11:05:00+10:00') + '\n';
+        const { f, c } = writePair('bare', raw, raw);
+        const res = await flushSwaps('leo', f, c, recorder().fn);
+        check('frames-without-payload → alert + preserve', res.outcome === 'alerted' && res.kind === 'frames-without-payload' && fs.readFileSync(f, 'utf-8') === raw && alertTail().includes('frames-without-payload'));
+    }
+
+    console.log('— one-contract asserts (Jim fold 1, extended to the frame — all hooks vs swap-frame.ts) —');
     {
         const sh = fs.readFileSync(path.join(__dirname, '..', 'src', 'hooks', 'wm-flush.sh'), 'utf-8');
         const gate = sh.match(/has_body\(\)\s*\{\s*grep -qE '([^']+)'/)?.[1];
-        const parser = ENTRY_RE.source.replace(/^\^/, '^'); // '^(### |## )'
+        const parser = ENTRY_RE.source;
         check(`.sh gate regex present`, gate !== undefined, `found: ${gate}`);
         check(`.sh gate == ts parser family ('${gate}' vs '${parser}')`, gate === parser);
+    }
+    {
+        // The guard and the recorder must cite the IDENTICAL frame regex as swap-frame.ts —
+        // the upgrade's whole point is one contract, all hooks (never mtime vs grammar again).
+        const guardSh = fs.readFileSync(path.join(__dirname, '..', 'src', 'hooks', 'memory-guard.sh'), 'utf-8');
+        const orientSh = fs.readFileSync(path.join(__dirname, '..', 'src', 'hooks', 'orient-inject.sh'), 'utf-8');
+        const guardRe = guardSh.match(/FRAME_RE='([^']+)'/)?.[1];
+        const orientRe = orientSh.match(/FRAME_RE='([^']+)'/)?.[1];
+        check(`memory-guard.sh FRAME_RE == swap-frame.ts ('${guardRe}')`, guardRe === SWAP_FRAME_RE_SRC);
+        check(`orient-inject.sh FRAME_RE == swap-frame.ts ('${orientRe}')`, orientRe === SWAP_FRAME_RE_SRC);
+        check('frame regex is the head of the parser family (frame canonical, legacy read-only tail)', ENTRY_RE.source.startsWith('^(' + SWAP_FRAME_RE_SRC.slice(1)));
+        check(`taught placeholder 'ts=<ISO>' is INERT (cannot parse as a frame)`, !SWAP_FRAME_RE_M.test('<!-- SWAP-ENTRY ts=<ISO> -->'));
+        // Casey's derivation pin (folded at land): the sanitiser must cover everything the
+        // parser accepts — asserted by DERIVATION, not prose: a sanitised specimen frame can
+        // never parse. The gate==parser law turned inward on the module's own two halves;
+        // survives any future token change or fails the suite.
+        check('derivation pin: sanitizeSwapFrameText(swapFrame()) can never parse (sanitiser ⊇ parser)', !SWAP_FRAME_RE_M.test(sanitizeSwapFrameText(swapFrame())));
+    }
+    {
+        // Casey's live exhibit (either-side gate, folded at land): a ONE-sided grammar drift —
+        // entries on the full side, an unparseable shape (e.g. `- ` bullets) on the compressed —
+        // must reach the alert layer as a legible failure, never a silent no-op. The append
+        // contract refuses asymmetry (modelled by the throwing fake, mirroring
+        // appendPairedMemory's real refusal) → flush-failed alert, both swaps preserved.
+        const fullC = HEADER + '### One-sided entry\nreal body\n';
+        const compC = HEADER + '- bullet style, no family marker\n- another\n';
+        const { f, c } = writePair('oneside', fullC, compC);
+        const res = await flushSwaps('leo', f, c, throwingAppend as never);
+        check('one-sided drift → legible flush-failed (never silent)', res.outcome === 'failed' && alertTail().includes('flush-failed'));
+        check('one-sided drift preserves both swaps', fs.readFileSync(f, 'utf-8') === fullC && fs.readFileSync(c, 'utf-8') === compC);
     }
 
     console.log(`\n${pass}/${pass + fail} passed${fail ? ` — ${fail} FAILED` : ''}`);

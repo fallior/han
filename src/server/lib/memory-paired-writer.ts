@@ -37,6 +37,7 @@ import * as path from 'path';
 import { gradientConfigForAgent } from './agent-registry';
 import { withMemorySlot } from './memory-slot';
 import { countTokens } from './token-counter';
+import { sanitizeSwapFrameText } from './swap-frame';
 
 /**
  * WM-BOUNDARY marker — paired-ID handshake between WMF and WM at slice time.
@@ -126,8 +127,13 @@ export async function appendPairedMemory(
 
     // MNT-026: byte-stuff marker-shaped text in incoming content at the ONE chokepoint —
     // quoted `<!-- WM-BOUNDARY …` prose can never parse as a real boundary downstream.
-    fullContent = sanitizeMarkerText(fullContent);
-    compressedContent = sanitizeMarkerText(compressedContent);
+    // MNT-060 addendum: the SWAP-ENTRY transport frame gets the identical treatment here,
+    // garden-wide — whatever path content takes into WM, nothing frame-shaped survives it,
+    // so the sentinel never reaches WM or the gradient (wild occurrence → zero by
+    // construction). The flush strips its own recognised transport upstream; this is the
+    // belt for quotations and for every OTHER writer into WM. Idempotent.
+    fullContent = sanitizeSwapFrameText(sanitizeMarkerText(fullContent));
+    compressedContent = sanitizeSwapFrameText(sanitizeMarkerText(compressedContent));
 
     const fullPresent = !!fullContent.trim();
     const compPresent = !!compressedContent.trim();

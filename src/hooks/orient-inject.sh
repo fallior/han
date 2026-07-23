@@ -48,12 +48,18 @@ skip=0
 skip=${skip:-0}
 if [ "$skip" -gt 0 ] 2>/dev/null; then
   bang="⚠"; [ "$skip" -ge 2 ] && bang="⚠⚠"; [ "$skip" -ge 3 ] && bang="🔴🔴🔴"
-  echo "$bang MEMORY: unpaired/no swap write for the last ${skip} turn(s). Per the Incremental Memory Protocol — write this exchange's entry to BOTH $(basename "$COMP_SWAP") (compressed) AND $(basename "$FULL_SWAP") (full) BEFORE the work. The Stop hook holds the turn open until both are written."
+  echo "$bang MEMORY: unpaired/no FRAMED swap write for the last ${skip} turn(s). Per the Incremental Memory Protocol — write this exchange's entry to BOTH $(basename "$COMP_SWAP") (compressed) AND $(basename "$FULL_SWAP") (full) BEFORE the work, each opened with its transport frame <!-- SWAP-ENTRY ts=<ISO> --> on its own line (date -Iseconds). The Stop hook holds the turn open until both are written."
 fi
 
-# 3. Record BOTH prompt-start mtimes (B-3 paired enforcement).
-full_mtime=0; comp_mtime=0
+# 3. Record BOTH prompt-start baselines (B-3 paired enforcement): mtimes (legacy fallback +
+# debugging) AND SWAP-ENTRY frame counts — the MNT-060-addendum canonical measure. The frame
+# regex is the ONE contract (src/server/lib/swap-frame.ts); the suite string-compares this
+# line to it and to memory-guard.sh's — change swap-frame.ts, change all three.
+FRAME_RE='^<!-- SWAP-ENTRY ts=[0-9][^ ]* -->$'
+full_mtime=0; comp_mtime=0; full_frames=0; comp_frames=0
 [ -n "$MEM" ] && [ -f "$FULL_SWAP" ] && full_mtime=$(stat -c %Y "$FULL_SWAP" 2>/dev/null || echo 0)
 [ -n "$MEM" ] && [ -f "$COMP_SWAP" ] && comp_mtime=$(stat -c %Y "$COMP_SWAP" 2>/dev/null || echo 0)
-printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=%s\nblocked=0\nwake_grace=%s\n' "$full_mtime" "$comp_mtime" "$skip" "$wake_grace" > "$STATE"
+if [ -n "$MEM" ] && [ -f "$FULL_SWAP" ]; then full_frames=$(grep -cE "$FRAME_RE" "$FULL_SWAP" 2>/dev/null); full_frames=${full_frames:-0}; fi
+if [ -n "$MEM" ] && [ -f "$COMP_SWAP" ]; then comp_frames=$(grep -cE "$FRAME_RE" "$COMP_SWAP" 2>/dev/null); comp_frames=${comp_frames:-0}; fi
+printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nprompt_full_frames=%s\nprompt_comp_frames=%s\nskip=%s\nblocked=0\nwake_grace=%s\n' "$full_mtime" "$comp_mtime" "$full_frames" "$comp_frames" "$skip" "$wake_grace" > "$STATE"
 exit 0

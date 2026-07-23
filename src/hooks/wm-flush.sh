@@ -32,19 +32,20 @@ SLUG="${AGENT_SLUG:-unknown}"
 [ ! -f "$FULL_SWAP" ] && exit 0
 [ ! -f "$COMP_SWAP" ] && exit 0
 
-# No-op unless BOTH swap files carry a real entry. MNT-060 F1: the gate greps the IDENTICAL
-# entry-grammar FAMILY as wm-flush.ts's ENTRY_RE (`### ` canonical + `## ` legacy) — change one,
-# change both; a gate/parser mismatch recreates the MNT-060 outage inside the fix (the gate
-# declining bodies the parser could eat, or vice versa: the original defect was this gate + parser
-# both keying `### ` while every seat wrote `## ` — a garden-wide silent no-op for 13 days).
+# No-op unless BOTH swap files carry a real entry. The gate greps the IDENTICAL entry-BOUNDARY
+# FAMILY as wm-flush.ts's ENTRY_RE — declared ONCE in src/server/lib/swap-frame.ts: the
+# SWAP-ENTRY transport frame (canonical, MNT-060 addendum) + `### |## ` (transitional
+# read-acceptance for drains and stragglers during the frame migration). Change swap-frame.ts,
+# change this line — the suite string-compares them (a gate/parser mismatch recreates the
+# MNT-060 outage inside the fix: the gate declining bodies the parser could eat, or vice versa).
 # Keying on ENTRY markers — not "any non-header line" — stays robust to every header shape (Jim's
 # MNT-012 catch). Cheap, so spoke turns (diary path, no entry marker in swap) never spawn tsx.
-# TRANSITIONAL (MNT-060 addendum, Darron 2026-07-20 22:27): this content-shaped family is a
-# stopgap; the destination is the sentinel transport-frame (byte-stuffed, stripped at flush,
-# guard-checks-frame) — a named follow-on build.
-has_body() { grep -qE '^(### |## )' "$1"; }
-has_body "$FULL_SWAP" || exit 0
-has_body "$COMP_SWAP" || exit 0
+has_body() { grep -qE '^(<!-- SWAP-ENTRY ts=[0-9][^ ]* -->$|### |## )' "$1"; }
+# EITHER-side gate (Casey's live exhibit, folded at land): a ONE-sided grammar drift must reach
+# the tsx alert layer, not short-circuit silently — the asymmetry falls through to
+# appendPairedMemory's refusal, which writes the flush-failed alert (the last silent door in
+# the migration window made legible). Both-empty stays the cheap spoke no-op.
+has_body "$FULL_SWAP" || has_body "$COMP_SWAP" || exit 0
 
 # Flush via the atomic paired writer (appendPairedMemory, #49) in a tsx one-shot — atomicity
 # (both-or-neither, refuses asymmetric) is the reason this is TS not a bash append. The script

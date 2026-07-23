@@ -56,50 +56,78 @@ fi
 
 prompt_full=$(grep -oE 'prompt_full_mtime=[0-9]+' "$STATE" | cut -d= -f2); prompt_full=${prompt_full:-0}
 prompt_comp=$(grep -oE 'prompt_comp_mtime=[0-9]+' "$STATE" | cut -d= -f2); prompt_comp=${prompt_comp:-0}
+# MNT-060 addendum (the sentinel-frame build): the guard is upgraded from MTIME- to
+# FRAME-checking — a turn's paired write is proven by a NEW `<!-- SWAP-ENTRY ts=… -->`
+# transport frame appearing in BOTH swap files. Guard and flush now cite the SAME declared
+# contract (src/server/lib/swap-frame.ts is the source of truth; the suite string-compares
+# this regex to it and to orient-inject.sh's — change swap-frame.ts, change all three).
+# The block message below TEACHES the frame — it is the migration's own teacher; its
+# `ts=<ISO>` placeholder can never itself parse as a frame (the regex requires a digit).
+FRAME_RE='^<!-- SWAP-ENTRY ts=[0-9][^ ]* -->$'
+prompt_full_fr=$(grep -oE 'prompt_full_frames=[0-9]+' "$STATE" | cut -d= -f2)
+prompt_comp_fr=$(grep -oE 'prompt_comp_frames=[0-9]+' "$STATE" | cut -d= -f2)
 skip=$(grep -oE 'skip=[0-9]+' "$STATE" | cut -d= -f2); skip=${skip:-0}
 blocked=$(grep -oE 'blocked=[0-9]+' "$STATE" | cut -d= -f2); blocked=${blocked:-0}
 wake_grace=$(grep -oE 'wake_grace=[0-9]+' "$STATE" | cut -d= -f2); wake_grace=${wake_grace:-0}
 
+now_full=$(stat -c %Y "$FULL_SWAP" 2>/dev/null || echo 0)
+now_comp=$(stat -c %Y "$COMP_SWAP" 2>/dev/null || echo 0)
+now_full_fr=$(grep -cE "$FRAME_RE" "$FULL_SWAP" 2>/dev/null); now_full_fr=${now_full_fr:-0}
+now_comp_fr=$(grep -cE "$FRAME_RE" "$COMP_SWAP" 2>/dev/null); now_comp_fr=${now_comp_fr:-0}
+
+# One state shape everywhere: mtimes kept (legacy fallback + debugging), frame counts canonical.
+state_write() { # $1 full_mtime $2 comp_mtime $3 full_frames $4 comp_frames $5 skip $6 blocked $7 wake_grace
+  printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nprompt_full_frames=%s\nprompt_comp_frames=%s\nskip=%s\nblocked=%s\nwake_grace=%s\n' \
+    "$1" "$2" "$3" "$4" "$5" "$6" "$7" > "$STATE"
+}
+
 # WAKE-GRACE (2026-06-24): orient-inject.sh sets wake_grace=1 on a welcome-back turn.
 # A wake is reconstitution, not an exchange to record — blocking here interrupts the
-# welcome-back. Exempt exactly this one turn, then clear the flag so the NEXT turn is
-# guarded normally. Sits ahead of the anti-loop/paired checks so the wake is never held.
+# welcome-back. Exempt exactly this one turn (re-baselining to the CURRENT counts so a
+# pre-existing frame can't false-satisfy the next turn), then clear the flag so the NEXT
+# turn is guarded normally. Sits ahead of the anti-loop/paired checks so the wake is never held.
 if [ "$wake_grace" -eq 1 ] 2>/dev/null; then
-  printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=%s\nblocked=0\nwake_grace=0\n' "$prompt_full" "$prompt_comp" "$skip" > "$STATE"
+  state_write "$now_full" "$now_comp" "$now_full_fr" "$now_comp_fr" "$skip" 0 0
   allow
 fi
 
-now_full=$(stat -c %Y "$FULL_SWAP" 2>/dev/null || echo 0)
-now_comp=$(stat -c %Y "$COMP_SWAP" 2>/dev/null || echo 0)
-full_adv=0; [ "$now_full" -gt "$prompt_full" ] 2>/dev/null && full_adv=1
-comp_adv=0; [ "$now_comp" -gt "$prompt_comp" ] 2>/dev/null && comp_adv=1
+# Advanced-this-turn: FRAME counts when the state carries frame baselines (canonical);
+# mtime fallback ONLY for a stale pre-frame state (the single flip turn — never trap).
+if [ -n "$prompt_full_fr" ] && [ -n "$prompt_comp_fr" ]; then
+  full_adv=0; [ "$now_full_fr" -gt "$prompt_full_fr" ] 2>/dev/null && full_adv=1
+  comp_adv=0; [ "$now_comp_fr" -gt "$prompt_comp_fr" ] 2>/dev/null && comp_adv=1
+else
+  full_adv=0; [ "$now_full" -gt "$prompt_full" ] 2>/dev/null && full_adv=1
+  comp_adv=0; [ "$now_comp" -gt "$prompt_comp" ] 2>/dev/null && comp_adv=1
+fi
 
 # Anti-loop: only ever block ONCE per turn. B-4: reset skip if the paired write
 # landed during the block; otherwise preserve skip for the next nag.
 if [ "$blocked" -ge 1 ] 2>/dev/null; then
   if [ "$full_adv" -eq 1 ] && [ "$comp_adv" -eq 1 ]; then
-    printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=0\nblocked=0\n' "$now_full" "$now_comp" > "$STATE"
+    state_write "$now_full" "$now_comp" "$now_full_fr" "$now_comp_fr" 0 0 0
   else
-    printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=%s\nblocked=0\n' "$prompt_full" "$prompt_comp" "$skip" > "$STATE"
+    state_write "$prompt_full" "$prompt_comp" "${prompt_full_fr:-0}" "${prompt_comp_fr:-0}" "$skip" 0 0
   fi
   allow
 fi
 
-# PAIRED write this turn (BOTH sides advanced) -> good.
+# PAIRED framed write this turn (BOTH sides advanced) -> good.
 if [ "$full_adv" -eq 1 ] && [ "$comp_adv" -eq 1 ]; then
-  printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=0\nblocked=0\n' "$now_full" "$now_comp" > "$STATE"
+  state_write "$now_full" "$now_comp" "$now_full_fr" "$now_comp_fr" 0 0 0
   allow
 fi
 
-# Unpaired or no write -> block once, naming the missing side.
+# Unpaired or no framed write -> block once, naming the missing side + teaching the frame.
+frame_teach="open each entry with its transport frame <!-- SWAP-ENTRY ts=<ISO> --> on its own line (use date -Iseconds; then your ### heading + body — the frame is stripped at flush and never enters memory)"
 if [ "$full_adv" -eq 0 ] && [ "$comp_adv" -eq 0 ]; then
-  miss="no swap write this turn — write the paired entry to BOTH $(basename "$COMP_SWAP") and $(basename "$FULL_SWAP")"
+  miss="no FRAMED swap entry this turn — write the paired entry to BOTH $(basename "$COMP_SWAP") and $(basename "$FULL_SWAP"); $frame_teach"
 elif [ "$full_adv" -eq 1 ]; then
-  miss="FULL written but COMPRESSED ($(basename "$COMP_SWAP")) skipped — write the c1 twin (unpaired writes create gradient drift)"
+  miss="FULL framed but COMPRESSED ($(basename "$COMP_SWAP")) has no new frame — write the framed c1 twin (unpaired writes create gradient drift); $frame_teach"
 else
-  miss="COMPRESSED written but FULL ($(basename "$FULL_SWAP")) skipped — write the c0 twin (unpaired writes create gradient drift)"
+  miss="COMPRESSED framed but FULL ($(basename "$FULL_SWAP")) has no new frame — write the framed c0 twin (unpaired writes create gradient drift); $frame_teach"
 fi
 newskip=$((skip + 1))
-printf 'prompt_full_mtime=%s\nprompt_comp_mtime=%s\nskip=%s\nblocked=1\n' "$prompt_full" "$prompt_comp" "$newskip" > "$STATE"
+state_write "$prompt_full" "$prompt_comp" "${prompt_full_fr:-0}" "${prompt_comp_fr:-0}" "$newskip" 1 0
 printf '{"decision":"block","reason":"Incremental Memory Protocol (B-3 paired guard): %s. FLUSH-FIRST/WRITE-SECOND. This guard blocks at most once per turn; it cannot trap you."}\n' "$miss"
 exit 0

@@ -15,13 +15,15 @@
  *       (an unreadable swap is alert+preserve, never "treat as empty" — Tenshi's polarity);
  *   F4  the hook's `timeout 30` is sufficient BY CONSTRUCTION now: F3 caps any single flush at
  *       ~20K (a 9.5K flush measured ~2s); the fail-state is alert-and-retry, not silent-kill.
- * TRANSITIONAL, by ruling: the family regex and the `### ` convention are stopgaps. The
- * destination is the MNT-060-addendum SENTINEL FRAME (Darron, 2026-07-20 22:27): a high-entropy
- * transport-frame marker (`<!-- SWAP-ENTRY … -->` family), byte-stuffed at the chokepoint
- * (MNT-026), stripped at flush so it never enters WM or the gradient, with the B-3 guard
- * upgraded to frame-checking — one contract, both hooks, unforgeable by construction. That
- * build is a named follow-on, gated on Tenshi's two endgame tests (frame-quoting body must
- * neither split nor survive the strip; guard fail-closed on measurement).
+ * SENTINEL FRAME (the MNT-060 addendum build — "the wall", commissioned 2026-07-23): entries
+ * are now delimited by the SWAP-ENTRY transport frame (`src/server/lib/swap-frame.ts` — the one
+ * contract): high-entropy, transport-not-payload — STRIPPED at flush (never enters WM or the
+ * gradient), any in-body *quotation* byte-stuffed at the chokepoint (MNT-026 pattern) so it can
+ * neither split an entry nor survive into memory (Tenshi gates 1+3). The B-3 guard
+ * (memory-guard.sh) upgraded mtime→frame-checking; guard, recorder (orient-inject.sh) and this
+ * parser all cite swap-frame.ts's regex sources, suite-asserted byte-for-byte. The transitional
+ * `### |## ` family stays accepted on READ during migration (drains and stragglers);
+ * canonical-frame on WRITE — the guard's block message teaches the frame.
  *
  * Usage: wm-flush.ts <slug> <fullSwapPath> <compSwapPath>
  *   (the hook passes the already-resolved swap paths, so there's no env re-resolution drift
@@ -40,11 +42,16 @@ import * as path from 'path';
 import * as os from 'os';
 import { appendPairedMemory } from '../src/server/lib/memory-paired-writer';
 import { swapFlushMaxBytesFor } from '../src/server/lib/garden-manifest';
+import {
+    ENTRY_BOUNDARY_RE_SRC,
+    sanitizeSwapFrameText,
+    stripSwapFrames,
+} from '../src/server/lib/swap-frame';
 
-/** F1 — the declared entry-grammar family (transitional; see header). `### ` is the canonical
- *  forward convention; `## ` is the legacy shape every 07-July-era backlog carries. The `.sh`
- *  gate's has_body() greps the IDENTICAL pattern — change one, change both (one contract). */
-export const ENTRY_RE = /^(### |## )/m;
+/** The declared entry-BOUNDARY family (swap-frame.ts, the one contract): the SWAP-ENTRY frame
+ *  (canonical) + `### |## ` (transitional read-acceptance). The `.sh` gate's has_body() greps
+ *  the IDENTICAL pattern — change swap-frame.ts, change both hooks (the suite string-compares). */
+export const ENTRY_RE = new RegExp('^' + ENTRY_BOUNDARY_RE_SRC, 'm');
 
 /** Header floor above which "no entries parsed" is treated as grammar drift, not emptiness. */
 const NO_ENTRY_SUSPECT_BYTES = 4096;
@@ -143,11 +150,28 @@ export async function flushSwaps(
         return { outcome: 'alerted', kind: 'backlog-over-cap' };
     }
 
-    // The body starts at the entry marker. Prepend a blank line so the first flushed entry
-    // doesn't jam against WM's existing tail (matches the paired-append convention). An empty
-    // side stays empty — appendPairedMemory throws on asymmetric → swap preserved.
-    const fullOut = full.body.trim() ? '\n' + full.body : '';
-    const compOut = comp.body.trim() ? '\n' + comp.body : '';
+    // ENCAPSULATION at the layer boundary (the addendum, property 3): strip the SWAP-ENTRY
+    // transport frames from the body — only PAYLOAD moves to WM (the entry's own `### ` heading
+    // + prose, which downstream WM grammar depends on). Then byte-stuff any REMAINING
+    // frame-shaped text (an in-body quotation — Tenshi gate 1) so nothing frame-shaped can
+    // ever survive into WM or the gradient. Order matters: strip real transport FIRST, or the
+    // stuffing would mangle it into payload noise. Both transforms are idempotent.
+    const fullPayload = sanitizeSwapFrameText(stripSwapFrames(full.body));
+    const compPayload = sanitizeSwapFrameText(stripSwapFrames(comp.body));
+
+    // Frames with NO payload (a seat satisfying the guard with bare transport lines): alert +
+    // preserve — never silently consume a turn that recorded nothing (the guard's purpose is
+    // real memory; an empty-framed turn must be legible, not vanish). F2 family.
+    if (!fullPayload.trim() && !compPayload.trim()) {
+        writeAlert(slug, 'frames-without-payload', 'frame lines present but no payload — the frame is transport, the entry needs content', fullBytes, compBytes);
+        return { outcome: 'alerted', kind: 'frames-without-payload' };
+    }
+
+    // Prepend a blank line so the first flushed entry doesn't jam against WM's existing tail
+    // (matches the paired-append convention). An empty side stays empty — appendPairedMemory
+    // throws on asymmetric → swap preserved.
+    const fullOut = fullPayload.trim() ? '\n' + fullPayload : '';
+    const compOut = compPayload.trim() ? '\n' + compPayload : '';
 
     try {
         await appendFn(slug, fullOut, compOut, { source: 'wm-flush' });
