@@ -141,6 +141,29 @@ export interface SpokeLifecycle {
      *  inside the hook's 30s ceiling); RAISE if legitimate long turns trip it, LOWER if dumps
      *  sneak through. */
     swapFlushMaxBytes?: number;
+    /** MNT-061 (DEC-101 amended — Darron's idle-recycle mechanic): hours a bound spoke may sit
+     *  UNSERVED before the sweep decouples it from its thread (then ctx<rethread-ceiling →
+     *  recycled to the pool WITH its context, else reaped). The missing third trigger — a thread
+     *  that goes quiet unresolved was never covered (100% of the 58 stale spokes, S227). Default
+     *  48 — stated-guess: two full day-cycles so a daily's overnight gap never trips it; RAISE if
+     *  live threads get decoupled mid-conversation, LOWER if idle spokes hoard vessels. Applies
+     *  uniformly (dailies included — Jim's ruling: no content-shaped carve-outs in a lifecycle
+     *  mechanic; the affinity hint re-binds a reviving daily to its own spoke cheaply). */
+    spokeIdleReapHours?: number;
+    /** MNT-061: the RE-THREAD ceiling (ctx %) — an idle-decoupled spoke at/above this is reaped
+     *  rather than recycled, and a recycled stem at/above it is never assigned a NEW thread.
+     *  Distinct from ctxReapThresholdPct (92, the CONTINUE ceiling): continuing costs only a
+     *  delta (~8% headroom suffices); re-threading must load thread B first (~30% cushion).
+     *  Headroom priced to the operation (Darron, 2026-07-20). Default 70 — stated-guess for a
+     *  typical thread's load cost; RAISE if healthy spokes reap too eagerly, LOWER if re-threaded
+     *  spokes keep overflowing at assignment. */
+    spokeRethreadCtxCeilingPct?: number;
+    /** MNT-061: the FIT ceiling (ctx %) for the fit-calculation — assign a thread to a recycled
+     *  stem only when `stem_ctx + estimated_thread_burden ≤ this`. Default 80 — stated-guess:
+     *  room for the estimate to be ~1.5× wrong before hitting the 92 continue-net; RAISE if
+     *  fresh stems are grabbed while fitting partials sit unused, LOWER if assigned spokes
+     *  overflow-reap too often. */
+    spokeFitCeilingPct?: number;
 }
 
 export interface AgentManifest {
@@ -600,6 +623,21 @@ export function prewarmAlertMinsFor(slug: string, surface: string): number {
  *  Stop-hook flush serves; per-surface overrides ride the standard lifecycle merge. */
 export function swapFlushMaxBytesFor(slug: string, surface: string = 'session'): number {
     return spokeLifecycleFor(slug, surface).swapFlushMaxBytes ?? 20000;
+}
+
+/** MNT-061: hours a bound spoke may sit unserved before the idle sweep decouples it. Default 48. */
+export function spokeIdleReapHoursFor(slug: string, surface: string): number {
+    return spokeLifecycleFor(slug, surface).spokeIdleReapHours ?? 48;
+}
+
+/** MNT-061: the re-thread ceiling (ctx %) — recycle-vs-reap at decouple; new-thread eligibility. Default 70. */
+export function spokeRethreadCtxCeilingFor(slug: string, surface: string): number {
+    return spokeLifecycleFor(slug, surface).spokeRethreadCtxCeilingPct ?? 70;
+}
+
+/** MNT-061: the fit ceiling (ctx %) — `stem_ctx + burden ≤ this` assigns a thread to a recycled stem. Default 80. */
+export function spokeFitCeilingFor(slug: string, surface: string): number {
+    return spokeLifecycleFor(slug, surface).spokeFitCeilingPct ?? 80;
 }
 
 /** #107 Phase-2 P2.1b: does this (slug, surface) wake via the feeder (the wake-feed queue)?

@@ -53,6 +53,25 @@ export interface PoolStem {
     conversation_id?: string;
     /** DEC-101: when the stem was bound to its thread (spoke birth) — for LRU/dormancy (future). */
     bound_at?: string;
+    /** MNT-061: when this spoke last SERVED a dispatch (stamped after every successful
+     *  dispatchToBoundSpoke turn) — the idle clock. `leased_at`/`bound_at` are bind-time, not
+     *  serve-time; without this stamp idle-time is unmeasurable (the design record's one
+     *  prerequisite). Jim's null-clock ruling: absent → the clock reads the bind time (a bind IS
+     *  a serve for clock purposes); unreadable → skip + alert, never reap. */
+    last_served_at?: string;
+    /** MNT-061 (Jim's affinity-aware-fit nicety): the thread this stem served before it was
+     *  idle-DECOUPLED back to the pool. A reviving thread prefers its former spoke at delta-only
+     *  burden (its history is already in-context) — a daily naturally re-binds its own spoke
+     *  morning after morning until the spoke genuinely fills. */
+    last_thread?: string;
+    /** MNT-061 (Tenshi's trust-partition seam, poured with the foundation): the HIGHEST trust
+     *  tier this stem's context has touched. A recycled spoke's context is un-scrubbed BY DESIGN
+     *  (no /clear — cross-pollination is the feature), so the fit-eligibility predicate ANDs
+     *  tier-compatibility: the dangerous mix is made unrepresentable, never scrubbed. Today the
+     *  garden has ONE tier ('family') so the predicate is a no-op — but the field + slot exist
+     *  so the untrusted-tier day (public surfaces, external clients) is a one-line predicate
+     *  sharpening, not a re-architecture of a load-bearing pool. Absent = 'family'. */
+    trust_tier?: string;
 }
 
 export interface Pool {
@@ -149,6 +168,46 @@ export function findSpokeForThread(slug: string, surface: string, conversationId
     const pool = readPool(slug, surface);
     const stem = pool.stems.find(s => s.state === 'spoke' && s.conversation_id === conversationId);
     return stem ? { ...stem } : null;
+}
+
+/** MNT-061: stamp a spoke's idle clock after a successful serve. No-op if unknown. */
+export function touchSpokeServed(slug: string, surface: string, stemId: string, nowIso: string): void {
+    const pool = readPool(slug, surface);
+    const stem = pool.stems.find(s => s.stem_id === stemId);
+    if (!stem) return;
+    stem.last_served_at = nowIso;
+    writePool(slug, surface, pool);
+}
+
+/** MNT-061 idle-RECYCLE: decouple an idle spoke from its thread and return it to the pool AS-IS —
+ *  carrying its accumulated context (cross-pollination is the design goal, never a bleed; NO
+ *  /clear — Darron's ruling: a 70%-then-clear equals a 99%-then-clear, mandating /clear deletes
+ *  the very knob the re-thread gate turns on). The former thread is kept as the `last_thread`
+ *  affinity hint. No-op if the stem is unknown or not a spoke (never decouple mid-lease). */
+export function decoupleSpoke(slug: string, surface: string, stemId: string, nowIso: string): void {
+    const pool = readPool(slug, surface);
+    const stem = pool.stems.find(s => s.stem_id === stemId);
+    if (!stem || stem.state !== 'spoke') return;
+    stem.state = 'free';
+    stem.last_thread = stem.conversation_id;
+    stem.last_served_at = nowIso; // the recycle resets the idle clock — a fresh 48h from re-entry
+    delete stem.conversation_id;
+    delete stem.bound_at;
+    delete stem.leased_at;
+    writePool(slug, surface, pool);
+}
+
+/** MNT-061 best-fit: atomically lease a SPECIFIC free stem (the fit-selection's choice). Returns
+ *  null if the stem is gone or no longer free (raced) — the caller re-selects or falls back to
+ *  the generic checkout. Same synchronous read-modify-write guarantee as checkoutStem. */
+export function checkoutStemById(slug: string, surface: string, stemId: string, nowIso: string): PoolStem | null {
+    const pool = readPool(slug, surface);
+    const stem = pool.stems.find(s => s.stem_id === stemId && s.state === 'free');
+    if (!stem) return null;
+    stem.state = 'leased';
+    stem.leased_at = nowIso;
+    writePool(slug, surface, pool);
+    return { ...stem };
 }
 
 /** Add or replace a stem (by stem_id) — pre-warm / replenish / post-freshen cursor update. */

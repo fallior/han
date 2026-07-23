@@ -37,10 +37,11 @@ import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
-import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, spokePersistFor, ctxReapThresholdFor, prewarmAlertMinsFor } from './garden-manifest';
+import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, spokePersistFor, ctxReapThresholdFor, prewarmAlertMinsFor, spokeIdleReapHoursFor, spokeRethreadCtxCeilingFor, spokeFitCeilingFor } from './garden-manifest';
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
-import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, readPool, poolStatus, findSpokeForThread, bindSpoke, type PoolStem } from './stem-pool';
+import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, readPool, poolStatus, findSpokeForThread, bindSpoke, touchSpokeServed, decoupleSpoke, checkoutStemById, type PoolStem } from './stem-pool';
+import { decideIdleAction, selectStemForThread, burdenPctForChars, writeSpokeLifecycleReceipt, threadTrustTier, bindTierDecision } from './spoke-lifecycle';
 import { serverDir } from './paths';
 
 const HEALTH_DIR = process.env.HAN_HEALTH_DIR || healthDir();
@@ -1467,18 +1468,61 @@ async function dispatchToBoundSpoke(
         else { retireStem(slug, surface, existing, 'bound-spoke-dead'); // died since last turn → fresh checkout
             console.warn(`[tmux-dispatcher] ${slug}/${surface}: thread ${conversationId} spoke ${existing.stem_id} dead — retired; fresh checkout`); }
     }
-    // 2) no live spoke → check out a free stem, bind it to the thread, cast at checkout (once)
+    // 2) no live spoke → select by MNT-061 FIT (affinity → best-fit → freshest), lease it, bind,
+    //    cast at checkout. The fit-selection reads ctx sync then leases ATOMICALLY by id — a raced
+    //    stem (grabbed between select and lease) falls through to the generic checkout loop below.
     if (!stem) {
-        for (let attempt = 0; attempt < Math.max(1, poolSizeFor(slug, surface)); attempt++) {
-            const candidate = checkoutStem(slug, surface, new Date().toISOString());
-            if (!candidate) return null; // empty pool → floor
-            if (adoptPooledStem(slug, surface, candidate)) { stem = candidate; break; }
-            retireStem(slug, surface, candidate, 'dead-at-adopt');
-            console.warn(`[tmux-dispatcher] ${slug}/${surface}: leased stem ${candidate.stem_id} is dead — trying next`);
+        const fit = selectStemForThread(
+            readPool(slug, surface).stems.filter(s => s.state === 'free'),
+            conversationId,
+            (s) => getContextPctForSession(slug, surface, s.tmux_session),
+            estimateThreadBurdenPct(conversationId),
+            spokeFitCeilingFor(slug, surface),
+            spokeRethreadCtxCeilingFor(slug, surface),
+            threadTrustTier(conversationId), // Tenshi's partition — ANDed before affinity/fit
+        );
+        if (fit) {
+            const candidate = checkoutStemById(slug, surface, fit.stemId, new Date().toISOString());
+            if (candidate && adoptPooledStem(slug, surface, candidate)) {
+                stem = candidate;
+                writeSpokeLifecycleReceipt({ ts: new Date().toISOString(), slug, surface, stem_id: candidate.stem_id, tmux_session: candidate.tmux_session, verb: 'assign', thread: conversationId, ctx_pct: fit.ctxPct, detail: `fit-mode=${fit.mode}` });
+            } else if (candidate) { retireStem(slug, surface, candidate, 'dead-at-adopt'); }
+        }
+        // Fallback (fit raced/unmeasurable/pool-of-fresh): the generic first-free checkout loop.
+        if (!stem) {
+            for (let attempt = 0; attempt < Math.max(1, poolSizeFor(slug, surface)); attempt++) {
+                const candidate = checkoutStem(slug, surface, new Date().toISOString());
+                if (!candidate) return null; // empty pool → floor
+                if (adoptPooledStem(slug, surface, candidate)) { stem = candidate; break; }
+                retireStem(slug, surface, candidate, 'dead-at-adopt');
+                console.warn(`[tmux-dispatcher] ${slug}/${surface}: leased stem ${candidate.stem_id} is dead — trying next`);
+            }
         }
         if (!stem) return null; // every candidate dead → floor
+        // MNT-061 stamp-fix (Tenshi's re-run finding, folded at land 2026-07-23): the bind-time
+        // REFUSAL at the SINGLE chokepoint all three checkout doors converge on (fit-selection,
+        // raced-lease fallback, the tier-blind generic loop) — a partition enforced at bind is
+        // physics, whichever path delivered the stem. Refusal fails toward FRESH: retire +
+        // receipt + null (the pool floor / cold path) — never a retry loop (S74/DEC-103).
+        // Unreachable today (one tier); the day there are two, this is the wall.
+        const tier = threadTrustTier(conversationId);
+        const decision = bindTierDecision(stem.trust_tier, tier);
+        if (decision.action === 'refuse') {
+            writeSpokeLifecycleReceipt({ ts: new Date().toISOString(), slug, surface, stem_id: stem.stem_id, tmux_session: stem.tmux_session, verb: 'bind-refused', thread: conversationId, detail: `stem-tier=${decision.stemTier} thread-tier=${tier}` });
+            retireStem(slug, surface, stem, 'cross-tier-bind-refused');
+            return null; // fail toward fresh (the caller's floor) — alert-not-loop
+        }
         bindSpoke(slug, surface, stem.stem_id, conversationId, new Date().toISOString());
         stem.state = 'spoke'; stem.conversation_id = conversationId; // keep the in-memory row truthful
+        // The tier stamp is a HISTORY, not a label: same-tier/first-bind sticks the thread's
+        // tier; a differing tier (any path that slipped past the refusal) quarantines the
+        // vessel as 'mixed' — sticky-with-a-fuse, the belt behind the refusal's physics
+        // (stampTier via bindTierDecision; 'mixed' is equality-incompatible with everything,
+        // finishes its tenure on the 92-net, ages out, never fit-selected again).
+        if (stem.trust_tier !== decision.stamp) {
+            upsertStem(slug, surface, { ...stem, trust_tier: decision.stamp });
+            stem.trust_tier = decision.stamp;
+        }
         void replenishPool(slug, surface); // gate 1: a free stem just became a spoke → refill to N free
     }
     let cap: CaptureRecord;
@@ -1497,9 +1541,66 @@ async function dispatchToBoundSpoke(
         retireStem(slug, surface, stem, `dispatch-failed: ${(err as Error).message.slice(0, 80)}`); // Jim cond-1: never keep a wedged spoke
         throw err;
     }
+    // MNT-061: stamp the idle clock — this spoke just SERVED (the design record's prerequisite;
+    // leased_at/bound_at are bind-time, so without this the idle sweep cannot measure).
+    touchSpokeServed(slug, surface, stem.stem_id, new Date().toISOString());
     // NO return. The spoke stays bound. Reap at idle if over the ctx threshold (C4).
     await reapSpokeIfOverCtx(slug, surface, stem);
     return cap;
+}
+
+/** MNT-061: a thread's estimated ctx-%% burden from its message history (chars ÷ the measured
+ *  2.4–2.8 chars/token rate + response headroom — never chars÷4, FI #116 falsified it). Lazy
+ *  db require: the dispatcher must not open gradient.db at import for processes that never
+ *  assign threads. Unreadable → NULL (Tenshi's sharpening 1, the F3 polarity at the fit
+ *  layer: an unmeasured burden fails toward a FRESH stem, never toward packing a spoke
+ *  against it — over-packing is the direction that overflows past 92%%). */
+function estimateThreadBurdenPct(conversationId: string): number | null {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { conversationMessageStmts } = require('../db');
+        const msgs = conversationMessageStmts.list.all(conversationId) as Array<{ content?: string }>;
+        const chars = msgs.reduce((n, m) => n + (m.content?.length ?? 0), 0);
+        return burdenPctForChars(chars);
+    } catch { return null; }
+}
+
+/** MNT-061 (DEC-101 amended — the third trigger): decouple/reap bound spokes idle past
+ *  `spokeIdleReapHours`. Runs on the 60s pool-manager tick. BOUNDED CHURN by construction
+ *  (DEC-103 CBA pre-done): fires at most once per spoke per idle-crossing, populations are
+ *  pool-capped, and a recycle resets the clock — no storm shape. The ADVERSARIAL twin (Tenshi's
+ *  sharpening 3, named for the day the public door opens): once thread-creation is reachable by
+ *  an untrusted party, forced churn (create→bind→idle→re-thread) is a lever on the live-vessel
+ *  budget — LOW today (unreachable), priced here so the reader who opens that door finds the
+ *  threat already named. Race-safe: only `state==='spoke'`
+ *  rows are touched (a leased/mid-dispatch stem is invisible to it) and the reap path routes
+ *  through retireStem → the chrome-guarded graceful sweep (never a hand-kill, MNT-062).
+ *  Fail-toward-holding: unreadable clock → skip + alert receipt; unmeasurable ctx → RECYCLE
+ *  (hold, don't kill — the unmeasurable free stem is never fit-selected and the 24h substrate
+ *  reload bounds its tenure). Receipts for BOTH verbs (Casey's disposal-schedule precedent). */
+function sweepIdleSpokes(slug: string, surface: string): void {
+    const idleHours = spokeIdleReapHoursFor(slug, surface);
+    const rethreadCeiling = spokeRethreadCtxCeilingFor(slug, surface);
+    const now = Date.now();
+    for (const stem of readPool(slug, surface).stems) {
+        if (stem.state !== 'spoke') continue;
+        const ctx = getContextPctForSession(slug, surface, stem.tmux_session);
+        const decision = decideIdleAction(stem, now, idleHours, rethreadCeiling, ctx);
+        if (decision.action === 'keep') continue;
+        const base = { ts: new Date().toISOString(), slug, surface, stem_id: stem.stem_id, tmux_session: stem.tmux_session, thread: stem.conversation_id };
+        if (decision.action === 'skip-alert') {
+            writeSpokeLifecycleReceipt({ ...base, verb: 'skip-alert', detail: decision.reason });
+            console.warn(`[pool-manager] ${slug}/${surface}: idle sweep SKIPPED spoke ${stem.stem_id} — ${decision.reason} (held, never reaped on a bad clock)`);
+        } else if (decision.action === 'recycle') {
+            decoupleSpoke(slug, surface, stem.stem_id, new Date().toISOString());
+            writeSpokeLifecycleReceipt({ ...base, verb: 'recycle', idle_hours: Math.round(decision.idleHours * 10) / 10, ctx_pct: decision.ctxPct, detail: 'idle-decouple → free (context carried; last_thread affinity kept)' });
+            console.log(`[pool-manager] ${slug}/${surface}: recycled idle spoke ${stem.stem_id} (${Math.round(decision.idleHours)}h idle, ctx ${decision.ctxPct ?? 'unmeasured'}%) — returned to pool with context`);
+        } else {
+            writeSpokeLifecycleReceipt({ ...base, verb: 'reap', idle_hours: Math.round(decision.idleHours * 10) / 10, ctx_pct: decision.ctxPct, detail: 'idle-decouple → reap (ctx ≥ rethread ceiling)' });
+            retireStem(slug, surface, stem, `idle-reap (${Math.round(decision.idleHours)}h idle, ctx ${decision.ctxPct}%)`);
+            void replenishPool(slug, surface);
+        }
+    }
 }
 
 const execFileP = promisify(execFile);
@@ -1806,6 +1907,7 @@ export function startPoolManager(slug: string, surface: string): void {
         try {
             sweepRetiredStems();
             sweepDeadRegisteredStems(slug, surface); // MNT-056: heal the cgroup-kill-without-restart case before replenish
+            sweepIdleSpokes(slug, surface); // MNT-061: the third trigger — idle-abandoned spokes recycle or reap
             // 24h substrate reload: retire FREE over-age stems (a leased one retires on return/next tick).
             const now = Date.now();
             for (const stem of readPool(slug, surface).stems) {
