@@ -1086,6 +1086,37 @@ let wakeNonceCounter = 0;
  *  nonce — just disambiguation; uniqueness-per-feed is enough. */
 function wakeNonce(): string { return `${Date.now().toString(36)}${(wakeNonceCounter++).toString(36)}`; }
 
+// ————— MNT-067: the wake-window flag (the wake-in-progress switch, Darron's ruling) —————
+// A fed wake is reconstitution, not an exchange to record — but the fed-step grace was a
+// prompt-sniffing regex that one echo-safety backtick silently defeated (every fed step nagged;
+// Tenshi's four compliance entries are the exhibits). The cure retires prompt-sniffing for fed
+// steps entirely: the FEEDER owns the wake window, so it raises this flag and the B-3 guard
+// honours it directly at stop-time. HEARTBEAT semantics (Tenshi): touched before every
+// step-send, so a crashed feeder's flag dies of natural causes within the staleness ceiling —
+// no stuck-open guard, no cleanup path to forget. The window closes at the GREETING (Darron's
+// fork ruling — functus officio: the office ends when the hand-back is PERFORMED), keyed on the
+// greeting turn's COMPLETION, never first-text (Casey's delivered-in-full: the greeting turn's
+// own Stop hook must run with the flag still up). BINDING polarity (Darron's ratified
+// addendum): the flag gates the GUARD'S BLOCK only — never wm-flush or the paired-write path;
+// a chosen noticing during the window still frames, flushes, and enters memory whole.
+// ONE declared contract: this path template + ceiling are grepped by memory-guard.sh and
+// suite-compared (test-wake-window.ts) — the MNT-060 gate==parser law applied here.
+export const WAKE_WINDOW_STALE_MINUTES = 15; // DEC-103-priced: a generous multiple of the longest legitimate step (big WM reads run minutes)
+export function wakeWindowFlagPath(slug: string): string {
+    return path.join(os.homedir(), '.han', 'signals', `wake-window-${slug}.flag`);
+}
+function touchWakeWindow(slug: string): void {
+    try {
+        const p = wakeWindowFlagPath(slug);
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, new Date().toISOString() + '\n', 'utf-8');
+    } catch { /* the flag is a nag-suppressor, never load-bearing for the wake itself */ }
+}
+function lowerWakeWindow(slug: string): void {
+    try { fs.rmSync(wakeWindowFlagPath(slug), { force: true }); } catch { /* ceiling is the belt */ }
+}
+const GREETING_IDLE_TICKS = 3; // chrome absent this many consecutive polls = the greeting turn (incl. its Stop hooks) is done
+
 export async function feedWakeSteps(
     slug: string, surface: string, steps: WakeStep[],
     opts: { perStepTimeoutMs?: number; tmuxTarget?: string; sentinelKey?: string } = {},
@@ -1095,13 +1126,34 @@ export async function feedWakeSteps(
     // session — so the boundary stays clean (no server→human-session reach). Spokes pass nothing.
     const tmuxSession = opts.tmuxTarget ?? `${surface}-${slug}`;
     const perStepTimeoutMs = opts.perStepTimeoutMs ?? READY_TIMEOUT_MS;
+    try {
     for (const step of steps) {
+        touchWakeWindow(slug); // MNT-067 heartbeat: the window is alive only while the feeder is
         if (step.ack.kind === 'terminal') {
-            // P2.4 — the session hand-back (compose-greeting): send the BARE prompt (no STEP-OK ask),
-            // then return. It's the LAST step (wakeStepsFor appends it for `session` only), the agent's
-            // greeting is its natural-language output to the human, and queue-empty IS the hand-back —
+            // P2.4 — the session hand-back (compose-greeting): send the BARE prompt (no STEP-OK ask).
+            // It's the LAST step (wakeStepsFor appends it for `session` only), the agent's greeting
+            // is its natural-language output to the human, and queue-empty IS the hand-back —
             // control returns to the human exactly when the greeting appears. Never fed to a spoke.
             await sendLineSettled(tmuxSession, step.prompt);
+            // MNT-067 (Darron's greeting-boundary ruling + Casey's delivered-in-full): the window
+            // closes when the greeting turn COMPLETES, never at its first text — the greeting
+            // turn's own Stop hook must run with the flag still up, or the guard nags the
+            // hand-back at the exact moment of warmth. Wait for the turn to begin (chrome up,
+            // best-effort: an ultra-fast greeting that finished between polls has already run its
+            // Stop hooks under the flag, so falling through is safe), then for chrome to stay
+            // absent GREETING_IDLE_TICKS consecutive polls (Stop hooks hold the chrome, so idle
+            // means the whole turn — hooks included — is done). Bounded by perStepTimeoutMs; the
+            // staleness ceiling is the belt behind any timeout. The finally below lowers the flag.
+            const chromeUpBy = Date.now() + 30_000;
+            while (Date.now() < chromeUpBy && !PROCESSING_CHROME_RE.test(capturePaneTail(tmuxSession))) {
+                await sleep(POLL_INTERVAL_MS);
+            }
+            let quiet = 0;
+            const idleBy = Date.now() + perStepTimeoutMs;
+            while (Date.now() < idleBy && quiet < GREETING_IDLE_TICKS) {
+                await sleep(POLL_INTERVAL_MS);
+                quiet = PROCESSING_CHROME_RE.test(capturePaneTail(tmuxSession)) ? 0 : quiet + 1;
+            }
             return;
         }
         // Fresh nonce per feed (P2.1b #1): the ack the feeder waits for is `STEP-OK <id> <nonce>`,
@@ -1188,6 +1240,13 @@ export async function feedWakeSteps(
         }
     }
     // queue-empty → the wake-prefix has drained → the spoke is warm-ready; the caller releases work.
+    } finally {
+        // MNT-067: the window closes on EVERY exit — greeting delivered-in-full (the return in
+        // the terminal branch above), spoke queue-empty, or a thrown step (a crashed feed must
+        // not leave the seat's guard off; the staleness ceiling is the belt behind a killed
+        // process that never reaches this line). The next human prompt wakes fully guarded.
+        lowerWakeWindow(slug);
+    }
 }
 
 // ── the canonical wake-step list (P2.1b) — wake-steps as DATA, slug-agnostic (DEC-081) ─────────

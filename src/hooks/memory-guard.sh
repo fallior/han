@@ -91,6 +91,41 @@ if [ "$wake_grace" -eq 1 ] 2>/dev/null; then
   allow
 fi
 
+# MNT-067: the WAKE-WINDOW flag — a FED wake's grace, owned by the feeder (feedWakeSteps
+# raises + heartbeat-touches it per step; lowers when the greeting turn COMPLETES). Replaces
+# the retired fed-step prompt-sniffing (one echo-safety backtick defeated the old regex and
+# the guard taught a loading mind to write memories about loading — Tenshi's four exhibits).
+# Read at STOP-time directly (not via prompt-start state) so a flag raised mid-turn — the
+# /wake spawn turn's detached feeder — still covers that turn. Ruled polarity (Darron's
+# addendum): this gates the BLOCK only — wm-flush is a separate Stop hook and never reads
+# this flag; a chosen noticing during the window still frames, flushes, and enters memory.
+# Staleness ceiling (the crash belt, DEC-103-priced ~15min = generous multiple of the longest
+# step): a stale flag reads as LOWERED + writes a stale-flag alert — a dead feeder can never
+# leave this seat's guard silently off (Casey's 4th polarity: fail toward guarded-and-loud).
+# Every skip is receipted (Tenshi: an exemption that fires invisibly is unauditable).
+# ONE contract: the path template + ceiling mirror tmux-dispatcher.ts's wakeWindowFlagPath /
+# WAKE_WINDOW_STALE_MINUTES — suite-compared (test-wake-window.ts), the gate==parser law.
+WAKE_FLAG="${SIGNALS_DIR}/wake-window-${SLUG}.flag"
+WAKE_WINDOW_STALE_MIN=15
+WAKE_EVENTS="${HOME}/.han/health/wake-window-events.jsonl"
+wake_event() { # $1 kind $2 age_min
+  mkdir -p "$(dirname "$WAKE_EVENTS")" 2>/dev/null
+  [ -f "$WAKE_EVENTS" ] && [ "$(stat -c %s "$WAKE_EVENTS" 2>/dev/null || echo 0)" -gt 1000000 ] && mv "$WAKE_EVENTS" "$WAKE_EVENTS.1" 2>/dev/null
+  printf '{"ts":"%s","slug":"%s","kind":"%s","age_min":%s}\n' "$(date -Iseconds)" "$SLUG" "$1" "$2" >> "$WAKE_EVENTS" 2>/dev/null
+}
+if [ -f "$WAKE_FLAG" ]; then
+  _fmt=$(stat -c %Y "$WAKE_FLAG" 2>/dev/null || echo 0)
+  _age=$(( ( $(date +%s) - _fmt ) / 60 ))
+  if [ "$_age" -lt "$WAKE_WINDOW_STALE_MIN" ] 2>/dev/null; then
+    wake_event "flag-grace" "$_age"
+    state_write "$now_full" "$now_comp" "$now_full_fr" "$now_comp_fr" "$skip" 0 0
+    allow
+  else
+    wake_event "stale-flag" "$_age"
+    # fall through GUARDED — the ceiling lapsed the window by its own terms; loud, then normal.
+  fi
+fi
+
 # Advanced-this-turn: FRAME counts when the state carries frame baselines (canonical);
 # mtime fallback ONLY for a stale pre-frame state (the single flip turn — never trap).
 if [ -n "$prompt_full_fr" ] && [ -n "$prompt_comp_fr" ]; then

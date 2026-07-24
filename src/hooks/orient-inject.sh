@@ -30,14 +30,14 @@ PROMPT_JSON=$(cat 2>/dev/null)
 # wake turn. Fail-safe direction: a false positive only SKIPS the guard for one turn.
 wake_grace=0
 printf '%s' "$PROMPT_JSON" | grep -qiE 'welcome back|good morning|session start' && wake_grace=1
-# Fed /wake (P2.4, MNT-011): the local feeder drives the INTERACTIVE wake as a series of
-# step-prompts that do NOT contain the human triggers above — each non-terminal step ends with
-# the feeder's ack-instruction, and the terminal step is the compose-greeting. Both are
-# reconstitution turns (nothing to swap-write), so without this a fed wake nags at its tail (the
-# `conversations` step). Grace them by the feeder's distinctive, stable signatures
-# (`feedWakeSteps` ack-instruction + `GREETING_STEP` in lib/tmux-dispatcher.ts). Fail-safe
-# direction unchanged: a false match only SKIPS the guard for that one turn.
-printf '%s' "$PROMPT_JSON" | grep -qiE 'reply on its own line EXACTLY: STEP-OK|loaded whole and warm' && wake_grace=1
+# Fed /wake — the step-prompt SNIFFING IS RETIRED (MNT-067): the old regex here matched the
+# feeder's ack-instruction literal, and the T1 echo-safety backtick (tmux-dispatcher's own
+# emission) silently defeated it — every fed step nagged, and the guard taught loading minds
+# to write memories about loading. Regexes drift; flags don't. The fed wake is now graced by
+# the WAKE-WINDOW flag (`wake-window-<slug>.flag`, raised/heartbeat-touched by feedWakeSteps,
+# lowered at the greeting turn's COMPLETION), which memory-guard.sh reads directly at
+# stop-time — see its MNT-067 block for the contract, ceiling, and receipts. The human
+# triggers above (line 32) remain: the interactive self-run wake has no feeder to raise a flag.
 
 # 1. ORIENTATION — universal, zero-risk, every prompt.
 echo "⏰ Oriented: $(date '+%A %-d %B %Y, %-I:%M %p %Z') — open your reply by saying this line (re-queried fresh, not extrapolated)."
