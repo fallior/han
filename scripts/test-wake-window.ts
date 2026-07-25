@@ -43,15 +43,21 @@ const FLAG = path.join(HOME, '.han', 'signals', 'wake-window-wsuite.flag');
 const EVENTS = path.join(HOME, '.han', 'health', 'wake-window-events.jsonl');
 
 function resetSwaps(): void { fs.writeFileSync(FULL, HEADER); fs.writeFileSync(COMP, HEADER); }
+// Jim's must-fix (the seal's env-porosity finding, Tenshi-reproduced): the child envs PIN the
+// swap filenames — the suite creates `session-swap*.md`, so inheriting a seat's launcher
+// exports (jim's `supervisor-swap*.md`) made the guard hunt files the suite never wrote and
+// early-allow at the missing-file gate: 10/14 on the auditor's seat, honest-RED both times.
+// An env-isolation gap in a suite about env-honouring hooks (the MNT-012/015 family) — pinned
+// so the suite proves the same thing on EVERY seat.
 function runOrient(): void {
     execFileSync('bash', [path.join(repoRoot, 'src', 'hooks', 'orient-inject.sh')], {
-        env: { ...process.env, HOME, AGENT_MEMORY_DIR: MEM, AGENT_SLUG: 'wsuite', AGENT_SURFACE: 'session' },
+        env: { ...process.env, HOME, AGENT_MEMORY_DIR: MEM, AGENT_SLUG: 'wsuite', AGENT_SURFACE: 'session', AGENT_SWAP_FULL: 'session-swap-full.md', AGENT_SWAP_COMPRESSED: 'session-swap.md' },
         input: '{}', stdio: ['pipe', 'ignore', 'ignore'],
     });
 }
 function runGuard(): string {
     return execFileSync('bash', [path.join(repoRoot, 'src', 'hooks', 'memory-guard.sh')], {
-        env: { ...process.env, HOME, AGENT_MEMORY_DIR: MEM, AGENT_SLUG: 'wsuite', AGENT_SURFACE: 'session', HAN_SESSION: '' },
+        env: { ...process.env, HOME, AGENT_MEMORY_DIR: MEM, AGENT_SLUG: 'wsuite', AGENT_SURFACE: 'session', HAN_SESSION: '', AGENT_SWAP_FULL: 'session-swap-full.md', AGENT_SWAP_COMPRESSED: 'session-swap.md' },
         stdio: ['ignore', 'pipe', 'ignore'],
     }).toString();
 }
