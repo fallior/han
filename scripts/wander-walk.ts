@@ -154,7 +154,7 @@ async function main(): Promise<void> {
         // J1's invite door — after the wanderer's own leg lands, invited seats add their voices.
         for (const invitee of beat.invite ?? []) {
             const inviteLanded = await composeAndVerify(arc, invitee, now.title, directive.created_at, directive.id,
-                { invitedBy: gardenAgentDisplayName(arc.slug) }, beat.n);
+                { invitedBy: displayName(arc.slug) }, beat.n);
             if (inviteLanded) {
                 writeWanderReceipt({ ts: new Date().toISOString(), slug: arc.slug, conversationId: arc.conversationId, kind: 'invite-landed', beat: beat.n, post_id: inviteLanded.id, detail: invitee });
             } else {
