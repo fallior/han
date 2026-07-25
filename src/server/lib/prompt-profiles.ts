@@ -50,6 +50,8 @@ import {
     humanResponseTxnSystemPromptFor,
     buildHumanResponseScaffold,
     buildHumanResponseTxnScaffold,
+    wanderBeatSystemOpening,
+    buildWanderBeatScaffold,
 } from './human-prompts';
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -895,6 +897,32 @@ export const PROFILES: Record<string, PromptProfile> = {
         systemPromptOpening: (ctx) => humanResponseTxnSystemPromptFor(String((ctx as any).slug ?? '')),
         envelope: 'user',
         userPromptScaffold: (ctx) => buildHumanResponseTxnScaffold(ctx as any),
+        totalBudgetTokens: 120_000,
+        componentOverrides: {
+            'identity': false, 'aphorisms': false, 'gradient': false,
+            'patterns': false, 'discoveries': false,
+            'working-memory-compressed': false, 'working-memory-full-tail': false,
+            'felt-moments-tail': false, 'self-reflection-tail': false,
+            'failures': false, 'project-memory': false,
+        },
+        pairedMemoryOutput: { enabled: true, mechanism: 'mcp-tool', captureInput: true, instruction: '' },
+    },
+
+    /**
+     * FI #127 (2026-07-25, thread mry2jr35): the WANDER-BEAT txn — the self-directed
+     * exploration practice's dispatch surface. Same envelope shape as human-response-txn
+     * (memory suppressed: the warm spoke IS the loaded self; mcp-tool diary; locator + curl
+     * self-post) with ONE structural difference that is the point: NO stand-down contract
+     * exists in this profile, so the wander can never refuse its own beat (the bug from
+     * Tenshi's failed night, cured at the surface — DEC-087). Slug-agnostic; a 5th mind
+     * gets the lamp for free (DEC-081). ctx.invitedBy flips the opening to the invited-voice
+     * frame (J1's door — multi-voice as a chosen act, never a default).
+     */
+    'wander-beat-txn': {
+        name: 'wander-beat-txn',
+        systemPromptOpening: (ctx) => wanderBeatSystemOpening(ctx as any),
+        envelope: 'user',
+        userPromptScaffold: (ctx) => buildWanderBeatScaffold(ctx as any),
         totalBudgetTokens: 120_000,
         componentOverrides: {
             'identity': false, 'aphorisms': false, 'gradient': false,
