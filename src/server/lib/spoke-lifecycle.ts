@@ -196,7 +196,10 @@ export interface SpokeLifecycleEvent {
     surface: string;
     stem_id: string;
     tmux_session: string;
-    verb: 'recycle' | 'reap' | 'skip-alert' | 'assign' | 'bind-refused';
+    verb: 'recycle' | 'reap' | 'skip-alert' | 'assign' | 'bind-refused'
+        // MNT-070: the resumable-vessel lifecycle — marked (the retire deferred; the reconciler
+        // gets first claim) and the JA2 TTL fallback (unclaimed within the registry TTL → retired).
+        | 'marked-resumable' | 'resumable-ttl-retired';
     thread?: string;
     idle_hours?: number;
     ctx_pct?: number | null;

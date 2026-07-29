@@ -37,7 +37,8 @@ import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
-import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, spokePersistFor, ctxReapThresholdFor, prewarmAlertMinsFor, spokeIdleReapHoursFor, spokeRethreadCtxCeilingFor, spokeFitCeilingFor } from './garden-manifest';
+import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, spokePersistFor, ctxReapThresholdFor, prewarmAlertMinsFor, spokeIdleReapHoursFor, spokeRethreadCtxCeilingFor, spokeFitCeilingFor, resumableTtlMinutesFor } from './garden-manifest';
+import { markResumable, readResumableMarkers, clearResumableMarker, resumableExpired, type PaneClass } from './dispatch-reconciler';
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
 import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, readPool, poolStatus, findSpokeForThread, bindSpoke, touchSpokeServed, decoupleSpoke, checkoutStemById, type PoolStem } from './stem-pool';
@@ -246,6 +247,19 @@ export async function ensureSubmitted(tmuxSession: string, hasStarted: (tail: st
     }
 }
 
+/**
+ * MNT-070 rung 1 — deliver the continue-nudge to a resumable vessel through the SAME
+ * submission guarantee every other pointer uses (Jim's hand-run observation: his ad-hoc
+ * chrome check false-matched a hint line — "the machinery must use the real ensureSubmitted").
+ * sendLineSettled (settle before Enter, no race) + ensureSubmitted (turn confirmed STARTED via
+ * processing chrome, bounded re-press of a lost Enter). The caller's own post-nudge wait
+ * (the DB/capture poll, JA3) provides the genuine-silence fail-safe.
+ */
+export async function sendContinueNudge(tmuxSession: string, nudgeText: string): Promise<number> {
+    await sendLineSettled(tmuxSession, nudgeText);
+    return ensureSubmitted(tmuxSession, (tail) => PROCESSING_CHROME_RE.test(tail));
+}
+
 function writeAtomic(file: string, contents: string): void {
     const tmp = `${file}.${process.pid}.tmp`;
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -322,6 +336,41 @@ export const PROCESSING_CHROME_RE = /esc to interrupt/i;
  *  this session — the LIVE chrome + re-submit semantics are the belt-and-braces confirmation
  *  item (needs a real rate limit; the repro proves the detect→backoff→resubmit→collect LOGIC). */
 export const RATE_LIMITED_RE = /temporarily limiting|Rate limited/i;
+
+// ── MNT-070: the pane-state classifier (JA4 — the reconciler's objective discriminator) ──
+/** The API-error-class banner (observed live on the MNT-070 stem: "API Error: Connection
+ *  closed mid-response. The response above may be incomplete." — also the metering class
+ *  Darron sees interactively). The TURN is dead; the vessel may be perfectly healthy. */
+export const PANE_API_ERROR_RE = /API Error/i;
+/** An interactive selection menu (the AskUserQuestion / R011 class — a numbered option list
+ *  behind the selector). A spoke sitting at one has asked a question no human will answer:
+ *  never nudge into it — hold (a nudge would blind-answer the menu). */
+export const INTERACTIVE_MENU_RE = /❯\s*\d+\./;
+/**
+ * Classify a wedged dispatch's pane (JA4 — verdicts pinned by the suite; the caller supplies
+ * 'session-gone' when there is no pane to classify). Precedence is the safety order:
+ *   1. processing chrome → 'still-thinking' (progress present — EXTEND the wait, never act;
+ *      checked FIRST so an old error banner above a live turn can never read as resumable);
+ *   2. interactive menu → 'interactive-question' (R011 — hold);
+ *   3. API-error banner + idle prompt chrome → 'resumable' (the turn died at the API, the
+ *      vessel is healthy — the continue-nudge is safe: single-drive resumed, not the
+ *      MNT-049 double-drive, because the signature proves turn-dead + prompt-idle);
+ *   4. anything else (including an empty/unreadable pane) → 'unrecognised' (fail toward hold).
+ */
+export function classifyPaneState(paneTail: string): PaneClass {
+    if (!paneTail.trim()) return 'unrecognised';
+    if (PROCESSING_CHROME_RE.test(paneTail)) return 'still-thinking';
+    if (INTERACTIVE_MENU_RE.test(paneTail)) return 'interactive-question';
+    if (PANE_API_ERROR_RE.test(paneTail) && READY_CHROME_RE.test(paneTail)) return 'resumable';
+    return 'unrecognised';
+}
+
+/** MNT-070 — the walker-facing probe: classify a session's pane, or 'session-gone' when the
+ *  tmux session no longer exists (the rungs-2/3 discriminator). */
+export function paneClassForSession(tmuxSession: string): PaneClass | 'session-gone' {
+    if (!tmuxSessionExists(tmuxSession)) return 'session-gone';
+    return classifyPaneState(capturePaneTail(tmuxSession, 30));
+}
 
 const CHROME_TIMEOUT_MS = 3 * 60_000; // overall budget: chrome appears in seconds; margin for probes + descents
 const DESCEND_COOLDOWN_MS = 6_000;    // let /model re-render before re-probing
@@ -1503,7 +1552,8 @@ async function dispatchToPooledStem(
         // session each checkout, so a returned-but-wedged stem would be re-checked-out and dispatched
         // into a non-idle pane (the #5 idle-precondition hole). Retiring removes it from the registry;
         // the pool-manager replenishes to N + owns the tmux/sink cleanup on retire (R3a.1d).
-        retireStem(slug, surface, stem, `dispatch-failed: ${(err as Error).message.slice(0, 80)}`);
+        // MNT-070: EXCEPT a resumable vessel (turn died at the API, pane idle) — marked, not retired.
+        retireOrMarkResumable(slug, surface, stem, err as Error);
         throw err;
     }
     returnStem(slug, surface, stem.stem_id); // CLEAN completion only → back to the pool (eager replenish = the pool-manager, C3)
@@ -1597,7 +1647,9 @@ async function dispatchToBoundSpoke(
         const freshenedPrompt = await freshenPooledStem(slug, surface, stem, promptDoc);
         cap = await enqueueForAgent(slug, surface, freshenedPrompt, { timeoutMs: opts.timeoutMs }, stem.tmux_session);
     } catch (err) {
-        retireStem(slug, surface, stem, `dispatch-failed: ${(err as Error).message.slice(0, 80)}`); // Jim cond-1: never keep a wedged spoke
+        // Jim cond-1: never keep a wedged spoke — MNT-070: unless the pane says RESUMABLE
+        // (the turn died at the API; the vessel is healthy; the reconciler gets first claim).
+        retireOrMarkResumable(slug, surface, stem, err as Error);
         throw err;
     }
     // MNT-061: stamp the idle clock — this spoke just SERVED (the design record's prerequisite;
@@ -1679,7 +1731,7 @@ const SERVER_DIR = path.resolve(__dirname, '..');
  *  alerts, it never acts). Fire-and-forget; a failed post is logged, never thrown — the alert must
  *  not be able to hurt the warm it watches. The curl's own 10s timeout bounds a NETWORK op on the
  *  alert, not cognition (same bound as every existing ntfy call). */
-function postNtfyAlert(message: string, title: string): void {
+export function postNtfyAlert(message: string, title: string): void {
     try {
         const cfg = JSON.parse(fs.readFileSync(path.join(hanHome(), 'config.json'), 'utf8'));
         if (!cfg.ntfy_topic) return;
@@ -1814,6 +1866,73 @@ function retireStem(slug: string, surface: string, stem: PoolStem, reason: strin
     removeStem(slug, surface, stem.stem_id);
     pendingStemKills.set(stem.tmux_session, { slug, reason });
     console.warn(`[pool-manager] ${slug}/${surface}: retired stem ${stem.stem_id} (${reason}) — kill queued for the chrome-guarded sweep`);
+}
+
+/**
+ * MNT-070 — the no-retire-on-resumable fix (the deepest correction of the plan-audit: the
+ * night's actual harm was the RETIRE, not the drop). On a dispatch failure, diagnose the pane
+ * BEFORE retiring: DispatchTimeout + resumable signature (idle prompt + API-error banner, the
+ * turn died at the API but the vessel is healthy) → mark `resumable` (cross-process marker,
+ * JA2's TTL substrate) + receipt, and LEAVE the stem registered — the reconciler gets first
+ * claim on the vessel; retire only what diagnosis says is actually gone. A RateLimitedError
+ * (P7's bounded retries already exhausted — a SUSTAINED limit, the account axis) and every
+ * other failure class retire exactly as before, now with a forensic receipt (the plan's
+ * retire-cleanup fold: never the silent unrecorded zombie).
+ */
+function retireOrMarkResumable(slug: string, surface: string, stem: PoolStem, err: Error): void {
+    if (err instanceof DispatchTimeoutError && !(err instanceof RateLimitedError)
+        && classifyPaneState(capturePaneTail(stem.tmux_session, 30)) === 'resumable') {
+        markResumable({
+            slug, surface, stem_id: stem.stem_id, tmux_session: stem.tmux_session,
+            conversation_id: stem.conversation_id ?? undefined,
+            marked_at: new Date().toISOString(), reason: 'dispatch-timeout-resumable-pane',
+        });
+        writeSpokeLifecycleReceipt({
+            ts: new Date().toISOString(), slug, surface, stem_id: stem.stem_id,
+            tmux_session: stem.tmux_session, verb: 'marked-resumable',
+            thread: stem.conversation_id ?? undefined, detail: 'dispatch-timeout + resumable pane — retire deferred; reconciler has first claim',
+        });
+        console.warn(`[pool-manager] ${slug}/${surface}: stem ${stem.stem_id} is RESUMABLE (turn died at the API, vessel healthy) — NOT retired; marker written, TTL fallback armed`);
+        return;
+    }
+    writeSpokeLifecycleReceipt({
+        ts: new Date().toISOString(), slug, surface, stem_id: stem.stem_id,
+        tmux_session: stem.tmux_session, verb: 'reap',
+        thread: stem.conversation_id ?? undefined, detail: `dispatch-failed-retire: ${err.message.slice(0, 80)}`,
+    });
+    retireStem(slug, surface, stem, `dispatch-failed: ${err.message.slice(0, 80)}`);
+}
+
+/**
+ * MNT-070 (JA2) — the TTL fallback, run in the pool-manager tick (the LONG-LIVED process,
+ * which is the point: the MNT-070 zombie was a retire whose in-memory kill queue died with
+ * the walker process). A vessel marked resumable that no reconciler claimed within the
+ * registry TTL falls back to the needs-reconcile/retire path — keeping one becomes a choice
+ * (the marker + receipts), forgetting one becomes impossible (this sweep).
+ */
+function sweepResumableStems(slug: string, surface: string): void {
+    const ttl = resumableTtlMinutesFor(slug, surface);
+    const now = Date.now();
+    for (const marker of readResumableMarkers(slug, surface)) {
+        if (!tmuxSessionExists(marker.tmux_session)) {
+            clearResumableMarker(marker.tmux_session); // vessel already gone — marker is stale residue
+            continue;
+        }
+        if (!resumableExpired(marker, ttl, now)) continue; // the reconciler's claim window is open
+        const stem = readPool(slug, surface).stems.find(s => s.stem_id === marker.stem_id);
+        if (stem) {
+            retireStem(slug, surface, stem, `resumable-ttl-expired (${ttl}m unclaimed)`);
+        } else {
+            // Registered row already gone (another path retired it) — still reclaim the pane.
+            pendingStemKills.set(marker.tmux_session, { slug, reason: `resumable-ttl-expired (${ttl}m, unregistered)` });
+        }
+        writeSpokeLifecycleReceipt({
+            ts: new Date().toISOString(), slug, surface, stem_id: marker.stem_id,
+            tmux_session: marker.tmux_session, verb: 'resumable-ttl-retired',
+            thread: marker.conversation_id, detail: `unclaimed for ${ttl}m — fell back to retire (JA2)`,
+        });
+        clearResumableMarker(marker.tmux_session);
+    }
 }
 
 /** The chrome-guarded GRACEFUL kill sweep (two-stage since 2026-07-15, Darron's graceful-reap):
@@ -1967,6 +2086,7 @@ export function startPoolManager(slug: string, surface: string): void {
             sweepRetiredStems();
             sweepDeadRegisteredStems(slug, surface); // MNT-056: heal the cgroup-kill-without-restart case before replenish
             sweepIdleSpokes(slug, surface); // MNT-061: the third trigger — idle-abandoned spokes recycle or reap
+            sweepResumableStems(slug, surface); // MNT-070 (JA2): unclaimed resumable vessels fall back to retire
             // 24h substrate reload: retire FREE over-age stems (a leased one retires on return/next tick).
             const now = Date.now();
             for (const stem of readPool(slug, surface).stems) {

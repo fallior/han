@@ -379,6 +379,11 @@ export function buildWanderBeatScaffold(ctx: {
     beatDirective?: string;
     charter?: string;
     invitedBy?: string;
+    /** MNT-070 rung 2 — the recovery variant: a previous turn's composed-but-unposted leg
+     *  survives at this path; the seat verifies it is its own and posts it (sovereignty —
+     *  the walker never posts words on a seat's behalf; the work is re-delivered, never
+     *  re-composed). Carries JA1's check-thread-first belt in the frame itself. */
+    recoveredLegPath?: string;
 }): string {
     if (!ctx.roleLabel) throw new Error("buildWanderBeatScaffold: ctx.roleLabel is required — no silent leo-default; the walker must pass the agent's conversationRole");
     const roleLabel = ctx.roleLabel;
@@ -387,7 +392,16 @@ export function buildWanderBeatScaffold(ctx: {
 THE CHARTER (consent at capture — you write knowing the room this may reach):
 ${ctx.charter}
 ` : '';
-    const frameLine = ctx.invitedBy
+    const frameLine = ctx.recoveredLegPath
+        ? `RECOVERY LEG (MNT-070): a previous turn of yours composed this beat's leg, but the API dropped before it posted. The leg survives at \`${ctx.recoveredLegPath}\`.
+1. CHECK THE THREAD FIRST — if your leg for this beat already landed, do NOT re-post; call \`mcp__han-diary__submit_response\` noting it landed, and stop.
+2. Read the recovered file and VERIFY it is yours and complete — against the thread and your directive below. It is your own hand; do not re-compose unless the file is wrong or incomplete.
+3. Post it via the mechanics below, exactly as you would a fresh leg.
+Your directive for this beat was:
+---
+${ctx.beatDirective ?? '(read the thread — your latest directive is its last message)'}
+---`
+        : ctx.invitedBy
         ? `You were invited by ${ctx.invitedBy}. Their thread, your voice.`
         : `Your own beat directive for this leg:
 ---

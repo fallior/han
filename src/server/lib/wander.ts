@@ -124,10 +124,42 @@ export interface WanderEvent {
     ts: string;
     slug: string;
     conversationId: string;
-    kind: 'armed' | 'beat-posted' | 'beat-landed' | 'invite-landed' | 'held-alert' | 'arc-complete' | 'resolved';
+    kind: 'armed' | 'beat-posted' | 'beat-landed' | 'invite-landed' | 'held-alert' | 'arc-complete' | 'resolved'
+        // MNT-070 — the reconciler's closed additions (mechanics only, like everything here):
+        // 'recovery-attempt' is written BEFORE any recovery acts (the one-per-beat counter —
+        // crash-safe: a reconciler that dies mid-recovery still spent its one attempt);
+        // 'recovered-landed' is diagnosis, not recovery (the post landed, only the capture died
+        // — JA3), so it never burns the attempt; the rest are the ladder's terminal receipts.
+        | 'recovery-attempt' | 'recovered-landed' | 'resumed-same-spoke' | 'recovered-posted'
+        | 're-dispatched' | 'recovery-failed-held';
     beat?: number;
     post_id?: string;
     detail?: string;
+}
+
+/** MNT-070 — read this arc's receipts back (current file + one rotation). The reconciler's
+ *  one-per-beat counter reads THIS trail — the landed-trail discipline (J5's law) reused for
+ *  recovery accounting. Unparseable lines are skipped (a receipt log survives its own noise). */
+export function readWanderEventsFor(conversationId: string): WanderEvent[] {
+    const events: WanderEvent[] = [];
+    for (const file of [receiptFile() + '.1', receiptFile()]) {
+        try {
+            for (const line of fs.readFileSync(file, 'utf-8').split('\n')) {
+                if (!line.trim()) continue;
+                try {
+                    const ev = JSON.parse(line) as WanderEvent;
+                    if (ev.conversationId === conversationId) events.push(ev);
+                } catch { /* skip noise */ }
+            }
+        } catch { /* file absent — fine */ }
+    }
+    return events;
+}
+
+/** MNT-070 — pure: has this beat's ONE recovery already been attempted? Keys on the
+ *  'recovery-attempt' receipt (written before the action), never a counter in memory. */
+export function recoverySpent(events: WanderEvent[], beat: number): boolean {
+    return events.some(e => e.kind === 'recovery-attempt' && e.beat === beat);
 }
 
 export function writeWanderReceipt(ev: WanderEvent): void {

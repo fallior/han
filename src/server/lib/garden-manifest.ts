@@ -150,6 +150,14 @@ export interface SpokeLifecycle {
      *  uniformly (dailies included — Jim's ruling: no content-shaped carve-outs in a lifecycle
      *  mechanic; the affinity hint re-binds a reviving daily to its own spoke cheaply). */
     spokeIdleReapHours?: number;
+    /** MNT-070 (JA2): minutes a `resumable`-marked vessel may wait UNCLAIMED before the
+     *  pool-manager falls back to the retire path (the needs-reconcile fate the mark deferred).
+     *  The mark says "the turn died at the API but the vessel is healthy — the reconciler gets
+     *  first claim"; the TTL makes forgetting one impossible (the 21-hour living stem of
+     *  MNT-070 is the accidental demonstration). Default 30 — stated-guess: 2× the 15-min
+     *  dispatch capture window, so an in-flight rung-1 claim can never be swept mid-nudge;
+     *  RAISE if legitimate reconcilers claim later, LOWER if unclaimed vessels linger. */
+    resumableTtlMinutes?: number;
     /** MNT-061: the RE-THREAD ceiling (ctx %) — an idle-decoupled spoke at/above this is reaped
      *  rather than recycled, and a recycled stem at/above it is never assigned a NEW thread.
      *  Distinct from ctxReapThresholdPct (92, the CONTINUE ceiling): continuing costs only a
@@ -623,6 +631,11 @@ export function prewarmAlertMinsFor(slug: string, surface: string): number {
  *  Stop-hook flush serves; per-surface overrides ride the standard lifecycle merge. */
 export function swapFlushMaxBytesFor(slug: string, surface: string = 'session'): number {
     return spokeLifecycleFor(slug, surface).swapFlushMaxBytes ?? 20000;
+}
+
+/** MNT-070 (JA2): minutes a resumable-marked vessel may wait unclaimed before the TTL retire. Default 30. */
+export function resumableTtlMinutesFor(slug: string, surface: string): number {
+    return spokeLifecycleFor(slug, surface).resumableTtlMinutes ?? 30;
 }
 
 /** MNT-061: hours a bound spoke may sit unserved before the idle sweep decouples it. Default 48. */
