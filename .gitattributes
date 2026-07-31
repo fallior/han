@@ -1,0 +1,13 @@
+# Line-ending law (DEC-104 family — legibility is a security property, Tenshi):
+# code is LF by construction, so a whole-file CRLF flip can never again ride
+# silently inside a feature diff (the a62e0dd orchestrator lesson).
+# Historical documents (.md session-notes, logs) carry NO rule — byte-preserved
+# as committed (the DEC-069 posture: records keep their original form).
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.json text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.sh   text eol=lf
