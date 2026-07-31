@@ -48,10 +48,10 @@ import path from 'node:path';
 import { dispatchTxn, applyMeditationMarkers } from './lib/agent-cycle';
 import { computeWallClockDelay } from './lib/agent-scheduler';
 import { getDayPhase, isHeartbeatPaused, type DayPhase } from './lib/day-phase';
-import { manifestModelLadder, manifestModelHead, loadResidents } from './lib/garden-manifest';
+import { manifestModelLadder, loadResidents } from './lib/garden-manifest';
 import { gradientConfigForAgent } from './lib/agent-registry';
 import { appendPairedMemory } from './lib/memory-paired-writer';
-import { observeActiveModel } from './lib/tmux-dispatcher';
+import { observedOrUnobservedModel } from './lib/tmux-dispatcher';
 import { gradientStmts, feelingTagStmts } from './db';
 import { ENVELOPE_PATH } from './lib/cognition-envelope';
 import type { CaptureRecord } from './lib/diary-mcp-server';
@@ -148,7 +148,8 @@ function buildDreamMemorySection(): { section: string } {
 async function writeBeatMemory(beatType: string, phase: string, cap: CaptureRecord): Promise<void> {
     const timestamp = new Date().toISOString().split('T')[0] + ' ' +
         new Date().toTimeString().split(' ')[0];
-    const model = (observeActiveModel(SLUG, SURFACE) ?? manifestModelHead(SLUG, SURFACE)) ?? undefined;
+    // DEC-104 M1: honest-absence stamp — never a bare floating alias into DEC-092 provenance.
+    const model = observedOrUnobservedModel(SLUG, SURFACE);
     const modelTag = model ? ` [model: ${model}]` : '';
     const summary = cap.args.working_memory_full;         // curated c0-grade record (DEC-093)
     const distilled = cap.args.working_memory_compressed; // the agent's in-situ c1 (DEC-085)

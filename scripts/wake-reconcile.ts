@@ -33,6 +33,8 @@ import { readFileSync, existsSync } from 'fs';
 const { manifestModelHead } = require('../src/server/lib/garden-manifest.ts');
 
 const WINDOW_BY_MODEL: Record<string, number> = {
+    // observation-pin: measured token-rate constants keyed by OBSERVED api ids (DEC-104:
+    // observation pins; these are measurements of specific versions, not selections).
     'claude-fable-5': 1_000_000,
     'claude-sonnet-5': 1_000_000,
     // opus-family and legacy rungs run the 200K window

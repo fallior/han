@@ -34,7 +34,7 @@ import { execFileSync } from 'child_process';
 import { awaitChromeOrDescend, capturePaneTail, MODEL_UNAVAILABLE_RE } from '../src/server/lib/tmux-dispatcher';
 
 const BOGUS = 'claude-bogus-not-real-xyz';
-const WORKING = 'claude-opus-4-8';
+const WORKING = 'claude-opus-4-8'; // observation-pin: synthetic OBSERVED fixture (DEC-104)
 const READY_CHROME_RE = /❯|shortcuts|bypass permissions/i;
 
 function tmux(args: string[]): string {

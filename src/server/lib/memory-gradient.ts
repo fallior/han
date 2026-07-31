@@ -467,7 +467,7 @@ If none contradicted: {"contradicted": false}`;
         const q = agentQuery({
             prompt,
             options: {
-                model: 'claude-haiku-4-5-20251001',
+                model: 'haiku', // DEC-104: alias — selection floats
                 maxTurns: 1,
                 cwd: process.env.HOME || '/root',
                 permissionMode: 'bypassPermissions',
@@ -547,7 +547,7 @@ Respond with ONLY valid JSON lines, no markdown fences.`;
             const q = agentQuery({
                 prompt,
                 options: {
-                    model: 'claude-haiku-4-5-20251001',
+                    model: 'haiku', // DEC-104: alias — selection floats
                     maxTurns: 1,
                     cwd: process.env.HOME || '/root',
                     permissionMode: 'bypassPermissions',

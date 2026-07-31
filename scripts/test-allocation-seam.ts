@@ -81,7 +81,7 @@ console.log('[5] SHARED_SURFACES retired-empty (P3 2026-07-04) — compression r
 // first) — retired at P3 with runSDK. An unknown slug now falls through to null/[] like any
 // other surface; a real agent resolves its own FABLE_LADDER leaf.
 ok(manifestModelHead('anyslug', 'compression') === null, `modelHead(unknown, 'compression') === null (no shared shadow)`);
-ok(manifestModelHead('jim', 'compression') === 'claude-fable-5', `modelHead('jim', 'compression') === FABLE head (the agent leaf, un-shadowed)`);
+ok(manifestModelHead('jim', 'compression') === 'fable', `modelHead('jim', 'compression') === FABLE head alias (the agent leaf, un-shadowed; DEC-104)`);
 ok(manifestModelLadder('jim', 'compression').length > 1, `modelLadder('jim', 'compression') is the full FABLE_LADDER (descent rungs exist)`);
 
 if (failures) { console.error(`\nFAILED: ${failures} assertion(s).`); process.exit(1); }

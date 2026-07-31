@@ -171,7 +171,7 @@ export async function callLLM<T = Record<string, unknown>>(
         const q = agentQuery({
             prompt: fullPrompt,
             options: {
-                model: 'claude-haiku-4-5-20251001',
+                model: 'haiku' /* DEC-104: alias — selection floats */,
                 maxTurns: 1,
                 cwd: process.cwd(),
                 permissionMode: 'bypassPermissions',
@@ -201,7 +201,7 @@ export async function callLLM<T = Record<string, unknown>>(
         return {
             response: JSON.parse(jsonText.trim()) as T,
             backend: 'sdk',
-            model: 'claude-haiku-4-5-20251001'
+            model: 'haiku' /* DEC-104: alias — selection floats */
         };
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

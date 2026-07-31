@@ -37,7 +37,7 @@ import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
-import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, spokePersistFor, ctxReapThresholdFor, prewarmAlertMinsFor, spokeIdleReapHoursFor, spokeRethreadCtxCeilingFor, spokeFitCeilingFor, resumableTtlMinutesFor } from './garden-manifest';
+import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, manifestModelHead, spokePersistFor, ctxReapThresholdFor, prewarmAlertMinsFor, spokeIdleReapHoursFor, spokeRethreadCtxCeilingFor, spokeFitCeilingFor, resumableTtlMinutesFor } from './garden-manifest';
 import { markResumable, readResumableMarkers, clearResumableMarker, resumableExpired, type PaneClass } from './dispatch-reconciler';
 import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
@@ -489,11 +489,49 @@ export async function awaitChromeOrDescend(
 // ── observeActiveModel (DEC-092 observed-banner stamp, S175) ──────────────────────────
 /** Map the Claude Code chrome's display model name → the API id we stamp. Best-effort; the
  *  caller falls back to the configured manifest head when this returns null. */
+// observation-pin: the DEC-092 stamp table — chrome display → EXACT api id. Observation records
+// versions BY DESIGN (DEC-104: selection floats, observation pins); these literals are the
+// instrument, not a constraint. EXCEPTIONS ONLY — `chromeDisplayToId`'s generic normaliser below
+// covers the mechanical "Name X[.Y]" → claude-name-x[-y] form, so a model that does not exist yet
+// is observed + stamped with zero maintenance; this table exists for any future irregular form.
 const MODEL_DISPLAY_TO_ID: Record<string, string> = {
     'opus 4.8': 'claude-opus-4-8', 'opus 4.7': 'claude-opus-4-7', 'opus 4.6': 'claude-opus-4-6',
     'sonnet 4.6': 'claude-sonnet-4-6', 'haiku 4.5': 'claude-haiku-4-5', 'fable 5': 'claude-fable-5',
     'sonnet 5': 'claude-sonnet-5', // S216: the Sonnet-5 cycle A/B — absent, the overnight DEC-092 stamps would fall back to the manifest head and misreport the comparison
 };
+
+/** DEC-104 move 4 — the pure chrome-display normaliser: "Opus 4.8" → claude-opus-4-8,
+ *  "Opus 5" → claude-opus-5, "Opus 10.1" → claude-opus-10-1 (multi-digit-safe, Jim's minor).
+ *  Table first (irregular forms), generic construction second — observation FLOATS to models
+ *  that do not exist yet while always recording an exact version. Null on no match. */
+export function chromeDisplayToId(text: string): string | null {
+    const m = text.match(/\b(Opus|Sonnet|Haiku|Fable)\s+([0-9]+(?:\.[0-9]+)?)/i);
+    if (!m) return null;
+    const key = `${m[1].toLowerCase()} ${m[2]}`;
+    if (MODEL_DISPLAY_TO_ID[key]) return MODEL_DISPLAY_TO_ID[key];
+    return `claude-${m[1].toLowerCase()}-${m[2].replace(/\./g, '-')}`;
+}
+
+/** DEC-104 move 2 — alias-aware model equality for the cast check: a bare family alias rung
+ *  ('opus') is satisfied by ANY observed id of that family (claude-opus-*), so a warm stem
+ *  keeps its version until recycle (the float lands at wake/recycle — Jim's confirmed
+ *  granularity) and cast-when-different never fires a wasted /model against an alias head.
+ *  A version-shaped rung compares exactly (today's behaviour). Null observed → false (cast). */
+export function modelSatisfiesRung(observedId: string | null | undefined, rung: string): boolean {
+    if (!observedId || !rung) return false;
+    const o = observedId.toLowerCase();
+    const r = rung.toLowerCase();
+    if (o === r) return true;
+    return /^[a-z]+$/.test(r) && o.startsWith(`claude-${r}-`);
+}
+
+/** DEC-092 stamp with the honest-absence fallback (Jim's M1; Casey + Tenshi's R3 ruling —
+ *  label the absence, never guess the fact): when the pane is unreadable the stamp says so,
+ *  `<head>:unobserved`, never a bare floating alias and never a guessed version. */
+export function observedOrUnobservedModel(slug: string, surface: string, tmuxTarget?: string): string {
+    return observeActiveModel(slug, surface, tmuxTarget)
+        ?? `${manifestModelHead(slug, surface) ?? 'unknown'}:unobserved`;
+}
 /**
  * Read the ACTUALLY-ACTIVE model from a surface's live pane chrome (the status line shows
  * e.g. "Opus 4.8 ~/repo ctx: 30%"). The DEC-092 observed-banner gate (Jim's failover audit,
@@ -513,13 +551,10 @@ export function observeActiveModel(slug: string, surface: string, tmuxTarget?: s
     // Direct api-id form, if a chrome version prints it: "claude-opus-4-8".
     const idMatch = tail.match(/claude-[a-z]+-[0-9][0-9-]*/i);
     if (idMatch) return idMatch[0].toLowerCase();
-    // Display-name form in the status line: "Opus 4.8", "Fable 5", …
-    const dispMatch = tail.match(/\b(Opus|Sonnet|Haiku|Fable)\s+[0-9](?:\.[0-9])?/i);
-    if (dispMatch) {
-        const key = dispMatch[0].toLowerCase().replace(/\s+/g, ' ').trim();
-        if (MODEL_DISPLAY_TO_ID[key]) return MODEL_DISPLAY_TO_ID[key];
-    }
-    return null;
+    // Display-name form in the status line: "Opus 4.8", "Fable 5", … — via the pure normaliser
+    // (table first for irregular forms, generic construction second), so an unknown FUTURE
+    // version stamps correctly with zero maintenance (DEC-104 move 4 + Jim's multi-digit minor).
+    return chromeDisplayToId(tail);
 }
 
 // ── primitive 1: spawnAgentSession ───────────────────────────────────────────────────
@@ -1463,7 +1498,10 @@ async function freshenPooledStem(slug: string, surface: string, stem: PoolStem, 
  */
 async function castStemToServeModel(slug: string, surface: string, stem: PoolStem): Promise<void> {
     const serve = serveModelFor(slug, surface);
-    if (!serve || stem.model === serve) return; // already on the serve model (or no serve ladder) → no cast
+    // DEC-104: alias-aware — an observed claude-opus-* SATISFIES a bare 'opus' rung (no wasted
+    // per-dispatch /model + cooldown against an alias head); a family MISMATCH (e.g. the Mythos
+    // guard tripping a fable stem onto opus — Tenshi's R5, suite-pinned) still casts back.
+    if (!serve || modelSatisfiesRung(stem.model, serve)) return; // on the serve family/model (or no serve ladder) → no cast
     sendLine(stem.tmux_session, `/model ${serve}`);
     await sleep(DESCEND_COOLDOWN_MS);
     // Probe the serve head; descend the SURFACE ladder on unavailable (throws if every rung dead).

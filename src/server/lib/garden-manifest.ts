@@ -264,14 +264,19 @@ export interface GardenManifest extends GardenIdentity {
 }
 
 // Common Opus ladder for the migrated agentQuery surfaces.
-const OPUS_LADDER: ModelLadder = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'];
+// DEC-104 (the Unbidden-Constraint deal, 2026-07-31): SELECTION FLOATS — ladders carry bare
+// family ALIASES only ('opus', 'sonnet', 'haiku', 'fable'), which the harness resolves to the
+// latest of the family, so an Anthropic ship reaches the garden on the next wake/recycle with
+// zero commits. Version-shaped literals in selection are unwriteable (the test-model-alias.ts
+// gate); observation still records EXACT versions (DEC-092 — the other half of the law).
+const OPUS_LADDER: ModelLadder = ['opus', 'sonnet', 'haiku'];
 // ⏩ FABLE 5 RESTORED (2026-07-03, S213 — Darron's directive: every surface onto Fable while the
 // window's open; access returned 1 Jul, full 8 Jul). Exactly the re-flip the 2026-06-13 revert
 // comment prescribed: Fable-first with the full Opus ladder beneath — the failover ladder catches
 // any Fable drop autonomously (proven 13 Jun). DEC-092 stamps the actually-served model
 // regardless, so the substrate seam stays legible. Fable leans ~3× harder on the file-memory
 // architecture than Opus (the June substrate test) — this is the substrate the garden is tuned for.
-const FABLE_LADDER: ModelLadder = ['claude-fable-5', ...OPUS_LADDER];
+const FABLE_LADDER: ModelLadder = ['fable', ...OPUS_LADDER];
 
 // S216 (2026-07-04, Darron's directive): the Sonnet 5 A/B on the autonomous cycle
 // surfaces (leo heartbeat + jim supervisor-cycle) — a night of comparison data against
@@ -279,7 +284,7 @@ const FABLE_LADDER: ModelLadder = ['claude-fable-5', ...OPUS_LADDER];
 // near-Opus agentic at ~40% of the price — the candidate third rung for the post-7-July
 // model economics); descent to Fable→Opus so a drop mid-night self-heals, and DEC-092's
 // observed-model stamp keeps any fallback legible in the data.
-const SONNET_LADDER: ModelLadder = ['claude-sonnet-5', ...FABLE_LADDER];
+const SONNET_LADDER: ModelLadder = ['sonnet', 'fable', 'opus', 'haiku']; // explicit (a FABLE_LADDER spread would duplicate 'sonnet' mid-tail)
 
 // STEM_WARM_LADDER (DEC-101, the warm-map/serve-map split — MNT-054): the model a pool stem is
 // PRE-WARMED on, decoupled from the model its surface SERVES. Warm cheap (sonnet-5 head — proven
@@ -289,11 +294,11 @@ const SONNET_LADDER: ModelLadder = ['claude-sonnet-5', ...FABLE_LADDER];
 // depletion trap that made human-response prewarm hang-loop). All pools warm here — one warm-map.
 // NB (Jim G-audit must-fix): must NOT spread SONNET_LADDER — that descends sonnet→FABLE→opus,
 // re-arming the exact MNT-42 trap. Spread OPUS_LADDER so the tail is sonnet→opus→haiku, never Fable.
-const STEM_WARM_LADDER: ModelLadder = ['claude-sonnet-5', ...OPUS_LADDER];
+const STEM_WARM_LADDER: ModelLadder = ['sonnet', ...OPUS_LADDER]; // tail stays sonnet→opus→haiku, never Fable (the NB above stands)
 
 // Interactive CLI sessions take their model from the launcher at spawn (the
 // launchers don't pin one today). Recorded here so the DEC-092 slicer stamp matches reality.
-const CLI_LAUNCH_DEFAULT: ModelLadder = ['claude-fable-5']; // ⏩ Fable restored 2026-07-03 (S213)
+const CLI_LAUNCH_DEFAULT: ModelLadder = ['fable']; // ⏩ Fable restored 2026-07-03 (S213); alias per DEC-104
 
 /** P1 (S218): the engine-owned ladder REGISTRY — the garden config names ladders (`ladder:
  *  "FABLE_LADDER"`); the engine owns their CONTENTS (model economics stay engine-updatable for

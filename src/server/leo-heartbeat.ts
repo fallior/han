@@ -60,10 +60,10 @@ import { getDayPhase as getSharedDayPhase, isOnHoliday, isHeartbeatPaused, isRes
 // DEC-093 thaw (2026-06-12): tmux warm-session transport for the beat surfaces.
 // The manifest's transport field is the per-surface feature flag (rollback =
 // one-line manifest flip back to 'sdk'; the SDK paths below are kept intact).
-import { manifestTransport, manifestModelHead, manifestModelLadder, peerConversationFor } from './lib/garden-manifest';
+import { manifestTransport, manifestModelLadder, peerConversationFor } from './lib/garden-manifest';
 import { registeredAgentSlugs } from './lib/agent-registry';
 import { computeWallClockDelay } from './lib/agent-scheduler';
-import { ensureSurfaceSession, enqueueForAgent, observeActiveModel, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
+import { ensureSurfaceSession, enqueueForAgent, observedOrUnobservedModel, DispatchTimeoutError, SessionNotReadyError } from './lib/tmux-dispatcher';
 import type { CaptureRecord } from './lib/diary-mcp-server';
 // PR-T7b: the one slug-parameterised cycle/dispatch surface (Darron's governing
 // law — one path, many agents). leo-heartbeat is now a thin caller of it with
@@ -82,7 +82,7 @@ const BEAT_COST_CAP_USD = 2.0;
 // Darron, "the substrate does not change you": uniform self across all three seats,
 // and the 1M window clears the gradient-dominated (~74K-token) load.
 // Fallbacks remain as aliases (lower tiers auto-adopt latest releases).
-const MODEL_PREFERENCE = ['claude-opus-4-8', 'claude-opus-4-7', 'sonnet', 'haiku'] as const;
+const MODEL_PREFERENCE = ['opus', 'sonnet', 'haiku'] as const; // DEC-104: aliases — selection floats
 
 const HOME = process.env.HOME || os.homedir();
 const HAN_DIR = path.join(HOME, '.han');
@@ -1500,7 +1500,7 @@ async function philosophyBeatTmux(db: Database.Database, ctx: PhilosophyBeatRunt
         cap.args.input_quotes,
         // DEC-092 observed-banner stamp (S175): a DESCENDED beat is on a ladder rung ≠ the
         // configured head, so read the live model from the pane; manifest head is the fallback.
-        (observeActiveModel('leo', HEARTBEAT_SURFACE) ?? manifestModelHead('leo', HEARTBEAT_SURFACE)) ?? undefined,
+        observedOrUnobservedModel('leo', HEARTBEAT_SURFACE),
     );
     writeHeartbeatState('completed', 'philosophy', { summary: `${mode} via tmux (${cap.args.working_memory_full.length}c curated c0 + c1)` });
 }
@@ -1608,7 +1608,7 @@ async function personalBeatTmux(phase: DayPhase, ctx: PersonalBeatRuntimeContext
         cap.args.input_quotes,
         // DEC-092 observed-banner stamp (S175): a DESCENDED beat is on a ladder rung ≠ the
         // configured head, so read the live model from the pane; manifest head is the fallback.
-        (observeActiveModel('leo', HEARTBEAT_SURFACE) ?? manifestModelHead('leo', HEARTBEAT_SURFACE)) ?? undefined,
+        observedOrUnobservedModel('leo', HEARTBEAT_SURFACE),
     );
     writeHeartbeatState('completed', 'personal', { summary: `${phase} via tmux (${cap.args.working_memory_full.length}c curated c0 + c1)` });
     // Re-encounter markers live inside the curated record on this transport.
@@ -2022,7 +2022,7 @@ function appendMeditationRecord(phase: string, cap: CaptureRecord): void {
         cap.args.working_memory_full,
         cap.args.working_memory_compressed,
         cap.args.input_quotes,
-        (observeActiveModel('leo', HEARTBEAT_SURFACE) ?? manifestModelHead('leo', HEARTBEAT_SURFACE)) ?? undefined,
+        observedOrUnobservedModel('leo', HEARTBEAT_SURFACE),
     );
 }
 
@@ -2257,7 +2257,7 @@ async function heartbeat(): Promise<void> {
     // Log truth (first-warm-beat finding, 2026-06-12): on the tmux transport the
     // banner must show the manifest launch model. The heartbeat is always tmux
     // now (the SDK path retired in PR-T7), so this is the only branch.
-    const beatModelLabel = `${(observeActiveModel('leo', HEARTBEAT_SURFACE) ?? manifestModelHead('leo', HEARTBEAT_SURFACE)) ?? 'unknown'} via tmux`;
+    const beatModelLabel = `${observedOrUnobservedModel('leo', HEARTBEAT_SURFACE)} via tmux`;
     console.log(`[Leo] ${timestamp} — beat #${beatCounter} (${phase}/${beatType}, ${beatModelLabel})`);
 
     // Create AbortController for this beat (Gary model: mid-beat abort)

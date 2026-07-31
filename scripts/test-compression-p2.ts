@@ -30,7 +30,7 @@ check('txn: FEELING_TAG routed to the tool field', txn.systemPrompt.includes("fe
 check('txn: the cN task scaffold carries the source', txn.userPrompt.includes('SYNTH-MARKER') && txn.userPrompt.includes('c2') && txn.userPrompt.includes('c3'));
 check('flags: BOTH agents ON (jim P2-flipped; leo flipped post-MNT-023-drain, 78be76a)', surfaceEnabledFor('jim', 'compression') && surfaceEnabledFor('leo', 'compression'));
 check('P3: the retired P0 full-bank profile throws (no SDK-shape consumer)', (() => { try { buildPrompt('leo', 'compression', ctx); return false; } catch { return true; } })());
-check('P3: compression resolves the per-agent FABLE_LADDER (shared shadow retired)', manifestModelLadder('jim', 'compression')[0] === 'claude-fable-5' && manifestModelLadder('jim', 'compression').length > 1);
+check('P3: compression resolves the per-agent FABLE_LADDER (shared shadow retired)', manifestModelLadder('jim', 'compression')[0] === 'fable' && manifestModelLadder('jim', 'compression').length > 1);
 
 const script = fs.readFileSync(path.join(ROOT, 'scripts/process-pending-compression.ts'), 'utf-8');
 check('the transport gate present', script.includes("surfaceEnabledFor(agent!, 'compression')"));

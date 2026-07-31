@@ -29,7 +29,7 @@ const check = (name: string, cond: boolean) => {
 const stem = (n: number, over: Partial<any> = {}) => ({
     stem_id: `session-leo-${n}`, tmux_session: `session-leo-${n}`, state: 'free' as const,
     c0: `c0-${n}`, wm_cursor: 1000, cursor_set_ts: '2026-07-01T10:00:00Z',
-    model: 'claude-opus-4-8', warm_at: '2026-07-01T10:00:00Z', ...over,
+    model: 'claude-opus-4-8', /* observation-pin: synthetic OBSERVED fixture (DEC-104) */ warm_at: '2026-07-01T10:00:00Z', ...over,
 });
 
 const NOW = '2026-07-01T11:00:00Z';
