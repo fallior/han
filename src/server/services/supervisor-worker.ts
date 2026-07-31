@@ -44,9 +44,9 @@ import { jimSupervisorCycleActionBlock, JIM_REFLECTIVE_CYCLE_ACTION_BLOCK } from
 // (supervisor-swap, the supervisor_cycles telemetry, no health-signal file —
 // the supervisor's "health" is the cycle DB + sendMessage, not leo's signal).
 import { dispatchTxn, applyMeditationMarkers, MEDITATION_ACTION_BLOCK, runReincorporationMeditationTmux, runReencounterMeditationTmux } from '../lib/agent-cycle';
-import { manifestModelLadder, manifestModelHead, conversationRolesExcept, displayNameForRole } from '../lib/garden-manifest';
+import { manifestModelLadder, conversationRolesExcept, displayNameForRole } from '../lib/garden-manifest';
 import { getPersona, getMentionPatterns } from './village';
-import { observeActiveModel } from '../lib/tmux-dispatcher';
+import { observedOrUnobservedModel } from '../lib/tmux-dispatcher';
 import type { CaptureRecord } from '../lib/diary-mcp-server';
 import { spawn as spawnChild } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
@@ -923,7 +923,8 @@ const jimMeditationDispatch = (profile: string, ctx: Record<string, unknown>, la
 
 /** Jim's light meditation record → supervisor-swap (flushed with the cycle), DEC-093. */
 function jimAppendMeditationRecord(cap: CaptureRecord): void {
-    const observed = observeActiveModel('jim', JIM_MEDITATION_SPOKE) ?? manifestModelHead('jim', JIM_MEDITATION_SPOKE) ?? undefined;
+    // DEC-104 M1 completion: honest-absence stamp — never a bare floating alias into provenance.
+    const observed = observedOrUnobservedModel('jim', JIM_MEDITATION_SPOKE);
     const header = `\n\n### Meditation (tmux) — ${new Date().toISOString()}${observed ? ` [model: ${observed}]` : ''}`;
     fs.appendFileSync(SUPERVISOR_SWAP_FILE, `${header}\n${cap.args.working_memory_compressed}`);
     fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${header}\n${cap.args.working_memory_full}`);
@@ -1343,7 +1344,8 @@ async function dispatchSupervisorCycleViaTmux(p: {
         return;
     }
 
-    const observedModel = observeActiveModel('jim', SURFACE) ?? manifestModelHead('jim', SURFACE) ?? undefined;
+    // DEC-104 M1 completion: honest-absence stamp — never a bare floating alias into provenance.
+    const observedModel = observedOrUnobservedModel('jim', SURFACE);
     const wmFull = cap.args.working_memory_full || '';
     const wmCompressed = cap.args.working_memory_compressed || '';
     const stoodDown = cap.mode === 'stand-down';

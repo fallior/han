@@ -49,14 +49,28 @@ async function main(): Promise<void> {
         check("non-model text → null (caller's honest-absence path takes over)", chromeDisplayToId('no model here 5') === null && chromeDisplayToId('') === null);
     }
 
-    console.log('— the honest-absence stamp (Jim M1; Casey/Tenshi R3 — label the absence, never guess) —');
+    console.log('— the OBSERVATION-SIDE gate (M1 completed repo-wide; Tenshi/Jim — the R1 twin: observation cannot go version-less) —');
     {
-        const heartbeats = ['src/server/leo-heartbeat.ts', 'src/server/agent-heartbeat.ts']
-            .map(f => fs.readFileSync(path.join(repoRoot, f), 'utf-8'));
-        const uses = heartbeats.map(s => (s.match(/observedOrUnobservedModel\(/g) ?? []).length).reduce((a, b) => a + b, 0);
-        check('the DEC-092 stamp sites use observedOrUnobservedModel (≥5 sites)', uses >= 5, `found ${uses}`);
-        const bareFallback = heartbeats.some(s => /observeActiveModel\([^)]*\)\s*\?\?\s*manifestModelHead/.test(s));
-        check('no stamp site falls back to a bare manifest head (the alias-into-provenance leak)', !bareFallback);
+        // The companion to the unwriteable cuff below: R1 makes "selection never pins" structural;
+        // THIS makes "observation always pins a version" structural. The proof it was needed:
+        // two stamp sites (supervisor-worker) survived the five-site M1 list — a careful human's
+        // eye slipped, and only structure doesn't (the two missed sites are the living demo).
+        const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+            if (e.name === 'node_modules' || e.name.startsWith('.') || e.name === '_archive') return [];
+            const p = path.join(dir, e.name);
+            return e.isDirectory() ? walk(p) : (e.isFile() && e.name.endsWith('.ts') ? [p] : []);
+        });
+        const srcFiles = walk(path.join(repoRoot, 'src'));
+        const bareFallbackRe = /observeActiveModel\([^)]*\)\s*\?\?/;
+        const offenders = srcFiles.filter(f => {
+            const rel = path.relative(repoRoot, f);
+            if (rel === 'src/server/lib/tmux-dispatcher.ts') return false; // the ONE lawful ??-site: observedOrUnobservedModel itself
+            return bareFallbackRe.test(fs.readFileSync(f, 'utf-8'));
+        }).map(f => path.relative(repoRoot, f));
+        check('NO bare observeActiveModel-?? fallback anywhere in src/ (every stamp routes through observedOrUnobservedModel)',
+            offenders.length === 0, offenders.join(', '));
+        const stampUsers = srcFiles.map(f => (fs.readFileSync(f, 'utf-8').match(/observedOrUnobservedModel\(/g) ?? []).length).reduce((a, b) => a + b, 0);
+        check('the DEC-092 stamp sites use observedOrUnobservedModel (≥7 sites: 5 heartbeat + 2 supervisor-worker)', stampUsers >= 7, `found ${stampUsers}`);
         const dispatcher = fs.readFileSync(path.join(repoRoot, 'src/server/lib/tmux-dispatcher.ts'), 'utf-8');
         check("the fallback stamps ':unobserved' — the absence labelled in the record", dispatcher.includes(':unobserved`'));
     }
