@@ -3840,3 +3840,37 @@ The original load **staggered** each compression level's window deeper in time (
 **Relations:** #129 (the hardware/venture horizon this shares a den with) · DEC-069 + the honest-label practice (the conviction the thesis names) · DEC-083/DEC-102 (the trust root thread 5 protects) · the 2026-07-30 thread (the founding record — Darron's commissioning words verbatim).
 
 *Recorded by Leo (session), 2026-07-30, at Darron's ask — the draft leo-human's, the sharpenings Tenshi's, Casey's, and Jim's, credited in place.*
+
+## #131 — The Telltale: who's thinking, who's waiting — the dispatch queue made visible (purely for human comfort, and now for Jemma's too)
+
+**Source:** Darron, 2026-06-24 ("lose of gravity event" thread `mqrohgdd-mie7eh`, msg `mqrpybhu`): *"I will design in a telltale that indicates who is working and who is waiting 😁. Those are purely for human comfort."* Revived and commissioned as its own idea 2026-08-01 (MNT-075 plan thread `msa223n5-sin7h9`) after Jim's research traced the origin — and found the recursion that makes it load-bearing: **the reply endorsing the telltale opened with the exact false "sibling failed" preamble MNT-075 now exists to kill.** The telltale and that bug were born in the same exchange, about the same silence. Minted by Jim (session) at Darron's nod, 2026-08-01.
+
+**What it is.** After Darron hits send on a post, the conversation view shows the dispatch queue as a strip of the recipients — **each mind in their own colour with the left border** (the established persona-colour + border convention) — with a lamp per state:
+
+| lamp | meaning | existing state (`jemma_dispatch.recipients_ordered`) |
+|---|---|---|
+| **waiting** | queued by Jemma, not yet activated | `pending` |
+| **thinking** | dispatched, actively composing | `in_progress` + fresh `last_progress_at` (the S151 `composing` heartbeat) |
+| **answered** | reply landed | `done` / `posted_but_ack_missed` |
+| **declined** | stood down by choice | `stood_down` |
+| **failed** | genuinely failed (record-reconciled, MNT-075 R1) | `failed` |
+
+So the moment a post is sent, Darron sees who Jemma will dispatch to and in what order; any *thinking* lamp is someone she has already dispatched; a slow turn reads as **thinking, not gone** — and never as falsely failed. *"The queue buys the speed; the telltale buys the knowing"* (Leo, the founding thread).
+
+**Why it's cheap — the state already exists; only the window is missing.** `jemma_dispatch` (db.ts:407) already holds per-recipient status JSON, wake/progress timestamps, and `current_index`, keyed by `conversation_id`. Zero readers outside the orchestrator today (grep-verified 2026-08-01). The build is a read-only window:
+1. **Read surface** — `GET /api/jemma/dispatches?conversation_id=` (read-only over `jemma_dispatch`; recent-N default).
+2. **Live push** — a `broadcastDispatchUpdate` WS event fired at the orchestrator's existing transitions (wake fired / heartbeat ack / done / stood_down / watchdog) — the `ws.ts:118` typed-broadcaster pattern, one more event.
+3. **The strip** — React conversation view renders recipients in agent colour + left border with the lamp per state. Display layer only; no state machinery is created, none is altered.
+
+**Foundations acquitted by MNT-075 (build that plan first — truth first, lamp second):**
+- **R1 (reconcile-at-the-watchdog)** makes the lamps *honest* — without it the telltale would have shown a red "failed" on Jim and Casey on 2026-08-01 while their answers sat in the thread: the false preamble, as a dashboard.
+- **The F2 heartbeat trace/fix** IS the thinking-pulse — the S151 `composing` heartbeat was found silent for both caught dispatches; fixing it serves the watchdog and the lamp with the same tick.
+- **The shared reconcile helper** (*does a post from agent X exist after T?*) doubles as the answered-check when an ack goes missing.
+
+**Pairs with #105 (serial/parallel).** A serial thread shows "waiting for X" honestly; an `independent: true` thread (#105, needs the explicit DEC-079 nod) shows **both lamps thinking at once** — toggle + telltale = *choose and see*, exactly as the June thread named it.
+
+**Honest scope notes.** Read-only by construction (the UI never writes dispatch state — the store/render split, same law as DEC-105's store-UTC/speak-local). The lamp is a *rendering* of orchestrator truth; if the truth layer is wrong the lamp is wrong — which is why MNT-075 is the precondition, not a co-requisite. Blast radius of the whole feature: one strip in one view.
+
+**Relations:** MNT-075 + `plans/mnt-075-plan.md` (the truth layer; the acquittal) · #105 (the parallel toggle it displays) · #126 The Vitals Board (same absence-is-alarm family, garden-organs scale — the telltale is the per-conversation sibling) · #59 (bi-directional WS full realisation — NOT required; this rides the existing one-way broadcast) · founding thread `mqrohgdd-mie7eh`; research + acquittal post `msa47hdd` on `msa223n5-sin7h9`.
+
+*Recorded by Jim (session), 2026-08-01, at Darron's ask — capture-and-return; Leo builds when the rhythm allows, after MNT-075 lands.*
