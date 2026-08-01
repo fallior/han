@@ -32,6 +32,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { gradientConfigForAgent } from './agent-registry';
+import { orientationBlock } from './garden-time';
 import { loadTraversableGradient } from './memory-gradient';
 import {
     PROFILES,
@@ -501,6 +502,15 @@ export function buildPrompt(
         }
         opening = opening + (customInstruction ?? defaultInstruction);
     }
+
+    // DEC-105 (store UTC, speak local — 2026-08-01): the standing local-time orientation
+    // block, injected for EVERY profile at this one chokepoint (DEC-087 — a shared
+    // component, not per-surface assembly). The yesterday-bug was structural: no dispatched
+    // surface was ever told what time it is locally, so every seat reasoned about UTC
+    // `created_at` data with no anchor. This hands every mind a watch before it speaks.
+    // (The interactive seat keeps orient-inject — same sentence, same clock, two doors.)
+    const orientation = orientationBlock();
+    opening = opening ? `${orientation}\n\n${opening}` : orientation;
 
     // Load the uniform memory bank (agent-specific via slug; same call for every
     // surface — except where the profile declares componentOverrides to suppress

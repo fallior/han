@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'fs';
 import path from 'path';
 import { HAN_DIR, PENDING_DIR } from '../db';
+import { gardenTimezone } from '../lib/garden-manifest';
 
 /**
  * Live-mirror capture window (DEC-013). The broadcast/cache capture the last N lines, NOT the
@@ -204,7 +205,11 @@ export function appendToLog(content: string): void {
 
         // First capture — write everything (minus noise), this is session start
         if (prevCapture.length === 0) {
-            let output = `\n--- ${new Date().toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' })} ---\n`;
+            // DEC-105 G4: zone from the manifest leaf (was a hardcoded 'Australia/Brisbane' —
+            // a per-garden fact in shared code). NB this marker is the ONE grandfathered
+            // local-parsed-back site (terminal-search.ts parseAuMarker) — format is pinned
+            // as a pair in scripts/test-garden-time.ts; keep en-AU toLocaleString exactly.
+            let output = `\n--- ${new Date().toLocaleString('en-AU', { timeZone: gardenTimezone() })} ---\n`;
             lastTimestamp = now;
             for (const line of lines) {
                 if (!isNoise(line)) output += line + '\n';
@@ -290,7 +295,7 @@ export function appendToLog(content: string): void {
 
         // Timestamp every 5 minutes
         if (now - lastTimestamp >= TIMESTAMP_INTERVAL) {
-            output += `\n--- ${new Date().toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' })} ---\n`;
+            output += `\n--- ${new Date().toLocaleString('en-AU', { timeZone: gardenTimezone() })} ---\n`; // DEC-105 G4 (paired with parseAuMarker — see above)
             lastTimestamp = now;
         }
 

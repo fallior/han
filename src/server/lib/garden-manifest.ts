@@ -261,6 +261,11 @@ export interface GardenManifest extends GardenIdentity {
     spokeLifecycle: SpokeLifecycle;
     /** Optional update-channel calibration (absent = advisory freshness, the safe default). */
     update?: UpdateConfig;
+    /** DEC-105 (store UTC, speak local): the garden's IANA timezone — where the garden lives.
+     *  OPTIONAL garden-scoped leaf (the UpdateConfig precedent, not a per-agent leaf): absent
+     *  means the garden hasn't said where it lives and every local render speaks UTC with an
+     *  honest label. Per-garden by construction (DEC-081 — Mike's garden sets its own). */
+    timezone?: string;
 }
 
 // Common Opus ladder for the migrated agentQuery surfaces.
@@ -377,6 +382,8 @@ function loadGardenConfig(): { manifest: GardenManifest; allocations: Record<str
         if (cfg.update.enforceFreshnessExpiry !== undefined && typeof cfg.update.enforceFreshnessExpiry !== 'boolean') fail('update.enforceFreshnessExpiry must be a boolean');
         if (cfg.update.freshnessMaxAgeDays !== undefined && typeof cfg.update.freshnessMaxAgeDays !== 'number') fail('update.freshnessMaxAgeDays must be a number');
     }
+    // Optional timezone leaf (DEC-105): validate shape iff present; absence = UTC-with-honest-label.
+    if (cfg.timezone !== undefined && typeof cfg.timezone !== 'string') fail('timezone must be an IANA zone string when present');
     const manifest: GardenManifest = {
         manifestVersion: cfg.manifestVersion,
         spokeLifecycle: cfg.spokeLifecycle,
@@ -384,6 +391,7 @@ function loadGardenConfig(): { manifest: GardenManifest; allocations: Record<str
         user: cfg.user,
         agents,
         ...(cfg.update !== undefined ? { update: cfg.update as UpdateConfig } : {}),
+        ...(cfg.timezone !== undefined ? { timezone: cfg.timezone as string } : {}),
     };
     return { manifest, allocations };
 }
@@ -407,6 +415,20 @@ export function updateConfig(): { enforceFreshnessExpiry: boolean; freshnessMaxA
             + `would expire EVERY freshness (self-lockout) — set a positive max-age or disarm the flag`);
     }
     return out;
+}
+
+/** DEC-105: the garden's timezone, resolved — always a usable IANA zone string ('UTC' when the
+ *  garden hasn't set one). Local time is a DISPLAY PROJECTION of UTC only (Tenshi's invariant):
+ *  never persisted, compared, or fed back into the machine layer. Renders that want to say
+ *  honestly whether the garden actually declared a zone pair this with gardenTimezoneConfigured(). */
+export function gardenTimezone(): string {
+    return GARDEN_MANIFEST.timezone ?? 'UTC';
+}
+
+/** DEC-105: whether the garden DECLARED a timezone (false = the UTC default is a fallback the
+ *  render layer should label honestly, not a chosen zone). */
+export function gardenTimezoneConfigured(): boolean {
+    return GARDEN_MANIFEST.timezone !== undefined;
 }
 
 /**

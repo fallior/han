@@ -4,6 +4,7 @@
   "spokeLifecycle": { "ctxClearThresholdPct": 85, "warmFloorPct": 30, "maxWarmNudges": 2 },
   "project": { "name": "My Garden", "tagline": "a garden of minds", "path": "~/Projects/my-garden" },
   "user": { "name": "Your Name", "pronounSubj": "they", "pronounObj": "them", "location": "Somewhere (UTC+0)" },
+  "timezone": "UTC",
   "agents": [
     {
       "slug": "gardener",
