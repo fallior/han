@@ -263,8 +263,8 @@ export function buildHumanResponseScaffold(ctx: {
 }): string {
     const priorFailedBlock = ctx.priorAgentFailed ? `
 
-PRIOR AGENT FAILED (acknowledge briefly in your own voice before responding):
-${ctx.priorAgentFailed.agent} tried to respond but couldn't (${ctx.priorAgentFailed.reason}). One natural sentence at the top of your response: "${ctx.priorAgentFailed.agent} seems to have had trouble on this one — let me take it." Then respond normally. Do NOT repeat the distress details; do NOT apologise for them; do NOT use a system-notice tone.
+PRIOR AGENT MAY HAVE FAILED — VERIFY IN THE RECORD BEFORE SAYING SO (MNT-075 R3, the mast):
+The dispatcher labelled ${ctx.priorAgentFailed.agent} failed (${ctx.priorAgentFailed.reason}) — but that label was made from a missing ack RECEIPT at watchdog time, and their reply may have LANDED since (both live instances of this bug were exactly that). You hold the thread: FIRST check it — does ANY message from ${ctx.priorAgentFailed.agent} (their role, or a message id starting "${ctx.priorAgentFailed.agent}-") appear after the message you are answering? IF YES: they did NOT fail — say NOTHING about them, no preamble, no mention; just respond normally. ONLY IF no such message exists, open with one natural sentence: "${ctx.priorAgentFailed.agent} seems to have had trouble on this one — let me take it." Then respond normally. Do NOT repeat the distress details; do NOT apologise for them; do NOT use a system-notice tone. If you cannot check the thread at all, say nothing about them — silence over accusation, always.
 ` : '';
 
     if (ctx.source === 'discord') {
@@ -312,8 +312,8 @@ export function buildHumanResponseTxnScaffold(ctx: {
 }): string {
     const priorFailedBlock = ctx.priorAgentFailed ? `
 
-PRIOR AGENT FAILED (acknowledge briefly in your own voice before responding):
-${ctx.priorAgentFailed.agent} tried to respond but couldn't (${ctx.priorAgentFailed.reason}). One natural sentence at the top of your response: "${ctx.priorAgentFailed.agent} seems to have had trouble on this one — let me take it." Then respond normally. Do NOT repeat the distress details; do NOT apologise for them; do NOT use a system-notice tone.
+PRIOR AGENT MAY HAVE FAILED — VERIFY IN THE RECORD BEFORE SAYING SO (MNT-075 R3, the mast):
+The dispatcher labelled ${ctx.priorAgentFailed.agent} failed (${ctx.priorAgentFailed.reason}) — but that label was made from a missing ack RECEIPT at watchdog time, and their reply may have LANDED since (both live instances of this bug were exactly that). You hold the thread: FIRST check it — does ANY message from ${ctx.priorAgentFailed.agent} (their role, or a message id starting "${ctx.priorAgentFailed.agent}-") appear after the message you are answering? IF YES: they did NOT fail — say NOTHING about them, no preamble, no mention; just respond normally. ONLY IF no such message exists, open with one natural sentence: "${ctx.priorAgentFailed.agent} seems to have had trouble on this one — let me take it." Then respond normally. Do NOT repeat the distress details; do NOT apologise for them; do NOT use a system-notice tone. If you cannot check the thread at all, say nothing about them — silence over accusation, always.
 ` : '';
 
     if (ctx.source === 'discord') {

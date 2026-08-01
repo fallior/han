@@ -32,6 +32,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { db, HAN_DIR } from '../db';
+import { siblingPostedSince, progressAnchorMs } from '../lib/dispatch-reconcile';
 import { deliverMessage, SIGNALS_DIR, HEALTH_DIR } from './jemma-dispatch';
 
 // ── Paths ─────────────────────────────────────────────────────
@@ -466,12 +467,24 @@ async function advanceQueue(
     // v2 amendment (Jim-session): populate prior_agent_failed ONLY on
     // ground-truth-reconciled `failed`. NOT on `stood_down` (dedup working as
     // designed). NOT on `posted_but_ack_missed` (thread is truth, post succeeded).
+    // MNT-075 R2: the amendment's "ground-truth-reconciled" claim is now TRUE by
+    // construction — re-check the record at the publication seam. Speak only on
+    // CONFIRMED absence (false); heal the label on a late-landed post (true);
+    // suppress silently on an unreadable record (null — Tenshi's G4).
     if (prior.status === 'failed') {
-        priorAgentFailed = {
-            agent: prior.agent,
-            reason: prior.last_error || 'unknown',
-            exit_reason: prior.exit_reason || 'failed_ack',
-        };
+        const posted = siblingPostedSince(row.conversation_id, prior.agent, prior.wake_at ?? row.created_at);
+        if (posted === true) {
+            prior.status = 'posted_but_ack_missed';
+            prior.exit_reason = 'posted_but_ack_missed';
+            console.log(`[Orchestrator] advanceQueue reconcile for ${row.id}/${prior.agent}: post landed since labelling — label healed, no preamble`);
+        } else if (posted === false) {
+            priorAgentFailed = {
+                agent: prior.agent,
+                reason: prior.last_error || 'unknown',
+                exit_reason: prior.exit_reason || 'failed_ack',
+            };
+        }
+        // posted === null → say nothing about them (fail closed)
     }
 
     // Reconstruct orchestrate request fields needed for re-dispatch
@@ -521,9 +534,9 @@ async function checkWatchdogs(): Promise<void> {
         // The progress-aware clock means long-running composes that emit
         // heartbeats reset the watchdog; only genuinely silent recipients
         // (process dead, agent stuck) trigger the watchdog.
-        const progressAtMs = state.last_progress_at
-            ? new Date(state.last_progress_at).getTime()
-            : (state.wake_at ? new Date(state.wake_at).getTime() : new Date(row.updated_at).getTime());
+        // (MNT-075 F2: extracted pure to dispatch-reconcile.progressAnchorMs and
+        // suite-pinned — a fresh heartbeat structurally prevents a fire.)
+        const progressAtMs = progressAnchorMs(state, row.updated_at);
         const elapsed = nowMs - progressAtMs;
         const timeoutMs = getComposeWatchdogTimeoutMs();
 
@@ -536,17 +549,33 @@ async function checkWatchdogs(): Promise<void> {
 
         if (elapsed < timeoutMs) continue;
 
-        // Watchdog fired. DEC-079: thread-as-ground-truth reconcile retired.
-        // With dedup gates removed from leo-human/jim-human, a missed-ack-but-posted
-        // case is benign — the agent posted, the user sees it, the queue simply
-        // marks failed and advances. No false-positive dedup trip downstream.
+        // Watchdog fired. MNT-075 R1: reconcile against the RECORD before labelling —
+        // the old "benign mislabel" comment (DEC-079 era) was written when the `failed`
+        // label was queue-internal; the prior-agent-failed preamble later began
+        // PUBLISHING it. One SELECT at labelling time gives the designed
+        // `posted_but_ack_missed` status its missing producer (it had none since the
+        // DEC-079 reconcile retired). This is NOT the retired standing reconcile —
+        // it runs once, here, at the moment the label is about to matter.
         const now = new Date().toISOString();
-        state.status = 'failed';
-        state.exit_reason = 'watchdog_timeout';
-        state.last_error = `no ack within ${Math.round(elapsed / 1000)}s`;
-        state.completed_at = now;
-        console.warn(`[Orchestrator] Watchdog fired for ${row.id}/${state.agent} — no ack`);
-        writeDistress(row, state, 'warning');
+        const posted = siblingPostedSince(row.conversation_id, state.agent, state.wake_at ?? row.created_at);
+        if (posted === true) {
+            // The reply is IN THE THREAD — the agent did not fail; only the ack did.
+            state.status = 'posted_but_ack_missed';
+            state.exit_reason = 'posted_but_ack_missed';
+            state.completed_at = now;
+            console.log(`[Orchestrator] Watchdog reconcile for ${row.id}/${state.agent}: post found in thread — posted_but_ack_missed (no distress; nothing is wrong)`);
+        } else {
+            // false = confirmed absent (today's behaviour, now honest); null = record
+            // unreadable — the LABEL stays failed (queue bookkeeping stays truthful
+            // about the silence) but publication seams suppress the preamble on
+            // non-false (Tenshi's G4: uncertainty resolves to silence, never speech).
+            state.status = 'failed';
+            state.exit_reason = 'watchdog_timeout';
+            state.last_error = `no ack within ${Math.round(elapsed / 1000)}s${posted === null ? ' (record unreadable at reconcile)' : ''}`;
+            state.completed_at = now;
+            console.warn(`[Orchestrator] Watchdog fired for ${row.id}/${state.agent} — no ack, no post found`);
+            writeDistress(row, state, 'warning');
+        }
 
         await advanceQueue(row, states, {});
     }

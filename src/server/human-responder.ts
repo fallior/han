@@ -39,6 +39,7 @@ import { resolveChannelName, fetchDiscordContext, postToDiscord } from './servic
 import { appendPairedMemory } from './lib/memory-paired-writer';
 import { ensureSingleInstance } from './lib/pid-guard';
 import { buildPrompt, PromptOverbudgetError } from './lib/prompt-builder';
+import { maySpeakFailurePreamble } from './lib/dispatch-reconcile';
 // dispatchToSpoke = the generic spoke monitor (DEC-094 transport; P1/e14e2ef). It wraps
 // ensureSurfaceSession + the warm-gate + enqueue + the ctx-pressure self-clear, and swallows
 // DispatchTimeoutError|SessionNotReadyError into a null return + onDispatchFail (no hollow
@@ -386,12 +387,29 @@ async function respondToConversationViaTmux(db: Database.Database, conversationI
         return;
     }
 
+    // MNT-075 F1c (Jim's fold): the delivery-time re-check. The label was made at
+    // watchdog time; the record may have changed since (both live instances were
+    // slow composes whose posts landed AFTER the label — 79s/19s). Re-consult the
+    // record NOW, at prompt-build, and speak the preamble only on CONFIRMED absence
+    // since the triggering message. No anchor / unreadable record → silence (G4).
+    // This narrows the race from minutes to seconds; the irreducible residual
+    // (a post landing mid-compose) is R3's — the spoke's own thread read.
+    let vettedPriorFailed = priorAgentFailed;
+    if (priorAgentFailed) {
+        const since = signal?.mentionedAt;
+        const speak = !!since && maySpeakFailurePreamble(conversationId, priorAgentFailed.agent, since);
+        if (!speak) {
+            console.log(`${LOG} (tmux) MNT-075 F1c: suppressing prior-failed preamble for ${priorAgentFailed.agent} — post found since the triggering message, or absence not confirmable`);
+            vettedPriorFailed = undefined;
+        }
+    }
+
     // LOCATOR txn prompt — the spoke fetches the thread itself (no embedded tail).
     let txnPrompt: string;
     try {
         const built = buildPrompt(SLUG, 'human-response-txn', {
             source: 'conversation', title, conversationId,
-            roleLabel: CONVERSATION_ROLE, priorAgentFailed,
+            roleLabel: CONVERSATION_ROLE, priorAgentFailed: vettedPriorFailed,
         });
         txnPrompt = `${built.systemPrompt}\n\n${built.userPrompt}`;
         console.log(`${LOG} (tmux) human-response-txn: ~${built.meta.est_total_tokens_chars_div_4} tokens (memory suppressed: ${built.meta.memory_chars} chars)`);
