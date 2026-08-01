@@ -61,6 +61,67 @@ export function maySpeakFailurePreamble(
     return siblingPostedSince(conversationId, agentSlug, sinceIso) === false;
 }
 
+// ── MNT-077: the watchdog learns the agent has one seat ─────────────────────
+
+/** A sibling dispatch on which the agent is verifiably mid-compose right now. */
+export interface BusySibling { dispatchId: string; progressAtIso: string }
+
+/**
+ * MNT-077 R1 — is `agent` the CURRENT recipient on another in-progress dispatch row,
+ * with GENUINE fresh compose progress? (The adjournment-for-counsel-part-heard check,
+ * Casey's mapping: the court consults its own daily list before entering default.)
+ *
+ * THE LOAD-BEARING INVARIANT (Tenshi's fold 2 — recorded here because it is quietly
+ * breakable): `last_progress_at` means GENUINE COMPOSE PROGRESS — it is set ONLY by
+ * the S151 `composing` heartbeat ack, never by mere aliveness. That is WHY the defer
+ * is safe: a sibling hung on an interactive prompt (R011) stops emitting composing
+ * heartbeats, its anchor goes stale, the defer self-terminates, and the deferred row
+ * fires honestly. If anyone ever makes `last_progress_at` tick on liveness rather
+ * than compose progress, this defer would mask a hung sibling and starve the deferred
+ * dispatch indefinitely — borrowed progress from a sibling that will never finish.
+ * Do not "improve" progress-tracking into that shape. Corollary: a sibling with only
+ * a fresh `wake_at` and NO heartbeat yet is NOT engagement (no certificate — no
+ * borrow; the honest fire + the MNT-075 reconcile are the safe fallback).
+ *
+ * NEVER THROWS (Tenshi's fold 1 — the `siblingPostedSince` pattern, one shelf over):
+ * this runs inside the watchdog's poll loop, so an unhandled throw would crash the
+ * garden's entire alarm — the exact silent failure this family hunts. Any scan error
+ * returns null (⇒ not-busy ⇒ today's honest tail, which fails closed downstream).
+ */
+export function busyElsewhere(
+    agent: string,
+    rows: Array<{ id: string; recipients_ordered: string; current_index: number }>,
+    excludeDispatchId: string,
+    nowMs: number,
+    timeoutMs: number,
+): BusySibling | null {
+    try {
+        for (const row of rows) {
+            // N1 (Tenshi's fold): PER-ROW containment — one poisoned row must skip, not
+            // abort the scan, or a single malformed row silently disables the defer for
+            // every agent that poll (don't let one bad element take down the batch).
+            try {
+                if (row.id === excludeDispatchId) continue;
+                const states = JSON.parse(row.recipients_ordered) as Array<{
+                    agent: string; status: string; last_progress_at?: string;
+                }>;
+                const idx = row.current_index;
+                if (idx < 0 || idx >= states.length) continue;
+                const s = states[idx];
+                if (s.agent !== agent || s.status !== 'in_progress') continue;
+                if (!s.last_progress_at) continue; // no certificate of engagement — no borrow
+                const at = new Date(s.last_progress_at).getTime();
+                if (Number.isFinite(at) && nowMs - at < timeoutMs) {
+                    return { dispatchId: row.id, progressAtIso: s.last_progress_at };
+                }
+            } catch { /* skip the poisoned row, keep scanning */ }
+        }
+        return null;
+    } catch {
+        return null; // belt: never crash the watchdog loop; the honest tail is the safe direction
+    }
+}
+
 /**
  * The watchdog's progress anchor (S151, extracted pure for the F2 suite pin): prefer
  * the freshest `composing` heartbeat, fall back to the wake, then the row's own

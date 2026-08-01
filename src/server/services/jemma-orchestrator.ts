@@ -32,7 +32,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { db, HAN_DIR } from '../db';
-import { siblingPostedSince, progressAnchorMs } from '../lib/dispatch-reconcile';
+import { siblingPostedSince, progressAnchorMs, busyElsewhere } from '../lib/dispatch-reconcile';
 import { deliverMessage, SIGNALS_DIR, HEALTH_DIR } from './jemma-dispatch';
 
 // ── Paths ─────────────────────────────────────────────────────
@@ -105,6 +105,15 @@ export interface RecipientState {
     attempts: number;                // always 1 in Phase 1
     exit_reason?: 'done' | 'failed_ack' | 'watchdog_timeout' | 'stood_down' | 'posted_but_ack_missed';
     last_error?: string;
+    /** MNT-077 R1: set WITH each borrowed-progress defer — the sibling dispatch the agent
+     *  was verifiably composing on. The borrow and this stamp are ONE act (Casey's
+     *  atomicity pin: borrowed progress without the memo line would falsify the row). */
+    deferred_busy_on?: string;
+    /** MNT-077 R2: the one-re-wake receipt, written BEFORE the re-fire (crash-safe;
+     *  exactly one — S74's no-retry-black-holes). Covers consumed-then-died: the wake
+     *  queue's claim is read+unlink, so a controller that claims a wake then dies has
+     *  consumed it with no post; the re-wake recovers the unanswered human (Tenshi). */
+    deferred_rewake?: boolean;
 }
 
 export interface DispatchRow {
@@ -488,20 +497,27 @@ async function advanceQueue(
     }
 
     // Reconstruct orchestrate request fields needed for re-dispatch
-    const messageRow = db.prepare(`
-        SELECT content FROM conversation_messages WHERE id = ?
-    `).get(row.message_id) as { content: string } | undefined;
-
-    if (!messageRow) {
+    const reconstructed = reconstructRequest(row, states);
+    if (!reconstructed) {
         console.error(`[Orchestrator] Cannot advance dispatch ${row.id}: source message ${row.message_id} not found`);
         updateDispatch.run(JSON.stringify(states), row.current_index, 'orphaned', now, null, now, row.id);
         return;
     }
 
+    await fireWakeForIndex(row.id, nextIndex, reconstructed, states, priorAgentFailed);
+}
+
+/** Rebuild the OrchestrateRequest a wake needs from the dispatch row (shared by
+ *  advanceQueue and the MNT-077 R2 re-wake — one path, not a twin). Null = the
+ *  source message is gone (the caller decides the orphan handling). */
+function reconstructRequest(row: DispatchRow, states: RecipientState[]): OrchestrateRequest | null {
+    const messageRow = db.prepare(`
+        SELECT content FROM conversation_messages WHERE id = ?
+    `).get(row.message_id) as { content: string } | undefined;
+    if (!messageRow) return null;
     const convRow = db.prepare(`SELECT discussion_type FROM conversations WHERE id = ?`).get(row.conversation_id) as
         { discussion_type?: string } | undefined;
-
-    const reconstructed: OrchestrateRequest = {
+    return {
         conversationId: row.conversation_id,
         messageId: row.message_id,
         recipients: states.map(s => s.agent),
@@ -510,8 +526,6 @@ async function advanceQueue(
         source: row.source as 'admin' | 'discord',
         discussionType: convRow?.discussion_type,
     };
-
-    await fireWakeForIndex(row.id, nextIndex, reconstructed, states, priorAgentFailed);
 }
 
 // ── Watchdog + thread-as-ground-truth ─────────────────────────
@@ -548,6 +562,51 @@ async function checkWatchdogs(): Promise<void> {
         }
 
         if (elapsed < timeoutMs) continue;
+
+        // MNT-077 R1 — the agent has ONE SEAT: before labelling, consult our own table.
+        // Both 2026-08-01 false fires were an agent verifiably mid-compose on the
+        // concurrent SIBLING dispatch (same-thread concurrency is DEC-079's design; the
+        // blindness was per-row). The adjournment-for-counsel-part-heard check (Casey):
+        // a fresh composing tick on a sibling row is the certificate of engagement.
+        const busy = busyElsewhere(state.agent, rows, row.id, nowMs, timeoutMs);
+        if (busy) {
+            // Borrowed progress + its stamp are ONE act (Casey's atomicity pin): the
+            // borrow is honest bookkeeping only because the memo says where the
+            // progress truly happened. No borrow without the stamp — suite-pinned.
+            state.last_progress_at = busy.progressAtIso;
+            state.deferred_busy_on = busy.dispatchId;
+            updateDispatch.run(JSON.stringify(states), idx, 'in_progress', new Date().toISOString(), null, new Date().toISOString(), row.id);
+            console.log(`[Orchestrator] Watchdog defer for ${row.id}/${state.agent} — verifiably composing on sibling ${busy.dispatchId} (borrowed progress, MNT-077; a mind at work elsewhere is not a mind that failed)`);
+            continue;
+        }
+
+        // MNT-077 R2 — defer-exit with still no progress here: the consumed-then-died
+        // residual (the wake-queue's claim is read+unlink, so a controller that claimed
+        // this wake and died consumed it with no post — the queue cannot re-offer it).
+        // ONE re-wake, receipt BEFORE the act (crash-safe; S74: never a retry loop),
+        // to recover the UNANSWERED HUMAN (Tenshi: a dropped human message is worse
+        // than a wasted re-wake). A second defer-exit falls to the honest timeout.
+        if (state.deferred_busy_on && !state.deferred_rewake) {
+            // M1 (Jim's catch, Tenshi-verified): the borrowed anchor MUST clear with the
+            // receipt, in this same one-act write — borrowed progress is honest DURING
+            // the defer (the agent genuinely is progressing, on the sibling), but a
+            // re-wake is a FRESH START, not a continuation: it must measure from its own
+            // fresh wake_at, never from the dead sibling's last tick. Without this clear,
+            // progressAnchorMs keeps preferring the ≥90s-stale borrow and the very next
+            // ~30s poll fires the honest label — the promised window becomes a coin-flip.
+            // (`deferred_busy_on` deliberately KEPT: it is the receipt trail; FI #131's
+            // lamp keys on `deferred_rewake` — both chairs concur.)
+            state.deferred_rewake = true; // the receipt, before the act
+            state.last_progress_at = undefined; // the anchor-clear, same act (M1)
+            updateDispatch.run(JSON.stringify(states), idx, 'in_progress', new Date().toISOString(), null, new Date().toISOString(), row.id);
+            const req = reconstructRequest(row, states);
+            if (req) {
+                console.log(`[Orchestrator] Watchdog re-wake for ${row.id}/${state.agent} — defer ended with no progress (consumed-then-died residual); one fresh window (MNT-077 R2)`);
+                await fireWakeForIndex(row.id, idx, req, states, undefined);
+                continue;
+            }
+            // Source message gone — fall through to the honest label below.
+        }
 
         // Watchdog fired. MNT-075 R1: reconcile against the RECORD before labelling —
         // the old "benign mislabel" comment (DEC-079 era) was written when the `failed`
