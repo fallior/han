@@ -3,11 +3,13 @@
 // thread msa3ny9e-knlzg0; built by Leo, held for Jim's diff-audit).
 //
 // One sample per invocation — the cadence lives in cron (the ~/scripts host-watcher
-// family, han-gdrive-backup shape). Intended install (NOT installed by this build —
-// held; the cron line is the operator's at land):
+// family, han-gdrive-backup shape). INSTALLED at the 2026-08-01 land (Darron's order)
+// via the family wrapper `~/scripts/han-thermal-guard.sh` — which resolves node from
+// nvm by glob (cron's PATH has no nvm; a bare npx line died silently on the first two
+// ticks) and fail-LOUDS to ntfy if the runner itself cannot start (who watches the
+// watcher: the wrapper does):
 //
-//   * * * * * cd ~/Projects/han/src/server && NODE_PATH=$(pwd)/node_modules \
-//       npx tsx ../../scripts/pump-fail-watch.ts >> ~/.han/logs/thermal-guard.log 2>&1
+//   * * * * * ~/scripts/han-thermal-guard.sh >> ~/.han/logs/thermal-guard.log 2>&1
 //
 // What one run does:
 //   1. Reads /sys/class/hwmon (coretemp → package; superio/acpitz → board; the rest →
