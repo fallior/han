@@ -140,8 +140,22 @@ export function orientationLine(now: Date = new Date()): string {
  * local-parsed-back pair. With this, parseAuMarker constructs its Date in the WRITER's
  * own zone (gardenTimezone()) instead of the box's, so the pair is correct BY
  * CONSTRUCTION on any box — UTC system clocks included — and the old box==garden
- * coincidence is retired rather than witnessed. Two-pass Intl technique (the second
- * pass absorbs DST-edge shifts); fail-closed zone resolution as everywhere else.
+ * coincidence is retired rather than witnessed. Two-pass Intl technique; fail-closed
+ * zone resolution as everywhere else.
+ *
+ * THE FOLD, NAMED WHERE THE EXCEPTION LIVES (Tenshi's informational note + Casey's
+ * residual (b), both at the seal, 2026-08-02): this function runs the local→UTC
+ * direction that DEC-105's own text declares NON-INJECTIVE. The two passes converge on
+ * spring-forward gaps and ordinary offsets — but in the autumn FOLD hour (one wall
+ * reading, two real instants) no algorithm can be "correct by construction", because
+ * the input does not determine an answer. Resolution here is DETERMINISTIC-BUT-
+ * ARBITRARY: it takes the STANDARD-TIME (later) instant — measured: Sydney 5 Apr 2026
+ * 02:30 → 16:30Z, never 15:30Z — so a marker written in the first (daylight) pass
+ * parses one hour late while still rendering back as 02:30 (it LOOKS correct; that is
+ * the hazard). A gap-hour input (which the writer can never produce — it renders only
+ * real instants) resolves to an instant that renders one hour on. One repeated hour
+ * per year, DST gardens only, terminal-anchoring blast radius; suite-pinned so the
+ * behaviour is measured, not believed.
  */
 export function dateFromZonedParts(
     year: number, month1: number, day: number,

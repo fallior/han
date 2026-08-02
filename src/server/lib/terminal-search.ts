@@ -73,10 +73,17 @@ export interface TerminalSearchResult {
  *  never the box's — so the pair is correct by construction on any box, UTC system
  *  clocks included (the old box==garden coincidence is retired, not witnessed).
  *
- *  RECORDED RESIDUAL (Jim's (a), the H2 non-retrospectivity shape): if the garden's
+ *  RECORDED RESIDUAL (a) (Jim's, the H2 non-retrospectivity shape): if the garden's
  *  zone is ever CHANGED, markers written before the change parse in the new zone and
  *  skew by the difference. Acceptable for this grandfathered single class (terminal-
- *  search anchoring only); written here so the next builder inherits the boundary. */
+ *  search anchoring only); written here so the next builder inherits the boundary.
+ *
+ *  RECORDED RESIDUAL (b) (Casey's, measured at the seal): correct by construction
+ *  EXCEPT at the DST fold instant, where the input itself is ambiguous and the
+ *  resolution is deterministic-but-arbitrary (the standard-time reading — the later
+ *  instant). One repeated hour per year, DST gardens only; the round-trip still
+ *  renders the same wall time, so the skew is invisible from the marker itself.
+ *  The carve-out is where the rule's own named danger lives; this is it, written down. */
 export function parseAuMarker(s: string, zone: string = gardenTimezone()): Date | null {
     const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})\s*(am|pm)$/i);
     if (!m) return null;

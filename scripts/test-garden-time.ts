@@ -118,6 +118,19 @@ check('the gate sees the dimension: a wrong-zone parse is hours off, detectably'
 const gardenMarker = new Date(T_INSTANT).toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' });
 check('default parse uses the garden zone (writer and parser one source of truth)',
     parseAuMarker(gardenMarker)?.getTime() === T_INSTANT, gardenMarker);
+// THE FOLD HOUR itself (Tenshi's note + Casey's residual (b), measured then pinned):
+// Sydney 5 Apr 2026 — 02:30 happens twice (15:30Z daylight, 16:30Z standard). The
+// resolution is deterministic-but-arbitrary: the STANDARD-TIME (later) instant. This
+// pin measures the documented behaviour so the ambiguity can never drift silently.
+const foldParsed = parseAuMarker('5/04/2026, 2:30:00 am', 'Australia/Sydney');
+check('the fold resolves deterministically to the standard-time instant (16:30Z, never 15:30Z)',
+    foldParsed?.toISOString() === '2026-04-04T16:30:00.000Z', foldParsed?.toISOString());
+// The gap hour (unreachable from the writer — it renders only real instants): a
+// nonexistent 02:30 on 4 Oct 2026 resolves to an instant rendering one hour on.
+const gapParsed = parseAuMarker('4/10/2026, 2:30:00 am', 'Australia/Sydney');
+check('the gap resolves to a real instant (documented, writer-unreachable)',
+    gapParsed !== null && new Date(gapParsed).toLocaleString('en-AU', { timeZone: 'Australia/Sydney' }).includes('3:30:00'),
+    gapParsed?.toISOString());
 
 // ── G2b/G2c: the store layer is unwriteable-to-localise ──────────────────────
 console.log('\nG2b — garden-time import allow-list (a render-site is a conscious addition)');

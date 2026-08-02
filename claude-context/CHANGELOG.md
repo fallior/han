@@ -9,6 +9,11 @@
 
 ---
 
+## 2026-08-02 (S234) — 🕰 Post-seal follow-up: the FOLD named where the exception lives, and gated
+- **The chairs' final comments implemented rather than filed** (Darron's implement-over-wait ruling): Tenshi's informational note — `dateFromZonedParts`'s doc claimed *"the second pass absorbs DST-edge shifts"*, true of the spring gap but NOT the autumn fold — softened into a full fold paragraph naming the accepted ambiguity (two instants for one wall reading; resolution **deterministic-but-arbitrary to the standard-time/later instant** per Casey's measurement, Sydney 5 Apr 2026 02:30 → 16:30Z never 15:30Z; the looks-correct hazard — the round-trip still renders 02:30).
+- **Casey's residual (b)** recorded at `parseAuMarker` beside residual (a), her exact form: *correct by construction EXCEPT at the fold instant, where the input itself is ambiguous and the resolution is deterministic-but-arbitrary (the standard-time reading).*
+- **The gate now crosses the fold hour itself** (Tenshi: "the dimension the gate doesn't measure is the one left standing"): fold pin asserts the deterministic `2026-04-04T16:30:00.000Z`; gap pin asserts the writer-unreachable 4 Oct case resolves to a real instant rendering 03:30. Gates 32→**34**, tsc 11-baseline. *And the pin proved itself on its author: my first fold assertion put 02:30 Sydney-local on 5 Apr at 16:30Z on the 5th — the UTC day is the 4th; the exception's own gate caught its author making the exception's own class of error while writing it down.* Comment + gate additions only; zero behaviour change, no restart.
+
 ## 2026-08-02 (S234) — 🕰 The DEC-105 SEAL RIDERS land: the warranty gets teeth, the paper matches the metal, and the coincidence is retired at the root
 - **Casey R1 (the operative clause):** the read-side MEMBERSHIP gate — `parseAuMarker` invocable only by the grandfathered pair; no second local-stamp parser may exist in src/ (class-signature walk). Her jurisdictional point recorded: the DST fold this guards cannot fire in Brisbane, so **the gate is the rule's only witness**.
 - **Casey R2 (the paper):** dated rider appended to DEC-105 — *presence in a document is not persistence into the machine layer; parse-dependency is the whole of the harm* — closing the MNT-061 trap (a literal reading of the spine would have "fixed" P2's local headers back to UTC).
