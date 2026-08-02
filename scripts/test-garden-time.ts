@@ -18,7 +18,7 @@
 // Run: cd src/server && NODE_PATH=$(pwd)/node_modules npx tsx ../../scripts/test-garden-time.ts
 
 import {
-    localStamp, localStampSeconds, localDate, resolveZone, renderOrientationLine, orientationBlock,
+    localStamp, localStampSeconds, localDate, resolveZone, renderOrientationLine, orientationBlock, boxZoneMatchesGarden,
 } from '../src/server/lib/garden-time';
 import { parseAuMarker } from '../src/server/lib/terminal-search';
 import { buildPrompt, PROFILES } from '../src/server/lib/prompt-builder';
@@ -95,12 +95,29 @@ check('every profile\'s built prompt carries the orientation block', clockless.l
 // ── G2a: the grandfathered writer/parser pair, consistency-pinned ────────────
 console.log('\nG2a — the ONE legacy local-parsed-back site (terminal marker ↔ parseAuMarker)');
 
-// The exact writer expression from services/terminal.ts / terminal-anchor-diff.ts.
-const markerBody = new Date(1750000000000).toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' });
-check('terminal marker still parses via parseAuMarker (pair intact)', parseAuMarker(markerBody) !== null, markerBody);
-// NB: parseAuMarker constructs its Date in the BOX zone — the pair is correct only while
-// box zone == garden zone (Jim F3). This pin guards FORMAT consistency; the zone coupling
-// is documented at both sites and in garden-time.ts's header.
+// Jim's root-cure fold (2026-08-02): the parser now constructs in the WRITER's zone, so
+// the pair is correct BY CONSTRUCTION on any box. The gate is DE-HARDCODED per his G2a
+// ask — it round-trips through a NON-Brisbane DST zone so it finally sees the dimension
+// Tenshi named (the old gate hardcoded Brisbane on both sides and could not).
+const T_INSTANT = Date.parse('2026-01-15T12:00:00Z');
+const sydMarker = new Date(T_INSTANT).toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
+const sydParsed = parseAuMarker(sydMarker, 'Australia/Sydney');
+check('the pair round-trips EXACTLY through a DST zone (Sydney, January = AEDT)',
+    sydParsed !== null && sydParsed.getTime() === T_INSTANT, `${sydMarker} → ${sydParsed?.toISOString()}`);
+const julInstant = Date.parse('2026-07-15T12:00:00Z');
+const sydJulMarker = new Date(julInstant).toLocaleString('en-AU', { timeZone: 'Australia/Sydney' });
+check('…and through the other DST face (Sydney, July = AEST)',
+    parseAuMarker(sydJulMarker, 'Australia/Sydney')?.getTime() === julInstant);
+// The counterfactual that proves the gate SEES the zone dimension: the same marker
+// parsed in the WRONG zone lands hours off — on the pre-fold parser this class of
+// error was invisible to the suite (box==garden hardcoded both sides).
+const wrongZone = parseAuMarker(sydMarker, 'UTC');
+check('the gate sees the dimension: a wrong-zone parse is hours off, detectably',
+    wrongZone !== null && Math.abs(wrongZone.getTime() - T_INSTANT) === 11 * 3600_000, `${wrongZone?.toISOString()}`);
+// The default path (no explicit zone) parses in gardenTimezone() — the writer's own.
+const gardenMarker = new Date(T_INSTANT).toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' });
+check('default parse uses the garden zone (writer and parser one source of truth)',
+    parseAuMarker(gardenMarker)?.getTime() === T_INSTANT, gardenMarker);
 
 // ── G2b/G2c: the store layer is unwriteable-to-localise ──────────────────────
 console.log('\nG2b — garden-time import allow-list (a render-site is a conscious addition)');
@@ -113,6 +130,8 @@ const ALLOWED_IMPORTERS = new Set([
     'server/agent-heartbeat.ts',          // P2 — the agnostic twin's header (same chimera)
     'server/human-responder.ts',          // P2 — the Response-to section header
     'server/services/supervisor-worker.ts', // P2 — jim's cycle/dream record headers (chimera cured; the SDK shim's stamp stays byte-intact)
+    'server/server.ts',                   // Seal Rider 3 (Casey) — the boot-time box/garden zone tripwire
+    'server/lib/terminal-search.ts',      // Jim's root-cure fold — the grandfathered parser shares the writer's clock (dateFromZonedParts)
 ]);
 function walk(dir: string): string[] {
     const out: string[] = [];
@@ -170,6 +189,40 @@ for (const f of walk(SRC)) {
 }
 check('the UTC-date+local-time chimera pattern is gone from src/ (unwriteable)',
     chimeraOffenders.length === 0, chimeraOffenders.join(', '));
+
+// ── Casey's Rider 1 (the operative clause, 2026-08-02): the read-side MEMBERSHIP gate.
+// DEC-105 warrants "no second member may join the local-parsed-back class" — this is the
+// mechanism (write-side gates can't see a new PARSER; this walks the read side). The harm
+// it guards fires only in DST jurisdictions (Brisbane can never feel it — Sydney and
+// Mike's fork can), so this gate is the rule's ONLY witness, not belt-and-braces.
+console.log('\nRider 1 — the local-parsed-back class stays exactly the one grandfathered pair');
+
+const PARSEBACK_CALLERS = new Set(['server/lib/terminal-search.ts']); // the grandfathered pair's parser, alone
+const callOffenders: string[] = [];
+const classOffenders: string[] = [];
+for (const f of walk(SRC)) {
+    const rel = path.relative(SRC, f).replace(/\\/g, '/');
+    const text = fs.readFileSync(f, 'utf8');
+    // (a) nobody new may CALL the grandfathered parser (comments mention it; only
+    //     terminal-search may invoke or define it — spreading the parser spreads the class)
+    if (/parseAuMarker\(/.test(text) && !PARSEBACK_CALLERS.has(rel)) callOffenders.push(rel);
+    // (b) nobody may WRITE a new local-stamp parser: the class signature is a regex
+    //     carrying an am/pm alternation beside Date-construction from captures
+    if (rel !== 'server/lib/terminal-search.ts'
+        && /\(am\|pm\)/i.test(text) && /new Date\(Number/.test(text)) classOffenders.push(rel);
+}
+check('parseAuMarker is invoked only by the grandfathered pair', callOffenders.length === 0, callOffenders.join(', '));
+check('no second local-stamp parser exists in src/ (the class is closed)', classOffenders.length === 0, classOffenders.join(', '));
+
+// ── The shared Rider 3 (Casey's instrument + Tenshi's organ): box zone vs garden zone.
+console.log('\nRider 3 — the box/garden zone coupling is CHECKED, not documented');
+const bz = boxZoneMatchesGarden();
+check('boxZoneMatchesGarden reports both zones + a consistent verdict',
+    typeof bz.boxZone === 'string' && typeof bz.gardenZone === 'string'
+    && bz.match === (bz.boxZone === bz.gardenZone), JSON.stringify(bz));
+const serverTs = fs.readFileSync(path.join(SRC, 'server', 'server.ts'), 'utf8');
+check('the server asserts the coupling LOUDLY at boot (fail-loud, never fail-stop)',
+    /boxZoneMatchesGarden\(\)/.test(serverTs) && /console\.(warn|error)[\s\S]{0,300}?parseAuMarker|parseAuMarker[\s\S]{0,600}?console\.(warn|error)|BOX ZONE[\s\S]{0,400}?console|console\.warn[\s\S]{0,400}?zone/.test(serverTs));
 
 // ── verdict ──────────────────────────────────────────────────────────────────
 console.log(`\ngarden-time gates: ${pass} passed, ${fail} failed`);

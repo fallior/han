@@ -74,6 +74,7 @@ const UI_DIR = path.join(__dirname, '..', 'ui');
 // SIGTERM each other. Previously the shared 'han-server' name caused hanjim to kill the
 // systemd-managed han-server on 3847 via replaceExistingInstance (2026-04-20, S130).
 import { replaceExistingInstance } from './lib/pid-guard';
+import { boxZoneMatchesGarden } from './lib/garden-time'; // DEC-105 seal Rider 3
 const serverPidGuard = replaceExistingInstance(`han-server-${PORT}`);
 process.on('exit', () => serverPidGuard.cleanup());
 process.on('SIGINT', () => { serverPidGuard.cleanup(); process.exit(130); });
@@ -351,6 +352,18 @@ if (runsSupervisorCycle(process.env.AGENT_SLUG)) {
 }
 
 // ── Start server ─────────────────────────────────────────
+
+// DEC-105 seal Rider 3 (Casey's fail-loud instrument, softened by Jim's root-cure fold:
+// the parseAuMarker pair is now correct BY CONSTRUCTION on any box, so divergence no
+// longer breaks it). What remains worth one loud line at boot is clock HYGIENE: a box
+// whose system zone differs from the garden's speaks two clocks in its own logs, cron
+// times and `date` output. Never fail-stop. The standing daily check is FI #126's organ.
+{
+    const zc = boxZoneMatchesGarden();
+    if (!zc.match) {
+        console.warn(`[Server] ⚠ clock hygiene: system zone '${zc.boxZone}' != garden zone '${zc.gardenZone}' — the box's own logs/cron speak a different clock than the garden's records (the parseAuMarker pair is zone-safe by construction; this is hygiene, not breakage — DEC-105 rider).`);
+    }
+}
 
 server.listen(Number(PORT), '0.0.0.0', () => {
     const proto = useHttps ? 'https' : 'http';

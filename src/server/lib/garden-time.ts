@@ -15,11 +15,12 @@
 // does not. All rendering here is Intl-based with the zone named — never hand-rolled
 // offsets (L008), and DST-correct abbreviations come from `timeZoneName: 'short'`.
 //
-// THE ONE GRANDFATHERED LOCAL-PARSED-BACK SITE (Jim F3): services/terminal.ts writes
-// en-AU local markers that lib/terminal-search.ts `parseAuMarker` parses back — a legacy
-// writer/parser pair that predates DEC-105, consistent only as a pair (and only while
-// the box zone matches the garden zone). It is NAMED and consistency-pinned in
-// scripts/test-garden-time.ts; do not add a second member to this class.
+// THE ONE GRANDFATHERED LOCAL-PARSED-BACK SITE (Jim F3, root-cured at the seal):
+// services/terminal.ts writes en-AU local markers that lib/terminal-search.ts
+// `parseAuMarker` parses back — a legacy pair predating DEC-105. Since Jim's seal-rider
+// fold the parser constructs in the WRITER's own zone (dateFromZonedParts below), so the
+// pair is correct by construction on any box. It is NAMED, membership-gated and
+// round-trip-pinned in scripts/test-garden-time.ts; no second member may join the class.
 //
 // FAILURE POLARITY (Tenshi): a garbage/unparseable zone fails CLOSED to UTC with an
 // honest label — blast radius one render, never a throw on the render path.
@@ -131,6 +132,50 @@ export function orientationLine(now: Date = new Date()): string {
         gardenTimezoneConfigured(),
         GARDEN_MANIFEST.user?.location,
     );
+}
+
+/**
+ * Jim's root-cure fold (the DEC-105 seal riders, 2026-08-02): interpret wall-clock
+ * PARTS as a moment in a named zone — the inverse render, for the ONE grandfathered
+ * local-parsed-back pair. With this, parseAuMarker constructs its Date in the WRITER's
+ * own zone (gardenTimezone()) instead of the box's, so the pair is correct BY
+ * CONSTRUCTION on any box — UTC system clocks included — and the old box==garden
+ * coincidence is retired rather than witnessed. Two-pass Intl technique (the second
+ * pass absorbs DST-edge shifts); fail-closed zone resolution as everywhere else.
+ */
+export function dateFromZonedParts(
+    year: number, month1: number, day: number,
+    hour: number, minute: number, second: number,
+    zone?: string,
+): Date {
+    const r = resolveZone(zone);
+    const target = Date.UTC(year, month1 - 1, day, hour, minute, second);
+    let utc = target;
+    for (let i = 0; i < 2; i++) {
+        const p = parts(new Date(utc), r.zone, {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+        } as Intl.DateTimeFormatOptions);
+        const asIf = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+        utc += target - asIf;
+    }
+    return new Date(utc);
+}
+
+/**
+ * Rider 3 of the DEC-105 seal (Casey's instrument, Tenshi's organ, 2026-08-02 — then
+ * softened by Jim's root-cure fold the same day): the parseAuMarker pair originally
+ * depended on box zone == garden zone by undocumented coincidence; the root cure
+ * (dateFromZonedParts in the parser) retired that dependency — the pair is correct by
+ * construction on any box. What this checker still reports is clock HYGIENE: a box
+ * whose system zone differs from the garden's speaks two clocks in its own logs, cron
+ * schedules and `date` output. Boot tripwire in server.ts (loud, never stop); the
+ * standing daily read is FI #126's clock organ.
+ */
+export function boxZoneMatchesGarden(): { match: boolean; boxZone: string; gardenZone: string } {
+    const boxZone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
+    const gz = gardenTimezone();
+    return { match: boxZone === gz, boxZone, gardenZone: gz };
 }
 
 /** The P1 standing orientation BLOCK injected by buildPrompt (DEC-087 chokepoint) — the

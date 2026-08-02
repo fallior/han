@@ -24,6 +24,8 @@
 import { execFileSync } from 'node:child_process';
 import * as fs from 'fs';
 import { stripAnsi } from '../services/terminal';
+import { dateFromZonedParts } from './garden-time'; // DEC-105 seal rider: the pair shares the writer's clock
+import { gardenTimezone } from './garden-manifest';
 
 // ── tunables (D4: window size to refine by measurement) ──────────────────────────
 const RECENT_BYTES = 64 * 1024 * 1024;      // ~64 MB tail — days of recent work, sub-second
@@ -62,14 +64,26 @@ export interface TerminalSearchResult {
 
 // ── helpers ──────────────────────────────────────────────────────────────────────
 
-/** Parse an en-AU marker timestamp (`1/06/2026, 6:33:00 pm`) to a Date, or null. */
-export function parseAuMarker(s: string): Date | null {
+/** Parse an en-AU marker timestamp (`1/06/2026, 6:33:00 pm`) to a Date, or null.
+ *
+ *  THE GRANDFATHERED PAIR (DEC-105): this is the garden's ONE local-parsed-back site —
+ *  the terminal writer renders `toLocaleString('en-AU', { timeZone: gardenTimezone() })`
+ *  and this parses it back. Jim's seal-rider root-cure (2026-08-02): the Date is
+ *  constructed IN THE WRITER'S OWN ZONE (`dateFromZonedParts(..., gardenTimezone())`),
+ *  never the box's — so the pair is correct by construction on any box, UTC system
+ *  clocks included (the old box==garden coincidence is retired, not witnessed).
+ *
+ *  RECORDED RESIDUAL (Jim's (a), the H2 non-retrospectivity shape): if the garden's
+ *  zone is ever CHANGED, markers written before the change parse in the new zone and
+ *  skew by the difference. Acceptable for this grandfathered single class (terminal-
+ *  search anchoring only); written here so the next builder inherits the boundary. */
+export function parseAuMarker(s: string, zone: string = gardenTimezone()): Date | null {
     const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})\s*(am|pm)$/i);
     if (!m) return null;
     let [, d, mon, y, h, min, sec, ap] = m;
     let hour = Number(h) % 12;
     if (ap.toLowerCase() === 'pm') hour += 12;
-    return new Date(Number(y), Number(mon) - 1, Number(d), hour, Number(min), Number(sec));
+    return dateFromZonedParts(Number(y), Number(mon), Number(d), hour, Number(min), Number(sec), zone);
 }
 
 function terms(q: string): string[] {
