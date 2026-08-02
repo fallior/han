@@ -32,6 +32,7 @@ import { findSpokeForThread } from '../src/server/lib/stem-pool';
 import { manifestModelLadder, conversationRoleFor, humanResponderTxnTimeoutMs, communityPort } from '../src/server/lib/garden-manifest';
 import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
 import { appendPairedMemory } from '../src/server/lib/memory-paired-writer';
+import { localStampSeconds } from '../src/server/lib/garden-time'; // DEC-105 P2: record headers speak local
 
 function displayName(slug: string): string { return gradientConfigForAgent(slug).displayName; }
 
@@ -117,7 +118,7 @@ async function composeAndVerify(
     try {
         const args = cap.args as { working_memory_full?: string; working_memory_compressed?: string; input_quotes?: string };
         if (args?.working_memory_full && args?.working_memory_compressed) {
-            const header = `### Wander beat ${beatN} — "${title}" (${new Date().toISOString()})`;
+            const header = `### Wander beat ${beatN} — "${title}" (${localStampSeconds()})`; // DEC-105 P2: the keepsake header speaks local (receipts stay UTC)
             await appendPairedMemory(composeSlug,
                 `${header}\n[INPUT]\n${args.input_quotes ?? ''}\n\n[BODY]\n${args.working_memory_full}`,
                 `${header}\n${args.working_memory_compressed}`,

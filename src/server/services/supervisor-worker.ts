@@ -52,6 +52,7 @@ import { spawn as spawnChild } from 'node:child_process';
 import { readDreamGradient, processDreamGradient } from '../lib/dream-gradient';
 import { rotateMemoryFile, loadMemoryFileGradient, loadTraversableGradient, rollingWindowRotate, updateFeelingTagWithHistory, maybeUpgradeTagStability, retroactiveUVContradictionSweep } from '../lib/memory-gradient';
 import { gradientStmts, feelingTagStmts, gradientAnnotationStmts } from '../db';
+import { localStampSeconds } from '../lib/garden-time'; // DEC-105 P2: record headers speak local
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -1376,7 +1377,7 @@ async function dispatchSupervisorCycleViaTmux(p: {
         try {
             const body = wmFull.replace(/\[INPUT\][\s\S]*?\[BODY\]\s*/i, '').trim();
             if (body.length > 10) {
-                const ts = new Date().toISOString().split('T')[0] + ' ' + new Date().toTimeString().split(' ')[0];
+                const ts = localStampSeconds(); // DEC-105 P2: was the UTC-date+local-time chimera
                 fs.appendFileSync(path.join(MEMORY_DIR, 'explorations.md'), `\n\n### Dream ${p.cycleNumber} (${ts})\n${body}\n`);
             }
         } catch { /* best effort */ }
@@ -1389,7 +1390,7 @@ async function dispatchSupervisorCycleViaTmux(p: {
     // the gradient's c0 lineage via the slicer, not stored here).
     if (!stoodDown && wmFull.trim() && wmCompressed.trim()) {
         try {
-            const cycleHeader = `\n\n### Cycle #${p.cycleNumber} — ${p.cycleType} (tmux) (${new Date().toISOString()})${observedModel ? ` [model: ${observedModel}]` : ''}`;
+            const cycleHeader = `\n\n### Cycle #${p.cycleNumber} — ${p.cycleType} (tmux) (${localStampSeconds()})${observedModel ? ` [model: ${observedModel}]` : ''}`; // DEC-105 P2: record header speaks local
             fs.appendFileSync(SUPERVISOR_SWAP_FILE, `${cycleHeader}\n${wmCompressed}`);
             fs.appendFileSync(SUPERVISOR_SWAP_FULL_FILE, `${cycleHeader}\n${wmFull}`);
 

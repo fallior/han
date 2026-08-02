@@ -54,6 +54,7 @@ import {
 import { wakeQueueDir, claimWakeFiles, pickNextEligible } from './lib/wake-queue';
 import { gradientConfigForAgent } from './lib/agent-registry';
 import type { CaptureRecord } from './lib/diary-mcp-server';
+import { localStampSeconds } from './lib/garden-time'; // DEC-105 P2: record headers speak local
 
 // ── Slug + derived identity (fail-loud, DEC-081 — NO default identity) ─────────
 
@@ -468,7 +469,7 @@ async function respondToConversationViaTmux(db: Database.Database, conversationI
         ORDER BY created_at DESC LIMIT 1
     `).get(conversationId, CONVERSATION_ROLE, composeStartIso) as { id: string } | undefined;
     const postRef = postRow ? `verified post id=${postRow.id}` : `NO CURL-POST DETECTED in DB`;
-    const timestamp = new Date().toISOString();
+    const timestamp = localStampSeconds(); // DEC-105 P2: the record header speaks local, zone named
     const sectionHeader = `### Response to "${title}" (${timestamp})`;
     const compressedSwap = `${sectionHeader}\n${cap.args.working_memory_compressed}`;
     const fullSwap = `${sectionHeader}\n[INPUT]\n${cap.args.input_quotes}\n\n[BODY]\n${cap.args.working_memory_full}`;
@@ -551,7 +552,7 @@ async function respondToDiscordViaTmux(signal: SignalData): Promise<void> {
                 if (convId) postMessage(ddb, convId, body);
                 ddb.close();
             } catch (err) { console.warn(`${LOG} (tmux) Failed to record Discord response in DB:`, (err as Error).message); }
-            const timestamp = new Date().toISOString();
+            const timestamp = localStampSeconds(); // DEC-105 P2: the record header speaks local, zone named
             const sectionHeader = `### Discord #${channelName} (${timestamp})`;
             await flushCapturePairedMemory(`${sectionHeader}\n${cap.args.working_memory_compressed}`, `${sectionHeader}\n[INPUT]\n${cap.args.input_quotes}\n\n[BODY]\n${cap.args.working_memory_full}`); // PR-C3
         } else {

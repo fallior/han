@@ -932,8 +932,10 @@ function appendWorkingMemory(
     authoredModel?: string,
 ): void {
     try {
-        const timestamp = new Date().toISOString().split('T')[0] + ' ' +
-            new Date().toTimeString().split(' ')[0];
+        // DEC-105 P2: the old stamp was a UTC-date + LOCAL-time CHIMERA (toISOString date
+        // glued to toTimeString clock) — any beat before ~10 AM AEST carried yesterday's
+        // date with today's time. Now the one shared clock, zone named (L008).
+        const timestamp = localStampSeconds();
         // PR-C1-4: slice-truncation fallback retired. `distilled` is the c1
         // source unconditionally.
         const brief = distilled;
@@ -1762,6 +1764,7 @@ function preFlightMemoryRotation(): void {
 import { spawn as spawnChild } from 'child_process';
 import { acquireWmSensorLock, releaseWmSensorLock } from './lib/sensor-lock.js';
 import BetterSqlite3 from 'better-sqlite3';
+import { localStampSeconds } from './lib/garden-time'; // DEC-105 P2: record headers speak local
 
 const PROCESS_PENDING_SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'process-pending-compression.ts');
 // Mirror db.ts:32 pattern — honour HAN_DB_PATH override so dev/test scenarios

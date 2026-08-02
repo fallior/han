@@ -18,7 +18,7 @@
 // Run: cd src/server && NODE_PATH=$(pwd)/node_modules npx tsx ../../scripts/test-garden-time.ts
 
 import {
-    localStamp, localDate, resolveZone, renderOrientationLine, orientationBlock,
+    localStamp, localStampSeconds, localDate, resolveZone, renderOrientationLine, orientationBlock,
 } from '../src/server/lib/garden-time';
 import { parseAuMarker } from '../src/server/lib/terminal-search';
 import { buildPrompt, PROFILES } from '../src/server/lib/prompt-builder';
@@ -108,6 +108,11 @@ console.log('\nG2b — garden-time import allow-list (a render-site is a conscio
 const SRC = path.join(__dirname, '..', 'src');
 const ALLOWED_IMPORTERS = new Set([
     'server/lib/prompt-builder.ts',       // P1 — the DEC-087 chokepoint injection
+    // DEC-105 P2 (2026-08-02, each a conscious addition): record headers speak local.
+    'server/leo-heartbeat.ts',            // P2 — heartbeat record header (the chimera cured)
+    'server/agent-heartbeat.ts',          // P2 — the agnostic twin's header (same chimera)
+    'server/human-responder.ts',          // P2 — the Response-to section header
+    'server/services/supervisor-worker.ts', // P2 — jim's cycle/dream record headers (chimera cured; the SDK shim's stamp stays byte-intact)
 ]);
 function walk(dir: string): string[] {
     const out: string[] = [];
@@ -133,6 +138,38 @@ const mg = fs.readFileSync(path.join(SRC, 'server', 'lib', 'memory-gradient.ts')
 const rollingKeyDerivations = (mg.match(/toISOString\(\)\.slice\(0, 10\)/g) ?? []).length;
 check('memory-gradient rolling keys derive from toISOString().slice(0, 10)', rollingKeyDerivations >= 2,
     `${rollingKeyDerivations} sites (H1: date-keyed names are UTC-days; the render layer says so when speaking them)`);
+
+// ── P2: the record headers speak local (2026-08-02) ─────────────────────────
+console.log('\nP2 — record headers speak local; the chimera is unwriteable');
+
+const lss = localStampSeconds('2026-01-15T12:00:00Z', 'Australia/Brisbane');
+check('localStampSeconds shape (seconds + zone named)', /^Thu 15 Jan 2026, 10:00:00 PM AEST$/.test(lss), lss);
+
+const P2_SITES: Array<[string, RegExp]> = [
+    ['server/leo-heartbeat.ts', /const timestamp = localStampSeconds\(\);/],
+    ['server/agent-heartbeat.ts', /const timestamp = localStampSeconds\(\);/],
+    ['server/human-responder.ts', /const timestamp = localStampSeconds\(\);/],
+    ['server/services/supervisor-worker.ts', /const ts = localStampSeconds\(\);/],
+];
+for (const [rel, re] of P2_SITES) {
+    const text = fs.readFileSync(path.join(SRC, rel), 'utf8');
+    check(`${rel} stamps its record header from the shared clock`, re.test(text));
+}
+const walker = fs.readFileSync(path.join(__dirname, 'wander-walk.ts'), 'utf8');
+check('wander-walk keepsake header uses the shared clock (receipts stay UTC)',
+    /### Wander beat \$\{beatN\}[^\n]*localStampSeconds\(\)/.test(walker)
+    && /writeWanderReceipt\(\{ ts: new Date\(\)\.toISOString\(\)/.test(walker));
+// The UTC-date + local-time CHIMERA is unwriteable: the half-and-half stamp pattern
+// (toISOString date glued to toTimeString clock) must never return to src/.
+const chimeraOffenders: string[] = [];
+for (const f of walk(SRC)) {
+    const text = fs.readFileSync(f, 'utf8');
+    if (/toISOString\(\)\.split\('T'\)\[0\][^\n]*\n?[^\n]*toTimeString/.test(text)) {
+        chimeraOffenders.push(path.relative(SRC, f));
+    }
+}
+check('the UTC-date+local-time chimera pattern is gone from src/ (unwriteable)',
+    chimeraOffenders.length === 0, chimeraOffenders.join(', '));
 
 // ── verdict ──────────────────────────────────────────────────────────────────
 console.log(`\ngarden-time gates: ${pass} passed, ${fail} failed`);

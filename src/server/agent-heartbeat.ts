@@ -55,6 +55,7 @@ import { observedOrUnobservedModel } from './lib/tmux-dispatcher';
 import { gradientStmts, feelingTagStmts } from './db';
 import { ENVELOPE_PATH } from './lib/cognition-envelope';
 import type { CaptureRecord } from './lib/diary-mcp-server';
+import { localStampSeconds } from './lib/garden-time'; // DEC-105 P2: record headers speak local
 
 // ── Identity: fail-loud, never defaulted (Tenshi condition 1) ────────────────
 const SLUG: string = (() => {
@@ -146,8 +147,8 @@ function buildDreamMemorySection(): { section: string } {
 
 // ── The DEC-085 paired write — byte-shape mirrored from leo's appendWorkingMemory ──
 async function writeBeatMemory(beatType: string, phase: string, cap: CaptureRecord): Promise<void> {
-    const timestamp = new Date().toISOString().split('T')[0] + ' ' +
-        new Date().toTimeString().split(' ')[0];
+    // DEC-105 P2: the UTC-date + local-time chimera cured (see leo-heartbeat.ts twin).
+    const timestamp = localStampSeconds();
     // DEC-104 M1: honest-absence stamp — never a bare floating alias into DEC-092 provenance.
     const model = observedOrUnobservedModel(SLUG, SURFACE);
     const modelTag = model ? ` [model: ${model}]` : '';
