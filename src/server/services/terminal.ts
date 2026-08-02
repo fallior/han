@@ -209,7 +209,12 @@ export function appendToLog(content: string): void {
             // a per-garden fact in shared code). NB this marker is the ONE grandfathered
             // local-parsed-back site (terminal-search.ts parseAuMarker) — format is pinned
             // as a pair in scripts/test-garden-time.ts; keep en-AU toLocaleString exactly.
-            let output = `\n--- ${new Date().toLocaleString('en-AU', { timeZone: gardenTimezone() })} ---\n`;
+            // Darron's injectivity rider (2026-08-02): the zone ABBREVIATION rides the marker
+            // (timeZoneName 'short' → "… 2:30:00 am AEDT"), so a labelled stamp names a UNIQUE
+            // instant even in the DST fold hour — 02:30 AEDT and 02:30 AEST are as distinct as
+            // Sydney and Brisbane readings. Local-with-zone-named IS complete data (no decode
+            // needed for the human eye); the parser honours the label to pick the fold side.
+            let output = `\n--- ${new Date().toLocaleString('en-AU', { timeZone: gardenTimezone(), timeZoneName: 'short' })} ---\n`;
             lastTimestamp = now;
             for (const line of lines) {
                 if (!isNoise(line)) output += line + '\n';
@@ -295,7 +300,7 @@ export function appendToLog(content: string): void {
 
         // Timestamp every 5 minutes
         if (now - lastTimestamp >= TIMESTAMP_INTERVAL) {
-            output += `\n--- ${new Date().toLocaleString('en-AU', { timeZone: gardenTimezone() })} ---\n`; // DEC-105 G4 (paired with parseAuMarker — see above)
+            output += `\n--- ${new Date().toLocaleString('en-AU', { timeZone: gardenTimezone(), timeZoneName: 'short' })} ---\n`; // DEC-105 G4 + injectivity rider (paired with parseAuMarker — see above)
             lastTimestamp = now;
         }
 

@@ -131,11 +131,32 @@ const gapParsed = parseAuMarker('4/10/2026, 2:30:00 am', 'Australia/Sydney');
 check('the gap resolves to a real instant (documented, writer-unreachable)',
     gapParsed !== null && new Date(gapParsed).toLocaleString('en-AU', { timeZone: 'Australia/Sydney' }).includes('3:30:00'),
     gapParsed?.toISOString());
+// DARRON'S INJECTIVITY RIDER (2026-08-02): the writer now labels the marker with its
+// zone abbreviation, and the label names WHICH fold side was meant — 02:30 AEDT and
+// 02:30 AEST are as distinct as Sydney and Brisbane readings. The labelled input is
+// injective; the bare form (legacy) keeps the deterministic resolution pinned above.
+check('labelled fold — AEDT recovers the daylight instant (15:30Z, unreachable from a bare reading)',
+    parseAuMarker('5/04/2026, 2:30:00 am AEDT', 'Australia/Sydney')?.toISOString() === '2026-04-04T15:30:00.000Z');
+check('labelled fold — AEST names the standard instant (16:30Z)',
+    parseAuMarker('05/04/2026, 2:30:00 am AEST', 'Australia/Sydney')?.toISOString() === '2026-04-04T16:30:00.000Z');
+check('a garbage label fails SAFE to the deterministic candidate (anchoring never breaks)',
+    parseAuMarker('5/04/2026, 2:30:00 am XYZT', 'Australia/Sydney')?.toISOString() === '2026-04-04T16:30:00.000Z');
+const lblInstant = Date.UTC(2026, 0, 15, 3, 45, 12);
+const lblMarker = new Date(lblInstant).toLocaleString('en-AU', { timeZone: 'Australia/Sydney', timeZoneName: 'short' });
+check('the labelled writer form round-trips exactly (January = AEDT)',
+    parseAuMarker(lblMarker, 'Australia/Sydney')?.getTime() === lblInstant, lblMarker);
+const lblJul = new Date(julInstant).toLocaleString('en-AU', { timeZone: 'Australia/Sydney', timeZoneName: 'short' });
+check('…and through the other DST face labelled (July = AEST)',
+    parseAuMarker(lblJul, 'Australia/Sydney')?.getTime() === julInstant, lblJul);
 
 // ── G2b/G2c: the store layer is unwriteable-to-localise ──────────────────────
 console.log('\nG2b — garden-time import allow-list (a render-site is a conscious addition)');
 
 const SRC = path.join(__dirname, '..', 'src');
+
+const terminalSrc = fs.readFileSync(path.join(SRC, 'server', 'services', 'terminal.ts'), 'utf8');
+check('the WRITER labels its markers (timeZoneName short at both sites — the rider is in the metal)',
+    (terminalSrc.match(/timeZone: gardenTimezone\(\), timeZoneName: 'short'/g) ?? []).length === 2);
 const ALLOWED_IMPORTERS = new Set([
     'server/lib/prompt-builder.ts',       // P1 — the DEC-087 chokepoint injection
     // DEC-105 P2 (2026-08-02, each a conscious addition): record headers speak local.

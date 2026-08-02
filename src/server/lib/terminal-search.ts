@@ -78,19 +78,54 @@ export interface TerminalSearchResult {
  *  skew by the difference. Acceptable for this grandfathered single class (terminal-
  *  search anchoring only); written here so the next builder inherits the boundary.
  *
- *  RECORDED RESIDUAL (b) (Casey's, measured at the seal): correct by construction
- *  EXCEPT at the DST fold instant, where the input itself is ambiguous and the
- *  resolution is deterministic-but-arbitrary (the standard-time reading — the later
- *  instant). One repeated hour per year, DST gardens only; the round-trip still
- *  renders the same wall time, so the skew is invisible from the marker itself.
- *  The carve-out is where the rule's own named danger lives; this is it, written down. */
+ *  RECORDED RESIDUAL (b) (Casey's, measured at the seal — NARROWED by Darron's
+ *  injectivity rider, 2026-08-02): correct by construction EXCEPT at the DST fold
+ *  instant on a BARE (unlabelled) reading, where the input itself is ambiguous and
+ *  the resolution is deterministic-but-arbitrary (the standard-time reading — the
+ *  later instant). Since the rider, the writer labels every marker with its zone
+ *  abbreviation ("… 2:30:00 am AEDT") and this parser honours it — a labelled stamp
+ *  is INJECTIVE (02:30 AEDT and 02:30 AEST are as distinct as Sydney and Brisbane
+ *  readings), so the residual now covers only LEGACY markers written before the
+ *  rider, plus a garbage label (which fails SAFE to the deterministic candidate —
+ *  a wrong label degrades to the old behaviour, never breaks anchoring). */
 export function parseAuMarker(s: string, zone: string = gardenTimezone()): Date | null {
-    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})\s*(am|pm)$/i);
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})\s*(am|pm)(?:\s+([A-Za-z]{2,5}|GMT[+\u2212-]\d{1,2}(?::\d{2})?))?$/i);
     if (!m) return null;
-    let [, d, mon, y, h, min, sec, ap] = m;
+    let [, d, mon, y, h, min, sec, ap, label] = m;
     let hour = Number(h) % 12;
     if (ap.toLowerCase() === 'pm') hour += 12;
-    return dateFromZonedParts(Number(y), Number(mon), Number(d), hour, Number(min), Number(sec), zone);
+    const candidate = dateFromZonedParts(Number(y), Number(mon), Number(d), hour, Number(min), Number(sec), zone);
+    if (!label) return candidate; // legacy bare marker — deterministic resolution, unchanged
+
+    // Darron's injectivity rider: the abbreviation names WHICH side of a DST fold was
+    // meant. Verify the candidate re-renders to the same label AND wall reading; if not,
+    // try the fold's other side (±60/±30 min covers whole- and half-hour DST deltas) and
+    // take the first shift that reproduces both. No match → fail safe to the candidate.
+    const rendersAs = (dd: Date): { abbr: string; wallOk: boolean } => {
+        const fmt = new Intl.DateTimeFormat('en-AU', {
+            timeZone: zone, year: 'numeric', month: 'numeric', day: 'numeric',
+            hour: 'numeric', minute: '2-digit', second: '2-digit',
+            hourCycle: 'h23', timeZoneName: 'short',
+        } as Intl.DateTimeFormatOptions);
+        const p: Record<string, string> = {};
+        for (const part of fmt.formatToParts(dd)) p[part.type] = part.value;
+        return {
+            abbr: (p.timeZoneName ?? '').toUpperCase(),
+            wallOk: +p.year === +y && +p.month === +mon && +p.day === +d
+                && +p.hour === hour && +p.minute === +min && +p.second === +sec,
+        };
+    };
+    try {
+        const want = label.toUpperCase();
+        const first = rendersAs(candidate);
+        if (first.abbr === want && first.wallOk) return candidate;
+        for (const shiftMin of [-60, 60, -30, 30]) {
+            const alt = new Date(candidate.getTime() + shiftMin * 60_000);
+            const r = rendersAs(alt);
+            if (r.abbr === want && r.wallOk) return alt;
+        }
+    } catch { /* invalid zone in the re-render probe — fall through to the candidate */ }
+    return candidate;
 }
 
 function terms(q: string): string[] {
