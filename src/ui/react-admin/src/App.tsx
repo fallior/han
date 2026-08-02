@@ -15,6 +15,7 @@ import MemoryPage from './pages/MemoryPage'
 import ProductsPage from './pages/ProductsPage'
 import { WebSocketProvider } from './providers/WebSocketProvider'
 import { useStore } from './store'
+import { setGardenZone } from './lib/garden-clock'
 
 function AppContent() {
   // S151 follow-on: useVisibilitySync hook removed per Darron's "refresh
@@ -26,6 +27,15 @@ function AppContent() {
   // Load persona registry from API on mount
   const loadPersonas = useStore((s) => s.loadPersonas)
   const personasLoaded = useStore((s) => s.personasLoaded)
+  // DEC-105 P3: the garden's zone arrives from the manifest via /api/ecosystem —
+  // set once at mount; every formatter renders garden time (fail-closed to UTC).
+  useEffect(() => {
+    apiFetch('/api/ecosystem')
+      .then(res => res.json())
+      .then(data => setGardenZone(data.timezone))
+      .catch(() => setGardenZone(undefined)) // unreachable ⇒ honest UTC
+  }, [])
+
   useEffect(() => {
     if (personasLoaded) return
     apiFetch('/api/village/personas')

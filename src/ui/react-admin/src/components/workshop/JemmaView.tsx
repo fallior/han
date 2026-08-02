@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useWorkshopStore } from '../../store/workshopStore';
 import { useStore } from '../../store';
 import { fetchJemmaStatus, type JemmaStatus, type JemmaMessage } from '../../lib/api';
+import { inGardenZone } from '../../lib/garden-clock'; // DEC-105 P3
 
 /**
  * JemmaView Component
@@ -110,7 +111,7 @@ interface MessageCardProps {
 
 function MessageCard({ message }: MessageCardProps) {
   const confidence = Math.round(message.confidence * 100);
-  const timestamp = new Date(message.timestamp).toLocaleString();
+  const timestamp = new Date(message.timestamp).toLocaleString('en-AU', inGardenZone());
   const preview = message.message.length > 200
     ? message.message.substring(0, 200)
     : message.message;
@@ -176,7 +177,7 @@ function StatsTab({ data }: StatsTabProps) {
   const personaTabs = useStore((st) => st.personaTabs);
   const uptime = data.uptime_seconds ? Math.floor(data.uptime_seconds / 60) : 0;
   const lastReconciliation = data.last_reconciliation
-    ? new Date(data.last_reconciliation).toLocaleString()
+    ? new Date(data.last_reconciliation).toLocaleString('en-AU', inGardenZone())
     : 'Never';
   const gatewayStatus = data.status || 'unknown';
   const stats = data.delivery_stats || {};

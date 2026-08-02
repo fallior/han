@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { db, portfolioStmts } from '../db';
 import { syncRegistry, getProjectStats, getAllProjectStats } from '../db';
 import { getEcosystemSummary } from '../services/context';
+import { gardenTimezone, gardenTimezoneConfigured } from '../lib/garden-manifest'; // DEC-105 P3
 
 const orchestrator = require('../orchestrator');
 
@@ -158,7 +159,13 @@ router.get('/ecosystem', (req: Request, res: Response) => {
             };
         });
         const summaryText = getEcosystemSummary();
-        res.json({ success: true, projects: ecosystem, summary: summaryText });
+        // DEC-105 P3 (Jim's fold 1): the garden's zone reaches the client FROM THE
+        // MANIFEST via this already-called payload — never hardcoded in the bundle
+        // (a fork's admin shows its own garden's time). One field, no new endpoint.
+        res.json({
+            success: true, projects: ecosystem, summary: summaryText,
+            timezone: gardenTimezone(), timezoneConfigured: gardenTimezoneConfigured(),
+        });
     } catch (err: any) {
         res.status(500).json({ success: false, error: err.message });
     }

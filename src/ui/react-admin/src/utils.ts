@@ -1,3 +1,4 @@
+import { inGardenZone, zoneLabel } from './lib/garden-clock'; // DEC-105 P3
 /**
  * Pure utility functions ported from admin.js
  * React-compatible (no direct DOM dependencies)
@@ -79,7 +80,7 @@ export function renderMarkdown(text: string): string {
 export function formatTime(iso: string): string {
   if (!iso) return '—';
   const d = new Date(iso);
-  return d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', ...inGardenZone() }) + ' ' + zoneLabel(d); // DEC-105 P3: garden time, zone named
 }
 
 /**
@@ -89,9 +90,10 @@ export function formatDateTime(iso: string): string {
   if (!iso) return '—';
   const d = new Date(iso);
   return (
-    d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) +
+    d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', ...inGardenZone() }) +
     ' ' +
-    d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })
+    d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', ...inGardenZone() }) +
+    ' ' + zoneLabel(d) // DEC-105 P3: garden time, zone named
   );
 }
 
@@ -113,7 +115,7 @@ export function timeSince(iso: string): string {
 export function formatDate(iso: string): string {
   if (!iso) return '—';
   const d = new Date(iso);
-  return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', ...inGardenZone() }); // DEC-105 P3: the garden's calendar day
 }
 
 // Alias for backwards compatibility
