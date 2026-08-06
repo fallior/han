@@ -7,6 +7,24 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-06 (night) — Leo (session) — Battlemage-prep folds: twin M-1 + status-file + launcher guard + runbook v2 + harness archive
+
+### Fixed
+- `scripts/make-twin.sh` + `scripts/refresh-twin.sh` — Jim's M-1 (the hex-B awk trap: the
+  BootOrder restore extracted `B000` for every entry; fix verified live `Boot0003*`→`0003`);
+  the merged Tenshi+Casey `/etc/han-twin-status` instrument planted + asserted (TWIN on its
+  face; UNMASK step 5 crowns it); UNMASK renumbered.
+- `han*` launchers (infrastructure/scripts, all six) — the divergence guard: refuse when
+  han-twin-status exists without ^CROWNED (uncrowned twin never wakes minds; crowned twin's
+  oars never locked; ambiguity refuses).
+- `plans/mint22-migration-runbook.md` — Tenshi's four folds (Stage-1 expected-ENODEV with the
+  real experiment at 6.14; Stage-5 strike-the-udev-pin as a numbered step — the "self-retires"
+  claim was false, slot-keyed rule; guard form updated; Casey's certification line at the
+  mintupgrade door + the loreforge pg_dump belt; re-audited blob note).
+- `scripts/verify-post-upgrade.ts` — baseline mode archives the prior baseline to a dated
+  .bak before writing (Jim's 2AM-hand fold).
+
+
 ## 2026-08-06 (late) — Leo (session) — the starttime discriminator lands (plan v2, all chairs)
 
 ### Added
