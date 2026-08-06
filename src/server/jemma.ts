@@ -393,10 +393,21 @@ async function classifyWithHaikuSDK(prompt: string): Promise<ClassificationResul
   const text = resultText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
   const result = JSON.parse(text);
   return {
-    recipient: result.recipient || 'ignore',
+    recipient: normaliseRecipient(result.recipient),
     confidence: result.confidence || 0,
     reasoning: result.reasoning || 'Classification uncertain',
   };
+}
+
+
+/** MNT-090: a classifier (esp. the gemma fallback) may answer with a COMPOUND recipient
+ *  ("leo|darron|tenshi") — the router's exact-membership check then silently drops a
+ *  well-classified message (the 2026-08-06 Discord silence). Normalise: lowercase, split
+ *  on non-alphanumerics, return the FIRST token — the classifier's own primary. Downstream
+ *  membership checks still apply unchanged. */
+function normaliseRecipient(raw: unknown): string {
+  const first = String(raw ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)[0];
+  return first || 'ignore';
 }
 
 async function classifyWithOllama(prompt: string): Promise<ClassificationResult> {
@@ -417,7 +428,7 @@ async function classifyWithOllama(prompt: string): Promise<ClassificationResult>
   const data = await res.json();
   const result = JSON.parse(data.response);
   return {
-    recipient: result.recipient || 'ignore',
+    recipient: normaliseRecipient(result.recipient),
     confidence: result.confidence || 0,
     reasoning: result.reasoning || 'Classification uncertain',
   };

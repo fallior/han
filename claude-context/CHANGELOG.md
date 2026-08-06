@@ -7,6 +7,22 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-06 (evening) — Leo (session) — MNT-089 completion: parity guard + sanitiser + log-word (3-chair GREEN)
+
+### Fixed
+- `src/server/agent-heartbeat.ts` — Tenshi's parity guard (her prescribed call verbatim):
+  the agnostic rhythm driver now carries the same pid-guard as the legacy driver — a 4th
+  agent never gets LESS (DEC-081). Precondition proven by her second pass (SLUG fail-loud
+  from AGENT_SLUG; both live drivers' environ verified).
+- `src/server/jemma.ts` — MNT-090 recipient sanitiser at both classifier returns:
+  compound answers ("leo|darron|tenshi") route to the classifier's primary instead of
+  dropping at the membership gate; fail-closed to 'ignore'.
+- `src/server/lib/pid-guard.ts` — Tenshi's log-word: a last-instant verdict flip logs
+  "exited-or-recycled — no signal sent", never "graceful".
+- Plan added: `plans/pid-starttime-discriminator-plan.md` (Casey's name+date-of-birth
+  discriminator; field-22 semantics verified empirically same evening; next guard slot).
+
+
 ## 2026-08-06 — Leo (session) — MNT-089 pid-guard hardening + MNT-090 seatless-guard cure
 
 ### Fixed

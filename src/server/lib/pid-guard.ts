@@ -211,6 +211,11 @@ export function replaceExistingInstance(
                 try { process.kill(oldPid, 'SIGKILL'); } catch { /* already dead */ }
                 const killStart = Date.now();
                 while (Date.now() - killStart < 2000) { /* spin */ }
+            } else if (alive) {
+                // Tenshi's log-word note (2026-08-06): the fresh verdict flipped at the last
+                // instant — the pid answers but is no longer verifiably ours. Not "graceful";
+                // exited-or-recycled. No signal was sent (the belt held).
+                console.log(`[${serviceName}] Previous instance (PID ${oldPid}) exited-or-recycled at the final verdict — no signal sent`);
             } else {
                 console.log(`[${serviceName}] Previous instance (PID ${oldPid}) shut down gracefully`);
             }

@@ -58,6 +58,8 @@ import type { CaptureRecord } from './lib/diary-mcp-server';
 import { localStampSeconds } from './lib/garden-time'; // DEC-105 P2: record headers speak local
 
 // ── Identity: fail-loud, never defaulted (Tenshi condition 1) ────────────────
+import { ensureSingleInstance } from './lib/pid-guard';
+
 const SLUG: string = (() => {
     const s = process.env.AGENT_SLUG;
     if (!s) {
@@ -281,6 +283,14 @@ function scheduleNext(): void {
         scheduleNext();
     }, delay);
 }
+
+// MNT-089 parity (Tenshi's sweep): the agnostic driver had NO guard — the two newest
+// minds' rhythm carried less protection than the legacy driver. DEC-081's test read
+// back at us: a 4th agent never gets LESS. Her prescribed call, verbatim:
+const pidGuard = ensureSingleInstance(`${SLUG}-heartbeat`, { cmdlineToken: 'agent-heartbeat.ts', envMatch: { AGENT_SLUG: SLUG } });
+process.on('exit', () => pidGuard.cleanup());
+process.on('SIGTERM', () => { pidGuard.cleanup(); process.exit(143); });
+process.on('SIGINT', () => { pidGuard.cleanup(); process.exit(130); });
 
 console.log(`[${SLUG}-heartbeat] agnostic rhythm driver up (Ring-3a) — slug=${SLUG}, memoryDir=${CFG.memoryDir}, surface=${SURFACE}`);
 writeHealthSignal(null);
