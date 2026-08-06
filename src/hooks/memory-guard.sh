@@ -25,6 +25,17 @@ else FULL_SWAP="${MEM}/${AGENT_SWAP_FULL:-session-swap-full.md}"; COMP_SWAP="${M
 
 allow() { exit 0; }
 
+# MNT-090 (2026-08-06): NO SEAT, NO GUARD. A claude invocation with no agent seat —
+# AGENT_SLUG or AGENT_MEMORY_DIR unset: jemma's Haiku classifier, ad-hoc CLI runs,
+# scripts — owes no swap discipline, and guarding it blocks the turn against files
+# that cannot exist. The block-loop killed every Haiku classification after the
+# Sunday CLI update (the new CLI honours Stop-hook blocks in -p mode), which
+# silenced Discord routing garden-wide. wm-flush.sh already fail-safes this case;
+# the guard now matches it. (A seatless run that SHOULD be guarded does not exist:
+# the guard's whole subject is a seat's swap files.)
+[ -z "${AGENT_SLUG:-}" ] && allow
+[ -z "${AGENT_MEMORY_DIR:-}" ] && allow
+
 # DEC-093 (humans-PR thaw, 2026-06-13): SPOKE seats (AGENT_SURFACE != session — heartbeat,
 # human-response) write memory via the han-diary MCP tool (submit_response IS the turn's
 # paired-memory write), NOT via the session swap files this guard enforces. So the guard

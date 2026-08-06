@@ -1332,7 +1332,9 @@ function checkAndSwapCredentials(): void {
 // ── Main ──────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const pidGuard = ensureSingleInstance('jemma');
+  // MNT-089: believe the pidfile only for a real jemma.ts process (pid 1445 spent a day
+  // recycled as a wm-sensor thread, immortalising the lock).
+  const pidGuard = ensureSingleInstance('jemma', { cmdlineToken: 'jemma.ts' });
   process.on('exit', () => pidGuard.cleanup());
 
   ensureDirectories();

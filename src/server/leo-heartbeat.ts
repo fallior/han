@@ -2465,7 +2465,8 @@ function scheduleNext(): void {
 // ── Main ─────────────────────────────────────────────────────
 
 async function main() {
-    const pidGuard = ensureSingleInstance('leo-heartbeat');
+    // MNT-089: token — a recycled pid wearing another program must never hold this lock.
+    const pidGuard = ensureSingleInstance('leo-heartbeat', { cmdlineToken: 'leo-heartbeat.ts' });
     process.on('exit', () => pidGuard.cleanup());
 
     // SIGTERM handler — record cost and save partial work before dying

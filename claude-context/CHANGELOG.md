@@ -7,6 +7,26 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-06 — Leo (session) — MNT-089 pid-guard hardening + MNT-090 seatless-guard cure
+
+### Fixed
+- `src/server/lib/pid-guard.ts` — the immortal-lock class dies: `classifyPidClaim` believes a
+  pidfile only for a real PROCESS (`Tgid==Pid` — thread ids refused), running the right program
+  (`cmdlineToken`), the right instance (`envMatch`, e.g. AGENT_SLUG). Stale claims logged with
+  reason, never obeyed, **never killed** (the replace path re-verifies per poll and again at the
+  SIGKILL itself — Tenshi's fresh-verdict belt). Call sites discriminated: `human-responder.ts`,
+  `jemma.ts`, `server.ts` (cross-server SIGTERM unrepresentable), `leo-heartbeat.ts`. Suite
+  `scripts/test-pid-guard.ts` (8/8 ×2) reproduces the immortal lock live via own libuv tids.
+  Three-chair GREEN (Jim/Tenshi/Casey). Receipts: jemma + both human responders crash-looped
+  16h+ behind recycled-tid locks this week.
+- `src/hooks/memory-guard.sh` — MNT-090 NO-SEAT-NO-GUARD exemption (already live, hooks are
+  live-on-save): a seatless claude invocation (jemma's Haiku classifier, ad-hoc CLI) is never
+  guarded — the Stop-hook block-loop had killed every classification since the Sunday CLI float
+  began honouring blocks in `-p` mode, silencing Discord routing. Owed follow-ups registered:
+  jemma recipient sanitiser, `agent-heartbeat.ts` parity guard (Tenshi), starttime birthdate
+  discriminator (Casey, revisit-slot).
+
+
 ## 2026-08-06 — Leo (session) — FI #132 Token Ledger P0 (the burn observatory)
 
 ### Added

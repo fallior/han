@@ -75,7 +75,10 @@ const UI_DIR = path.join(__dirname, '..', 'ui');
 // systemd-managed han-server on 3847 via replaceExistingInstance (2026-04-20, S130).
 import { replaceExistingInstance } from './lib/pid-guard';
 import { boxZoneMatchesGarden } from './lib/garden-time'; // DEC-105 seal Rider 3
-const serverPidGuard = replaceExistingInstance(`han-server-${PORT}`);
+// MNT-089: token + slug discriminator — BOTH agent servers share the `tsx server.ts`
+// cmdline, so without the env match a recycled pid could SIGTERM the other garden server.
+const serverPidGuard = replaceExistingInstance(`han-server-${PORT}`,
+    { cmdlineToken: 'server.ts', envMatch: process.env.AGENT_SLUG ? { AGENT_SLUG: process.env.AGENT_SLUG } : {} });
 process.on('exit', () => serverPidGuard.cleanup());
 process.on('SIGINT', () => { serverPidGuard.cleanup(); process.exit(130); });
 

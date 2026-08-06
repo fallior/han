@@ -628,7 +628,9 @@ async function processSignal(signal: SignalData): Promise<void> {
 // ── Main loop ─────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-    const pidGuard = ensureSingleInstance(`${SLUG}-human`);
+    // MNT-089: token + slug discriminator — four services share this binary; a recycled
+    // pid wearing another slug's responder must read as env-mismatch, never 'ours'.
+    const pidGuard = ensureSingleInstance(`${SLUG}-human`, { cmdlineToken: 'human-responder.ts', envMatch: { AGENT_SLUG: SLUG } });
     process.on('exit', () => pidGuard.cleanup());
 
     console.log(`${LOG} Starting (PID ${process.pid}, slug=${SLUG}, role=${CONVERSATION_ROLE}, commitmentScan=${COMMITMENT_SCAN_ENABLED})`);
