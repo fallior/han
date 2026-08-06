@@ -7,6 +7,24 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-06 — Leo (session) — FI #132 Token Ledger P0 (the burn observatory)
+
+### Added
+- `scripts/han-token-ledger.ts` — the P0 harvester + report: incremental byte-cursor scan of the
+  shared harness transcripts into an append-only ledger (`~/.han/health/token-ledger.jsonl`) of
+  10-min windows per (agent|human-other, surface, model, sidechain) × the four token families
+  (Jim M1 — no single-scalar total). Attribution via in-band `cwd` + `loadResidents()` (agnostic).
+  Projection-only parse — content never retained, error paths record location only (F5 + Casey R5).
+  Genesis-at-EOF with genesis-only `--backfill` (F1); archive-move rotation (F3/DEC-069);
+  `human-other` as a non-alarmable class (M2); coverage-declaration report header (Casey R2).
+- `scripts/test-token-ledger.ts` — 10-test suite on an env-injected scratch substrate (prod write
+  unrepresentable), incl. the two-direction privacy canary (happy path + malformed-line dark twin).
+- `~/scripts/han-token-ledger.sh` (host-side, host-config-captured) + `*/10` cron — the runner,
+  thermal-guard family pattern (node-by-glob, ntfy fail-loud).
+- Plan: `plans/token-ledger-plan.md` (three-chair GREEN: Jim M1/M2+F1–F6, Tenshi lanes/constants
+  structure, Casey riders 1–5). P1 rule engines gate on the calibration-week close-out.
+
+
 ---
 
 ## 2026-08-02 (S234) — 🕰 DARRON'S INJECTIVITY RIDER lands: the labelled stamp makes the fold decidable
