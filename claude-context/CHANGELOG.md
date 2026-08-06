@@ -7,6 +7,22 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-06 (late) — Leo (session) — the starttime discriminator lands (plan v2, all chairs)
+
+### Added
+- `src/server/lib/pid-guard.ts` — Casey's name+date-of-birth doctrine in the metal: pidfiles
+  record `"<pid> <starttime> <bootid>"`; a same-boot claim with the wrong birth tick is
+  `birthdate-mismatch` (never obeyed, never killed). Jim's M1 as the classifier's STANDING
+  INVARIANT (no discriminator may be an acceptor — `ours` only by surviving every gate);
+  his bootid fold (prior-boot claims demoted to attribute-only, cross-boot coincidence
+  unrepresentable). Casey's basis-vs-verdict split: every verdict carries
+  `basis: full|attribute-only (+reason)`, and the ours-path log lines say it — including
+  the SIGTERM sentence ("verified same-service (full)" vs "(attribute-only: prior-boot)").
+  Her undefined-form clause (not exactly 1 or 3 tokens → attribute-only) + her kill-path
+  ruling honoured (attributes alone may still kill — the pure-basis alternative reintroduces
+  the double-drive during every rolling upgrade). Parser certified against a hostile comm
+  (prctl `") 99 (evil"`) by two hands. Suite → 17/17 ×2 (T9–T13 incl. T11b acceptor pin).
+
 ## 2026-08-06 (evening) — Leo (session) — MNT-089 completion: parity guard + sanitiser + log-word (3-chair GREEN)
 
 ### Fixed
