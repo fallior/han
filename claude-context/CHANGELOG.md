@@ -19,6 +19,12 @@
   cross-check). Casey: five bare-name comments re-worded; zero `nvme[01]n1` and zero
   doctrine `TARGET_DISK` by grep. Acceptance: `refresh-twin.sh verify` PASSED on the
   exact enumeration that previously died (Darron's hand, read-only).
+- `docs/CROWNING.md` — Casey's plain-reader pass folded whole (same night): the triple
+  rule on every step (command · expected sight · divergence instruction), Step −1
+  (which-room check before Step 0), the equipped Step 0 (sticker identifiers —
+  original=Samsung 980 PRO, twin=WD_BLACK SN850X, verified against roles by lsblk — +
+  the spelled-out mask-in-place block with linger removal), the deletes-nothing floor
+  statement, the Step-7 daylight fence, `hostname -I`, the situs footnote.
 - Doctrine (both headers, `plans/mint22-migration-runbook.md`, `docs/CROWNING.md` step 7)
   — pins-are-role-values simplifies to PIN_*-only (the disk derives) + Casey's
   re-consecration formality (thread-stated values, second-seat blkid verify before any
