@@ -143,6 +143,19 @@ sensor set** (her fingerprint proposal) — the hop may bind it87 natively and s
 `boardC`; the swap changes the GPU sensors; the RAM may shift idle temps. One recalibration
 after the dust settles, close-out with Jim.
 
+## The Succession Law (Darron's ruling, 2026-08-07)
+
+**Whichever drive is CROWNED is HAN's drive** — after a coronation, the crowned drive is
+not "a recovered copy"; it IS HAN, full stop. The roles reverse: the old original, once
+repaired and present, becomes the **heir apparent** — re-consecrated as the new twin by
+re-running the consecration against it (the scripts' PIN_*/TARGET_DISK constants are
+per-consecration role values, edited at each consecration; never eternal drive
+identities). **Re-sync always runs crowned→heir.** Tenshi's enforcement rider is in the
+metal: `refresh-twin.sh` refuses to run onto a CROWNED drive — a stale original can never
+clobber the live garden under its own past. A later deliberate revert to the larger drive
+as HAN is its own ceremony (consecrate-the-larger-as-heir → refresh crowned→heir → crown
+the heir → the roles reverse again) — never an ad-hoc rsync.
+
 ## Abort ladders (decided in calm, per the shed-load law)
 
 - **Hop fails mid-flight / unbootable:** F12 → old kernel entry; if root is damaged → **the

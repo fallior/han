@@ -45,6 +45,12 @@
 #   5. Host fstab: scratch mounts by LABEL (unchanged by design); mount -a + assert.
 #   6. Post-asserts (incl. the user-mask layer + BootOrder), then boot-test instructions.
 #
+# THE SUCCESSION LAW (Darron's ruling 2026-08-07): whichever drive is CROWNED is HAN's
+# drive — after a coronation the roles REVERSE (the old original becomes the heir) and
+# this mechanism persists across the reversal: the PIN_*/TARGET_DISK constants are
+# per-consecration ROLE values, re-set at each consecration, never eternal drive
+# identities. Re-sync always runs crowned→heir. See refresh-twin.sh UNMASK step 7.
+#
 # The standing posture afterwards: NEVER bare-rsync onto the twin — that clobbers
 # its fstab and silently un-twins it (THE REFRESH TRAP). Refresh only via
 # refresh-twin.sh, which re-applies twin-isation in the same act.

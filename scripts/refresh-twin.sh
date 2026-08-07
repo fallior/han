@@ -42,6 +42,13 @@
 #     5. CROWN — rewrite the status file so the launchers pass and the record shows it:
 #          echo "CROWNED $(date -Iseconds) — predecessor revoked step 0" | sudo tee /etc/han-twin-status
 #     6. sudo systemctl daemon-reload && reboot
+#     7. THE SUCCESSION (Darron's ruling, 2026-08-07): the crowned drive IS HAN's drive
+#        from this moment — not a recovered copy. The old original, once repaired and
+#        present, becomes the HEIR: re-consecrate it as the new twin by re-running the
+#        consecration AGAINST IT (the PIN_*/TARGET_DISK constants are per-consecration
+#        role values, not eternal drive identities — edit them to the old original's
+#        actual UUIDs/disk, then make-twin it). Re-sync is always crowned→heir. A later
+#        deliberate revert to the larger drive as HAN is its own ceremony, not a refresh.
 #   Do this ONLY when the original is truly lost or masked/disconnected.
 
 set -euo pipefail
@@ -130,6 +137,13 @@ TWIN_ESP_UUID=$(blkid -s UUID -o value "$TWIN_ESP_DEV")
 # Sanity: the mounted thing must LOOK like a twin (twin fstab backup present).
 [ -f "$TWIN_MNT/etc/fstab.pre-twin.bak" ] || [ -f "$TWIN_MNT/etc/profile.d/00-twin-banner.sh" ] \
   || die "target does not look like a built twin — refusing."
+
+# THE SUCCESSION LAW (Darron's ruling 2026-08-07 + Tenshi's rider): from the moment of
+# crowning, the CROWNED drive IS HAN — the direction of truth reverses (re-sync is
+# crowned→heir, NEVER the reverse). A stale original must never clobber the live garden
+# under its own past and silently demote the crown back to TWIN.
+grep -q '^CROWNED' "$TWIN_MNT/etc/han-twin-status" 2>/dev/null && \
+  die "twin declares CROWNED — it IS HAN now; never refresh a crowned drive from the old original (re-sync runs crowned→heir). Deliberate un-crowning/revert is its own ceremony: rewrite han-twin-status by hand first."
 
 # M1: capture BootOrder before any grub-install this run might do.
 BOOT_ORDER_BEFORE=$(efibootmgr | awk -F': ' '/^BootOrder/{print $2}')
