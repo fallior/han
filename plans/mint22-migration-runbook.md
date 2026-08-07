@@ -85,11 +85,18 @@ sqlite-consistent staged copy + RESURRECTION.md as the deeper fallback.
 ## Stage 4 — the distro hop (its own window; nothing else that day)
 
 **Pre-window:** quiesce the garden (same stop-list as the twin gates; capture `tmux ls` first;
-warn: the hop restarts nothing itself — the garden returns only at reboot). Fresh twin refresh
-+ verify. Fresh cold gradient copy. **The pg_dump belt (Tenshi's Finding D):** loreforge's
-postgres lives in docker volumes no restic lane reads —
+warn: the hop restarts nothing itself — the garden returns only at reboot). Fresh cold
+gradient copy. **The pg_dump belt (Tenshi's Finding D):** loreforge's postgres lives in
+docker volumes no restic lane reads —
 `docker exec supabase_db_loreforge pg_dumpall -U postgres > /mnt/scratch/loreforge-prehop.sql`
 (container name verify first: `docker ps`).
+
+**Stage 4.1 — THE FINAL REFRESH (numbered, the last act before the door — Freshness
+Doctrine line 1, Darron's fold):** post-quiesce, pre-mintupgrade — the one moment when
+freshest-possible and writers-stopped are simultaneously true — run
+`sudo bash refresh-twin.sh` + `verify`. After it the twin is the complete last-known-good
+21.3 snapshot: the rollback key the one-way door deserves. From mintupgrade's first write,
+**the twin's staleness IS its value — never refresh again until the soak passes** (line 3).
 
 **THE DOOR (Casey's certification line — write it in the thread before `mintupgrade upgrade`):**
 > *"Twin boot-test PASSED at __:__, verified by ____ — mintupgrade may proceed."*
@@ -113,6 +120,28 @@ remain in GRUB (add-never-replace — the fallback is one F12 away).
 **Post-hop acceptance:** `verify-post-upgrade.ts` — must be GREEN-or-explained line by line
 against the Stage-0 baseline (kernel, drivers/DKMS, garden services, servers, DB counts, tmux
 sessions, mounts, sensor fingerprint). Then `refresh-twin.sh --reinstall-grub`.
+
+**Stage 4.9 — THE POST-SOAK REFRESH (numbered — Freshness Doctrine line 3's second half):**
+only after the soak passes, one deliberate `refresh-twin.sh` converts the twin from
+21.3-rollback-leg back to Mint-22 recovery-leg. Numbered so it never relies on memory.
+
+## The Twin Freshness Doctrine (Jim, with Darron's correcting fold — 2026-08-07)
+
+1. **The final refresh is a numbered pre-hop stage** (4.1 above) — post-quiesce,
+   pre-mintupgrade, capturing everything at the door at zero marginal cost. *The correction
+   is Darron's; the record says so.*
+2. **Between now and the hop: verify-only by default.** Intermediate refreshes only at
+   natural quiet moments (the M2 quiesce gate is why refresh is never casual — live writers
+   risk a torn gradient.db inside the recovery copy); none is *required*, because 4.1
+   captures everything at the door regardless.
+3. **Never refresh after the hop begins, until the soak passes** — the twin's staleness IS
+   its rollback value. Then one deliberate refresh (4.9) converts it back to recovery-leg.
+4. **Standing rhythm thereafter: event-driven with a watched staleness metric, never a
+   cron.** Refresh after major arcs/OS changes; the health monitor carries
+   days-since-refresh + the verify drift count and flags past threshold (a future Bill
+   job: run the maths, raise the flag, a human turns the key). The always-on lanes own
+   *data* freshness; the twin owns *bootability*; CROWNING.md's honesty line covers the
+   gap at crown time.
 **Python note:** venvs break across 3.10→3.12 (expected, cheap): rebuild the voice/quantum
 venvs on demand; model caches survive.
 

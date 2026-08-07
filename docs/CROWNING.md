@@ -74,7 +74,10 @@ survives enumeration flips, dead firmware, and fear: **the original is the Samsu
 role values — they swap at a re-consecration and join Step 7's edit list + second-seat
 verify.)*
 
-*If you cannot open the case tonight, mask it in place instead:*
+*If you cannot open the case tonight, mask it in place instead* — **a night patch, not the
+revocation: the revocation completes when the Samsung leaves the slot** (or the boot order
+is changed, in daylight, as its own considered act). Until then the masked original is still
+the default boot — anyone power-cycling the box lands on its dark, normal-looking login:
 ```bash
 sudo mkdir -p /mnt/original
 sudo mount /dev/disk/by-uuid/d5a37330-7c4a-4df9-a4d8-d9f99c44aac5 /mnt/original
@@ -82,11 +85,17 @@ for u in cron docker containerd tailscaled; do
   sudo ln -sf /dev/null /mnt/original/etc/systemd/system/$u.service
 done
 sudo rm -f /mnt/original/var/lib/systemd/linger/darron
+echo "ABDICATED $(date -Iseconds) — masked in place, crowning in progress on the twin" | sudo tee /mnt/original/etc/han-twin-status
 sudo umount /mnt/original
 ```
-*You should see:* silence from every line. *If the `mount` says the UUID doesn't exist,* the
-original really is gone from the bus — that IS your revocation; continue. *(The UUID is the
-original-root role value — Step 7's edit list at a re-consecration.)*
+*You should see:* silence from every line except the `tee`, which prints its ABDICATED line
+back — that line also makes every `han*` launcher **refuse** on the original (the guard
+refuses any status that isn't CROWNED), so a habitual `hanleo` at that misleading login
+wakes nothing. *If the `mount` says the UUID doesn't exist:* the drive is off the bus —
+revoked, continue. ***Any OTHER mount error*** *(corrupt superblock, wrong-fs complaints):*
+the drive is **present but sick — it is NOT revoked**; pull it as soon as you can open the
+case, and don't count Step 0 done until then. *(The UUID is the original-root role value —
+Step 7's edit list at a re-consecration.)*
 
 **Step 1 — remove the system drill-masks:**
 ```bash

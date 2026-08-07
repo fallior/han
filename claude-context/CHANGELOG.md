@@ -19,6 +19,13 @@
   cross-check). Casey: five bare-name comments re-worded; zero `nvme[01]n1` and zero
   doctrine `TARGET_DISK` by grep. Acceptance: `refresh-twin.sh verify` PASSED on the
   exact enumeration that previously died (Darron's hand, read-only).
+- `docs/CROWNING.md` (2nd pass) — Casey's three mask-in-place riders: R1 absent-vs-sick
+  mount divergence split; R2 night-patch honesty label (revocation completes when the
+  Samsung leaves the slot); R3 the ABDICATED status file planted on the original while
+  mounted (any non-CROWNED status makes every launcher refuse — her metal-verified guard
+  read). `plans/mint22-migration-runbook.md` — the Twin Freshness Doctrine (Jim, Darron's
+  correcting fold): Stage 4.1 final-refresh-at-the-door (numbered), Stage 4.9 post-soak
+  refresh (numbered), verify-only between, event-driven-never-cron standing rhythm.
 - `docs/CROWNING.md` — Casey's plain-reader pass folded whole (same night): the triple
   rule on every step (command · expected sight · divergence instruction), Step −1
   (which-room check before Step 0), the equipped Step 0 (sticker identifiers —
