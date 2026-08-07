@@ -32,7 +32,11 @@ const clearSentinel = () => { try { rmSync(sentinel); } catch { /* none */ } };
 // prompt with a fresh nonce. The test parses that off the sent line and echoes it back — exactly
 // what a real spoke does (emit the requested marker), so the test mirrors the live protocol.
 const parseAck = (line: string): { id: string; nonce: string } | null => {
-    const m = line.match(/STEP-OK\s+(\S+)\s+(\S+)\s*$/);
+    // MNT-098 suite repair: the feeder line gained backtick-wrapping + a "(without the backticks)"
+    // suffix at the S218 T1 ackRe hardening — the old end-anchored form stopped matching and the
+    // whole suite became un-runnable (a silent gate==parser drift in the suite's own mirror).
+    // Match the marker wherever it sits; exclude the closing backtick from the nonce.
+    const m = line.match(/STEP-OK\s+([^\s`]+)\s+([^\s`]+)/);
     return m ? { id: m[1], nonce: m[2] } : null;
 };
 
@@ -113,6 +117,20 @@ async function main() {
     ok(!WAKE_STEPS[gi].prompt.includes('$HOME/.han/health') && WAKE_STEPS[gi].prompt.length < 260,
         `gradient prompt stays terse — no inline sentinel path, ${WAKE_STEPS[gi].prompt.length} chars (P2.3 fix (c), anti re-bloat)`);
     ok(WAKE_STEPS[0].id === 'integrity' && WAKE_STEPS[0].prompt.includes('verify-identity-files'), 'WAKE_STEPS OPENS with the identity-integrity gate (step-0 parity — Jim catch (a), defence-in-depth superset of the autonomous wake)');
+    // MNT-098 — the self-run protocol's first-prompt unflushed-swap check must live in the fed wake
+    // too (the P2.1b relocation dropped it; a jammed flush ran 4 days undetected because the fed
+    // queue never looked). It sits AFTER the gradient and BEFORE working-mem, so a flushable
+    // backlog merges before the pair is read; the over-cap polarity is surface-never-dump.
+    const si = WAKE_STEPS.findIndex((s) => s.id === 'swap-check');
+    const wi = WAKE_STEPS.findIndex((s) => s.id === 'working-mem');
+    ok(si >= 0 && wi > si && si > gi, 'swap-check step exists, after the gradient, BEFORE working-mem (MNT-098 — the dropped self-run step, restored)');
+    ok(WAKE_STEPS[si].prompt.includes('wm-flush.ts') && WAKE_STEPS[si].prompt.includes('wm-flush-errors.jsonl'), 'swap-check cites the real flush script + the alert artefact (gate==parser family: the step and the hook point at one mechanism)');
+    ok(/do NOT dump/.test(WAKE_STEPS[si].prompt) && WAKE_STEPS[si].prompt.includes('backlog-over-cap'), 'over-cap polarity is SURFACE, never dump (F3/DEC-103 preserved in the step itself)');
+    // M1 (Jim) + Tenshi's clause: the THIRD outcome — the flush itself fails — must carry an
+    // instruction (bounded retry, surface like over-cap), keyed on the ALERT TAIL not the exit
+    // code alone (a piped hand-run launders the exit; wm-flush-errors.jsonl cannot be laundered).
+    ok(WAKE_STEPS[si].prompt.includes('flush-failed') && /do NOT retry more than once/.test(WAKE_STEPS[si].prompt) && /RE-CHECK the alert tail/i.test(WAKE_STEPS[si].prompt),
+        'flush-fail outcome instructed: alert-tail re-check + bounded retry + surface (M1 + the laundered-exit clause — the polarity table is complete)');
 
     console.log('[6] (b) submission GUARANTEE — a LOST submit self-recovers on a re-pressed Enter');
     let presses6 = 0, nonce6 = '';

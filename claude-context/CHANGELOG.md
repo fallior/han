@@ -7,6 +7,24 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-07 (evening) — Leo (session) — MNT-098 leg 1: the fed wake's dropped unflushed-swap step, restored (Jim GREEN + M1; Tenshi GREEN + clauses)
+
+### Fixed
+- `src/server/lib/tmux-dispatcher.ts` — `WAKE_STEPS` gains the `swap-check` step (after
+  `gradient`, before `working-mem`): the self-run protocol's first-prompt unflushed-swap
+  check, dropped at the P2.1b prose→data relocation, restored to every fed wake (both
+  feeders consume the one list — DEC-081). Full three-outcome polarity: under-cap →
+  hand-flush now; flush-fails → alert-tail re-check + bounded retry + surface (Jim's M1,
+  keyed on the un-launderable `wm-flush-errors.jsonl` per Tenshi's laundered-exit clause);
+  over-cap → surface-never-dump naming the MNT-060 §3 drain (DEC-103 preserved). Swap
+  paths named sleeve-resolved (Tenshi's step==hook word).
+- `scripts/test-wake-feed-queue.ts` — the suite had been silently UN-RUNNABLE since the
+  S218 T1 ackRe hardening (the fed line's backtick-wrapping broke the suite's end-anchored
+  `parseAck`); repaired, + 4 new MNT-098 asserts (position, gate==parser citation,
+  surface-never-dump, the flush-fail clause). ALL PASS ×2; tsc 11-baseline/0-new.
+- Context: MNT-098 (maintenance journal) — Tenshi's 4-day jammed-flush finding; thread
+  `msiha5oa-ak26ij`. Leg 2 (the over-cap ratchet's chunked drain) built separately, held.
+
 ## 2026-08-06 (night) — Leo (session) — Battlemage-prep folds: twin M-1 + status-file + launcher guard + runbook v2 + harness archive
 
 ### Fixed
