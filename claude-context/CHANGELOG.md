@@ -7,6 +7,24 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-07 (late night) — Leo (session) — the /timeshift exclude (panel ×3 nods) + the splash re-apply land together
+
+### Fixed
+- `scripts/make-twin.sh` + `scripts/refresh-twin.sh` — `--exclude=/timeshift/` at all
+  three rsync sites (copy ×2 + verify's drift measure — instrument and act in one diff,
+  Casey's rider). The 3.8M "drift" was 99.3% Timeshift's hardlink farm (panel-replicated
+  ×3); real day-drift ≈ 25–27K paths. Reasons, stacked: Tenshi — the farm is thirteen
+  point-in-time copies of since-rotated credentials (secrets-across-time, the deciding
+  argument); Jim — the successor is not the original's archivist (Succession category
+  error); Casey — an un-ceremonied revert lever Timeshift's button would never gate.
+  Stage 4.1 re-sizes hours→minutes. The held splash blocks (login-visible twin identity,
+  `d5158102`/`afbc7fe9` family) re-applied from stash and ride this land.
+- Runbook — doctrine line 4 gains the measured baseline with provenance (25–27K/day,
+  2026-08-07, exclusion noted); the farm-residue NAMED cleanup act (prospective-only
+  exclude; Darron's hand; secret-surface reason stated). `docs/CROWNING.md` step 7 —
+  `backup_device_uuid` joins the role-value edit list (Tenshi's seam: on a crowned twin
+  Timeshift still aims at the abdicated original).
+
 ## 2026-08-07 (night) — Leo (session) — twin disk stable-pin: derive the disk, never name it (all chairs GREEN + folds; verify PASSED on the flipped boot)
 
 ### Fixed

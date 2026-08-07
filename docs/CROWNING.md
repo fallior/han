@@ -155,7 +155,10 @@ original, once repaired and present, becomes the **HEIR**: re-consecrate it as t
 by re-running the consecration *against it* — edit the `PIN_*` UUIDs in the twin scripts to
 the old original's actual **partition UUIDs**; the disk **derives** from them (they are
 **per-consecration role values, never eternal identities** — device names are boot-scoped
-and never typed; the model↔role sticker lines in Step 0 swap here too). At any
+and never typed; the model↔role sticker lines in Step 0 swap here too, **and so does
+Timeshift's `backup_device_uuid` in `/etc/timeshift/timeshift.json`** — on a crowned twin
+it still aims at the abdicated original until edited (Tenshi's seam: the snapshots were
+the payload, the config is the aim)). At any
 re-consecration, **state the new `PIN_*` values on the thread and have a second seat verify
 them against live `blkid` output before any destructive invocation** — the second seat is
 the only independent witness at that moment. Then `make-twin.sh` it. Re-sync always runs

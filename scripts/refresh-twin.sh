@@ -132,6 +132,7 @@ if [ "$MODE" = "verify" ]; then
     --exclude=/proc/ --exclude=/sys/ --exclude=/dev/ --exclude=/run/ \
     --exclude=/tmp/ --exclude=/mnt/ --exclude=/media/ --exclude=/lost+found \
     --exclude=/swapfile --exclude=/boot/efi/ --exclude=/boot/grub/grub.cfg \
+    --exclude=/timeshift/ \
     --exclude=/etc/fstab --exclude=/etc/hostname --exclude=/etc/hosts \
     --exclude='/home/darron/.config/systemd/user*' \
     / "$TWIN_MNT"/ 2>/dev/null | wc -l)
@@ -181,6 +182,7 @@ rsync -aHAXx --delete --info=progress2 \
   --exclude=/proc/ --exclude=/sys/ --exclude=/dev/ --exclude=/run/ \
   --exclude=/tmp/ --exclude=/mnt/ --exclude=/media/ --exclude=/lost+found \
   --exclude=/swapfile --exclude=/boot/efi/ --exclude=/boot/grub/grub.cfg \
+    --exclude=/timeshift/ \
   / "$TWIN_MNT"/
 RSYNC_RC=$?
 set -e
@@ -229,6 +231,61 @@ echo "  Garden services are MASKED here by design."
 echo "  Real recovery: see refresh-twin.sh UNMASK notes."
 echo "==============================================="
 BANNER
+
+# LOGIN-VISIBLE twin identity — re-planted every refresh (the rsync carries the original's
+# LACK of these files, so they must be restored here like hostname/fstab/status; same block
+# as make-twin.sh — keep the two aligned). Self-retiring splash: silent once CROWNED.
+log "re-planting login-visible twin identity (greeter background + login splash + Desktop CROWNING.md)..."
+mkdir -p "$TWIN_MNT/usr/share/backgrounds" "$TWIN_MNT/etc/lightdm"
+if command -v convert >/dev/null 2>&1; then
+  convert -size 1920x1080 xc:'#5a1010' -gravity center -fill white \
+    -pointsize 96 -annotate +0-120 'HAN-TWIN' \
+    -pointsize 40 -annotate +0+20 'Subordinate copy — masked, not crowned' \
+    -pointsize 30 -annotate +0+110 'Real recovery: Desktop/CROWNING.md (the UNMASK ceremony)' \
+    "$TWIN_MNT/usr/share/backgrounds/han-twin-banner.png"
+  GREETER_BG="background=/usr/share/backgrounds/han-twin-banner.png"
+else
+  GREETER_BG="background-color=#5a1010"
+fi
+cat > "$TWIN_MNT/etc/lightdm/slick-greeter.conf" <<GREETER
+[Greeter]
+${GREETER_BG}
+draw-user-backgrounds=false
+GREETER
+cat > "$TWIN_MNT/usr/local/bin/han-twin-banner.sh" <<'SPLASH'
+#!/bin/bash
+# Self-retiring twin splash: silent once crowned (no UNMASK cleanup step required).
+grep -q '^CROWNED' /etc/han-twin-status 2>/dev/null && exit 0
+TEXT="<b>This is han-twin — the bootable twin.</b>
+
+Garden services are MASKED here by design; the launchers refuse until crowned.
+
+Real recovery (the 7-step UNMASK ceremony):
+<b>/home/darron/Desktop/CROWNING.md</b>
+(also: the UNMASK header in refresh-twin.sh)"
+zenity --warning --width=560 --title="HAN-TWIN" --text="$TEXT" 2>/dev/null || true
+SPLASH
+chmod +x "$TWIN_MNT/usr/local/bin/han-twin-banner.sh"
+mkdir -p "$TWIN_MNT/etc/xdg/autostart"
+cat > "$TWIN_MNT/etc/xdg/autostart/han-twin-banner.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=HAN twin notice
+Exec=/usr/local/bin/han-twin-banner.sh
+X-GNOME-Autostart-enabled=true
+DESKTOP
+CROWNING_SRC="$(cd "$(dirname "$0")/.." && pwd)/docs/CROWNING.md"
+[ -f "$CROWNING_SRC" ] || CROWNING_SRC="$TWIN_MNT/home/darron/Projects/han/docs/CROWNING.md"
+if [ -f "$CROWNING_SRC" ]; then
+  mkdir -p "$TWIN_MNT/home/darron/Desktop"
+  cp "$CROWNING_SRC" "$TWIN_MNT/home/darron/Desktop/CROWNING.md"
+  chown 1000:1000 "$TWIN_MNT/home/darron/Desktop/CROWNING.md" 2>/dev/null || true
+fi
+# Asserts beside the plant (MNT-097's lesson); NOT in run_asserts — verify mode must stay
+# green on a twin built before the splash existed.
+[ -f "$TWIN_MNT/etc/lightdm/slick-greeter.conf" ]            || die "assert: twin greeter conf missing (login-visible identity)"
+[ -x "$TWIN_MNT/usr/local/bin/han-twin-banner.sh" ]          || die "assert: twin login splash script missing/not executable"
+[ -f "$TWIN_MNT/etc/xdg/autostart/han-twin-banner.desktop" ] || die "assert: twin splash autostart missing"
 
 log "regenerating the twin's grub from ITS OWN chroot..."
 mountpoint -q "$TWIN_MNT/boot/efi" || mount "$TWIN_ESP_DEV" "$TWIN_MNT/boot/efi"

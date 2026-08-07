@@ -141,7 +141,22 @@ only after the soak passes, one deliberate `refresh-twin.sh` converts the twin f
    days-since-refresh + the verify drift count and flags past threshold (a future Bill
    job: run the maths, raise the flag, a human turns the key). The always-on lanes own
    *data* freshness; the twin owns *bootability*; CROWNING.md's honesty line covers the
-   gap at crown time.
+   gap at crown time. **Measured baseline (2026-08-07, the metric's first datapoint —
+   Casey's provenance rider):** one full garden day ≈ **25–27K paths, <400 real content
+   edits** (the `-i` itemize run, panel-replicated ×3; `/timeshift/` excluded from copy
+   AND measure as of this date — instrument and act moved in the same diff).
+
+**The farm residue (Tenshi's leg — a NAMED act, Darron's hand, once, before Stage 4.1):**
+the twin was built before the `/timeshift/` exclude and already carries the original's
+snapshot farm — thirteen point-in-time copies of since-rotated credentials among them
+(the exclude is prospective-only; no `--delete-excluded`, by design — Casey F2). The
+cleanup is one deliberate act with this stated reason (secret-surface reduction,
+Tenshi's 2-Aug finding ×13-across-time), never a flag side-effect:
+```bash
+sudo mkdir -p /mnt/twin && sudo mount /dev/disk/by-label/twin /mnt/twin
+sudo rm -rf /mnt/twin/timeshift
+sudo umount /mnt/twin
+```
 **Python note:** venvs break across 3.10→3.12 (expected, cheap): rebuild the voice/quantum
 venvs on demand; model caches survive.
 
