@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# make-twin.sh — build the bootable twin of the garden's root onto nvme1n1
+# make-twin.sh — build the bootable twin of the garden's root onto the consecrated twin
+# disk (derived from its pinned partition UUIDs — never a boot-scoped device name)
 #
 # Darron's bootable-twin instrument (supersedes Tenshi's G0.2 snapshot — msb5c2tb).
 # Run BY DARRON'S HAND with sudo (L013: agents never run state-changing ops on the host):
@@ -35,7 +36,7 @@
 #   1. Preflight — identity-pins the target disk by the UUIDs it carries TODAY;
 #      refuses to run against anything else. Verifies scratch is empty, swap unused,
 #      UEFI boot, tools present, garden quiesced, and asks for explicit confirmation.
-#   2. Repartition nvme1n1: KEEP p1 (swap, UUID untouched — no initramfs churn);
+#   2. Repartition the DERIVED target disk: KEEP p1 (swap, UUID untouched — no initramfs churn);
 #      replace empty scratch with p2 ESP 1G + p3 twin 1000G + p4 scratch (rest).
 #   3. rsync the live root -> twin (one filesystem, pseudo-fs excludes, grub.cfg excluded).
 #   4. Twin-ise: its own fstab (twin root + twin ESP + shared swap, NO scratch),
@@ -47,9 +48,12 @@
 #
 # THE SUCCESSION LAW (Darron's ruling 2026-08-07): whichever drive is CROWNED is HAN's
 # drive — after a coronation the roles REVERSE (the old original becomes the heir) and
-# this mechanism persists across the reversal: the PIN_*/TARGET_DISK constants are
-# per-consecration ROLE values, re-set at each consecration, never eternal drive
-# identities. Re-sync always runs crowned→heir. See refresh-twin.sh UNMASK step 7.
+# this mechanism persists across the reversal: the PIN_* UUIDs are per-consecration ROLE
+# values, re-set at each consecration, never eternal identities — the disk DERIVES from
+# them. At any re-consecration the new PIN_* values are STATED ON THE THREAD and a second
+# seat verifies them against live blkid output BEFORE any destructive invocation (Casey's
+# formality — the second seat is the only independent witness at that moment). Re-sync
+# always runs crowned→heir. See refresh-twin.sh UNMASK step 7.
 #
 # The standing posture afterwards: NEVER bare-rsync onto the twin — that clobbers
 # its fstab and silently un-twins it (THE REFRESH TRAP). Refresh only via
@@ -57,11 +61,12 @@
 
 set -euo pipefail
 
-# ── Identity pins (the disk as it is TODAY — the script refuses anything else) ──
-TARGET_DISK="/dev/nvme1n1"
-PIN_SWAP_UUID="56a75d81-f033-4f06-b189-c29bb6963c37"     # nvme1n1p1 today
-PIN_SCRATCH_UUID="c971b993-7a07-4f21-a1e5-02f0230a8245"  # nvme1n1p2 today (empty, consumed)
-HOST_ROOT_UUID="d5a37330-7c4a-4df9-a4d8-d9f99c44aac5"    # nvme0n1p2 — must be what we run FROM
+# ── Identity pins (partition UUIDs as consecrated — the script refuses anything else.
+#    Device NAMES are boot-scoped (the 2026-08-07 enumeration flip) and never appear here:
+#    the target disk DERIVES from the pins below.) ──
+PIN_SWAP_UUID="56a75d81-f033-4f06-b189-c29bb6963c37"     # the KEPT swap partition, wherever it enumerates
+PIN_SCRATCH_UUID="c971b993-7a07-4f21-a1e5-02f0230a8245"  # the empty scratch to consume, wherever it enumerates
+HOST_ROOT_UUID="d5a37330-7c4a-4df9-a4d8-d9f99c44aac5"    # the ORIGINAL root we must be running FROM
 TWIN_HOSTNAME="han-twin"
 TWIN_SIZE="1000GiB"
 ESP_SIZE="1GiB"
@@ -69,6 +74,14 @@ TWIN_MNT="/mnt/twin"
 
 log()  { printf '\n\033[1;32m[make-twin]\033[0m %s\n' "$*"; }
 die()  { printf '\n\033[1;31m[make-twin] FATAL:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# parent_disk: partition device -> its physical disk, enumeration-proof (lsblk asks the
+# kernel live). BOUND (Jim N2): a dm/LVM root would misdirect this — irrelevant on this box
+# by declared design (plain-partition roots; the script is box-pinned).
+parent_disk() {
+  local pk; pk=$(lsblk -no pkname "$1" 2>/dev/null | head -1)
+  [ -n "$pk" ] && printf '/dev/%s\n' "$pk"
+}
 
 # ───────────────────────────── 1. PREFLIGHT ─────────────────────────────
 [ "$(id -u)" = 0 ] || die "run with sudo (Darron's hand)."
@@ -81,7 +94,21 @@ done
 CUR_ROOT_UUID=$(findmnt -no UUID /) || die "cannot read root UUID"
 [ "$CUR_ROOT_UUID" = "$HOST_ROOT_UUID" ] || die "running root ($CUR_ROOT_UUID) is not the pinned original — refusing (are you ON the twin?)."
 
-# Target disk must carry today's exact partition UUIDs — the identity pin.
+# The target disk DERIVES from the pinned swap UUID (the partition the build KEEPS — a
+# post-crash retry can still derive; scratch is consumed). Jim F1: the anchor must be
+# UNIQUE before a by-uuid symlink means anything. Counted by lsblk (Tenshi's live-read
+# option): the blkid cache under-counts stale, failing OPEN — the wrong direction for a
+# refuse-ambiguity gate — and cache-bypassed blkid needs root to answer at all.
+[ "$(lsblk -rno UUID | grep -cx "$PIN_SWAP_UUID")" = 1 ] || die "derivation anchor UUID is ambiguous or absent — refusing."
+SWAP_DEV=$(readlink -f "/dev/disk/by-uuid/$PIN_SWAP_UUID") || die "pinned swap UUID not present — not the consecrated disk's boot?"
+TARGET_DISK=$(parent_disk "$SWAP_DEV") || die "cannot derive target disk from pinned swap"
+# Tenshi's gate — on the DESTRUCTIVE side above all: derived from the live kernel, so a
+# mis-edited PIN_* value cannot defeat it. Every other belt on the sgdisk path compares two
+# human-typed values; this one asks the one witness a re-consecrating hand cannot author.
+LIVE_DISK=$(parent_disk "$(findmnt -no SOURCE /)") || die "cannot derive live root's disk"
+[ "$TARGET_DISK" != "$LIVE_DISK" ] || die "TARGET_DISK ($TARGET_DISK) is the disk carrying the RUNNING ROOT — refusing."
+
+# Pin belts (kept — now belts over a derivation, not gates over a guessed name).
 [ -b "$TARGET_DISK" ] || die "$TARGET_DISK not present"
 ACTUAL_P1=$(blkid -s UUID -o value "${TARGET_DISK}p1" || true)
 ACTUAL_P2=$(blkid -s UUID -o value "${TARGET_DISK}p2" || true)

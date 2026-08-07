@@ -7,6 +7,24 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-07 (night) — Leo (session) — twin disk stable-pin: derive the disk, never name it (all chairs GREEN + folds; verify PASSED on the flipped boot)
+
+### Fixed
+- `scripts/make-twin.sh` + `scripts/refresh-twin.sh` — boot-scoped device names retired
+  from the twin machinery (the 2026-08-07 NVMe enumeration flip): make-twin DERIVES the
+  target disk from `PIN_SWAP_UUID` (Jim F1 anchor-uniqueness gate first; Tenshi's
+  not-live kernel-witness gate on the destructive path); refresh deletes the constant and
+  gains the invariant set (lsblk uniqueness ×2 — the declared instrument-swap after
+  blkid's unprivileged false-0; same-disk N3; not-the-live-disk; partlabel↔label
+  cross-check). Casey: five bare-name comments re-worded; zero `nvme[01]n1` and zero
+  doctrine `TARGET_DISK` by grep. Acceptance: `refresh-twin.sh verify` PASSED on the
+  exact enumeration that previously died (Darron's hand, read-only).
+- Doctrine (both headers, `plans/mint22-migration-runbook.md`, `docs/CROWNING.md` step 7)
+  — pins-are-role-values simplifies to PIN_*-only (the disk derives) + Casey's
+  re-consecration formality (thread-stated values, second-seat blkid verify before any
+  destructive invocation). CROWNING.md (the bad-night UNMASK reference, written tonight)
+  rides this land. Plan: `plans/twin-disk-stable-pin-plan.md`; thread `msb5c2tb`.
+
 ## 2026-08-07 (evening) — Leo (session) — MNT-098 leg 1: the fed wake's dropped unflushed-swap step, restored (Jim GREEN + M1; Tenshi GREEN + clauses)
 
 ### Fixed

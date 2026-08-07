@@ -45,15 +45,17 @@
 #     7. THE SUCCESSION (Darron's ruling, 2026-08-07): the crowned drive IS HAN's drive
 #        from this moment — not a recovered copy. The old original, once repaired and
 #        present, becomes the HEIR: re-consecrate it as the new twin by re-running the
-#        consecration AGAINST IT (the PIN_*/TARGET_DISK constants are per-consecration
-#        role values, not eternal drive identities — edit them to the old original's
-#        actual UUIDs/disk, then make-twin it). Re-sync is always crowned→heir. A later
-#        deliberate revert to the larger drive as HAN is its own ceremony, not a refresh.
+#        consecration AGAINST IT (the PIN_* UUIDs are per-consecration role values,
+#        never eternal identities — edit them to the old original's actual partition
+#        UUIDs; the disk DERIVES from them). At any re-consecration the new PIN_* values
+#        are STATED ON THE THREAD and a second seat verifies them against live blkid
+#        output BEFORE any destructive invocation (Casey's formality). Re-sync is always
+#        crowned→heir. A later deliberate revert to the larger drive as HAN is its own
+#        ceremony, not a refresh.
 #   Do this ONLY when the original is truly lost or masked/disconnected.
 
 set -euo pipefail
 
-TARGET_DISK="/dev/nvme1n1"
 HOST_ROOT_UUID="d5a37330-7c4a-4df9-a4d8-d9f99c44aac5"   # must be what we run FROM
 PIN_SWAP_UUID="56a75d81-f033-4f06-b189-c29bb6963c37"
 TWIN_HOSTNAME="han-twin"
@@ -63,6 +65,14 @@ MODE="${1:-refresh}"
 log() { printf '\n\033[1;36m[refresh-twin]\033[0m %s\n' "$*"; }
 die() { printf '\n\033[1;31m[refresh-twin] FATAL:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# parent_disk: partition device -> its physical disk, enumeration-proof (lsblk asks the
+# kernel live). BOUND (Jim N2): a dm/LVM root would misdirect this — irrelevant on this box
+# by declared design (plain-partition roots; the script is box-pinned).
+parent_disk() {
+  local pk; pk=$(lsblk -no pkname "$1" 2>/dev/null | head -1)
+  [ -n "$pk" ] && printf '/dev/%s\n' "$pk"
+}
+
 # ── Preflight ──
 [ "$(id -u)" = 0 ] || die "run with sudo (Darron's hand)."
 case "$MODE" in refresh|verify|--reinstall-grub) ;; *) die "usage: refresh-twin.sh [refresh|verify|--reinstall-grub]";; esac
@@ -70,11 +80,26 @@ CUR_ROOT_UUID=$(findmnt -no UUID /) || die "cannot read root UUID"
 [ "$CUR_ROOT_UUID" = "$HOST_ROOT_UUID" ] || die "running root is not the original — NEVER refresh from the twin."
 
 # Find the twin by its LABEL (partition numbers may shift; the label is the pin).
+# Uniqueness FIRST — refuse ambiguity, counted by lsblk (Tenshi's live-read option: the
+# blkid cache under-counts stale, failing OPEN — and unprivileged cache-bypassed blkid
+# returns a false 0, caught on this build's own dry-probe. lsblk reads the kernel, live,
+# at any privilege — the instrument whose null means what it says).
+[ "$(lsblk -rno LABEL | grep -cx 'twin')" = 1 ]    || die "label 'twin' is ambiguous or absent — refusing."
+[ "$(lsblk -rno LABEL | grep -cx 'TWINESP')" = 1 ] || die "label 'TWINESP' is ambiguous or absent — refusing."
 TWIN_DEV=$(blkid -L twin) || die "no partition labelled 'twin' — has make-twin.sh run?"
 TWIN_ESP_DEV=$(blkid -L TWINESP 2>/dev/null || blkid -t LABEL=TWINESP -o device | head -1) || die "twin ESP not found"
-case "$TWIN_DEV" in "$TARGET_DISK"*) ;; *) die "twin label found on unexpected disk: $TWIN_DEV";; esac
-# N3 (Jim): the ESP must sit on the pinned disk too.
-case "$TWIN_ESP_DEV" in "$TARGET_DISK"*) ;; *) die "twin ESP on unexpected disk: $TWIN_ESP_DEV";; esac
+# The invariants the old TARGET_DISK case-belts actually protected — enumeration-proof:
+# both twin partitions on ONE physical disk (Jim N3); that disk is NOT the live disk
+# (the 2026-08-07 enumeration lesson, structural); partlabel and fs-label agree on the
+# same partition. Stronger than the old belt, which accepted anything on whatever the
+# old hardcoded name happened to point at that boot.
+TWIN_DISK=$(parent_disk "$TWIN_DEV")               || die "cannot derive twin's disk"
+ESP_DISK=$(parent_disk "$TWIN_ESP_DEV")            || die "cannot derive twin ESP's disk"
+LIVE_DISK=$(parent_disk "$(findmnt -no SOURCE /)") || die "cannot derive live root's disk"
+[ "$TWIN_DISK" = "$ESP_DISK" ]   || die "twin root and ESP on different disks — not a consecrated twin (N3)."
+[ "$TWIN_DISK" != "$LIVE_DISK" ] || die "twin label resolves to the LIVE disk — refusing (the enumeration lesson)."
+[ "$(readlink -f /dev/disk/by-partlabel/twin-esp 2>/dev/null)" = "$(readlink -f "$TWIN_ESP_DEV")" ] \
+  || die "partlabel twin-esp and label TWINESP disagree — refusing ambiguity."
 
 USERHOME="$TWIN_MNT/home/darron"
 

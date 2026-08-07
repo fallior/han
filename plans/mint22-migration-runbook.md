@@ -67,8 +67,8 @@ sqlite-consistent staged copy + RESURRECTION.md as the deeper fallback.
 
 1. Twin scripts: re-audit GREEN received (Tenshi AMBER-lifted + Jim GREEN-pending-M-1);
    **M-1 awk fix applied** (the hex-B trap — extraction verified live: `Boot0003*` → `0003`)
-   + the merged status-file planted/asserted. Current blobs `9aae0546` (make) /
-   `cffce375` (refresh) — one quick membrane re-hash owed on these final bytes.
+   + the merged status-file planted/asserted. Blob currency lives in the THREAD, not here
+   (this line went stale twice in one day — cite the surface that updates, per Casey).
 2. Tenshi's **launcher guard: BUILT 2026-08-06** (the merged Tenshi+Casey instrument —
    NOT hostname-keyed, which would have locked the lifeboat's oars on a crowned twin):
    all six `han*` launchers refuse when `/etc/han-twin-status` exists without `^CROWNED`;
@@ -148,9 +148,13 @@ after the dust settles, close-out with Jim.
 **Whichever drive is CROWNED is HAN's drive** — after a coronation, the crowned drive is
 not "a recovered copy"; it IS HAN, full stop. The roles reverse: the old original, once
 repaired and present, becomes the **heir apparent** — re-consecrated as the new twin by
-re-running the consecration against it (the scripts' PIN_*/TARGET_DISK constants are
-per-consecration role values, edited at each consecration; never eternal drive
-identities). **Re-sync always runs crowned→heir.** Tenshi's enforcement rider is in the
+re-running the consecration against it (the scripts' PIN_* UUIDs are per-consecration
+role values, edited at each consecration, never eternal identities — **the disk derives
+from them**; device names are boot-scoped, per the 2026-08-07 enumeration flip). At any
+re-consecration the new PIN_* values are **stated on the thread and a second seat
+verifies them against live `blkid` output before any destructive invocation** (Casey's
+formality — the second seat is the only independent witness at that moment).
+**Re-sync always runs crowned→heir.** Tenshi's enforcement rider is in the
 metal: `refresh-twin.sh` refuses to run onto a CROWNED drive — a stale original can never
 clobber the live garden under its own past. A later deliberate revert to the larger drive
 as HAN is its own ceremony (consecrate-the-larger-as-heir → refresh crowned→heir → crown
