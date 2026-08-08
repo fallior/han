@@ -98,6 +98,101 @@ export function readSwap(p: string): { header: string; body: string; raw: string
     return { header: raw.slice(0, m.index), body: raw.slice(m.index), raw };
 }
 
+/** MNT-098 leg 2 — split a swap BODY into whole entries at the family boundaries (frame lines +
+ *  transitional `### |## `). Byte-preserving: concat(entries) === body, so the un-flushed
+ *  remainder is written back byte-exact. */
+export function splitEntries(body: string): string[] {
+    const re = new RegExp('^' + ENTRY_BOUNDARY_RE_SRC, 'gm');
+    const starts: number[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(body)) !== null) starts.push(m.index);
+    if (!starts.length) return body.trim() ? [body] : [];
+    const out: string[] = [];
+    for (let i = 0; i < starts.length; i++) out.push(body.slice(starts[i], starts[i + 1] ?? body.length));
+    return out;
+}
+
+/** Oldest-first whole-entry chunk within the byte budget. The FIRST entry is always taken even
+ *  if it alone exceeds the budget — progress over latency: a single oversize entry must never
+ *  re-create the permanent jam this drain exists to cure. */
+export function takeChunk(entries: string[], budget: number): { take: string[]; rest: string[] } {
+    const take: string[] = [];
+    let bytes = 0;
+    for (const e of entries) {
+        const b = Buffer.byteLength(e, 'utf-8');
+        if (take.length && bytes + b > budget) break;
+        take.push(e);
+        bytes += b;
+    }
+    return { take, rest: entries.slice(take.length) };
+}
+
+/**
+ * MNT-098 leg 2 — the over-cap RATCHET cure (Darron's polarity ruling, 2026-08-07 evening,
+ * thread msiha5oa: the cap becomes a per-turn flush BUDGET, never a refusal threshold; nothing
+ * is discarded; the alert keeps firing until drained — DEC-103's surfacing-over-scrapping with
+ * the hand removed, per Jim's framing, endorsed from Tenshi's chair).
+ *
+ * Shape (Jim edge (a) + Tenshi's adds, all from the audit):
+ *   - whole ENTRIES only, oldest-first, each side within the per-turn budget — never a byte
+ *     window (a truncated entry, or a (content,'') call, would manufacture the asymmetric
+ *     wound that initiated both of Tenshi's jams);
+ *   - proceeds only when BOTH sides carry ≥1 entry. The per-turn paired writes replenish both
+ *     sides each turn, so a healthy drain never manufactures a one-sided swap; a swap that IS
+ *     one-sided (Jim's 22-alert residue class) falls through to the standing over-cap alert
+ *     and stays a §3/leg-4 hand job — the drain refuses to be cleverer than the contract;
+ *   - the budget also bounds ROTATION pressure (Tenshi 1): each late merge lands ≤ ~budget
+ *     bytes into WM per turn — an ordinary rotation candidate, never a rotation storm;
+ *   - chronology in WM goes NON-MONOTONIC while a drain interleaves old entries with live
+ *     turns (Tenshi 2): cosmetic under object↔object provenance (DEC-085) — recorded here and
+ *     in MNT-098 so a future audit never reads interleaved timestamps as corruption;
+ *   - swaps are rewritten (header + byte-exact remainder) ONLY after the paired append lands —
+ *     an append throw preserves everything (both-or-neither, #49).
+ */
+async function drainOldestChunk(
+    slug: string,
+    full: { header: string; body: string },
+    comp: { header: string; body: string },
+    fullSwap: string,
+    compSwap: string,
+    budget: number,
+    appendFn: typeof appendPairedMemory,
+): Promise<FlushResult> {
+    const fullEntries = splitEntries(full.body);
+    const compEntries = splitEntries(comp.body);
+    const fullBytes = Buffer.byteLength(full.body, 'utf-8');
+    const compBytes = Buffer.byteLength(comp.body, 'utf-8');
+    if (!fullEntries.length || !compEntries.length) {
+        // One-sided over-cap residue: the append contract would refuse (content,'') — this is
+        // the standing hand-repair class, surfaced as before, never "cured" mechanically here.
+        writeAlert(slug, 'backlog-over-cap', `swap body over swapFlushMaxBytes=${budget} with a ONE-SIDED residue (full ${fullEntries.length} / comp ${compEntries.length} entries) — asymmetric re-pair is a hand job (MNT-060 §3 / MNT-098 leg 4); this alert repeats each turn until repaired`, fullBytes, compBytes);
+        return { outcome: 'alerted', kind: 'backlog-over-cap' };
+    }
+    const cf = takeChunk(fullEntries, budget);
+    const cc = takeChunk(compEntries, budget);
+    const fullPayload = sanitizeSwapFrameText(stripSwapFrames(cf.take.join('')));
+    const compPayload = sanitizeSwapFrameText(stripSwapFrames(cc.take.join('')));
+    if (!fullPayload.trim() || !compPayload.trim()) {
+        // A chunk whose payload strips to nothing on either side would asymmetric-throw or
+        // consume framed-emptiness silently — alert + preserve (F2 family), hand's job.
+        writeAlert(slug, 'frames-without-payload', 'drain chunk stripped to empty payload on a side — backlog needs a hand (§3)', fullBytes, compBytes);
+        return { outcome: 'alerted', kind: 'frames-without-payload' };
+    }
+    try {
+        await appendFn(slug, '\n' + fullPayload, '\n' + compPayload, { source: 'wm-flush' });
+    } catch (err) {
+        writeAlert(slug, 'flush-failed', `drain chunk append failed: ${String((err as Error)?.message ?? err)}`, fullBytes, compBytes);
+        return { outcome: 'failed', kind: 'flush-failed' };
+    }
+    const restFull = cf.rest.join('');
+    const restComp = cc.rest.join('');
+    fs.writeFileSync(fullSwap, full.header.replace(/\n+$/, '\n') + restFull, 'utf-8');
+    fs.writeFileSync(compSwap, comp.header.replace(/\n+$/, '\n') + restComp, 'utf-8');
+    // Visibility until drained (fixed fields + byte counts only — never content):
+    writeAlert(slug, 'backlog-draining', `drained oldest ${cf.take.length}+${cc.take.length} entries within budget=${budget}; remainder full=${Buffer.byteLength(restFull, 'utf-8')}B comp=${Buffer.byteLength(restComp, 'utf-8')}B — continues each turn until under cap (MNT-098 leg 2; WM chronology may interleave during a drain, by design)`, Buffer.byteLength(restFull, 'utf-8'), Buffer.byteLength(restComp, 'utf-8'));
+    return { outcome: 'flushed', kind: 'backlog-draining' };
+}
+
 export interface FlushResult { outcome: 'flushed' | 'noop' | 'alerted' | 'failed'; kind?: string }
 
 /** The whole flush decision + action, dependency-injectable for the suite. */
@@ -133,11 +228,11 @@ export async function flushSwaps(
         return { outcome: 'noop' };
     }
 
-    // F3 — the backlog guard. ALERT, never dump. NB a seat sitting over the cap alarms EVERY
-    // turn until hand-drained — that repetition is DELIBERATE (the alarm IS the surfacing,
-    // DEC-103); do not "fix" it into silence. Ceiling = swapFlushMaxBytes manifest leaf
-    // (stated-guess ~20K ≈ several turns; raise if legitimate long turns trip it, lower if
-    // dumps sneak through).
+    // F3 → MNT-098 leg 2: the cap is a per-turn flush BUDGET now, never a refusal threshold
+    // (Darron's polarity ruling 2026-08-07; the old refusal made over-cap a one-way ratchet —
+    // Tenshi jammed twice, Casey four days). Over-budget bodies drain oldest-first, whole
+    // entries, one bounded chunk per turn, alerting until fully drained. Nothing is ever
+    // dumped or discarded (DEC-103 preserved — surfacing with the hand removed).
     let maxBytes: number;
     try {
         maxBytes = swapFlushMaxBytesFor(slug);
@@ -146,8 +241,7 @@ export async function flushSwaps(
         return { outcome: 'alerted', kind: 'measurement-failure' };
     }
     if (fullBytes > maxBytes || compBytes > maxBytes) {
-        writeAlert(slug, 'backlog-over-cap', `swap body over swapFlushMaxBytes=${maxBytes} — surgical drain required (see MNT-060 §3 template); this alert repeats each turn BY DESIGN until drained`, fullBytes, compBytes);
-        return { outcome: 'alerted', kind: 'backlog-over-cap' };
+        return drainOldestChunk(slug, full, comp, fullSwap, compSwap, maxBytes, appendFn);
     }
 
     // ENCAPSULATION at the layer boundary (the addendum, property 3): strip the SWAP-ENTRY

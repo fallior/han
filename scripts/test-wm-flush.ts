@@ -8,8 +8,10 @@
  *      Casey's rewrite-not-append semantics (a ## backlog is BODY, never header).
  *   F2 artefact: written on failure + no-op-with-body; no swap CONTENT ever echoed (Tenshi 5b);
  *      rotation at the cap (Tenshi 5a).
- *   F3 guard both polarities: over-cap → alert+preserve; measurement failure → alert+preserve
- *      (NEVER treat-unreadable-as-empty — Tenshi finding 4).
+ *   F3 → MNT-098 leg 2: over-cap DRAINS oldest-first whole entries within the per-turn budget
+ *      (the cap is a budget, never a refusal — Darron's polarity ruling 2026-08-07), alerting
+ *      until drained; one-sided residue stays alert+preserve (the hand class); measurement
+ *      failure → alert+preserve (NEVER treat-unreadable-as-empty — Tenshi finding 4).
  *   Reset-only-on-success + asymmetric-refusal preserved (append throws → swap intact).
  * The gate/parser contract (Jim fold 1) is asserted by grep-comparing the .sh regex family
  * against ENTRY_RE's source — a mismatch fails the suite.
@@ -102,18 +104,62 @@ async function main(): Promise<void> {
         check('drift swap preserved', fs.readFileSync(f, 'utf-8') === big);
     }
 
-    console.log('— F3 backlog guard —');
+    console.log('— F3 → MNT-098 leg 2: the cap is a BUDGET — over-cap drains oldest-first, bounded, alerting until done —');
     {
-        const bigBody = '### Backlog\n' + 'SECRETMARKER-content-line\n'.repeat(2000); // >20K body
-        const { f, c } = writePair('cap', HEADER + bigBody, HEADER + '### small\nok\n');
-        const before = fs.readFileSync(f, 'utf-8');
+        // Multi-entry backlog >20K on the full side: ONE bounded chunk drains per call, oldest
+        // first, whole entries only; remainder preserved byte-exact; alert names the drain.
+        const entryOf = (n: number) => `### E${n}\n` + `SECRETMARKER-line-${n}\n`.repeat(200); // ~4.4K each
+        const bigBody = [1, 2, 3, 4, 5, 6, 7, 8].map(entryOf).join(''); // ~35K, 8 entries
+        const { f, c } = writePair('drain', HEADER + bigBody, HEADER + '### small\nok\n');
         const r = recorder();
         const res = await flushSwaps('leo', f, c, r.fn);
         const t = alertTail();
-        check('over-cap → alert, never dump', res.outcome === 'alerted' && res.kind === 'backlog-over-cap' && r.calls.length === 0);
-        check('over-cap swap preserved byte-identical', fs.readFileSync(f, 'utf-8') === before);
-        check('alert names the by-design repetition', t.includes('BY DESIGN'));
-        check('alert carries NO swap content (Tenshi 5b)', !t.includes('SECRETMARKER'));
+        const remainder = fs.readFileSync(f, 'utf-8');
+        check('over-cap → drains a bounded chunk (not refused, not dumped whole)',
+            res.outcome === 'flushed' && res.kind === 'backlog-draining' && r.calls.length === 1);
+        check('chunk is OLDEST-first whole entries', r.calls[0]?.full.includes('### E1') === true && r.calls[0]?.full.includes('### E4') === true && r.calls[0]?.full.includes('### E6') === false);
+        check('remainder preserved byte-exact (suffix of the original body)',
+            remainder.startsWith('# Session Swap') && remainder.includes('### E6') && remainder.includes('### E8') && !remainder.includes('### E1\n'));
+        check('drain alert fires (visibility until drained) with NO swap content (Tenshi 5b)',
+            t.includes('backlog-draining') && !t.includes('SECRETMARKER'));
+        // Successive calls fully drain: run until under cap, then the normal path clears it.
+        let guard = 0;
+        let last = res;
+        while (guard++ < 10) {
+            last = await flushSwaps('leo', f, c, r.fn);
+            if (last.kind !== 'backlog-draining') break;
+        }
+        check('successive turns fully drain, ending in an ordinary flush',
+            last.outcome === 'flushed' && last.kind === undefined && !ENTRY_RE.test(fs.readFileSync(f, 'utf-8')));
+        check('every entry delivered exactly once across the drain',
+            [1, 2, 3, 4, 5, 6, 7, 8].every((n) => r.calls.filter((x) => x.full.includes(`### E${n}\n`)).length === 1));
+    }
+    {
+        // A SINGLE oversize entry (> budget alone) is taken anyway — progress over latency;
+        // an un-chunkable entry must never re-create the permanent jam.
+        const { f, c } = writePair('oversize', HEADER + '### Huge\n' + 'x'.repeat(25_000) + '\n', HEADER + '### small\nok\n');
+        const r = recorder();
+        const res = await flushSwaps('leo', f, c, r.fn);
+        check('oversize single entry drains alone (no permanent jam)', res.outcome === 'flushed' && r.calls.length === 1 && !ENTRY_RE.test(fs.readFileSync(f, 'utf-8')));
+    }
+    {
+        // ONE-SIDED over-cap residue (entries on one side, none on the other): the append
+        // contract would refuse (content,'') — stays the standing alert + hand-repair class.
+        const { f, c } = writePair('onesided', HEADER + '### Big\n' + 'y'.repeat(21_000) + '\n', HEADER);
+        const before = fs.readFileSync(f, 'utf-8');
+        const r = recorder();
+        const res = await flushSwaps('leo', f, c, r.fn);
+        check('one-sided over-cap → alert + preserve (hand class, never manufactured symmetry)',
+            res.outcome === 'alerted' && res.kind === 'backlog-over-cap' && r.calls.length === 0 && fs.readFileSync(f, 'utf-8') === before && alertTail().includes('ONE-SIDED'));
+    }
+    {
+        // Append throw mid-drain → flush-failed + BOTH swaps preserved (both-or-neither, #49).
+        const fullC = HEADER + '### A\n' + 'z'.repeat(21_000) + '\n### B\nsecond\n';
+        const compC = HEADER + '### Ac\nsmall\n';
+        const { f, c } = writePair('drainthrow', fullC, compC);
+        const res = await flushSwaps('leo', f, c, throwingAppend as never);
+        check('drain append-throw → flush-failed, both swaps preserved',
+            res.outcome === 'failed' && fs.readFileSync(f, 'utf-8') === fullC && fs.readFileSync(c, 'utf-8') === compC);
     }
     {
         const res = await flushSwaps('leo', path.join(tmp, 'missing-full.md'), path.join(tmp, 'missing-comp.md'), recorder().fn);

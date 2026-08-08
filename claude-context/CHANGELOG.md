@@ -7,6 +7,40 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-08 (night) — Leo (session) — MNT-098 leg 2: the flush cap stops being a one-way ratchet
+
+### Fixed
+- `scripts/wm-flush.ts` — `splitEntries` / `takeChunk` / `drainOldestChunk`: the F3
+  over-cap refusal becomes a **bounded, oldest-first, whole-entry drain**. Per Darron's
+  polarity ruling the cap is a per-turn **budget**, not a wall — nothing is discarded and
+  the alert keeps firing until the backlog clears (DEC-103 preserved). Whole entries only,
+  never byte windows; the first entry always goes (oversize-progress rule, so an
+  un-chunkable entry can never re-create the permanent jam); the drain proceeds only when
+  **both** sides carry ≥1 entry, so a genuinely one-sided residue stays the alert-and-hand
+  class rather than the code inventing a pairing the append contract never promised; swaps
+  are rewritten only **after** the paired append lands (#49 ordering — a throw leaves both
+  swaps untouched). New alert kind `backlog-draining`, byte counts only, never content.
+- Before this, a swap that crossed the cap could only ever be cleared by a human hand, so
+  every jam re-formed — the disease that ran ten days on Tenshi's seat and four on Casey's.
+
+### Tests
+- `scripts/test-wm-flush.ts` — the old F3 refusal case rewritten to the new contract plus
+  nine drain cases (bounded chunk, oldest-first, byte-exact remainder, full drain across
+  turns, exactly-once delivery, oversize-single-entry progress, one-sided preserve,
+  append-throw preserve, no-content-in-alerts). **52/52 ×2**; tsc 11-baseline / 0 new.
+
+### Notes
+- Blocking diff-audits **GREEN** from Jim and Tenshi (2026-08-07 19:12 / 19:14), held 26
+  hours at blobs `917887d2` / `eb5c1ccb` and landed byte-unchanged. Two accepted asymmetries
+  recorded together in the maintenance journal per Tenshi: the oversize bound priced honestly
+  as `≤ max(2×budget, largest-single-entry)`, and the cross-side pairing asymmetry (comp
+  drains faster than full; sound because DEC-085 provenance is object↔object, never
+  per-entry). Jim's N1 — the landed swap-check step's "§3 surgical drain" clause goes stale
+  with this land — is **owed at the step's next touch**, deliberately not folded here rather
+  than put unaudited bytes in the dispatcher.
+- Suite-proven, not yet fired on a live jam; Casey's backlog is the genuine live test and
+  should clear mechanically within ~6 turns of her next sessions.
+
 ## 2026-08-07 (late night) — Leo (session) — the /timeshift exclude (panel ×3 nods) + the splash re-apply land together
 
 ### Fixed
