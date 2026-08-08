@@ -14,3 +14,19 @@ cloudflare/**/.wrangler/
 *.db
 src/server/c1
 src/server/.replay-leo.ts
+
+# Working surface, not repo content (Darron's ruling, 2026-08-08 — the tidy-up
+# before the Mint 22 hop). These are where builds get staged, probed and diffed;
+# they are not the build. Ignoring them is the actual cure for "there seems to be
+# lots uncommitted" — most of that noise was never work awaiting a commit.
+#   scratchpad/ — held diffs, probes, FULL-file drafts (416K)
+#   quarantine/ — the 2026-07-08 /tmp capture rescue (660M of raw typescripts).
+#     Committing it would put transient capture into history permanently, which is
+#     against DEC-069's grain rather than with it: the rule protects MEMORY from
+#     destruction, it does not ask us to version every byte that ever passed through.
+#     NOTE: quarantine/ carries its own .gitignore claiming "the manifest + this
+#     file are tracked" — they are NOT (git ls-files is empty there). Flagged to
+#     Darron; if he wants the RECORD (README.md + MANIFEST.tsv) versioned without
+#     the blobs, that is a negation rule and a separate deliberate act.
+scratchpad/
+quarantine/
