@@ -9,6 +9,21 @@
 
 ## 2026-08-08 (late night) — Leo (session) — tidy up before the hop: the launcher guard was never committed
 
+### Fixed (Batch 2)
+- `scripts/manifest-get.ts` — the **EPIPE guard**, 25 days on disk, its own comment still
+  reading *"DEC pending Jim's audit"*. A `| grep -q` / `| head` consumer closes stdout as
+  soon as it has what it needs; Node then threw an unhandled EPIPE that a `set -o pipefail`
+  caller read as failure. `launch-tmux-surface.sh`'s
+  `manifest-get surfaces <slug> | grep -qx <surface>` did exactly this — so **every
+  non-last surface read as "not launchable" and Jim's supervisor cycle broke.** The guard
+  swallows **only** `EPIPE` and re-throws everything else (the narrowness is the whole
+  audit); `exit(0)` is the point, not a shortcut, because under `pipefail` a non-zero
+  producer fails the pipeline even when `grep` succeeded. Jim: GREEN, and **no DEC is
+  needed** — it is a bug fix conforming to the Unix producer-gets-SIGPIPE convention, not a
+  decision. Named worst case, accepted: a genuinely aborted consumer now reports success,
+  so a truncated surface list could read as complete — narrow (ENOSPC/EACCES still throw)
+  and strictly better than today's always-fail.
+
 ### Fixed
 - `scripts/{han,hanleo,hanjim,hancasey,hantenshi}` — the **uncrowned-twin refusal
   guard**, landed at last. `f68d4c9`'s message claimed *"six launchers guarded"* and the

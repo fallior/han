@@ -28,6 +28,18 @@
 import { GARDEN_MANIFEST, manifestModelHead } from '../src/server/lib/garden-manifest';
 import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
 
+// EPIPE guard: a `| grep -q` / `| head` consumer closes our stdout as soon as it
+// has what it needs, and Node otherwise throws an unhandled EPIPE that a
+// `set -o pipefail` caller misreads as a failure. launch-tmux-surface.sh's
+// `manifest-get surfaces <slug> | grep -qx <surface>` check did exactly this — the
+// crash made every non-last surface (e.g. supervisor-cycle) read as "not launchable"
+// and broke Jim's supervisor cycle. Swallow EPIPE and exit cleanly (the Unix
+// producer-gets-SIGPIPE convention). (2026-07-14, Leo — DEC pending Jim's audit.)
+process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EPIPE') process.exit(0);
+    throw err;
+});
+
 /** Q-V2-3 deferral (named decision, T-2 PR 2026-06-11): meditation surfaces are
  *  re-encounter practice and stay frozen-on-SDK pending their own call. */
 const DEFERRED_SURFACE_PREFIXES = ['meditation-'];
