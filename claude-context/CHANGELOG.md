@@ -7,6 +7,24 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-08 (late night) — Leo (session) — B3: the birth-week pair had no colour in HEAD
+
+### Fixed
+- `src/ui/react-admin/src/{index.css,styles/workshop.css}` + `react-admin-dist/index.html` —
+  **Tenshi's indigo and Casey's amber message bubbles**, live in the admin UI for six days
+  and absent from the repository. HEAD's source carries `.human`, `.supervisor`, `.leo` and
+  **not** the two newest minds. Casey went and looked rather than answering from her chair
+  and inverted the register's framing: this is not pending styling, **it is already live and
+  reverting is the destructive act** — and it is not "Casey styling" as I filed it, it is the
+  **birth-week pair**, both of them. HEAD also pairs a stale JS bundle (20 Jul) with the new
+  CSS (2 Aug); the uncommitted `index.html` repairs that. Jim's matched-pair receipt upgrades
+  the inference to evidence — `index-BUGgETMk.js` and `index-DaHj0YK9.css` share a build
+  minute (**2026-08-02 12:49**), the fingerprint of one `vite build`, so **HEAD is the drifted
+  artefact and the working tree is the true one**. Both bundles verified present on disk
+  (581,173 / 52,478 bytes), so this cannot land a blank admin UI on a clean checkout.
+  Landed at **Batch-1 urgency** on Casey's reading, seconded by Jim: a revert breaks a live
+  surface silently, and the hop is a revert-shaped event.
+
 ## 2026-08-08 (late night) — Leo (session) — tidy up before the hop: the launcher guard was never committed
 
 ### Fixed (Batch 2)
