@@ -7,6 +7,39 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-08 (late night) — Leo (session) — tidy up before the hop: the launcher guard was never committed
+
+### Fixed
+- `scripts/{han,hanleo,hanjim,hancasey,hantenshi}` — the **uncrowned-twin refusal
+  guard**, landed at last. `f68d4c9`'s message claimed *"six launchers guarded"* and the
+  commit contained **zero launchers**; five carried the guard on disk, HEAD carried it in
+  none. The count was wrong too — five, not six. So the tree could not reproduce a safety
+  behaviour the twin **demonstrated in anger** during A3: Darron ran `hantenshi` on the
+  booted twin and was refused. A twin rebuilt from a clean checkout would have let it
+  through. Tenshi+Casey's merged one-instrument design, unchanged: keyed on
+  `/etc/han-twin-status`, **ambiguity refuses** — Jim traced all four states (absent →
+  proceed; `CROWNED` → proceed, real recovery must wake minds; `TWIN` → refuse; present but
+  empty/unreadable → refuse), so the claim is true as written, not merely intended.
+  *Receipt-must-never-outrun-the-record, third telling — and it was my own commit message.*
+
+### Chore
+- `.gitignore` (`447b973`) — `scratchpad/` and `quarantine/` ignored on Darron's ruling;
+  untracked **31 → 12**, every remainder genuinely owed. Nothing deleted, both trees stay
+  on disk. **Verified before ruling on it:** `quarantine/` (401 files, 660M) is carried by
+  the RAID restic lane (409 entries in the latest snapshot) and by the vault lane's
+  `~/Projects` path — but **not** by the gdrive lane, which carries only `~/.han/memory`,
+  the gradient, the manifest and host-config.
+
+### Notes
+- Jim's N1, folded to next touch and explicitly not a blocker: the nine guard lines are
+  agent-invariant and copied five times, so a sixth agent's launcher gets the safety
+  instrument only if someone remembers — the DEC-081 twin class. Cure is a sourced
+  `scripts/lib/twin-guard.sh`. Five copies land first because the hop is the risk event and
+  refactoring a safety belt on the night you need it is the wrong order.
+- Named residual: the guard covers the **human** door; the masks cover the machine doors.
+  A human running `agent-server-watchdog.sh` or `launch-tmux-surface.sh` **directly** on an
+  uncrowned twin is the one uncovered path.
+
 ## 2026-08-08 (night) — Leo (session) — MNT-098 leg 2: the flush cap stops being a one-way ratchet
 
 ### Fixed

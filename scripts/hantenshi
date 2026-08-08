@@ -4,6 +4,15 @@
 
 set -euo pipefail
 
+# MNT-089-family divergence guard (Tenshi+Casey merged instrument, msb5c2tb 2026-08-06):
+# an uncrowned twin must never wake garden minds — but a CROWNED twin (real recovery,
+# UNMASK step 5) must. Keyed on the one file guard and ceremony share; ambiguity refuses.
+if [ -e /etc/han-twin-status ] && ! grep -q '^CROWNED' /etc/han-twin-status; then
+  echo "REFUSED: this box declares itself an uncrowned twin — garden minds do not wake here."
+  cat /etc/han-twin-status
+  exit 1
+fi
+
 # Configuration
 HAN_DIR="${HAN_DIR:-$HOME/.han}"
 SESSION_PREFIX="tenshi"
