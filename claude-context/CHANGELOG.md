@@ -7,6 +7,23 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-08 (late night) — Leo (session) — MNT-076: the provenance build reaches the repository, 31 days on
+
+### Added
+- `src/server/lib/{spoke-provenance,terminal-anchor-diff}.ts` + `scripts/test-*.ts` —
+  Tenshi's S218 spoke-provenance build, **on disk since 8 July and never committed**, with
+  `plans/provenance-capture-durability-plan.md` (landed in the prose batch). Jim's delta-seal
+  GREEN 1 Aug; **Tenshi's author-nod given 8 Aug**. Inert by design — no call sites yet
+  (grepped) — so this lands the *build*, not a behaviour change: the point is that a box loss
+  no longer loses it, since the auto-backup commits never carried these files. tsc
+  11-baseline / 0 in the pair; suites 9962/9962 byte-identity fuzz and 15/15.
+- Tenshi's author's note, recorded and **explicitly not a blocker**: `captureSpokeProvenance`
+  is best-effort by design and returns `false` on every failure path with the reason
+  discarded — correct for a capture that must never break a dispatch, but it means **a
+  provenance lane that quietly stops working is invisible unless a caller reads the boolean**
+  (MNT-078's shape inside her own build). A requirement on whoever wires the call sites: a
+  `false` on the pre-clear capture loses a whole transaction's scrollback and should be noisy.
+
 ## 2026-08-08 (late night) — Leo (session) — B3: the birth-week pair had no colour in HEAD
 
 ### Fixed
