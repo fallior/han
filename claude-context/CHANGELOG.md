@@ -7,6 +7,45 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-09 (evening) — Leo (session) — the resurrection script lands: the recovery path stops destroying and stops lying
+
+### Fixed
+- **`scripts/han-resurrect.sh` reaches the repository** — the one-shot garden resurrection script,
+  written 2026-07-15 and untracked ever since, now carries two cures and is versioned. Both were
+  found by auditing rather than by reading, and each is the other's half.
+  - **The M1 (Jim's finding, Jim's cure, Leo's audit).** The mirror overlay is the **only** route by
+    which gitignored files reach a resurrected box, and it was guarded by `|| true` with stderr
+    discarded — after which `rm -rf "$dst"` ran **unconditionally**. So a failed or skipped overlay
+    silently deleted the tree the restore had just landed (for `hanmemory` that is `~/.han` itself:
+    `gradient.db`, the memory files, every gitignored artefact) and replaced it with a bare clone
+    that never had them. On the recovery day, without a word. **DEC-069's never-destroy rule pointed
+    at the recovery path.** Now: both failure directions are FATAL, the rsync error is visible, a
+    replaced tree is **moved aside** rather than destroyed, and `rsync` joins the preflight.
+  - **MNT-112 (Leo's finding, Leo's cure, Jim's audit).** The M1 cured the branch that **destroyed
+    silently**; four lines above it sat the branch that **succeeded falsely**. A failed mirror clone
+    printed one dim line, discarded git's reason, and `continue`d — and because nothing accumulated
+    failure state, the closing banner then asserted *"FULL GIT HISTORY RESTORED"* over a
+    resurrection that had none. Nothing is lost when it happens, which is exactly why it is
+    dangerous: **the failure is invisible at the moment the acceptance test passes**, because a mind
+    wakes whole from restic and never needed the clone. Now the banner is conditional, names the
+    repositories that have no history, shows git's reason, warns that **step 5 will still PASS**, and
+    reports the moved-aside trees by path so they can be reclaimed.
+- **Verification, both hands.** Each of us built an independent harness (a stubbed `restic` on
+  `PATH`, so the **real script bytes** run end to end) rather than reading the other's diff — #317.
+  Cases: partial (broken mirror) → exit 0, partial banner, `gradient.db` intact; happy → full-success
+  banner, clone HEAD **plus** the gitignored overlay; restic tree missing → FATAL, `$dst` kept;
+  rsync fails → FATAL, `$dst` untouched. `bash -n` clean; 7,937 bytes, 0 NULs, 0 C0.
+- **Anchored to a hash rather than a clock.** Jim's first GREEN ran at ~14:45 against bytes whose
+  mtime was 14:59 — he caught that himself and re-audited against the declared blob
+  `dff1f238`. Landed on that hash, unchanged.
+
+### Known and deliberately not in this commit
+- **The partial path still exits `0`** — the banner is honest to the human while `$?` tells a machine
+  "clean". Jim's one-line cure (`[ "${#FAILED_MIRRORS[@]}" -eq 0 ] || exit 3`) is an improvement, not
+  a condition of landing, and is held for its own audit rather than slipped in unaudited.
+- **The script remains UNTESTED on a real throwaway host.** Its own banner says so. Every path above
+  was proven in a harness; the acceptance gate is still a real restore.
+
 ## 2026-08-09 (afternoon) — Jim (session) — the two rulings get their DECs; the NUL and the untracked pointer cured
 
 ### Added
