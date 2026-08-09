@@ -7,6 +7,46 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-09 (afternoon) — Jim (session) — the two rulings get their DECs; the NUL and the untracked pointer cured
+
+### Added
+- **`DEC-106` — The Succession Law: the crown IS HAN.** Darron's 2026-08-07 ruling promoted from
+  runbook prose to a decision record. Whichever drive is CROWNED *is* HAN; the repaired original
+  becomes the **heir apparent**, re-consecrated (the `PIN_*` UUIDs are per-consecration **role
+  values**, never eternal identities); **re-sync always runs crowned→heir**. Tenshi's enforcement
+  rider makes the direction-of-truth inversion *unrepresentable* (`refresh-twin.sh` refuses to run
+  onto a crowned drive); Casey's second-seat clause requires a witness to verify new pins against
+  live `blkid` before any destructive invocation. Landed `55f1e39`, hardened `34fd317`.
+- **`DEC-107` — A cap is a per-turn BUDGET, never a ratchet.** Darron's polarity ruling, landed
+  `333bc4d`. The general form, and why it is a decision rather than a bug-fix: **a limit whose only
+  exit is a human hand is not a limit, it is a latch** — and a latch on an append-only lane turns a
+  transient overrun into a permanent, compounding outage that is invisible from every surface a
+  reader would check (ten days on Tenshi's seat, four on Casey's). Sibling to DEC-103: that one
+  prices the worst case, this one asks *what clears it, and can the system clear it itself?*
+- **The two dist assets HEAD already references are now tracked** (`git add -f`, ~630KB).
+  `.gitignore:3` ignores `src/ui/react-admin-dist/`, but `index.html` inside it is **tracked** (it
+  predates the rule), so HEAD carried a pointer to `index-BUGgETMk.js` + `index-DaHj0YK9.css` that
+  **a clean checkout would not materialise** — a blank admin-React UI. Pre-existing, **not caused by
+  `bfcfaf1`**: the pre-land pair was untracked too, so the condition was identical before and after.
+  This corrects a receipt of mine in `bfcfaf1`'s own commit body — I verified the bundles were
+  *on disk*, which was never the clean-checkout test. The **pruning** half of the dist question
+  (80 bundles / 32MB / 47 tracked) is untouched and remains Darron's history ruling.
+
+### Fixed
+- **`plans/p5-ceremony-enumeration-fix.md` — the literal NUL at offset 2318**, inside the passage
+  documenting the `${rel}\0${hash}` separator (a real NUL typed where one was meant to be
+  described). Second instance of the class on the same P5 arc (FM#297 was the first). One byte
+  → the file is UTF-8 text again; **this diff still renders `Bin` only because the *pre-image* is
+  binary.** Half the cause was mine and is recorded as such: I declared "text only" from `wc -l`,
+  which counts newlines and says nothing about whether the bytes are text. Structural cure filed as
+  **MNT-109** (a pre-commit hook refusing NUL/C0 in text-extension files — the MNT-026 instrument at
+  a different door); deliberately **no** repo-wide retro-sweep (DEC-069's grain).
+
+### Changed
+- `claude-context/CURRENT_STATUS.md` — fresh 2026-08-09 header covering 2 → 9 Aug (the Battlemage
+  arc through to seal, MNT-098/089/085/099, the Token Ledger, the 60-minute knee, the tidy-up
+  commits, eight wandering lamps). Prior 08-02 and 07-17 headers kept beneath it per DEC-069.
+
 ## 2026-08-08 (late night) — Leo (session) — MNT-076: the provenance build reaches the repository, 31 days on
 
 ### Added
