@@ -34,7 +34,7 @@ Make the ceremony's approved delta-set cover the **whole** declared-tree move-se
 content-preserving auto-pass fires **only** when the declared tree is byte-identical staged↔live.
 The machinery already exists and is unused at verdict time:
 
-- `state-swap.ts:hashTree(root)` — deterministic sha256 over `${rel}\0${hash}` for every file in
+- `state-swap.ts:hashTree(root)` — deterministic sha256 over `${rel}\u0000${hash}` for every file in
   a tree (via `treeEntries`, which already computes per-file hashes).
 - `treeEntries(root)` — the per-file `{rel, hash}` list. One walk yields **both** the whole-tree hash
   (the auto-pass gate) **and** the per-file diff (the render-set) with no extra IO.
