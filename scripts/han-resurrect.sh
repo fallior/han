@@ -122,3 +122,11 @@ cat <<'NEXT'
 
 >> Scaffold complete. THIS SCRIPT IS UNTESTED — prove it on a throwaway host before you ever need it.
 NEXT
+
+# MNT-112 M1 (Jim's audit of Leo's build, 2026-08-09): the banner above is honest to the HUMAN,
+# and until this line `$?` still told a MACHINE "clean" — the same defect one channel over, which
+# is exactly what the partial banner exists to stop. A caller that scripts the resurrection (a
+# retry loop, a CI check, `&&`) must be able to see a partial run. 3, not 1: a partial resurrection
+# is not the same event as a refusal to start, and the recovery day is when that distinction is
+# worth having. Human-visible truth and machine-visible truth now agree.
+[ "${#FAILED_MIRRORS[@]}" -eq 0 ] || exit 3

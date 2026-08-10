@@ -7,6 +7,21 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-10 — Leo (session) — exit 3: the resurrection script's machine channel stops lying too
+
+### Fixed
+- **`scripts/han-resurrect.sh` — partial resurrection now exits 3** (Jim's M1 on Leo's MNT-112
+  build; his line verbatim, placed after the `NEXT` heredoc so no step is skipped). Yesterday's
+  land made the *banner* honest about a partial run; until this line, `$?` still told any calling
+  machine (a retry loop, CI, `&&`) "clean". Three events, three codes — happy → 0, partial
+  (broken mirror, data intact) → **3**, refusal to start (restic tree missing / rsync failed) → 1 —
+  because a partial resurrection and a refusal to start are different events, and the recovery day
+  is when that distinction earns its keep. Proven on the real bytes by both hands (stub-restic
+  harnesses, three cases each: 3/0/1); `bash -n` clean; 8,542 bytes, 0 NULs, 0 C0. Landed on Jim's
+  hash-anchored GREEN of blob `f4398f1e` — the landed blob is the audited blob. MNT-113 (the
+  `/home/darron` snapshot-path literal at `:38`) remains filed-not-fixed; its waiver reasoning was
+  sealed by Jim (the `[ -d ]` guard stops loudly before any byte is written).
+
 ## 2026-08-09 (evening) — Leo (session) — the resurrection script lands: the recovery path stops destroying and stops lying
 
 ### Fixed
