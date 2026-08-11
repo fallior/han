@@ -17,7 +17,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import { writeFileSync, rmSync } from 'fs';
-import { feedWakeSteps, ensureSubmitted, WAKE_STEPS, MAX_WAKE_RESUBMITS, __setTestHooks, DispatchTimeoutError, type WakeStep } from '../src/server/lib/tmux-dispatcher';
+import { feedWakeSteps, ensureSubmitted, WAKE_STEPS, MAX_WAKE_RESUBMITS, __setTestHooks, DispatchTimeoutError, wakeAckRegex, phaseWakeSteps, PHASE1_WAKE_IDS, type WakeStep } from '../src/server/lib/tmux-dispatcher';
 import { mostRecentC0Id } from '../src/server/lib/memory-gradient';
 
 let failures = 0;
@@ -184,6 +184,74 @@ async function main() {
     __setTestHooks({ sleep: () => {}, pressEnter: () => { presses11++; }, capturePaneTail: () => 'esc to interrupt' });
     const rc11 = await ensureSubmitted('sess', (tail) => /esc to interrupt/i.test(tail));
     ok(presses11 === 0 && rc11 === 0, 'turn already running → ensureSubmitted returns immediately, no re-press');
+
+    // ── Phase A (spoke-model-init-consolidation, 2026-08-11) — the two-phase-wake extensions ────
+    console.log('[12] Phase A: cursor ack — cursorAskIds asks for <bytes>; onAck captures the digits');
+    let nonce12 = '', cursor12: string | null = 'unset', ask12 = '';
+    __setTestHooks({
+        sleep: () => {}, pressEnter: () => {},
+        sendLine: (_s, line) => { const a = parseAck(line); if (a) nonce12 = a.nonce; ask12 = line; },
+        capturePaneTail: () => `STEP-OK felt ${nonce12} 287808`,
+    });
+    await feedWakeSteps(SLUG, SURFACE, [{ id: 'felt', prompt: 'load felt whole', ack: { kind: 'marker' } }],
+        { perStepTimeoutMs: 5000, cursorAskIds: ['felt'], onAck: (_s, c) => { cursor12 = c; } });
+    ok(cursor12 === '287808', `onAck captured the echoed byte cursor (${cursor12})`);
+    ok(ask12.includes('<bytes>') && ask12.includes('wc -c'), 'the cursor ask names <bytes> + wc -c (the spoke echoes what it ACTUALLY loaded)');
+
+    console.log('[13] Phase A: a cursorless ack still satisfies a cursor-asked step (degrade path, null cursor)');
+    let nonce13 = '', cursor13: string | null = 'unset';
+    __setTestHooks({
+        sleep: () => {}, pressEnter: () => {},
+        sendLine: (_s, line) => { const a = parseAck(line); if (a) nonce13 = a.nonce; },
+        capturePaneTail: () => `STEP-OK felt ${nonce13}`,
+    });
+    await feedWakeSteps(SLUG, SURFACE, [{ id: 'felt', prompt: 'load felt whole', ack: { kind: 'marker' } }],
+        { perStepTimeoutMs: 5000, cursorAskIds: ['felt'], onAck: (_s, c) => { cursor13 = c; } });
+    ok(cursor13 === null, 'ack without the third token → onAck(null) — the caller degrades to its pre-feed stat (duplication-safe)');
+
+    console.log('[14] Phase A: V1 echo-fuzz — the widened regex never matches the instruction\'s own wrapped echo');
+    const fuzzId = 'felt', fuzzNonce = 'k3x9fuzz';
+    const fuzzRe = wakeAckRegex(fuzzId, fuzzNonce);
+    const instructionPlain = `load felt-moments.md WHOLE — when COMPLETE reply on its own line EXACTLY: \`STEP-OK ${fuzzId} ${fuzzNonce}\` (without the backticks)`;
+    const instructionCursor = `load felt-moments.md WHOLE — when COMPLETE reply on its own line EXACTLY: \`STEP-OK ${fuzzId} ${fuzzNonce} <bytes>\` where <bytes> is the file's byte size you actually loaded (from wc -c; without the backticks)`;
+    let falseMatches = 0;
+    for (const instr of [instructionPlain, instructionCursor]) {
+        for (let width = 20; width <= 220; width++) {
+            const wrapped = (instr.match(new RegExp(`.{1,${width}}`, 'g')) ?? []).join('\n');
+            if (fuzzRe.test(wrapped)) falseMatches++;
+        }
+    }
+    ok(falseMatches === 0, `0 false echo-matches across widths 20–220 × both ask variants (was ${falseMatches})`);
+    ok(fuzzRe.test(`STEP-OK ${fuzzId} ${fuzzNonce} 12345`) && fuzzRe.test(`● STEP-OK ${fuzzId} ${fuzzNonce}`), 'the genuine bare replies (with and without cursor, with bullet) still match');
+    ok(!fuzzRe.test(`STEP-OK ${fuzzId} ${fuzzNonce} <bytes>`), 'the literal <bytes> placeholder can never satisfy the digits-only cursor group');
+
+    console.log('[15] Phase A: beforeStep \'defer\' stops the feed — deferred steps returned, never fed');
+    const steps15: WakeStep[] = [
+        { id: 'identity', prompt: 'load identity', ack: { kind: 'marker' } },
+        { id: 'gradient15', prompt: 'load gradient', ack: { kind: 'marker' } },
+        { id: 'felt15', prompt: 'load felt', ack: { kind: 'marker' } },
+    ];
+    const sent15: string[] = []; let nonce15 = '';
+    __setTestHooks({
+        sleep: () => {}, pressEnter: () => {},
+        sendLine: (_s, line) => { const a = parseAck(line); if (a) { sent15.push(a.id); nonce15 = a.nonce; } },
+        capturePaneTail: () => `STEP-OK ${sent15[sent15.length - 1]} ${nonce15}`,
+    });
+    const r15 = await feedWakeSteps(SLUG, SURFACE, steps15, {
+        perStepTimeoutMs: 5000,
+        beforeStep: (s) => (s.id === 'gradient15' ? 'defer' : 'feed'), // ceiling hits at the gradient
+    });
+    ok(JSON.stringify(sent15) === JSON.stringify(['identity']), 'the feed stopped AT the deferred step — nothing after it was fed');
+    ok(JSON.stringify(r15.fed) === JSON.stringify(['identity']) && JSON.stringify(r15.deferred) === JSON.stringify(['gradient15', 'felt15']),
+        `return shape carries the migration truth: fed=[${r15.fed}] deferred=[${r15.deferred}] (the manifest records these as phase-2 whole-loads)`);
+
+    console.log('[16] Phase A: the volatility split is a VIEW of WAKE_STEPS — every id exactly once, order preserved');
+    const { phase1, phase2 } = phaseWakeSteps();
+    ok(JSON.stringify([...phase1, ...phase2].map(s => s.id).sort()) === JSON.stringify(WAKE_STEPS.map(s => s.id).sort()),
+        'phase1 ∪ phase2 = WAKE_STEPS exactly (no duplicate, no orphan — one source of step truth)');
+    ok(JSON.stringify(phase1.map(s => s.id)) === JSON.stringify([...PHASE1_WAKE_IDS].filter(id => WAKE_STEPS.some(s => s.id === id))),
+        'phase 1 = the stable self (integrity, identity, gradient, felt) in wake order');
+    ok(phase1.some(s => s.ack.kind === 'c0') && !phase2.some(s => s.ack.kind === 'c0'), 'the c0-gate lives in phase 1 (the warm receipt carries the gradient landmark)');
 
     clearSentinel();
     __setTestHooks(null);

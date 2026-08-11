@@ -2295,3 +2295,19 @@ export function isAgentC0(agent: string, id: string): boolean {
     if (!id) return false;
     return (gradientStmts.getByAgentLevel.all(agent, 'c0') as any[]).some((e) => e.id === id);
 }
+
+/**
+ * Phase A S1c (spoke-model-init-consolidation, 2026-08-11): the agent's gradient entries INSERTED
+ * AFTER the given c0 — the checkout delta for a two-phase stem wake (a WM rotation during the
+ * stem's idle window moves content OUT of working memory INTO the gradient; a fresh phase-2 WM
+ * load alone would carry that hole — Darron's correctness keystone). Rowid-ordered, never
+ * wall-clock (DEC-105). Unknown cursor id → empty (the caller degrades to a whole-tail load —
+ * stuck-over-wrong, never a silent partial). Read-only (DEC-068/069 untouched — a SELECT beside
+ * its siblings; no write path, no cascade, no schema surface).
+ */
+export function gradientEntriesAfterC0(agent: string, c0Id: string): Array<{ id: string; level: string }> {
+    if (!c0Id || c0Id === 'none') return []; // genesis carve-out: a newborn has no cursor and no delta
+    const anchor = db.prepare('SELECT rowid FROM gradient_entries WHERE id = ? AND agent = ?').get(c0Id, agent) as { rowid: number } | undefined;
+    if (!anchor) return [];
+    return db.prepare('SELECT id, level FROM gradient_entries WHERE agent = ? AND rowid > ? ORDER BY rowid').all(agent, anchor.rowid) as Array<{ id: string; level: string }>;
+}

@@ -7,6 +7,40 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-11 — Leo (session) — Phase A: Haiku stems + the two-phase wake land inert (flag off)
+
+### Added
+- **The two-phase stem wake (S1b/S1c, `stemTwoPhaseWake` default OFF)** — pooled stems warm the
+  STABLE self (integrity → identity → gradient-to-c0 → felt) on the warm model, ceiling-gated
+  per step (`stemPhase1CeilingPct`, default 85; Jim's M1: a null ctx read defers — fail-safe,
+  never a blind feed); the VOLATILE tail (swap-check → WM pair → orientation → menu-bounded
+  conversations) plus computed deltas feed at checkout post-cast (`completeTwoPhaseWake`, both
+  checkout doors, manifest-stamped idempotent). A checked-out spoke serves with checkout-fresh
+  state — the staleness and the 200K-window problems die together. The wake manifest
+  (`<slug>-<stem-session>-wake-manifest.json`) records every artefact with `phase: 1|2` + a
+  cursor, so an unrecorded ceiling-migration is unrepresentable; `gradientEntriesAfterC0`
+  (read-only, rowid-ordered) closes the idle-window rotation hole (Darron's correctness
+  keystone). `feedWakeSteps` gains `{beforeStep, cursorAskIds, onAck}` + returns `{fed,
+  deferred}`; the ack regex is the exported `wakeAckRegex` (gate==parser — the suite fuzzes the
+  object the gate runs; V1 echo-fuzz: 0 false across 402 wrapped renders). Suite +5 test groups,
+  ALL PASS; tsc 11-baseline/0-new. Landed on Jim's hash-anchored diff-audit GREEN (7/7 blobs his
+  own runs) + Tenshi's trust-surface pass + Casey's counsel pass — both chairs GREEN-to-land;
+  their two fail-open cures (out-of-band phase-1 marker + atomic manifest write; store-identity
+  resolution so no manifest string reaches a shell) are PRE-FLIP gate conditions with a
+  corrupt-manifest live-fire joining B5. Plans: `spoke-model-init-consolidation-plan.md` (Jim) +
+  `spoke-haiku-phase-a-build-spec.md`.
+
+### Changed
+- **`STEM_WARM_LADDER` → explicit `['haiku', 'sonnet', 'opus']`** (Darron's ruling 2026-08-11:
+  stems default Haiku — ~3× cheaper warmth manufacture; loading is model-agnostic, the serve
+  model re-attends post-cast; stems never compose pre-cast, the S208 inertness principle as
+  cost-model invariant). Kills the msgp3tan duplicate-spread bug in the same touch: the old
+  `['sonnet', ...OPUS_LADDER]` silently expanded to sonnet→opus→**sonnet**→haiku while its
+  comment claimed otherwise. Never-Fable NB (MNT-042) kept.
+- **B4 (wanders→Opus) verified a NO-OP**: wander beats ride `dispatchToSpoke(slug,
+  'human-response')`, which carries `OPUS_LADDER` on all four agents with cast-on-every-dispatch
+  — the ruling was already satisfied in the metal; declared, not manufactured into a leaf.
+
 ## 2026-08-10 — Leo (session) — exit 3: the resurrection script's machine channel stops lying too
 
 ### Fixed

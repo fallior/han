@@ -172,6 +172,16 @@ export interface SpokeLifecycle {
      *  fresh stems are grabbed while fitting partials sit unused, LOWER if assigned spokes
      *  overflow-reap too often. */
     spokeFitCeilingPct?: number;
+    /** Phase A (spoke-model-init-consolidation, 2026-08-11): the two-phase wake flag for POOLED
+     *  stems — phase 1 (stable self) on the warm model, phase 2 (volatile tail + deltas) fed at
+     *  checkout after the cast. Default OFF until the B5 gates pass (≥5 clean Haiku wakes/agent
+     *  + C4 sidecar verified); rollback is this flip, not a revert. */
+    stemTwoPhaseWake?: boolean;
+    /** Phase A: the phase-1 feed ceiling (ctx % of the WARM model's window). The feeder stops
+     *  feeding phase-1 steps at/above it — remaining steps migrate to phase 2, recorded in the
+     *  wake manifest (never harness compaction; spokes self-clear, never compact). Default 85
+     *  (M1: a null ctx read is treated as ceiling-reached — fail-safe, never a null-skip). */
+    stemPhase1CeilingPct?: number;
 }
 
 export interface AgentManifest {
@@ -291,15 +301,17 @@ const FABLE_LADDER: ModelLadder = ['fable', ...OPUS_LADDER];
 // observed-model stamp keeps any fallback legible in the data.
 const SONNET_LADDER: ModelLadder = ['sonnet', 'fable', 'opus', 'haiku']; // explicit (a FABLE_LADDER spread would duplicate 'sonnet' mid-tail)
 
-// STEM_WARM_LADDER (DEC-101, the warm-map/serve-map split — MNT-054): the model a pool stem is
-// PRE-WARMED on, decoupled from the model its surface SERVES. Warm cheap (sonnet-5 head — proven
-// to pass the #107 c0-gate on the heartbeat/supervisor/compression lanes and today's own live
-// fills), then cast to the surface's serve model at checkout (`dispatchToPooledStem`). The
-// descent tail exists only for a sonnet-drop; a warm load never touches Fable (the MNT-42
-// depletion trap that made human-response prewarm hang-loop). All pools warm here — one warm-map.
-// NB (Jim G-audit must-fix): must NOT spread SONNET_LADDER — that descends sonnet→FABLE→opus,
-// re-arming the exact MNT-42 trap. Spread OPUS_LADDER so the tail is sonnet→opus→haiku, never Fable.
-const STEM_WARM_LADDER: ModelLadder = ['sonnet', ...OPUS_LADDER]; // tail stays sonnet→opus→haiku, never Fable (the NB above stands)
+// STEM_WARM_LADDER (DEC-101 warm-map/serve-map split — MNT-054; Haiku head 2026-08-11, Darron's
+// ruling, Phase A of the spoke-model-init-consolidation plan): the model a pool stem is
+// PRE-WARMED on, decoupled from the model its surface SERVES. Warm cheapest (haiku head — ~3×
+// cheaper warmth manufacture; loading is model-agnostic, the serve model re-attends post-cast),
+// then cast to the surface's serve model at checkout (`dispatchToPooledStem`). The descent tail
+// exists only for a haiku-drop; a warm load never touches Fable (the MNT-042 depletion trap that
+// made human-response prewarm hang-loop). All pools warm here — one warm-map.
+// NB (Jim G-audit must-fix, standing): never spread another ladder here — the old
+// `['sonnet', ...OPUS_LADDER]` silently expanded to sonnet→opus→SONNET→haiku (the msgp3tan
+// duplicate-spread bug, confirmed 2026-08-11); an explicit literal is the only honest form.
+const STEM_WARM_LADDER: ModelLadder = ['haiku', 'sonnet', 'opus']; // explicit, no spread; never Fable
 
 // Interactive CLI sessions take their model from the launcher at spawn (the
 // launchers don't pin one today). Recorded here so the DEC-092 slicer stamp matches reality.
@@ -678,6 +690,17 @@ export function spokeRethreadCtxCeilingFor(slug: string, surface: string): numbe
 /** MNT-061: the fit ceiling (ctx %) — `stem_ctx + burden ≤ this` assigns a thread to a recycled stem. Default 80. */
 export function spokeFitCeilingFor(slug: string, surface: string): number {
     return spokeLifecycleFor(slug, surface).spokeFitCeilingPct ?? 80;
+}
+
+/** Phase A (2026-08-11): is the two-phase stem wake ON for this (slug, surface)? Default OFF —
+ *  the flag flips only after the B5 gates pass; flipping back IS the rollback (config, not revert). */
+export function stemTwoPhaseWakeFor(slug: string, surface: string): boolean {
+    return spokeLifecycleFor(slug, surface).stemTwoPhaseWake === true;
+}
+
+/** Phase A: the phase-1 feed ceiling (% of the WARM model's window). Default 85. */
+export function stemPhase1CeilingPctFor(slug: string, surface: string): number {
+    return spokeLifecycleFor(slug, surface).stemPhase1CeilingPct ?? 85;
 }
 
 /** #107 Phase-2 P2.1b: does this (slug, surface) wake via the feeder (the wake-feed queue)?

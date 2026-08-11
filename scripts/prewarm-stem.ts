@@ -19,9 +19,11 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { feedWakeSteps, wakeStepsFor, awaitChromeOrDescend, observeActiveModel, currentWmCharLen } from '../src/server/lib/tmux-dispatcher';
-import { stemWarmLadder, swapPrefixFor } from '../src/server/lib/garden-manifest';
+import { feedWakeSteps, wakeStepsFor, awaitChromeOrDescend, observeActiveModel, currentWmCharLen, phaseWakeSteps, writeWakeManifest, getContextPctForSession, PHASE1_WAKE_IDS, type WakeManifestEntry, type WakeStep } from '../src/server/lib/tmux-dispatcher';
+import { stemWarmLadder, swapPrefixFor, stemTwoPhaseWakeFor, stemPhase1CeilingPctFor } from '../src/server/lib/garden-manifest';
 import { writeSleeveState } from '../src/server/lib/sleeve-state';
+import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
+import { existsSync, statSync } from 'node:fs';
 
 const slug = process.argv[2];
 if (!slug) {
@@ -101,17 +103,67 @@ async function main(): Promise<void> {
     // ladder is what let a depleted Fable hang the prewarm (MNT-42); the warm-map never touches Fable.
     await awaitChromeOrDescend(slug, SURFACE, tmuxSession, stemWarmLadder(slug, SURFACE));
 
-    // 3) feed the WHOLE self, GREET-LESS (greet:false) — completion = queue-empty = warm; the gradient
-    //    step traverses to GRADIENT-EOF and writes the reached c0 to the sentinel (the c0-ack reads it).
-    await feedWakeSteps(slug, SURFACE, wakeStepsFor(slug, SURFACE, { greet: false }), {
-        tmuxTarget: tmuxSession,
-        // PR-C2: the c0-ack reads the stem's PER-STEM sentinel in pool mode (see SENTINEL above).
-        ...(POOL ? { sentinelKey: tmuxSession } : {}),
-    });
+    // 3) feed the wake, GREET-LESS. Phase A (S1b, pool mode + flag on): PHASE 1 ONLY — the stable
+    //    self (integrity → identity → gradient → felt) on the warm model, ceiling-gated per step;
+    //    the volatile tail + deltas are fed at checkout post-cast (completeTwoPhaseWake). Flag off
+    //    (or non-pool): the WHOLE self, byte-identical to the pre-Phase-A behaviour.
+    const twoPhase = POOL && stemTwoPhaseWakeFor(slug, SURFACE);
+    if (twoPhase) {
+        const { phase1 } = phaseWakeSteps();
+        const ceiling = stemPhase1CeilingPctFor(slug, SURFACE);
+        const reg = gradientConfigForAgent(slug);
+        const memDir = reg.memoryDir;
+        const feltPath = path.join(memDir, 'felt-moments.md');
+        const preStat = (p: string): string => { try { return String(statSync(p).size); } catch { return '0'; } };
+        const feltPreFeedSize = preStat(feltPath); // Q3 (a) degrade: recorded BEFORE the step is fed — errs toward re-delivery
+        let feltCursor: string | null = null;
+        const result = await feedWakeSteps(slug, SURFACE, phase1, {
+            tmuxTarget: tmuxSession,
+            sentinelKey: tmuxSession,
+            // M1 (Jim's must-fix): a NULL ctx read is fail-safe = ceiling-reached — the sidecar
+            // not being wired must migrate steps to phase 2, never feed blind past the window.
+            beforeStep: (step: WakeStep) => {
+                if (step.id === 'integrity' || step.id === 'identity') return 'feed'; // the floor: identity always phase-1 (tiny)
+                const pct = getContextPctForSession(slug, SURFACE, tmuxSession);
+                return (pct === null || pct >= ceiling) ? 'defer' : 'feed';
+            },
+            cursorAskIds: ['felt'],
+            onAck: (step: WakeStep, cursor: string | null) => { if (step.id === 'felt') feltCursor = cursor; },
+        });
+        // S1c — the wake manifest: what phase 1 actually loaded, with cursors the checkout reads.
+        const identityFiles = [
+            path.join(memDir, 'identity.md'), path.join(memDir, 'patterns.md'),
+            existsSync(path.join(memDir, 'self-reflections-curated.md'))
+                ? path.join(memDir, 'self-reflections-curated.md') : path.join(memDir, 'self-reflection.md'),
+            path.join(reg.fractalDir, 'aphorisms.md'),
+        ];
+        const nowIso = new Date().toISOString();
+        const entries: WakeManifestEntry[] = [];
+        for (const id of PHASE1_WAKE_IDS) {
+            if (result.deferred.includes(id)) { entries.push({ store: id, phase: 2, cursor: null, loaded_at: nowIso }); continue; }
+            if (id === 'identity') for (const f of identityFiles) entries.push({ store: f, phase: 1, cursor: { kind: 'mtime', value: preStat(f) === '0' ? '0' : String(statSync(f).mtimeMs) }, loaded_at: nowIso });
+            else if (id === 'gradient') entries.push({ store: 'gradient', phase: 1, cursor: { kind: 'c0', value: (() => { try { return readFileSync(SENTINEL, 'utf8').trim(); } catch { return 'none'; } })() }, loaded_at: nowIso });
+            else if (id === 'felt') entries.push({ store: feltPath, phase: 1, cursor: { kind: 'offset', value: feltCursor ?? feltPreFeedSize }, loaded_at: nowIso });
+            // 'integrity' carries no store — a gate, not a load.
+        }
+        writeWakeManifest({ stem_session: tmuxSession, slug, surface: SURFACE, phase1_completed_at: nowIso, phase2_completed_at: null, entries });
+        if (result.deferred.length > 0) console.log(`[prewarm] two-phase: ceiling deferred ${result.deferred.join(', ')} to phase 2 (recorded in the wake manifest)`);
+    } else {
+        // Flag off / non-pool: the WHOLE self, unchanged — completion = queue-empty = warm; the
+        // gradient step traverses to GRADIENT-EOF and writes the reached c0 to the sentinel.
+        await feedWakeSteps(slug, SURFACE, wakeStepsFor(slug, SURFACE, { greet: false }), {
+            tmuxTarget: tmuxSession,
+            // PR-C2: the c0-ack reads the stem's PER-STEM sentinel in pool mode (see SENTINEL above).
+            ...(POOL ? { sentinelKey: tmuxSession } : {}),
+        });
+    }
 
     // 4) the warm stem's metadata. `wm_cursor` is the working-memory.md CHAR length at pre-warm (the
     //    #91 freshen cursor — deltaSinceCursor compares content.length, so CHARS not statSync bytes).
-    const c0 = readFileSync(SENTINEL, 'utf8').trim();
+    //    Phase A: under two-phase, a ceiling/M1-deferred gradient step leaves NO per-stem sentinel —
+    //    the c0 arrives at checkout (the deferred step re-fed by completeTwoPhaseWake). `deferred`
+    //    is legible in logs; PoolStem.c0 has no functional consumer (log-only, verified 2026-08-11).
+    const c0 = (() => { try { return readFileSync(SENTINEL, 'utf8').trim(); } catch { if (twoPhase) return 'deferred'; throw new Error(`prewarm: sentinel ${SENTINEL} unreadable after a full wake feed`); } })();
     const nowIso = new Date().toISOString();
     const model = observeActiveModel(slug, SURFACE, tmuxSession); // C3 model-stamp fix: read the STEM's own pane (the `${surface}-${slug}` default was a wrong/absent pane in pool mode → the model:null bug)
     const wmCursor = currentWmCharLen(slug);

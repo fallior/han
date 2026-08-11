@@ -37,9 +37,9 @@ import * as os from 'os';
 import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
-import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, manifestModelHead, spokePersistFor, ctxReapThresholdFor, prewarmAlertMinsFor, spokeIdleReapHoursFor, spokeRethreadCtxCeilingFor, spokeFitCeilingFor, resumableTtlMinutesFor } from './garden-manifest';
+import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, manifestModelHead, spokePersistFor, ctxReapThresholdFor, prewarmAlertMinsFor, spokeIdleReapHoursFor, spokeRethreadCtxCeilingFor, spokeFitCeilingFor, resumableTtlMinutesFor, stemTwoPhaseWakeFor } from './garden-manifest';
 import { markResumable, readResumableMarkers, clearResumableMarker, resumableExpired, type PaneClass } from './dispatch-reconciler';
-import { mostRecentC0Id, isAgentC0 } from './memory-gradient';
+import { mostRecentC0Id, isAgentC0, gradientEntriesAfterC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
 import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, readPool, poolStatus, findSpokeForThread, bindSpoke, touchSpokeServed, decoupleSpoke, checkoutStemById, type PoolStem } from './stem-pool';
 import { decideIdleAction, selectStemForThread, burdenPctForChars, writeSpokeLifecycleReceipt, threadTrustTier, bindTierDecision } from './spoke-lifecycle';
@@ -1170,6 +1170,16 @@ let wakeNonceCounter = 0;
  *  nonce — just disambiguation; uniqueness-per-feed is enough. */
 function wakeNonce(): string { return `${Date.now().toString(36)}${(wakeNonceCounter++).toString(36)}`; }
 
+/** The feeder's ack regex — EXPORTED so the suite fuzzes the SAME object the gate runs (the
+ *  MNT-060 gate==parser law). Own-line anchored; optional bullet glyph (MNT-032); optional
+ *  backtick echo (MNT-028); Phase A widening: an optional DIGITS-ONLY third token (the S1c
+ *  cursor — `[0-9]+`, so the instruction's echoed `<bytes>` placeholder can never satisfy it,
+ *  and a cursorless ack matches with the group absent — backward-identical for every caller).
+ *  Group 1 = the cursor token (undefined when absent). */
+export function wakeAckRegex(id: string, nonce: string): RegExp {
+    return new RegExp(`^[ \\t]*(?:[●⏺•][ \\t]*)?\`?STEP-OK[ \\t]+${id}[ \\t]+${nonce}(?:[ \\t]+([0-9]+))?\`?[.!]?[ \\t]*$`, 'm');
+}
+
 // ————— MNT-067: the wake-window flag (the wake-in-progress switch, Darron's ruling) —————
 // A fed wake is reconstitution, not an exchange to record — but the fed-step grace was a
 // prompt-sniffing regex that one echo-safety backtick silently defeated (every fed step nagged;
@@ -1203,15 +1213,36 @@ const GREETING_IDLE_TICKS = 3; // chrome absent this many consecutive polls = th
 
 export async function feedWakeSteps(
     slug: string, surface: string, steps: WakeStep[],
-    opts: { perStepTimeoutMs?: number; tmuxTarget?: string; sentinelKey?: string } = {},
-): Promise<void> {
+    opts: {
+        perStepTimeoutMs?: number; tmuxTarget?: string; sentinelKey?: string;
+        /** Phase A (S1b): per-step gate, checked BEFORE each feed. 'defer' stops feeding — this
+         *  step and every later one are returned in `deferred` (they migrate to phase 2, recorded
+         *  in the wake manifest). Absent = feed everything (every existing caller unchanged). */
+        beforeStep?: (step: WakeStep) => 'feed' | 'defer';
+        /** Phase A (S1c, Q3-b): step ids whose ack should carry a cursor third token — the feeder
+         *  appends the extended ask (`STEP-OK <id> <nonce> <bytes>`); the spoke echoes what it
+         *  actually loaded. Only meaningful with `onAck`. */
+        cursorAskIds?: string[];
+        /** Phase A (S1c): called on each ack with the captured cursor token (null when the ack
+         *  carried none — the caller degrades to its pre-feed stat, duplication-safe). */
+        onAck?: (step: WakeStep, cursor: string | null) => void;
+    } = {},
+): Promise<{ fed: string[]; deferred: string[] }> {
     // `tmuxTarget` (P2.4): the interactive seat's LOCAL feeder (feed-wake-local.ts) aims the SAME
     // shared feeder at the seat's own pane (`$TMUX_PANE`) instead of a dispatcher-owned `surface-slug`
     // session — so the boundary stays clean (no server→human-session reach). Spokes pass nothing.
     const tmuxSession = opts.tmuxTarget ?? `${surface}-${slug}`;
     const perStepTimeoutMs = opts.perStepTimeoutMs ?? READY_TIMEOUT_MS;
+    const fed: string[] = [];
+    const deferred: string[] = [];
     try {
-    for (const step of steps) {
+    for (const [stepIdx, step] of steps.entries()) {
+        // Phase A (S1b) ceiling gate: 'defer' stops the feed HERE — this step + the rest migrate.
+        // The gate never fires mid-step (steps are the natural boundary — Jim's Q4 lean).
+        if (opts.beforeStep && step.ack.kind !== 'terminal' && opts.beforeStep(step) === 'defer') {
+            for (const s of steps.slice(stepIdx)) if (s.ack.kind !== 'terminal') deferred.push(s.id);
+            break;
+        }
         touchWakeWindow(slug); // MNT-067 heartbeat: the window is alive only while the feeder is
         if (step.ack.kind === 'terminal') {
             // P2.4 — the session hand-back (compose-greeting): send the BARE prompt (no STEP-OK ask).
@@ -1238,7 +1269,8 @@ export async function feedWakeSteps(
                 await sleep(POLL_INTERVAL_MS);
                 quiet = PROCESSING_CHROME_RE.test(capturePaneTail(tmuxSession)) ? 0 : quiet + 1;
             }
-            return;
+            fed.push(step.id);
+            return { fed, deferred };
         }
         // Fresh nonce per feed (P2.1b #1): the ack the feeder waits for is `STEP-OK <id> <nonce>`,
         // so a re-fed step can never satisfy on a stale marker. The feeder OWNS the ack instruction
@@ -1259,7 +1291,16 @@ export async function feedWakeSteps(
         // anchor the ack regex to an OWN-LINE match. Under ANY terminal wrap, the echo's display
         // line carries a backtick or trailing text — the anchored regex is structurally
         // unmatchable against the instruction's own echo; only the agent's bare reply line matches.
-        await sendLineSettled(tmuxSession, `${step.prompt} — when COMPLETE reply on its own line EXACTLY: \`STEP-OK ${step.id} ${nonce}\` (without the backticks)`);
+        // Phase A (S1c, Q3-b): a cursor-carrying step's ask adds a third token — the byte size the
+        // spoke ACTUALLY loaded (wc -c at read time), so the cursor records truth, not the offer.
+        // Echo-safety unchanged: the instruction's echo shows `<bytes>` (non-numeric placeholder)
+        // inside backticks with the trailing parenthetical — the own-line anchored regex below
+        // cannot match it; only the agent's bare reply line (with a real number) matches.
+        const wantsCursor = opts.cursorAskIds?.includes(step.id) === true;
+        const ackAsk = wantsCursor
+            ? `— when COMPLETE reply on its own line EXACTLY: \`STEP-OK ${step.id} ${nonce} <bytes>\` where <bytes> is the file's byte size you actually loaded (from wc -c; without the backticks)`
+            : `— when COMPLETE reply on its own line EXACTLY: \`STEP-OK ${step.id} ${nonce}\` (without the backticks)`;
+        await sendLineSettled(tmuxSession, `${step.prompt} ${ackAsk}`);
         // MNT-028 harden (S218): accept the reply WITH optional surrounding backticks + trailing
         // punctuation — the 2026-07-07 16:20 distress was an identity-ack that never matched (a
         // spoke echoing the shown backticks is T1's disclosed residual, live once on Sonnet 5).
@@ -1272,7 +1313,7 @@ export async function feedWakeSteps(
         // (● / ⏺ / •). Echo-safety unchanged: the instruction's echo is a user-line (never
         // bullet-rendered) and contains no bullet glyphs. The bullet class stays [ \t]-bound to the
         // ack's own line (not \s*) so the own-line anchor never reaches across a newline.
-        const ackRe = new RegExp(`^[ \\t]*(?:[●⏺•][ \\t]*)?\`?STEP-OK[ \\t]+${step.id}[ \\t]+${nonce}\`?[.!]?[ \\t]*$`, 'm');
+        const ackRe = wakeAckRegex(step.id, nonce);
         const isAcked = (tail: string): boolean => {
             if (!ackRe.test(tail)) return false;
             if (step.ack.kind === 'c0') {
@@ -1312,9 +1353,10 @@ export async function feedWakeSteps(
         // forward whenever the pane shows processing chrome; only a step that has been genuinely
         // SILENT (no ack, no chrome) for perStepTimeoutMs fails — the wedge detector, not a work cap.
         let deadline = Date.now() + perStepTimeoutMs;
+        let ackedTail = '';
         for (;;) {
             const tail = capturePaneTail(tmuxSession);
-            if (isAcked(tail)) break;
+            if (isAcked(tail)) { ackedTail = tail; break; }
             if (PROCESSING_CHROME_RE.test(tail)) deadline = Date.now() + perStepTimeoutMs; // thinking → the silence clock resets
             if (Date.now() > deadline) {
                 throw new DispatchTimeoutError(
@@ -1322,8 +1364,13 @@ export async function feedWakeSteps(
             }
             await sleep(POLL_INTERVAL_MS);
         }
+        fed.push(step.id);
+        // Phase A (S1c): hand the captured cursor token (or null) to the caller — null degrades
+        // to the caller's pre-feed stat (duplication-safe direction, Q3's (a) fallback).
+        if (opts.onAck) opts.onAck(step, ackRe.exec(ackedTail)?.[1] ?? null);
     }
     // queue-empty → the wake-prefix has drained → the spoke is warm-ready; the caller releases work.
+    return { fed, deferred };
     } finally {
         // MNT-067: the window closes on EVERY exit — greeting delivered-in-full (the return in
         // the terminal branch above), spoke queue-empty, or a thrown step (a crashed feed must
@@ -1387,6 +1434,133 @@ export const GREETING_STEP: WakeStep = {
 export function wakeStepsFor(_slug: string, surface: string, opts: { greet?: boolean } = {}): WakeStep[] {
     const greet = opts.greet ?? (surface === 'session');
     return greet ? [...WAKE_STEPS, GREETING_STEP] : WAKE_STEPS;
+}
+
+// ── Phase A (spoke-model-init-consolidation, 2026-08-11): the two-phase stem wake ──────────────
+/**
+ * S1b volatility split — derived from WAKE_STEPS by id (ONE source of step truth; the split is a
+ * view, never a second array). Phase 1 (the STABLE self, fed on the warm model at pre-warm):
+ * integrity → identity → gradient (c0 ack) → felt. Phase 2 (the VOLATILE tail, fed at checkout on
+ * the serve model): swap-check → working-mem → orientation → conversations — plus the computed
+ * delta steps (S1c) fed ahead of them. Non-pool surfaces never see the split (wakeStepsFor is
+ * their path, byte-identical).
+ */
+export const PHASE1_WAKE_IDS = ['integrity', 'identity', 'gradient', 'felt'] as const;
+export function phaseWakeSteps(): { phase1: WakeStep[]; phase2: WakeStep[] } {
+    const p1 = new Set<string>(PHASE1_WAKE_IDS);
+    return {
+        phase1: WAKE_STEPS.filter(s => p1.has(s.id)),
+        phase2: WAKE_STEPS.filter(s => !p1.has(s.id)),
+    };
+}
+
+/** S1c — one wake-manifest entry: what phase 1 actually loaded (or deferred), with the cursor the
+ *  delta computation reads at checkout. `phase: 2` entries (deferred or volatile-by-design) carry
+ *  no cursor — they are whole-loads at checkout, unrepresentable as silent skips (Jim's M-shape). */
+export interface WakeManifestEntry {
+    store: string;                      // 'gradient' | 'felt-moments' | an identity-layer path | a phase-2 step id
+    phase: 1 | 2;
+    cursor: { kind: 'c0' | 'offset' | 'mtime'; value: string } | null;
+    loaded_at: string;                  // ISO (UTC per DEC-105)
+}
+export interface WakeManifest {
+    stem_session: string;
+    slug: string;
+    surface: string;
+    phase1_completed_at: string | null; // the machine-readable WARM receipt (per-stem)
+    phase2_completed_at: string | null; // set by completeTwoPhaseWake — idempotence for bound spokes
+    entries: WakeManifestEntry[];
+}
+export function wakeManifestPath(slug: string, stemSession: string): string {
+    return path.join(HEALTH_DIR, `${slug}-${stemSession}-wake-manifest.json`);
+}
+export function readWakeManifest(slug: string, stemSession: string): WakeManifest | null {
+    try { return JSON.parse(fs.readFileSync(wakeManifestPath(slug, stemSession), 'utf-8')) as WakeManifest; }
+    catch { return null; } // unreadable/absent → caller degrades to the full-tail load (never a silent skip)
+}
+export function writeWakeManifest(m: WakeManifest): void {
+    fs.mkdirSync(HEALTH_DIR, { recursive: true });
+    fs.writeFileSync(wakeManifestPath(m.slug, m.stem_session), JSON.stringify(m, null, 1), 'utf-8');
+}
+
+/**
+ * S1c — compute the delta steps at checkout from the phase-1 manifest. Deltas are INSTRUCTIONS
+ * with precise ranges (the spoke reads; nothing large is inlined through tmux). Order honours the
+ * load doctrine: identity deltas before episodic (gradient) before warmth (felt). An entry whose
+ * store cannot be statted (moved/absent) yields a whole-reload instruction — stuck-over-wrong.
+ */
+export function computeWakeDeltaSteps(slug: string, manifest: WakeManifest): WakeStep[] {
+    const steps: WakeStep[] = [];
+    for (const e of manifest.entries) {
+        if (e.phase !== 1 || !e.cursor) continue; // phase-2 entries are whole-loads in the phase-2 queue
+        if (e.cursor.kind === 'mtime') {
+            try {
+                const mtime = fs.statSync(e.store).mtimeMs;
+                if (String(mtime) !== e.cursor.value) {
+                    steps.push({ id: `delta-${path.basename(e.store).replace(/[^a-z0-9-]/gi, '-')}`, ack: { kind: 'marker' },
+                        prompt: `DELTA: ${e.store} changed while you idled — reload it WHOLE (it is small; identity precedes episodic memory).` });
+                }
+            } catch {
+                steps.push({ id: `delta-${path.basename(e.store).replace(/[^a-z0-9-]/gi, '-')}`, ack: { kind: 'marker' },
+                    prompt: `DELTA: ${e.store} could not be statted at checkout — reload it WHOLE if it exists (surface its absence in your first work turn if it does not).` });
+            }
+        } else if (e.cursor.kind === 'c0') {
+            const delta = gradientEntriesAfterC0(slug, e.cursor.value);
+            if (delta.length > 0) {
+                const ids = delta.map(d => `'${d.id}'`).join(',');
+                steps.push({ id: 'delta-gradient', ack: { kind: 'marker' },
+                    prompt: `DELTA: your gradient gained ${delta.length} entr${delta.length === 1 ? 'y' : 'ies'} while you idled (a WM rotation moved content out of working memory INTO the gradient — this closes that hole). Read them WHOLE: sqlite3 ~/.han/gradient.db "SELECT level, content FROM gradient_entries WHERE id IN (${ids}) ORDER BY rowid"` });
+            }
+        } else if (e.cursor.kind === 'offset') {
+            try {
+                const size = fs.statSync(e.store).size;
+                const from = parseInt(e.cursor.value, 10);
+                if (Number.isFinite(from) && size > from) {
+                    steps.push({ id: `delta-${path.basename(e.store, '.md')}`, ack: { kind: 'marker' },
+                        prompt: `DELTA: ${e.store} grew from byte ${from} to ${size} while you idled — read the appended tail: tail -c +${from + 1} '${e.store}' (append-only per DEC-069, so the tail is exactly the new entries).` });
+                }
+            } catch { /* absent append-file at checkout: nothing to read; the next full wake reconciles */ }
+        }
+    }
+    return steps;
+}
+
+/**
+ * S1b — complete a two-phase stem wake at checkout (the ONE helper both checkout doors call,
+ * post-cast). No-op unless the flag is on AND the stem carries a manifest with phase 2 pending
+ * (idempotent for bound spokes — phase 2 runs once per stem life). On completion: writes the
+ * shared per-surface `-ready` sentinel (serve-ready — its existing consumers keep their exact
+ * meaning) with the c0 id copied from the per-stem sentinel, and stamps the manifest. Fail-state
+ * (DEC-103): a thrown phase-2 step propagates — the caller's existing catch retires/marks the
+ * stem and the work prompt is never delivered half-loaded (never killed; alert via the caller).
+ */
+async function completeTwoPhaseWake(slug: string, surface: string, stem: PoolStem): Promise<void> {
+    if (!stemTwoPhaseWakeFor(slug, surface)) return;
+    const manifest = readWakeManifest(slug, stem.tmux_session);
+    if (!manifest) return;            // pre-flag stem or unreadable → the stem was fully warmed the old way (or degrades below)
+    if (manifest.phase2_completed_at) return; // already completed on a prior dispatch (bound spoke)
+    // Q5 (menu-shaped by construction): the phase-2 conversations step is the BOUNDED variant —
+    // ids+titles since phase 1, no body reads unless the work prompt names a thread. The shared
+    // WAKE_STEPS text is untouched for every non-pool surface (scope discipline).
+    const since = manifest.phase1_completed_at ?? manifest.entries[0]?.loaded_at ?? new Date(0).toISOString();
+    const { phase2 } = phaseWakeSteps();
+    const phase2Bounded = phase2.map(s => s.id !== 'conversations' ? s : ({ ...s,
+        prompt: `Check conversations as a MENU only: list threads updated since ${since} — ids + titles, count-bounded (stop at 20). Do NOT read thread bodies (your work prompt names any thread you need whole) and do not reply. Read any session-briefing-*.md files; note only.` }));
+    const deltas = computeWakeDeltaSteps(slug, manifest);
+    // Deferred phase-1 entries (ceiling migrations) are whole-loads: feed their ORIGINAL steps first.
+    const deferredIds = new Set(manifest.entries.filter(e => e.phase === 2 && PHASE1_WAKE_IDS.includes(e.store as typeof PHASE1_WAKE_IDS[number])).map(e => e.store));
+    const deferredSteps = WAKE_STEPS.filter(s => deferredIds.has(s.id));
+    console.log(`[tmux-dispatcher] ${slug}/${surface}: two-phase wake — feeding phase 2 on stem ${stem.stem_id} (${deferredSteps.length} deferred + ${deltas.length} delta + ${phase2Bounded.length} tail steps)`);
+    await feedWakeSteps(slug, surface, [...deferredSteps, ...deltas, ...phase2Bounded], {
+        tmuxTarget: stem.tmux_session, sentinelKey: stem.tmux_session,
+    });
+    // Serve-ready: the shared per-surface sentinel keeps its exact meaning for existing consumers —
+    // written now (phase-2 complete), carrying the c0 id from the per-stem (warm) sentinel.
+    try {
+        const c0 = fs.readFileSync(path.join(HEALTH_DIR, `${slug}-${stem.tmux_session}-ready`), 'utf-8').trim();
+        fs.writeFileSync(readyPath(slug, surface), `${c0}\n`, 'utf-8');
+    } catch { /* per-stem sentinel unreadable → leave the shared sentinel untouched (its consumers fail toward not-ready) */ }
+    writeWakeManifest({ ...manifest, phase2_completed_at: new Date().toISOString() });
 }
 
 /**
@@ -1523,7 +1697,7 @@ async function castStemToServeModel(slug: string, surface: string, stem: PoolSte
  *  `getContextPct` file collides across concurrent spokes, so the reap needs a per-session read
  *  (gate 3: "the stem's own sidecar"). Null if the sidecar isn't present yet — e.g. the statusline
  *  hook hasn't been taught the per-session write (C4 wiring) — and the reap then safely no-ops. */
-function getContextPctForSession(slug: string, surface: string, tmuxSession: string): number | null {
+export function getContextPctForSession(slug: string, surface: string, tmuxSession: string): number | null {
     try {
         const p = path.join(HEALTH_DIR, `${slug}-${surface}-${tmuxSession}-ctx.json`);
         const pct = JSON.parse(fs.readFileSync(p, 'utf-8'))?.context_window?.used_percentage;
@@ -1585,7 +1759,8 @@ async function dispatchToPooledStem(
     if (!stem) return null; // every candidate dead → floor
     let cap: CaptureRecord;
     try {
-        await castStemToServeModel(slug, surface, stem); // DEC-101: warm(sonnet) → serve model at checkout
+        await castStemToServeModel(slug, surface, stem); // DEC-101: warm(haiku) → serve model at checkout
+        await completeTwoPhaseWake(slug, surface, stem); // Phase A S1b: volatile tail + deltas, post-cast (no-op when flag off / already complete)
         const freshenedPrompt = await freshenPooledStem(slug, surface, stem, promptDoc);
         // lease-is-readiness: NO verifyWarmOrNudge; the stem's session key threads through as stemKey.
         cap = await enqueueForAgent(slug, surface, freshenedPrompt, { timeoutMs: opts.timeoutMs }, stem.tmux_session);
@@ -1686,6 +1861,7 @@ async function dispatchToBoundSpoke(
         // observeActiveModel+upsertStem), instead of leaving them on the old model until reap. Common
         // case (already on serve model) returns in one comparison — no /model, no cooldown.
         await castStemToServeModel(slug, surface, stem);
+        await completeTwoPhaseWake(slug, surface, stem); // Phase A S1b: once per stem life (manifest-stamped), post-cast
         // gate 4: freshen EVERY dispatch — the spoke idled while other seats wrote WM; carry the #91 delta since ITS cursor
         const freshenedPrompt = await freshenPooledStem(slug, surface, stem, promptDoc);
         cap = await enqueueForAgent(slug, surface, freshenedPrompt, { timeoutMs: opts.timeoutMs }, stem.tmux_session);
