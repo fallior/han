@@ -1474,13 +1474,52 @@ export interface WakeManifest {
 export function wakeManifestPath(slug: string, stemSession: string): string {
     return path.join(HEALTH_DIR, `${slug}-${stemSession}-wake-manifest.json`);
 }
+/** F1 cure (Tenshi mso7cgc9, 2026-08-11): the OUT-OF-BAND two-phase marker — a second file whose
+ *  fate the manifest does not share. The pre-warmer writes it at the two-phase DECISION (before
+ *  phase 1 is fed), so checkout can tell a pre-flag stem (no marker → nothing owed) from a flag-on
+ *  stem whose manifest was lost or torn (marker present → phase 2 OWED, certificate missing →
+ *  defer-and-alert, never serve half-loaded). */
+export function phase1MarkerPath(slug: string, stemSession: string): string {
+    return path.join(HEALTH_DIR, `${slug}-${stemSession}-twophase`);
+}
 export function readWakeManifest(slug: string, stemSession: string): WakeManifest | null {
     try { return JSON.parse(fs.readFileSync(wakeManifestPath(slug, stemSession), 'utf-8')) as WakeManifest; }
-    catch { return null; } // unreadable/absent → caller degrades to the full-tail load (never a silent skip)
+    // unreadable/absent → null. The checkout caller consults the out-of-band two-phase marker to
+    // distinguish "pre-flag stem, nothing owed" from "phase 2 owed, certificate lost" — the latter
+    // defers-and-alerts, never serves half-loaded (F1 cure 2026-08-11; the prior recital here
+    // claimed a degrade the caller did not perform — Casey mso7nq14 §1a, corrected in the F1 commit).
+    catch { return null; }
 }
 export function writeWakeManifest(m: WakeManifest): void {
     fs.mkdirSync(HEALTH_DIR, { recursive: true });
-    fs.writeFileSync(wakeManifestPath(m.slug, m.stem_session), JSON.stringify(m, null, 1), 'utf-8');
+    // F1 cure: ATOMIC write — temp-then-rename (same dir, POSIX-atomic), so a crash mid-write can
+    // never leave a torn manifest. A torn certificate was exactly what turned "phase 2 owed" into
+    // "nothing owed" at the old fail-open branch.
+    const p = wakeManifestPath(m.slug, m.stem_session);
+    fs.writeFileSync(`${p}.tmp`, JSON.stringify(m, null, 1), 'utf-8');
+    fs.renameSync(`${p}.tmp`, p);
+}
+/** F1: TRUE iff this stem owes a phase 2 whose certificate is missing — the two-phase marker exists
+ *  but the manifest is unreadable/absent. The one branch that must never serve (defer-and-alert). */
+export function twoPhaseOwedButLost(slug: string, stemSession: string): boolean {
+    return readWakeManifest(slug, stemSession) === null && fs.existsSync(phase1MarkerPath(slug, stemSession));
+}
+
+/** F2 cure (Tenshi mso7cgc9, 2026-08-11): the ONE derivation of the stores a phase-1 manifest may
+ *  legitimately name — registry-resolved (S195: through `gradientConfigForAgent`, never a layout
+ *  guess). The pre-warmer WRITES manifest entries from this set; `computeWakeDeltaSteps` RESOLVES
+ *  entries against it — so the string that reaches a prompt or a shell command is always the
+ *  registry's copy, never the manifest's. A forged/corrupt `store` is unrepresentable in an
+ *  instruction by construction (adoption-not-location, Casey mso7nq14 §2). */
+export function knownWakeStores(slug: string): { identityFiles: string[]; feltPath: string } {
+    const reg = gradientConfigForAgent(slug);
+    const identityFiles = [
+        path.join(reg.memoryDir, 'identity.md'), path.join(reg.memoryDir, 'patterns.md'),
+        fs.existsSync(path.join(reg.memoryDir, 'self-reflections-curated.md'))
+            ? path.join(reg.memoryDir, 'self-reflections-curated.md') : path.join(reg.memoryDir, 'self-reflection.md'),
+        path.join(reg.fractalDir, 'aphorisms.md'),
+    ];
+    return { identityFiles, feltPath: path.join(reg.memoryDir, 'felt-moments.md') };
 }
 
 /**
@@ -1488,21 +1527,30 @@ export function writeWakeManifest(m: WakeManifest): void {
  * with precise ranges (the spoke reads; nothing large is inlined through tmux). Order honours the
  * load doctrine: identity deltas before episodic (gradient) before warmth (felt). An entry whose
  * store cannot be statted (moved/absent) yields a whole-reload instruction — stuck-over-wrong.
+ * F2: every path below comes from `knownWakeStores` (the registry), never from the manifest string —
+ * an entry whose `store` resolves to no known store emits NO instruction and raises an alert.
  */
 export function computeWakeDeltaSteps(slug: string, manifest: WakeManifest): WakeStep[] {
     const steps: WakeStep[] = [];
+    const { identityFiles, feltPath } = knownWakeStores(slug);
+    // The manifest string only SELECTS a known store; the value used downstream is the registry's.
+    const known = new Map<string, string>([...identityFiles, feltPath].map(f => [f, f]));
+    known.set('gradient', 'gradient');
+    let unknown = 0;
     for (const e of manifest.entries) {
         if (e.phase !== 1 || !e.cursor) continue; // phase-2 entries are whole-loads in the phase-2 queue
+        const store = known.get(e.store);
+        if (store === undefined) { unknown++; continue; } // F2: never a prompt/command from an unresolved string
         if (e.cursor.kind === 'mtime') {
             try {
-                const mtime = fs.statSync(e.store).mtimeMs;
+                const mtime = fs.statSync(store).mtimeMs;
                 if (String(mtime) !== e.cursor.value) {
-                    steps.push({ id: `delta-${path.basename(e.store).replace(/[^a-z0-9-]/gi, '-')}`, ack: { kind: 'marker' },
-                        prompt: `DELTA: ${e.store} changed while you idled — reload it WHOLE (it is small; identity precedes episodic memory).` });
+                    steps.push({ id: `delta-${path.basename(store).replace(/[^a-z0-9-]/gi, '-')}`, ack: { kind: 'marker' },
+                        prompt: `DELTA: ${store} changed while you idled — reload it WHOLE (it is small; identity precedes episodic memory).` });
                 }
             } catch {
-                steps.push({ id: `delta-${path.basename(e.store).replace(/[^a-z0-9-]/gi, '-')}`, ack: { kind: 'marker' },
-                    prompt: `DELTA: ${e.store} could not be statted at checkout — reload it WHOLE if it exists (surface its absence in your first work turn if it does not).` });
+                steps.push({ id: `delta-${path.basename(store).replace(/[^a-z0-9-]/gi, '-')}`, ack: { kind: 'marker' },
+                    prompt: `DELTA: ${store} could not be statted at checkout — reload it WHOLE if it exists (surface its absence in your first work turn if it does not).` });
             }
         } else if (e.cursor.kind === 'c0') {
             const delta = gradientEntriesAfterC0(slug, e.cursor.value);
@@ -1513,14 +1561,28 @@ export function computeWakeDeltaSteps(slug: string, manifest: WakeManifest): Wak
             }
         } else if (e.cursor.kind === 'offset') {
             try {
-                const size = fs.statSync(e.store).size;
+                const size = fs.statSync(store).size;
                 const from = parseInt(e.cursor.value, 10);
                 if (Number.isFinite(from) && size > from) {
-                    steps.push({ id: `delta-${path.basename(e.store, '.md')}`, ack: { kind: 'marker' },
-                        prompt: `DELTA: ${e.store} grew from byte ${from} to ${size} while you idled — read the appended tail: tail -c +${from + 1} '${e.store}' (append-only per DEC-069, so the tail is exactly the new entries).` });
+                    steps.push({ id: `delta-${path.basename(store, '.md')}`, ack: { kind: 'marker' },
+                        prompt: `DELTA: ${store} grew from byte ${from} to ${size} while you idled — read the appended tail: tail -c +${from + 1} '${store}' (append-only per DEC-069, so the tail is exactly the new entries).` });
+                } else if (Number.isFinite(from) && from > size) {
+                    // Felt-shrink guard (Tenshi verify-item 1, licence-not-property): the file SHRANK
+                    // while the stem idled — curation is the anticipated event that ends the offset
+                    // licence. A tail from a beyond-EOF offset is void; reload whole instead.
+                    steps.push({ id: `delta-${path.basename(store, '.md')}`, ack: { kind: 'marker' },
+                        prompt: `DELTA: ${store} SHRANK from byte ${from} to ${size} while you idled (curation — the offset cursor is void). Re-read the file WHOLE.` });
                 }
             } catch { /* absent append-file at checkout: nothing to read; the next full wake reconciles */ }
         }
+    }
+    if (unknown > 0) {
+        // Detection is the point: a store string the registry cannot resolve is either manifest
+        // corruption/forgery or the identity layer changed shape while the stem idled (e.g. a curated
+        // self-reflection appearing). Either way: no instruction was built from it (above), the next
+        // FULL wake collects the content, and the operator hears about it now (stuck-over-wrong).
+        console.warn(`[tmux-dispatcher] ${slug}: wake-manifest carried ${unknown} entr${unknown === 1 ? 'y' : 'ies'} with store strings the registry cannot resolve — no delta instruction built from them (F2); next full wake reconciles`);
+        postNtfyAlert(`${slug}: wake-manifest for stem ${manifest.stem_session} carried ${unknown} unresolvable store entr${unknown === 1 ? 'y' : 'ies'} — possible corruption; deltas skipped safely (F2)`, `HAN two-phase wake: unresolvable manifest store (${slug})`);
     }
     return steps;
 }
@@ -1528,16 +1590,31 @@ export function computeWakeDeltaSteps(slug: string, manifest: WakeManifest): Wak
 /**
  * S1b — complete a two-phase stem wake at checkout (the ONE helper both checkout doors call,
  * post-cast). No-op unless the flag is on AND the stem carries a manifest with phase 2 pending
- * (idempotent for bound spokes — phase 2 runs once per stem life). On completion: writes the
- * shared per-surface `-ready` sentinel (serve-ready — its existing consumers keep their exact
- * meaning) with the c0 id copied from the per-stem sentinel, and stamps the manifest. Fail-state
+ * (idempotent for bound spokes — phase 2 runs once per stem life). On completion: stamps the
+ * manifest (`phase2_completed_at` — the session-keyed serve-ready signal). Fail-states
  * (DEC-103): a thrown phase-2 step propagates — the caller's existing catch retires/marks the
- * stem and the work prompt is never delivered half-loaded (never killed; alert via the caller).
+ * stem and the work prompt is never delivered half-loaded (never killed; alert via the caller);
+ * a lost/torn manifest on a marker-carrying stem throws the same way (F1 — see below).
  */
 async function completeTwoPhaseWake(slug: string, surface: string, stem: PoolStem): Promise<void> {
     if (!stemTwoPhaseWakeFor(slug, surface)) return;
     const manifest = readWakeManifest(slug, stem.tmux_session);
-    if (!manifest) return;            // pre-flag stem or unreadable → the stem was fully warmed the old way (or degrades below)
+    if (!manifest) {
+        // F1 cure (Tenshi mso7cgc9, closed 2026-08-11): a null manifest cannot tell
+        // fully-warmed-the-old-way from phase-2-owed-with-the-certificate-lost. The out-of-band
+        // two-phase marker (written at the pre-warm DECISION, file-fate independent of the
+        // manifest) is the discriminator: no marker → genuinely a pre-flag stem, nothing owed;
+        // marker present → phase 2 is OWED and the certificate is lost/torn → defer-and-alert.
+        // "A seat without a receipt is a crash to investigate, never a discharge presumed from
+        // silence" (Casey mso7nq14 §1e-at-checkout).
+        if (fs.existsSync(phase1MarkerPath(slug, stem.tmux_session))) {
+            postNtfyAlert(
+                `${slug}/${surface}: stem ${stem.stem_id} carries the two-phase marker but its wake-manifest is lost/torn — refusing to serve half-loaded; the stem retires for a fresh warm (F1 defer-and-alert)`,
+                `HAN two-phase wake: torn manifest (${slug})`);
+            throw new SessionNotReadyError(`${slug}/${surface}: two-phase marker present but wake-manifest unreadable for stem ${stem.stem_id} — phase 2 owed, certificate lost (F1: defer, never serve half-loaded)`);
+        }
+        return; // no marker → pre-flag stem, fully warmed the old way: nothing owed
+    }
     if (manifest.phase2_completed_at) return; // already completed on a prior dispatch (bound spoke)
     // Q5 (menu-shaped by construction): the phase-2 conversations step is the BOUNDED variant —
     // ids+titles since phase 1, no body reads unless the work prompt names a thread. The shared
@@ -1554,12 +1631,15 @@ async function completeTwoPhaseWake(slug: string, surface: string, stem: PoolSte
     await feedWakeSteps(slug, surface, [...deferredSteps, ...deltas, ...phase2Bounded], {
         tmuxTarget: stem.tmux_session, sentinelKey: stem.tmux_session,
     });
-    // Serve-ready: the shared per-surface sentinel keeps its exact meaning for existing consumers —
-    // written now (phase-2 complete), carrying the c0 id from the per-stem (warm) sentinel.
-    try {
-        const c0 = fs.readFileSync(path.join(HEALTH_DIR, `${slug}-${stem.tmux_session}-ready`), 'utf-8').trim();
-        fs.writeFileSync(readyPath(slug, surface), `${c0}\n`, 'utf-8');
-    } catch { /* per-stem sentinel unreadable → leave the shared sentinel untouched (its consumers fail toward not-ready) */ }
+    // F3 cure (Tenshi mso8hjjx, Casey msohxz4y — STRUCK 2026-08-11, dated): checkout previously
+    // wrote the SHARED per-surface `-ready` sentinel here. Struck entirely: no pool consumer reads
+    // that file (LEASE-IS-READINESS, above), and its only live readers are the FLOOR's cold-launch
+    // waitForReady + c0-gate — which a pool-side write can cross-satisfy mid-wake (the same
+    // stem-vs-floor race the per-stem sentinel re-key closed; `prewarm-stem.ts`'s own "a pre-warm
+    // can NEVER touch the FLOOR's per-surface sentinel" comment is the codebase's precedent on the
+    // class). The session-keyed serve-ready signal is the manifest stamp below.
+    // [Declared deviation from the Q2 lean's letter ("-ready written at phase-2 completion") —
+    //  ruled at this batch's diff-audit.]
     writeWakeManifest({ ...manifest, phase2_completed_at: new Date().toISOString() });
 }
 
@@ -1951,6 +2031,9 @@ const SERVER_DIR = path.resolve(__dirname, '..');
  *  not be able to hurt the warm it watches. The curl's own 10s timeout bounds a NETWORK op on the
  *  alert, not cognition (same bound as every existing ntfy call). */
 export function postNtfyAlert(message: string, title: string): void {
+    // Test-hooked runs never reach the real wire (the assert-scratch-db family, MNT-075: a suite
+    // must not be able to page the operator). Any hook set = a driven run.
+    if (Object.keys(testHooks).length > 0) { console.log(`[tmux-dispatcher] (test) ntfy suppressed: ${title}`); return; }
     try {
         const cfg = JSON.parse(fs.readFileSync(path.join(hanHome(), 'config.json'), 'utf8'));
         if (!cfg.ntfy_topic) return;

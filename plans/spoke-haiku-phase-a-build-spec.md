@@ -153,3 +153,49 @@ model-switches). Independent of B1–B3; can land first.
 - D4 (land pre-hop Wed vs post-hop) remains Darron's word — this spec is build-ready either way.
 
 — Leo (session), 2026-08-11, held for Jim's plan-audit.
+
+---
+
+## Amendment 2026-08-11 (evening) — the flip licence, CONSOLIDATED (Casey msohxz4y §3)
+
+> The pre-flip conditions had accumulated across five posts (Jim's two folds, Casey's two
+> passes, Tenshi's second pass); this section is the ONE instrument flip-day is judged against.
+> Assembled by Leo (session) on Darron's "the pre-flip cure batch can be done now" (evening chat).
+
+**`stemTwoPhaseWake` may flip ON only when ALL of the following hold:**
+
+1. **F1 cure LANDED** — the out-of-band two-phase marker (written at the pre-warm decision,
+   file-fate independent of the manifest) + the atomic temp-then-rename manifest write + the
+   checkout defer-and-alert on marker-without-manifest (never serve half-loaded; never presume
+   nothing-owed from silence). The false `:1479` recital corrected **in the same commit**
+   (Casey §1a — the recital rides the fix).
+2. **F2 cure LANDED** — manifest `store` strings resolve through `knownWakeStores` (the
+   registry); the string reaching any prompt/shell is always the registry's copy; an
+   unresolvable entry emits NO instruction and raises an alert (unrepresentable, not filtered).
+   Writer and resolver share the ONE derivation (prewarm imports the same helper).
+3. **F3 cure LANDED** — the shared per-surface `-ready` sentinel write STRUCK from checkout
+   (no pool consumer reads it; its only live readers are the floor's, which it can only
+   misinform — the codebase's own stem-vs-floor precedent). Serve-ready = the session-keyed
+   manifest `phase2_completed_at`. *Declared deviation from the Q2 lean's letter — ruled at
+   this batch's diff-audit.*
+4. **Felt-shrink guard LANDED** — offset cursor beyond EOF → whole-reload instruction (the
+   never-shrink licence written into code; curation is the anticipated licence-ending event).
+5. **Plan line-79 dated correction** — DONE (parent plan, Jim's hand, 2026-08-11 ~3:20 PM).
+6. **Window gate** — per-agent phase-1 footprint measured from wake-reconcile receipts; every
+   agent fits under the ceiling with margin.
+7. **Wake-fidelity gate** — ≥5 consecutive live Haiku fed-wakes per agent, WITH the
+   sidecar-exists assertion (an always-null sidecar must fail the gate, not pass as green).
+8. **No-compose-pre-cast invariant** — stems idle after phase 1 (S208 inertness; DEC-092
+   stamps make violations legible).
+9. **Four manufactured live-fires**, each proven to **defer-and-alert rather than serve**:
+   (a) a rotation across an idle window arriving as deltas at checkout;
+   (b) a torn/absent manifest on a marker-carrying stem;
+   (c) a floor/pool sentinel race — prove the floor's `waitForReady` can NO LONGER be
+       cross-satisfied by a concurrent checkout (the F3 strike proven live, not just in suite);
+   (d) the existing corrupt-manifest fire (Jim's fold), which the F2 alert path now serves.
+10. **Jim's seal** on the cure batch by his own runs — the flip happens on the seal, not on
+    the land.
+
+*Provenance: Tenshi mso7cgc9 (F1/F2 + live-fires), mso8hjjx (F3 + premise verification);
+Casey mso7nq14 (recital/§1c/line-79), msohxz4y (F3 counsel + this consolidation); Jim
+mso7i7we + mso7q9h4 (folds); Darron's rulings 2026-08-11 (rhythm continues; batch now).*

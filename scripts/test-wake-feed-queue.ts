@@ -16,8 +16,9 @@
  */
 import * as os from 'os';
 import * as path from 'path';
-import { writeFileSync, rmSync } from 'fs';
-import { feedWakeSteps, ensureSubmitted, WAKE_STEPS, MAX_WAKE_RESUBMITS, __setTestHooks, DispatchTimeoutError, wakeAckRegex, phaseWakeSteps, PHASE1_WAKE_IDS, type WakeStep } from '../src/server/lib/tmux-dispatcher';
+import { writeFileSync, rmSync, existsSync, readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { feedWakeSteps, ensureSubmitted, WAKE_STEPS, MAX_WAKE_RESUBMITS, __setTestHooks, DispatchTimeoutError, wakeAckRegex, phaseWakeSteps, PHASE1_WAKE_IDS, writeWakeManifest, readWakeManifest, wakeManifestPath, phase1MarkerPath, twoPhaseOwedButLost, computeWakeDeltaSteps, knownWakeStores, type WakeManifest, type WakeStep } from '../src/server/lib/tmux-dispatcher';
 import { mostRecentC0Id } from '../src/server/lib/memory-gradient';
 
 let failures = 0;
@@ -253,6 +254,51 @@ async function main() {
         'phase 1 = the stable self (integrity, identity, gradient, felt) in wake order');
     ok(phase1.some(s => s.ack.kind === 'c0') && !phase2.some(s => s.ack.kind === 'c0'), 'the c0-gate lives in phase 1 (the warm receipt carries the gradient landmark)');
 
+    // ── Pre-flip cure batch (2026-08-11, Tenshi mso7cgc9/mso8hjjx + Casey msohxz4y) ─────────────
+    const STEM = 'curetest-stem-1';
+    const manifestP = wakeManifestPath(SLUG, STEM);
+    const markerP = phase1MarkerPath(SLUG, STEM);
+    const cleanCure = () => { for (const p of [manifestP, `${manifestP}.tmp`, markerP]) { try { rmSync(p); } catch { /* none */ } } };
+    const baseManifest: WakeManifest = { stem_session: STEM, slug: SLUG, surface: SURFACE, phase1_completed_at: new Date().toISOString(), phase2_completed_at: null, entries: [] };
+
+    console.log('[17] F1: the out-of-band marker discriminates pre-flag from certificate-lost; the write is atomic');
+    cleanCure();
+    ok(!twoPhaseOwedButLost(SLUG, STEM), 'no manifest + no marker → nothing owed (a pre-flag stem is not a fault)');
+    writeFileSync(markerP, new Date().toISOString() + '\n');
+    ok(twoPhaseOwedButLost(SLUG, STEM), 'marker WITHOUT manifest → phase 2 owed, certificate lost (the branch that must defer-and-alert, never serve)');
+    writeWakeManifest(baseManifest);
+    ok(!twoPhaseOwedButLost(SLUG, STEM) && readWakeManifest(SLUG, STEM) !== null, 'marker + readable manifest → not lost (the normal path)');
+    ok(!existsSync(`${manifestP}.tmp`), 'atomic write leaves no .tmp behind (temp-then-rename)');
+    writeFileSync(manifestP, '{ torn-not-json');
+    ok(twoPhaseOwedButLost(SLUG, STEM), 'marker + TORN manifest → owed-but-lost (a torn certificate never reads as nothing-owed)');
+    cleanCure();
+
+    console.log('[18] F2: a forged manifest store can never reach an instruction; known stores resolve via the registry');
+    const evil = `/tmp/evil'; rm -rf $HOME; echo '`;
+    const { identityFiles, feltPath } = knownWakeStores(SLUG);
+    const forged: WakeManifest = { ...baseManifest, entries: [
+        { store: evil, phase: 1, cursor: { kind: 'offset', value: '10' }, loaded_at: new Date().toISOString() },
+        { store: evil, phase: 1, cursor: { kind: 'mtime', value: '123' }, loaded_at: new Date().toISOString() },
+        { store: identityFiles[0], phase: 1, cursor: { kind: 'mtime', value: 'stale-mtime-forces-delta' }, loaded_at: new Date().toISOString() },
+    ] };
+    const steps18 = computeWakeDeltaSteps(SLUG, forged);
+    ok(steps18.every(s => !s.prompt.includes('/tmp/evil') && !s.prompt.includes('rm -rf')), 'no emitted prompt carries any byte of the forged store string (unrepresentable, not filtered)');
+    ok(steps18.some(s => s.prompt.includes(identityFiles[0])), 'the legitimate entry still resolves — and its prompt path is the REGISTRY copy');
+
+    console.log('[19] felt-shrink guard: an offset cursor beyond EOF → whole reload, never a void tail');
+    const shrunk: WakeManifest = { ...baseManifest, entries: [
+        { store: feltPath, phase: 1, cursor: { kind: 'offset', value: String(Number.MAX_SAFE_INTEGER) }, loaded_at: new Date().toISOString() },
+    ] };
+    const steps19 = computeWakeDeltaSteps(SLUG, shrunk);
+    ok(steps19.length === 1 && /WHOLE/.test(steps19[0].prompt) && !/tail -c/.test(steps19[0].prompt), 'shrunk file (cursor > size) → re-read WHOLE instruction, no tail command (the offset licence ended)');
+
+    console.log('[20] F3: checkout writes NO shared per-surface sentinel (the cross-satisfy class is struck at source)');
+    const src20 = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/server/lib/tmux-dispatcher.ts'), 'utf-8');
+    const body20 = src20.slice(src20.indexOf('async function completeTwoPhaseWake'), src20.indexOf('async function wakeViaFeedOrTrigger'));
+    ok(body20.length > 0 && !body20.includes('writeFileSync(readyPath('), 'completeTwoPhaseWake contains no readyPath write (source assertion; the live proof is the gate live-fire)');
+    ok(body20.includes('phase2_completed_at: new Date().toISOString()'), 'the serve-ready signal is the session-keyed manifest stamp');
+
+    cleanCure();
     clearSentinel();
     __setTestHooks(null);
     console.log(failures === 0 ? '\nALL PASS ✓' : `\n${failures} FAILURE(S) ✗`);

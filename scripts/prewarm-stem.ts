@@ -19,11 +19,10 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { feedWakeSteps, wakeStepsFor, awaitChromeOrDescend, observeActiveModel, currentWmCharLen, phaseWakeSteps, writeWakeManifest, getContextPctForSession, PHASE1_WAKE_IDS, type WakeManifestEntry, type WakeStep } from '../src/server/lib/tmux-dispatcher';
+import { feedWakeSteps, wakeStepsFor, awaitChromeOrDescend, observeActiveModel, currentWmCharLen, phaseWakeSteps, writeWakeManifest, wakeManifestPath, phase1MarkerPath, knownWakeStores, getContextPctForSession, PHASE1_WAKE_IDS, type WakeManifestEntry, type WakeStep } from '../src/server/lib/tmux-dispatcher';
 import { stemWarmLadder, swapPrefixFor, stemTwoPhaseWakeFor, stemPhase1CeilingPctFor } from '../src/server/lib/garden-manifest';
 import { writeSleeveState } from '../src/server/lib/sleeve-state';
-import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
-import { existsSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 
 const slug = process.argv[2];
 if (!slug) {
@@ -69,6 +68,14 @@ async function main(): Promise<void> {
     // stem's fresh traversal-to-EOF. (The clobber of a live seat's sentinel is benign — fork-3:
     // the stem-registry is the attach source-of-truth; pool-of-1 replaces, doesn't parallel.)
     try { unlinkSync(SENTINEL); } catch { /* absent = fine */ }
+    // F1 hygiene (2026-08-11): clear any STALE wake-manifest / two-phase marker / torn temp left by
+    // a prior stem that carried this session name — a recycled name must never inherit a dead stem's
+    // certificate (the same reason the sentinel is cleared above).
+    if (POOL) {
+        for (const p of [wakeManifestPath(slug, tmuxSession), `${wakeManifestPath(slug, tmuxSession)}.tmp`, phase1MarkerPath(slug, tmuxSession)]) {
+            try { unlinkSync(p); } catch { /* absent = fine */ }
+        }
+    }
 
     // 1) launch the stem via the shared contract (--stem bypasses only the launchable-surface check).
     //    Pool mode passes --session-name so the stem gets its own distinct tmux session.
@@ -109,11 +116,14 @@ async function main(): Promise<void> {
     //    (or non-pool): the WHOLE self, byte-identical to the pre-Phase-A behaviour.
     const twoPhase = POOL && stemTwoPhaseWakeFor(slug, SURFACE);
     if (twoPhase) {
+        // F1 cure: the OUT-OF-BAND two-phase marker, written at the DECISION — before a single
+        // phase-1 step is fed — so a crash anywhere between here and the manifest write leaves a
+        // marker-without-manifest, which checkout reads as "phase 2 owed, certificate lost" and
+        // defers-and-alerts (never serves the stem half-loaded, never presumes nothing owed).
+        writeFileSync(phase1MarkerPath(slug, tmuxSession), `${new Date().toISOString()}\n`, 'utf-8');
         const { phase1 } = phaseWakeSteps();
         const ceiling = stemPhase1CeilingPctFor(slug, SURFACE);
-        const reg = gradientConfigForAgent(slug);
-        const memDir = reg.memoryDir;
-        const feltPath = path.join(memDir, 'felt-moments.md');
+        const feltPath = knownWakeStores(slug).feltPath;
         const preStat = (p: string): string => { try { return String(statSync(p).size); } catch { return '0'; } };
         const feltPreFeedSize = preStat(feltPath); // Q3 (a) degrade: recorded BEFORE the step is fed — errs toward re-delivery
         let feltCursor: string | null = null;
@@ -131,12 +141,10 @@ async function main(): Promise<void> {
             onAck: (step: WakeStep, cursor: string | null) => { if (step.id === 'felt') feltCursor = cursor; },
         });
         // S1c — the wake manifest: what phase 1 actually loaded, with cursors the checkout reads.
-        const identityFiles = [
-            path.join(memDir, 'identity.md'), path.join(memDir, 'patterns.md'),
-            existsSync(path.join(memDir, 'self-reflections-curated.md'))
-                ? path.join(memDir, 'self-reflections-curated.md') : path.join(memDir, 'self-reflection.md'),
-            path.join(reg.fractalDir, 'aphorisms.md'),
-        ];
+        // F2: the store list comes from knownWakeStores — the SAME derivation the checkout resolver
+        // uses, so writer and resolver cannot drift (a drift would read legitimate entries as
+        // unresolvable at checkout).
+        const identityFiles = knownWakeStores(slug).identityFiles;
         const nowIso = new Date().toISOString();
         const entries: WakeManifestEntry[] = [];
         for (const id of PHASE1_WAKE_IDS) {
