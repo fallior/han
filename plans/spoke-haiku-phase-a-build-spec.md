@@ -187,12 +187,30 @@ model-switches). Independent of B1–B3; can land first.
    sidecar-exists assertion (an always-null sidecar must fail the gate, not pass as green).
 8. **No-compose-pre-cast invariant** — stems idle after phase 1 (S208 inertness; DEC-092
    stamps make violations legible).
-9. **Four manufactured live-fires**, each proven to **defer-and-alert rather than serve**:
+9. **Four manufactured live-fires**, each proven to **refuse correctly rather than serve**
+   *(§9 AMENDED 2026-08-12 ~9:50 PM — Casey's count correction (filed 10:44 AM, her own page)
+   + Tenshi's blind verification at the landed bytes (`readWakeManifest :1485` collapses
+   torn/absent/unparseable into one null; `:1601-1602` branches to F1's defer-and-alert;
+   nothing reaches `computeWakeDeltaSteps :1626` on that path). The old (b) and (d) were ONE
+   branch described twice — the page read as four proofs and delivered three. The old (d)'s
+   sentence "which the F2 alert path now serves" is STRUCK as a false recital the landed code
+   refutes: a corrupt manifest exercises F1 and only F1. Struck-not-deleted per the
+   correction-beside law; the original wording is preserved in git history and in the thread
+   record (msq0-era posts). The new (d) is F2's OWN fire — Tenshi's design, converged
+   independently with Casey's drafting-end wording (the ultra-vires probe).)*:
    (a) a rotation across an idle window arriving as deltas at checkout;
-   (b) a torn/absent manifest on a marker-carrying stem;
+   (b) a torn/absent/corrupt manifest on a marker-carrying stem — one input class by
+       construction at `readWakeManifest`; proves F1's defer-and-alert (merges the old (b)
+       and (d), which double-counted this branch);
    (c) a floor/pool sentinel race — prove the floor's `waitForReady` can NO LONGER be
        cross-satisfied by a concurrent checkout (the F3 strike proven live, not just in suite);
-   (d) the existing corrupt-manifest fire (Jim's fold), which the F2 alert path now serves.
+   (d) **F2's own fire (Tenshi's design; the ultra-vires probe, Casey's naming):** a manifest
+       that **parses cleanly** and names a `store` OUTSIDE the `knownWakeStores` allowlist —
+       the only shape that reaches `computeWakeDeltaSteps` (`:1626`) with a hostile value —
+       proving the closed registry **refuses** rather than interpolates. The acceptance is
+       *something refuses* with the hostile value in its hands, not *the check exists*. This
+       is the one cure where content becomes behaviour, and the only refusing branch that has
+       never run outside the suite.
 10. **Jim's seal** on the cure batch by his own runs — the flip happens on the seal, not on
     the land.
 

@@ -84,6 +84,9 @@ Per-store cursor design (most of this machinery already exists):
 ## Build phasing (Darron's ruling, 2026-08-11 ~10:29 AM: begin the build; pool thinning later)
 - **Phase A — build now:** S1 (stems→haiku init) + S1b (two-phase wake) + S1c (delta manifest), plus the wanders→Opus serve leaf (trivial manifest change, ruled msnt3dxf). Self-contained: config + feeder work, **no DEC-101 supersession required** — the pool keeps today's shape while its stems get cheaper and fresher.
 - **Phase B — later, as one coupled design:** S2 (pool thinning) + S3 (active-spoke consolidation / per-thread retirement) + D2 (wanders scope) + D3 (DEC numbering — only needed when S3 lands). One-stem-plus-one-active-spoke is a single dynamic; splitting it would ship half a queue model.
+  - **Phase-B owned items (added 2026-08-12 ~9:52 PM on Casey's ask, her name per her own ledger — "they belong on a page with a reader"):**
+    - **The DEC-101 supersession draft — owner: CASEY** (the D3 lean's "new DEC, DEC-101 kept with a dated supersession note" — drafting, her lane; she writes it when Phase B is called).
+    - **The melding confidentiality seam — owner: CASEY** (her §5a/D2-adjacent item: what a consolidated active spoke may carry between threads — the confidences of one thread must not ride into another's context).
 - **Open: hop sequencing.** The 10-Aug ruling was "design this week, build post-hop (Sat 15 Aug)". If "begin" means land Phase A pre-hop, that supersedes it — Darron's word settles which.
 
 ## Open decisions (Darron)
