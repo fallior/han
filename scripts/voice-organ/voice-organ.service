@@ -1,0 +1,20 @@
+# The voice organ — resident Kokoro TTS on the 5060 Ti (port 3851, localhost).
+# USER unit, like every other HAN service (no sudo anywhere in the garden's path).
+# Install:
+#   cp ~/Projects/han/scripts/voice-organ/voice-organ.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now voice-organ.service
+[Unit]
+Description=HAN voice organ (Kokoro TTS resident on GPU)
+After=network.target
+
+[Service]
+Type=simple
+Environment=VOICE_ORGAN_PORT=3851
+Environment=VOICE_ORGAN_WARM_VOICE=bm_fable
+# %h = the user's home (systemd user-unit specifier) — no user literal ships.
+ExecStart=%h/voice-organ/venv/bin/python %h/Projects/han/scripts/voice-organ/organ.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

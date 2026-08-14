@@ -177,6 +177,36 @@ function getVoiceForRole(role: string): string {
     return voiceMap[role] || defaultVoice;
 }
 
+/**
+ * Voice strings resolve to a provider spec. Two forms:
+ *   - Plain OpenAI voice name (the original shape): `"fable"` → OpenAI.
+ *   - On-card Kokoro form: `"kokoro:<voice>"` or `"kokoro:<voice>|<openaiFallback>"`
+ *     e.g. `"kokoro:bm_fable|fable"` → render on the local voice organ
+ *     (scripts/voice-organ/organ.py, port 3851), falling back to OpenAI voice
+ *     `fable` if the organ is down/failing (fallback logged as an anomaly;
+ *     no fallback named → the error propagates, fail-loud).
+ * The FULL string participates in cache keys, so provider switches never
+ * collide with previously cached audio.
+ * Source: Darron 2026-08-14 — replace cloud TTS with the 5060 Ti organ,
+ * one seat at a time, each mind choosing its own voice (a trial; voices
+ * freely changeable).
+ */
+interface VoiceSpec {
+    provider: 'openai' | 'kokoro';
+    voice: string;
+    fallback?: string;
+}
+
+function parseVoiceSpec(voiceString: string): VoiceSpec {
+    const m = voiceString.match(/^kokoro:([a-z]{2}_[a-z0-9]+)(?:\|([a-z0-9-]+))?$/);
+    if (m) return { provider: 'kokoro', voice: m[1], fallback: m[2] };
+    return { provider: 'openai', voice: voiceString };
+}
+
+function getVoiceOrganUrl(): string {
+    return loadConfig()?.voiceOrganUrl || 'http://127.0.0.1:3851';
+}
+
 function getTtsModel(): string {
     return loadConfig()?.ttsModel || 'tts-1';
 }
@@ -293,13 +323,7 @@ function chunkText(text: string): string[] {
 
 // ── Core TTS function (with caching) ──────────────────────
 
-async function generateTts(text: string, voice: string, model: string, instructions: string): Promise<Buffer> {
-    const key = cacheKey(text, voice, model, instructions);
-    const cached = readCache(key);
-    if (cached) {
-        return cached;
-    }
-
+async function generateOpenAiTts(text: string, voice: string, model: string, instructions: string): Promise<Buffer> {
     // OpenAI TTS request body. `instructions` is supported by `gpt-4o-mini-tts`
     // (and successor models) for natural-language voice steering — register,
     // cadence, pace. Older models (`tts-1`, `tts-1-hd`) reject unknown fields,
@@ -326,12 +350,60 @@ async function generateTts(text: string, voice: string, model: string, instructi
         throw new Error(`OpenAI TTS error (${response.status}): ${err}`);
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer());
+    return Buffer.from(await response.arrayBuffer());
+}
 
-    // Sanity floor — empirical normal is ~958 bytes/char; observed truncation
-    // bug (S152) returned ~20 bytes/char. Anything below the floor is refused
-    // and logged so a corrupt response never gets cached as authoritative.
-    // Override floor via `ttsBytesPerCharFloor` in ~/.han/config.json.
+async function generateKokoroTts(text: string, voice: string): Promise<Buffer> {
+    const response = await fetch(`${getVoiceOrganUrl()}/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice }),
+    });
+
+    if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`Voice organ error (${response.status}): ${err.slice(0, 300)}`);
+    }
+
+    return Buffer.from(await response.arrayBuffer());
+}
+
+async function generateTts(text: string, voice: string, model: string, instructions: string): Promise<Buffer> {
+    const key = cacheKey(text, voice, model, instructions);
+    const cached = readCache(key);
+    if (cached) {
+        return cached;
+    }
+
+    const spec = parseVoiceSpec(voice);
+    let buffer: Buffer;
+    if (spec.provider === 'kokoro') {
+        try {
+            buffer = await generateKokoroTts(text, spec.voice);
+        } catch (err) {
+            // The organ failing is an anomaly worth a row whether or not a
+            // fallback exists — a silent drift to cloud would hide an outage.
+            logVoiceAnomaly({
+                kind: 'kokoro_organ_failed',
+                voice: spec.voice,
+                fallback: spec.fallback ?? null,
+                input_chars: text.length,
+                text_hash: textHash(text),
+                detail: (err as Error).message.slice(0, 300),
+            });
+            if (!spec.fallback) throw err;
+            buffer = await generateOpenAiTts(text, spec.fallback, model, instructions);
+        }
+    } else {
+        buffer = await generateOpenAiTts(text, spec.voice, model, instructions);
+    }
+
+    // Sanity floor (both providers) — empirical normal is ~958 bytes/char on
+    // OpenAI mp3 (Kokoro-via-ffmpeg 128k lands comfortably above too); the
+    // observed truncation bug (S152) returned ~20 bytes/char. Anything below
+    // the floor is refused and logged so a corrupt response never gets cached
+    // as authoritative. Override floor via `ttsBytesPerCharFloor` in
+    // ~/.han/config.json.
     const bytesPerChar = buffer.length / text.length;
     const FLOOR: number = loadConfig()?.ttsBytesPerCharFloor ?? 200;
     if (bytesPerChar < FLOOR) {
@@ -346,7 +418,7 @@ async function generateTts(text: string, voice: string, model: string, instructi
             text_hash: textHash(text),
         });
         throw new Error(
-            `OpenAI TTS returned suspiciously short audio: ${buffer.length} bytes for ${text.length} chars `
+            `TTS returned suspiciously short audio: ${buffer.length} bytes for ${text.length} chars `
             + `(${bytesPerChar.toFixed(1)} bytes/char, floor ${FLOOR}). Refusing to cache.`
         );
     }

@@ -7,6 +7,34 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-14 — Leo (session) — On-card TTS: the voice organ replaces cloud TTS, one seat at a time
+
+### Added
+- **The voice organ (`scripts/voice-organ/organ.py` + `voice-organ.service` user unit, port 3851
+  registered in the infrastructure registry)** — resident Kokoro-82M on the 5060 Ti serving mp3
+  over localhost HTTP: `GET /health`, `GET /voices` (54-voice menu), `POST /tts`. Renders
+  lock-serialised; wav→ffmpeg→mp3 128k so the Express layer serves byte-shapes identical to the
+  OpenAI path (zero client changes). Live-fire: 10.32s audio in 0.209s warm (49× realtime),
+  989 bytes/char. Localhost-only — the Express server remains the auth boundary.
+- **Provider dispatch in `routes/voice.ts`** — voice strings parse to a spec: plain names stay
+  OpenAI; `kokoro:<voice>|<openaiFallback>` routes to the organ with the named cloud voice as
+  logged fallback (organ failure always writes a `voice-anomalies.jsonl` row — a silent drift to
+  cloud can't hide an outage; no fallback named → fail-loud). The S152 truncation floor now
+  covers both providers; the full voice string keys the cache so provider switches never collide
+  with cached audio.
+
+### Changed
+- **voiceMap flips (config, the trial begins):** `leo → kokoro:bm_fable|fable` (Darron's ears
+  passed bm_fable twice; Leo's chosen trial companion), `supervisor → kokoro:am_onyx|onyx`
+  (Jim's choice, continuity-first namesake register; his parade shortlist bm_george/bm_daniel
+  awaits Darron's ear). Tenshi/Casey stay on cloud voices until each chooses — a TRIAL; voices
+  freely changeable per mind. Economics: ~$15 USD/day peak cloud TTS → ~zero marginal (resident
+  floor P8/~7.4W, VRAM-only cost, measured 2026-08-12).
+- Landed on Jim's blocking audit GREEN (mss9sma4 — all four blobs re-hashed + organ live-fired
+  by his own hands). One declared deviation: unit file converted system→user shape at install
+  (the garden runs user units; no sudo path). Jim's note-1 (malformed-spec error should name the
+  spec) deliberately not folded post-GREEN — rides the next `voice.ts` touch.
+
 ## 2026-08-11 — Leo (session) — Phase A: Haiku stems + the two-phase wake land inert (flag off)
 
 ### Added
