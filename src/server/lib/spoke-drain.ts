@@ -13,6 +13,15 @@
 import { execSync } from 'child_process';
 import { loadResidents } from './garden-manifest';
 import { capturePaneTail, PROCESSING_CHROME_RE } from './tmux-dispatcher';
+// MNT-115 (2026-08-15): the chrome regex matched nothing live (35 panes, 0 hits —
+// Tenshi's finding), so `busy` was always empty and this gate returned ok in ~4s
+// regardless — SEC-04's drain-succeeds-or-update-aborts was unreachable. The DECLARED
+// state is the real gate: the diary-sink current.json txn pointer, on disk, readable
+// out-of-process (han-update.ts is a separate process — exactly why it scraped panes).
+// A pooled stem's sink key is its tmux session name; a non-pooled surface's is its
+// slug — both are checked. The chrome test stays as a belt.
+import { declaredBusy } from './spoke-organelle';
+import { healthDir } from './paths';
 
 export interface DrainResult {
     ok: boolean;
@@ -39,8 +48,13 @@ export async function drainSpokes(timeoutMs: number, pollMs = 2000): Promise<Dra
     const watched = dispatcherSessions();
     let stillStreak = 0;
     for (;;) {
+        const slugs = loadResidents().map((a) => a.slug);
         const busy = watched.filter((s) => {
-            try { return PROCESSING_CHROME_RE.test(capturePaneTail(s)); } catch { return false; } // vanished session = not busy
+            try {
+                const owner = slugs.find((sl) => s.endsWith(`-${sl}`) || s.startsWith(`stem-${sl}-`));
+                const keys = owner ? [s, owner] : [s];
+                return declaredBusy(healthDir(), keys) || PROCESSING_CHROME_RE.test(capturePaneTail(s));
+            } catch { return false; } // vanished session = not busy
         });
         if (busy.length === 0) {
             stillStreak++;

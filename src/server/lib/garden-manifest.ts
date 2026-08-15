@@ -133,6 +133,34 @@ export interface SpokeLifecycle {
      *  duration (6.0 min across n=178 T2 receipts, 2026-07-15; observed max 10.8 min) — never the
      *  author's guess (§2). Re-alerts at doubling intervals from the threshold. */
     prewarmAlertMins?: number;
+    /** Build B (adaptive-hearth §8, 2026-08-15): the activity-reset hearth pulse — Darron's v4.
+     *  All default OFF/inert; the flip is config, never revert. */
+    hearthPulseEnabled?: boolean;
+    /** Minutes of genuine idleness before the pulse fires (inside the measured ~60-min knee,
+     *  whose price is 20× the warm activation). Default 50. */
+    hearthPulseMinutes?: number;
+    /** The BAKED standing message — materialised into the session at spawn, never fetched at
+     *  fire time (§2.8: N fire-time readers of one source multiply the injection blast radius). */
+    hearthStandingMessage?: string;
+    /** Build B: senescence observation (the line/fits() boundary check). OBSERVE-ONLY in this
+     *  build — the retirement act is P3, behind the DEC-096 Amendment-1 ruling + Q2 + MNT-115. */
+    senescenceEnabled?: boolean;
+    /** The real never-compact base the line subtracts from (Darron's formula: line = 98 − reserve). */
+    senescenceCeilingPct?: number;
+    /** The rolling per-surface op-pool window (ops) the p99 is computed over — rolling so noise
+     *  converges away while genuine drift moves the number. Default 4000 ≈ a 12-day drift
+     *  horizon at measured volume (Jim, 2026-08-15). */
+    opPoolWindowOps?: number;
+    /** Sample floor below which the pooled p99 is NOT emitted (the declared fallback serves) —
+     *  never below 100 (the definitional floor: p99 of n<100 IS the max, Tenshi's catch);
+     *  default 500 (Jim's measured practical floor). */
+    opPoolMinSamples?: number;
+    /** ctx% below which the boundary check idles entirely (Darron: the comparison can be lazy
+     *  early; the danger zone is deep). Default 80. */
+    boundaryCheckMinCtxPct?: number;
+    /** The declared fallback reserve (pct of window) served while the pool is under-sampled —
+     *  from Jim's measured garden p99 (≈15.4% of a 200K window). Declared, never silent. */
+    fallbackReservePct?: number;
     /** MNT-060 F3: the per-turn swap-flush backlog guard. A swap BODY over this many bytes is
      *  never auto-flushed — the flush alerts (wm-flush-errors.jsonl) and preserves the swap for
      *  a deliberate surgical drain (DEC-103 surfacing-over-scrapping; the guard is what made

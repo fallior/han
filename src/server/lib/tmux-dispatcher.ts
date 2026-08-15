@@ -38,6 +38,13 @@ import type { CaptureRecord } from './diary-mcp-server';
 import { withMemorySlot } from './memory-slot';
 import { gradientConfigForAgent } from './agent-registry';
 import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelFor, manifestModelLadder, manifestModelHead, spokePersistFor, ctxReapThresholdFor, prewarmAlertMinsFor, spokeIdleReapHoursFor, spokeRethreadCtxCeilingFor, spokeFitCeilingFor, resumableTtlMinutesFor, stemTwoPhaseWakeFor } from './garden-manifest';
+// Build B (adaptive-hearth §8, held 2026-08-15): the per-spoke stats organelle, the
+// hearth pulse (flag-gated OFF), and the MNT-115 declared-busy predicate.
+import {
+    organelleOnDispatchStart, organelleOnTurnComplete, boundaryCheck,
+    armHearthPulse, clearHearthPulse, hearthStandingMessageFor, writeWindingUp,
+    declaredBusy,
+} from './spoke-organelle';
 import { markResumable, readResumableMarkers, clearResumableMarker, resumableExpired, type PaneClass } from './dispatch-reconciler';
 import { mostRecentC0Id, isAgentC0, gradientEntriesAfterC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
@@ -115,6 +122,9 @@ export interface AgentSession {
      *  not "the session is idle". The queue runs reconcileSession ahead of the
      *  next dispatch. Confirm idleness; never assume it from elapsed time. */
     turnState: 'idle' | 'busy' | 'needs-reconcile';
+    /** Build B (§2.8): the BAKED hearth standing message — materialised at session
+     *  creation, never fetched at fire time. */
+    pulseMessage?: string;
     /** Epoch ms of the last completed transaction — the orphan-capture mtime gate (#5). */
     lastTransactionTs: number;
     /** Byte length of working-memory.md last delta-read by this session — the #91 cross-
@@ -584,7 +594,7 @@ export async function spawnAgentSession(
         await waitForReady(slug, surface, null, READY_TIMEOUT_MS);
     }
 
-    const session: AgentSession = { slug, surface, tmuxSession, launchCommand, ready: true, turnState: 'idle', lastTransactionTs: Date.now(), lastMemoryLen: currentWmLen(slug) };
+    const session: AgentSession = { slug, surface, tmuxSession, launchCommand, ready: true, turnState: 'idle', lastTransactionTs: Date.now(), lastMemoryLen: currentWmLen(slug), pulseMessage: hearthStandingMessageFor(slug, surface) };
     sessions.set(sessionKey(slug, surface), session);
     console.log(`[tmux-dispatcher] session ready: slug=${slug} surface=${surface} tmux=${tmuxSession}`);
     return session;
@@ -915,6 +925,10 @@ export async function sendTransactionPrompt(
     const txnId = `txn-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     const timeoutMs = opts.timeoutMs ?? TRANSACTION_TIMEOUT_MS;
     session.turnState = 'busy';
+    // Build B: activity IS the pulse reset; capture fromPct for the op row (ctx-delta def).
+    clearHearthPulse(session.tmuxSession);
+    organelleOnDispatchStart(session.tmuxSession,
+        () => getContextPctForSession(slug, surface, session.tmuxSession));
 
     // 1) Point the diary sink at this transaction BEFORE the prompt can be answered.
     writeAtomic(currentPtrPath(stemKey), JSON.stringify({ txnId, startedAt: new Date().toISOString() }));
@@ -976,6 +990,25 @@ export async function sendTransactionPrompt(
 
     session.turnState = 'idle';
     session.lastTransactionTs = Date.now();
+    // Build B / Jim's M1 (2026-08-15 audit): CLEAR WHERE YOU WRITE. The pointer is
+    // written per-STEM at dispatch (:934) but was only ever unlinked per-SLUG (the
+    // /clear belt) — so a pooled stem's pointer never cleared and declaredBusy would
+    // have read eight idle stems as thinking forever (SEC-04 blocking every update —
+    // the inverted twin of the blind chrome regex). The invariant "dispatched → exists;
+    // submitted → cleared" is now true on the pooled path too.
+    try { fs.unlinkSync(currentPtrPath(stemKey)); } catch { /* already gone */ }
+    // Build B: record the completed op (producer), run the observe-only boundary check,
+    // and re-arm the hearth pulse (inert unless hearthPulseEnabled — default false).
+    try {
+        organelleOnTurnComplete(slug, surface, session.tmuxSession, null,
+            () => getContextPctForSession(slug, surface, session.tmuxSession));
+        boundaryCheck(slug, surface, session.tmuxSession);
+        armHearthPulse(slug, surface, session.tmuxSession,
+            () => session.turnState === 'idle',
+            () => { void enqueueForAgent(slug, surface, session.pulseMessage ?? hearthStandingMessageFor(slug, surface), {}, stemKey); });
+    } catch (err) {
+        console.warn(`[tmux-dispatcher] ${slug}/${surface}: organelle hooks failed (observe-only, continuing): ${(err as Error).message}`);
+    }
     // Best-effort cleanup of this txn's transient files; leave captures for forensics.
     try { fs.unlinkSync(promptFile); } catch { /* ignore */ }
     const summary = cap.mode === 'stand-down'
@@ -1714,6 +1747,7 @@ function adoptPooledStem(slug: string, surface: string, stem: PoolStem): boolean
         // lastMemoryLen = current WM so the per-turn #91 watermark (computeMemoryDelta) is a no-op;
         // the stem's OWN staleness (its pre-warm cursor) is handled by the freshen-at-checkout below.
         lastMemoryLen: currentWmLen(slug),
+        pulseMessage: hearthStandingMessageFor(slug, surface),
     };
     sessions.set(stem.tmux_session, session);
     return true;
@@ -2254,7 +2288,16 @@ function sweepRetiredStems(): void {
                 console.log(`[pool-manager] swept retired stem session ${session} (${meta.reason}) — already gone, sink cleaned`);
                 continue;
             }
-            if (PROCESSING_CHROME_RE.test(capturePaneTail(session))) continue; // still thinking — next sweep
+            // MNT-115: the chrome regex has matched nothing live (Tenshi, 2026-08-15 — 35
+            // panes, 0 hits), so the R011 mid-thought guard was blind. The DECLARED state is
+            // the real gate: the diary-sink current.json txn pointer (dispatched → exists;
+            // submit_response → cleared) plus the in-process turnState when the session is
+            // registered. The regex stays as a belt only.
+            const reg = sessions.get(session);
+            const busyDeclared = (reg && reg.turnState !== 'idle')
+                || declaredBusy(HEALTH_DIR, [session])
+                || PROCESSING_CHROME_RE.test(capturePaneTail(session));
+            if (busyDeclared) continue; // still thinking — next sweep (R011, now enforceable)
             if (meta.exitSentAt === undefined) {
                 // Stage 1: graceful close — let claude-logged write its file. Kill comes next sweep.
                 sendLine(session, '/exit');
@@ -2267,6 +2310,10 @@ function sweepRetiredStems(): void {
             try { tmux(['kill-session', '-t', session]); } catch { /* raced its own death */ }
             try { fs.rmSync(sinkDir(session), { recursive: true, force: true }); } catch { /* best-effort */ }
             pendingStemKills.delete(session);
+            // Build B: the winding-up record (two acts, two names — Casey cl. 5). A reap is
+            // neither senescence nor compaction-retirement; it records as its own act, and the
+            // spoke's persist-as-you-go stats ride along (or the row says died-without-declaring).
+            try { writeWindingUp({ session, slug: meta.slug, surface: 'pool-stem', act: 'reaped', reason: meta.reason }); } catch { /* observe-only */ }
             console.log(`[pool-manager] swept retired stem session ${session} (${meta.reason}) — /exit'd, lag honoured, killed + sink cleaned`);
         } catch (err) {
             console.warn(`[pool-manager] sweep of ${session} failed (retry next tick): ${(err as Error).message}`);
@@ -2325,7 +2372,9 @@ function sweepUnregisteredStems(slug: string, surface: string): void {
     for (const sess of sessions) {
         if (!sess.startsWith(prefix) || known.has(sess)) continue;
         const tail = capturePaneTail(sess);
-        if (PROCESSING_CHROME_RE.test(tail)) {
+        // MNT-115: declared state first (the sink pointer — an unregistered stem keeps its
+        // per-stem sink keyed by session name), chrome regex as belt.
+        if (declaredBusy(HEALTH_DIR, [sess]) || PROCESSING_CHROME_RE.test(tail)) {
             console.warn(`[pool-manager] ${slug}/${surface}: unregistered stem ${sess} is mid-thought — left alone (R011); next start reaps it if idle`);
             continue;
         }

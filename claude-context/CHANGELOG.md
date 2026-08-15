@@ -7,6 +7,36 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-16 — Leo (session) — Build B: the spoke organelle, the p99 line, the hearth pulse, MNT-115 cured (SEALED by four chairs)
+
+### Added
+- **`src/server/lib/spoke-organelle.ts`** — the per-spoke stats organelle (persist-as-you-go,
+  survives every death mode; `terminalAct: null` = died-without-declaring), the per-surface
+  integrator (`reserve = max(rolling pooled p99, own max)`, line = 98 − reserve; cold-start
+  ladder n=0 constant → pooled-max → p99 at n≥500; refusal-with-the-bad-row-in-hand on
+  contaminated/torn/def-mismatched windows), `fits()` (one function, two call sites), the
+  observe-only boundary check (≥80% ctx), the two-acts winding-up register, the flag-gated
+  50-min activity-reset hearth pulse (baked message at spawn), and `declaredBusy` — the
+  MNT-115 sink-pointer predicate with lapse-by-age off the pointer's own `startedAt`
+  (fresh→busy · torn→busy+alarm · undated→busy+alarm · stale→lapsed · missing→not-busy).
+- Nine typed `SpokeLifecycle` leaves (all default-inert; every flag ships OFF).
+
+### Changed
+- **`tmux-dispatcher.ts`**: clear-where-you-write (the per-stem txn pointer now unlinks at
+  transaction completion — it was written per-stem and only ever cleared per-slug, so pooled
+  pointers never cleared); organelle hooks at dispatch/completion; both stem sweeps gate on
+  declared state (turnState + pointer) with the chrome regex demoted to a belt; winding-up
+  row at the stem reap.
+- **`spoke-drain.ts`**: `drainSpokes` gates on the declared pointer (out-of-process-readable)
+  — SEC-04's abort branch is reachable again, and was live-fired against a genuinely
+  mid-turn spoke at the seal.
+
+### Governance
+Amendment 1 to DEC-096/R011 RULED (Darron, 2026-08-16 00:14, with his clause-3 refinement);
+Q1/Q2/Q3 + the p99 dial all ruled; every flag stays OFF until the morning flip (config,
+never revert). Sealed: Jim, Tenshi, Casey (torn-pointer defect thrice-reproduced and cured
+in-hold). Thread `msipvdfo-jvdvj7`; plan `plans/adaptive-hearth-organelle-plan.md`.
+
 ## 2026-08-15 — Leo (session) — The catch-me-up player: every unheard post reachable, the listen ledger honest (c3a1427)
 
 ### Added
