@@ -7,6 +7,39 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-15 — Leo (session) — The catch-me-up player: every unheard post reachable, the listen ledger honest (c3a1427)
+
+### Added
+- **Virtual loops for messages outside every loop's span** (`routes/voice.ts` — the M1
+  generalisation): an all-agent thread gets a "Whole thread" loop; a mixed thread's head (agent
+  posts before the first human turn — 47 threads / 284 unheard posts, measured) gets "Before the
+  first turn", loop_number 0, prepended. Computed in the response, never inserted (a loops row
+  with a non-human anchor would be a false record). `/messages` resolution is span-aware and
+  carries a per-message `speakable` verdict (Tenshi nit 2 — one set, one definition).
+- **The owner's read-state toggle (B5)** — `PATCH /api/voice/read-state/:messageId {read:bool}`
+  + an envelope-style ●/○ control per message in react-admin: unread zeroes the count (the post
+  re-enters play-all-unread), read restores `max(1, current)`. The owner's hand is authoritative
+  on his own listening ledger; mechanical writers stay single-writer-per-mode.
+- **Non-destructive spoken-signature normalisation (B4)** in `stripMarkdown`: a trailing
+  signature line loses only its leading em/en-dash and dangling punctuation and gains a terminal
+  stop — every word kept, zero-loss proven across 21 cases incl. adversarial. Kills the
+  "power-failure drawl" for new renders; nothing deletable ⇒ nothing wrong cacheable.
+
+### Changed
+- **The Siri stitcher (`GET /api/voice/unread/:conversationId`) marking is moded (B3/M2):**
+  default is pure fetch (marks nothing — a download is not a listening); `?mark=eager` restores
+  the old coarse behaviour except that a failed render no longer counts as heard (renderedIds
+  only). Unspeakable posts are excluded from the unread set and all acquittal counts by
+  definition (M4); transient render failures stay unread and self-heal.
+- **`PATCH /api/voice/loops/:loopId`** now refuses honestly: 400 for the virtual id, 404 via
+  rows-changed for unknown ids (M3 — the silent no-op wearing a `{success:true}` receipt is
+  unrepresentable).
+
+### Audits
+Jim GREEN (LAND APPROVED) · Casey SEALED · Tenshi happy (NOT-YET withdrawn) — all five gates
+verified by each chair's own hands; client ruled by Darron: `/admin-react` (FI #137 files the
+non-react phase-out). Thread `msto2o57-lpbta6`; plan `plans/play-unheard-posts-plan.md`.
+
 ## 2026-08-14 — Leo (session) — On-card TTS: the voice organ replaces cloud TTS, one seat at a time
 
 ### Added
