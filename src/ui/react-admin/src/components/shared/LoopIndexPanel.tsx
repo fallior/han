@@ -12,8 +12,12 @@ interface Loop {
   id: string;
   conversation_id: string;
   loop_number: number;
-  human_message_id: string;
+  // B1 (catch-me-up v2.1): null on the virtual whole-thread loop, which a thread
+  // with no human-side messages (e.g. a wander lamp) gets from the server —
+  // computed, never stored.
+  human_message_id: string | null;
   tag: string | null;
+  virtual?: boolean;
   message_count: number;
   unlistened_count: number;
   all_listened: boolean;
@@ -124,7 +128,9 @@ export function LoopIndexPanel({
         const res = await apiFetch(`/api/voice/loops/${conversationId}/${loop.id}/messages`);
         if (res.ok) {
           const data = await res.json();
-          const unread = (data.messages || []).filter((m: any) => (m.listen_count || 0) === 0);
+          // Tenshi nit 2: honour the server's speakable verdict so the play queue and
+          // the acquittal count share one definition of the set.
+          const unread = (data.messages || []).filter((m: any) => (m.listen_count || 0) === 0 && m.speakable !== false);
           allMessages.push(...unread.map((m: any) => m.id));
         }
       } catch { /* skip */ }
@@ -165,6 +171,7 @@ export function LoopIndexPanel({
 
   // Inline tag edit
   const startEditTag = (loop: Loop) => {
+    if (loop.virtual) return; // B1: the virtual loop is not a row — no tag to edit
     setEditingTag(loop.id);
     setEditTagValue(loop.tag || '');
   };
@@ -247,7 +254,7 @@ export function LoopIndexPanel({
                   <span
                     className="loop-tag"
                     onClick={() => startEditTag(loop)}
-                    title="Click to edit tag"
+                    title={loop.virtual ? 'Whole thread (virtual loop)' : 'Click to edit tag'}
                   >
                     {loop.tag || '(untagged)'}
                   </span>
@@ -261,13 +268,15 @@ export function LoopIndexPanel({
                 >
                   ▶
                 </button>
-                <button
-                  className="loop-nav-btn"
-                  onClick={() => { onScrollToMessage(loop.human_message_id); onClose(); }}
-                  title="Go to this loop in conversation"
-                >
-                  ↗
-                </button>
+                {loop.human_message_id && (
+                  <button
+                    className="loop-nav-btn"
+                    onClick={() => { onScrollToMessage(loop.human_message_id!); onClose(); }}
+                    title="Go to this loop in conversation"
+                  >
+                    ↗
+                  </button>
+                )}
               </div>
             ))
           )}

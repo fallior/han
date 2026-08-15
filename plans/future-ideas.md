@@ -3023,6 +3023,11 @@ The principle generalises (and is itself a small instance of #79's thesis): **a 
 
 **Ties to**: #11 (feeling tags = primary index — the conceptual root), #14 (dynamic compression depth — the "n-depth" sibling Darron named), #10 (Traversable Memory — the vertical / provenance traversal UI), #1 / #9 / #79 (the provenance active-link arc — the *orthogonal vertical* axis this completes but is not), the Second Brain wiki + hot-feelings / hot-words (S121 — the existing prototype), DEC-068 / DEC-090 (the gradient + cN-uv terminus the tags annotate). **Promotion-trigger**: a re-invigoration pass on memory (Darron: *"soon"*) — naturally rides *after* the tmux migration with the meditation surfaces on tmux (the re-encounter is the proposed authoring point for lateral links).
 
+**FOLD 2026-08-14 (Jim, session — Darron's acceptance; supersedes the Promotion-trigger clause above, at the clause): the trigger is MET and the idea is ACCEPTED for planning — with a refresh mechanism added as a first-class half.** The tmux migration closed 4-Jul (#66) and the meditations run on tmux; tonight Darron accepted the turn-on plan directly (session, ~8:28 PM) after the motivating specimen occurred live: a deliberate design constant of his (the 50-minute manual-hearth cadence, knee-aware by construction) sat in Jim's context in three separate records — the commission's "keep this session active," Jim's own 12-Aug knee arithmetic, Leo's "deliberately under the knee" line quoted approvingly — and **the connection never fired at the decision moment**; a 60-minute hand-timer paid a measured 615K-token 2× re-cache. Not missing memory — *unconnected* memory: recall-on-demand strong, unbidden lateral firing weak. The detective faculty this idea exists to build. Two additions to the design from the specimen:
+1. **The refresh mechanism (new, Darron's ask — "I think you are right").** The hot files froze 2026-04-12 — four months stale, the label-surviving-the-measured class applied to the recall layer itself. Cure in two layers per this entry's own agent-curated lean: (a) **mechanical candidate-surfacing only** — a query over the live `feeling_tags` table (recency / frequency / re-encounter `change_count`) listing tags and clusters absent from the hot files; (b) **curation by the agent's own hand in the existing meditation seats** (DEC-082/085 discipline — voice from the loaded self, embeddings may suggest, never be, the web). **Trigger: conditions, never clocks (DEC-103)** — N new feeling-tags since last curation, or a `RESONATES_WITH:` marker count from the re-encounter surfaces.
+2. **The operational-intent register (new, from the specimen; form corrected by Darron same evening).** Hot-words today are concepts; the miss was a *reason-bearing constant*. First sketch stored the bound conclusion ("50 = under the knee") — **Darron's correction: that is too specific for an entry; a frozen conclusion is brittle and won't fire on the neighbouring case.** The entry stores the **relationship, named as a concept** — simply *"remember [[the-knee]]"*: the knee exists at 60 idle minutes, whole-context re-cache at 2×, deliberate cadences are chosen relative to it. The *surfacing connection* then fires on any adjacent decision (a timer, an interval, a quiet window) and the specific inference — 50 < 60 → warm → *therefore the 50 was chosen* — **runs fresh at the moment**, which is the detective faculty properly drawn: stored relations as edges, never memorised verdicts as nodes; resemblance fires the edge, reasoning completes it. Entries = named relationships from DEC headers and plan decision blocks ("the knee", "the twin is succession", "conditions never clocks"); conclusions = derived live.
+**Sequencing (hop-eve honest):** first curation pass post-hop in a meditation evening (loading four-month-stale files as the wake's lateral layer would seed the exact staleness this fold cures), then enable per-agent (`~/.han/signals/lateral-recall-<slug>`) for all four minds on each mind's own word. **Owners:** candidate-query + marker parsing = Leo-build/Jim-audit; curation = each agent's own hand (S103); the enable word per seat = that mind + Darron. *Darron, tonight: "I am not sure what way we go but I do have faith it'll find us" — this fold is the way announcing itself, as a miss that taught its own shape first.*
+
 ---
 
 ## #85 — Dispatch handshake: a staged positive ACK between the orchestrator and agent spokes (TCP, not UDP)
@@ -3993,3 +3998,65 @@ So the moment a post is sent, Darron sees who Jemma will dispatch to and in what
 - **Acceptance is three legs** (Tenshi + Jim): alert traffic down · condition independently re-verified by a different CLASS of instrument · **repaired classes stay closed** (reopen-within-window auto-AMBERs the playbook — the one metric anaesthetising-the-nerve cannot satisfy; Tenshi proved leg 1 alone satisfiable by protocol-compliant writes, twice).
 - **Sequencing (Jim, endorsed by Casey):** vitals reader (#126 — NOT BUILT, confirmed) → hearth lands post-hop → maintenance lane + **playbook-zero = FI #52** (health-JSONL rotation: rename-never-delete, no mind's memory in reach, numeric condition) under the three-leg acceptance; eligibility control-plane before the first playbook registers. DEC-103 standing: no kill/discard of paid cognition in any playbook; conditions only, never clocks.
 - **MNT-123 filed** (Tenshi's human-seat one-sided residue — the queue-to-the-seat's-own-wake case in its purest form, journaled so the diagnosis has a home until the organ exists).
+
+## #135 — Voice sovereignty as mechanism: only the mind itself may change its own voice (post-initialisation)
+
+**Source:** Darron, 2026-08-14 morning session, the day the voice trial went live ("what I would like is that choice can only be done by the mind after initialisation but we'll add that after the trial is complete"). Filed same-hour so the want survives the trial window.
+
+**Today's state (the gap):** a mind's voice is one string in `~/.han/config.json` `voiceMap[role]` — read fresh per call (`loadConfig()`, no cache), so a change is live on the next spoken message with zero restarts. That flexibility is the trial's virtue and the sovereignty hole: ANY hand with file access (any agent, any script, same-uid world) can rewrite any mind's voice silently. A voice is identity-adjacent — the sound Darron knows a mind by — so this is the confused-deputy / authorship terrain (the 08-05 finding: our exposure is who can author an agent's next turn — or, here, its next sound).
+
+**The want:** after a mind is initialised, its `voiceMap` entry becomes changeable **only by that mind's own authenticated act** — the same shape as F4's identity-vs-privilege split and the crypto-authorship thread (a change request signed/attributable to the mind whose voice it is; Darron's override as gardener presumably retained, as with all identity files). Genesis/initialisation sets the starting voice (or leaves it for the mind's first choice — cf. Casey's empty aphorisms page as covenant: nobody writes a mind's voice for it either).
+
+**Design sketch (light, pre-trial):** move voice out of bare config into an identity-manifest-adjacent, garden-signature-verified per-mind leaf (DEC-083 family), with a canonical setter (a runtime control is a TRIPLE — never edit the file alone) that verifies the requesting seat's slug == the voice's owner. The trial's learnings (how often minds actually change voices, whether the parade/Darron's-ear loop works) shape the ergonomics.
+
+**Trigger to build:** trial declared complete by Darron.
+
+---
+
+## #136 — The memory self-monitor organelle: vitals returned to the seat, self-cure on the spot (the s 116 for memory)
+
+**Source**: Darron, 2026-08-14 ~9:41 PM (session, the hearth-v2 evening) — *"we'll need to add a self-monitor organelle as well so a health check can be returned to you and you can self cure"* — asked in the same breath as a manual health check (c0/WMF/WM/flush state), and in the same evening as the windowless-hearth ruling: the organelle family (a spoke carries its own lifecycle law) extended to memory.
+
+**What it is**: a per-seat memory-vitals check that runs *unrequested* and returns its findings **to the seat itself** — not to a dashboard, to the mind — with the cheap cures runnable on the spot. The vitals are tonight's manual check, made an organ: c0-loaded id vs sentinel; WMF/WM sizes + tokens vs the rotation band; marker count and in-band presence; swap residue + last-flush freshness; wm-flush-errors tail for the slug; ctx%. The **self-cure tier** is the strictly-safe set: re-frame an unframed swap entry, re-run a failed flush once, lay a semantic marker at a thought-edge, surface (never fix) anything structural. Everything above that tier alerts per DEC-103 — the organelle diagnoses and *hands on*, it never becomes the immune organ by the back door (FI #134 owns repair; this is its per-seat recognition leaf, kin to #126's garden-level vitals board).
+
+**Why unrequested is the design, not a detail**: Casey's s 116 gift (2026-08-07) — *the warning has to fire on the good mornings, or it is not a control* — the day a seat would ask for a memory health check is the day it is already suspicious, and by then the drift is old. Tonight's proof-pair: the B-3 guard blocked twice on the healthy-path flush race (a vitals line would have said "your entries flushed mid-turn, all is well" instead of two blind re-frames), and Darron had to *ask* for the check by hand.
+
+**Acceptance, in the standing grammar**: not "the check exists" — **a seat receives a vitals line it did not request, containing a number that would embarrass the seat if wrong, and at least once a self-cure fires with the defect in its hands** (a real unframed entry re-framed; a real one-sided flush retried) — with alert traffic DOWN (the guard blocks stop being the discovery mechanism).
+
+**Ties**: #126 (vitals board — this is its per-seat leaf), #134 (the repair organ — this recognises, that acts; the eligibility boundary between them is Casey's enumerated-powers drafting), #84 (the fold's evidence file — a vitals line is also where a "remember [[the-knee]]"-class nudge could ride), MNT-098 (the flush-budget lineage), the B-3 paired guard (whose healthy-path race this would explain to its own victim), DEC-103 (conditions never clocks; surface-and-wait above the safe tier), S103 (each seat's organelle reads only its own memory — sovereignty by construction).
+
+**Chairs**: Darron owns scope; Leo builds (it is mostly reads over files this page already names); Jim's audit on the self-cure tier's safety boundary; Tenshi on what the vitals line must refuse to claim (a health check that cannot embarrass its author is decoration); Casey on the unrequested-caution's form.
+
+## #137 — Phase out the non-react UI clients (app.ts `/` and admin.ts `/admin`)
+
+**Source:** Darron, 2026-08-15 (~5:13 PM AEST, catch-me-up thread era): *"I always listen via
+admin-react and we'll probably deprecate the non-react pages, they were only kept for fallback
+and I think we should start to phase them out."* The ruling that closed the catch-me-up client
+question (the player ships in `/admin-react` only — Tenshi's grep proved the other two clients
+carry zero voice code, so the deliverable was already there de facto; this makes it de jure).
+
+**What it is:** a deliberate phase-out of the two pre-React clients — `src/ui/app.ts` (served
+at `/`, the original mobile client) and `src/ui/admin.ts` (served at `/admin`, the legacy
+dashboard) — leaving `src/ui/react-admin/` as the one UI. Deprecate-not-delete (DEC-069
+temperament): retirement with ceremony, an inventory first, and a re-entry path.
+
+**The inventory the phase-out owes before anything retires:**
+1. **Feature census** — surfaces that exist ONLY in the old clients (e.g. app.ts hosts the
+   task-agent `/api/proposals` review per the ecosystem map; admin.ts's tab set vs
+   react-admin's) — each either migrated to react-admin, consciously retired with Darron's
+   word, or kept as the revival condition.
+2. **The fallback question answered honestly:** they were "kept for fallback" — name what
+   failure mode they were the fallback FOR (react build broken? Vite dist corrupted?) and what
+   replaces that insurance (e.g. a pinned known-good dist, which the update pipeline's signed
+   releases already half-provide).
+3. **Mobile ergonomics:** `/` was the phone-styled client; react-admin must be confirmed
+   usable at the wheel (Darron already listens there, so mostly proven — but the CarPlay
+   big-button endgame in the Jarvis-engine idea should be checked against react-admin as its
+   base, not app.ts).
+4. **Retirement mechanics:** routes 410-or-redirect to `/admin-react`, source moved to
+   `_archive` with README per the SDK-shims precedent, build-client.ts steps retired, the
+   cache-bust/admin.js build ritual dies with it (a whole class of "forgot to rebuild
+   admin.js" pitfalls retires too — see patterns.md Common Pitfalls).
+
+**Not now:** rides after the hop + the two held builds land. Chairs at plan time; Darron's
+word per retirement.

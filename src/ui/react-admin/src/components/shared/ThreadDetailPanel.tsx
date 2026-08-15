@@ -51,6 +51,36 @@ export function ThreadDetailPanel({
   const [loopIndexOpen, setLoopIndexOpen] = useState(false);
   const [autoVoice, setAutoVoice] = useState(true);
 
+  // B5 (catch-me-up v2.1): optimistic overrides for the owner's read-state toggle —
+  // messages come from props, so local overrides carry the toggled value until the
+  // parent's next refetch reconciles. Keyed by message id → effective listen_count.
+  const [listenOverrides, setListenOverrides] = useState<Record<string, number>>({});
+  const effectiveListenCount = (msg: Message): number =>
+    listenOverrides[msg.id] ?? (msg.listen_count || 0);
+
+  const toggleReadState = useCallback(async (msg: Message) => {
+    const currentlyRead = effectiveListenCount(msg) > 0;
+    const target = !currentlyRead;
+    // Optimistic flip; server response reconciles below.
+    setListenOverrides(prev => ({ ...prev, [msg.id]: target ? 1 : 0 }));
+    try {
+      const res = await apiFetch(`/api/voice/read-state/${msg.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ read: target })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setListenOverrides(prev => ({ ...prev, [msg.id]: data.listen_count || 0 }));
+      } else {
+        setListenOverrides(prev => ({ ...prev, [msg.id]: msg.listen_count || 0 }));
+      }
+    } catch {
+      setListenOverrides(prev => ({ ...prev, [msg.id]: msg.listen_count || 0 }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listenOverrides]);
+
   // Load auto-voice setting on mount
   useEffect(() => {
     apiFetch('/api/voice/config').then(r => r.json()).then(d => {
@@ -65,13 +95,17 @@ export function ThreadDetailPanel({
     playbackSpeed, cycleSpeed, currentTime, duration, seekTo, skipAhead, skipBack
   } = useVoice();
 
-  // Play specific messages by ID (used by loop index)
+  // Play specific messages by ID (used by loop index). B5: apply the local
+  // read-state overrides so a just-toggled-unread post is picked up before the
+  // parent's refetch (speakUnread filters on listen_count internally).
   const playMessagesByIds = useCallback((msgIds: string[]) => {
-    const msgsToPlay = messages.filter(m => msgIds.includes(m.id));
+    const msgsToPlay = messages
+      .filter(m => msgIds.includes(m.id))
+      .map(m => ({ ...m, listen_count: listenOverrides[m.id] ?? m.listen_count }));
     if (msgsToPlay.length > 0) {
       speakUnread(msgsToPlay);
     }
-  }, [messages, speakUnread]);
+  }, [messages, speakUnread, listenOverrides]);
 
   // Scroll to a specific message
   const scrollToMessage = useCallback((messageId: string) => {
@@ -318,8 +352,20 @@ export function ThreadDetailPanel({
                   >
                     {currentMessageId === msg.id && playbackState === 'loading' ? '⏳' : currentMessageId === msg.id ? '⏹' : '🔈'}
                   </button>
-                  {(msg.listen_count || 0) === 0 && msg.role !== 'human' && (
-                    <span className="listen-badge unread" title="Not yet listened">●</span>
+                  {msg.role !== 'human' && (
+                    // B5: the owner's read-state toggle — "just like email". The badge
+                    // is now a button: ● unheard (click to mark heard), ○ heard (click
+                    // to mark unheard — re-enters play-all-unread).
+                    <button
+                      className={`listen-badge${effectiveListenCount(msg) === 0 ? ' unread' : ' read'}`}
+                      onClick={() => toggleReadState(msg)}
+                      title={effectiveListenCount(msg) === 0
+                        ? 'Not yet listened — click to mark heard'
+                        : 'Heard — click to mark unheard'}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}
+                    >
+                      {effectiveListenCount(msg) === 0 ? '●' : '○'}
+                    </button>
                   )}
                 </div>
                 <div

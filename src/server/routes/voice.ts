@@ -242,7 +242,7 @@ function getVoiceInstructions(role?: string): string {
 
 /** Strip markdown for cleaner TTS output */
 function stripMarkdown(text: string): string {
-    return text
+    const stripped = text
         .replace(/```[\s\S]*?```/g, '')       // fenced code blocks (before inline)
         .replace(/`{1,3}[^`]*`{1,3}/g, '')   // inline code
         .replace(/^#{1,6}\s+/gm, '')         // headers
@@ -256,6 +256,34 @@ function stripMarkdown(text: string): string {
         .replace(/^\s*>/gm, '')               // blockquotes
         .replace(/\n{3,}/g, '\n\n')           // collapse excess newlines
         .trim();
+    return normaliseSpokenSignature(stripped);
+}
+
+// B4 (catch-me-up v2.2 — NON-DESTRUCTIVE per Tenshi's cure + Jim's escalation): a
+// trailing signature line ("— Leo (session)") hands the synth an unvoiced em-dash with
+// no terminal stop — the "power failure" drawl. The v2.1 regex COLLAPSED the line to
+// "Name." and thereby deleted trailing words (Jim's run: two goodnights, 61 chars) —
+// and because this sits in stripMarkdown, autoGenerateTts would have written truncated
+// tails PERMANENTLY into a never-invalidated per-message cache, for every future post.
+// The non-destructive form makes that class unrepresentable: strip ONLY the leading
+// em/en-dash, keep every word, ensure a terminal stop. A false positive costs a dash
+// and gains a full stop — nothing is ever deleted. Spoken render only; the written
+// signature stays byte-intact (the (session)/(human) distinction is load-bearing).
+function normaliseSpokenSignature(text: string): string {
+    const lines = text.trimEnd().split('\n');
+    let last = lines.length - 1;
+    while (last >= 0 && lines[last].trim() === '') last--;
+    if (last < 0) return text;
+    const trimmed = lines[last].trim();
+    // Conservative: only a line that OPENS with an em/en-dash followed by a
+    // capitalised name-shaped word is treated as a signature line.
+    const m = trimmed.match(/^[—–]\s*([A-Z][a-z].*)$/);
+    if (!m) return text;
+    // Tenshi nit 1 (v2.2 land): a trailing comma/semicolon/colon would otherwise
+    // yield "Leo,." — strip dangling punctuation before ensuring the stop.
+    const kept = m[1].trimEnd().replace(/[,;:]+$/, '');
+    lines[last] = /[.!?]$/.test(kept) ? kept : `${kept}.`;
+    return lines.slice(0, last + 1).join('\n');
 }
 
 // ── Text chunking ──────────────────────────────────────────
@@ -585,6 +613,36 @@ router.patch('/listened/:messageId', (req: Request, res: Response) => {
     res.json({ messageId, listen_count: updated.listen_count });
 });
 
+// B5 (catch-me-up v2.1): the owner's read-state override — "just like email".
+// read:false zeroes the count so the post re-enters play-all-unread; read:true
+// restores max(1, current) so completion history survives a double-toggle.
+// Semantics for the ledger: the mechanical writers stay single-writer-per-mode
+// (player marks on completion; Siri marks only with explicit ?mark=eager) — this
+// endpoint is the OWNER'S deliberate hand on his own listening ledger, authoritative
+// by definition. The column keeps one meaning: "Darron considers this heard."
+const setListenCount = db.prepare(
+    'UPDATE conversation_messages SET listen_count = ? WHERE id = ?'
+);
+
+router.patch('/read-state/:messageId', (req: Request, res: Response) => {
+    const { messageId } = req.params;
+    const { read } = req.body || {};
+    if (typeof read !== 'boolean') {
+        return res.status(400).json({ error: 'read (boolean) is required' });
+    }
+    const msg = getMessage.get(messageId) as any;
+    if (!msg) {
+        return res.status(404).json({ error: 'Message not found' });
+    }
+    setListenCount.run(read ? Math.max(1, msg.listen_count || 0) : 0, messageId);
+    const updated = getMessage.get(messageId) as any;
+    res.json({
+        messageId,
+        listen_count: updated.listen_count,
+        read: (updated.listen_count || 0) > 0,
+    });
+});
+
 // ── Loops (old simple boundary detection — replaced by DB-backed version below) ──
 // Removed in S127 Phase 1b. Loop endpoints now use conversation_loops table.
 
@@ -593,6 +651,12 @@ router.patch('/listened/:messageId', (req: Request, res: Response) => {
 router.get('/unread/:conversationId', async (req: Request, res: Response) => {
     const { conversationId } = req.params;
     const loops = parseInt(req.query.loops as string) || 1;
+    // B3 (catch-me-up v2.1): marking is EXPLICITLY moded. Default is pure fetch —
+    // a download is not a listening (the receipt must never outrun the record).
+    // Genuine Siri-shortcut use opts into the old coarse behaviour with ?mark=eager,
+    // which is byte-identical to the pre-v2.1 endpoint. The UI player is the single
+    // mechanical writer otherwise, marking per-message on playback completion.
+    const eagerMark = req.query.mark === 'eager';
 
     const messages = getConversationMessages.all(conversationId) as any[];
     if (messages.length === 0) {
@@ -607,8 +671,13 @@ router.get('/unread/:conversationId', async (req: Request, res: Response) => {
 
     const startBoundary = Math.max(0, boundaries.length - loops);
     const loopStartIdx = boundaries[startBoundary] ?? 0;
+    // M4 (v2.2): a post with NO speakable text after cleaning is not playable content —
+    // it is excluded from the unread set BY DEFINITION (it cannot be listened to, so it
+    // cannot be owed). Distinct from a TRANSIENT render failure below, which stays
+    // unread and self-heals on the next attempt. Without this split, mark-only-rendered
+    // (M2) would leave unspeakable posts permanently owed and no thread could acquit.
     const unreadMessages = messages.slice(loopStartIdx)
-        .filter(m => m.role !== 'human' && (m.listen_count || 0) === 0);
+        .filter(m => m.role !== 'human' && (m.listen_count || 0) === 0 && stripMarkdown(m.content).length > 0);
 
     if (unreadMessages.length === 0) {
         return res.status(204).json({ message: 'No unread messages' });
@@ -616,6 +685,7 @@ router.get('/unread/:conversationId', async (req: Request, res: Response) => {
 
     try {
         const audioBuffers: Buffer[] = [];
+        const renderedIds: string[] = [];
 
         for (const msg of unreadMessages) {
             const voice = getVoiceForRole(msg.role);
@@ -623,14 +693,16 @@ router.get('/unread/:conversationId', async (req: Request, res: Response) => {
             const instructions = getVoiceInstructions(msg.role);
             const cleanText = stripMarkdown(msg.content);
 
-            if (!cleanText) continue;
+            if (!cleanText) continue; // belt — the set filter above already excludes these
 
             try {
                 const buffer = await generateTtsChunked(cleanText, voice, model, instructions);
                 audioBuffers.push(buffer);
+                renderedIds.push(msg.id);
             } catch (err) {
                 console.error(`[Voice/Unread] TTS failed for message ${msg.id}:`, err);
-                // Continue with remaining messages
+                // Transient failure: stays UNREAD (M2/M4) — loud beats silent; it
+                // self-heals on the next fetch. Continue with remaining messages.
             }
         }
 
@@ -638,9 +710,13 @@ router.get('/unread/:conversationId', async (req: Request, res: Response) => {
             return res.status(204).json({ message: 'No audio generated' });
         }
 
-        // Mark all as listened (Siri can't call back)
-        for (const msg of unreadMessages) {
-            markListened.run(msg.id);
+        // Mark-on-download ONLY under ?mark=eager (Siri can't call back), and ONLY the
+        // messages that actually produced audio (M2 — a failed render must never count
+        // as heard; over-marking is silent and its victim isn't the caller).
+        if (eagerMark) {
+            for (const id of renderedIds) {
+                markListened.run(id);
+            }
         }
 
         const concatenated = Buffer.concat(audioBuffers);
@@ -742,6 +818,58 @@ router.patch('/config', (req: Request, res: Response) => {
 
 import { conversationLoopStmts, conversationMessageStmts as convMsgStmts } from '../db';
 
+// B1 (catch-me-up v2.2 — M1 GENERALISED): the virtual loop id. The predicate is
+// "messages outside every loop's span" (Tenshi's cure), NOT "no human anchors": loops
+// anchor on human messages and span FORWARD, so agent posts BEFORE the first human turn
+// belong to no loop (47 threads / 284 unheard head posts, measured 2026-08-15) — and an
+// all-agent thread has no loops at all. Both cases get ONE virtual loop — computed in
+// the response, NEVER inserted: a conversation_loops row whose human_message_id pointed
+// at a non-human message would be a false record (rendered-never-written).
+const VIRTUAL_LOOP_ID = 'whole-thread';
+
+function agentMessagesForConversation(conversationId: string, fullRows: boolean, beforeMessageId?: string): any[] {
+    const roles = humanSideRoles();
+    const placeholders = roles.map(() => '?').join(',');
+    const headClause = beforeMessageId
+        ? 'AND created_at < (SELECT created_at FROM conversation_messages WHERE id = ?)'
+        : '';
+    const params = beforeMessageId
+        ? [conversationId, ...roles, beforeMessageId]
+        : [conversationId, ...roles];
+    return db.prepare(
+        `SELECT ${fullRows ? '*' : 'id, role, listen_count, content, created_at'}
+         FROM conversation_messages
+         WHERE conversation_id = ? AND role NOT IN (${placeholders}) ${headClause}
+         ORDER BY created_at ASC`
+    ).all(...params) as any[];
+}
+
+// M4 (v2.2): the acquittal counts exclude unspeakable posts — a post with no speakable
+// text cannot be listened to, so it cannot be owed. Transient render failures are a
+// different animal (they stay unread and self-heal).
+function speakable(m: any): boolean {
+    try { return stripMarkdown(String(m.content ?? '')).length > 0; } catch { return false; }
+}
+
+/** The uncovered-head virtual loop (or whole-thread when no loops exist), enriched. */
+function virtualLoopFor(conversationId: string, firstAnchorMessageId: string | null): any | null {
+    const msgs = agentMessagesForConversation(conversationId, false, firstAnchorMessageId ?? undefined);
+    if (msgs.length === 0) return null;
+    const unlistened = msgs.filter(m => (m.listen_count || 0) === 0 && speakable(m)).length;
+    return {
+        id: VIRTUAL_LOOP_ID,
+        conversation_id: conversationId,
+        loop_number: 0,
+        human_message_id: null,
+        tag: firstAnchorMessageId ? 'Before the first turn' : 'Whole thread',
+        virtual: true,
+        created_at: msgs[0].created_at,
+        message_count: msgs.length,
+        unlistened_count: unlistened,
+        all_listened: unlistened === 0,
+    };
+}
+
 // Get all loops for a conversation
 router.get('/loops/:conversationId', (req: Request, res: Response) => {
     try {
@@ -771,6 +899,15 @@ router.get('/loops/:conversationId', (req: Request, res: Response) => {
             }
         }
 
+        // B1/M1 (v2.2): messages OUTSIDE EVERY LOOP'S SPAN get the virtual loop — the
+        // whole thread when no loops exist, the uncovered HEAD (posts before the first
+        // human anchor) when loops do. Same virtual loop, same code path, predicate
+        // generalised (the 47-thread/284-post hole).
+        if (loops.length === 0) {
+            const virtual = virtualLoopFor(String(req.params.conversationId), null);
+            if (virtual) return res.json({ loops: [virtual] });
+        }
+
         // Enrich with listen status
         const enriched = loops.map((loop: any) => {
             // Get messages in this loop (between this human msg and next)
@@ -781,7 +918,7 @@ router.get('/loops/:conversationId', (req: Request, res: Response) => {
             let msgs: any[];
             if (nextLoop) {
                 msgs = db.prepare(
-                    `SELECT id, role, listen_count FROM conversation_messages
+                    `SELECT id, role, listen_count, content FROM conversation_messages
                      WHERE conversation_id = ? AND role NOT IN (${humanSideRoles().map(() => '?').join(',')})
                      AND created_at >= (SELECT created_at FROM conversation_messages WHERE id = ?)
                      AND created_at < (SELECT created_at FROM conversation_messages WHERE id = ?)
@@ -789,14 +926,15 @@ router.get('/loops/:conversationId', (req: Request, res: Response) => {
                 ).all(loop.conversation_id, ...humanSideRoles(), loop.human_message_id, nextLoop.human_message_id) as any[];
             } else {
                 msgs = db.prepare(
-                    `SELECT id, role, listen_count FROM conversation_messages
+                    `SELECT id, role, listen_count, content FROM conversation_messages
                      WHERE conversation_id = ? AND role NOT IN (${humanSideRoles().map(() => '?').join(',')})
                      AND created_at >= (SELECT created_at FROM conversation_messages WHERE id = ?)
                      ORDER BY created_at ASC`
                 ).all(loop.conversation_id, ...humanSideRoles(), loop.human_message_id) as any[];
             }
 
-            const unlistenedCount = msgs.filter(m => (m.listen_count || 0) === 0).length;
+            // M4: unspeakable posts are not owed — excluded from the acquittal count.
+            const unlistenedCount = msgs.filter(m => (m.listen_count || 0) === 0 && speakable(m)).length;
 
             return {
                 ...loop,
@@ -805,6 +943,13 @@ router.get('/loops/:conversationId', (req: Request, res: Response) => {
                 all_listened: msgs.length > 0 && unlistenedCount === 0,
             };
         });
+
+        // M1: the uncovered HEAD — agent posts before the first human anchor belong to
+        // no loop; they get the virtual loop, prepended (loop_number 0 sorts first).
+        if (enriched.length > 0) {
+            const headVirtual = virtualLoopFor(String(req.params.conversationId), enriched[0].human_message_id);
+            if (headVirtual) enriched.unshift(headVirtual);
+        }
 
         res.json({ loops: enriched });
     } catch (err: any) {
@@ -815,6 +960,27 @@ router.get('/loops/:conversationId', (req: Request, res: Response) => {
 // Get messages for a specific loop
 router.get('/loops/:conversationId/:loopId/messages', (req: Request, res: Response) => {
     try {
+        // B1/M1: the virtual loop resolves SPAN-AWARE — head posts only when real loops
+        // exist (everything before the first anchor), the whole thread when none do.
+        // Tenshi nit 2: every /messages payload carries the SAME `speakable` verdict the
+        // acquittal counts use, so the client's play-all filter and the server's count
+        // share one definition of the set (one set, one definition).
+        if (req.params.loopId === VIRTUAL_LOOP_ID) {
+            const convId = String(req.params.conversationId);
+            const realLoops = conversationLoopStmts.getByConversation.all(convId) as any[];
+            const firstAnchor = realLoops.length > 0 ? realLoops[0].human_message_id : undefined;
+            const msgs = agentMessagesForConversation(convId, true, firstAnchor)
+                .map(m => ({ ...m, speakable: speakable(m) }));
+            return res.json({
+                loop: {
+                    id: VIRTUAL_LOOP_ID,
+                    conversation_id: convId,
+                    virtual: true,
+                },
+                messages: msgs,
+            });
+        }
+
         const loop = conversationLoopStmts.getById.get(req.params.loopId) as any;
         if (!loop) return res.status(404).json({ error: 'Loop not found' });
 
@@ -840,7 +1006,8 @@ router.get('/loops/:conversationId/:loopId/messages', (req: Request, res: Respon
             ).all(loop.conversation_id, ...humanSideRoles(), loop.human_message_id) as any[];
         }
 
-        res.json({ loop, messages: msgs });
+        // Tenshi nit 2: same speakable verdict on the real-loop payload too.
+        res.json({ loop, messages: msgs.map(m => ({ ...m, speakable: speakable(m) })) });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
@@ -849,8 +1016,19 @@ router.get('/loops/:conversationId/:loopId/messages', (req: Request, res: Respon
 // Update loop tag (inline edit)
 router.patch('/loops/:loopId', (req: Request, res: Response) => {
     try {
+        // B1: the virtual loop is not a row — nothing to edit. 400 (a KNOWN id with an
+        // invalid operation — Casey's more-truthful status, Jim's ruling: keep it)…
+        if (req.params.loopId === VIRTUAL_LOOP_ID) {
+            return res.status(400).json({ error: 'The whole-thread loop is virtual — it has no editable tag' });
+        }
         const { tag } = req.body;
-        conversationLoopStmts.updateTag.run(tag, req.params.loopId);
+        // …and M3 UNDERNEATH it: the rows-changed 404 for the UNKNOWN id. One refuses
+        // what we named; the other refuses what we didn't (a silent no-op wearing a
+        // {success:true} receipt was today's behaviour — Tenshi's line, Casey's law).
+        const info = conversationLoopStmts.updateTag.run(tag, req.params.loopId);
+        if (info.changes === 0) {
+            return res.status(404).json({ error: 'Loop not found' });
+        }
         res.json({ success: true });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
