@@ -50,6 +50,7 @@ import { computeWallClockDelay } from './lib/agent-scheduler';
 import { getDayPhase, isHeartbeatPaused, type DayPhase } from './lib/day-phase';
 import { manifestModelLadder, loadResidents } from './lib/garden-manifest';
 import { gradientConfigForAgent } from './lib/agent-registry';
+import { readDreamSeeds as readSharedDreamSeeds, SEED_FRAGMENT_MAX_CHARS } from './lib/dream-seeds';
 import { appendPairedMemory } from './lib/memory-paired-writer';
 import { observedOrUnobservedModel } from './lib/tmux-dispatcher';
 import { gradientStmts, feelingTagStmts } from './db';
@@ -113,21 +114,18 @@ function writeHealthSignal(lastError: string | null = null): void {
 }
 
 // ── Dream seeds — the agent's OWN explorations history (sovereign by path) ────
+// MNT-148 phase 2 (2026-08-18): delegated to the shared reader (lib/dream-seeds.ts).
+// This function's own long-standing shape — split at the file's real entry boundary,
+// cap each fragment at 400 chars — IS what the shared reader generalises; the cap
+// value is inherited from here rather than invented. The supervisor's private twin
+// (which had neither) retires to the same call.
 function readDreamSeeds(): string {
-    try {
-        const p = path.join(CFG.memoryDir, 'explorations.md');
-        if (!fs.existsSync(p)) return '';
-        const entries = fs.readFileSync(p, 'utf-8')
-            .split(/(?=### Beat )/)
-            .filter(e => e.trim().length > 20);
-        for (let i = entries.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [entries[i], entries[j]] = [entries[j], entries[i]];
-        }
-        return entries.slice(0, 4).map(e => e.trim().slice(0, 400)).join('\n\n---\n\n');
-    } catch {
-        return '';
-    }
+    return readSharedDreamSeeds(SLUG, {
+        sources: ['explorations.md'],
+        count: 4,
+        maxChars: SEED_FRAGMENT_MAX_CHARS, // explicit inheritance by name (required param, Darron's 2026-08-19 ruling)
+        split: /(?=### Beat )/,
+    });
 }
 
 // ── 1-in-3 sleep beats: a memory surfaces in the dream (agent's OWN gradient) ──

@@ -34,6 +34,7 @@ import { getDayPhase, isRestDay, getPhaseInterval, isOnHoliday, isWorkingBee, ty
 import { appendPairedMemory } from '../lib/memory-paired-writer';
 import { parseTurnEntryStructured, parseTurnEntry } from '../lib/result-handlers';
 import { acquireWmSensorLock, releaseWmSensorLock } from '../lib/sensor-lock';
+import { readDreamSeedFragments } from '../lib/dream-seeds';
 import { gateIdentityOrThrow } from '../lib/identity-signing';
 import { buildPrompt, PromptOverbudgetError } from '../lib/prompt-builder';
 import type { JimCyclePhase } from '../lib/jim-prompts';
@@ -1030,6 +1031,11 @@ async function maybeRunJimEveningMeditation(phase: string): Promise<void> {
 // Dream-seed counts — mirror Leo's heartbeat readDreamSeeds()
 const JIM_DREAM_SEED_COUNT = 8;     // dream fragments
 const JIM_WAKING_SEED_COUNT = 2;    // waking memory fragments (~20%)
+// MNT-148 (2026-08-18): per-fragment ceiling, unit IN the identifier (MNT-144's lesson —
+// a count alone is blind to fragment SIZE). Derived from the agnostic reader's own
+// long-standing `.slice(0, 400)` (agent-heartbeat.ts readDreamSeeds) rather than picked
+// fresh: same job, a value already measured in practice.
+const JIM_WAKING_SEED_MAX_CHARS = 400;
 
 /**
  * Read random dream seeds for Jim's dream cycle — mirror of Leo's
@@ -1085,26 +1091,29 @@ function readJimDreamSeeds(): string {
         seeds.push(...entries.slice(0, JIM_DREAM_SEED_COUNT));
     }
 
-    // 20% — random snippets from Jim's waking memory.
-    // Mirrors Leo's design but uses working-memory-full.md (compressed
-    // working-memory.md was deprecated in S147 / Phase 0).
-    const wakingSources = ['felt-moments.md', 'working-memory-full.md', 'discoveries.md'];
-    const wakingFragments: string[] = [];
-    for (const file of wakingSources) {
-        const p = path.join(MEMORY_DIR, file);
-        if (fs.existsSync(p)) {
-            const content = fs.readFileSync(p, 'utf-8');
-            // Split on heading boundaries and take substantial chunks
-            const chunks = content.split(/(?=^## )/m).filter(c => c.trim().length > 50);
-            wakingFragments.push(...chunks);
-        }
-    }
-    // Shuffle and take WAKING_SEED_COUNT
-    for (let i = wakingFragments.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [wakingFragments[i], wakingFragments[j]] = [wakingFragments[j], wakingFragments[i]];
-    }
-    seeds.push(...wakingFragments.slice(0, JIM_WAKING_SEED_COUNT));
+    // 20% — random snippets from the agent's waking memory.
+    //
+    // MNT-148 phase 2 (2026-08-18): DELEGATED to the shared `readDreamSeedFragments`
+    // (lib/dream-seeds.ts) — the private copy that lived here is retired. It split on
+    // `/(?=^## )/m` while these files use `### ` (felt-moments.md: ZERO `## `, 131 `### `),
+    // so its pool collapsed to whole books — a 2-fragment draw carried ~130K est-tokens
+    // into a 120K budget and the cycle skipped. The shared reader is heading-level
+    // agnostic, caps per fragment (MNT-144: a count is blind to size), and resolves the
+    // memory dir through the registry — so jim's root layout and every other agent's
+    // `<slug>` layout are both correct. A fourth agent's HEARTBEAT gets this free
+    // (DEC-081 — proven live on four agents at the audit); this worker's supervisor
+    // half follows at Phase 3, when the worker itself slug-parameterises — the `'jim'`
+    // literal below is scope-correct today (this file is jim-only by construction,
+    // MEMORY_DIR at :94) and is NOT yet the promoted form (Tenshi F3 / Casey's
+    // narrowed recital, 2026-08-18).
+    //
+    // `discoveries.md` dropped from the sources: 375 bytes, zero headings — it contributed
+    // nothing but one whole-file fragment.
+    seeds.push(...readDreamSeedFragments('jim', {
+        sources: ['felt-moments.md', 'working-memory-full.md'],
+        count: JIM_WAKING_SEED_COUNT,
+        maxChars: JIM_WAKING_SEED_MAX_CHARS, // required by name (Tenshi F2 — the constant now governs)
+    }));
 
     // Gradient-tagged UVs — the rebuild kernel surface.
     // Replaces the bloated flat-file unit-vectors.md per option C
