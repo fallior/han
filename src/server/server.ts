@@ -33,7 +33,9 @@ import { checkWeeklyReportSchedule } from './services/reports';
 // Maintenance removed — autonomous agents with unrestricted shell access are too dangerous
 import { advancePipeline, setCreateGoalFn, setBroadcastFn as setProductsBroadcastFn, setLoadConfigFn } from './services/products';
 import { initSupervisor, scheduleSupervisorCycle, stopSupervisor, setSupervisorBroadcastFn } from './services/supervisor';
-import { runsSupervisorCycle, runsOrchestrator } from './lib/garden-manifest';
+import { runsSupervisorCycle, runsOrchestrator, poolSizeFor } from './lib/garden-manifest';
+import { startPoolManager } from './lib/tmux-dispatcher';
+import { startSessionHearth } from './lib/session-hearth';
 
 // Route modules
 import promptsRouter from './routes/prompts';
@@ -352,6 +354,24 @@ if (runsSupervisorCycle(process.env.AGENT_SLUG)) {
     setTimeout(scheduleSupervisorCycle, 30000);
 } else {
     console.log(`[Supervisor] Not started — this server is AGENT_SLUG=${process.env.AGENT_SLUG ?? '(unset)'}; no manifest agent with this slug sets runsSupervisorCycle (project-b Phase 1 gate, DEC-081).`);
+}
+
+// ── Session-surface pool driver + hearth checker (warm-checkout P0, Jim's M1) ─────
+// The per-agent server is the DRIVER for its own slug's session-surface pool: the pool
+// machinery is (slug,surface)-agnostic but startPoolManager's only other caller is
+// human-responder@<slug> for its OWN surface — nobody owned `session`, so a session pool
+// would populate once and silently die (M1, thread msz950i2). This server is leo-scoped
+// by launch (AGENT_SLUG), long-lived, and boot-owned once P3's server session lands —
+// the natural owner. Inert until the manifest sets poolSize>0 on (slug, 'session').
+// A 4th agent's server gets this free: slug from env, sizes from the manifest (DEC-081).
+{
+    const slug = process.env.AGENT_SLUG;
+    if (slug && poolSizeFor(slug, 'session') > 0) {
+        startPoolManager(slug, 'session');
+        startSessionHearth(slug); // P2 layer-1 checker (pull-only; no HTTP route — Tenshi F3)
+    } else if (slug) {
+        console.log(`[session-pool] Not started — (${slug}, session) has poolSize 0 in the manifest (warm-checkout P0 not enabled).`);
+    }
 }
 
 // ── Start server ─────────────────────────────────────────

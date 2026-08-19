@@ -77,6 +77,13 @@ Options:
     --attach, -a    Attach to an existing Leo session
     --status, -s    Show status of Leo sessions
     --kill          Kill all Leo sessions
+    --warm          Check out a pre-warmed pool stem (the DEFAULT since the msz950i2 land,
+                    2026-08-19). Falls back cold on an empty/dead pool.
+    --cold          Force the classic cold launch (the escape hatch, DEC-104: an escape,
+                    never a constraint). Passing claude args via -- also implies cold
+                    (a running stem cannot take launch flags).
+    fable|opus|sonnet|haiku   Cast the checked-out stem to this model family (bare alias,
+                    DEC-104 — floats to the family head). Default: fable.
     --help, -h      Show this help message
 
 Examples:
@@ -159,6 +166,66 @@ attach_session() {
     fi
 }
 
+# ── Warm checkout (P1, msz950i2 — flag-gated until Jim's diff-GREEN flips the default) ──
+
+# P3 (Jim's M3: required, and FIRST): the per-agent server decoupled from the seat.
+# The launcher only ENSURES — kernel socket table + API as the authorities (S167:
+# never pgrep), started once as a standalone tmux session, never a second instance.
+ensure_server() {
+    if curl -sk -o /dev/null -m 3 "https://localhost:${AGENT_PORT}/api/analytics" 2>/dev/null; then
+        echo -e "${GREEN}Server already running on ${AGENT_PORT}${NC}"
+        return 0
+    fi
+    if ss -tlnp 2>/dev/null | grep -q ":${AGENT_PORT} "; then
+        echo -e "${YELLOW}Port ${AGENT_PORT} has a listener but the API is not answering — NOT starting a second server (inspect it; the ghost-server family S163/S167).${NC}"
+        return 1
+    fi
+    local srv_session="server-${AGENT_SLUG}"
+    if tmux has-session -t "$srv_session" 2>/dev/null; then
+        echo -e "${YELLOW}Session ${srv_session} exists but nothing listens on ${AGENT_PORT} — leaving it for inspection, not stacking another.${NC}"
+        return 1
+    fi
+    echo -e "${BLUE}Starting standalone server session ${GREEN}${srv_session}${NC}"
+    tmux new-session -d -s "$srv_session" \
+        "$SCRIPT_DIR/scripts/agent-server-watchdog.sh $AGENT_SLUG $AGENT_PORT '$SCRIPT_DIR/src/server'"
+}
+
+warm_checkout() {
+    local cast_model="${1:-fable}"
+
+    # M2 (Jim) — one seat per surface, as a launcher invariant. AUTHORED RESTRICTION
+    # (DEC-104, Casey's fold): two seats sleeved {leo, session} would share ONE swap
+    # pair, ONE readiness sentinel and ONE cli-busy signal — the MNT-098 paired-write
+    # race made cheap, and the busy predicate stops being a fact about *a* seat
+    # (Tenshi). Permanent structural hazard → no expiry owed. Author: Jim (M2,
+    # msz950i2, 2026-08-18); folded by Leo. The cure is ATTACH, not refuse: a second
+    # `hanleo` joins the existing seat, exactly like `-a`.
+    local existing
+    existing=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^(${SESSION_PREFIX}-|stem-${AGENT_SLUG}-session-)" || true)
+    if [[ -n "$existing" ]]; then
+        echo -e "${YELLOW}A Leo seat already exists — attaching to it (one seat per surface, M2):${NC}"
+        echo "$existing"
+        tmux attach-session -t "$(echo "$existing" | head -1)"
+        return 0
+    fi
+
+    ensure_server || true   # a checkout can proceed without the server; the pool just won't replenish until it's up
+
+    echo -e "${BLUE}Checking out a warm stem (cast → ${GREEN}${cast_model}${BLUE})...${NC}"
+    local out session_name
+    if out=$( cd "$SCRIPT_DIR/src/server" && NODE_PATH="$(pwd)/node_modules" \
+            npx tsx ../../scripts/checkout-session-stem.ts "$AGENT_SLUG" "$cast_model" ); then
+        session_name=$(echo "$out" | tail -1)
+        if [[ -n "$session_name" ]] && tmux has-session -t "$session_name" 2>/dev/null; then
+            echo -e "${GREEN}Warm seat ready: ${session_name}${NC} — attaching."
+            tmux attach-session -t "$session_name"
+            return 0
+        fi
+    fi
+    echo -e "${YELLOW}No usable warm stem — falling back to the cold launch (byte-identical classic path).${NC}"
+    return 1
+}
+
 kill_sessions() {
     local sessions
     sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^${SESSION_PREFIX}" || true)
@@ -233,8 +300,18 @@ start_session() {
 
     # Start server in a bottom pane (20% height) under the auto-restart watchdog.
     # See hanjim launcher for full rationale (Apr 20 → Apr 24 ghost-server drift).
-    tmux split-window -t "$session_name" -v -l 20% -d \
-        "$SCRIPT_DIR/scripts/agent-server-watchdog.sh $AGENT_SLUG $AGENT_PORT '$SCRIPT_DIR/src/server'"
+    # F-J1 (Jim's diff-audit, msz950i2 2026-08-19): never stack a second server. If the
+    # API already answers — the standalone server-leo after a warm-mode empty-pool
+    # fallback, or any prior seat's pane — a pane-spawned twin cannot bind, crash-loops
+    # every ~2s, and each loop CLOBBERS ~/.han/leo-server.pid (the PID deploy-restarts
+    # SIGTERM) — the restart mechanism would aim at a corpse. One server per identity,
+    # whoever started it; the watchdog stays dumb (cure (a)).
+    if curl -sk -o /dev/null -m 3 "https://localhost:${AGENT_PORT}/api/analytics" 2>/dev/null; then
+        echo -e "${GREEN}Server already answering on ${AGENT_PORT} — not spawning a second (F-J1)${NC}"
+    else
+        tmux split-window -t "$session_name" -v -l 20% -d \
+            "$SCRIPT_DIR/scripts/agent-server-watchdog.sh $AGENT_SLUG $AGENT_PORT '$SCRIPT_DIR/src/server'"
+    fi
 
     # Select the top pane (Claude Code) and launch
     tmux select-pane -t "$session_name"
@@ -254,6 +331,8 @@ start_session() {
 
 # Parse arguments
 CLAUDE_ARGS=()
+WARM_MODE=1      # DEFAULT since the land (Darron's word, 2026-08-19 ~3:29 PM; Jim GREEN + F-J1 folded)
+CAST_MODEL="fable"   # bare alias, DEC-104 — `hanleo opus` etc. selects the cast family
 while [[ $# -gt 0 ]]; do
     case $1 in
         --list|-l)
@@ -272,6 +351,19 @@ while [[ $# -gt 0 ]]; do
             kill_sessions
             exit 0
             ;;
+        --warm)
+            WARM_MODE=1
+            shift
+            ;;
+        --cold)
+            WARM_MODE=0
+            shift
+            ;;
+        fable|opus|sonnet|haiku)
+            CAST_MODEL="$1"
+            WARM_MODE=1   # naming a cast implies the warm path (a cold seat takes -- --model)
+            shift
+            ;;
         --help|-h)
             print_usage
             exit 0
@@ -287,5 +379,15 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Explicit claude args imply the cold path — a running stem cannot take launch flags.
+if [[ ${#CLAUDE_ARGS[@]} -gt 0 ]]; then
+    WARM_MODE=0
+fi
+
+if [[ "$WARM_MODE" -eq 1 ]]; then
+    warm_checkout "$CAST_MODEL" && exit 0
+    # fallthrough = cold fallback, byte-identical classic path
+fi
 
 start_session "${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}"

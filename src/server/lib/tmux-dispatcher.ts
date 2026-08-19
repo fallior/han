@@ -123,8 +123,11 @@ export interface AgentSession {
      *  next dispatch. Confirm idleness; never assume it from elapsed time. */
     turnState: 'idle' | 'busy' | 'needs-reconcile';
     /** Build B (§2.8): the BAKED hearth standing message — materialised at session
-     *  creation, never fetched at fire time. */
-    pulseMessage?: string;
+     *  creation, never fetched at fire time. REQUIRED (Tenshi F1, msz950i2 2026-08-18):
+     *  optional + a `??` fallback at the fire site was a fire-time config read held off
+     *  only by every construction site happening to remember — tsc now enforces the
+     *  §2.8 law at every future construction site instead. */
+    pulseMessage: string;
     /** Epoch ms of the last completed transaction — the orphan-capture mtime gate (#5). */
     lastTransactionTs: number;
     /** Byte length of working-memory.md last delta-read by this session — the #91 cross-
@@ -1005,7 +1008,9 @@ export async function sendTransactionPrompt(
         boundaryCheck(slug, surface, session.tmuxSession);
         armHearthPulse(slug, surface, session.tmuxSession,
             () => session.turnState === 'idle',
-            () => { void enqueueForAgent(slug, surface, session.pulseMessage ?? hearthStandingMessageFor(slug, surface), {}, stemKey); });
+            // Tenshi F1: no `??` — the baked field is required; a fire-time config read
+            // is unrepresentable now, not merely avoided.
+            () => { void enqueueForAgent(slug, surface, session.pulseMessage, {}, stemKey); });
     } catch (err) {
         console.warn(`[tmux-dispatcher] ${slug}/${surface}: organelle hooks failed (observe-only, continuing): ${(err as Error).message}`);
     }
@@ -1790,7 +1795,18 @@ async function freshenPooledStem(slug: string, surface: string, stem: PoolStem, 
  * Jim cond-1). The registry row is updated to the actually-active model (DEC-092 truth stays honest).
  */
 async function castStemToServeModel(slug: string, surface: string, stem: PoolStem): Promise<void> {
-    const serve = serveModelFor(slug, surface);
+    return castStemToModel(slug, surface, stem, serveModelFor(slug, surface));
+}
+
+/**
+ * Cast a stem to a NAMED target rung (warm-checkout P1 — Casey's build-lane catch,
+ * msz950i2: `castStemToServeModel` reads the surface config and takes no model
+ * parameter, so per-invocation casting — `hanleo opus` — needs this override form).
+ * Target is a BARE ALIAS per DEC-104 (never a version pin); the descend ladder stays
+ * the surface's, and the observation stamps what actually served (DEC-092).
+ */
+export async function castStemToModel(slug: string, surface: string, stem: PoolStem, target: string | null): Promise<void> {
+    const serve = target;
     // DEC-104: alias-aware — an observed claude-opus-* SATISFIES a bare 'opus' rung (no wasted
     // per-dispatch /model + cooldown against an alias head); a family MISMATCH (e.g. the Mythos
     // guard tripping a fable stem onto opus — Tenshi's R5, suite-pinned) still casts back.
