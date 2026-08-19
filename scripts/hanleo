@@ -166,65 +166,11 @@ attach_session() {
     fi
 }
 
-# ── Warm checkout (P1, msz950i2 — flag-gated until Jim's diff-GREEN flips the default) ──
-
-# P3 (Jim's M3: required, and FIRST): the per-agent server decoupled from the seat.
-# The launcher only ENSURES — kernel socket table + API as the authorities (S167:
-# never pgrep), started once as a standalone tmux session, never a second instance.
-ensure_server() {
-    if curl -sk -o /dev/null -m 3 "https://localhost:${AGENT_PORT}/api/analytics" 2>/dev/null; then
-        echo -e "${GREEN}Server already running on ${AGENT_PORT}${NC}"
-        return 0
-    fi
-    if ss -tlnp 2>/dev/null | grep -q ":${AGENT_PORT} "; then
-        echo -e "${YELLOW}Port ${AGENT_PORT} has a listener but the API is not answering — NOT starting a second server (inspect it; the ghost-server family S163/S167).${NC}"
-        return 1
-    fi
-    local srv_session="server-${AGENT_SLUG}"
-    if tmux has-session -t "$srv_session" 2>/dev/null; then
-        echo -e "${YELLOW}Session ${srv_session} exists but nothing listens on ${AGENT_PORT} — leaving it for inspection, not stacking another.${NC}"
-        return 1
-    fi
-    echo -e "${BLUE}Starting standalone server session ${GREEN}${srv_session}${NC}"
-    tmux new-session -d -s "$srv_session" \
-        "$SCRIPT_DIR/scripts/agent-server-watchdog.sh $AGENT_SLUG $AGENT_PORT '$SCRIPT_DIR/src/server'"
-}
-
-warm_checkout() {
-    local cast_model="${1:-fable}"
-
-    # M2 (Jim) — one seat per surface, as a launcher invariant. AUTHORED RESTRICTION
-    # (DEC-104, Casey's fold): two seats sleeved {leo, session} would share ONE swap
-    # pair, ONE readiness sentinel and ONE cli-busy signal — the MNT-098 paired-write
-    # race made cheap, and the busy predicate stops being a fact about *a* seat
-    # (Tenshi). Permanent structural hazard → no expiry owed. Author: Jim (M2,
-    # msz950i2, 2026-08-18); folded by Leo. The cure is ATTACH, not refuse: a second
-    # `hanleo` joins the existing seat, exactly like `-a`.
-    local existing
-    existing=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -E "^(${SESSION_PREFIX}-|stem-${AGENT_SLUG}-session-)" || true)
-    if [[ -n "$existing" ]]; then
-        echo -e "${YELLOW}A Leo seat already exists — attaching to it (one seat per surface, M2):${NC}"
-        echo "$existing"
-        tmux attach-session -t "$(echo "$existing" | head -1)"
-        return 0
-    fi
-
-    ensure_server || true   # a checkout can proceed without the server; the pool just won't replenish until it's up
-
-    echo -e "${BLUE}Checking out a warm stem (cast → ${GREEN}${cast_model}${BLUE})...${NC}"
-    local out session_name
-    if out=$( cd "$SCRIPT_DIR/src/server" && NODE_PATH="$(pwd)/node_modules" \
-            npx tsx ../../scripts/checkout-session-stem.ts "$AGENT_SLUG" "$cast_model" ); then
-        session_name=$(echo "$out" | tail -1)
-        if [[ -n "$session_name" ]] && tmux has-session -t "$session_name" 2>/dev/null; then
-            echo -e "${GREEN}Warm seat ready: ${session_name}${NC} — attaching."
-            tmux attach-session -t "$session_name"
-            return 0
-        fi
-    fi
-    echo -e "${YELLOW}No usable warm stem — falling back to the cold launch (byte-identical classic path).${NC}"
-    return 1
-}
+# ── Warm checkout — SHARED leg (DEC-081: one path, many agents) ──────────────
+# ensure_server + warm_checkout live in scripts/lib/launcher-warm-checkout.sh so
+# hanjim/hantenshi/hancasey source the same audited functions rather than growing
+# twins (extracted 2026-08-19; the extraction also fixed the M2 free-stem attach).
+source "$SCRIPT_DIR/scripts/lib/launcher-warm-checkout.sh"
 
 kill_sessions() {
     local sessions
