@@ -15,13 +15,32 @@
  *    time — §2.8's blast-radius law, never fetched at fire). The seat's own Stop hook
  *    (src/hooks/hearth-pulse-pull.sh) consumes it at a turn boundary the seat already
  *    owns — the pulse arrives through the harness's feedback channel, never the input box.
- *  - LAYER 2 — quiet-hours push: NOT SHIPPED. `client_activity` is UNPROVEN as a
- *    keystroke-only signal (2026-08-19 test: the field advanced during an output stream
- *    with the human live at the keyboard — contaminated, inconclusive). This checker logs
- *    an OBSERVE-ONLY row (`session-pulse-would-push`) with the client-activity age each
- *    time a pulse goes due, so a week of rows becomes the clean experiment (the Build-B
- *    shape: observe first, flip on data). Until then the away-case honestly stalls: no
- *    turns → no boundaries → pulses wait for the human's return. Named, not hidden.
+ *  - LAYER 2 — the quiet-hours PUSH (Darron's ruling 2026-08-20 ~06:52, verbatim in thread
+ *    mt04sic8 at mt0kkoba; built 2026-08-20 after both lands per Jim's sequencing): when a
+ *    due-file sits UNCONSUMED (the seat idle — no Stop to pull it), read the input box.
+ *      EMPTY → consume the due-file and deliver the pulse directly (paste + Enter — the one
+ *        transport that can wake a turn-less seat; Tenshi's attribution note holds: the
+ *        message is machine-authored in an attended transcript, so it is STAMPED, below).
+ *      NON-EMPTY → snapshot; after ≥5 min unchanged (byte-exact over the extracted box text,
+ *        whitespace preserved — the stated comparison method Tenshi asked for) → press Enter,
+ *        submitting HIS OWN half-written draft as a real turn ("even if it is half written
+ *        it still keeps that spoke warm"); that turn's Stop consumes the due-file via the
+ *        EXISTING layer-1 pull, so pulse text NEVER touches his input (F2's fusion channel
+ *        does not exist here — the two texts share no path). Changed → he's typing; re-wait.
+ *      RACE CURE (Tenshi's build question, Jim-endorsed lean + a keystroke-level belt):
+ *        immediately before the Enter, re-check cli-busy (mid-turn → abort; the turn's own
+ *        Stop pulls the due-file anyway) AND final-recapture the box (ms window) — any
+ *        change aborts. The 5-min window's race shrinks to milliseconds.
+ *      STAMP (Casey's clause, Jim-endorsed — it closes her Step-2 concern AND the empty-
+ *        branch attribution sibling): every hearth-submitted turn writes a counters row
+ *        `session-pulse-push` with submittedBy:'hearth-pulse' and the mode; the draft case
+ *        carries length + sha256-prefix, never the text (his words enter the record as his
+ *        turn; the stamp identifies WHICH turn a timer sent without copying it). Consent is
+ *        a fact about now; the record is read later — the stamp is what lets a future
+ *        reader see a machine-submitted turn was consented to.
+ *      GATE: a seat past the knee gets neither push nor Enter (fits() re-checked at push
+ *        time — the pause path refreshes the stamp but a pending due-file could straddle
+ *        the knee-crossing; the re-check closes that straddle).
  *  - NO HTTP ROUTE (Tenshi F3, Casey's split-brain precedent): a runtime control is a
  *    triple {memory, disk, side-effects} and this one keeps NO in-process state a second
  *    process could disagree with — due-ness is COMPUTED from the cli-busy file's mtime and
@@ -72,6 +91,69 @@ function counter(row: Record<string, unknown>): void {
     } catch { /* observe-only — never let telemetry break the tick */ }
 }
 
+function pushStatePath(slug: string): string {
+    return path.join(HEALTH, `hearth-push-${slug}.json`);
+}
+
+type PushSnapshot = { text: string; capturedAtMs: number };
+
+function readPushSnapshot(slug: string): PushSnapshot | null {
+    try {
+        const j = JSON.parse(fs.readFileSync(pushStatePath(slug), 'utf-8'));
+        return (typeof j.text === 'string' && typeof j.capturedAtMs === 'number') ? j : null;
+    } catch { return null; }
+}
+function writePushSnapshot(slug: string, snap: PushSnapshot | null): void {
+    try {
+        if (snap === null) { fs.rmSync(pushStatePath(slug), { force: true }); return; }
+        fs.writeFileSync(pushStatePath(slug), JSON.stringify(snap, null, 2));
+    } catch { /* disk-only state; next tick retries */ }
+}
+
+/**
+ * Extract the INPUT-BOX text from a Claude-Code pane, or null when no box is readable
+ * (mid-turn spinner, menu, clear-in-progress, capture failure). Null is honest
+ * UNDECIDABLE (Casey's precondition: where nothing proves the check was reached, the
+ * state is undecidable, not idle-and-fine) — the caller defers, never pushes.
+ * Method (read off a LIVE pane's bytes, 2026-08-20, not guessed): the input area sits
+ * between the capture's last two full-width `─` rules, its first line prompted `❯ `; an
+ * empty box renders `❯` + a non-breaking space. Content = the lines between the rules,
+ * `❯ ` stripped from the first. A first line NOT prompted `❯`, or a `❯ 1.`-shaped menu,
+ * is a dialog — null. Byte-exact from there (whitespace preserved) — the comparison unit
+ * the 5-min unchanged check and the final recapture both use.
+ */
+export function captureInputBox(tmuxSession: string): string | null {
+    let pane = '';
+    try {
+        pane = execFileSync('tmux', ['capture-pane', '-p', '-t', tmuxSession],
+            { encoding: 'utf-8', timeout: 3000 });
+    } catch { return null; }
+    const lines = pane.replace(/\n+$/, '').split('\n');
+    const isRule = (l: string): boolean => l.length >= 8 && /^─+$/.test(l.trim()) && l.trim().length >= 8;
+    let bottom = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+        if (isRule(lines[i])) { bottom = i; break; }
+    }
+    if (bottom <= 0) return null;
+    let top = -1;
+    for (let i = bottom - 1; i >= 0; i--) {
+        if (isRule(lines[i])) { top = i; break; }
+    }
+    if (top < 0 || bottom - top < 2) return null;
+    const content = lines.slice(top + 1, bottom);
+    if (!/^\s*❯/.test(content[0])) return null;          // not the input area (dialog, other chrome)
+    if (/❯\s*\d+\./.test(content[0])) return null;        // an interactive menu, not input
+    content[0] = content[0].replace(/^\s*❯\s?/, '');
+    return content.join('\n');
+}
+
+/** A rendered input box whose text is only whitespace (incl. the empty box's non-breaking
+ *  space) or the TUI's dim placeholder counts as EMPTY — nothing of the human's is in it. */
+function boxIsEmpty(text: string): boolean {
+    const t = text.replace(/[\s ]+/g, ' ').trim();
+    return t === '' || /^Try\s["“]/.test(t);
+}
+
 /** Newest client_activity age (s) across this slug's seat sessions — OBSERVE-ONLY data
  *  for the layer-2 experiment. Null = no client / tmux unavailable. */
 function newestClientActivityAgeSec(slug: string): number | null {
@@ -89,6 +171,80 @@ function newestClientActivityAgeSec(slug: string): number | null {
         }
         return newest ? Math.max(0, Math.round(Date.now() / 1000 - newest)) : null;
     } catch { return null; }
+}
+
+/**
+ * LAYER 2 — one push attempt against an unconsumed due-file. Every branch is disk-state +
+ * tmux-read; no in-process memory a restart could lose (a mid-wait restart CONTINUES the
+ * wait — the snapshot persists on disk with its capture time; Jim's audit note, 2026-08-20:
+ * better than re-waiting, and the failure direction is never a wrong Enter). Returns a
+ * verdict string for
+ * the counters row. Design source: Darron's ruling (thread mt04sic8 at mt0kkoba) + Casey's
+ * stamp + Tenshi's race questions + Jim's sequencing fold — the module header carries the WHY.
+ */
+function attemptPush(slug: string, seatSession: string, now: number): string {
+    // Gate 0: mid-turn → no push of ANY kind (both branches). The live turn's own Stop
+    // pulls the due-file — the safe rail always has first claim on a busy seat.
+    if (fs.existsSync(busySignalPath(slug))) return 'mid-turn-abort';
+    // Gate: a seat past the knee gets neither push nor Enter (Jim's fold — the pause path
+    // can't retract an already-written due-file, so the knee is re-checked HERE).
+    const ctx = getContextPctForSession(slug, 'session', seatSession);
+    if (ctx !== null) {
+        const r = computeReserve(slug, 'session', seatSession);
+        if (!fits(ctx, r.reservePct, senescenceCeilingPctFor(slug, 'session'))) {
+            writePushSnapshot(slug, null);
+            return 'senescent-no-push';
+        }
+    }
+    const box = captureInputBox(seatSession);
+    if (box === null) { writePushSnapshot(slug, null); return 'box-unreadable-deferred'; }
+
+    if (boxIsEmpty(box)) {
+        // EMPTY branch: consume the due-file FIRST (at-most-once — the delivered turn's own
+        // Stop must find nothing to pull, or the pulse arrives twice), then paste + Enter.
+        // The message is single-lined defensively: send-keys -l is not a bracketed paste, and
+        // a literal newline mid-paste is a submit — the fusion class, structurally avoided.
+        let message: string;
+        try { message = String(JSON.parse(fs.readFileSync(dueFilePath(slug), 'utf-8')).message ?? ''); }
+        catch { return 'due-file-vanished'; } // consumed by a racing Stop pull — the good race
+        fs.rmSync(dueFilePath(slug), { force: true });
+        const line = `Hearth pulse (layer-2 push — the box was empty; submitted-by: hearth-pulse): ${message.replace(/\s*\n\s*/g, ' ')}`;
+        execFileSync('tmux', ['send-keys', '-t', seatSession, '-l', line], { timeout: 3000 });
+        execFileSync('sleep', ['1']);
+        execFileSync('tmux', ['send-keys', '-t', seatSession, 'Enter'], { timeout: 3000 });
+        writePushSnapshot(slug, null);
+        counter({ kind: 'session-pulse-push', slug, surface: 'session', session: seatSession,
+            submittedBy: 'hearth-pulse', mode: 'delivered-into-empty' });
+        console.log(`[session-hearth] ${slug}: layer-2 push delivered into empty box (${seatSession})`);
+        return 'delivered-into-empty';
+    }
+
+    // NON-EMPTY branch: his draft. Snapshot → 5-min unchanged → Enter.
+    const snap = readPushSnapshot(slug);
+    if (!snap || snap.text !== box) {
+        writePushSnapshot(slug, { text: box, capturedAtMs: now });
+        return snap ? 'draft-changed-rewait' : 'draft-snapshotted';
+    }
+    if (now - snap.capturedAtMs < 5 * 60_000) return 'draft-waiting';
+
+    // Unchanged ≥5 min. Race gates, then Enter.
+    const busyPath = busySignalPath(slug);
+    if (fs.existsSync(busyPath)) { writePushSnapshot(slug, null); return 'mid-turn-abort'; }
+    const finalBox = captureInputBox(seatSession);
+    if (finalBox === null || finalBox !== box) {
+        if (finalBox !== null) writePushSnapshot(slug, { text: finalBox, capturedAtMs: now });
+        return 'final-recapture-changed';
+    }
+    execFileSync('tmux', ['send-keys', '-t', seatSession, 'Enter'], { timeout: 3000 });
+    writePushSnapshot(slug, null);
+    // The due-file is deliberately LEFT: the Enter-turn's Stop consumes it via layer-1 —
+    // the pulse rides the safe rail; his draft and the pulse text never share a channel.
+    const crypto = require('node:crypto') as typeof import('node:crypto');
+    counter({ kind: 'session-pulse-push', slug, surface: 'session', session: seatSession,
+        submittedBy: 'hearth-pulse', mode: 'entered-his-draft',
+        draftLen: box.length, draftSha256_12: crypto.createHash('sha256').update(box).digest('hex').slice(0, 12) });
+    console.log(`[session-hearth] ${slug}: layer-2 pressed Enter on an unchanged 5-min draft (${seatSession}, ${box.length}c) — the turn's Stop pulls the pulse`);
+    return 'entered-his-draft';
 }
 
 /**
@@ -128,6 +284,17 @@ export function startSessionHearth(slug: string): void {
             if (!seat) {
                 try { execFileSync('tmux', ['has-session', '-t', `session-${slug}`], { stdio: 'ignore' }); }
                 catch { return; } // no leased stem, no cold seat → no timer exists
+            }
+            const seatSession = seat?.tmux_session ?? `session-${slug}`;
+            // ── LAYER 2: an unconsumed due-file ≥60s old means the seat is idle (a live turn's
+            // Stop would have pulled it) — run one push attempt. 60s gives a just-finishing
+            // turn its boundary first; the pull rail always has first claim.
+            const dueMtime = mtimeMs(dueFilePath(slug));
+            if (dueMtime !== null && now - dueMtime >= 60_000) {
+                const verdict = attemptPush(slug, seatSession, now);
+                if (verdict !== 'draft-waiting') { // waiting is the quiet steady state, not a row per tick
+                    counter({ kind: 'session-pulse-push-attempt', slug, surface: 'session', session: seatSession, verdict });
+                }
             }
             // Completion-anchored (his 9:54 AM drift-catch): cli-free-<slug> mtime IS the
             // seat's last turn completion (written at every session Stop, surface-gated so a
@@ -181,12 +348,14 @@ export function startSessionHearth(slug: string): void {
             fs.writeFileSync(statePath(slug), JSON.stringify({ lastPulseMs: now }, null, 2));
             const clientAge = newestClientActivityAgeSec(slug);
             counter({ kind: 'session-pulse-due', slug, surface: 'session' });
-            // Layer-2 experiment row: what a gated push WOULD have decided, and on what data.
+            // The old layer-2 EXPERIMENT row, kept as telemetry beside the now-live push
+            // (history: client_activity was the candidate gate until Darron's 2026-08-20
+            // ruling made the input box itself the gate — this row let the two be compared).
             counter({
                 kind: 'session-pulse-would-push', slug, surface: 'session',
                 clientActivityAgeSec: clientAge,
                 verdict: clientAge === null ? 'no-client' : (clientAge >= 300 ? 'would-push' : 'would-defer'),
-                note: 'observe-only — client_activity unproven as keystroke-only (2026-08-19 test contaminated)',
+                note: 'comparison telemetry — the LIVE push gates on the input box, not this field',
             });
         } catch (err) {
             console.warn(`[session-hearth] ${slug}: tick failed: ${(err as Error).message}`);

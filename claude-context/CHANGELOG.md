@@ -39,6 +39,13 @@
   four seats firing on the same minute); the 7:02 simultaneous-bootstrap seed retired
   structurally, history in-comment per DEC-108.
 - `hancasey` header fossil (Jim N2): "Contempire project agent" → the S226-rectified identity.
+- **Layer 2 — the session push (LANDED same day, Jim GREEN no-must-fixes):** an unconsumed
+  due-file on an idle seat → empty box: consume-first + single-lined paste + Enter; his
+  half-written draft: 5-min byte-exact unchanged + cli-busy re-check + ms final recapture →
+  Enter on HIS bytes (the due-file left for the layer-1 rail — draft and pulse share no
+  channel). Casey's `submittedBy: hearth-pulse` stamp on every hearth-submitted turn;
+  fits() re-checked at push; UNDECIDABLE box defers. Acceptance = the first real
+  `session-pulse-push` row.
 
 ## 2026-08-16 — Leo (session) — Build B: the spoke organelle, the p99 line, the hearth pulse, MNT-115 cured (SEALED by four chairs)
 
