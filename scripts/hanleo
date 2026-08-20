@@ -78,7 +78,7 @@ Options:
     --status, -s    Show status of Leo sessions
     --kill          Kill all Leo sessions
     --warm          Check out a pre-warmed pool stem (the DEFAULT since the msz950i2 land,
-                    2026-08-19). Falls back cold on an empty/dead pool.
+                    2026-08-19). WAITS for a warm stem rather than falling back cold.
     --cold          Force the classic cold launch (the escape hatch, DEC-104: an escape,
                     never a constraint). Passing claude args via -- also implies cold
                     (a running stem cannot take launch flags).
@@ -333,7 +333,11 @@ fi
 
 if [[ "$WARM_MODE" -eq 1 ]]; then
     warm_checkout "$CAST_MODEL" && exit 0
-    # fallthrough = cold fallback, byte-identical classic path
+    # NO FALLTHROUGH (Darron's ruling, 2026-08-20 ~22:18: "simply don't fall back, wait").
+    # warm_checkout has already waited for the pool and reported loudly; seating a human
+    # on the lease-less classic path behind their back is the failure this replaces.
+    # `--cold` (below) remains the deliberate escape — DEC-104: an escape, never a constraint.
+    exit 1
 fi
 
 start_session "${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}"

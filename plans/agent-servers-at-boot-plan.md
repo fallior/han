@@ -141,3 +141,20 @@ mind's server enables at admission) and optionally from the post-commit hook.
 4. Detector-rule probe by my own hand: stop a unit's server process directly → systemd restarts
    it within ~2s (the Restart path fires on the real condition); launch a duplicate → refused.
 5. Reboot acceptance verified at the next natural reboot (not forced).
+
+---
+
+> **LANDED 2026-08-21 (Leo, session) — dated note above the spec per non-falsification; the spec
+> below stands unedited.** Built to this design: `scripts/run-agent-server.sh`, the per-host user
+> unit `han-agent-server@.service` + `killmode.conf` drop-in, `scripts/sync-agent-server-units.sh`.
+> All four instances enabled for boot; **casey cut over and live** (HTTP 200, organs starting);
+> leo/jim/tenshi keep their pane watchdogs until their cutover. Jim's audit (packet `mt1js5u1`)
+> returned GREEN on one MUST-FIX, folded before landing: **M1** — this unit was the only
+> tmux-touching unit without a `KillMode` drop-in while the pool manager's startup `replenishPool`
+> can birth the shared tmux server inside its cgroup; cured with `After=`/`Wants=han-tmux.service`
+> **and** `KillMode=process`, and the unit's false "cured by construction" comment corrected in
+> place. Four build defects were caught by running rather than asserting (manifest `agents` is a
+> LIST not a dict; `npx` absent from a systemd user unit's PATH; env-node resolving to system node
+> v18 and killing better-sqlite3 at dlopen; the sync script's departed-resident loop matching the
+> bare template and disabling all four instances it had just enabled). **Still unproven:** the boot
+> test — which is this plan's own acceptance — and the live cutover for the remaining three.

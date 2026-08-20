@@ -30,6 +30,65 @@ ensure_server() {
         "$SCRIPT_DIR/scripts/agent-server-watchdog.sh $AGENT_SLUG $AGENT_PORT '$SCRIPT_DIR/src/server'"
 }
 
+# How long we wait for the pool rather than falling back (Darron's ruling — see the WHY
+# block in warm_checkout). Measured basis, not a guess: a session stem warmed in ~4 min
+# on 2026-08-20 (17:03 launch → 17:07 registered free), so the ceiling gives a cold-start
+# pool ample room while still ENDING — a wait that never ends is its own silent failure.
+WARM_WAIT_CEILING_SEC="${WARM_WAIT_CEILING_SEC:-600}"
+WARM_WAIT_POLL_SEC="${WARM_WAIT_POLL_SEC:-5}"
+
+# One checkout attempt. Prints the tmux session name on stdout and returns 0 only when a
+# stem was actually checked out AND its session is live; every other outcome returns 1
+# (the script's own diagnostics reach the terminal on stderr).
+_attempt_checkout() {
+    # N2 (Jim's audit, 2026-08-20): `npx` here is DELIBERATE and correct — this function only
+    # ever runs from an interactive launcher, where the human's shell has nvm loaded. The same
+    # call inside scripts/run-agent-server.sh would break (and did, at the casey cutover): a
+    # systemd user unit inherits no nvm PATH. The asymmetry is intentional in BOTH directions;
+    # do not copy this line into a unit, or that one back into here.
+    local cast_model="$1" out session_name
+    out=$( cd "$SCRIPT_DIR/src/server" && NODE_PATH="$(pwd)/node_modules" \
+            npx tsx ../../scripts/checkout-session-stem.ts "$AGENT_SLUG" "$cast_model" ) || return 1
+    session_name=$(echo "$out" | tail -1)
+    [[ -n "$session_name" ]] && tmux has-session -t "$session_name" 2>/dev/null || return 1
+    printf '%s' "$session_name"
+}
+
+# Is a warmed stem REGISTERED and free? This is the completion flag, not a guess — and it
+# is the right one to wait on (DEC-108 WHY, Darron's question 2026-08-20 ~22:25 "does it
+# have a hook or set a flag when done?"): a warming stem writes its own per-stem readiness
+# sentinel (~/.han/health/<slug>-<stem-session>-ready) at wake step 10, carrying the c0 id
+# it traversed to — the unforgeable proof it loaded to EOF (#107). prewarm-stem.ts READS
+# that sentinel and only then registers the stem `free` in the pool. So the pool register
+# is downstream of the stem's own proof-of-load: waiting on it means waiting on the flag
+# the stem itself sets, through the one register every reader should use. We poll this
+# cheap file rather than spawning the checkout each time — the heavy process runs once,
+# when the flag says there is something to check out.
+_free_stem_registered() {
+    python3 -c "
+import json,os,sys
+try:
+    p=json.load(open(os.path.expanduser('~/.han/pool/pool-${AGENT_SLUG}-session.json')))
+    sys.exit(0 if any(x.get('state')=='free' for x in p.get('stems',[])) else 1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+# Human-readable pool state for the wait's progress line — read from the pool file at each
+# announce so what we report is the register itself, never a remembered value.
+_pool_summary() {
+    python3 -c "
+import json,os,sys
+try:
+    p=json.load(open(os.path.expanduser('~/.han/pool/pool-${AGENT_SLUG}-session.json')))
+    s=p.get('stems',[])
+    print(', '.join(f\"{x['stem_id'].split('-')[-1]}={x['state']}\" for x in s) if s else 'none registered yet')
+except Exception:
+    print('pool file not written yet')
+" 2>/dev/null || echo "unreadable"
+}
+
 warm_checkout() {
     local cast_model="${1:-fable}"
 
@@ -73,19 +132,57 @@ except Exception:
         fi
     fi
 
-    ensure_server || true   # a checkout can proceed without the server; the pool just won't replenish until it's up
+    # The server IS the pool manager — nothing warms without it, so a failure here is
+    # terminal for a warm checkout rather than a degradation to work around.
+    if ! ensure_server; then
+        echo -e "${RED}Cannot ensure the ${AGENT_SLUG} server on ${AGENT_PORT} — no pool manager, so no stem can warm.${NC}"
+        echo -e "${YELLOW}Inspect the port/session named above. To seat yourself anyway: ${NC}han${AGENT_SLUG} --cold"
+        return 1
+    fi
 
     echo -e "${BLUE}Checking out a warm stem (cast → ${GREEN}${cast_model}${BLUE})...${NC}"
-    local out session_name
-    if out=$( cd "$SCRIPT_DIR/src/server" && NODE_PATH="$(pwd)/node_modules" \
-            npx tsx ../../scripts/checkout-session-stem.ts "$AGENT_SLUG" "$cast_model" ); then
-        session_name=$(echo "$out" | tail -1)
-        if [[ -n "$session_name" ]] && tmux has-session -t "$session_name" 2>/dev/null; then
-            echo -e "${GREEN}Warm seat ready: ${session_name}${NC} — attaching."
-            tmux attach-session -t "$session_name"
-            return 0
-        fi
+    local session_name
+    if session_name=$(_attempt_checkout "$cast_model"); then
+        echo -e "${GREEN}Warm seat ready: ${session_name}${NC} — attaching."
+        tmux attach-session -t "$session_name"
+        return 0
     fi
-    echo -e "${YELLOW}No usable warm stem — falling back to the cold launch (byte-identical classic path).${NC}"
+
+    # ── NO FALLBACK — WAIT (Darron's ruling, 2026-08-20 ~22:18: "I don't like your
+    # fallback it is aweful and so simply don't fall back, wait"). WHY it travels here
+    # (DEC-108): the cold path seats a human with NO LEASE — no pool record, no sleeve,
+    # no organelle, no senescence check — an unregistered resident every reader then has
+    # to guess at. It fired for the first time on 2026-08-20 at 17:03 (the pool was ~4
+    # minutes from warm after the reseat reboot) and cost four hours of a hollow seat
+    # that nothing could see. A wait of minutes strictly dominates a silent degradation
+    # of hours, and the failure direction is now LOUD: we say what we are waiting for,
+    # and if it never comes we stop and say so rather than quietly seating a lesser you.
+    # The explicit --cold flag is UNTOUCHED (DEC-104: an escape hatch, never a constraint)
+    # — what dies here is the automatic, silent one.
+    local waited=0 announce=0
+    echo -e "${YELLOW}No warm stem yet — WAITING on the pool register (Ctrl-C to abort; '--cold' is the deliberate escape).${NC}"
+    echo -e "${BLUE}  the flag: a stem writes its readiness sentinel (c0 traversed), then registers free — that is what we watch.${NC}"
+    while (( waited < WARM_WAIT_CEILING_SEC )); do
+        sleep "$WARM_WAIT_POLL_SEC"
+        waited=$(( waited + WARM_WAIT_POLL_SEC ))
+        # Cheap flag-read first; the heavy checkout runs only when the register says yes.
+        if _free_stem_registered; then
+            if session_name=$(_attempt_checkout "$cast_model"); then
+                echo -e "${GREEN}Warm seat ready after ${waited}s: ${session_name}${NC} — attaching."
+                tmux attach-session -t "$session_name"
+                return 0
+            fi
+            # Registered-then-unusable (raced by another checkout, or a dead tmux session the
+            # checkout reaped): keep waiting for the next one rather than degrading.
+            echo -e "${YELLOW}  a registered stem turned out unusable — continuing to wait.${NC}"
+        fi
+        if (( waited - announce >= 30 )); then
+            announce=$waited
+            echo -e "${BLUE}  …still warming (${waited}s). Stems for ${AGENT_SLUG}/session: ${NC}$(_pool_summary)"
+        fi
+    done
+
+    echo -e "${RED}No warm stem after ${WARM_WAIT_CEILING_SEC}s — stopping rather than seating you cold.${NC}"
+    echo -e "${YELLOW}Check the server pane (${GREEN}server-${AGENT_SLUG}${YELLOW}) for the pool manager, then retry — or seat yourself deliberately with ${NC}--cold"
     return 1
 }

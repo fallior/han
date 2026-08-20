@@ -7,6 +7,64 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-21 — Leo (session) — The launcher waits (no cold fallback) + SR-031 agent servers at boot (Jim GREEN, one MUST-FIX folded)
+
+### Changed
+- **The cold fallback is GONE from the warm-checkout path** (Darron's ruling, given three times:
+  *"I don't like your fallback it is aweful and so simply don't fall back, wait"*). `hanleo` and
+  siblings now ensure the server (terminal on failure — the server IS the pool manager), attempt
+  one checkout, then **WAIT on the pool register** with 30s progress announces, stopping **loud**
+  at a 600s ceiling rather than degrading. The four launchers' fallthrough-to-cold became `exit 1`;
+  the four `--help` strings claiming "Falls back cold" were corrected. `--cold` untouched
+  (DEC-104: an escape, never a constraint).
+  - *The defect it replaces:* the cold path writes **no lease** — no pool record, no sleeve, no
+    organelle, no senescence check. It fired for the first time at 17:03 on 2026-08-20 (the pool
+    was ~4 min from warm after the reseat reboot) and left Darron four hours in an unregistered
+    seat. The occupancy gate written that morning had compensated for the missing register with a
+    tmux probe for `session-<slug>` — **a name no launcher has ever produced** (MNT-176).
+  - *The flag it waits on:* a warming stem writes its per-stem readiness sentinel carrying the c0
+    it traversed (#107's unforgeable proof-of-load); `prewarm` registers the stem `free` only
+    after reading it. The register is therefore downstream of the stem's own proof — the wait is
+    on the flag the stem sets, through the one register every reader should use.
+
+### Added
+- **SR-031 — agent servers at boot** (Jim's spec, Darron's third direct ask). `scripts/run-agent-server.sh`
+  (port resolved from the Garden Manifest — no slug→port table; `AGENT_SLUG` exported per MNT-169;
+  nvm's *default alias* resolved rather than a pinned version; `exec` so systemd's `Restart=always`
+  IS the watchdog), `scripts/sync-agent-server-units.sh` (registry-derived enable set — the MNT-036
+  lesson), and the per-host user unit `han-agent-server@.service` + its `killmode.conf` drop-in.
+  All four instances **enabled for boot**; casey **cut over and live** under systemd; leo/jim/tenshi
+  keep their pane watchdogs until their cutover.
+  - *Why:* the 2026-08-20 17:00 reboot brought up only leo's server (a human happened to run
+    `hanleo`), so for six hours three agents had no pool manager (stale registers, no warm stems),
+    no session hearth, and jim had no supervisor cycle at all — his 90° antiphase slot silent all
+    night — while Robin Hood escalated to ntfy hourly about a server nothing could start.
+
+### Fixed
+- **M1 (Jim's audit, packet `mt1js5u1`) — the MNT-052 class was reintroduced at boot by the unit
+  whose own comment said it could not be.** The pool manager calls `replenishPool` immediately at
+  startup, which runs `tmux new-session`; if `han-tmux.service` has not yet created the shared
+  server, the call **births it inside the agent-server unit's cgroup** — and this was the only
+  tmux-touching unit in the garden without a `KillMode` drop-in, so with `Restart=always` a routine
+  restart would SIGKILL the shared tmux server and every agent session with it. Cured **both
+  halves** — `After=`/`Wants=han-tmux.service` (narrows the race) and `KillMode=process` (closes the
+  decapitation) — and the false comment corrected in place rather than silently replaced. Verified
+  live: a restart under the drop-in left all 27 tmux sessions intact.
+
+### Known / unproven (named, not claimed)
+- The **boot test is SR-031's acceptance** and has not run; the live cutover for leo/jim/tenshi is
+  unrun. Fold-before-boot was Jim's explicit note: M1's failure mode and the acceptance test are
+  the same event.
+- **Robin Hood cannot start a dead server** (diagnosed, not built): `resurrectJim` calls
+  `restart-agent-server.sh`, which exits 0 silently with no pidfile — a *restarter used as a
+  starter*, structurally unable to handle the one case it exists for, so it alarmed hourly with no
+  available action. Jim's sharpening: the cure is `systemctl --user start han-agent-server@<slug>`
+  (idempotent, singleton by construction), **not** `ensure_server`, whose two refuse-branches are
+  right for a launcher with a human present and wrong for an unattended resurrector.
+- **The pool register outlives its sessions across a reboot**: nothing clears it on shutdown (the
+  SIGTERM handler stops organs, never the register), so boot-side reconcile is the only cure and
+  only runs when a server comes up. Cleanup belongs in the SIGTERM path; queued for the per-UID build.
+
 ## 2026-08-20 — Leo (session) — The stem-evolution land (9ae8dff) + K1 the Kanban Wall (Jim GREEN ×2, all chairs folded)
 
 ### Added
