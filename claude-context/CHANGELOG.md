@@ -7,6 +7,39 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-20 — Leo (session) — The stem-evolution land (9ae8dff) + K1 the Kanban Wall (Jim GREEN ×2, all chairs folded)
+
+### Added
+- **The 1M warm head**: `STEM_WARM_LADDER` head → `sonnet[1m]` (bare alias, DEC-104) — a full
+  wake fits the warm window, wake-compaction unrepresentable. Proven at jim scale
+  (isCompactSummary 0, ctx 55% ≈ 550K). Two-phase wake retired for session pools
+  (flags off ×4, code kept for rollback per DEC-069; Casey's dormant-and-armed law noted:
+  revives if the warm head is ever a 200K-window model, including by descent).
+- **The model unbake**: per-session state file (`~/.han/health/model-<session>`) written at
+  launch, read by the pane command via deferred `$(cat)`, updated by every cast — a claude
+  relaunch boots on the CURRENT intended model, never the spawn-frozen literal.
+- **MNT-166 retire actor** at turn-complete, four-gated (flag OFF garden-wide + verdict +
+  session-surface belt + `state==='spoke'` — Jim M1 folded: the unfiltered pool find made
+  the old comment a false recital). Session seats PAUSE the organelle past fits() instead.
+- **`src/server/routes/board.ts` + KanbanPage** (K1): `/api/board` serialises the ONE parser
+  (K0 15a0869); reconciliation banner first, UNPARSEABLE visible, hearth lane, zero
+  dangerouslySetInnerHTML (Tenshi P0); Jim M1 folded — `readSessionPools()` enumerates
+  `pool-*-session.json`, the filesystem is the roster (DEC-081, no slug list).
+- **DEC-108** recorded (the reason travels with the artefact — Settled, Darron verbatim).
+
+### Fixed
+- **MNT-169**: `agent-server-watchdog.sh` never exported AGENT_SLUG — standalone servers ran
+  no pool-manager, no hearth checker, no boot reconcile (jim's supervisor down 8h). The
+  watchdog owns the export now; server.ts's silent third branch made loud.
+- **Jim M2**: `checkout-session-stem.ts` catch RETIRES a suspect stem (removeStem — the
+  process-appropriate mirror of the pooled door), never returns it 'free'.
+- **session-hearth**: occupancy-gated timers born at checkout (free stems structurally
+  unpulsable — the inertness principle pre-encoded for Layer 2); completion-anchored 50min
+  per seat (anchor = max(cli-busy, cli-free, stamp), surface-gated — Darron's drift catch:
+  four seats firing on the same minute); the 7:02 simultaneous-bootstrap seed retired
+  structurally, history in-comment per DEC-108.
+- `hancasey` header fossil (Jim N2): "Contempire project agent" → the S226-rectified identity.
+
 ## 2026-08-16 — Leo (session) — Build B: the spoke organelle, the p99 line, the hearth pulse, MNT-115 cured (SEALED by four chairs)
 
 ### Added

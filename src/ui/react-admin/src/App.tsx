@@ -13,6 +13,7 @@ import ReportsPage from './pages/ReportsPage'
 import ConversationsPage from './pages/ConversationsPage'
 import MemoryPage from './pages/MemoryPage'
 import ProductsPage from './pages/ProductsPage'
+import KanbanPage from './pages/KanbanPage'
 import { WebSocketProvider } from './providers/WebSocketProvider'
 import { useStore } from './store'
 import { setGardenZone } from './lib/garden-clock'
@@ -62,6 +63,7 @@ function AppContent() {
             <Route path="/conversations" element={<ErrorBoundary><ConversationsPage /></ErrorBoundary>} />
             <Route path="/memory" element={<ErrorBoundary><MemoryPage /></ErrorBoundary>} />
             <Route path="/products" element={<ErrorBoundary><ProductsPage /></ErrorBoundary>} />
+            <Route path="/kanban" element={<ErrorBoundary><KanbanPage /></ErrorBoundary>} />
           </Routes>
         </ErrorBoundary>
       </Layout>

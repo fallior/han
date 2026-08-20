@@ -127,6 +127,15 @@ export default function Sidebar({ collapsed = false, onToggleCollapse = () => {}
           </span>
           <span className="sidebar-label">Products</span>
         </NavLink>
+
+        <NavLink to="/kanban" className="sidebar-item" onClick={onNavigate}>
+          <span className="sidebar-icon">
+            <svg viewBox="0 0 20 20">
+              <path d="M3 3h4v14H3zM8 3h4v9H8zM13 3h4v6h-4z"/>
+            </svg>
+          </span>
+          <span className="sidebar-label">The Wall</span>
+        </NavLink>
       </div>
 
       <div className="sidebar-footer">

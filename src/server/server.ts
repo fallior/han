@@ -55,6 +55,7 @@ import tailscaleRouter from './routes/tailscale';
 import villageRouter from './routes/village';
 import voiceRouter from './routes/voice';
 import healthRouter from './routes/health';
+import boardRouter from './routes/board';
 
 // ── Single instance lock ─────────────────────────────────
 
@@ -136,6 +137,7 @@ app.use('/api/village', villageRouter);
 app.use('/api/voice/stt', express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '25mb' }));
 app.use('/api/voice', voiceRouter);
 app.use(healthRouter);
+app.use(boardRouter); // K1: the kanban wall's read-only feed (one parser, board.ts serialises)
 
 // Serve the UI
 const UI_PATH = path.join(UI_DIR, 'index.html');
