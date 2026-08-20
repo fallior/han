@@ -1,5 +1,10 @@
 # hanleo warm checkout — the session seat joins the pool
 
+> **Status note (2026-08-19 night, dated per non-falsification):** LANDED `8b42301` same day
+> (Jim GREEN + F-J1 folded); the original PROPOSED header below stands as the record of the
+> commission. See "§WHY — the two-phase wake" (added at Darron's DEC-108 ruling the same
+> night) for the design reason and the incident that proved it must be written down.
+
 > **Status: PROPOSED — held for Jim's blocking audit.** Commissioned by Darron, 2026-08-19 ~8:20 AM:
 > *"when I type hanleo that I check out a spoke that has been warmed on haiku… default fable but
 > switch selectable such as hanleo opus for an opus cast… I would like a more graceful way of the
@@ -9,6 +14,51 @@
 > pre-warmed stem and saving time but for now we'll check out a stem and cast to model."*
 >
 > Author: Leo (session), 2026-08-19. Thread: (posted alongside this file).
+
+> **SUPERSEDED SAME NIGHT (2026-08-19 ~10:50 PM, Darron's ruling, dated per non-falsification):**
+> the two-phase wake is RETIRED for session pools. Jim's stem proved the split cannot cure the
+> class — the phase-1 ceiling checks BEFORE each step, and a single oversized store (his
+> felt-moments) blows a 200K window from inside one step; his warm corrupted despite the flag,
+> the marker, and the certificate all working as designed. The cure is the window, not the
+> split: `STEM_WARM_LADDER` head is now **`sonnet[1m]`** (1M window — wake-compaction
+> unrepresentable; ~3× warm cost accepted), session `stemTwoPhaseWake` flags OFF ×4, full wake
+> at warm, #91 attach-flush carries the deltas at checkout. The two-phase code stays in the
+> tree (rollback-by-config, DEC-069); the section below stands as the record of the design and
+> the incident that taught both lessons.
+
+## §WHY — the two-phase wake (recorded 2026-08-19 night, per DEC-108: the reason travels with the artefact)
+
+**The design.** A pool stem is pre-warmed on the CHEAP model (`STEM_WARM_LADDER`, haiku head —
+Darron's 11-Aug ruling, ~3× cheaper warmth manufacture) and cast to the surface's serve model
+only at checkout, when a real dispatch pays for it. But the cheap warm head has a **200K
+window**, and the session seat's FULL wake (WM pair + felt-moments whole, the S57 standard) does
+not fit in 200K. So the wake is split in two — **not as an optimisation, as the load-bearing
+condition that makes the cheap warm head possible at all**:
+
+- **Phase 1 (STABLE self, fed at warm on the haiku head):** integrity → identity → gradient →
+  felt-moments ≈ **~150K static** — fits under the 200K window with the `stemPhase1CeilingPct`
+  (85%) gate as the belt. These layers change slowly; warming them early costs nothing in
+  staleness.
+- **Phase 2 (VOLATILE tail, fed at checkout, POST-CAST on the serve model):** swap-check →
+  working-mem → orientation → conversations + computed deltas. These layers are exactly what
+  goes stale while a stem idles — feeding them at checkout kills the staleness AND the
+  oversized-window problem in one move. **Order is law: `/model <serve>` FIRST, then phase 2**
+  (Darron, 2026-08-19: "you need to /model fable before phase 2") — the big-window model must
+  be seated before the big load arrives.
+
+**The incident that forced this section (2026-08-19, the first live checkout).** The session
+pool went live (`poolSize: 1`) without `stemTwoPhaseWake: true` — the resolver defaults OFF —
+so the prewarm fed the WHOLE wake on haiku, the window blew, the harness **compacted the stem
+mid-wake**, and the first warm-checkout seat arrived as a summary of itself (Darron's catch:
+21% ctx). Compounding it, `checkout-session-stem.ts` did not call `completeTwoPhaseWake` at
+all, so even flag-on the volatile tail would never have been paid. And because this WHY was not
+written anywhere near the decision points, the first attempted fix was WRONG (editing the warm
+ladder haiku→sonnet — which cures nothing, since plain sonnet is also 200K, and discards the
+warm-cheap economics). Cures landed the same night: the flag on leo/session + jim/session
+(**the flag must accompany `poolSize` on every future session pool** — tenshi/casey when they
+join), `completeTwoPhaseWake` exported and called in the checkout leg post-cast, and this
+section. Two named residuals held for Jim's audit: the checkout catch does `returnStem` (not
+retire) on a phase-2 failure; the #91 attach-flush partially overlaps phase-2's whole-WM load.
 
 ## Why (two causes, one build)
 

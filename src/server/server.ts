@@ -369,6 +369,11 @@ if (runsSupervisorCycle(process.env.AGENT_SLUG)) {
     if (slug && poolSizeFor(slug, 'session') > 0) {
         startPoolManager(slug, 'session');
         startSessionHearth(slug); // P2 layer-1 checker (pull-only; no HTTP route — Tenshi F3)
+    } else if (!slug) {
+        // The silent third branch, made loud (2026-08-20): an AGENT_SLUG-less server drives
+        // no pool, runs no checker, reconciles nothing — and previously said NOTHING about it.
+        // A whole night of dead organs hid behind this absent log line.
+        console.log('[session-pool] Not started — AGENT_SLUG is unset (a bare server drives no pool, no hearth, no reconcile).');
     } else if (slug) {
         console.log(`[session-pool] Not started — (${slug}, session) has poolSize 0 in the manifest (warm-checkout P0 not enabled).`);
     }

@@ -1,5 +1,18 @@
 # Agent servers at boot + one-server-per-identity (SR-031)
 
+> **RE-RATIFIED + RAISED (2026-08-19 night, Darron's word, dated per non-falsification):**
+> *"we need to have them come up with the box and not need to wait for han\<slug\> to become
+> live"* — the second direct ask for this build, five weeks after the first. State at this
+> ruling: only leo's server is standalone (`server-leo` tmux session, migrated out of the seat
+> 2026-08-19 pre-swap because the server would otherwise have DIED with the seat during the
+> warm-checkout handover — the live proof of Gap 1's cost); jim (3848), tenshi (3849) and
+> casey (3850) still run wherever their launch left them, coupled to seats. The warm-checkout
+> land (`8b42301`) shipped `ensure_server()` in the shared launcher lib — the launcher-side
+> half of this design (check-then-start, never a second) — so the remaining build is the
+> systemd unit below + retiring the launchers' spawn responsibility to pure ensure. WHY at
+> boot (DEC-108): the servers carry the admin UI, conversation API, pools' drivers and the
+> voice surface — a rebooted box with no human present is otherwise dark until someone types.
+
 > **Status: SPEC — for Leo's hands.** Jim spec (2026-07-16, Darron's direct request post-reboot).
 > Darron: *"I would like every resident in the garden to launch their servers on han wake up, and
 > if that means we put han\<slug\> on the boot list I would like that… maybe put it with the

@@ -36,7 +36,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { hearthPulseEnabledFor, hearthPulseMinutesFor, hearthStandingMessageFor } from './spoke-organelle';
+import { hearthPulseEnabledFor, hearthPulseMinutesFor, hearthStandingMessageFor, computeReserve, fits, senescenceCeilingPctFor } from './spoke-organelle';
+import { getContextPctForSession } from './tmux-dispatcher';
+import { readPool } from './stem-pool';
 
 const HAN = path.join(os.homedir(), '.han');
 const HEALTH = path.join(HAN, 'health');
@@ -104,15 +106,69 @@ export function startSessionHearth(slug: string): void {
         return;
     }
     const intervalMin = hearthPulseMinutesFor(slug, 'session');
-    console.log(`[session-hearth] ${slug}: checker started (pulse=${intervalMin}m, layer-1 pull only; layer-2 observe-only)`);
+    // (History, kept per DEC-108: a boot-time state seed briefly lived here on 2026-08-20 —
+    // the cure for the anchor-deadlock, since cli-busy dies at every Stop and the state file
+    // was only written on-due, so no first pulse could ever fire. Superseded the same morning
+    // by Darron's occupancy ruling below: the deadlock dissolves structurally once the timer
+    // exists only for an OCCUPIED seat, whose own turns supply the anchor.)
+    console.log(`[session-hearth] ${slug}: checker started (pulse=${intervalMin}m, occupancy-gated; layer-1 pull only; layer-2 observe-only)`);
     const tick = (): void => {
         try {
             const now = Date.now();
+            // ── Occupancy gate (Darron's ruling 2026-08-20 ~10:26 AM; DEC-108 WHY): "a never-
+            // woken seat doesn't need to be kept warm... the re-caching fee will be paid at the
+            // cast anyhow — the timer only comes into existence when the stem is checked out,
+            // maturing to a spoke." A FREE stem gets no timer, no dues, no rows (pulsing it
+            // buys nothing the checkout fee doesn't pay, and under future layer-2 push it would
+            // violate the inertness principle — a free stem must never produce). The timer is
+            // born at checkout for free: the sleeve is written before the attach-flush, so the
+            // flush-turn's Stop writes cli-free and the anchor exists from the first minute.
+            // A classic COLD seat (empty-pool fallback) is occupied too — tmux is its evidence.
+            const seat = readPool(slug, 'session').stems.find(s => s.state === 'leased' || s.state === 'spoke');
+            if (!seat) {
+                try { execFileSync('tmux', ['has-session', '-t', `session-${slug}`], { stdio: 'ignore' }); }
+                catch { return; } // no leased stem, no cold seat → no timer exists
+            }
+            // Completion-anchored (his 9:54 AM drift-catch): cli-free-<slug> mtime IS the
+            // seat's last turn completion (written at every session Stop, surface-gated so a
+            // spoke's turns can never reset it); busy covers mid-turn; the stamp paces due
+            // re-writes between pulses on an idle occupied seat. Each agent's rhythm its own.
             const busy = mtimeMs(busySignalPath(slug));
+            const free = mtimeMs(path.join(HAN, 'signals', `cli-free-${slug}`));
             const lastPulse = readLastPulseMs(slug);
-            const anchor = Math.max(busy ?? 0, lastPulse);
-            if (anchor === 0) return; // no activity record at all — a seat that never spoke gets no pulse
+            const anchor = Math.max(busy ?? 0, free ?? 0, lastPulse);
+            if (anchor === 0) {
+                // Occupied but no signal yet (freshly checked out, first flush still landing):
+                // seed the stamp so the first due fires one interval from NOW — the timer's birth.
+                try { fs.writeFileSync(statePath(slug), JSON.stringify({ lastPulseMs: now }, null, 2)); } catch { /* next tick retries */ }
+                return;
+            }
             if (now - anchor < intervalMin * 60_000) return;
+            // ── Senescence PAUSE (Darron's ruling 2026-08-19 ~11:26 PM; DEC-108 WHY) ──────────
+            // An interactive seat past the knee — fits(): ctx + p99-reserve ≤ ceiling (98) —
+            // gets NO pulse: within one worst-case operation of the cliff, the organelle stops
+            // adding machine-driven turns. B2b forbids auto-retiring the human's seat, so of
+            // Darron's "auto-retire or pause" the session arm is PAUSE (the pooled-spoke retire
+            // arm is the MNT-166 turn-complete actor). The ctx source is the statusline SIDECAR
+            // (getContextPctForSession), NOT boundaryCheck's spoke-stats — an attached seat's
+            // typed turns never traverse the dispatcher, so spoke-stats are blind exactly here.
+            // Null ctx → pulse normally: the pause protects a MEASURED cliff; an unmeasured
+            // seat keeps today's behaviour rather than silently losing its organelle. The stamp
+            // refreshes on pause so the row paces at the pulse interval, never per-tick.
+            if (seat) { // the occupancy gate's find, reused
+                const ctx = getContextPctForSession(slug, 'session', seat.tmux_session);
+                if (ctx !== null) {
+                    const r = computeReserve(slug, 'session', seat.tmux_session);
+                    const ceiling = senescenceCeilingPctFor(slug, 'session');
+                    if (!fits(ctx, r.reservePct, ceiling)) {
+                        fs.writeFileSync(statePath(slug), JSON.stringify({ lastPulseMs: now }, null, 2));
+                        counter({ kind: 'session-pulse-paused-senescent', slug, surface: 'session',
+                            session: seat.tmux_session, ctxPct: ctx, reservePct: r.reservePct, ceilingPct: ceiling });
+                        console.log(`[session-hearth] ${slug}: pulse PAUSED — seat ${seat.stem_id} at ctx ${ctx}% + reserve ${r.reservePct}% > ceiling ${ceiling}% (senescent; retirement is the human's hand)`);
+                        return;
+                    }
+                }
+            }
             // Due. Write the due-file (message materialised NOW — §2.8), refresh the stamp.
             // One pending pulse, never a queue: an unconsumed due-file is overwritten.
             const due = {

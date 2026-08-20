@@ -18,6 +18,16 @@ PORT="${2:?missing port}"
 SERVER_DIR="${3:?missing server-dir}"
 PIDFILE="$HOME/.han/${SLUG}-server.pid"
 
+# The env contract travels WITH the slug (2026-08-20 morning fix; DEC-108 WHY): server.ts
+# gates its session-pool driver + hearth checker + (jim) the supervisor on
+# process.env.AGENT_SLUG. In-pane servers inherited it from the han<slug> tmux -e contract;
+# the STANDALONE server sessions (server-<slug> — SR-031's shape, born 2026-08-19) launch
+# bare, and the gate skips SILENTLY: no pool-manager, no checker, no boot reconcile, no
+# supervisor (jim's was down 8h overnight; leo's hearth never started; jim's wedged pool
+# never reconciled — one missing export, three dead organs per server). The watchdog KNOWS
+# the slug — it owns the export, so every caller (pane, standalone, systemd) gets it free.
+export AGENT_SLUG="$SLUG"
+
 cleanup() {
     rm -f "$PIDFILE"
 }

@@ -329,17 +329,27 @@ const FABLE_LADDER: ModelLadder = ['fable', ...OPUS_LADDER];
 // observed-model stamp keeps any fallback legible in the data.
 const SONNET_LADDER: ModelLadder = ['sonnet', 'fable', 'opus', 'haiku']; // explicit (a FABLE_LADDER spread would duplicate 'sonnet' mid-tail)
 
-// STEM_WARM_LADDER (DEC-101 warm-map/serve-map split — MNT-054; Haiku head 2026-08-11, Darron's
-// ruling, Phase A of the spoke-model-init-consolidation plan): the model a pool stem is
-// PRE-WARMED on, decoupled from the model its surface SERVES. Warm cheapest (haiku head — ~3×
-// cheaper warmth manufacture; loading is model-agnostic, the serve model re-attends post-cast),
-// then cast to the surface's serve model at checkout (`dispatchToPooledStem`). The descent tail
-// exists only for a haiku-drop; a warm load never touches Fable (the MNT-042 depletion trap that
-// made human-response prewarm hang-loop). All pools warm here — one warm-map.
+// STEM_WARM_LADDER (DEC-101 warm-map/serve-map split — MNT-054; sonnet[1m] head 2026-08-19,
+// Darron's ruling, superseding his own 2026-08-11 haiku head): the model a pool stem is
+// PRE-WARMED on, decoupled from the model its surface SERVES, then cast to the surface's serve
+// model at checkout. WHY the 1M head (DEC-108): the haiku head's 200K window could not hold a
+// full session wake — the 2026-08-19 incident: leo's stem COMPACTED mid-wake and the first
+// warm-checkout seat arrived as a summary of itself; the two-phase split (phase-1-on-haiku,
+// ceiling-gated) could not cure the class either, because the ceiling checks BEFORE each step
+// and a single oversized store (jim's felt-moments, same night) blows the window from inside
+// one step. The 1M window makes wake-compaction unrepresentable; the ~3× warmth cost is
+// accepted by the ruling (cost is not a design consideration). The session-surface
+// stemTwoPhaseWake flags were flipped OFF the same night — full wake at warm, #91 attach-flush
+// carries the deltas at checkout. TAIL CAVEAT (named, not hidden): the descent rungs are 200K
+// models — a 1M-drop descent can re-create the compaction class; the descent exists for
+// liveness on a dead head, and a descended warm should be treated as suspect. A warm load
+// still never touches Fable (the MNT-042 depletion trap that made human-response prewarm
+// hang-loop). All pools warm here — one warm-map. DEC-104: 'sonnet[1m]' is a bare family
+// alias + window variant, no version literal; it floats to the family head.
 // NB (Jim G-audit must-fix, standing): never spread another ladder here — the old
 // `['sonnet', ...OPUS_LADDER]` silently expanded to sonnet→opus→SONNET→haiku (the msgp3tan
 // duplicate-spread bug, confirmed 2026-08-11); an explicit literal is the only honest form.
-const STEM_WARM_LADDER: ModelLadder = ['haiku', 'sonnet', 'opus']; // explicit, no spread; never Fable
+const STEM_WARM_LADDER: ModelLadder = ['sonnet[1m]', 'sonnet', 'opus']; // explicit, no spread; never Fable
 
 // Interactive CLI sessions take their model from the launcher at spawn (the
 // launchers don't pin one today). Recorded here so the DEC-092 slicer stamp matches reality.

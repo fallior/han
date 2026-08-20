@@ -26,10 +26,10 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { checkoutStem, removeStem, returnStem } from '../src/server/lib/stem-pool';
+import { checkoutStem, removeStem } from '../src/server/lib/stem-pool';
 import { writeSleeveState } from '../src/server/lib/sleeve-state';
 import {
-    castStemToModel, deltaSinceCursor, feedWakeSteps, observedOrUnobservedModel,
+    castStemToModel, completeTwoPhaseWake, deltaSinceCursor, feedWakeSteps, observedOrUnobservedModel,
     type WakeStep,
 } from '../src/server/lib/tmux-dispatcher';
 
@@ -63,6 +63,17 @@ async function main(): Promise<number> {
     try {
         // 2. Cast to the requested alias (null → the surface's serve config inside the callee).
         await castStemToModel(slug, SURFACE, stem, requestedAlias);
+
+        // 2b. Pay the phase-2 debt POST-CAST (Darron's ruling 2026-08-19: "/model fable before
+        // phase 2") — the volatile tail (swap-check → working-mem → orientation → conversations
+        // + deltas) loads on the big-window serve model, never the 200K warm head. Same position
+        // as the pooled door (dispatchToPooledStem: cast → completeTwoPhaseWake). No-op for a
+        // pre-flag stem; F1 defer-and-alert (throws) on a marker-without-manifest stem — the
+        // catch below falls back cold rather than serving half-loaded. This call was MISSING at
+        // the first live checkout (2026-08-19): with leo/session's stemTwoPhaseWake unset the
+        // prewarm fed the WHOLE wake on haiku, compacted, and the seat arrived on a summary of
+        // itself — the flag flip + this call are the paired cure.
+        await completeTwoPhaseWake(slug, SURFACE, stem);
 
         // 3. Sleeve: the stem now IS the interactive seat. Swap prefix = the session pair.
         writeSleeveState(stem.tmux_session, slug, SURFACE, 'session-swap');
@@ -101,9 +112,18 @@ async function main(): Promise<number> {
         console.log(stem.tmux_session); // the contract: last stdout line = the session to attach
         return 0;
     } catch (err) {
-        // Any failure after checkout: return the stem so the pool heals, fall back cold.
-        console.error(`[checkout] ${slug}/${SURFACE}: failed (${(err as Error).message}) — returning stem, cold fallback`);
-        try { returnStem(slug, SURFACE, stem.stem_id); } catch { /* sweeps reconcile */ }
+        // Any failure after checkout: RETIRE the stem, never return it (Jim's M2 audit ruling
+        // 2026-08-20, mirroring the pooled door — returnStem's own docstring says the pooled
+        // flow "is retired, never returned"). A stem that failed mid-cast/mid-flush is suspect
+        // by definition: cast half-applied, possibly already sleeved — handing it back 'free'
+        // gives the next checkout an unverified seat (the packet's own suspect-warm doctrine).
+        // Process note: the dispatcher's retireStem() queues its kill in SERVER-process memory,
+        // unreachable from this script — so the process-appropriate mirror is removeStem()
+        // (deregister: the pool can never hand it out again; the manager re-warms the shortfall)
+        // and the live-but-unregistered session is collected by the MNT-056 orphan sweep,
+        // never a hand-kill from here (MNT-062).
+        console.error(`[checkout] ${slug}/${SURFACE}: failed (${(err as Error).message}) — retiring suspect stem ${stem.stem_id}, cold fallback`);
+        try { removeStem(slug, SURFACE, stem.stem_id); } catch { /* sweeps reconcile */ }
         return 3;
     }
 }

@@ -370,11 +370,24 @@ export function fits(ctxPct: number, reservePct: number, ceilingPct: number): bo
  * (Darron's laziness ruling: the comparison can idle early; the value is one max()
  * and a subtraction when it matters).
  */
-export function boundaryCheck(slug: string, surface: string, session: string): void {
+/** The boundary verdict — returned so the dispatcher can ACT on it (MNT-166: the check
+ *  was built observational-only; the retire actor was P3, never built, and four pooled
+ *  spokes were harness-COMPACTED busy-through-the-ceiling while the idle-only reaper
+ *  read their post-compaction ctx as healthy — the failure resets the very instrument
+ *  the guard reads. Turn-complete is the one boundary where the spoke is idle BY
+ *  DEFINITION, so acting here catches the busy crossing the idle reaper cannot). */
+export interface BoundaryVerdict {
+    wouldRetire: boolean;
+    ctxPct: number;
+    linePct: number;
+    reservePct: number;
+}
+
+export function boundaryCheck(slug: string, surface: string, session: string): BoundaryVerdict | null {
     const stats = readSpokeStats(session);
     const ctx = stats?.lastCtxPct;
-    if (ctx === null || ctx === undefined) return;
-    if (ctx < boundaryCheckMinCtxPctFor(slug, surface)) return;
+    if (ctx === null || ctx === undefined) return null;
+    if (ctx < boundaryCheckMinCtxPctFor(slug, surface)) return null;
     const r = computeReserve(slug, surface, session);
     const wouldRetire = !fits(ctx, r.reservePct, senescenceCeilingPctFor(slug, surface));
     try {
@@ -384,7 +397,8 @@ export function boundaryCheck(slug: string, surface: string, session: string): v
             sampleN: r.sampleN, wouldRetire,
             enabled: senescenceEnabledFor(slug, surface),
         }) + '\n');
-    } catch { /* observe-only; nothing to do */ }
+    } catch { /* the log row is best-effort; the verdict still returns */ }
+    return { wouldRetire, ctxPct: ctx, linePct: r.linePct, reservePct: r.reservePct };
 }
 
 // ── The winding-up record (Casey's clause 5/7 — two acts, two names) ─────────

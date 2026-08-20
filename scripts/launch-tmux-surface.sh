@@ -102,6 +102,18 @@ fi
 
 MODEL="${MODEL_OVERRIDE:-$(manifest_get model "$SLUG" "$SURFACE")}"
 
+# The model is STATE, never a frozen literal (Darron's ruling 2026-08-19, DEC-108 WHY): the
+# pane command reads this file at EVALUATION time and `castStemToModel` updates it after a
+# cast — so a claude relaunch in the pane boots on the CURRENT intended model, not the
+# spawn-time one. Provenance, corrected same night: the suspected live bite (jim's seat
+# "reverting" to haiku) was a MISREAD — the boot BANNER froze the warm model in scrollback
+# while the live statusline showed the cast (fable) correctly; no restart ever happened
+# (Darron's catch). The hardening stands on the structural argument alone: any real relaunch
+# WOULD boot on the frozen literal. Same law as DEC-104's "selection floats, observation
+# pins" — the interpolated command line was accidentally a pin, caught before it bit.
+MODEL_STATE="$HOME/.han/health/model-${SESSION_NAME}"
+printf '%s\n' "$MODEL" > "$MODEL_STATE"
+
 # AGENT_* env contract from the manifest + registry (agent-agnostic, DEC-081).
 ENV_KV="$(manifest_get env "$SLUG" "$SURFACE")"
 ENV_ARGS=()
@@ -158,10 +170,11 @@ fi
 # Launch Claude in the pane. claude-logged is a ~/.bashrc function (canonical
 # per-agent transcript, DEC-091); CLAUDECODE is unset first (L012). HAN_LOG_SURFACE
 # is exported for the (proposed, Darron's hand) claude-logged filename amendment.
+# --model reads the STATE FILE at evaluation time (deferred \$(cat)) — never the frozen value.
 if [[ "$NO_LOG" == true ]]; then
-    LAUNCH_LINE="unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT; claude --model $MODEL --dangerously-skip-permissions"
+    LAUNCH_LINE="unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT; claude --model \"\$(cat '$MODEL_STATE')\" --dangerously-skip-permissions"
 else
-    LAUNCH_LINE="unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT; claude-logged --model $MODEL"
+    LAUNCH_LINE="unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT; claude-logged --model \"\$(cat '$MODEL_STATE')\""
 fi
 tmux send-keys -t "$SESSION_NAME" -l "$LAUNCH_LINE"
 tmux send-keys -t "$SESSION_NAME" Enter

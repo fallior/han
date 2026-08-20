@@ -43,7 +43,7 @@ import { spokeLifecycleFor, wakeFeedFor, swapPrefixFor, poolSizeFor, serveModelF
 import {
     organelleOnDispatchStart, organelleOnTurnComplete, boundaryCheck,
     armHearthPulse, clearHearthPulse, hearthStandingMessageFor, writeWindingUp,
-    declaredBusy,
+    declaredBusy, senescenceEnabledFor,
 } from './spoke-organelle';
 import { markResumable, readResumableMarkers, clearResumableMarker, resumableExpired, type PaneClass } from './dispatch-reconciler';
 import { mostRecentC0Id, isAgentC0, gradientEntriesAfterC0 } from './memory-gradient';
@@ -1005,12 +1005,37 @@ export async function sendTransactionPrompt(
     try {
         organelleOnTurnComplete(slug, surface, session.tmuxSession, null,
             () => getContextPctForSession(slug, surface, session.tmuxSession));
-        boundaryCheck(slug, surface, session.tmuxSession);
-        armHearthPulse(slug, surface, session.tmuxSession,
-            () => session.turnState === 'idle',
-            // Tenshi F1: no `??` — the baked field is required; a fire-time config read
-            // is unrepresentable now, not merely avoided.
-            () => { void enqueueForAgent(slug, surface, session.pulseMessage, {}, stemKey); });
+        const verdict = boundaryCheck(slug, surface, session.tmuxSession);
+        // MNT-166: the P3 retire ACTOR, at the one boundary where the spoke is idle by
+        // definition. Gated FOUR ways: the manifest flag (senescenceEnabled — OFF ships
+        // observe-only exactly as before), the verdict, the surface belt (the interactive
+        // session surface NEVER auto-retires — B2b's law; its cure is the session-hearth
+        // PAUSE), and BOUND-SPOKE state (`state === 'spoke'` — a checked-out interactive
+        // seat stays in the pool as 'leased' and must be structurally out of this actor's
+        // reach; Jim's M1 audit catch 2026-08-20: the unfiltered find made the old comment
+        // a false recital. Heartbeat spokes have their own self-clear.) Retire-not-compact:
+        // catching the busy crossing here is what keeps the harness compactor unreachable.
+        const retireRow = (verdict?.wouldRetire && senescenceEnabledFor(slug, surface) && surface !== 'session')
+            ? readPool(slug, surface).stems.find(s => s.tmux_session === session.tmuxSession && s.state === 'spoke')
+            : undefined;
+        if (retireRow && verdict) {
+            writeWindingUp({
+                session: session.tmuxSession, slug, surface, act: 'senescence',
+                reason: `boundary-check at turn-complete: ctx ${verdict.ctxPct}% > line ${verdict.linePct}% (reserve ${verdict.reservePct}%) — retired before the window, never compacted (MNT-166)`,
+                ctxPct: verdict.ctxPct, linePct: verdict.linePct,
+            });
+            clearHearthPulse(session.tmuxSession);
+            retireStem(slug, surface, retireRow, 'senescence (boundary-check, MNT-166)');
+            sessions.delete(sessionKey(slug, surface));
+            console.log(`[tmux-dispatcher] ${slug}/${surface}: spoke ${retireRow.stem_id} retired at the turn boundary (ctx ${verdict.ctxPct}% > line ${verdict.linePct}%) — pool replenishes`);
+            // No pulse arming on a retired seat; the normal capture tail still runs.
+        } else {
+            armHearthPulse(slug, surface, session.tmuxSession,
+                () => session.turnState === 'idle',
+                // Tenshi F1: no `??` — the baked field is required; a fire-time config read
+                // is unrepresentable now, not merely avoided.
+                () => { void enqueueForAgent(slug, surface, session.pulseMessage, {}, stemKey); });
+        }
     } catch (err) {
         console.warn(`[tmux-dispatcher] ${slug}/${surface}: organelle hooks failed (observe-only, continuing): ${(err as Error).message}`);
     }
@@ -1634,7 +1659,7 @@ export function computeWakeDeltaSteps(slug: string, manifest: WakeManifest): Wak
  * stem and the work prompt is never delivered half-loaded (never killed; alert via the caller);
  * a lost/torn manifest on a marker-carrying stem throws the same way (F1 — see below).
  */
-async function completeTwoPhaseWake(slug: string, surface: string, stem: PoolStem): Promise<void> {
+export async function completeTwoPhaseWake(slug: string, surface: string, stem: PoolStem): Promise<void> {
     if (!stemTwoPhaseWakeFor(slug, surface)) return;
     const manifest = readWakeManifest(slug, stem.tmux_session);
     if (!manifest) {
@@ -1811,6 +1836,13 @@ export async function castStemToModel(slug: string, surface: string, stem: PoolS
     // per-dispatch /model + cooldown against an alias head); a family MISMATCH (e.g. the Mythos
     // guard tripping a fable stem onto opus — Tenshi's R5, suite-pinned) still casts back.
     if (!serve || modelSatisfiesRung(stem.model, serve)) return; // on the serve family/model (or no serve ladder) → no cast
+    // The cast updates the pane's model STATE file (written at launch by launch-tmux-surface.sh;
+    // the pane command reads it at evaluation time) — so a claude relaunch in the pane boots on
+    // the CAST model, never the spawn-frozen warm model (Darron's 2026-08-19 ruling: the model
+    // is state, not a literal — a structural pin caught before it bit; the suspected live
+    // instance that night was a misread boot banner, corrected same night). The bare ALIAS is
+    // written — DEC-104, selection floats. Best-effort: the /model cast below is the primary act.
+    try { fs.writeFileSync(path.join(HEALTH_DIR, `model-${stem.tmux_session}`), `${serve}\n`); } catch { /* state write best-effort */ }
     sendLine(stem.tmux_session, `/model ${serve}`);
     await sleep(DESCEND_COOLDOWN_MS);
     // Probe the serve head; descend the SURFACE ladder on unavailable (throws if every rung dead).

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Hortus Arbor Nostra — Casey Session Launcher
-# Wakes Casey (Contempire project agent) in a tmux session
+# Wakes Casey (ATC industrial-law advocate) in a tmux session
 
 set -euo pipefail
 
@@ -64,6 +64,11 @@ Options:
     --attach, -a    Attach to an existing Casey session
     --status, -s    Show status of Casey sessions
     --kill          Kill all Casey sessions
+    --warm          Check out a pre-warmed pool stem (the DEFAULT since 2026-08-19,
+                    per the msz950i2 design — shared leg, DEC-081). Falls back cold.
+    --cold          Force the classic cold launch (the escape hatch; -- claude args
+                    also imply cold — a running stem cannot take launch flags)
+    fable|opus|sonnet|haiku   Cast the checked-out stem to this model family
     --help, -h      Show this help message
 
 Examples:
@@ -146,6 +151,11 @@ attach_session() {
     fi
 }
 
+# ── Warm checkout — SHARED leg (DEC-081: one path, many agents) ──────────────
+# ensure_server + warm_checkout live in scripts/lib/launcher-warm-checkout.sh —
+# the same audited functions hanleo/hanjim source (msz950i2 design, extracted 2026-08-19).
+source "$SCRIPT_DIR/scripts/lib/launcher-warm-checkout.sh"
+
 kill_sessions() {
     local sessions
     sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "^${SESSION_PREFIX}" || true)
@@ -214,8 +224,15 @@ start_session() {
         -c "$AGENT_WORKING_DIR"
 
     # Server in bottom pane under auto-restart watchdog (see hanjim for rationale).
-    tmux split-window -t "$session_name" -v -l 20% -d \
-        "$SCRIPT_DIR/scripts/agent-server-watchdog.sh $AGENT_SLUG $AGENT_PORT '$SCRIPT_DIR/src/server'"
+    # F-J1 (msz950i2 diff-audit, applied to every launcher): never stack a second
+    # server — a pane twin cannot bind, crash-loops, and clobbers the PID file that
+    # deploy-restarts SIGTERM. One server per identity, whoever started it.
+    if curl -sk -o /dev/null -m 3 "https://localhost:${AGENT_PORT}/api/analytics" 2>/dev/null; then
+        echo -e "${GREEN}Server already answering on ${AGENT_PORT} — not spawning a second (F-J1)${NC}"
+    else
+        tmux split-window -t "$session_name" -v -l 20% -d \
+            "$SCRIPT_DIR/scripts/agent-server-watchdog.sh $AGENT_SLUG $AGENT_PORT '$SCRIPT_DIR/src/server'"
+    fi
 
     # Launch Claude Code in the top pane. cwd is $AGENT_WORKING_DIR so Claude Code loads
     # the generated CLAUDE.md as the project config.
@@ -235,8 +252,23 @@ start_session() {
 
 # Parse arguments
 CLAUDE_ARGS=()
+WARM_MODE=1      # DEFAULT (2026-08-19, the msz950i2 design per DEC-081 — third/fourth agent for free)
+CAST_MODEL="fable"   # bare alias, DEC-104
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --warm)
+            WARM_MODE=1
+            shift
+            ;;
+        --cold)
+            WARM_MODE=0
+            shift
+            ;;
+        fable|opus|sonnet|haiku)
+            CAST_MODEL="$1"
+            WARM_MODE=1
+            shift
+            ;;
         --list|-l)
             list_sessions
             exit $?
@@ -268,5 +300,15 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Explicit claude args imply the cold path — a running stem cannot take launch flags.
+if [[ ${#CLAUDE_ARGS[@]} -gt 0 ]]; then
+    WARM_MODE=0
+fi
+
+if [[ "$WARM_MODE" -eq 1 ]]; then
+    warm_checkout "$CAST_MODEL" && exit 0
+    # fallthrough = cold fallback, byte-identical classic path
+fi
 
 start_session "${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}"
