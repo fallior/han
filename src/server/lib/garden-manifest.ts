@@ -210,6 +210,19 @@ export interface SpokeLifecycle {
      *  wake manifest (never harness compaction; spokes self-clear, never compact). Default 85
      *  (M1: a null ctx read is treated as ceiling-reached — fail-safe, never a null-skip). */
     stemPhase1CeilingPct?: number;
+    /** The warm-checkout WAIT CEILING (seconds): how long a han<slug> launcher waits on the
+     *  session pool register for a warmed stem before it STOPS LOUD — never a silent cold
+     *  seat (Darron's no-fallback ruling, 2026-08-20 ~22:18; the WHY block lives in
+     *  scripts/lib/launcher-warm-checkout.sh). PURPOSE: bound the wait so "never comes" is a
+     *  visible failure with a named escape (`--cold`), not an unending prompt. VALUE: 1200 —
+     *  Darron's ruling 2026-08-21 ("let's make that 600 maybe 1200, and let's have a registry
+     *  somewhere to track such parameters", FI #147) ≈ 4× the worst measured cold-start warm
+     *  (4m49s, 2026-08-20, a claude-opus-5 stem) so a slow box still seats you. RAISE if a
+     *  healthy pool stops being reached in time (check the pool manager first — it is the
+     *  likelier fault); LOWER only with a fresh measurement. Registry leaf, not a shell
+     *  constant (no-hidden-globals, DECISIONS.md:6521): the value carries its purpose on its
+     *  face, here, so the next maintainer is never disarming a bomb. */
+    warmWaitCeilingSec?: number;
 }
 
 export interface AgentManifest {
@@ -739,6 +752,14 @@ export function stemTwoPhaseWakeFor(slug: string, surface: string): boolean {
 /** Phase A: the phase-1 feed ceiling (% of the WARM model's window). Default 85. */
 export function stemPhase1CeilingPctFor(slug: string, surface: string): number {
     return spokeLifecycleFor(slug, surface).stemPhase1CeilingPct ?? 85;
+}
+
+/** The warm-checkout wait ceiling (seconds) for a launcher seating (slug, surface). Registry
+ *  leaf; default 1200 (Darron's ruling 2026-08-21 — see the SpokeLifecycle field's pricing).
+ *  Surface defaults to 'session' — the seat han<slug> checks out. Read from shell via
+ *  `manifest-get.ts leaf <slug> session warmWaitCeilingSec`, never re-typed there. */
+export function warmWaitCeilingSecFor(slug: string, surface: string = 'session'): number {
+    return spokeLifecycleFor(slug, surface).warmWaitCeilingSec ?? 1200;
 }
 
 /** #107 Phase-2 P2.1b: does this (slug, surface) wake via the feeder (the wake-feed queue)?

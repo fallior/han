@@ -23,9 +23,17 @@
  *         'supervisor' and his seats use supervisor-swap* + jim-human-swap*).
  *   npx tsx ../../scripts/manifest-get.ts agents
  *       → one active agent slug per line.
+ *   npx tsx ../../scripts/manifest-get.ts leaf <slug> <surface> <name>
+ *       → ONE resolved lifecycle leaf (defaults applied by the named resolver — the
+ *         same function the engine reads, so shell and TS can never disagree on a
+ *         value). Shell-land's only sanctioned way to read a tunable: a launcher that
+ *         re-types a number is a hidden global (no-hidden-globals, DECISIONS.md:6521;
+ *         FI #147's live specimen was WARM_WAIT_CEILING_SEC=600 typed into a .sh).
+ *         LEAF_RESOLVERS below is the whitelist — add a resolver there, never a raw
+ *         field read (a raw read would skip the default and print "undefined").
  */
 
-import { GARDEN_MANIFEST, manifestModelHead } from '../src/server/lib/garden-manifest';
+import { GARDEN_MANIFEST, manifestModelHead, warmWaitCeilingSecFor } from '../src/server/lib/garden-manifest';
 import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
 
 // EPIPE guard: a `| grep -q` / `| head` consumer closes our stdout as soon as it
@@ -44,7 +52,13 @@ process.stdout.on('error', (err: NodeJS.ErrnoException) => {
  *  re-encounter practice and stay frozen-on-SDK pending their own call. */
 const DEFERRED_SURFACE_PREFIXES = ['meditation-'];
 
-const [, , cmd, slugArg, surfaceArg] = process.argv;
+const [, , cmd, slugArg, surfaceArg, leafArg] = process.argv;
+
+/** `leaf` whitelist: name → the engine's own resolver (defaults included). One entry per
+ *  tunable that shell-land is allowed to read; FI #147's registry grows this map. */
+const LEAF_RESOLVERS: Record<string, (slug: string, surface: string) => number | boolean | string> = {
+    warmWaitCeilingSec: warmWaitCeilingSecFor,
+};
 
 function agent(slug: string) {
     const a = GARDEN_MANIFEST.agents.find((x) => x.slug === slug);
@@ -96,7 +110,17 @@ switch (cmd) {
         console.log(`AGENT_SWAP_FULL=${swapPrefix}-full.md`);
         break;
     }
+    case 'leaf': {
+        agent(slugArg); // unknown slug fails loud here, not as a silent engine default
+        const resolve = LEAF_RESOLVERS[leafArg];
+        if (!resolve) {
+            console.error(`manifest-get: unknown leaf '${leafArg}' (known: ${Object.keys(LEAF_RESOLVERS).join(', ')})`);
+            process.exit(1);
+        }
+        console.log(String(resolve(slugArg, surfaceArg || 'session')));
+        break;
+    }
     default:
-        console.error('usage: manifest-get.ts agents | surfaces <slug> | model <slug> <surface> | env <slug>');
+        console.error('usage: manifest-get.ts agents | surfaces <slug> | model <slug> <surface> | env <slug> | leaf <slug> <surface> <name>');
         process.exit(1);
 }

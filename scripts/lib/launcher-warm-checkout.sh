@@ -31,27 +31,68 @@ ensure_server() {
 }
 
 # How long we wait for the pool rather than falling back (Darron's ruling — see the WHY
-# block in warm_checkout). Measured basis, not a guess: a session stem warmed in ~4 min
-# on 2026-08-20 (17:03 launch → 17:07 registered free), so the ceiling gives a cold-start
-# pool ample room while still ENDING — a wait that never ends is its own silent failure.
-WARM_WAIT_CEILING_SEC="${WARM_WAIT_CEILING_SEC:-600}"
+# block in warm_checkout) is a REGISTRY LEAF, not a number typed here: it is resolved at
+# call time from the Garden Manifest (`spokeLifecycle.warmWaitCeilingSec`, default 1200 —
+# Darron's ruling 2026-08-21) through the engine's own resolver, so the .sh and the .ts can
+# never hold two different values. The leaf's PURPOSE and PRICING live on the field itself
+# (garden-manifest.ts, SpokeLifecycle.warmWaitCeilingSec) — this file deliberately carries
+# neither, because a constant that lives in two places drifts in one (no-hidden-globals,
+# DECISIONS.md:6521; FI #147 — the 600 that used to sit on this line was its live specimen:
+# audited GREEN without anyone checking it against a ruling, then debated with nowhere to
+# look it up). WARM_WAIT_CEILING_SEC in the environment is an explicit OPERATOR override
+# for one launch (DEC-104: an escape hatch, announced when used) — never the default.
+_warm_wait_ceiling() {
+    if [[ -n "${WARM_WAIT_CEILING_SEC:-}" ]]; then
+        echo -e "${YELLOW}  (operator override: WARM_WAIT_CEILING_SEC=${WARM_WAIT_CEILING_SEC} from the environment, not the registry)${NC}" >&2
+        printf '%s' "$WARM_WAIT_CEILING_SEC"; return 0
+    fi
+    local v
+    v=$( cd "$SCRIPT_DIR/src/server" && NODE_PATH="$(pwd)/node_modules" \
+            npx tsx ../../scripts/manifest-get.ts leaf "$AGENT_SLUG" session warmWaitCeilingSec 2>/dev/null | tail -1 )
+    if [[ "$v" =~ ^[0-9]+$ ]]; then printf '%s' "$v"; return 0; fi
+    # The registry could not be read: say so loudly and use the engine's own default for this
+    # one launch rather than refusing to seat a human over a resolver hiccup. The number is
+    # named as what it is — a fallback, not the leaf.
+    echo -e "${YELLOW}  could not read warmWaitCeilingSec from the Garden Manifest (manifest-get leaf) — using the engine default 1200 for this launch; check the manifest.${NC}" >&2
+    printf '1200'
+}
 WARM_WAIT_POLL_SEC="${WARM_WAIT_POLL_SEC:-5}"
 
 # One checkout attempt. Prints the tmux session name on stdout and returns 0 only when a
-# stem was actually checked out AND its session is live; every other outcome returns 1
-# (the script's own diagnostics reach the terminal on stderr).
+# stem was actually checked out AND its session is live. The checkout script's exit code is
+# PRESERVED, not collapsed (W-M1, Jim's audit 2026-08-20): 3 = no usable stem (pool empty,
+# or a dead-session ghost the script reaped) → the caller should WAIT; 4 = a stem WAS
+# checked out and the cast/flush then failed — the script has already retired it, and the
+# same fault will do the same to the next stem → the caller must STOP LOUD, never wait
+# (with no cold fallback, waiting on a deterministic post-checkout fault burns one
+# freshly-warmed stem per ~4 min for the whole ceiling). Anything else → 1 (wait).
 _attempt_checkout() {
     # N2 (Jim's audit, 2026-08-20): `npx` here is DELIBERATE and correct — this function only
     # ever runs from an interactive launcher, where the human's shell has nvm loaded. The same
     # call inside scripts/run-agent-server.sh would break (and did, at the casey cutover): a
     # systemd user unit inherits no nvm PATH. The asymmetry is intentional in BOTH directions;
     # do not copy this line into a unit, or that one back into here.
-    local cast_model="$1" out session_name
+    local cast_model="$1" out session_name rc
     out=$( cd "$SCRIPT_DIR/src/server" && NODE_PATH="$(pwd)/node_modules" \
-            npx tsx ../../scripts/checkout-session-stem.ts "$AGENT_SLUG" "$cast_model" ) || return 1
+            npx tsx ../../scripts/checkout-session-stem.ts "$AGENT_SLUG" "$cast_model" )
+    rc=$?
+    if (( rc != 0 )); then
+        (( rc == 4 )) && return 4   # post-checkout failure: terminal for the caller
+        return 1                    # 3 (no usable stem) or anything else: wait
+    fi
     session_name=$(echo "$out" | tail -1)
     [[ -n "$session_name" ]] && tmux has-session -t "$session_name" 2>/dev/null || return 1
     printf '%s' "$session_name"
+}
+
+# The W-M1 terminal branch, one place: a stem was leased and then the cast/flush failed.
+# The checkout script retired the suspect stem; waiting would only feed the next one to the
+# same fault. Stop, name the path (it is NOT the pool manager — that part worked), escape.
+_checkout_fault_stop() {
+    echo -e "${RED}A warm stem was checked out but the cast/attach-flush FAILED (the script retired it).${NC}"
+    echo -e "${RED}Not waiting for another: the same fault would burn the next stem too (W-M1).${NC}"
+    echo -e "${YELLOW}See the [checkout] error above for the failing step (cast / phase-2 / attach-flush). The pool manager is fine — do not restart it for this. Seat yourself deliberately with ${NC}--cold${YELLOW} while it is investigated.${NC}"
+    return 1
 }
 
 # Is a warmed stem REGISTERED and free? This is the completion flag, not a guess — and it
@@ -141,12 +182,14 @@ except Exception:
     fi
 
     echo -e "${BLUE}Checking out a warm stem (cast → ${GREEN}${cast_model}${BLUE})...${NC}"
-    local session_name
-    if session_name=$(_attempt_checkout "$cast_model"); then
+    local session_name rc
+    session_name=$(_attempt_checkout "$cast_model"); rc=$?
+    if (( rc == 0 )); then
         echo -e "${GREEN}Warm seat ready: ${session_name}${NC} — attaching."
         tmux attach-session -t "$session_name"
         return 0
     fi
+    (( rc == 4 )) && { _checkout_fault_stop; return 1; }
 
     # ── NO FALLBACK — WAIT (Darron's ruling, 2026-08-20 ~22:18: "I don't like your
     # fallback it is aweful and so simply don't fall back, wait"). WHY it travels here
@@ -159,30 +202,34 @@ except Exception:
     # and if it never comes we stop and say so rather than quietly seating a lesser you.
     # The explicit --cold flag is UNTOUCHED (DEC-104: an escape hatch, never a constraint)
     # — what dies here is the automatic, silent one.
-    local waited=0 announce=0
-    echo -e "${YELLOW}No warm stem yet — WAITING on the pool register (Ctrl-C to abort; '--cold' is the deliberate escape).${NC}"
+    local waited=0 announce=0 ceiling
+    ceiling=$(_warm_wait_ceiling)
+    echo -e "${YELLOW}No warm stem yet — WAITING on the pool register (up to ${ceiling}s — the manifest's warmWaitCeilingSec; Ctrl-C to abort; '--cold' is the deliberate escape).${NC}"
     echo -e "${BLUE}  the flag: a stem writes its readiness sentinel (c0 traversed), then registers free — that is what we watch.${NC}"
-    while (( waited < WARM_WAIT_CEILING_SEC )); do
+    while (( waited < ceiling )); do
         sleep "$WARM_WAIT_POLL_SEC"
         waited=$(( waited + WARM_WAIT_POLL_SEC ))
         # Cheap flag-read first; the heavy checkout runs only when the register says yes.
         if _free_stem_registered; then
-            if session_name=$(_attempt_checkout "$cast_model"); then
+            session_name=$(_attempt_checkout "$cast_model"); rc=$?
+            if (( rc == 0 )); then
                 echo -e "${GREEN}Warm seat ready after ${waited}s: ${session_name}${NC} — attaching."
                 tmux attach-session -t "$session_name"
                 return 0
             fi
+            # W-M1: a leased stem failed AFTER checkout — terminal, never "continue to wait".
+            (( rc == 4 )) && { _checkout_fault_stop; return 1; }
             # Registered-then-unusable (raced by another checkout, or a dead tmux session the
             # checkout reaped): keep waiting for the next one rather than degrading.
             echo -e "${YELLOW}  a registered stem turned out unusable — continuing to wait.${NC}"
         fi
         if (( waited - announce >= 30 )); then
             announce=$waited
-            echo -e "${BLUE}  …still warming (${waited}s). Stems for ${AGENT_SLUG}/session: ${NC}$(_pool_summary)"
+            echo -e "${BLUE}  …still warming (${waited}s of ${ceiling}s). Stems for ${AGENT_SLUG}/session: ${NC}$(_pool_summary)"
         fi
     done
 
-    echo -e "${RED}No warm stem after ${WARM_WAIT_CEILING_SEC}s — stopping rather than seating you cold.${NC}"
+    echo -e "${RED}No warm stem after ${ceiling}s (the manifest's warmWaitCeilingSec) — stopping rather than seating you cold.${NC}"
     echo -e "${YELLOW}Check the server pane (${GREEN}server-${AGENT_SLUG}${YELLOW}) for the pool manager, then retry — or seat yourself deliberately with ${NC}--cold"
     return 1
 }

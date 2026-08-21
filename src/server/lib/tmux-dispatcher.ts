@@ -45,7 +45,10 @@ import {
     armHearthPulse, clearHearthPulse, hearthStandingMessageFor, writeWindingUp,
     declaredBusy, senescenceEnabledFor,
 } from './spoke-organelle';
-import { markResumable, readResumableMarkers, clearResumableMarker, resumableExpired, type PaneClass } from './dispatch-reconciler';
+import {
+    markResumable, readResumableMarkers, clearResumableMarker, resumableExpired,
+    readRetireRequests, clearRetireRequest, type PaneClass,
+} from './dispatch-reconciler';
 import { mostRecentC0Id, isAgentC0, gradientEntriesAfterC0 } from './memory-gradient';
 import { writeSleeveState } from './sleeve-state';
 import { checkoutStem, returnStem, removeStem, setStemCursor, upsertStem, isStemStale, readPool, poolStatus, findSpokeForThread, bindSpoke, touchSpokeServed, decoupleSpoke, checkoutStemById, type PoolStem } from './stem-pool';
@@ -2470,6 +2473,45 @@ function sweepDeadRegisteredStems(slug: string, surface: string): void {
  * populate, eager replenish back to N, the chrome-guarded retire sweep, and the ~24h substrate
  * reload (stemReloadHours, a registry leaf). Idempotent per process.
  */
+/**
+ * MNT-179 M1 (Jim's audit, 2026-08-21): feed retire REQUESTS into the graceful kill sweep.
+ * A short-lived process that deregisters a live stem (the checkout leg's post-checkout catch)
+ * cannot reach `pendingStemKills` (server memory), and `sweepUnregisteredStems` is startup-only
+ * by design — so without this, a deregistered-but-alive stem persists until the next restart.
+ * The request names a SPECIFIC session the caller itself retired, which is what makes it safe
+ * to run every tick where the blind unregistered-enumeration is not (no mid-warm race: a
+ * warming stem never has a request written against it). Residue (sleeve/sentinel) is cleaned
+ * NOW, exactly as the startup sweep does; the kill itself goes through the chrome-guarded
+ * two-stage path (R011 — never kill a thinker), which also writes the winding-up record.
+ */
+function sweepRetireRequests(slug: string, surface: string): void {
+    for (const req of readRetireRequests(slug, surface)) {
+        const sess = req.tmux_session;
+        try {
+            if (!tmuxSessionExists(sess)) {
+                clearRetireRequest(sess); // already gone — nothing to reap; the request is stale residue
+                console.log(`[pool-manager] ${slug}/${surface}: retire request for ${sess} (${req.reason}) — session already gone, request cleared`);
+                continue;
+            }
+            if (!pendingStemKills.has(sess)) {
+                pendingStemKills.set(sess, { slug, reason: `retire-request from ${req.by}: ${req.reason}` });
+                try { fs.unlinkSync(path.join(sleevesDir(), `${sess}.json`)); } catch { /* absent */ }
+                try { fs.unlinkSync(path.join(healthDir(), `${slug}-${sess}-ready`)); } catch { /* absent */ }
+                console.log(`[pool-manager] ${slug}/${surface}: retire request for ${sess} (${req.reason}) queued for the graceful sweep (/exit → kill)`);
+            }
+            // Cleared at QUEUE time, not kill-completion (Jim N1, 2026-08-21): if this process dies
+            // between the in-memory enqueue and the two-stage kill, the request is gone and the
+            // orphan is briefly unnamed — the BACKSTOP is the next manager start's
+            // sweepUnregisteredStems (an unregistered idle session is reaped there). Named rather
+            // than cured: clearing at completion would need the kill sweep to carry the request
+            // id through pendingStemKills; the window is one tick in one process.
+            clearRetireRequest(sess);
+        } catch (err) {
+            console.warn(`[pool-manager] ${slug}/${surface}: retire request for ${sess} failed (retry next tick): ${(err as Error).message}`);
+        }
+    }
+}
+
 export function startPoolManager(slug: string, surface: string): void {
     const key = sessionKey(slug, surface);
     if (poolManagersStarted.has(key)) return;
@@ -2478,10 +2520,12 @@ export function startPoolManager(slug: string, surface: string): void {
     const maxAgeMs = (life.stemReloadHours ?? 24) * 3600_000;
     console.log(`[pool-manager] ${slug}/${surface}: started (poolSize=${poolSizeFor(slug, surface)}, reload=${life.stemReloadHours ?? 24}h)`);
     sweepUnregisteredStems(slug, surface); // C4: BEFORE the populate — no own-warms in flight yet
+    sweepRetireRequests(slug, surface); // MNT-179 M1: requests written while no manager was running
     sweepDeadRegisteredStems(slug, surface); // MNT-056: drop dead-registered rows so the deficit is real
     void replenishPool(slug, surface); // initial populate (async — never blocks the caller)
     setInterval(() => {
         try {
+            sweepRetireRequests(slug, surface); // MNT-179 M1: caller-retired sessions → the kill queue, BEFORE the sweep runs
             sweepRetiredStems();
             sweepDeadRegisteredStems(slug, surface); // MNT-056: heal the cgroup-kill-without-restart case before replenish
             sweepIdleSpokes(slug, surface); // MNT-061: the third trigger — idle-abandoned spokes recycle or reap

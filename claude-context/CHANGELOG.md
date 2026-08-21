@@ -7,6 +7,54 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-21 — Leo (session) — The wait ceiling becomes a registry leaf (1200), W-M1's exit-4 split, and the retire-request marker (Jim GREEN ×2; MNT-179 owned)
+
+### Changed
+- **The warm-checkout wait ceiling is a Garden Manifest leaf, not a shell constant** — Darron's
+  ruling this morning (*"let's make that 600 maybe 1200, and let's have a registry somewhere to
+  track such parameters"*, relayed by Jim 8:38 AM; the seed of FI #147). `SpokeLifecycle.
+  warmWaitCeilingSec` carries its **purpose and pricing on the field** (1200 ≈ 4× the worst
+  measured cold-start warm, 4m49s on a claude-opus-5 stem, 2026-08-20; RAISE/LOWER guidance;
+  `no-hidden-globals`, DECISIONS.md:6521). `warmWaitCeilingSecFor()` defaults 1200; the launcher
+  resolves it at call time through a new `manifest-get.ts leaf <slug> <surface> <name>`
+  subcommand (a `LEAF_RESOLVERS` whitelist — the engine's own resolver, so shell and TS cannot
+  disagree). `WARM_WAIT_CEILING_SEC` in the env is an *announced* operator override (DEC-104);
+  a resolver failure falls back loudly to the engine default, never silently. The leaf is in
+  `seeds/garden-manifest.seed.json` too, so a fresh garden inherits it.
+- **W-M1 (Jim's audit, 2026-08-20): the checkout leg's exit codes are a contract.** Exit **3** =
+  no usable stem (pool empty / ghost reaped) → the launcher waits; exit **4** = a live stem was
+  leased and the cast/phase-2/attach-flush then threw (the stem retired) → the launcher **stops
+  loud**, naming the path, never waits. Before: both were 3, and with the cold fallback gone a
+  deterministic fault burned one freshly-warmed stem per ~4-minute re-warm for the whole ceiling.
+  `_attempt_checkout` now preserves `$?`; `_checkout_fault_stop` is wired at the first attempt
+  and inside the loop. The three false "cold fallback" strings in the script now say what is true.
+
+### Added
+- **Retire-request marker** (`dispatch-reconciler.ts` + `sweepRetireRequests` in the pool-manager
+  tick) — Jim's must-fix on the *cure*, not the build: `retireStem()` queues kills in **server
+  memory**, so a short-lived process that deregisters a live stem could not reach it, and the
+  startup-only `sweepUnregisteredStems` (deliberately never on the tick — warming stems are
+  unregistered too) left a retired-but-alive stem unowned until the next restart. The caller now
+  writes a request naming the specific session; the tick feeds it into the existing chrome-guarded
+  two-stage `/exit → kill` sweep. Safe at tick time because it iterates the request files and
+  never enumerates tmux — a warming stem is outside its domain (Jim: *"a guard vs an
+  impossibility"*). Honours `HAN_HEALTH_DIR` like the resumable marker. N1 (clear-at-queue-time
+  window; backstop = the startup sweep) named in a comment.
+
+### Owned
+- **MNT-179 — a "sandbox" that symlinked `src/server` ran the REAL checkout script** (bash `cd`
+  is logical; the kernel resolves `../../scripts` physically) and leased a live leo/session stem
+  — two leased `{leo, session}` rows, the M2 hazard by the builder's own hand. Blast radius
+  verified before acting (sleeve/swap untouched; `cli-free` bumped); cured via `removeStem` +
+  the new retire request (`stem-leo-session-mt23u7s3`, collected by this land's restart).
+  Structural cure owed: a `HAN_POOL_DIR` override so a fixture can never reach `~/.han/pool`
+  (MNT-075's `assert-scratch-db` shape). The second sandbox used a real dir + `node_modules`
+  symlink, `readlink`-verified.
+- **MNT-180** (filed, not fixed — lib + a live-on-save hook, Darron's word): leo's completion
+  anchor reads `cli-free-leo`, which `leo-heartbeat.ts:2411` unlinks on write (an edge read as a
+  level) — so leo's session hearth pulses 50 min from the last *pulse*, never from a turn. Sibling
+  of MNT-176; proposed cure = a hearth-owned anchor file stamped by the pull hook.
+
 ## 2026-08-21 — Leo (session) — The launcher waits (no cold fallback) + SR-031 agent servers at boot (Jim GREEN, one MUST-FIX folded)
 
 ### Changed

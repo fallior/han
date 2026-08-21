@@ -126,6 +126,74 @@ export function clearResumableMarker(tmuxSession: string): void {
     try { fs.unlinkSync(resumableMarkerPath(tmuxSession)); } catch { /* absent — fine */ }
 }
 
+// ── Retire REQUEST marker (MNT-179 M1, Jim's audit 2026-08-21) ─────────────────────────────
+//
+// THE GAP IT CLOSES: `retireStem()` (tmux-dispatcher) = removeStem + `pendingStemKills.set`, and
+// that kill queue is SERVER-PROCESS MEMORY. A short-lived process that has just deregistered a
+// live stem — the checkout leg's post-checkout catch is the live case — cannot reach it, so it
+// used bare `removeStem` and left the tmux session for "the sweep". But the sweep that reaps
+// live-but-unregistered sessions (`sweepUnregisteredStems`) runs ONLY at manager start, by
+// design (at tick time our own mid-warm stems are unregistered too — it would reap honest
+// warms). Net: a deregistered-but-alive stem persisted until the next server restart (MNT-179:
+// a fable-cast, sleeved, clientless Leo sat unowned for hours).
+//
+// THE SHAPE: the same cross-process marker the resumable path above uses (MNT-070's lesson —
+// the long-lived tick is the consumer; a short-lived writer's in-memory state dies with it).
+// The caller that deregistered a SPECIFIC session writes a request naming it; the pool-manager
+// tick (`sweepRetireRequests`) feeds it into `pendingStemKills`, whose existing two-stage sweep
+// (chrome/declared-busy guard → `/exit` → lag → kill → winding-up record) does the rest. Naming
+// a specific session is what makes this safe at tick time where the blind enumeration is not.
+// Leaf module, no dispatcher import — same reason the resumable marker lives here.
+
+export interface RetireRequest {
+    slug: string;
+    surface: string;
+    stem_id: string;
+    tmux_session: string;
+    requested_at: string; // ISO
+    reason: string;       // fixed mechanic string, never content
+    by: string;           // the writer (script/surface), for the winding-up record
+}
+
+function retireRequestDir(): string {
+    const dir = process.env.HAN_HEALTH_DIR || path.join(os.homedir(), '.han', 'health');
+    return path.join(dir, 'retire-requests');
+}
+
+export function retireRequestPath(tmuxSession: string): string {
+    return path.join(retireRequestDir(), `${tmuxSession}.json`);
+}
+
+/** Ask the pool-manager tick to gracefully reap a session the caller has ALREADY deregistered.
+ *  Idempotent (first request stands). Never throws — a failed write must not fail the caller's
+ *  own exit path; the manager's next START still reaps an idle orphan (the existing belt). */
+export function requestRetire(req: RetireRequest): void {
+    try {
+        fs.mkdirSync(retireRequestDir(), { recursive: true });
+        const p = retireRequestPath(req.tmux_session);
+        if (fs.existsSync(p)) return;
+        fs.writeFileSync(p, JSON.stringify(req, null, 2) + '\n', 'utf-8');
+    } catch (err) {
+        console.warn(`[dispatch-reconciler] retire-request write failed (non-fatal; manager start reaps idle orphans): ${(err as Error).message}`);
+    }
+}
+
+export function readRetireRequests(slug: string, surface: string): RetireRequest[] {
+    try {
+        return fs.readdirSync(retireRequestDir())
+            .filter(f => f.endsWith('.json'))
+            .map(f => { try { return JSON.parse(fs.readFileSync(path.join(retireRequestDir(), f), 'utf-8')) as RetireRequest; } catch { return null; } })
+            .filter((r): r is RetireRequest => r !== null && r.slug === slug && r.surface === surface);
+    } catch {
+        return []; // dir absent — nothing requested
+    }
+}
+
+/** Clear once the request has been queued into the kill sweep (or the session is already gone). */
+export function clearRetireRequest(tmuxSession: string): void {
+    try { fs.unlinkSync(retireRequestPath(tmuxSession)); } catch { /* absent — fine */ }
+}
+
 /** JA2 — pure TTL check. Unparseable marked_at counts as EXPIRED (fail toward cleanup:
  *  a marker we cannot date must not shield a zombie forever). */
 export function resumableExpired(marker: ResumableMarker, ttlMinutes: number, nowMs: number): boolean {

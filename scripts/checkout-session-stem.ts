@@ -7,7 +7,7 @@
  *
  * Flow (plan msz950i2 P1, with the audit folds):
  *   1. checkout a free stem from the (slug, 'session') pool — absent/dead/stale → exit 3
- *      (the launcher's cold path is the fallback, byte-identical to today).
+ *      (the launcher WAITS on the pool register — Darron's no-fallback ruling 2026-08-20).
  *   2. cast to the REQUESTED alias (castStemToModel — Casey's build-lane catch: the serve
  *      variant reads config and takes no parameter). Bare alias only, DEC-104.
  *   3. write the sleeve {slug, surface: 'session'} — every surface-keyed facet (swap,
@@ -19,14 +19,26 @@
  *      VARIABLE, and this is its standing column (measurement, not credence).
  *   6. print the tmux session name as the LAST stdout line — the launcher attaches to it.
  *
- * Exit codes: 0 = checked out (last line = session name) · 3 = no usable stem (fall back
- * cold) · 1 = unexpected error (fall back cold, loudly).
+ * Exit codes — a CONTRACT with the launcher's wait loop (launcher-warm-checkout.sh), not
+ * diagnostics; the caller branches on them (W-M1, Jim's audit 2026-08-20):
+ *   0 = checked out (last stdout line = the session to attach).
+ *   3 = NO USABLE STEM — the pool was empty, or the leased row had no live tmux session and
+ *       was reaped. Nothing of value was spent; the right response is to WAIT for the next
+ *       registration.
+ *   4 = POST-CHECKOUT FAILURE — a live stem was leased and then the cast / phase-2 /
+ *       attach-flush threw. The suspect stem is retired here (removeStem). This is
+ *       DISTINCT from 3 on purpose: the fault is in the cast/flush path, not the pool, and
+ *       it will do the same to the next stem — so the caller must STOP LOUD, never wait
+ *       (before W-M1 both were 3, and with no cold fallback a deterministic fault burned a
+ *       freshly-warmed stem per ~4-minute re-warm for the whole ceiling).
+ *   1 = unexpected error before any checkout (usage, crash) — loud.
  */
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { checkoutStem, removeStem } from '../src/server/lib/stem-pool';
+import { requestRetire } from '../src/server/lib/dispatch-reconciler';
 import { writeSleeveState } from '../src/server/lib/sleeve-state';
 import {
     castStemToModel, completeTwoPhaseWake, deltaSinceCursor, feedWakeSteps, observedOrUnobservedModel,
@@ -51,11 +63,11 @@ async function main(): Promise<number> {
     const nowIso = new Date().toISOString();
     const stem = checkoutStem(slug, SURFACE, nowIso);
     if (!stem) {
-        console.error(`[checkout] ${slug}/${SURFACE}: pool empty — cold fallback`);
+        console.error(`[checkout] ${slug}/${SURFACE}: pool empty — no usable stem (exit 3: the launcher waits)`);
         return 3;
     }
     if (!tmuxAlive(stem.tmux_session)) {
-        console.error(`[checkout] ${slug}/${SURFACE}: stem ${stem.stem_id} has no live tmux session — removing, cold fallback`);
+        console.error(`[checkout] ${slug}/${SURFACE}: stem ${stem.stem_id} has no live tmux session — removing it (exit 3: the launcher waits for the next)`);
         removeStem(slug, SURFACE, stem.stem_id);
         return 3;
     }
@@ -118,13 +130,26 @@ async function main(): Promise<number> {
         // by definition: cast half-applied, possibly already sleeved — handing it back 'free'
         // gives the next checkout an unverified seat (the packet's own suspect-warm doctrine).
         // Process note: the dispatcher's retireStem() queues its kill in SERVER-process memory,
-        // unreachable from this script — so the process-appropriate mirror is removeStem()
-        // (deregister: the pool can never hand it out again; the manager re-warms the shortfall)
-        // and the live-but-unregistered session is collected by the MNT-056 orphan sweep,
-        // never a hand-kill from here (MNT-062).
-        console.error(`[checkout] ${slug}/${SURFACE}: failed (${(err as Error).message}) — retiring suspect stem ${stem.stem_id}, cold fallback`);
+        // unreachable from this script — so the deregistration is removeStem() (the pool can
+        // never hand it out again; the manager re-warms the shortfall) AND the reap is a
+        // RETIRE REQUEST (MNT-179 M1, Jim's audit 2026-08-21): a cross-process marker the
+        // pool-manager tick feeds into its graceful two-stage sweep. The earlier claim that
+        // "the MNT-056 orphan sweep collects the session" was FALSE — that sweep is startup-only
+        // by design, so a retired-but-alive stem sat unowned until the next server restart.
+        // Never a hand-kill from here (MNT-062); the request names exactly one session.
+        // W-M1 (Jim's audit 2026-08-20): this is exit 4, NOT 3. The launcher no longer falls
+        // back cold — it waits on the register — so a 3 here would read as "wait for the next
+        // stem", and a deterministic cast/flush fault would then retire every freshly-warmed
+        // stem the manager produced, one per ~4 min, for the whole wait ceiling. 4 tells the
+        // launcher the fault is in THIS path, not the pool: stop loud, do not wait.
+        console.error(`[checkout] ${slug}/${SURFACE}: failed (${(err as Error).message}) — retiring suspect stem ${stem.stem_id} (exit 4: post-checkout fault, the launcher STOPS rather than waits)`);
         try { removeStem(slug, SURFACE, stem.stem_id); } catch { /* sweeps reconcile */ }
-        return 3;
+        requestRetire({
+            slug, surface: SURFACE, stem_id: stem.stem_id, tmux_session: stem.tmux_session,
+            requested_at: new Date().toISOString(), by: 'checkout-session-stem',
+            reason: `post-checkout-failure: ${(err as Error).message.slice(0, 80)}`,
+        });
+        return 4;
     }
 }
 

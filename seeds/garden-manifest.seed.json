@@ -1,7 +1,7 @@
 {
   "_comment": "The garden-manifest SEED FORM (P1, S218 — F4's middle box: ships with the engine, instantiated ONCE at genesis into $HAN_HOME/garden-manifest.json, then it is the garden's own and never overwritten by an update). Ladders are NAMES resolved by the engine's LADDER_REGISTRY. Replace the example agent with your garden's residents; the #98 seeder grows the rest.",
   "manifestVersion": 1,
-  "spokeLifecycle": { "ctxClearThresholdPct": 85, "warmFloorPct": 30, "maxWarmNudges": 2 },
+  "spokeLifecycle": { "ctxClearThresholdPct": 85, "warmFloorPct": 30, "maxWarmNudges": 2, "warmWaitCeilingSec": 1200 },
   "project": { "name": "My Garden", "tagline": "a garden of minds", "path": "~/Projects/my-garden" },
   "user": { "name": "Your Name", "pronounSubj": "they", "pronounObj": "them", "location": "Somewhere (UTC+0)" },
   "timezone": "UTC",
