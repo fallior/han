@@ -2176,11 +2176,21 @@ async function heartbeat(): Promise<void> {
     // Pre-flight: rolling window rotation for memory files (fast, no API)
     preFlightMemoryRotation();
 
-    // Phase 4c (DEC-079): backup queue-drain — sweep up pending_compressions
-    // if wm-sensor isn't running. No-op when sensor is doing its job (lock
-    // acquisition fails silently). Agent-scoped: heartbeat-Leo drains Leo's
-    // queue only.
-    await maybeBackupQueueDrain();
+    // Phase 4c (DEC-079) backup queue-drain — PASSENGER COMMENTED OUT 2026-08-23, Darron's order
+    // (MNT-189). Call preserved verbatim below; re-arming is deleting two slashes, and doing so
+    // is the prohibited move without re-pricing it first.
+    //
+    // WHY: cheap in-process under the Agent SDK. Under tmux it dispatches a warm-window spoke
+    // and AWAITS it — a wedged compression spoke cost READY_TIMEOUT_MS + one cold-relaunch
+    // (20 + 20 = 40 min), blocking the beat body every time. One whole 40-min period consumed,
+    // so the effective cadence became 80 and crossed the 60-min cache knee on every beat.
+    // The mechanism never changed; the transport underneath it did.
+    //
+    // SAFE TO DROP: the net's trigger is "wm-sensor isn't running". The sensor IS running; the
+    // compression SPOKE is what fails — and this net dispatches through that same spoke.
+    //
+    // NOTE: restores the CLOCK, not compression (that is the quota-refusal descent).
+    // await maybeBackupQueueDrain();
 
     // [project-b fence-clear, S179] One-shot force-meditation check — runs on every beat
     // (before the dream early-return) so a forced phase-b fires on the next beat regardless

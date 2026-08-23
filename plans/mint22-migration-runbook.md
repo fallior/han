@@ -95,6 +95,22 @@ docker volumes no restic lane reads —
 Doctrine line 1, Darron's fold):** post-quiesce, pre-mintupgrade — the one moment when
 freshest-possible and writers-stopped are simultaneously true — run
 `sudo bash refresh-twin.sh` + `verify`. After it the twin is the complete last-known-good
+
+> **RECONCILED 2026-08-17 (Casey's ruling of 2026-08-16, applied — a decided fix that had never reached the page).**
+> This document named the rollback key **by its release** in two places that disagree: line ~98 called the
+> *21.3 snapshot* the key, line ~210 described the twin as *a working 21.1 garden*. Both were true when written
+> and the release is a fact about the world that changes twice today, so naming the key that way cannot survive
+> the day it is needed.
+>
+> **The key is named by the ACT that produced it, never by the release:**
+> **Stage 4.1a** — an optional twin refresh *before* the point-hop.
+> **Stage 4.1b** — a **mandatory** twin refresh *after* the point-hop. **4.1b IS the rollback key.**
+> The abort ladder reads *"the twin as refreshed at Stage 4.1b"* — true under either timing outcome, so if 4.1a
+> is skipped at the keyboard nothing needs re-editing on the one night nobody edits documents.
+>
+> The two lines above are left standing rather than rewritten (DEC-069, non-falsification — the repair stays
+> legible as repair). Read them as *examples of the naming this note replaces.*
+
 21.3 snapshot: the rollback key the one-way door deserves. From mintupgrade's first write,
 **the twin's staleness IS its value — never refresh again until the soak passes** (line 3).
 

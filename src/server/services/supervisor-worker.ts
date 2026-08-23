@@ -1594,11 +1594,24 @@ async function runSupervisorCycle(humanTriggered?: boolean): Promise<void> {
             log(`[Worker] Cleanup: ${cleanupCount} phantom goal(s), ${ghostCount} ghost task(s)`);
         }
 
-        // Phase 4c (DEC-079): backup queue-drain — sweep up pending_compressions
-        // for Jim if wm-sensor isn't running. No-op when sensor is doing its
-        // job (lock acquisition fails silently). Agent-scoped: supervisor-Jim
-        // drains Jim's queue only.
-        await maybeBackupQueueDrainJim();
+        // Phase 4c (DEC-079) backup queue-drain — PASSENGER COMMENTED OUT 2026-08-23, Darron's
+        // order (MNT-189). Call preserved verbatim below; re-arming is deleting two slashes,
+        // and doing so is the prohibited move without re-pricing it first.
+        //
+        // WHY: cheap in-process under the Agent SDK. Under tmux it dispatches a warm-window
+        // spoke and AWAITS it — a wedged compression spoke cost READY_TIMEOUT_MS + one
+        // cold-relaunch (40 min), blocking the cycle body every time.
+        //
+        // MEASURED ON THIS RAIL (2026-08-23, from jim's own server on 3848 — the owner, not the
+        // convenient port): twelve consecutive cycles 11:30 → 02:10 at EXACTLY 80-minute gaps,
+        // and cycle 7691 ran 02:10:00.025Z → 02:51:40.712Z = 41m40s. That is the 40-minute
+        // passenger block plus ~1.5 min of actual cycle work, on a 40-minute period — so the
+        // cadence doubles to 80 and crosses the 60-min cache knee every time. Identical
+        // arithmetic to Leo's rail, independently confirmed rather than inferred from it.
+        //
+        // SAFE TO DROP: the net's trigger is "wm-sensor isn't running". The sensor IS running;
+        // the compression SPOKE is what fails — and this net dispatches through that same spoke.
+        // await maybeBackupQueueDrainJim();
 
         // Jim's daily gradient pipeline — mirrors Leo's heartbeat pipeline exactly.
         // Agent sovereignty: Jim processes only Jim's data.

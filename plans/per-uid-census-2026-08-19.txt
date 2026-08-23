@@ -1,0 +1,116 @@
+== P0 CENSUS 2026-08-19T18:11:57+10:00 ==
+
+-- 1. LIVE FILE OPENS: which service pid holds which agent tree open --
+[human-responder@leo pid=302900]
+    
+[human-responder@jim pid=302940]
+    
+[human-responder@tenshi pid=303001]
+    
+[human-responder@casey pid=303037]
+    
+[leo-heartbeat pid=303075]
+    
+[tenshi-heartbeat pid=303113]
+    
+[casey-heartbeat pid=303152]
+    
+[jemma pid=3137540]
+    
+[wm-sensor pid=1723]
+    
+
+-- 2. gradient.db openers --
+                     darron    303631 F.... MainThread
+                     darron    306811 F.... MainThread
+                     darron    3137551 F.... MainThread
+
+-- 3. CODE: cross-agent path literals NOT through the registry --
+src/server/leo-heartbeat.ts:30: *   - Unified identity: uses ~/.han/memory/leo/ (session Leo's home)
+src/server/leo-heartbeat.ts:1468:          `2. Append your reflection YOURSELF to ~/.han/memory/leo/self-reflection.md under a heading \`### Philosophy Beat (tmux) <date time>\` — append only, the vault is lossless (DEC-069).\n` +
+src/server/leo-heartbeat.ts:1589:        `2. Append the substantive body YOURSELF to ~/.han/memory/leo/explorations.md under a heading \`### Beat (tmux) <date time>\` — append only.\n` +
+src/server/leo-heartbeat.ts:2514:║  Memory:   ~/.han/memory/leo/             ║
+src/server/services/context.ts:317:- **~/.han/memory/leo/** — Leo's entire memory directory (identity, working memory, self-reflection, patterns, etc.)
+src/server/services/planning.ts:239:- ~/.han/memory/leo/* — Leo's memory banks, never modify
+
+-- 4. CODE: who invokes tmux (the control graph, static) --
+src/server/lib/session-hearth.ts
+src/server/lib/spoke-provenance.ts
+src/server/routes/prompts.ts
+src/server/lib/tmux-dispatcher.ts
+src/server/routes/bridge.ts
+src/server/services/terminal.ts
+scripts/checkout-session-stem.ts
+scripts/test-orphan-reap.ts
+scripts/attach-stem.ts
+scripts/warm-death-smoke.ts
+scripts/install.sh
+scripts/test-spoke-provenance.ts
+
+-- 5. signals-dir writers (cross-agent flags) --
+src/server/services/jemma-dispatch.ts
+src/server/services/jemma-orchestrator.ts
+
+-- 6. #91 watermark / cross-READ paths (the load-bearing enumeration candidates) --
+src/server/lib/stem-pool.ts:44:    /** #91 char-cursor: `working-memory.md` char length at warm/refresh (deltaSinceCursor input). */
+src/server/lib/memory-gradient.ts:1627:1. Read the unpaired entries above and write compressed counterparts to the side that's missing them — \`working-memory.md\` if \`unpairedSide=full\`, \`working-memory-full.md\` if \`unpairedSide=compressed\`.
+src/server/lib/tmux-dispatcher.ts:62: * lands — the DISPATCHER-SIDE confirm in computeMemoryDelta: compute behind the #49 memory
+src/server/lib/tmux-dispatcher.ts:136:     *  a confirmed-clean delta (computeMemoryDelta). */
+src/server/lib/tmux-dispatcher.ts:940:    //    session last looked). GATED OFF (DELTA_REFRESH_ENABLED=false) → computeMemoryDelta
+src/server/lib/tmux-dispatcher.ts:942:    const deltaBlock = await computeMemoryDelta(slug, session);
+src/server/lib/tmux-dispatcher.ts:1752:        // lastMemoryLen = current WM so the per-turn #91 watermark (computeMemoryDelta) is a no-op;
+src/server/lib/tmux-dispatcher.ts:1767: * reload's job (R3a.1d). `deltaSinceCursor` is the shared #91 slice helper (char-unit-matched).
+
+-- 1b. LIVE FILE OPENS, cgroup-walked (wrapper-vs-child cured) --
+[human-responder@leo pids: 302900 302933 ]
+    /home/darron/.han/gradient.db
+    /home/darron/.han/gradient.db-shm
+    /home/darron/.han/gradient.db-wal
+[human-responder@jim pids: 302940 302976 ]
+    /home/darron/.han/gradient.db
+    /home/darron/.han/gradient.db-shm
+    /home/darron/.han/gradient.db-wal
+[human-responder@tenshi pids: 303001 303030 ]
+    /home/darron/.han/gradient.db
+    /home/darron/.han/gradient.db-shm
+    /home/darron/.han/gradient.db-wal
+[human-responder@casey pids: 303037 303067 ]
+    /home/darron/.han/gradient.db
+    /home/darron/.han/gradient.db-shm
+    /home/darron/.han/gradient.db-wal
+[leo-heartbeat pids: 303075 303106 ]
+    /home/darron/.han/gradient.db
+    /home/darron/.han/gradient.db-shm
+    /home/darron/.han/gradient.db-wal
+[tenshi-heartbeat pids: 303113 303145 ]
+    /home/darron/.han/gradient.db
+    /home/darron/.han/gradient.db-shm
+    /home/darron/.han/gradient.db-wal
+[casey-heartbeat pids: 303152 303171 ]
+    /home/darron/.han/gradient.db
+    /home/darron/.han/gradient.db-shm
+    /home/darron/.han/gradient.db-wal
+[jemma pids: 3137540 3137551 ]
+    /home/darron/.han/gradient.db
+    /home/darron/.han/gradient.db-shm
+    /home/darron/.han/gradient.db-wal
+[wm-sensor pids: 1723 1976 2099 2145 ]
+    /home/darron/.han/gradient.db
+    /home/darron/.han/gradient.db-shm
+    /home/darron/.han/gradient.db-wal
+
+-- 2b. gradient.db opener pids → names --
+  1976 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  302933 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  302976 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  303030 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  303067 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  303106 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  303145 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  303171 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  303495 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  303514 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  303532 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  303631 /home/darron/.nvm/versions/node/v23.9.0/bin/node -r tsx/cjs /home/darron/Project
+  306811 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
+  3137551 /home/darron/.nvm/versions/node/v23.9.0/bin/node --require /home/darron/Projects
