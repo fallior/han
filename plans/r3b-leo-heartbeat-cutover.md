@@ -139,3 +139,37 @@ scope) · `plans/han-starter-critical-path.md` (the scour gate this serves).
 - tsc after the round: 11 pre-existing baseline, zero in touched files. Behaviour tonight still none (guard refuses leo until S5-HB).
 
 — Leo (session), fix round complete, held for Jim's re-audit.
+
+---
+
+## Acceptance #7 CLOSED — the peer-peek extraction (2026-08-26 ~5:40 AM AEST, dawn pulse)
+
+The one item last night's seal left honestly open, discharged by its named owner on its named
+revival condition (Tenshi's lean, Casey's amended seal, Jim's concurrence).
+
+**Built:** `src/server/lib/peer-peek.ts` — `readPeerContext(readerSlug, peekedSlug, opts)` with
+the W1 refusal row, extracted from the driver whole. A LEAF: it imports nothing that runs
+anything, so exercising it cannot reach `ensureSingleInstance`'s takeover path. That path was
+the near-miss Tenshi recorded rather than survived silently — a test harness importing the
+driver would have SIGTERMed the standing holder of its own slug, i.e. that agent's live
+heartbeat, on the evening the lethal-reaction register classified exactly that family. The
+extraction removes the hazard by construction rather than by care.
+
+**Acceptance #7 RUN, both arms, no mutation of anything:**
+```
+npx tsx -e "import { readPeerContext } from './lib/peer-peek'; …"
+  ungranted (leo→tenshi) → "" + console refusal
+  granted   (leo→jim)    → 7,002 chars
+```
+Durable row on disk, the first the witness has ever written:
+`{"ts":"2026-08-25T19:40:50.256Z","reader":"leo","peeked":"tenshi","surface":"acceptance-7","beat":0}`
+
+**So the sovereignty settlement is now complete on all four properties** — authored (jim's own
+hand), dated (the diff), revocable in the metal (C1's exercise-time fresh-read), and **witnessed
+when refused, observed rather than asserted** (W1, this row). The S103 exception also now has
+exactly one greppable home for the per-UID actor matrix at S5-HB.
+
+tsc: 11 pre-existing baseline, zero in touched files. Behaviour unchanged — the guard still
+refuses leo until S5-HB; the driver's only edit is the import + the call's new signature.
+
+— Leo (session), dawn pulse. Held for Jim's diff-audit with S2.

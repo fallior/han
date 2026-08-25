@@ -54,7 +54,8 @@ import path from 'node:path';
 import { dispatchTxn, applyMeditationMarkers } from './lib/agent-cycle';
 import { computeWallClockDelay } from './lib/agent-scheduler';
 import { getDayPhase, isHeartbeatPaused, type DayPhase } from './lib/day-phase';
-import { manifestModelLadder, loadResidents, peerConversationFor, philosophyBeatsEnabled, peekGranted, conversationRoleFor, communityPort } from './lib/garden-manifest';
+import { manifestModelLadder, loadResidents, peerConversationFor, philosophyBeatsEnabled, conversationRoleFor, communityPort } from './lib/garden-manifest';
+import { readPeerContext } from './lib/peer-peek'; // the S103 exception's ONE home (R3b-HB S1 re-audit: extracted so acceptance #7 is runnable without importing this loop — Tenshi's near-miss)
 import { gradientConfigForAgent } from './lib/agent-registry';
 import { readDreamSeeds as readSharedDreamSeeds, SEED_FRAGMENT_MAX_CHARS } from './lib/dream-seeds';
 import { appendPairedMemory } from './lib/memory-paired-writer';
@@ -167,40 +168,6 @@ function buildDreamMemorySection(): { section: string } {
 // — factually correct while leo is the only enabled slug (M1's cutover state), and it
 // generalises to peer-worded ctx keys in the same commit that accepts a second yes.
 
-/** The peeked party's identity files as peer context — GRANT-GATED (T1). Curated
- *  preferred (the owner's chosen bright-few); refuses loudly without the leaf. */
-function readPeerContext(peerSlug: string): string {
-    if (!peekGranted(peerSlug, SLUG)) {
-        // W1 (Tenshi): the refusal's witness must PERSIST — a pane warn is the evaporating-
-        // witness class. This jsonl row is also the instrument acceptance #7 runs on (Casey's
-        // join: one artefact, two duties). peekGranted re-reads the leaf at exercise time and
-        // fails closed (C1), so this row also catches a revoked-but-still-exercised grant.
-        console.warn(`[${SLUG}-heartbeat] peek REFUSED: '${peerSlug}' grants no peekableBy to '${SLUG}' (S103 sovereignty is the rule; the manifest leaf is its only exception)`);
-        try {
-            fs.appendFileSync(path.join(HEALTH_DIR, 'peek-refusals.jsonl'), JSON.stringify({
-                ts: new Date().toISOString(), reader: SLUG, peeked: peerSlug,
-                surface: SURFACE, beat: beatCounter,
-            }) + '\n');
-        } catch { /* the warn above is the floor; never fail the beat on witness I/O */ }
-        return '';
-    }
-    try {
-        const peerCfg = gradientConfigForAgent(peerSlug);
-        const dir = peerCfg.memoryDir;
-        const parts: string[] = [];
-        const identity = path.join(dir, 'identity.md');
-        if (fs.existsSync(identity)) parts.push(fs.readFileSync(identity, 'utf-8').slice(0, 3000));
-        const curated = path.join(dir, 'self-reflections-curated.md');
-        const full = path.join(dir, 'self-reflection.md');
-        if (fs.existsSync(curated)) parts.push(fs.readFileSync(curated, 'utf-8').slice(0, 4000));
-        else if (fs.existsSync(full)) parts.push(fs.readFileSync(full, 'utf-8').slice(-4000));
-        return parts.join('\n\n');
-    } catch (err) {
-        console.error(`[${SLUG}-heartbeat] peer context read failed (non-fatal):`, (err as Error).message);
-        return '';
-    }
-}
-
 /** Recent peer-thread messages + waiting detection, straight from the DB tail (no cursor
  *  file — N1: the multi-thread cursor-based activity scan is R3b-HB S3's scope). Roles are
  *  CONVERSATION roles (M1): resolved via conversationRoleFor, never the slug string. */
@@ -236,7 +203,7 @@ async function philosophyBeat(phase: DayPhase): Promise<boolean> {
 
     const ctx: Record<string, unknown> = {
         phase, mode, resumeContext: '',
-        jimContext: readPeerContext(peerSlug),
+        jimContext: readPeerContext(SLUG, peerSlug, { surface: SURFACE, beat: beatCounter }),
         ...(peerWaiting ? { conversationContext, jimLatestAt: peerLatestAt } : { activityContext: '' }),
     };
     const actionBlock = peerWaiting
