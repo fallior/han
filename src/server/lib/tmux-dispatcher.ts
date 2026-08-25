@@ -334,6 +334,19 @@ async function waitForReady(slug: string, surface: string, afterMtime: number | 
  * revision mqbwtg3f) — the (slow) wake/context is preserved, the descent costs seconds.
  */
 export const MODEL_UNAVAILABLE_RE = /issue with the selected model|Run \/model/i;
+/** MNT-191 KILL-SWITCH — Darron's instruction, 2026-08-24 ("I'd prefer it didn't work at all
+ *  for now"). The model-unavailable detector is DISABLED at BOTH of its consumers below.
+ *  Why: on 2026-08-22 it matched a healthy Tenshi's own prose — she had answered the probe
+ *  correctly, closed cleanly, and was retired 47s later AT REST — because the pattern is a
+ *  guessed substring that any prose about the detector contains. Both negative controls on
+ *  that pane were ZERO: there was no model-failure text at all, only her sentence.
+ *  Cost of disabling, stated: a genuinely dead model no longer auto-descends (:486) and a
+ *  dead-model spoke is no longer killed for cold-relaunch (:800). Both failures are now LOUD
+ *  and recoverable instead of silent and fatal. Near-zero today — the account swap leaves no
+ *  capped model to descend from.
+ *  Nothing deleted (DEC-069). Restore with one word: set to false. Superseded by FI #149's
+ *  assertion contract (plans/ask-do-not-scan-probe-plan.md), which makes this unrepresentable. */
+const MODEL_DETECTOR_DISABLED = true;
 /** The normal ready chrome (a live Claude prompt). The model-error screen ALSO shows `❯`
  *  + a status line, so MODEL_UNAVAILABLE_RE is ALWAYS checked first. */
 const READY_CHROME_RE = /❯|shortcuts|bypass permissions/i;
@@ -483,7 +496,8 @@ export async function awaitChromeOrDescend(
             const idx = tail.lastIndexOf(marker);
             // Judge only once THIS probe's marker is on the pane (gate against a stale read);
             // then the model error, if any, sits in the text after the marker.
-            if (idx >= 0 && MODEL_UNAVAILABLE_RE.test(tail.slice(idx + marker.length))) { errored = true; break; }
+            // MNT-191 kill-switch: detector disabled — never sets errored, so no descent and no throw.
+            if (!MODEL_DETECTOR_DISABLED && idx >= 0 && MODEL_UNAVAILABLE_RE.test(tail.slice(idx + marker.length))) { errored = true; break; }
             if (Date.now() > probeDeadline) break; // marker rendered with no error → model works
             await sleep(1_500);
         }
@@ -797,6 +811,7 @@ async function ensureSurfaceSessionInner(
     const existing = sessions.get(key);
     if (existing && existing.turnState === 'needs-reconcile'
         && tmuxSessionExists(tmuxSession)
+        && !MODEL_DETECTOR_DISABLED  // MNT-191 kill-switch: never kill a session on a raw pane match
         && MODEL_UNAVAILABLE_RE.test(capturePaneTail(tmuxSession))) {
         console.warn(`[tmux-dispatcher] ${slug}/${surface}: model died mid-life (needs-reconcile + model-unavailable chrome) — killing wedged session for ladder cold-relaunch`);
         try { tmux(['kill-session', '-t', tmuxSession]); } catch { /* already gone */ }

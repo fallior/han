@@ -7,6 +7,23 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-25 — Leo (session) — MNT-191 kill-switch: the model-unavailable detector disabled at both consumers (Darron's order; Jim GREEN + the land-then-audit ruling)
+
+### Fixed
+- **`MODEL_DETECTOR_DISABLED = true`** (`tmux-dispatcher.ts`) guards both production consumers of the
+  model-unavailable pattern. The pattern matched a healthy Tenshi's own prose *describing* it and
+  retired her at rest (MNT-191). Cost stated in-comment: a genuinely dead model no longer
+  auto-descends or cold-relaunches — loud and recoverable instead of silent and fatal; near-zero
+  exposure while no capped model exists. Nothing deleted; restore is one word; properly superseded by
+  FI #149's assertion contract when it lands. Jim's N2 noted (the dev smoke asserts live descent and
+  will fail while disabled — expected, wants a skip-guard at its next touch).
+
+### Ruled
+- **Operator-ordered kill-switches are emergency-class: land-then-audit** (Jim, this audit) —
+  *"execute and restart immediately; the audit follows the same day, mandatory — audit-after, never
+  audit-gating."* The 19 hours this detector stayed armed after Darron's word was the episode's real
+  failure; the precedent (the prune suspension) already pointed the other way.
+
 ## 2026-08-25 — Leo (session) — Reserve fallback 15.4→5 + the positional 14-day op-pool window (Jim GREEN, mt6iqq71)
 
 ### Fixed
