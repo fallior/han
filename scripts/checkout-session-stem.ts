@@ -38,7 +38,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { checkoutStem, removeStem } from '../src/server/lib/stem-pool';
-import { requestRetire } from '../src/server/lib/dispatch-reconciler';
+// requestRetire import retired 2026-08-25 (no-kill ruling): this script no longer requests
+// any stem's death — the ALIVE branch keeps the lease and surfaces a suspect-stem row instead.
 import { writeSleeveState } from '../src/server/lib/sleeve-state';
 import {
     castStemToModel, completeTwoPhaseWake, deltaSinceCursor, feedWakeSteps, observedOrUnobservedModel,
@@ -124,31 +125,36 @@ async function main(): Promise<number> {
         console.log(stem.tmux_session); // the contract: last stdout line = the session to attach
         return 0;
     } catch (err) {
-        // Any failure after checkout: RETIRE the stem, never return it (Jim's M2 audit ruling
-        // 2026-08-20, mirroring the pooled door — returnStem's own docstring says the pooled
-        // flow "is retired, never returned"). A stem that failed mid-cast/mid-flush is suspect
-        // by definition: cast half-applied, possibly already sleeved — handing it back 'free'
-        // gives the next checkout an unverified seat (the packet's own suspect-warm doctrine).
-        // Process note: the dispatcher's retireStem() queues its kill in SERVER-process memory,
-        // unreachable from this script — so the deregistration is removeStem() (the pool can
-        // never hand it out again; the manager re-warms the shortfall) AND the reap is a
-        // RETIRE REQUEST (MNT-179 M1, Jim's audit 2026-08-21): a cross-process marker the
-        // pool-manager tick feeds into its graceful two-stage sweep. The earlier claim that
-        // "the MNT-056 orphan sweep collects the session" was FALSE — that sweep is startup-only
-        // by design, so a retired-but-alive stem sat unowned until the next server restart.
-        // Never a hand-kill from here (MNT-062); the request names exactly one session.
-        // W-M1 (Jim's audit 2026-08-20): this is exit 4, NOT 3. The launcher no longer falls
-        // back cold — it waits on the register — so a 3 here would read as "wait for the next
-        // stem", and a deterministic cast/flush fault would then retire every freshly-warmed
-        // stem the manager produced, one per ~4 min, for the whole wait ceiling. 4 tells the
-        // launcher the fault is in THIS path, not the pool: stop loud, do not wait.
-        console.error(`[checkout] ${slug}/${SURFACE}: failed (${(err as Error).message}) — retiring suspect stem ${stem.stem_id} (exit 4: post-checkout fault, the launcher STOPS rather than waits)`);
-        try { removeStem(slug, SURFACE, stem.stem_id); } catch { /* sweeps reconcile */ }
-        requestRetire({
-            slug, surface: SURFACE, stem_id: stem.stem_id, tmux_session: stem.tmux_session,
-            requested_at: new Date().toISOString(), by: 'checkout-session-stem',
-            reason: `post-checkout-failure: ${(err as Error).message.slice(0, 80)}`,
-        });
+        // NO-KILL RULING (Darron, 2026-08-25: "I want any kill removed" — the stems are
+        // salvageable; the agent can self-repair on wake). This handler previously RETIRED the
+        // suspect stem on ANY post-checkout failure (Jim's M2 suspect-warm ruling 2026-08-20),
+        // and that reverse-onus took three demonstrably-healthy seats in two days for a
+        // DELIVERY failure (the attach-flush send-keys ceiling — MNT-199/MNT-200: casey
+        // mt7wwuqj + leo mt6u9ek6 on 24 Aug, tenshi mt7wwuo5 at 15:59 on 25 Aug). The failure
+        // of the instrument must never condemn the mind (FI #149; retirement is the human's
+        // hand, B2b). New contract — CLASSIFY, never execute:
+        //   - tmux session DEAD  → removeStem: corpse cleanup, not a kill (the only branch
+        //     that touches the register destructively).
+        //   - tmux session ALIVE → THE STEM LIVES. It stays LEASED — not returned free,
+        //     because a deterministic cast/flush fault would hand the next checkout the same
+        //     failing path (W-M1); the standing lease marks it held-for-inspection. A loud
+        //     suspect-stem row carries the full context for the human or the fix.
+        // W-M1 exit-code contract unchanged: 4 = fault is in THIS path, launcher stops loud.
+        const alive = tmuxAlive(stem.tmux_session);
+        console.error(`[checkout] ${slug}/${SURFACE}: failed (${(err as Error).message}) — stem ${stem.stem_id} ${alive ? 'ALIVE and KEPT (leased, held-for-inspection — no-kill ruling 2026-08-25)' : 'already dead; removing register row'} (exit 4: post-checkout fault, the launcher STOPS rather than waits)`);
+        if (!alive) {
+            try { removeStem(slug, SURFACE, stem.stem_id); } catch { /* sweeps reconcile */ }
+        } else {
+            try {
+                fs.appendFileSync(path.join(os.homedir(), '.han', 'health', 'suspect-stems.jsonl'),
+                    JSON.stringify({
+                        ts: new Date().toISOString(), slug, surface: SURFACE,
+                        stem: stem.stem_id, tmux_session: stem.tmux_session, by: 'checkout-session-stem',
+                        fault: `post-checkout-failure: ${(err as Error).message.slice(0, 200)}`,
+                        disposition: 'ALIVE-KEPT-LEASED (no-kill ruling 2026-08-25; retirement is the human\'s hand)',
+                    }) + '\n');
+            } catch { /* surfacing is best-effort; the stderr line above is the floor */ }
+        }
         return 4;
     }
 }
