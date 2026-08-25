@@ -66,7 +66,23 @@ export function senescenceCeilingPctFor(slug: string, surface: string): number {
 export function opPoolWindowOpsFor(slug: string, surface: string): number {
     // Default 4000 ≈ 12 days at measured per-surface volume (Jim's drift-horizon
     // recommendation — 20000 would still be describing July in October).
+    //
+    // ⚠ SUPERSEDED as the primary window by Darron's ruling 2026-08-24 — retained as the
+    // absolute hard cap only. The "≈12 days" equivalence was measured on the fastest
+    // surface and does not hold: at 2026-08-24 volumes 4000 ops is 65 days on
+    // leo-heartbeat (61.7/day), 257 days on leo-human-response (15.6/day) and 1,170 days
+    // on tenshi-compression (3.4/day). An ops-count window cannot be a time horizon when
+    // per-surface volume differs by 18x. See opPoolWindowDaysFor.
     return (spokeLifecycleFor(slug, surface) as any).opPoolWindowOps ?? 4000;
+}
+/** Darron's ruling 2026-08-24: the p99 window is a ROLLING 14 DAYS, floored at a minimum
+ *  population. Rows older than this are excluded from the CALCULATION only — never deleted
+ *  (DEC-069); the pool file stays append-only and complete. Slow-pulsing surfaces are the
+ *  reason for the floor: a 14-day cull that would drop the pool below opPoolMinSamples
+ *  reaches further back instead, so only pools that remain >= the floor are eligible for
+ *  the cull. Equivalently: the window is the MORE INCLUSIVE of (last N days, last M rows). */
+export function opPoolWindowDaysFor(slug: string, surface: string): number {
+    return (spokeLifecycleFor(slug, surface) as any).opPoolWindowDays ?? 14;
 }
 export function opPoolMinSamplesFor(slug: string, surface: string): number {
     return (spokeLifecycleFor(slug, surface) as any).opPoolMinSamples ?? 500;
@@ -74,13 +90,30 @@ export function opPoolMinSamplesFor(slug: string, surface: string): number {
 export function boundaryCheckMinCtxPctFor(slug: string, surface: string): number {
     return (spokeLifecycleFor(slug, surface) as any).boundaryCheckMinCtxPct ?? 80;
 }
-/** The declared fallback reserve (pct) — served ONLY at n=0 (a genuinely empty pool; the
- *  cold-start ladder's pooled-max takes over from op one). Sized from Jim's measured HAN
- *  numbers (p99 ≈ 15.4% of a 200K window) — ⚠ STARTER-SWEEP FLAG: this is a HAN-shaped
- *  constant (a number that encodes us); a starter garden ships something deliberately
- *  roomier, and the extraction sweeps treat it like a slug literal. */
+/** The declared fallback reserve (pct) — served at n=0 (a genuinely empty pool; the
+ *  cold-start ladder's pooled-max takes over from op one).
+ *
+ *  ⚠ IT IS NOT TRANSIENT ON EVERY SURFACE. `session` never writes op rows at all — an
+ *  attached seat's typed turns do not traverse the dispatcher, so no work-unit boundary
+ *  fires — which means there is no `*-session.jsonl` pool and this fallback is that
+ *  surface's PERMANENT reserve, not its cold-start one. A value named "fallback" has been
+ *  load-bearing forever on the one surface a human sits in.
+ *
+ *  Was 15.4, documented as "Jim's measured HAN numbers (p99 ≈ 15.4% of a 200K window)".
+ *  ⚠ THAT FIGURE IS CONTRADICTED BY THE GARDEN'S OWN op-pool: across 2,268 recorded work
+ *  ops (2026-08-24), the median op is 0-2%, per-surface p99 is 3-5, and the single largest
+ *  operation ever recorded anywhere is 12 (tenshi-human-response). 15.4 exceeded the
+ *  all-time maximum, so on `session` the line sat at 98-15.4 = 82.6 and surrendered ~10
+ *  points of usable context to a number the evidence does not support. Either the original
+ *  measurement predates the op-pool or it measured a different unit; flagged for Jim rather
+ *  than silently overwritten. Set to 5 by Darron's ruling 2026-08-24 (above every measured
+ *  p99, below every recorded max but one).
+ *
+ *  ⚠ STARTER-SWEEP FLAG retained: still a HAN-shaped constant. A starter garden reaches
+ *  pooled-max from op one on every dispatched surface, so 5 is safe there too — but its
+ *  `session` surface inherits this permanently, exactly as ours did. */
 export function fallbackReservePctFor(slug: string, surface: string): number {
-    return (spokeLifecycleFor(slug, surface) as any).fallbackReservePct ?? 15.4;
+    return (spokeLifecycleFor(slug, surface) as any).fallbackReservePct ?? 5;
 }
 
 // ── Paths ────────────────────────────────────────────────────────────────────
@@ -290,7 +323,7 @@ export function computeReserve(slug: string, surface: string, session: string): 
         // most likely corruption (a torn final line after a crash) is exactly the one
         // that must not vanish (Casey: a damaged record is evidence of the damaging
         // event — treat it as the most evidence-bearing row, not the least).
-        rows = lines.slice(-windowOps).map((l): OpRow => {
+        const parsed = lines.slice(-windowOps).map((l): OpRow => {
             try { return JSON.parse(l) as OpRow; }
             catch {
                 return {
@@ -300,6 +333,44 @@ export function computeReserve(slug: string, surface: string, session: string): 
                 };
             }
         });
+
+        // ── Darron's ruling 2026-08-24: rolling 14 days, floored at the min population ──
+        // The window is the MORE INCLUSIVE of (last windowDays) and (last minSamples rows):
+        // cull to the time horizon only when doing so still leaves >= minSamples, else reach
+        // further back until it does. Slow-pulsing surfaces (compression at ~3.4 ops/day)
+        // would otherwise be culled to nothing by a bare time window. Excluded rows are
+        // excluded from the CALCULATION only — the pool file is append-only and nothing is
+        // deleted (DEC-069).
+        //
+        // ⚠ SENTINELS ARE AGE-EXEMPT, and this is load-bearing rather than tidy. The
+        // unparseable sentinel is constructed with ts:'' (above), and Date.parse('') is NaN,
+        // so ANY naive time comparison drops it — which would mean `bad` is never found and
+        // Jim's M2 contamination REFUSAL silently stops firing. A time window that quietly
+        // disables the refusal it sits next to is strictly worse than no window. A damaged
+        // record is evidence of the damaging event (Casey) and does not age out.
+        const windowDays = opPoolWindowDaysFor(slug, surface);
+        const cutoffMs = Date.now() - windowDays * 86_400_000;
+        // POSITIONAL, not predicate-based, and the distinction is the whole correctness
+        // argument. The pool is append-only and therefore time-ordered, so the contiguous
+        // tail beginning at the first in-horizon row IS the time window — and because it is
+        // a slice rather than a filter, an UNDATED row (the unparseable sentinel, ts:'')
+        // sitting in that era is carried by position instead of being silently dropped by a
+        // Date.parse('') → NaN comparison. That drop would remove `bad` from the window and
+        // silently disable Jim's M2 contamination refusal.
+        //
+        // Equally: a sentinel is NOT age-exempt. Exempting it reads as respectful of damaged
+        // evidence and in fact converts a TEMPORARY refusal into a PERMANENT one — the
+        // surface could never use its pool again. The row is retained on disk forever
+        // (DEC-069); it simply stops voting once its era leaves the horizon.
+        const firstInHorizon = parsed.findIndex(r => {
+            const t = r.ts ? Date.parse(r.ts) : NaN;
+            return Number.isFinite(t) && t >= cutoffMs;
+        });
+        const timeSlice = firstInHorizon >= 0 ? parsed.slice(firstInHorizon) : [];
+        // Eligible for the cull only if the time-window population clears the floor;
+        // otherwise reach further back until it does (Darron: slower-pulsing seats).
+        const timeSliceWork = timeSlice.filter(r => r.klass === 'work' && r.opPct !== null).length;
+        rows = timeSliceWork >= minSamples ? timeSlice : parsed.slice(-minSamples);
     } catch { /* no pool yet */ }
 
     const windowRows = rows.filter(r => r.def === OP_DEF);

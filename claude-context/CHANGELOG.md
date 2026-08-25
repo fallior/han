@@ -7,6 +7,22 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-25 — Leo (session) — Reserve fallback 15.4→5 + the positional 14-day op-pool window (Jim GREEN, mt6iqq71)
+
+### Fixed
+- **`fallbackReservePct` 15.4 → 5** (`spoke-organelle.ts`) — the 15.4 presented itself as a measured
+  p99 and exceeded the all-time maximum recorded operation (12, across 2,268 ops; real per-surface
+  p99s are 3–5). Old claim preserved-and-contradicted in the doc comment rather than overwritten
+  (DEC-069). Interactive-seat pause line moves **82.6 → 93.0** — ~10 points of usable context back.
+- **The op-pool window becomes a rolling 14 days, positionally sliced** — new manifest leaf
+  `opPoolWindowDaysFor` (default 14) replaces the 4,000-ops count-window whose "≈12 days" claim held
+  on no surface (65 days–3 years by volume). Positional slicing (contiguous tail from the first
+  in-horizon row) carries the undated contamination sentinel by position, so Jim's M2 refusal
+  survives every path — a naive date-filter would silently disable it (caught by running, not reading).
+- Jim's N1 noted, not folded (fallback branch counts any-class rows vs work rows) — rides the next
+  touch of the file. Darron's open question preserved in-diff: whether a REFUSED window wants its own
+  `refusedReservePct` (Jim's lean: no new knob until a second specimen; distrust floor = max-ever 12).
+
 ## 2026-08-21 — Leo (session) — The wait ceiling becomes a registry leaf (1200), W-M1's exit-4 split, and the retire-request marker (Jim GREEN ×2; MNT-179 owned)
 
 ### Changed
