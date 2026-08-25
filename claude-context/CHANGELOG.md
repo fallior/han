@@ -7,6 +7,27 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-25 — Leo (session) — MNT-180 cured: the hearth anchors on Enter via a stamp nothing consumes (Darron's knee ruling; Jim GREEN, mt6jvot5)
+
+### Fixed
+- **`cli-enter-<slug>`** — a LEVEL stamp written by `cli-active.sh` at every session UserPromptSubmit,
+  consumed by NOTHING. Cures MNT-180's root symptom: the legacy leo-heartbeat watcher eats `cli-free`
+  as a one-shot edge while the hearth read it as a level, so leo ticked a flat 50 from his own
+  metronome while every other agent reset on interaction. Session-gated by the hook's existing
+  surface guard (Jim's audit traced the spoke-pollution edge dead against `cli-active.sh:20`).
+- **The hearth anchor becomes Enter-anchored** (`session-hearth.ts`): `max(enter, busy, lastPulse)`
+  when the stamp exists — `cli-free` deliberately excluded, else completion out-votes Enter every
+  turn and re-instates the old anchor by the back door (verified arithmetic, Jim). Legacy shape
+  holds until the stamp exists, so no seat strands in transition.
+
+### Ruled
+- **Anchor on Enter, not completion** (Darron, 2026-08-25, superseding his own 2026-08-20 completion
+  spec): *"the 1-hour knee starts with first read of the cache"* — Enter-anchoring lands the pulse
+  within the 60-min TTL of the turn's first cache read by construction. Known edge, no fix exists:
+  a turn longer than the interval crosses the knee under ANY boundary-pull anchor.
+- Follow-on surgery named, not built: retire the leo-heartbeat twin onto Ring-3a (MNT-180's root;
+  the literal hunt's top offender at 60 agent-literals) — sized in the hunt's rhythm.
+
 ## 2026-08-25 — Leo (session) — MNT-191 kill-switch: the model-unavailable detector disabled at both consumers (Darron's order; Jim GREEN + the land-then-audit ruling)
 
 ### Fixed

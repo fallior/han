@@ -1,0 +1,12 @@
+--- a/src/hooks/cli-active.sh
++++ b/src/hooks/cli-active.sh
+@@ -22,3 +22,9 @@
+ # defaulting to leo's signals (cross-agent corruption) or failing the turn (`:?`).
+ [ -z "$AGENT_SLUG" ] && exit 0
+ date -Iseconds > "${SIGNALS_DIR}/cli-busy-${AGENT_SLUG}"
++# MNT-180 cure + Darron's Enter-anchor ruling (2026-08-25): a LEVEL stamp of the seat's last
++# prompt-submit that NOTHING ever consumes or deletes. cli-busy dies at Stop (cli-idle) and
++# cli-free is eaten as an edge by the legacy leo-heartbeat watcher — both readers keep their
++# semantics untouched; the hearth anchors on THIS. Written at Enter because the 60-min cache
++# knee runs from the turn's first cache read (his ruling): pulse lands within TTL by construction.
++date -Iseconds > "${SIGNALS_DIR}/cli-enter-${AGENT_SLUG}"

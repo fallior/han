@@ -296,14 +296,25 @@ export function startSessionHearth(slug: string): void {
                     counter({ kind: 'session-pulse-push-attempt', slug, surface: 'session', session: seatSession, verdict });
                 }
             }
-            // Completion-anchored (his 9:54 AM drift-catch): cli-free-<slug> mtime IS the
-            // seat's last turn completion (written at every session Stop, surface-gated so a
-            // spoke's turns can never reset it); busy covers mid-turn; the stamp paces due
-            // re-writes between pulses on an idle occupied seat. Each agent's rhythm its own.
+            // ENTER-anchored (Darron's ruling 2026-08-25, superseding his 2026-08-20 completion
+            // anchor — MNT-180's cure): cli-enter-<slug> is a LEVEL stamp written by cli-active
+            // at every UserPromptSubmit and consumed by NOTHING, so it cannot be eaten the way
+            // cli-free-leo is (the legacy heartbeat watcher unlinks cli-free as a one-shot edge
+            // — two readers, one file, opposite semantics; leo ticked a flat 50 from lastPulse
+            // while every other agent reset on interaction). WHY Enter, not completion (his
+            // ruling, recorded): the 60-min cache knee runs from the turn's FIRST cache read —
+            // anchored on Enter the pulse lands within TTL by construction; anchored on
+            // completion, a 10-minute turn puts the next pulse at the knee's edge. busy stays
+            // as the mid-turn belt; cli-free is the TRANSITION fallback only (a seat whose
+            // hook predates the stamp), else completion would out-vote Enter and re-instate
+            // the old anchor by the back door.
             const busy = mtimeMs(busySignalPath(slug));
+            const enter = mtimeMs(path.join(HAN, 'signals', `cli-enter-${slug}`));
             const free = mtimeMs(path.join(HAN, 'signals', `cli-free-${slug}`));
             const lastPulse = readLastPulseMs(slug);
-            const anchor = Math.max(busy ?? 0, free ?? 0, lastPulse);
+            const anchor = enter !== null
+                ? Math.max(enter, busy ?? 0, lastPulse)
+                : Math.max(busy ?? 0, free ?? 0, lastPulse); // legacy shape until the stamp exists
             if (anchor === 0) {
                 // Occupied but no signal yet (freshly checked out, first flush still landing):
                 // seed the stamp so the first due fires one interval from NOW — the timer's birth.
