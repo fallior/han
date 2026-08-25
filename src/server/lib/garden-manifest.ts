@@ -91,6 +91,14 @@ export interface SurfaceManifest {
      *  (scheduled, non-overlapping). (PR-C2 collapsed the short-lived `pooled?: boolean` into
      *  this — F2, zero users at collapse.) */
     poolSize?: number;
+    /** R3b S1 (Jim's M1, 2026-08-25): does this heartbeat surface draw PHILOSOPHY beats (the
+     *  peer-thread reflection type)? An EXPLICIT capability leaf, never inferred from the mere
+     *  existence of a `peerConversations` edge — tenshi and casey both hold live jim edges, and
+     *  edge-derived activation would have lit them up silently on their next restart (the
+     *  activation-of-latent-config class). Leo-only at cutover; offered to each mind thereafter
+     *  (Casey's offer-never-roster). The peer edge is the ADDRESS the beat uses; this leaf is
+     *  the CONSENT to draw the beat type at all. Default falsy. */
+    philosophyBeats?: boolean;
 }
 
 /**
@@ -262,6 +270,15 @@ export interface AgentManifest {
      *  (e.g. the leo↔jim philosophy thread). The Jim↔Leo edge as manifest DATA,
      *  not a literal welded into an agent's driver. (Project-b Phase 2 — DEC-081.) */
     peerConversations?: Record<string, string>;
+    /** R3b S1 (Tenshi's T1 + Casey's grant doctrine, 2026-08-25): which slugs may READ this
+     *  agent's identity files (identity.md + self-reflections-curated.md, curated preferred)
+     *  as peer context for philosophy beats. The grant lives on the PEEKED side — authored,
+     *  dated in the diff that adds it, revocable by removing the entry — because a reader-side
+     *  edge granting the read is ambient authority wearing config's clothes, and a use that
+     *  survives by not being noticed acquires nothing (no prescription without acquiescence).
+     *  S103 sovereignty stays the RULE; this leaf is its written exception, never the reverse.
+     *  Absent/empty = nobody may peek; the driver REFUSES loudly. */
+    peekableBy?: string[];
     // ── Identity-as-config (S199 P4+P5, DEC-073→config): the template-var contract that was
     //    duplicated in each han<agent> launcher heredoc. The Garden Manifest is now the single
     //    source; `agentTemplateVars(slug)` assembles the full ${...} set for the shared generator. ──
@@ -942,6 +959,34 @@ export function slugForConversationRole(role: string): string | null {
 export function peerConversationFor(slug: string, peerSlug: string): string | null {
     const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
     return agent?.peerConversations?.[peerSlug] ?? null;
+}
+
+/** R3b S1 (Jim's M1): does `slug`'s heartbeat surface draw philosophy beats? Explicit leaf,
+ *  never inferred from a peer edge — see the SurfaceManifest field doc. Default false. */
+export function philosophyBeatsEnabled(slug: string): boolean {
+    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
+    const hb = agent?.surfaces?.find(s => s.name === 'heartbeat');
+    return hb?.philosophyBeats === true;
+}
+
+/** R3b S1 (Tenshi's T1): may `readerSlug` read `peekedSlug`'s identity files as peer context?
+ *  The grant lives on the PEEKED side (`peekableBy`); absent/empty = refuse.
+ *  C1 (Casey's massaging, 2026-08-25): the leaf is RE-READ FROM DISK AT EXERCISE TIME, never
+ *  answered from the boot cache — revocability is the load-bearing property of the T1
+ *  settlement, and a boot-latched read would make "revocable by one line" quietly mean
+ *  "revocable by one line plus a restart nobody is told about" (the runtime-control-is-a-
+ *  TRIPLE class). Any read/parse failure REFUSES (default-closed — a corrupt manifest must
+ *  never grant); the caller's refusal path carries the durable witness (W1). */
+export function peekGranted(peekedSlug: string, readerSlug: string): boolean {
+    try {
+        const raw = readFileSync(join(hanHome(), 'garden-manifest.json'), 'utf8');
+        const cfg = JSON.parse(raw);
+        const agents = (cfg.manifest ?? cfg)?.agents ?? [];
+        const peeked = agents.find((a: any) => a?.slug === peekedSlug);
+        return Array.isArray(peeked?.peekableBy) && peeked.peekableBy.includes(readerSlug);
+    } catch {
+        return false; // default-closed: an unreadable grant is no grant
+    }
 }
 
 /**

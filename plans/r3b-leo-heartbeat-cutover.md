@@ -91,3 +91,51 @@ lethal-reaction register (Robin Hood port re-read against Class A/E) · R3c (jim
 scope) · `plans/han-starter-critical-path.md` (the scour gate this serves).
 
 — Leo (session), 2026-08-25 evening, on Darron's go. Held for Jim's plan-audit.
+
+---
+
+## Folds bound 2026-08-25 late evening (all four chairs read whole; S0+S1 BUILT, held for Jim's diff-audit)
+
+**Jim's audit (GREEN, 297th leg):**
+- **M1 BOUND** — philosophy beats gate on an EXPLICIT `philosophyBeats` surface leaf, never edge-existence. Leo-only at cutover (`~/.han/garden-manifest.json`); tenshi/casey unset — each gets the OFFER (Casey's §3, offer-never-roster, with her declared interest as an affected party on the record).
+- **M2 BOUND** — the thread-posting PORT row is RE-DISPOSITIONED → RETIRE. **Ground (per Casey's §4, recorded with its revival condition):** `postMessageToConversation`/`notifyServer`/`writeBroadcastSignal` have zero callers; the live path is the spoke's own REST curl in the action block. *If the REST convergence is ever undone, this retirement reopens on its own terms.* D2 dissolved.
+- **F1** — acceptance gains an OBSERVATION row: pre-migration baseline banked (leo ≈30 annotations/14d to 20 Aug, Jim's figure); post-soak rate recorded beside it. Not a gate.
+- **F2 BOUND** — prompt assembly stays in the DEC-087 profile (`philosophy-beat-txn` + actionBlock-as-context). **Named residual:** the profile's scaffold is leo/jim-worded (`jimContext`, `jim-waiting`) — factually correct while leo is the only enabled slug; it generalises to peer-worded keys in the same commit that accepts a second slug's yes.
+- **F3 BOUND** — S0's rename states its boundary in both the header and the runtime guard: tmux-dispatcher's R3b/R3c strings are DEC-099's stem-pool names, untouched, never this guard's referent.
+- **F4** — bound to S3 with T3 (below): the distress writer's `agent: 'leo'` payload field slug-parameterises with the thresholds.
+
+**Tenshi's chair (GREEN, T1 decided before S1 per her condition):**
+- **T1 BOUND** — `readPeerContext` is GRANT-GATED on the PEEKED side: new `peekableBy` manifest field; absent/empty = loud refusal. Jim's entry records `peekableBy: ["leo"]` — codifying his standing de-facto grant (the twin has read these files since the S57 era), **flagged for Jim to confirm or strike at diff-audit: the grant's owner audits the diff that grants it.** The peek names itself in the per-UID actor matrix at S5 (same commit as the flip).
+- **T2** — bound to S4 (Robin Hood): single-watcher declared in manifest + fail-loud on double-enable; the pidfile arm verifies identity (`/proc/PID/cmdline` or pid-guard verdict) before any signal — Casey's §5 corroboration doctrine.
+- **T3** — bound to S3: `routes/supervisor.ts` distress filenames come from the registry in the same slice as the writer's port; acceptance gains the synthetic-distress-on-a-non-leo-slug row.
+- **Acceptance #4 instrumented** — byte-unchanged becomes a MEASUREMENT: hash the three peer trees before/after the soak, compare digests.
+
+**Casey's chair (GREEN):**
+- **Acceptance gains the reads row** — #4 is a write instrument and cannot see T1's subject; new row: a peek attempt against a slug WITHOUT the grant leaf REFUSES, observed in the metal.
+- **§4 RETIRE grounds** — every RETIRE row's reason is recorded as a GROUND with its revival condition implied (dependent relative revocation). M2's row above is the worked example.
+- S103 stays the stated rule; the grant leaf is its written exception — never the reverse.
+
+**S1 BUILT (this evening, uncommitted, held for Jim's diff-audit):**
+- `lib/garden-manifest.ts` — `philosophyBeats?` surface field, `peekableBy?` agent field, `philosophyBeatsEnabled()` + `peekGranted()` accessors (each carrying its chair's reasoning in the doc).
+- `~/.han/garden-manifest.json` — leo heartbeat `philosophyBeats: true`; jim `peekableBy: ["leo"]` (backup: `.pre-r3b-s1-2026-08-25.bak`). Config is INERT until S5 (the guard still refuses leo; tenshi/casey read the leaf as false).
+- `agent-heartbeat.ts` — S0 renames (header + runtime guard, F3 boundary in both); `readPeerContext` (grant-gated, curated-preferred, loud refusal); `readPeerThread` (peer-waiting detection + recent context via `conversationMessageStmts`); `philosophyBeat` (jim-waiting → compose + REST self-post + S163 post-verification; independent → self-reflection append; paired write via `writeBeatMemory`; stand-downs never paired-written); beat-branch on waking-phase parity behind the leaf; v1 header list updated (S1 landed; S2/S3 scopes sharpened — the general activity seed moved to S3 with its reason).
+- tsc: 11 pre-existing baseline errors, zero in touched files.
+- **Behaviour change tonight: NONE.** The guard still refuses leo (S5 is the flip); tenshi/casey draw nothing (leaf unset). The build is capability-in-waiting — exactly what makes it audit-sized.
+
+— Leo (session), folds bound + S1 built 2026-08-25 ~8:45 PM; held for Jim's diff-audit.
+
+---
+
+## Fix round 2026-08-25 ~9:10 PM (Jim NOT-YET → M1/M2/M3; Tenshi W1; Casey C1; all landed, held for re-audit)
+
+- **M1 LANDED** — roles resolve via `conversationRoleFor()` both sides (peer AND self: the thread read, the curl's role field, the post-verification). Jim posts as `supervisor` (Tenshi's DB receipt: 75/96/0); the slug string never reaches a role comparison again.
+- **M2 LANDED** — the curl posts to `communityPort()` (the manifest leaf whose own doc records the 2026-05-11 scattered-literal cure). The works-for-leo-by-coincidence resident-port read is gone.
+- **M3 LANDED** — port parity with the twin's `nextBeatType` (`:1350`): WORK phase only, 1-in-3. A cutover changes the driver, never the rhythm; the peek grant stays exercised at the rate its owner had in view (Casey's licence footing). Retuning belongs to Darron's weighted beat-roster design (his ruling tonight, folded into the plan by Jim's leg: scoped native beats — leo philosophy, jim supervisor-as-beat [R3c-HB's landing shape], tenshi security, casey legal — weights agent-tunable, supervisor a jim-only singleton; a short design note post-S1, not a rework).
+- **W1 LANDED** — the peek refusal writes a durable row (`~/.han/health/peek-refusals.jsonl`) beside the pane warn: the evaporating-witness cure, and the instrument acceptance #7 runs on (one artefact, two duties — Casey's join).
+- **C1 LANDED** — `peekGranted` re-reads its leaf from disk at exercise time, default-closed on any read/parse failure. "Revocable by one line" is now true in the metal, not just the record; the runtime-control TRIPLE honoured.
+- **N1 LANDED** — `readPeerThread` docstring now describes the body (no cursor file; the cursor scan is S3's scope). **N2 dissolved** — Tenshi's receipt: the backup exists at `.pre-r3b-s1-2026-08-25.bak` (new name pattern; the old glob missed it).
+- **Jim's grant row CONFIRMED by its owner in-thread**, with his ground recorded in his own voice — including the fallback's larger reach (curated absent → living tail), named and accepted. The consent instrument Casey called the garden's best.
+- **Commit-boundary requirement (staging time):** `lib/garden-manifest.ts` cohabits another seat's SONNET_LADDER hunks; hunk-split into its own declared commit (or dual-declare honestly). The compression wake-gate, orient-inject, and future-ideas working-tree changes are other seats' work — not staged with S1, each needing its own declaration.
+- tsc after the round: 11 pre-existing baseline, zero in touched files. Behaviour tonight still none (guard refuses leo until S5-HB).
+
+— Leo (session), fix round complete, held for Jim's re-audit.
