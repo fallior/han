@@ -357,7 +357,14 @@ const FABLE_LADDER: ModelLadder = ['fable', ...OPUS_LADDER];
 // near-Opus agentic at ~40% of the price — the candidate third rung for the post-7-July
 // model economics); descent to Fable→Opus so a drop mid-night self-heals, and DEC-092's
 // observed-model stamp keeps any fallback legible in the data.
-const SONNET_LADDER: ModelLadder = ['sonnet', 'fable', 'opus', 'haiku']; // explicit (a FABLE_LADDER spread would duplicate 'sonnet' mid-tail)
+// 2026-08-25 (Darron's order, the Friday fable-drain finding): fable + opus REMOVED from the
+// descent. Fable at rung 2 put the CHEAPEST surface's first fallback on the model with the
+// ~4x-SMALLER weekly window (measured post-reset 25 Aug: fable ≈13.6M tokens/point vs
+// all-models ≈54M/point) — one sonnet-rung miss cast the Friday 21 Aug heartbeat spoke onto
+// fable for a day (~62M, 55% of that day's fable burn). A cheap surface degrades to a cheap
+// model; a sonnet drop now descends to haiku and DEC-092's observed-model stamp keeps the
+// seam legible. (Reasons travel with the artefact — DEC-108.)
+const SONNET_LADDER: ModelLadder = ['sonnet', 'haiku'];
 
 // STEM_WARM_LADDER (DEC-101 warm-map/serve-map split — MNT-054; sonnet[1m] head 2026-08-19,
 // Darron's ruling, superseding his own 2026-08-11 haiku head): the model a pool stem is

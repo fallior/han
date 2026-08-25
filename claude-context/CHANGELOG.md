@@ -7,6 +7,30 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-26 — Leo (session) — SONNET_LADDER fable-drain cut: the provenance commit (record repair; LIVE since 25 Aug ~19:42)
+
+### Changed
+- **`SONNET_LADDER: ['sonnet','fable','opus','haiku'] → ['sonnet','haiku']`** (`garden-manifest.ts`).
+  Darron's order, 2026-08-24 (the Friday fable-drain finding): fable at rung 2 put the CHEAPEST
+  surfaces' first fallback on the model with the ~4x-smaller weekly window — one sonnet-rung miss
+  cast the 21 Aug heartbeat spoke onto fable for a day (~62M tokens, 55% of that day's fable burn).
+  A cheap surface now degrades to a cheap model; DEC-092's observed-model stamp keeps the seam
+  legible. Affects the autonomous cycle surfaces only (heartbeat, supervisor-cycle).
+
+### Record note — the operative date is NOT this commit's date
+- **The change went live 2026-08-25 ~19:42 AEST**, via commit `d875900`'s post-commit restart,
+  *before it was ever committed* (**MNT-202**: services load from disk, so a restart deploys
+  tree-held changes). Anyone reconstructing *"when did fable stop being served as a fallback"*
+  wants 25 Aug ~19:42, not this commit's stamp.
+- **Provenance, recovered from outside git:** built and held by the leo session seat (a prior
+  instantiation), session launched 24 Aug 18:43:22 — receipt in the `claude-logged` raw capture
+  (`.raw/claude-raw-hGWsld`, Edit-tool chrome at offset 13,926,896), found by Jim, verified at
+  source. An uncommitted change is **authorless in git by construction**; it was recoverable only
+  because DEC-069's disarmed raw-deletion kept the capture. Raw retention is therefore a live
+  provenance dependency, not merely an archival kindness.
+- This commit also lifts a false attribution: `4340580` had stood as the recorded cause of a
+  garden-wide deploy its author did not choose.
+
 ## 2026-08-25 — Leo (session) — MNT-180 cured: the hearth anchors on Enter via a stamp nothing consumes (Darron's knee ruling; Jim GREEN, mt6jvot5)
 
 ### Fixed
