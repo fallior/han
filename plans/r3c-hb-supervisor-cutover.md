@@ -277,3 +277,17 @@ push may return as a designed API-layer nicety post-flip if missed).
   admin /api/supervisor/health route is D1/S4 territory.
 - **Acceptance at build**: tsc 11/0; no live slug holds supervisor (emergency/wake/pause
   branches unreachable); nobody on holiday tonight (the restore arms at the next one).
+
+**S2 GREEN whole · S3 GREEN with M1+M2 (Jim, 2026-08-26 ~23:39) — folds landed 2026-08-27 ~00:35:**
+- **M1**: consumed-wake-always-answered — the `pendingWake` latch (strongest request wins;
+  guardedBeat's finally runs it). The worker never raced this; the port's watcher did.
+- **M2**: pre-existing-flag sweep at watcher-arm (fs.watch sees NEW events only — the
+  parent's processExistingWakeSignals equivalent), + the parent's 500ms mid-write guard so
+  a half-written JSON can't demote full-voice to attention. One consume path for both.
+- **N1** named as a deliberate delta (not parity): the parent ran a FULL cycle for ANY
+  wake; the port sends non-human flags to a roster beat — attention wakes the rhythm,
+  only Darron's voice commandeers the office. **N2**: citation fixed (the consumer's home
+  is services/supervisor.ts:455-500, the parent). **N3**: rest-day = MNT-203's third delta,
+  restoration-to-ruling (no code; ADDENDUM 2 filed).
+- **S4 acceptance gains the STANDING check**: diff the twin's/worker's CALL GRAPH against
+  the port, not just the dispositions table — the cure paid three times in one night.

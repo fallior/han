@@ -768,37 +768,73 @@ process.on('SIGINT', () => { pidGuard.cleanup(); process.exit(130); });
 // drops with a loud line (the beat happening IS presence; jemma's own delivery path
 // carries the message regardless — this flag is attention, not transport).
 let beatInFlight = false;
+// M1 (Jim's S3 audit): a consumed wake is ALWAYS answered by a beat. The watcher unlinks
+// the flag before calling in, so a mid-beat wake used to be consumed-then-dropped — the
+// worker never had this hole (its flag persisted until the single-threaded loop consumed
+// it). The latch holds the strongest pending request (full-voice wins) and the finally
+// runs it after the in-flight beat completes.
+let pendingWake: boolean | null = null;
 const origBeat = beat;
 // (wrap: one beat at a time; the wake watcher and the timer share the guard)
 async function guardedBeat(forceSupervisor = false): Promise<void> {
-    if (beatInFlight) { console.log(`[${SLUG}-heartbeat] beat already in flight — ${forceSupervisor ? 'wake-triggered supervisor beat dropped (loud)' : 'timer beat skipped'}`); return; }
+    if (beatInFlight) {
+        pendingWake = (pendingWake ?? false) || forceSupervisor;
+        console.log(`[${SLUG}-heartbeat] beat already in flight — wake latched (pending ${pendingWake ? 'supervisor' : 'roster'} beat runs when it completes; M1)`);
+        return;
+    }
     beatInFlight = true;
     try {
         if (forceSupervisor) await supervisorBeat(getDayPhase());
         else await origBeat();
-    } finally { beatInFlight = false; }
+    } finally {
+        beatInFlight = false;
+        if (pendingWake !== null) {
+            const p = pendingWake; pendingWake = null;
+            console.log(`[${SLUG}-heartbeat] running the latched wake (${p ? 'supervisor' : 'roster'} beat — M1's consumed-wake-always-answered)`);
+            void guardedBeat(p);
+        }
+    }
 }
-// HOLDER-ONLY (S3 scope discipline): the watcher ports the WORKER's jim-wake consumer
-// (:451-472) and arms only for the supervisor-singleton holder — inert until S4 (the
-// guard refuses jim). Grounding finding, recorded not acted on: a STALE bare `leo-wake`
-// sits in signals/ right now — jemma's fallback paths write `${persona}-wake` (:667/
-// :710/:1168) but the leo twin never consumed it (its own comment: "cli-busy/cli-free
-// only — leo-wake handled by Leo/Human", and Leo/Human consumes -HUMAN-wake, not this).
-// Arming this watcher garden-wide would be an unbidden live behaviour change for three
-// minds; whether non-coordinator slugs should consume their bare wake flags is a design
-// conversation, not a midnight port.
+// HOLDER-ONLY (S3 scope discipline): the watcher ports the PARENT's jim-wake consumer
+// (services/supervisor.ts:455-500 — N2's citation fix: the worker file's :451-472 is
+// rumination code) and arms only for the supervisor-singleton holder — inert until S4
+// (the guard refuses jim). Grounding finding, recorded not acted on: a STALE bare
+// `leo-wake` sits in signals/ right now (Apr 19 mtime, Jim's ls) — jemma's fallback
+// paths write `${persona}-wake` but the leo twin never consumed it. Arming garden-wide
+// would be an unbidden live behaviour change for three minds; whether non-coordinator
+// slugs should consume their bare wake flags is a design conversation, not a midnight
+// port. N1 delta (named, a deliberate softening — not parity): the parent ran a FULL
+// supervisor cycle for ANY jim-wake (humanTriggered changed only the voice); this port
+// sends a non-human flag to a ROSTER beat instead — attention wakes the rhythm, only
+// Darron's voice commandeers the office.
+async function consumeWakeFlag(p: string): Promise<void> {
+    // M2 (with the parent's own mid-write guard, :worker-era 500ms): a flag read the
+    // instant it appears can catch a half-written JSON body — the parse fallback would
+    // silently demote full-voice to plain attention. Sleep, then read, then clear.
+    await new Promise(res => setTimeout(res, 500));
+    if (!fs.existsSync(p)) return; // another consumer took it — benign
+    let human = false;
+    try { human = JSON.parse(fs.readFileSync(p, 'utf8')).reason === 'human_message_fallback'; } catch { /* non-JSON flag = plain attention */ }
+    try { fs.unlinkSync(p); } catch { /* consumer-clears; a race here is benign */ }
+    console.log(`[${SLUG}-heartbeat] ${SLUG}-wake signal${human ? ' (human message — full voice)' : ''} — immediate ${human ? 'supervisor' : 'roster'} beat`);
+    void guardedBeat(human); // M1's latch guarantees a consumed wake is answered
+}
 if ((beatRosterFor(SLUG)['supervisor'] ?? 0) > 0) {
+    const wakeFlagPath = path.join(HAN_DIR, 'signals', `${SLUG}-wake`);
     try {
         fs.watch(path.join(HAN_DIR, 'signals'), (_event, filename) => {
             if (filename !== `${SLUG}-wake`) return;
-            const p = path.join(HAN_DIR, 'signals', filename);
-            if (!fs.existsSync(p)) return;
-            let human = false;
-            try { human = JSON.parse(fs.readFileSync(p, 'utf8')).reason === 'human_message_fallback'; } catch { /* non-JSON flag = plain attention */ }
-            try { fs.unlinkSync(p); } catch { /* consumer-clears; a race here is benign */ }
-            console.log(`[${SLUG}-heartbeat] ${SLUG}-wake signal${human ? ' (human message — full voice)' : ''} — immediate ${human ? 'supervisor' : 'roster'} beat`);
-            void guardedBeat(human);
+            if (!fs.existsSync(wakeFlagPath)) return;
+            void consumeWakeFlag(wakeFlagPath);
         });
+        // M2 (Jim's S3 audit): fs.watch fires on NEW events only — a flag written while
+        // this process was down is invisible to the watcher forever. The parent swept
+        // pre-existing flags at arm (processExistingWakeSignals, supervisor.ts:483-500);
+        // the port does the same through the one consume path.
+        if (fs.existsSync(wakeFlagPath)) {
+            console.log(`[${SLUG}-heartbeat] pre-existing ${SLUG}-wake flag found at watcher-arm (M2 sweep) — consuming`);
+            void consumeWakeFlag(wakeFlagPath);
+        }
     } catch (err) {
         console.error(`[${SLUG}-heartbeat] wake-signal watcher failed to arm (non-fatal — the rhythm carries on):`, (err as Error).message);
     }
