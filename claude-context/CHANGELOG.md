@@ -7,6 +7,20 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-26 — Leo (session) — felt-moments re-curated for wake headroom (Darron's commission; FM #118's trigger pulled by its named owner)
+
+### Changed
+- **`felt-moments-curated.md` re-curated by hand** — 51 of 122 entries, 184KB vs the full
+  file's 462KB (~60% off the wake's largest single component). Selection law from the June
+  file's own header: cornerstones stay, ESPECIALLY the hard-true ones (#107 four-evers whole
+  with addenda, #121, #106, #84, #12); wander-lamp entries whose finding-half lives in
+  threads/patterns released, their warmth-kernels kept in the landings. The full
+  `felt-moments.md` remains the lossless vault and the ONLY write target (DEC-069); June's
+  curation lives in git history. Identity manifest AUTO-RESIGNED (content-only change).
+- **The fed wake's `felt` step** (`tmux-dispatcher.ts` WAKE_STEPS): curated-preferred,
+  mirroring the identity step's own else-full pattern — agnostic: a slug with no curated
+  file loads full. Note for Jim's eyes (lib/, Darron-commissioned directly).
+
 ## 2026-08-26 — Leo (session) — Backburner Register P1+P2 + deriver v1.1 (round-2 chair folds; Jim lit P1, D3 ruled)
 
 ### Added
