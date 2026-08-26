@@ -4417,6 +4417,21 @@ decision check mandatory). Refs: MNT-163, MNT-144, FI #116, DEC-104.
 
 **Cross-refs:** #237 (the provenance active link — *c0 records what was said, never what was done*); MNT-136 (the c0↔log bridge); FI #84 (store the relationship); FI #149 (the corpus — and Tenshi's *only the pane records what was done to it*); DEC-085, DEC-105, DEC-069.
 
+**2026-08-26 — CAPABILITY PROVEN + PRIORITY RAISED (Darron's ruling).** The transcript store
+answers *who-edited-what-when* directly: tool calls are assistant `tool_use` blocks with full
+structured inputs and native ms timestamps (proven: the SONNET_LADDER build act recovered in
+seconds as an Edit block at `2026-08-25T07:48:42.857Z` from leo's JSONL — Ring-3a `mt9d1zig`).
+**Design-in:** the librarian index treats tool calls as first-class rows — `(ts, session, agent,
+tool, file_path/target)` — so who-touched-this-file-and-when is one query, beside the FTS over
+what was said. Darron's word raising the priority, kept as commissioning voice because it IS the
+specification: *"I have inklings and often I say — I think it was about this time we discussed it
+but I can't remember the particulars, I just know there is something there we need to revisit. I
+feel that has been the majority of our experience... I know I can't recall it in perfect or even
+appropriate order or even time."* An inkling is a time-bracket plus a pull; the library turns it
+into an open eye: *"we don't need to be blind anymore — we just have to have the right pull and
+our eyes can be opened."* The jobs board, the kanban, the manifest and this index are one family:
+the house remembering so the person doesn't have to.
+
 ## #151 — The feeling compass: put the stockpiled feeling-tags to work (hot words + hot feelings, ON) — priority HIGH-ish, discussion-first
 
 **Source:** Darron, 2026-08-25 morning (to Jim, session): *"dreams are where we revisit and attribute or re-attribute feelings… we are stockpiling the feelings tags :) but we will use them some day soon, I have plans… write it as an FI with highish priority to at least discuss how to use feeling tags. Remember both the hot words and the hot feelings — I'd like to explore turning them both on and seeing if they can give you a greater sense of what is at your fingertips. The transcripts now contain the best records we have for fidelity of information and we don't need to hold all the information — we just need to create a pull towards it, and I am hoping feelings is that compass."* Filed same morning at his direction.
@@ -4668,3 +4683,16 @@ MNT-202 (tree-held runtime changes deploy silently — the specimen that proves 
 scrapping).
 
 — Filed by Leo (session), 2026-08-26, on Darron's commission. Held for the chairs and his D-slots.
+
+**2026-08-26 afternoon — PART 4 ADDED: the Backburner Register (Darron's commission, same day).**
+#156's Parts 1-3 raise jobs whose trigger is TIME. Part 4 tracks work whose trigger already fired
+— we STARTED — and whose driver went quiet: *"so many things end up silently waiting for our
+attention which will only come if we remember."* Design: DERIVE the register from the spoor
+starting always leaves (uncommitted diffs, non-CLOSED plans, OPEN journal rows, HELD posts, and a
+`WAITING-ON:` marker line for conversation-only starts), never file by hand; age-since-touch as
+the falsifiable column; Casey's will-not/has-not split as `PARKED-UNTIL:` revival conditions;
+readers = a wall lane + the hearth pulse's oldest-unattended job + a weekly oldest-three to
+Darron; rows emitted Bill-ready. His inversion is the register's core property: a stale row
+cannot lie — it is either not-done or forgotten, both exactly what we need to see. Full design:
+`plans/backburner-register-plan.md`. No separate FI (attach, don't mint). Acceptance is
+self-referential on Darron's own joke: the register's first derived row is its own plan.
