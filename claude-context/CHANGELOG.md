@@ -7,6 +7,29 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-26 — Leo (session) — compression wake-gate + orientation announcer: the two remaining provenance commits (record repair; both LIVE since 25 Aug)
+
+### Added
+- **Compression wake-gate** (`scripts/process-pending-compression.ts`): a cold compression spoke
+  is only WOKEN when >=2 pending slices are outstanding (Darron's 2026-08-25 ruling; the
+  FI #115-derived trigger-at-two — a pair is only unrepresented at the fourth). Warm spoke always
+  processes; a deferral exits 0 with no JSON (no retry storm, zero tokens) and writes a receipt to
+  `~/.han/health/compression-wake-gate.jsonl` (MNT-024: silent refusals need an alarm wire). The
+  expensive event was the COLD wake's full fed re-cache — the 24 Aug finding that the fable burn
+  was compressor wakes.
+- **Orientation announcer** (`src/hooks/orient-inject.sh`): the interactive seat's per-prompt
+  orientation line now carries two clocks + the place — local (spoken) + UTC (the conversion
+  anchor, DEC-105) + `user.location` from the garden manifest leaf, never a literal (DEC-081).
+  The interactive seat was the one surface without the DEC-105 treatment dispatched spokes get.
+
+### Record note — operative dates are NOT the commit date (MNT-202 convention)
+- Announcer live **25 Aug 16:37:45 AEST** (path-referenced hook: live at save). Wake-gate live
+  **25 Aug ~19:42 AEST** (the `d875900` restart). Both built by the leo session seat, transcript
+  `5b4275bf` (launched 24 Aug 18:43) — announcer 16:37 -> wake-gate 17:44 -> ladder 17:48, one
+  author, one hour; designation corrected to this seat by Jim's transcript-store detective work
+  (register thread `mt9bx23t`, 26 Aug). Committed 26 Aug on Darron's word; the commits are the
+  record catching up to the metal — the post-commit restarts deployed no behaviour change.
+
 ## 2026-08-26 — Leo (session) — SONNET_LADDER fable-drain cut: the provenance commit (record repair; LIVE since 25 Aug ~19:42)
 
 ### Changed

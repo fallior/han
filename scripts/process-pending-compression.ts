@@ -52,7 +52,7 @@ import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
 import { enqueueCascadeForDisplacedAt } from '../src/server/lib/memory-gradient';
 import { manifestModelHead } from '../src/server/lib/garden-manifest';
 import { buildPrompt } from '../src/server/lib/prompt-builder';
-import { dispatchToSpoke, observeActiveModel } from '../src/server/lib/tmux-dispatcher';
+import { dispatchToSpoke, observeActiveModel, paneClassForSession } from '../src/server/lib/tmux-dispatcher';
 import { surfaceEnabledFor, manifestModelLadder } from '../src/server/lib/garden-manifest';
 import { gradientConfigForAgent as agentCfg } from '../src/server/lib/agent-registry';
 
@@ -270,6 +270,35 @@ function parseFeelingTag(raw: string): { content: string; feelingTag: string | n
 async function main() {
     const db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
+
+    // ── Wake-gate (Darron's ruling, 2026-08-25: "a spoke is only WOKEN if work remains
+    // outstanding and 2 slices deep"). The expensive event is the COLD wake of the
+    // compression spoke — a full fed re-cache per launch; a batch of ≥2 pending rows
+    // amortises it (the FI #115-derived trigger-at-the-second-pair: two pairs of headroom
+    // under the live loader, per the 2026-08-23 derivation — a pair is only unrepresented
+    // at the FOURTH). If the spoke is already WARM no wake is being paid, so process
+    // regardless — this also keeps the sensor's drain loop whole mid-batch (row 2 of a
+    // batch, and any cascade rows it enqueues, meet a warm spoke and are never stranded).
+    // A deferral exits 0 with NO JSON, which the sensor reads as queue-empty: no retry
+    // storm, zero tokens, the row rides the next rotation's wake. Receipt to health so
+    // the silence has a wire (MNT-024's lesson: silent refusals need an alarm surface).
+    const pendingOutstanding = (db.prepare(`
+        SELECT COUNT(*) AS n FROM pending_compressions
+         WHERE agent = ? AND completed_at IS NULL
+           AND (claimed_at IS NULL
+                OR claimed_at < datetime('now', '-${STALE_CLAIM_MINUTES} minutes'))
+    `).get(agent!) as { n: number }).n;
+    const spokeWarm = paneClassForSession(`compression-${agent!}`) !== 'session-gone';
+    if (!spokeWarm && pendingOutstanding > 0 && pendingOutstanding < 2) {
+        log(`wake-gate: pending=${pendingOutstanding} < 2 and compression spoke is cold — deferring (the row rides the next rotation's wake)`);
+        try {
+            const hdir = `${process.env.HOME}/.han/health`;
+            fs.mkdirSync(hdir, { recursive: true });
+            fs.appendFileSync(`${hdir}/compression-wake-gate.jsonl`,
+                JSON.stringify({ ts: new Date().toISOString(), agent, pending: pendingOutstanding, spokeWarm, action: 'deferred' }) + '\n');
+        } catch { /* fail-open — telemetry never blocks */ }
+        process.exit(0);
+    }
 
     const claimed = claimNext(db, agent!, claimer);
     if (!claimed) {
