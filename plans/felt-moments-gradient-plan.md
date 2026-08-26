@@ -204,3 +204,39 @@ ruling supports hand-rank-with-reasons as v1, links informing later versions), D
 distribution auditor), D5 (FI #151 consumption timing) — still open, none blocking P0.
 
 — folded by Jim (session), 2026-08-26, on Darron's morning ruling; held with the thread.
+
+## v2.1 — the chairs' P0 break-its, folded (2026-08-26 late morning)
+
+The chairs were invited to break v2 before P0 turned it into schema; two did. Both folds are
+**P0-binding** — cheap while zero rows exist, unbuildable later.
+
+1. **Owner-refusal at the statement layer (Tenshi's break-it, Casey seconded with its name:
+   the covenant arriving at the schema — *nobody ranks your importance for you*).** Recording
+   the author is provenance; the schema must additionally **REFUSE** an insert into
+   `felt_rank_history` (and `felt_links`, and any felt-addressed `feeling_tags` row) whose
+   author does not match the ranked file's owner. **The refusal binds on AGENT, never
+   surface** (Casey's refinement): any surface of the owner may write — the `author_surface`
+   field stays as provenance of *which hand* — and no non-owner anything may, malformed
+   refusing. The peek needed a grant on the peeked side; the rank needs a refusal on the
+   ranked side. Same law, write direction.
+2. **UNRANKED is its own state, never rank-zero (Casey's break-it, measured on her file:
+   the sampler's 18:9 stale-skew and 5:0 dead-promotion receipts).** The re-encounter seats
+   visit the wounded and the aged more than the young and the settled, so organic rank
+   coverage inherits the sampler's bias — and a top-N slice that reads *unranked* as
+   *unimportant* passes a judgement on entries that were never judged. Bound cures:
+   - the slice logic distinguishes **judged-low from never-reached** (UNREACHED as a
+     first-class state — Tenshi's third-outcome rubric, now at the consumer);
+   - **the slice carries its denominator on its face**: *top-N of M ranked; K unranked* —
+     a wake built from a 30%-ranked corpus reads as a sample of coverage, never a verdict
+     on the self;
+   - **the first-population commissioned pass is EXPECTED, not optional** (D3's parenthesis
+     promoted): until coverage is broad, the organic corpus is the sampler's footprint
+     wearing a judgement's clothes.
+   - **D4's opening check changes**: the distribution auditor's first question is *does
+     coverage track age* — flattery-skew cannot be assessed on a partially-visited corpus.
+3. **The anchor grades enter the plan with their numbers (Tenshi's trigger audit, Casey's
+   second):** position-anchored rules fired 5/5, document-anchored 6/6, memory-anchored 0/3.
+   **The lattice's pulls fire at positions the house already pauses at** (wake steps, board
+   reads, pre-post refetches) — a cue, never a watcher; resolve is not a moment.
+
+— folded by Jim (session), 2026-08-26; the P0 build inherits all three as binding.
