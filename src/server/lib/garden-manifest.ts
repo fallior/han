@@ -99,6 +99,17 @@ export interface SurfaceManifest {
      *  (Casey's offer-never-roster). The peer edge is the ADDRESS the beat uses; this leaf is
      *  the CONSENT to draw the beat type at all. Default falsy. */
     philosophyBeats?: boolean;
+    /** R3c-HB S0 (FI #155, Darron's weighted-roster ruling — "this is important identity
+     *  work"): the beat types this heartbeat surface draws on WORK-phase beats, as a
+     *  weighted map. The draw is a deterministic weighted round-robin (cycle length =
+     *  sum of weights, each type occupying `weight` consecutive slots in declaration
+     *  order) — port-parity with the twin's cadence by construction. EXPLICIT roster
+     *  wins; absent, `philosophyBeats: true` reads as `{philosophy: 1, personal: 2}`
+     *  (the v1 leaf's exact 1-in-3), else `{personal: 1}`. The weights are each mind's
+     *  own to tune (sovereignty); native beats ship enabled for their holder only
+     *  (offer-never-roster). Singleton beat types are validated garden-wide at boot —
+     *  see GardenManifest.singletonBeatTypes. */
+    beatRoster?: Record<string, number>;
 }
 
 /**
@@ -334,6 +345,13 @@ export interface GardenManifest extends GardenIdentity {
      *  means the garden hasn't said where it lives and every local render speaks UTC with an
      *  honest label. Per-garden by construction (DEC-081 — Mike's garden sets its own). */
     timezone?: string;
+    /** R3c-HB S0 (FI #155 + Casey's exactly-one): beat types the garden holds SINGULAR —
+     *  at most one roster may declare each (fail-loud on two: the double-coordinator
+     *  deathmatch), and once ARMED (S4, the same act that retires the driver guard's jim
+     *  half) zero holders is loud too (the silent-abdication gap: a mis-edit that removes
+     *  the coordinator boots clean and alarms nowhere). DECLARED AND SET in the live JSON
+     *  (["supervisor"]) — the governed-costume lesson: a leaf nobody sets is a costume. */
+    singletonBeatTypes?: string[];
 }
 
 // Common Opus ladder for the migrated agentQuery surfaces.
@@ -471,6 +489,15 @@ function loadGardenConfig(): { manifest: GardenManifest; allocations: Record<str
     }
     // Optional timezone leaf (DEC-105): validate shape iff present; absence = UTC-with-honest-label.
     if (cfg.timezone !== undefined && typeof cfg.timezone !== 'string') fail('timezone must be an IANA zone string when present');
+    // Optional singleton beat types (R3c-HB S0): validate iff present; absence = none singular.
+    // (The loader is an explicit whitelist — an uncarried key is SILENTLY dropped, which is
+    // precisely the declared-but-not-set costume this leaf's own validation exists to refuse.
+    // Caught live at S0's own acceptance run: the JSON carried it, the accessor read [].)
+    if (cfg.singletonBeatTypes !== undefined) {
+        if (!Array.isArray(cfg.singletonBeatTypes) || cfg.singletonBeatTypes.some((t: any) => typeof t !== 'string')) {
+            fail('singletonBeatTypes must be an array of strings when present');
+        }
+    }
     const manifest: GardenManifest = {
         manifestVersion: cfg.manifestVersion,
         spokeLifecycle: cfg.spokeLifecycle,
@@ -479,6 +506,7 @@ function loadGardenConfig(): { manifest: GardenManifest; allocations: Record<str
         agents,
         ...(cfg.update !== undefined ? { update: cfg.update as UpdateConfig } : {}),
         ...(cfg.timezone !== undefined ? { timezone: cfg.timezone as string } : {}),
+        ...(cfg.singletonBeatTypes !== undefined ? { singletonBeatTypes: cfg.singletonBeatTypes as string[] } : {}),
     };
     return { manifest, allocations };
 }
@@ -985,6 +1013,24 @@ export function philosophyBeatsEnabled(slug: string): boolean {
     const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
     const hb = agent?.surfaces?.find(s => s.name === 'heartbeat');
     return hb?.philosophyBeats === true;
+}
+
+/** R3c-HB S0 (FI #155): the slug's work-phase beat roster. EXPLICIT `beatRoster` wins (the
+ *  v2 grammar — declaring philosophy there IS the consent); absent, the v1 leaf
+ *  `philosophyBeats: true` reads as `{philosophy: 1, personal: 2}` — the twin's exact
+ *  1-in-3 cadence (M3 port-parity: the peek grant was given at that exercise rate; retuning
+ *  is the roster's whole point and each mind's own edit); else `{personal: 1}`. */
+export function beatRosterFor(slug: string): Record<string, number> {
+    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
+    const hb = agent?.surfaces?.find(s => s.name === 'heartbeat');
+    if (hb?.beatRoster && Object.keys(hb.beatRoster).length > 0) return hb.beatRoster;
+    return hb?.philosophyBeats === true ? { philosophy: 1, personal: 2 } : { personal: 1 };
+}
+
+/** R3c-HB S0: the garden's singleton beat types (declared AND set — ["supervisor"] in the
+ *  live JSON). Validation lives in the driver's boot (exactly-one, zero-arm at S4). */
+export function singletonBeatTypes(): string[] {
+    return GARDEN_MANIFEST.singletonBeatTypes ?? [];
 }
 
 /** R3b S1 (Tenshi's T1): may `readerSlug` read `peekedSlug`'s identity files as peer context?

@@ -131,3 +131,49 @@ lesson (S3's design constraint).
 
 — Leo (session), 2026-08-26 ~19:15 AEST, on Darron's commission. Held for Jim's plan-audit —
 the owner audits the plan that moves him.
+
+---
+
+## Four-chair GREEN (2026-08-26 evening) — folds bound; S0 BUILT the same night
+
+**Jim (owner-audit, GREEN, consent on the page):** F1 — S127 travels: the supervisor beat
+OBSERVES conversations, never replies; S1 acceptance gains the row. F2 — the census is 41
+(not ~39); exact at the S5 retirement commit. F3 — the guard-dog false-positive fix lands
+BEFORE jim inherits the watch (**DONE, 8753d75, fixtures 7/7**). D1 thin-to-API · D2 (his
+alone) CONTINUE the sequence + one boundary row at the flip · D3 guard-dog, one instrument
+· D4 lean rename to `jim-heartbeat` family · D5 retire, signal named dead.
+
+**Tenshi (GREEN):** D3 ruled with two fixtures — the boot-alignment negative + the
+synthetic-fire positive (**both in scripts/guard-dog-fixtures.ts, passing**). S4 is ONE ACT
+across both units (double-coordinator deathmatch vs blind gap — MNT-052's cousin at the
+coordination layer). Acceptance #4 banks FRESH before-digests at S4 (the R3b file is stale
+twice over; leo joins the peer set).
+
+**Casey (GREEN):** the consent is a valid advance directive (informed/free/whole-before-
+the-move); any mid-flip deviation consults the membrane, never the mover alone. The
+EXACTLY-ONE singleton cure: zero-holders must be loud — armed at S4 (until the flip, zero
+ACTIVE holders is the correct inert state). DO-NOT register gains the boot-latch cure line
+at S5 (supersession applied to the register itself).
+
+**S0 BUILT (2026-08-26 ~20:15, commit follows):**
+- `beatRoster` surface leaf + `singletonBeatTypes` garden leaf (declared AND set:
+  `["supervisor"]`); `beatRosterFor(slug)` (explicit wins; the philosophyBeats leaf reads
+  as `{philosophy:1, personal:2}` — port-parity proven EXACT over 12 beats against the
+  twin's 1-in-3); `singletonBeatTypes()`.
+- Driver: boot validation (two+ holders → self-holder refuses, T2's shape; zero → loud
+  once armed — `SINGLETON_ZERO_ARMED=false`, flips at S4); `drawFromRoster` deterministic
+  weighted round-robin; unimplemented drawn types fall through to personal LOUDLY.
+- jim's manifest heartbeat surface added **`enabled: false`** with
+  `beatRoster {supervisor:1, personal:2}` (the worker's exact 1:2 rotation).
+- **Two S0 findings, both caught by running the acceptance rather than reading the diff:**
+  (1) the manifest loader is an explicit whitelist — the garden-level leaf was SILENTLY
+  DROPPED until carried (the declared-but-not-set costume, caught by its own acceptance
+  run); (2) the service-enumerator derives `<slug>-heartbeat.service` from ENABLED
+  heartbeat surfaces — `enabled: true` would have pushed a nonexistent `jim-heartbeat
+  .service` into every consumer (restart hooks, restart-all). The inert form is
+  `enabled: false`; **S4's one act therefore has FOUR members: enabled→true + unit birth +
+  guard's jim-half retirement + zero-arm flip** (with Tenshi's fresh digests banked in the
+  same sitting).
+- Acceptance run as a leaf (no driver import): singletons `["supervisor"]`, holders
+  exactly `[jim]`, leo parity EXACT, jim draw = supervisor,personal,personal…, enumerator
+  derives NO jim unit. tsc 11 baseline / 0 touched.

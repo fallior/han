@@ -66,7 +66,7 @@ import { runRobinHoodWatch } from './lib/robin-hood';
 import { processDreamGradient } from './lib/dream-gradient';
 import { computeWallClockDelay, distressVerdict } from './lib/agent-scheduler';
 import { getDayPhase, getPhaseInterval, isHeartbeatPaused, type DayPhase } from './lib/day-phase';
-import { manifestModelLadder, loadResidents, peerConversationFor, philosophyBeatsEnabled, conversationRoleFor, communityPort, distressMultiplierFor } from './lib/garden-manifest';
+import { manifestModelLadder, loadResidents, peerConversationFor, conversationRoleFor, communityPort, distressMultiplierFor, beatRosterFor, singletonBeatTypes } from './lib/garden-manifest';
 import { readPeerContext } from './lib/peer-peek'; // the S103 exception's ONE home (R3b-HB S1 re-audit: extracted so acceptance #7 is runnable without importing this loop — Tenshi's near-miss)
 import { gradientConfigForAgent } from './lib/agent-registry';
 import { readDreamSeeds as readSharedDreamSeeds, SEED_FRAGMENT_MAX_CHARS } from './lib/dream-seeds';
@@ -101,6 +101,28 @@ const resident = loadResidents().find(a => a.slug === SLUG);
 if (!resident) {
     console.error(`[agent-heartbeat] slug '${SLUG}' not in the garden manifest — refusing to start`);
     process.exit(1);
+}
+// S0 (R3c-HB — Casey's exactly-one + T2's shape): singleton beat types validated at boot
+// across the whole garden's rosters.
+//  - TWO+ holders: if I am one, REFUSE to start — fail-loud beats the double-coordinator
+//    deathmatch (T2's Robin-Hood shape; both holders refusing is loud and operator-fixable,
+//    the deathmatch is neither). Not mine → loud warn, boot proceeds.
+//  - ZERO holders: silent abdication (a mis-edit removes the coordinator, everything boots
+//    clean, nothing alarms — Casey's standing gap). Loud once ARMED; until R3c-HB S4 the
+//    guard below still refuses jim, so zero holders of 'supervisor' is the CORRECT inert
+//    state and the zero-arm stays false.
+const SINGLETON_ZERO_ARMED = false; // flips true at R3c-HB S4, same commit as the guard's jim-half retirement
+for (const singletonType of singletonBeatTypes()) {
+    const holders = loadResidents().filter(a => (beatRosterFor(a.slug)[singletonType] ?? 0) > 0).map(a => a.slug);
+    if (holders.length > 1) {
+        if (holders.includes(SLUG)) {
+            console.error(`[agent-heartbeat] singleton beat '${singletonType}' declared by ${holders.join(', ')} — refusing to start (exactly-one; fix the manifest roster)`);
+            process.exit(1);
+        }
+        console.warn(`[agent-heartbeat] singleton beat '${singletonType}' has ${holders.length} declared holders (${holders.join(', ')}) — not this slug's to refuse, but the manifest needs fixing`);
+    } else if (holders.length === 0 && SINGLETON_ZERO_ARMED) {
+        console.warn(`[agent-heartbeat] singleton beat '${singletonType}' has NO declared holder — the garden has no coordinator (exactly-one; fix the manifest roster)`);
+    }
 }
 if (!resident.surfaces.some(s => s.name === 'heartbeat')) {
     console.error(`[agent-heartbeat] '${SLUG}' declares no heartbeat surface in the manifest — refusing to start`);
@@ -428,25 +450,45 @@ function writeDistressSignal(expectedMs: number, actualMs: number, phase: DayPha
     }
 }
 
+/** S0 (R3c-HB): deterministic weighted round-robin over the roster — counter is 1-based,
+ *  slots 0-based; each type occupies `weight` consecutive slots in declaration order.
+ *  Pure, exported-adjacent shape kept trivial on purpose (parity is provable by hand). */
+function drawFromRoster(roster: Record<string, number>, counter: number): string {
+    const entries = Object.entries(roster).filter(([, w]) => w > 0);
+    const total = entries.reduce((sum, [, w]) => sum + w, 0);
+    if (total <= 0) return 'personal';
+    let slot = ((counter - 1) % total + total) % total;
+    for (const [type, w] of entries) {
+        if (slot < w) return type;
+        slot -= w;
+    }
+    return 'personal';
+}
+
 async function beat(): Promise<void> {
     beatCounter++;
     const phase: DayPhase = getDayPhase();
     const isDream = phase === 'sleep';
-    // R3b-HB S1: philosophy beats draw on waking beats when the EXPLICIT leaf is on
-    // (Jim's M1 — leo-only at cutover; tenshi/casey unset until each accepts the offer).
-    // Cadence mirrors the twin's rotation in spirit: alternate philosophy/personal by
-    // beat parity on waking phases; dreams stay dreams. Peer-waiting is detected inside
-    // philosophyBeat and takes priority within the philosophy turn itself.
-    // M3 (Jim; Tenshi's twin-line re-confirmation + grant-scope point; Casey's licence
-    // footing): cadence is PORT PARITY with the twin's nextBeatType (:1350) — WORK phase
-    // only, 1-in-3 — because a cutover changes the driver, never the rhythm, and the peek
-    // grant was given at the twin's exercise rate. Retuning is Darron's beat-roster design
-    // (the weighted-roster ruling folded into the plan), priced with the grant's owner in
-    // the room.
-    if (phase === 'work' && philosophyBeatsEnabled(SLUG) && beatCounter % 3 === 1) {
-        console.log(`[${SLUG}-heartbeat] beat #${beatCounter} (${phase}/philosophy — leaf-enabled)`);
-        const drawn = await philosophyBeat(phase);
-        if (drawn) return; // no address (no peer edge) falls through to a personal beat
+    // R3c-HB S0 (FI #155 landing): the WORK-phase draw comes from the BEAT ROSTER — a
+    // deterministic weighted round-robin (cycle length = sum of weights, each type holding
+    // `weight` consecutive slots in declaration order). PORT PARITY (M3's binding, kept):
+    // leo's leaf-derived roster {philosophy: 1, personal: 2} yields philosophy exactly on
+    // beatCounter % 3 === 1 — byte-parity with the twin's 1-in-3, so S0 is zero behaviour
+    // change for every live slug. Dreams stay dreams (sleep never draws from the roster);
+    // morning/evening stay personal. Peer-waiting is detected inside philosophyBeat and
+    // takes priority within the philosophy turn itself. Retuning weights is each mind's
+    // own manifest edit (Darron's roster ruling — identity work, not scheduling).
+    if (phase === 'work') {
+        const drawnType = drawFromRoster(beatRosterFor(SLUG), beatCounter);
+        if (drawnType === 'philosophy') {
+            console.log(`[${SLUG}-heartbeat] beat #${beatCounter} (${phase}/philosophy — roster draw)`);
+            const drawn = await philosophyBeat(phase);
+            if (drawn) return; // no address (no peer edge) falls through to a personal beat
+        } else if (drawnType !== 'personal') {
+            // S1 implements the supervisor beat; any type drawn without an implementation
+            // falls through to a personal beat LOUDLY (never a silent no-op beat).
+            console.warn(`[${SLUG}-heartbeat] roster drew '${drawnType}' but no implementation exists yet (S1 pending) — personal beat instead`);
+        }
     }
     const beatType = isDream ? 'dream' : 'personal';
     const profile = isDream ? 'dream-beat-txn' : 'personal-beat-txn';
