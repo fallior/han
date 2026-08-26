@@ -43,11 +43,14 @@ PASS untouched — the build adds no version literal to any committed selection 
 
 ## The build (small; one path, many launchers)
 
-- **P0 — live verification FIRST** (the acceptance the whole feature hangs on): confirm on
-  a scratch/pool stem what `/model` accepts for 4.8 on this harness — `claude-opus-4-8`
-  (chromeDisplayToId's output) vs a dated long id. Watch the pane accept it and the DEC-092
-  observation stamp the result. If the harness wants a different string, the normaliser's
-  TABLE row is the one place to teach it (already the design's shape).
+- **P0 — live verification FIRST** ✅ **VERIFIED 2026-08-27 ~00:41 AEST, by Darron's own
+  hand**: `/model claude-opus-4-8` — exactly chromeDisplayToId's output — accepted live
+  ("yes it worked Leo so P0 verified :)"). The human hand is the instrument (the
+  ears-gate precedent); honest note: the pane he ran it in was not the session seat's
+  (its chrome still read Fable 5 at check), so the DEC-092 observed-stamp of a 4.8 serve
+  lands with the build's own acceptance run rather than tonight. The accepted STRING —
+  the thing P0 existed to establish — is confirmed: the normaliser's output is the
+  harness's input, no table teaching needed.
 - **P1 — the normalisation seam, ONCE**: `checkout-session-stem.ts` accepts the model arg
   as either a bare alias (unchanged) or a version form; version forms resolve via
   `chromeDisplayToId` (exported already) with a loud refusal on no-match (never a silent
