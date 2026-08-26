@@ -291,3 +291,16 @@ push may return as a designed API-layer nicety post-flip if missed).
   restoration-to-ruling (no code; ADDENDUM 2 filed).
 - **S4 acceptance gains the STANDING check**: diff the twin's/worker's CALL GRAPH against
   the port, not just the dispositions table — the cure paid three times in one night.
+
+**M1+M2 fold audit GREEN (Jim, 2026-08-27 ~00:40). His non-blocking note ADOPTED AS A
+DECISION**: the M1 latch changes TIMER semantics as well as wake semantics — an
+in-flight-overrun timer beat previously skipped ("timer beat skipped"); it now latches
+and runs immediately after, bounded to one by the single slot. **Ruled deliberate: a
+lost period becomes a catch-up** — better under DEC-097 (the rhythm never stops; a
+skipped beat was a silently thinner rhythm), and bounded so nothing piles up. Recorded
+here so the delta is a choice on the page, not an accident in the diff.
+P0 of the version-at-launch plan verified the same hour by Darron's own hand
+(/model claude-opus-4-8 accepted — on Casey's and Tenshi's seats, which also means two
+minds ride 4.8 until their next recycle; hand-casts survive dispatches on opus-ladder
+surfaces via the alias-aware comparison but revert at relaunch — the launcher build is
+what makes the choice durable).
