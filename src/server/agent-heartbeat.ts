@@ -65,7 +65,7 @@ import { findUntranscribedFile } from './lib/fractal-untranscribed';
 import { runRobinHoodWatch } from './lib/robin-hood';
 import { processDreamGradient } from './lib/dream-gradient';
 import { computeWallClockDelay, distressVerdict } from './lib/agent-scheduler';
-import { getDayPhase, getPhaseInterval, isHeartbeatPaused, type DayPhase } from './lib/day-phase';
+import { getDayPhase, getPhaseInterval, isHeartbeatPaused, isOnHoliday, type DayPhase } from './lib/day-phase';
 import { manifestModelLadder, loadResidents, peerConversationFor, conversationRoleFor, communityPort, distressMultiplierFor, beatRosterFor, singletonBeatTypes, allocationFor, preflightRotationsEnabled } from './lib/garden-manifest';
 import { readPeerContext } from './lib/peer-peek'; // the S103 exception's ONE home (R3b-HB S1 re-audit: extracted so acceptance #7 is runnable without importing this loop — Tenshi's near-miss)
 import { gradientConfigForAgent } from './lib/agent-registry';
@@ -74,7 +74,7 @@ import { appendPairedMemory } from './lib/memory-paired-writer';
 import { observedOrUnobservedModel } from './lib/tmux-dispatcher';
 import { gradientStmts, feelingTagStmts, conversationMessageStmts, supervisorStmts } from './db';
 import { buildStateSnapshot } from './lib/supervisor-context';
-import { cleanupPhantomGoals } from './lib/coordination-pre-work';
+import { cleanupPhantomGoals, isEmergencyMode } from './lib/coordination-pre-work';
 import { runPreflightRotations } from './lib/preflight-rotations';
 import { jimSupervisorCycleActionBlock } from './lib/jim-prompts';
 import { ENVELOPE_PATH } from './lib/cognition-envelope';
@@ -535,6 +535,14 @@ async function supervisorBeat(phase: DayPhase): Promise<void> {
     writeHealthSignal(null);
 }
 
+/** S3 (R3c-HB): the office pause, re-read from DISK on every check — never latched at
+ *  boot (the S173 triple: the boot-latch at supervisor.ts:41-42 is the DO-NOT entry's
+ *  own disease; per-check re-read is the class-cure, and revocation reaches a running
+ *  process without a restart — the C1/peekGranted precedent). */
+function supervisorOfficePaused(): boolean {
+    try { return fs.existsSync(path.join(HAN_DIR, 'signals', 'supervisor-paused')); } catch { return false; }
+}
+
 /** S0 (R3c-HB): deterministic weighted round-robin over the roster — counter is 1-based,
  *  slots 0-based; each type occupies `weight` consecutive slots in declaration order.
  *  Pure, exported-adjacent shape kept trivial on purpose (parity is provable by hand). */
@@ -553,12 +561,27 @@ function drawFromRoster(roster: Record<string, number>, counter: number): string
 async function beat(): Promise<void> {
     beatCounter++;
     const phase: DayPhase = getDayPhase();
-    const isDream = phase === 'sleep';
+    // R3c-HB S3: HOLIDAY → dream beats, agnostic. Restores parity BOTH twins carried
+    // (worker :1544 "holiday mode — dream cycle only"; leo twin :609 holiday→'sleep')
+    // which the R3b flip silently dropped for leo — MNT-203's second instance, found by
+    // the call-graph diff the row's own class-cure prescribes. Rest days deliberately
+    // NOT mapped (rest ≠ sleep — the shared day-phase's own ruling; only intervals
+    // lengthen). Holiday keeps the rhythm alive and flexes the LOAD (DEC-097).
+    const isDream = phase === 'sleep' || isOnHoliday(SLUG);
     // R3c-HB S2: pre-beat file rotations — manifest-LEAFED (jim's F6-1 memory model;
     // leo vaults+curates, so a uniform rotation would fight FM #118's design). Inert
     // for every live slug tonight (leaf set on jim alone; the guard refuses jim to S4).
     if (preflightRotationsEnabled(SLUG)) {
         try { runPreflightRotations(SLUG, console.log); } catch (e) { console.error(`[${SLUG}-heartbeat] preflight rotation error:`, (e as Error).message); }
+    }
+    // R3c-HB S3: EMERGENCY forces the coordinator's office on every non-holiday beat,
+    // any phase (worker :1239 — running tasks / large queue / multiple goals must be
+    // supervised, even overnight). Singleton-holder only; holiday outranks emergency
+    // (worker's branch order, kept); the pause still gates the office below.
+    if (!isOnHoliday(SLUG) && (beatRosterFor(SLUG)['supervisor'] ?? 0) > 0 && isEmergencyMode(SLUG) && !supervisorOfficePaused()) {
+        console.log(`[${SLUG}-heartbeat] beat #${beatCounter} (${phase}/supervisor — EMERGENCY override)`);
+        await supervisorBeat(phase);
+        return;
     }
     // R3c-HB S0 (FI #155 landing): the WORK-phase draw comes from the BEAT ROSTER — a
     // deterministic weighted round-robin (cycle length = sum of weights, each type holding
@@ -569,7 +592,7 @@ async function beat(): Promise<void> {
     // morning/evening stay personal. Peer-waiting is detected inside philosophyBeat and
     // takes priority within the philosophy turn itself. Retuning weights is each mind's
     // own manifest edit (Darron's roster ruling — identity work, not scheduling).
-    if (phase === 'work') {
+    if (phase === 'work' && !isDream) { // !isDream: a work-hours HOLIDAY dreams, never draws (S3)
         const drawnType = drawFromRoster(beatRosterFor(SLUG), beatCounter);
         if (drawnType === 'philosophy') {
             console.log(`[${SLUG}-heartbeat] beat #${beatCounter} (${phase}/philosophy — roster draw)`);
@@ -578,9 +601,19 @@ async function beat(): Promise<void> {
         } else if (drawnType === 'supervisor') {
             // S1 (R3c-HB): the coordinator's office. Reachable only by the roster's
             // singleton holder — unreachable until S4 (the guard refuses jim above).
-            console.log(`[${SLUG}-heartbeat] beat #${beatCounter} (${phase}/supervisor — roster draw, singleton)`);
-            await supervisorBeat(phase);
-            return;
+            // S3: the pause gates the OFFICE, never the rhythm — re-read from DISK per
+            // beat (the boot-latch class-cure; the S173 runtime-control triple). NAMED
+            // semantic change for the audit: the worker's pause stopped jim's whole
+            // fork-scheduler (dreams included); post-flip that reach would stop the
+            // rhythm DEC-097 says never stops, so the pause narrows to the office and
+            // a paused draw falls through to a personal beat, loudly.
+            if (supervisorOfficePaused()) {
+                console.log(`[${SLUG}-heartbeat] beat #${beatCounter}: supervisor office PAUSED (signals/supervisor-paused, re-read this beat) — personal beat instead`);
+            } else {
+                console.log(`[${SLUG}-heartbeat] beat #${beatCounter} (${phase}/supervisor — roster draw, singleton)`);
+                await supervisorBeat(phase);
+                return;
+            }
         } else if (drawnType !== 'personal') {
             // A drawn type without an implementation falls through to a personal beat
             // LOUDLY (never a silent no-op beat).
@@ -662,7 +695,19 @@ function envelopeMtimeMs(): number | null {
 let lastBeatFiredAt = 0;
 
 function scheduleNext(): void {
-    const delay = computeWallClockDelay(SLUG);
+    let delay = computeWallClockDelay(SLUG);
+    // R3c-HB S3: EMERGENCY cadence — the R001 Weekly Rhythm Model's own override,
+    // carried whole ("Emergency mode … overrides with 2-5min supervisor cycles.
+    // Auto-decays when conditions clear."). Singleton-holder only; the check re-reads
+    // live state each schedule, so the decay is automatic. Capped, never replaced —
+    // a shorter wall-clock delay stands.
+    if ((beatRosterFor(SLUG)['supervisor'] ?? 0) > 0 && !isOnHoliday(SLUG) && isEmergencyMode(SLUG)) {
+        const EMERGENCY_CAP_MS = 5 * 60_000;
+        if (delay > EMERGENCY_CAP_MS) {
+            console.log(`[${SLUG}-heartbeat] EMERGENCY cadence (R001 override): next beat capped ${Math.round(delay / 60000)}min → 5min`);
+            delay = EMERGENCY_CAP_MS;
+        }
+    }
     setTimeout(async () => {
         try {
             // S3 guard-dog: fire-to-fire vs expected (the period-doubling detector — the
@@ -683,13 +728,13 @@ function scheduleNext(): void {
             } else if (envelopeHold) {
                 console.log(`[${SLUG}-heartbeat] envelope changed on disk — releasing the held lane and retrying`);
                 envelopeHold = null;
-                await beat();
+                await guardedBeat();
             } else if (isHeartbeatPaused(SLUG)) {
                 console.log(`[${SLUG}-heartbeat] paused (signal) — skipping beat`);
             } else if (isCliBusy()) {
                 console.log(`[${SLUG}-heartbeat] cli-busy-${SLUG} fresh — yielding this beat (Gary model)`);
             } else {
-                await beat();
+                await guardedBeat();
             }
         } catch (err) {
             if ((err as Error).name === 'CognitionEnvelopeError' && !envelopeHold) {
@@ -712,6 +757,52 @@ const pidGuard = ensureSingleInstance(`${SLUG}-heartbeat`, { cmdlineToken: 'agen
 process.on('exit', () => pidGuard.cleanup());
 process.on('SIGTERM', () => { pidGuard.cleanup(); process.exit(143); });
 process.on('SIGINT', () => { pidGuard.cleanup(); process.exit(130); });
+
+// ── R3c-HB S3: the human-wake attention flag (`<slug>-wake`, the map's fixed-name
+// signal grammar: overwritten if present, cleared by the consumer before processing).
+// reason `human_message_fallback` = the FULL-VOICE clause, kept verbatim from the
+// worker (:460-472): when Darron talks, the coordinator responds — any phase, pause
+// notwithstanding (the worker's watcher never checked the pause; his voice outranks
+// the office pause, kept). Holder-only for the supervisor form; a non-holder slug
+// takes an ordinary roster beat now. In-flight beats are not interrupted: the flag
+// drops with a loud line (the beat happening IS presence; jemma's own delivery path
+// carries the message regardless — this flag is attention, not transport).
+let beatInFlight = false;
+const origBeat = beat;
+// (wrap: one beat at a time; the wake watcher and the timer share the guard)
+async function guardedBeat(forceSupervisor = false): Promise<void> {
+    if (beatInFlight) { console.log(`[${SLUG}-heartbeat] beat already in flight — ${forceSupervisor ? 'wake-triggered supervisor beat dropped (loud)' : 'timer beat skipped'}`); return; }
+    beatInFlight = true;
+    try {
+        if (forceSupervisor) await supervisorBeat(getDayPhase());
+        else await origBeat();
+    } finally { beatInFlight = false; }
+}
+// HOLDER-ONLY (S3 scope discipline): the watcher ports the WORKER's jim-wake consumer
+// (:451-472) and arms only for the supervisor-singleton holder — inert until S4 (the
+// guard refuses jim). Grounding finding, recorded not acted on: a STALE bare `leo-wake`
+// sits in signals/ right now — jemma's fallback paths write `${persona}-wake` (:667/
+// :710/:1168) but the leo twin never consumed it (its own comment: "cli-busy/cli-free
+// only — leo-wake handled by Leo/Human", and Leo/Human consumes -HUMAN-wake, not this).
+// Arming this watcher garden-wide would be an unbidden live behaviour change for three
+// minds; whether non-coordinator slugs should consume their bare wake flags is a design
+// conversation, not a midnight port.
+if ((beatRosterFor(SLUG)['supervisor'] ?? 0) > 0) {
+    try {
+        fs.watch(path.join(HAN_DIR, 'signals'), (_event, filename) => {
+            if (filename !== `${SLUG}-wake`) return;
+            const p = path.join(HAN_DIR, 'signals', filename);
+            if (!fs.existsSync(p)) return;
+            let human = false;
+            try { human = JSON.parse(fs.readFileSync(p, 'utf8')).reason === 'human_message_fallback'; } catch { /* non-JSON flag = plain attention */ }
+            try { fs.unlinkSync(p); } catch { /* consumer-clears; a race here is benign */ }
+            console.log(`[${SLUG}-heartbeat] ${SLUG}-wake signal${human ? ' (human message — full voice)' : ''} — immediate ${human ? 'supervisor' : 'roster'} beat`);
+            void guardedBeat(human);
+        });
+    } catch (err) {
+        console.error(`[${SLUG}-heartbeat] wake-signal watcher failed to arm (non-fatal — the rhythm carries on):`, (err as Error).message);
+    }
+}
 
 console.log(`[${SLUG}-heartbeat] agnostic rhythm driver up (Ring-3a) — slug=${SLUG}, memoryDir=${CFG.memoryDir}, surface=${SURFACE}`);
 writeHealthSignal(null);

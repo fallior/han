@@ -244,3 +244,36 @@ push may return as a designed API-layer nicety post-flip if missed).
   the twin's CALL GRAPH, not just its dispositions table.
 - **Acceptance at build**: tsc 11/0; leaf reads jim=true, leo/tenshi/casey=false; inert
   (leaf on jim alone + guard refuses jim to S4).
+
+**S3 BUILT (2026-08-26 ~23:50; HELD for Jim's diff-audit):**
+- **Pause = the OFFICE, never the rhythm — NAMED semantic change.** `supervisorOfficePaused()`
+  re-reads `signals/supervisor-paused` from disk per check (the boot-latch class-cure — the
+  S173 triple; supervisor.ts:41-42's read-once is the DO-NOT entry's own disease). A paused
+  supervisor draw falls to a personal beat loudly. The worker's pause stopped jim's whole
+  fork-scheduler (dreams included); post-flip that reach would stop the rhythm DEC-097 says
+  never stops. The API's canonical setter stays untouched (D1's thin-to-API keeps it).
+- **Human-wake watcher** ports the worker's jim-wake consumer verbatim in semantics
+  (full-voice supervisor beat on `reason: human_message_fallback`, any phase, pause
+  notwithstanding — his voice outranks the office pause, kept), HOLDER-ONLY. Grounding
+  finding recorded: a stale bare `leo-wake` sits unconsumed in signals/ (jemma fallbacks
+  write `${persona}-wake`; the twin never consumed it) — whether non-coordinator slugs
+  should consume their bare wake flags is a named design conversation, not a midnight port.
+- **Emergency** (`isEmergencyMode(slug)` in coordination-pre-work: `<slug>-emergency`
+  signal OR board-derived, S125's goalCount>1 clause kept): forces the office on every
+  non-holiday beat any phase + caps cadence at 5min in scheduleNext (R001's OWN emergency
+  override, carried whole with auto-decay by re-read). Holder-only, inert until S4.
+- **Recovery mode: RETIRE-with-ground — the FOURTH costume.** `RECOVERY_MODE_UNTIL` is
+  hardcoded `null` (:122); `isRecoveryMode()` has been structurally false since the
+  constant was last edited. A hand-edited emergency constant is not a feature; if wanted
+  it returns as a signal like emergency.
+- **Holiday→dream RESTORED agnostic — the slice's one LIVE change, deliberate.** Both
+  twins agreed (worker :1544; leo twin :609); the shared day-phase never carried it; R3b
+  silently dropped it for leo (MNT-203 addendum — the call-graph-diff cure's second catch
+  in one hour). Rest-day NOT mapped (rest ≠ sleep stands). `guardedBeat` in-flight guard
+  wraps the timer + watcher (one beat at a time; a wake during a beat drops loudly —
+  attention, not transport).
+- **Health signal**: the driver's `{agent, timestamp, pid, beat}` shape verified
+  Robin-Hood-compatible (reader keys on timestamp+pid; `cycle` is detail-only). The
+  admin /api/supervisor/health route is D1/S4 territory.
+- **Acceptance at build**: tsc 11/0; no live slug holds supervisor (emergency/wake/pause
+  branches unreachable); nobody on holiday tonight (the restore arms at the next one).

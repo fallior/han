@@ -17,7 +17,32 @@
  *  - The phantom-goal sweep ports WHOLE: terminal-children parents, terminal-task
  *    standalones, stuck-decomposing timeouts — same SQL, shared db handle.
  */
-import { db, goalStmts } from '../db';
+import fs from 'node:fs';
+import path from 'node:path';
+import { db, goalStmts, taskStmts } from '../db';
+import { hanHome } from './paths';
+
+/**
+ * R3c-HB S3: emergency mode for the coordinator — the worker's isEmergencyMode
+ * (:1203-1226) ported whole, slug-keyed. TRUE when the explicit signal
+ * `signals/<slug>-emergency` exists, OR derived from the board: running tasks, a large
+ * pending queue, or multiple meaningful active goals (goalCount > 1 — a single
+ * decomposing goal shouldn't suppress dreaming; Jim + Darron, S125). The caller gates
+ * this to the supervisor-singleton holder; emergency forces supervisor beats and caps
+ * the cadence (R001's emergency override, carried at the caller).
+ */
+export function isEmergencyMode(slug: string): boolean {
+    try {
+        if (fs.existsSync(path.join(hanHome(), 'signals', `${slug}-emergency`))) return true;
+        const running = (taskStmts.listByStatus.all('running') as any[]).length;
+        const pending = (taskStmts.listByStatus.all('pending') as any[]).length;
+        const meaningfulGoals = db.prepare(
+            "SELECT COUNT(*) as count FROM goals WHERE status IN ('active', 'decomposing', 'planning') AND (goal_type = 'parent' OR EXISTS (SELECT 1 FROM tasks t WHERE t.goal_id = goals.id AND t.status IN ('pending', 'running')))"
+        ).get() as any;
+        const goalCount = meaningfulGoals?.count || 0;
+        return running > 0 || pending > 5 || goalCount > 1;
+    } catch { return false; }
+}
 
 /** Phantom-goal cleanup — goals whose children/tasks are all terminal, or stuck
  *  decomposing >1h. Returns the number cleaned. Coordinator-only by caller contract. */
