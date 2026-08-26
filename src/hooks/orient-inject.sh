@@ -39,8 +39,14 @@ printf '%s' "$PROMPT_JSON" | grep -qiE 'welcome back|good morning|session start'
 # stop-time — see its MNT-067 block for the contract, ceiling, and receipts. The human
 # triggers above (line 32) remain: the interactive self-run wake has no feeder to raise a flag.
 
-# 1. ORIENTATION — universal, zero-risk, every prompt.
-echo "⏰ Oriented: $(date '+%A %-d %B %Y, %-I:%M %p %Z') — open your reply by saying this line (re-queried fresh, not extrapolated)."
+# 1. ORIENTATION — universal, zero-risk, every prompt. Two clocks + the place (Darron's
+#    structural announcer, 2026-08-25): the interactive seat was the one surface without the
+#    DEC-105 treatment dispatched spokes get from orientationBlock (garden-time.ts) — and the
+#    yesterday-bug kept firing exactly here. The LOCAL line is the one to say aloud; the UTC
+#    half is the standing conversion anchor (records/receipts stamp UTC); the place comes from
+#    the garden manifest's user.location leaf — never a literal (DEC-081; the literal hunt).
+GARDEN_LOC=$(python3 -c "import json;print(json.load(open('${HOME}/.han/garden-manifest.json')).get('user',{}).get('location',''))" 2>/dev/null)
+echo "⏰ Oriented: $(date '+%A %-d %B %Y, %-I:%M %p %Z')${GARDEN_LOC:+ — ${GARDEN_LOC}} · UTC $(date -u '+%Y-%m-%dT%H:%MZ'). Records stamp UTC — convert before any \"yesterday\"/time-of-day word (DEC-105). Open your reply by saying the LOCAL line (re-queried fresh, not extrapolated)."
 
 # 2. MEMORY-NAG — escalate by how many turns were skipped.
 skip=0
