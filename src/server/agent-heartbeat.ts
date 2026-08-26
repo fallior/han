@@ -64,8 +64,8 @@ import { dispatchTxn, applyMeditationMarkers, runReincorporationMeditationTmux, 
 import { findUntranscribedFile } from './lib/fractal-untranscribed';
 import { runRobinHoodWatch } from './lib/robin-hood';
 import { processDreamGradient } from './lib/dream-gradient';
-import { computeWallClockDelay } from './lib/agent-scheduler';
-import { getDayPhase, isHeartbeatPaused, type DayPhase } from './lib/day-phase';
+import { computeWallClockDelay, distressVerdict } from './lib/agent-scheduler';
+import { getDayPhase, getPhaseInterval, isHeartbeatPaused, type DayPhase } from './lib/day-phase';
 import { manifestModelLadder, loadResidents, peerConversationFor, philosophyBeatsEnabled, conversationRoleFor, communityPort, distressMultiplierFor } from './lib/garden-manifest';
 import { readPeerContext } from './lib/peer-peek'; // the S103 exception's ONE home (R3b-HB S1 re-audit: extracted so acceptance #7 is runnable without importing this loop — Tenshi's near-miss)
 import { gradientConfigForAgent } from './lib/agent-registry';
@@ -519,9 +519,8 @@ function envelopeMtimeMs(): number | null {
     try { return fs.statSync(ENVELOPE_PATH).mtimeMs; } catch { return null; }
 }
 
-// S3 guard-dog state: last fire + its expected delay (the period-doubling detector).
+// S3 guard-dog state: last fire time (the period-doubling detector).
 let lastBeatFiredAt = 0;
-let lastExpectedDelayMs = 0;
 
 function scheduleNext(): void {
     const delay = computeWallClockDelay(SLUG);
@@ -529,15 +528,17 @@ function scheduleNext(): void {
         try {
             // S3 guard-dog: fire-to-fire vs expected (the period-doubling detector — the
             // instrument that caught the 80-min cadence). Threshold from the manifest.
+            // F3 (R3c-HB, 2026-08-26): the verdict is the pure distressVerdict — the gap
+            // judged against max(this fire's OWN scheduled delay, the phase period), never
+            // the previous gap's delay (the boot-alignment false-positive class: the
+            // 18:15/19:15/19:20 fires, all restart artefacts, all predicted then confirmed).
             const nowMs = Date.now();
-            if (lastBeatFiredAt > 0 && lastExpectedDelayMs > 0) {
-                const actual = nowMs - lastBeatFiredAt;
-                if (actual > distressMultiplierFor(SLUG) * lastExpectedDelayMs) {
-                    writeDistressSignal(lastExpectedDelayMs, actual, getDayPhase());
-                }
+            if (lastBeatFiredAt > 0) {
+                const gap = nowMs - lastBeatFiredAt;
+                const v = distressVerdict(gap, delay, getPhaseInterval(SLUG), distressMultiplierFor(SLUG));
+                if (v.fire) writeDistressSignal(v.expectedMs, gap, getDayPhase());
             }
             lastBeatFiredAt = nowMs;
-            lastExpectedDelayMs = delay;
             if (envelopeHold && envelopeMtimeMs() === envelopeHold.envMtimeMs) {
                 console.log(`[${SLUG}-heartbeat] lane HELD since ${envelopeHold.alertedAt} — cognition envelope failed verification; re-sign to release (alert-and-hold, DEC-103)`);
             } else if (envelopeHold) {

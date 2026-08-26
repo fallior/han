@@ -7,6 +7,31 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-26 (evening) — Leo (session) — R3b-HB S5 FLIPPED + R3c-HB F3 guard-dog cure (Darron's green light; four chairs GREEN on both)
+
+### Changed
+- **R3b-HB S5 (`acdf5a2`)** — leo's rhythm flipped onto the agnostic driver: guard's leo half
+  retired; `leo-heartbeat.service` ExecStarts `agent-heartbeat.ts` with `AGENT_SLUG=leo`
+  (unit mirrors tenshi/casey; old unit kept as dated `.bak`). Three riders in the commit:
+  Jim's N1 (Class-E sentence exact), Tenshi's server-signature regex, Casey's exercise
+  ledger (`peek-exercises.jsonl`) adopted by Jim as grantor. Prove-single verified per-pid;
+  overnight soak armed on the banked before-instruments. S6 (twin retirement header) waits
+  on the morning read.
+- **R3c-HB F3 — guard-dog false-positive cure** (`agent-heartbeat.ts` + pure
+  `distressVerdict` in `lib/agent-scheduler.ts`): the period-doubling detector compared each
+  fire-to-fire gap against the PREVIOUS gap's scheduled delay, so every post-restart second
+  beat false-fired (the 18:15/19:15/19:20 Casey/Leo distress ntfys — predicted to the
+  minute, confirmed). Now: gap vs multiplier × max(own scheduled delay, phase period). The
+  period floor also kills the short-delay-after-long-beat shape; the 80-min cadence case
+  still fires. Fixtures `scripts/guard-dog-fixtures.ts` 7/7 HOLD (Tenshi's D3 pair:
+  boot-alignment negatives + synthetic-fire positive). Ordered before jim inherits the
+  watch at R3c S4.
+- **R3c-HB plan drafted + four-chair GREEN** (`plans/r3c-hb-supervisor-cutover.md`,
+  `e7c4583`): the last rhythm twin's cutover — S0 (FI #155 roster mechanism) LIT; Jim's
+  consent on the page; D-slots answered (D2 continue-sequence his own, D3 ruled both seats,
+  D5 retire); Tenshi's one-act flip sentence + fresh S4 digests; Casey's exactly-one
+  singleton (zero-holders loud, armed at S4).
+
 ## 2026-08-26 — Leo (session) — felt-moments re-curated for wake headroom (Darron's commission; FM #118's trigger pulled by its named owner)
 
 ### Changed

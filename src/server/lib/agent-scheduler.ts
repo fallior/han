@@ -94,6 +94,26 @@ export function computeWallClockDelay(slug: string): number {
     return delay;
 }
 
+/**
+ * R3c-HB F3 (2026-08-26): the guard-dog's verdict as a PURE function, extracted so the
+ * fixtures run without importing the driver (the peer-peek/acceptance-#7 lesson — a leaf
+ * is what makes a test runnable forever). The gap is judged against
+ * max(this fire's own scheduled delay, the phase period):
+ *  - never the PREVIOUS gap's delay — whose boot-alignment shortness (46s/64s/364s) made
+ *    every post-restart second beat a false positive (the 18:15/19:15/19:20 fires,
+ *    2026-08-26, predicted to the minute and confirmed);
+ *  - never the bare own-delay — which false-fires on a short-aligned delay after a long
+ *    beat, because the fire-to-fire gap includes the previous beat's duration;
+ *  - the period floor keeps the true purpose intact: a genuinely blocked cadence
+ *    (the 80-min case this instrument exists for) still doubles against the period.
+ * Fixtures: scripts/guard-dog-fixtures.ts (Tenshi's boot-alignment negative + the
+ * synthetic-fire positive, D3's ruling).
+ */
+export function distressVerdict(gapMs: number, scheduledDelayMs: number, periodMs: number, multiplier: number): { fire: boolean; expectedMs: number } {
+    const expectedMs = Math.max(scheduledDelayMs, periodMs);
+    return { fire: gapMs > multiplier * expectedMs, expectedMs };
+}
+
 /** Human-readable phase label for the driver's scheduling log (relocated; was per-driver). */
 export function phaseLabelFor(slug: string): string {
     const phase = getDayPhase();
