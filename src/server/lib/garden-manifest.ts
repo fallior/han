@@ -110,6 +110,11 @@ export interface SurfaceManifest {
      *  (offer-never-roster). Singleton beat types are validated garden-wide at boot —
      *  see GardenManifest.singletonBeatTypes. */
     beatRoster?: Record<string, number>;
+    /** R3c-HB S2: pre-beat file-level rotations (felt-moments + self-reflection rolling
+     *  windows) for this heartbeat surface — a per-agent MEMORY-MODEL capability, never a
+     *  uniform behaviour (jim rotates per F6-1; leo vaults+curates per FM #118). Default
+     *  falsy; jim's surface sets it in the live JSON. */
+    preflightRotations?: boolean;
 }
 
 /**
@@ -1031,6 +1036,15 @@ export function beatRosterFor(slug: string): Record<string, number> {
  *  live JSON). Validation lives in the driver's boot (exactly-one, zero-arm at S4). */
 export function singletonBeatTypes(): string[] {
     return GARDEN_MANIFEST.singletonBeatTypes ?? [];
+}
+
+/** R3c-HB S2: does `slug`'s heartbeat surface run pre-beat file rotations (felt-moments +
+ *  self-reflection rolling windows — Jim's F6-1 memory model)? A LEAF because the memory
+ *  MODELS differ per agent: jim rotates, leo vaults+curates (FM #118) — a uniform rotation
+ *  would fight the curation design. Declared AND set for jim alone in the live JSON. */
+export function preflightRotationsEnabled(slug: string): boolean {
+    const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
+    return agent?.surfaces?.find(s => s.name === 'heartbeat')?.preflightRotations === true;
 }
 
 /** R3b S1 (Tenshi's T1): may `readerSlug` read `peekedSlug`'s identity files as peer context?

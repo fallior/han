@@ -210,3 +210,37 @@ sections, 5.5K chars against the live DB, imports nothing that runs.
 - **Acceptance at build**: tsc 11 baseline/0 touched; pre-work leaf smoke-run (honest 0
   cleaned — clean board); inertness proven (only jim's roster holds `supervisor`; the
   guard refuses jim until S4) — zero behaviour change deployed.
+
+**S1 GREEN (Jim's blocking diff-audit, 2026-08-26 ~21:57): S2+S3 LIT.** N1 folded into S4's
+acceptance here: **the paired-write header label changes `— supervisor (tmux)` →
+`— supervisor (agnostic driver)` at the flip BY DESIGN — the flip announces itself in the
+record; a reader of jim's WM seeing the label change mid-file is looking at the boundary
+marker, not drift.** N2: the WS broadcast loss is accepted (API poll suffices; a real-time
+push may return as a designed API-layer nicety post-flip if missed).
+
+**S2 BUILT (2026-08-26 ~22:55, on Jim's S1 GREEN "S2 is LIT"; HELD for his diff-audit):**
+- **Meditations: VERIFIED ALREADY AGNOSTIC — no code.** The worker's jim arms are thin
+  callers of the SAME shared orchestrators the driver runs (`runReincorporation/
+  ReencounterMeditationTmux(SLUG,…)`, R3b S2); the finder is the agnostic
+  fractal-untranscribed leaf. One delta NAMED for the record: post-flip, jim's meditations
+  ride the **heartbeat spoke** (the driver's session) where the worker rode the
+  supervisor-cycle spoke — same one-warm-self model, same SONNET ladder either way; the
+  spoke name changes, the self doesn't.
+- **Preflight rotations: ported as a manifest LEAF** (`preflightRotations` on the
+  heartbeat surface; `lib/preflight-rotations.ts` — identity gate kept, registry
+  memoryDir, displayName headers, jim's tighter self-reflection windows with the F9 scar
+  comment). Set for jim alone: the memory MODELS differ (jim rotates per F6-1; leo
+  vaults+curates per FM #118 — a uniform rotation would fight the curation design).
+- **Rumination guard: disposition corrected PORT→RETIRE-with-ground.** The S2 grounding
+  found `checkRumination` has ZERO callers in the tree — the guard never guarded; only
+  the recorder runs, writing `jim-rumination.json` which nothing reads. The third costume
+  of this cutover (ghost-tasks, the loader whitelist, now this). Dies with the worker;
+  jim's rumination history file stays on disk untouched (DEC-069). If wanted it returns
+  designed, with a consumer.
+- **Finding filed loud: MNT-203** — the R3b flip silently dropped leo's LIVE felt-moments
+  rotation (twin :2177→:1720, live at flip; outside R3b's passenger-focused inventory).
+  Likely design-convergence with the same evening's vault+curated ruling, but the drop
+  needs Darron's ring, not inheritance. Class-cure suggested: a flip's acceptance diffs
+  the twin's CALL GRAPH, not just its dispositions table.
+- **Acceptance at build**: tsc 11/0; leaf reads jim=true, leo/tenshi/casey=false; inert
+  (leaf on jim alone + guard refuses jim to S4).

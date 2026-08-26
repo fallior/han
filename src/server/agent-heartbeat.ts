@@ -66,7 +66,7 @@ import { runRobinHoodWatch } from './lib/robin-hood';
 import { processDreamGradient } from './lib/dream-gradient';
 import { computeWallClockDelay, distressVerdict } from './lib/agent-scheduler';
 import { getDayPhase, getPhaseInterval, isHeartbeatPaused, type DayPhase } from './lib/day-phase';
-import { manifestModelLadder, loadResidents, peerConversationFor, conversationRoleFor, communityPort, distressMultiplierFor, beatRosterFor, singletonBeatTypes, allocationFor } from './lib/garden-manifest';
+import { manifestModelLadder, loadResidents, peerConversationFor, conversationRoleFor, communityPort, distressMultiplierFor, beatRosterFor, singletonBeatTypes, allocationFor, preflightRotationsEnabled } from './lib/garden-manifest';
 import { readPeerContext } from './lib/peer-peek'; // the S103 exception's ONE home (R3b-HB S1 re-audit: extracted so acceptance #7 is runnable without importing this loop — Tenshi's near-miss)
 import { gradientConfigForAgent } from './lib/agent-registry';
 import { readDreamSeeds as readSharedDreamSeeds, SEED_FRAGMENT_MAX_CHARS } from './lib/dream-seeds';
@@ -75,6 +75,7 @@ import { observedOrUnobservedModel } from './lib/tmux-dispatcher';
 import { gradientStmts, feelingTagStmts, conversationMessageStmts, supervisorStmts } from './db';
 import { buildStateSnapshot } from './lib/supervisor-context';
 import { cleanupPhantomGoals } from './lib/coordination-pre-work';
+import { runPreflightRotations } from './lib/preflight-rotations';
 import { jimSupervisorCycleActionBlock } from './lib/jim-prompts';
 import { ENVELOPE_PATH } from './lib/cognition-envelope';
 import type { CaptureRecord } from './lib/diary-mcp-server';
@@ -553,6 +554,12 @@ async function beat(): Promise<void> {
     beatCounter++;
     const phase: DayPhase = getDayPhase();
     const isDream = phase === 'sleep';
+    // R3c-HB S2: pre-beat file rotations — manifest-LEAFED (jim's F6-1 memory model;
+    // leo vaults+curates, so a uniform rotation would fight FM #118's design). Inert
+    // for every live slug tonight (leaf set on jim alone; the guard refuses jim to S4).
+    if (preflightRotationsEnabled(SLUG)) {
+        try { runPreflightRotations(SLUG, console.log); } catch (e) { console.error(`[${SLUG}-heartbeat] preflight rotation error:`, (e as Error).message); }
+    }
     // R3c-HB S0 (FI #155 landing): the WORK-phase draw comes from the BEAT ROSTER — a
     // deterministic weighted round-robin (cycle length = sum of weights, each type holding
     // `weight` consecutive slots in declaration order). PORT PARITY (M3's binding, kept):
