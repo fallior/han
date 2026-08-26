@@ -1,6 +1,6 @@
 # The Backburner Register — started work that lost its driver, derived not filed
 
-> **Status: PLAN — posted for chairs 2026-08-26; build follows the normal rhythm on the GREENs.**
+> **Status: P0 LANDED 2026-08-26 (deriver + fixtures + cron live; first derivation: 178 rows — 118 unattended, 60 triage, register sees itself). P1 (wall lane, lib/ diff for Jim) + P2 (weekly digest) pending — the plan stays enrolled until LANDED whole.**
 > Commissioned by Darron, 2026-08-26 afternoon. Companion to FI #156 (standing-works registry) —
 > this is its **Part 4**: #156 raises jobs whose trigger is TIME (repeating maintenance); this
 > tracks work whose trigger already fired — we started — and whose driver then went quiet.
