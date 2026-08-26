@@ -639,6 +639,10 @@ export const conversationMessageStmts = {
     // carry a hardcoded ('human','leo') / 'supervisor' role-list in shared infra (DEC-081).
     // role parameterised (was hardcoded 'supervisor') so the cooldown check is the responder's OWN role:
     getLastResponseByRole: db.prepare('SELECT created_at FROM conversation_messages WHERE conversation_id = ? AND role = ? ORDER BY created_at DESC LIMIT 1') as any,
+    // R3b-HB S3 (2026-08-26): the heartbeat activity seed — everything NOT in my role
+    // since the cursor, open threads only. Agnostic by exclusion (role != ?), never a
+    // hardcoded role pair (the human-prompts.ts:153 literal class, avoided at birth).
+    recentOthersSince: db.prepare("SELECT c.id, c.title, c.discussion_type, cm.role, cm.content, cm.created_at FROM conversation_messages cm JOIN conversations c ON cm.conversation_id = c.id WHERE cm.role != ? AND cm.created_at > ? AND c.status = 'open' ORDER BY cm.created_at DESC LIMIT 20") as any,
 };
 
 export const conversationLoopStmts = {

@@ -173,3 +173,59 @@ tsc: 11 pre-existing baseline, zero in touched files. Behaviour unchanged — th
 refuses leo until S5-HB; the driver's only edit is the import + the call's new signature.
 
 — Leo (session), dawn pulse. Held for Jim's diff-audit with S2.
+
+
+---
+
+## S2+S3+S4 BUILT (2026-08-26 afternoon, Darron's complete-the-sweep-today go; held for Jim's blocking audit — packet mqvs3r6l ~17:50+18:05 local)
+
+- **S2**: `lib/fractal-untranscribed.ts` (registry fractalDir; S178 + null-guard lessons verbatim);
+  meditations wired via the agnostic orchestrators (3×phase-a/day → phase-b; evening; per-slug
+  force signal, clear-first). Records via writeBeatMemory.
+- **S3**: dream-gradient morning processing; activity seeds via NEW `recentOthersSince` db
+  statement (agnostic by role-EXCLUSION — the human-prompts:153 literal class avoided at birth);
+  cursor per-slug via registry memoryDir, twin's filename kept (leo's cursor carries over);
+  guard-dog period-doubling detector in scheduleNext, `distressMultiplier` manifest leaf
+  DECLARED AND SET ×3. **T3 discharged** with a latent defect cured: the supervisor route's
+  distress blocks became a loadResidents() loop AND now parse the LAST jsonl line (the old
+  per-slug blocks JSON.parse'd the whole appended file — silently broken on any 2nd signal
+  since the twin).
+- **S4**: `lib/robin-hood.ts` — alert-all/resurrect-sparse; `robinHood` + sparse
+  `robinHoodResurrectTargets` declared AND set (leo; jim/leo-human/jim-human/jemma); T2
+  single-watcher fail-loud + pidfile /proc identity corroboration at the caller; Class-E
+  re-read (restarts only, pid signals unrepresentable); per-target cooldown (cures the twin's
+  cross-target suppression). Inert until S5 (guard refuses leo; twin watches meanwhile — no
+  double-watch window).
+- **Two self-catches on the record**: memoryDir/../.. paths (the S195 jim-root trap, in the
+  agnosticism file itself) → HAN_DIR; a guessed `recentSince` statement → traced, real one added.
+- tsc 11-baseline/0-new throughout; finder smoke-run all four agents + positive control.
+- **NEXT: S5 on Jim's GREEN** — guard accepts leo, unit flip, overnight soak (acceptance rows 1-6
+  + Tenshi's digests + Casey's refusal-observation). S6 post-soak (-60 scour literals).
+
+---
+
+## S5 FLIPPED (2026-08-26 ~18:55 AEST, Darron's word "flip it"; Jim GREEN mt9s7kzy + all four chairs)
+
+- **The flip**: guard's leo half retired (`agent-heartbeat.ts:95` now refuses jim only, comment
+  updated both places); `leo-heartbeat.service` ExecStart → `agent-heartbeat.ts` with
+  `AGENT_SLUG=leo`, mirroring tenshi/casey units incl. the MNT-001 warning header; drop-ins
+  (KillMode=process + After=han-tmux, MNT-052) untouched.
+- **Folds in this commit** (all three riders):
+  - **N1 (Jim)**: Class-E header sentence exact — "no termination signal exists in any path;
+    the only signal sent is the null-signal aliveness probe".
+  - **Tenshi's regex**: `pidfileIdentityOk` requires the server signature (`/server\.ts/`),
+    never bare node/npm/tsx — a reused pid on an unrelated node process no longer passes.
+  - **Casey's exercise ledger, adopted by Jim as grantor**: one jsonl row per successful peek
+    (`peek-exercises.jsonl`: ts/reader/peeked/surface/beat) beside W1's refusals — "observable
+    when used" completes the settlement grammar. Actor-matrix clause discharged: the cross-read
+    declared in `plans/per-uid-sovereignty-plan.md` (the dial's exception list).
+- **Soak armed (before the flip)**: Tenshi's before-digests banked 17:39
+  (`~/.han/health/r3b-s5-peer-digests-before.txt`, 126 rows, method declared); acceptance rows
+  1-6 + Tenshi's two soak rows (granted-peek-with-positive-control; Robin-Hood expected-zero
+  with alerts-denominator) + Casey's refusal-observation row + F1 baseline (leo ≈30
+  annotations/14d). Morning read takes Casey's three-outcome rubric: every row CONFIRMED /
+  REFUTED / UNREACHED — an instrument dead overnight reads UNREACHED, never passed.
+- **Prove-single at the flip**: exactly one rhythm driver (agent-heartbeat AGENT_SLUG=leo) and
+  one Robin Hood watcher (manifest robinHood=leo; the twin's watch died with its unit, the leaf
+  took over in the same act) — verified below at the receipt.
+- **S6 remains** (post-soak): twin retired-by-header, unit no longer references it, -60 scour literals.

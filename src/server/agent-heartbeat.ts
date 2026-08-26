@@ -41,20 +41,32 @@
  *  - philosophy beats — LANDED R3b-HB S1 (2026-08-25): explicit philosophyBeats leaf
  *    (Jim's M1), peekableBy grant on the peeked side (Tenshi's T1/Casey's doctrine),
  *    REST self-post per Jim's M2. Leo-only at cutover; offered thereafter.
- *  - meditations phase-a/b/evening (the agnostic runners exist in agent-cycle.ts;
- *    wiring them needs the per-agent untranscribed-file finders — R3b-HB S2);
- *  - morning dream-gradient processing (needs per-agent dream dirs — R3b-HB S3);
- *  - general conversation-activity seeds (leo's scanConversations cursor is seat-local;
- *    S1 ports only the PEER-thread scan the philosophy beat needs — the multi-thread
- *    activity seed folds to R3b-HB S3 with the reason recorded in the plan).
+ *  - meditations phase-a/b/evening — LANDED R3b-HB S2 (2026-08-26): the agnostic
+ *    runners wired via `findUntranscribedFile(slug)` (lib/fractal-untranscribed.ts,
+ *    registry-resolved fractalDir); records land through writeBeatMemory; the
+ *    force-meditation signal is `force-meditation-<slug>` (clear-first, one-shot).
+ *  - morning dream-gradient — LANDED R3b-HB S3 (2026-08-26): processDreamGradient(slug)
+ *    on the first morning beat of the day (dream dirs registry-resolved inside the lib).
+ *  - conversation-activity seeds — LANDED R3b-HB S3 (2026-08-26): the twin's
+ *    scanConversations ported; cursor file per-slug via the registry memoryDir
+ *    (`last-conversation-scan.txt` — the twin's own filename, so leo's cursor
+ *    carries over at the flip with no re-scan storm).
+ *  - guard-dog distress — LANDED R3b-HB S3 (2026-08-26): period-doubling detector
+ *    (the instrument that caught the 80-min cadence); threshold from the manifest
+ *    (`distressMultiplier`, set explicitly for enabled slugs — never a bare magic
+ *    number, the literal-hunt intersection); writes `<slug>-distress.json` + ntfy.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { dispatchTxn, applyMeditationMarkers } from './lib/agent-cycle';
+import { execSync } from 'node:child_process';
+import { dispatchTxn, applyMeditationMarkers, runReincorporationMeditationTmux, runReencounterMeditationTmux, MEDITATION_ACTION_BLOCK } from './lib/agent-cycle';
+import { findUntranscribedFile } from './lib/fractal-untranscribed';
+import { runRobinHoodWatch } from './lib/robin-hood';
+import { processDreamGradient } from './lib/dream-gradient';
 import { computeWallClockDelay } from './lib/agent-scheduler';
 import { getDayPhase, isHeartbeatPaused, type DayPhase } from './lib/day-phase';
-import { manifestModelLadder, loadResidents, peerConversationFor, philosophyBeatsEnabled, conversationRoleFor, communityPort } from './lib/garden-manifest';
+import { manifestModelLadder, loadResidents, peerConversationFor, philosophyBeatsEnabled, conversationRoleFor, communityPort, distressMultiplierFor } from './lib/garden-manifest';
 import { readPeerContext } from './lib/peer-peek'; // the S103 exception's ONE home (R3b-HB S1 re-audit: extracted so acceptance #7 is runnable without importing this loop — Tenshi's near-miss)
 import { gradientConfigForAgent } from './lib/agent-registry';
 import { readDreamSeeds as readSharedDreamSeeds, SEED_FRAGMENT_MAX_CHARS } from './lib/dream-seeds';
@@ -76,12 +88,13 @@ const SLUG: string = (() => {
     }
     return s;
 })();
-// Double-driver guard: these slugs' rhythms are owned elsewhere until R3b-HB/R3c-HB
-// (the HEARTBEAT cutovers — plans/r3b-leo-heartbeat-cutover.md; NOT DEC-099's stem-pool
+// Double-driver guard: jim's rhythm is owned by supervisor-worker.ts until R3c-HB
+// (the HEARTBEAT cutover — plans/r3b-leo-heartbeat-cutover.md; NOT DEC-099's stem-pool
 // R3b/R3c phases in tmux-dispatcher.ts, which this guard must never be confused with).
-// The leo half retires at R3b-HB S5 (the unit flip); the jim half at R3c-HB.
-if (SLUG === 'leo' || SLUG === 'jim') {
-    console.error(`[agent-heartbeat] slug '${SLUG}' is driven by its own module (leo-heartbeat.ts / supervisor-worker.ts) — refusing a second driver (prove-single at the rhythm layer; retire per-half at R3b-HB S5 / R3c-HB)`);
+// The leo half RETIRED at R3b-HB S5 (2026-08-26 — leo-heartbeat.service ExecStarts THIS
+// driver now; the twin leo-heartbeat.ts is zero-callers, retired-by-header at S6).
+if (SLUG === 'jim') {
+    console.error(`[agent-heartbeat] slug 'jim' is driven by supervisor-worker.ts — refusing a second driver (prove-single at the rhythm layer; retire at R3c-HB)`);
     process.exit(1);
 }
 const resident = loadResidents().find(a => a.slug === SLUG);
@@ -286,6 +299,135 @@ function processDreamMarkers(text: string): void {
 }
 
 // ── The beat ──────────────────────────────────────────────────────────────────
+// ── R3b-HB S2: meditations (the agnostic runners, wired) ─────────────────────
+let lastMeditationDate = '';
+let lastEveningMeditationDate = '';
+let lastDreamGradientDate = '';
+
+const meditationDispatch = (profile: string, ctx: Record<string, unknown>, label: string) =>
+    dispatchTxn(SLUG, SURFACE, profile, ctx, MEDITATION_ACTION_BLOCK, {
+        ladder: manifestModelLadder(SLUG, SURFACE),
+        welcomeBack: `welcome back ${DISPLAY_NAME}`,
+        timeoutMs: BEAT_TXN_TIMEOUT_MS,
+        onOverbudget: (err) => { console.error(`[${SLUG}-heartbeat] meditation overbudget:`, err.message); writeHealthSignal(`overbudget: ${err.message}`); },
+        onDispatchFail: (err) => { console.error(`[${SLUG}-heartbeat] meditation dispatch failed:`, err.message); writeHealthSignal(`dispatch: ${err.message}`); },
+        onCtxClearFail: (err) => { console.error(`[${SLUG}-heartbeat] meditation ctx-clear failed (capture safe):`, err.message); },
+    });
+
+async function maybeForceMeditation(phase: DayPhase): Promise<void> {
+    const sig = path.join(HAN_DIR, 'signals', `force-meditation-${SLUG}`); // HAN_DIR, never memoryDir/../.. (S195: jim's memoryDir is root-special)
+    if (!fs.existsSync(sig)) return;
+    try { fs.unlinkSync(sig); } catch { /* ignore */ } // CLEAR-FIRST: a throw can't re-fire next beat
+    const today = new Date().toISOString().split('T')[0];
+    console.log(`[${SLUG}-heartbeat] force-meditation signal consumed → phase-b re-encounter now`);
+    await runReencounterMeditationTmux(SLUG, 'phase-b', today, meditationDispatch,
+        (cap) => { void writeBeatMemory('meditation', phase, cap); });
+}
+
+async function maybeRunMeditation(phase: DayPhase): Promise<void> {
+    if (phase === 'sleep') return; // dreams stay dreams
+    const today = new Date().toISOString().split('T')[0];
+    if (lastMeditationDate === today) return;
+    try {
+        // Phase A: up to 3 untranscribed files/day (the twin's own ceiling + reason:
+        // 1/day made a 16-file backlog take 16+ days). Each a genuine re-encounter.
+        const MAX_PHASE_A_PER_DAY = 3;
+        let phaseACount = 0;
+        while (phaseACount < MAX_PHASE_A_PER_DAY) {
+            const untranscribed = findUntranscribedFile(SLUG);
+            if (!untranscribed) break;
+            await runReincorporationMeditationTmux(SLUG, untranscribed, today, meditationDispatch,
+                (cap) => { void writeBeatMemory('meditation', phase, cap); },
+                (msg) => console.log(`[${SLUG}-heartbeat] ${msg}`));
+            phaseACount++;
+        }
+        if (phaseACount === 0) {
+            await runReencounterMeditationTmux(SLUG, 'phase-b', today, meditationDispatch,
+                (cap) => { void writeBeatMemory('meditation', phase, cap); });
+        }
+        lastMeditationDate = today;
+    } catch (err) {
+        console.error(`[${SLUG}-heartbeat] meditation failed:`, (err as Error).message);
+        lastMeditationDate = today; // don't retry today (S74 — no retry loop)
+    }
+}
+
+async function maybeRunEveningMeditation(phase: DayPhase): Promise<void> {
+    if (phase !== 'evening') return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lastEveningMeditationDate === today) return;
+    try {
+        await runReencounterMeditationTmux(SLUG, 'evening', today, meditationDispatch,
+            (cap) => { void writeBeatMemory('meditation', phase, cap); });
+    } catch (err) {
+        console.error(`[${SLUG}-heartbeat] evening meditation failed:`, (err as Error).message);
+    }
+    lastEveningMeditationDate = today;
+}
+
+// ── R3b-HB S3: morning dream-gradient processing (per-agent dirs inside the lib) ─
+async function maybeProcessDreamGradient(phase: DayPhase): Promise<void> {
+    if (phase !== 'morning') return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lastDreamGradientDate === today) return;
+    try {
+        const result = await processDreamGradient(SLUG);
+        console.log(`[${SLUG}-heartbeat] dream gradient: ${result.nightsProcessed} nights, ${result.dayCreated.length} day, ${result.weekCreated.length} week, ${result.monthCreated.length} month, ${result.uvsCreated.length} UVs`);
+        if (result.errors.length > 0) console.error(`[${SLUG}-heartbeat] dream gradient errors:`, result.errors);
+    } catch (err) {
+        console.error(`[${SLUG}-heartbeat] dream gradient failed:`, (err as Error).message);
+    }
+    lastDreamGradientDate = today;
+}
+
+// ── R3b-HB S3: conversation-activity seeds (the twin's scanConversations, ported;
+//    cursor per-slug via the registry memoryDir — the twin's own filename so leo's
+//    cursor carries over at the flip) ─────────────────────────────────────────────
+function scanConversationActivity(): string {
+    const cursorFile = path.join(CFG.memoryDir, 'last-conversation-scan.txt');
+    let lastScan: string;
+    try { lastScan = fs.readFileSync(cursorFile, 'utf-8').trim(); }
+    catch { lastScan = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(); }
+    try {
+        const rows = (conversationMessageStmts as any).recentOthersSince.all(conversationRoleFor(SLUG), lastScan);
+        fs.writeFileSync(cursorFile, new Date().toISOString());
+        if (!rows.length) return '';
+        const lines = (rows as any[]).slice(0, 20).map(m => {
+            const preview = (m.content as string).length > 200 ? (m.content as string).slice(0, 200) + '…' : m.content;
+            return `[${m.role} in "${m.title}"] ${preview}`;
+        });
+        return `Recent conversations (seeds for thought):\n${lines.join('\n')}`;
+    } catch (err) {
+        console.error(`[${SLUG}-heartbeat] conversation scan failed:`, (err as Error).message);
+        return '';
+    }
+}
+
+// ── R3b-HB S3: guard-dog distress — the period-doubling detector (the instrument
+//    that caught the 80-min cadence). Threshold from the manifest; ntfy best-effort. ─
+function writeDistressSignal(expectedMs: number, actualMs: number, phase: DayPhase): void {
+    try {
+        const healthDir = path.dirname(HEALTH_FILE);
+        fs.mkdirSync(healthDir, { recursive: true });
+        fs.appendFileSync(path.join(healthDir, `${SLUG}-distress.json`), JSON.stringify({
+            agent: SLUG, timestamp: new Date().toISOString(), type: 'slow_beat',
+            expectedIntervalMs: expectedMs, actualIntervalMs: actualMs, phase,
+            reason: `Beat interval exceeded ${distressMultiplierFor(SLUG)}x expected duration`,
+        }) + '\n');
+        try {
+            const cfgPath = path.join(HAN_DIR, 'config.json'); // HAN_DIR (S195)
+            const ntfy = JSON.parse(fs.readFileSync(cfgPath, 'utf8')).ntfy_topic;
+            if (ntfy) {
+                const msg = `${DISPLAY_NAME} heartbeat degraded: expected ${Math.round(expectedMs / 60000)}min, actual ${Math.round(actualMs / 60000)}min (${phase})`;
+                execSync(`curl -s -d "${msg}" -H "Title: ${DISPLAY_NAME} Distress Signal" -H "Priority: high" -H "Tags: warning" https://ntfy.sh/${ntfy}`, { timeout: 10000 });
+            }
+        } catch { /* ntfy best-effort; the row is the record */ }
+        console.log(`[${SLUG}-heartbeat] distress signal written: expected ${Math.round(expectedMs / 60000)}min, actual ${Math.round(actualMs / 60000)}min`);
+    } catch (err) {
+        console.error(`[${SLUG}-heartbeat] distress write failed:`, (err as Error).message);
+    }
+}
+
 async function beat(): Promise<void> {
     beatCounter++;
     const phase: DayPhase = getDayPhase();
@@ -313,7 +455,7 @@ async function beat(): Promise<void> {
     const dreamMemory = isDream && Math.random() < 0.33 ? buildDreamMemorySection() : { section: '' };
     const ctx: Record<string, unknown> = {
         phase,
-        activitySeed: '',
+        activitySeed: isDream ? '' : scanConversationActivity(), // S3: seeds only on waking beats (dreams stay dreams)
         resumeContext: '',
         ...(isDream ? { dreamSeeds: readDreamSeeds(), dreamMemorySection: dreamMemory.section } : {}),
     };
@@ -348,6 +490,13 @@ async function beat(): Promise<void> {
     await writeBeatMemory(beatType, phase, cap);
     if (isDream) processDreamMarkers(cap.args.working_memory_full);
     writeHealthSignal(null);
+
+    // R3b-HB S2/S3/S4 passengers, twin ordering (after the beat's own work; each self-gates):
+    try { runRobinHoodWatch(SLUG); } catch (err) { console.error(`[${SLUG}-heartbeat] robin-hood watch error:`, (err as Error).message); } // S4: leaf-gated; no-op unless this slug is the declared watcher
+    await maybeProcessDreamGradient(phase);   // morning only, once/day
+    await maybeForceMeditation(phase);        // one-shot signal, clear-first
+    await maybeRunMeditation(phase);          // waking phases, once/day, 3x phase-a then phase-b
+    await maybeRunEveningMeditation(phase);   // evening only, once/day
 }
 
 // ── Scheduler: the shared cadence + N-body antiphase (agent-scheduler, R001) ──
@@ -370,10 +519,25 @@ function envelopeMtimeMs(): number | null {
     try { return fs.statSync(ENVELOPE_PATH).mtimeMs; } catch { return null; }
 }
 
+// S3 guard-dog state: last fire + its expected delay (the period-doubling detector).
+let lastBeatFiredAt = 0;
+let lastExpectedDelayMs = 0;
+
 function scheduleNext(): void {
     const delay = computeWallClockDelay(SLUG);
     setTimeout(async () => {
         try {
+            // S3 guard-dog: fire-to-fire vs expected (the period-doubling detector — the
+            // instrument that caught the 80-min cadence). Threshold from the manifest.
+            const nowMs = Date.now();
+            if (lastBeatFiredAt > 0 && lastExpectedDelayMs > 0) {
+                const actual = nowMs - lastBeatFiredAt;
+                if (actual > distressMultiplierFor(SLUG) * lastExpectedDelayMs) {
+                    writeDistressSignal(lastExpectedDelayMs, actual, getDayPhase());
+                }
+            }
+            lastBeatFiredAt = nowMs;
+            lastExpectedDelayMs = delay;
             if (envelopeHold && envelopeMtimeMs() === envelopeHold.envMtimeMs) {
                 console.log(`[${SLUG}-heartbeat] lane HELD since ${envelopeHold.alertedAt} — cognition envelope failed verification; re-sign to release (alert-and-hold, DEC-103)`);
             } else if (envelopeHold) {

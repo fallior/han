@@ -970,6 +970,17 @@ export function peerConversationFor(slug: string, peerSlug: string): string | nu
 
 /** R3b S1 (Jim's M1): does `slug`'s heartbeat surface draw philosophy beats? Explicit leaf,
  *  never inferred from a peer edge — see the SurfaceManifest field doc. Default false. */
+/** R3b-HB S3: the guard-dog's period-doubling threshold — a beat interval exceeding
+ *  multiplier x expected writes <slug>-distress.json + ntfy. Manifest-settable per
+ *  heartbeat surface (`distressMultiplier`); the default is DECLARED AND SET for the
+ *  enabled slugs in the live manifest (the literal-hunt lesson: a `??` nobody sets is
+ *  a costume — so the value is written, not just declared). */
+export function distressMultiplierFor(slug: string): number {
+    const r = loadResidents().find(a => a.slug === slug);
+    const surf: any = r?.surfaces.find(s2 => s2.name === 'heartbeat');
+    return surf?.distressMultiplier ?? 2;
+}
+
 export function philosophyBeatsEnabled(slug: string): boolean {
     const agent = GARDEN_MANIFEST.agents.find(a => a.slug === slug);
     const hb = agent?.surfaces?.find(s => s.name === 'heartbeat');

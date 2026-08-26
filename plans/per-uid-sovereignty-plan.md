@@ -119,6 +119,13 @@ already leans toward: **per-agent tmux servers** — each agent's server/service
 - The dial: tighten 750→700 per-surface as the P0 map says which cross-reads are
   load-bearing (e.g. the #91 watermark either becomes an API read or a deliberate
   group-readable exception, ruled not inherited).
+  - **Declared cross-read (R3b-HB S5, 2026-08-26): `lib/peer-peek.ts` reads the peeked
+    mind's `identity.md` + curated/self-reflection under the manifest `peekableBy` grant
+    (today: jim grants leo, philosophy beats). Grant-gated (fail-closed, disk-fresh),
+    refusals receipted (`peek-refusals.jsonl`), exercises receipted
+    (`peek-exercises.jsonl` — Casey's rider, Jim's adoption as grantor). At uid-split
+    this is a deliberate exception to rule on — group-readable or API-mediated — never
+    an inherited hole; it is the ONE greppable home of the S103 exception.**
 - Per-garden backup lanes (the restic fence lesson: darron-run restic cannot read 750
   homes it isn't grouped into — backup becomes per-uid lanes or a backup user in `han`,
   decided, not discovered at restore time).

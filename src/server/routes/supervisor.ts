@@ -18,6 +18,7 @@ import {
     isSupervisorEnabled
 } from '../services/supervisor';
 import { createGoal, generateId } from '../services/planning';
+import { loadResidents } from '../lib/garden-manifest';
 
 const router = Router();
 const MEMORY_DIR = path.join(HAN_DIR, 'memory');
@@ -501,46 +502,27 @@ router.get('/health', (_req: Request, res: Response) => {
         const distress: any = {};
         const ONE_HOUR_MS = 60 * 60 * 1000;
 
-        // Jim's distress signal
-        const jimDistressPath = path.join(healthDir, 'jim-distress.json');
-        if (fs.existsSync(jimDistressPath)) {
+        // Resident distress signals — registry-derived (R3b-HB S3 / T3: filenames come
+        // from loadResidents(), never a hardcoded slug list; the 4th agent is seen for
+        // free). NOTE + fix: the writer APPENDS jsonl rows, so we parse the LAST line —
+        // the old per-slug blocks JSON.parse'd the whole file and silently broke on any
+        // second signal (latent since the twin; cured at the port).
+        for (const resident of loadResidents()) {
+            const dPath = path.join(healthDir, `${resident.slug}-distress.json`);
+            if (!fs.existsSync(dPath)) continue;
             try {
-                const jimDistressData = JSON.parse(fs.readFileSync(jimDistressPath, 'utf8'));
-                const distressTimestamp = new Date(jimDistressData.timestamp);
-                const distressAgeMs = now.getTime() - distressTimestamp.getTime();
-
-                if (distressAgeMs < ONE_HOUR_MS) {
-                    distress.jim = {
-                        timestamp: jimDistressData.timestamp,
-                        ageMinutes: Math.floor(distressAgeMs / 60000),
-                        reason: jimDistressData.reason,
-                        details: jimDistressData.details,
+                const lines = fs.readFileSync(dPath, 'utf8').trim().split('\n').filter(Boolean);
+                const data = JSON.parse(lines[lines.length - 1]);
+                const ageMs = now.getTime() - new Date(data.timestamp).getTime();
+                if (ageMs < ONE_HOUR_MS) {
+                    distress[resident.slug] = {
+                        timestamp: data.timestamp,
+                        ageMinutes: Math.floor(ageMs / 60000),
+                        reason: data.reason,
+                        details: data.details,
                     };
                 }
-            } catch (err) {
-                // Fall through if parsing fails
-            }
-        }
-
-        // Leo's distress signal
-        const leoDistressPath = path.join(healthDir, 'leo-distress.json');
-        if (fs.existsSync(leoDistressPath)) {
-            try {
-                const leoDistressData = JSON.parse(fs.readFileSync(leoDistressPath, 'utf8'));
-                const distressTimestamp = new Date(leoDistressData.timestamp);
-                const distressAgeMs = now.getTime() - distressTimestamp.getTime();
-
-                if (distressAgeMs < ONE_HOUR_MS) {
-                    distress.leo = {
-                        timestamp: leoDistressData.timestamp,
-                        ageMinutes: Math.floor(distressAgeMs / 60000),
-                        reason: leoDistressData.reason,
-                        details: leoDistressData.details,
-                    };
-                }
-            } catch (err) {
-                // Fall through if parsing fails
-            }
+            } catch { /* unreadable/garbled row — fall through, absent from the report */ }
         }
 
         // Jemma's distress signal

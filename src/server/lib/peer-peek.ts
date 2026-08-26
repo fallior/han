@@ -81,6 +81,20 @@ export function readPeerContext(readerSlug: string, peekedSlug: string, opts: Pe
         const full = path.join(dir, 'self-reflection.md');
         if (fs.existsSync(curated)) parts.push(fs.readFileSync(curated, 'utf-8').slice(0, REFLECTION_MAX_CHARS));
         else if (fs.existsSync(full)) parts.push(fs.readFileSync(full, 'utf-8').slice(-REFLECTION_MAX_CHARS));
+        // Exercise ledger (Casey's S5 rider, adopted by Jim AS GRANTOR: "a grant I
+        // cannot see exercised is revocable only in theory"). One row per successful
+        // peek beside W1's refusal rows — the settlement's grammar gains "observable
+        // when used": authored, dated, revocable, witnessed when refused, countable
+        // when exercised. The driver is not a seat (no JSONL transcript backstops
+        // this read), so this ledger is the grantor's only instrument.
+        try {
+            const healthDir = path.join(hanHome(), 'health');
+            fs.mkdirSync(healthDir, { recursive: true });
+            fs.appendFileSync(path.join(healthDir, 'peek-exercises.jsonl'), JSON.stringify({
+                ts: new Date().toISOString(), reader: readerSlug, peeked: peekedSlug,
+                surface: opts.surface ?? null, beat: opts.beat ?? null,
+            }) + '\n');
+        } catch { /* never fail a granted peek on ledger I/O; the read stands */ }
         return parts.join('\n\n');
     } catch (err) {
         console.error(`[peer-peek] peer context read failed for '${peekedSlug}' (non-fatal):`, (err as Error).message);
