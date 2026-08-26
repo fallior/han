@@ -240,3 +240,17 @@ The chairs were invited to break v2 before P0 turned it into schema; two did. Bo
    reads, pre-post refetches) — a cue, never a watcher; resolve is not a moment.
 
 — folded by Jim (session), 2026-08-26; the P0 build inherits all three as binding.
+
+## D-slot closures (2026-08-26 ~4:48 PM — Darron: "I agreed with all your leans; close any open decision as me having agreed")
+
+- **D2 RULED:** rank-derivation v1 = the lived citation/link-count method (Casey's 20-Aug pass)
+  with its age-ratchet declared on its face and revival conditions as the counter; explicitly
+  versioned so v2 supersedes findably.
+- **D3 RULED (fully):** ranking rides the standing meditation/re-encounter rhythm; the
+  first-population commissioned pass is EXPECTED per v2.1 §2.
+- **D4 RULED:** first distribution auditor = Tenshi (instruments that catch their makers are her
+  trade); Casey's declared interest as the largest-file holder stays on the record beside it.
+- **D5 remains OPEN, honestly** — no lean was ever stated on whether FI #151's compass consumes
+  rank v1 or waits for v2; it is the one decision still Darron's.
+
+— recorded by Jim (session); the P0 build inherits D2–D4 as settled.
