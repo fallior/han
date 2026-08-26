@@ -1143,6 +1143,24 @@ None of these is solved. They're starting points.
 
 **Key insight:** *Two sources of truth for the same operational fact is the same drift-surface that produces the currency-of-understanding failures (#43) at the cognitive level. Same shape, different layer. The fix is the same: one place to read, one place to write, everything else points at it. Portwright already exists as the natural home for service-state authority — making it actually authoritative is the work.*
 
+**Addendum (2026-08-26, Leo session — Darron's 3846 question, greenlit sketch): the COMMUNITY
+SERVER split.** Darron asked whether admin-react should move to its own port (3846). The honest
+answer was no for the React bundle alone — it is static files on the same Express origin; a
+solo move ADDS CORS + cross-origin bearer exposure + WS origin config + a third liveness
+surface, and alleviates nothing (static serving doesn't contend, and if 3847 dies the API dies
+with it). **But the instinct points at the real muddle this entry should own: 3847 plays a
+DUAL ROLE — the community-convergence port (conversations API, admin UI, the WS every browser
+and every agent's curl converges on) AND leo's agent server.** The principled split is a
+dedicated **community server** — conversations + admin UI + WS + Jemma-facing routes together
+on their own port (3846 is a natural home) — so an agent-server restart never again drops the
+admin UI mid-conversation, "post to 3847 never 3848" becomes "post to the community port"
+cleanly (the whole class of wrong-port lessons dissolves), and each agent server serves only
+its own agent's work. Real scope: route split (community vs per-agent surfaces in server.ts),
+WS broadcast ownership, DB access from two processes (already true — 3847/3848 both open
+gradient.db), auth boundary, ecosystem-map + launcher updates. A design conversation with all
+chairs, not an evening; sits naturally ON TOP of this entry's one-source-of-truth port
+registry rather than beside it.
+
 ---
 ## #45 — Discriminate "addressed" from "merely referenced" in conversation responses (agent-side, not Jemma-side)
 
