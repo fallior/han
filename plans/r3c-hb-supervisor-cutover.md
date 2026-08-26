@@ -185,3 +185,28 @@ statements; PROJECTS_DIR through hanHome()). ADDITIVE, zero callers — the work
 copy until the flip; the driver wires it when S1 completes (beat body + telemetry +
 singleton pre-work), then the whole slice takes Jim's blocking audit. Leaf smoke: 10
 sections, 5.5K chars against the live DB, imports nothing that runs.
+
+**S1 BUILT WHOLE (2026-08-26 ~21:00, Darron's go; HELD for Jim's blocking diff-audit):**
+- **The supervisor beat** (`agent-heartbeat.ts supervisorBeat`): roster-drawn (singleton),
+  telemetry CONTINUES the supervisor_cycles sequence (D2 — insertCycle/completeCycle/
+  failCycle via shared stmts, cost 0, actions '[]'), ctx = `{phase, stateSnapshot}` through
+  the `supervisor-cycle-txn` profile (DEC-087 — assembly stays in the builder), action
+  block via `jimSupervisorCycleActionBlock` with the port from `allocationFor(slug)` (the
+  driver unit carries no PORT env — no literal, no guess, fail-loud + failCycle when
+  absent), stand-down never paired-writes (DEC-093), the paired write keeps the CYCLE
+  header form for the record's continuity.
+- **`lib/coordination-pre-work.ts`**: phantom-goal sweep ported whole (same SQL, shared
+  db, goalStmts signatures verified). **Port finding: `detectAndRecoverGhostTasks` NOT
+  ported** — its worker body was already a delegated no-op stub ("can't check runningSlots…
+  just count them but don't recover", returning 0 unconditionally); carrying it would be a
+  costume. The PORT disposition for that half corrects to RETIRE-with-ground; real
+  ghost-recovery returns as a designed feature if wanted.
+- **F1 (S127) carried structurally**: no reply path exists in the beat body; conversations
+  arrive only inside the snapshot. S4's acceptance pins it.
+- **Knowingly not carried, named**: the parent's WS broadcast (admin tab reads rows via
+  API); logCycleToSession (claude-logged is provenance, DEC-091); recordRuminationTopic
+  (S2's slice). The action block stays jim-prompts-homed this slice (the beat is
+  jim-singleton by roster); the coordinator-prompts rename rides S5's sweep.
+- **Acceptance at build**: tsc 11 baseline/0 touched; pre-work leaf smoke-run (honest 0
+  cleaned — clean board); inertness proven (only jim's roster holds `supervisor`; the
+  guard refuses jim until S4) — zero behaviour change deployed.

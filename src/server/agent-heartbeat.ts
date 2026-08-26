@@ -66,13 +66,16 @@ import { runRobinHoodWatch } from './lib/robin-hood';
 import { processDreamGradient } from './lib/dream-gradient';
 import { computeWallClockDelay, distressVerdict } from './lib/agent-scheduler';
 import { getDayPhase, getPhaseInterval, isHeartbeatPaused, type DayPhase } from './lib/day-phase';
-import { manifestModelLadder, loadResidents, peerConversationFor, conversationRoleFor, communityPort, distressMultiplierFor, beatRosterFor, singletonBeatTypes } from './lib/garden-manifest';
+import { manifestModelLadder, loadResidents, peerConversationFor, conversationRoleFor, communityPort, distressMultiplierFor, beatRosterFor, singletonBeatTypes, allocationFor } from './lib/garden-manifest';
 import { readPeerContext } from './lib/peer-peek'; // the S103 exception's ONE home (R3b-HB S1 re-audit: extracted so acceptance #7 is runnable without importing this loop — Tenshi's near-miss)
 import { gradientConfigForAgent } from './lib/agent-registry';
 import { readDreamSeeds as readSharedDreamSeeds, SEED_FRAGMENT_MAX_CHARS } from './lib/dream-seeds';
 import { appendPairedMemory } from './lib/memory-paired-writer';
 import { observedOrUnobservedModel } from './lib/tmux-dispatcher';
-import { gradientStmts, feelingTagStmts, conversationMessageStmts } from './db';
+import { gradientStmts, feelingTagStmts, conversationMessageStmts, supervisorStmts } from './db';
+import { buildStateSnapshot } from './lib/supervisor-context';
+import { cleanupPhantomGoals } from './lib/coordination-pre-work';
+import { jimSupervisorCycleActionBlock } from './lib/jim-prompts';
 import { ENVELOPE_PATH } from './lib/cognition-envelope';
 import type { CaptureRecord } from './lib/diary-mcp-server';
 import { localStampSeconds } from './lib/garden-time'; // DEC-105 P2: record headers speak local
@@ -450,6 +453,87 @@ function writeDistressSignal(expectedMs: number, actualMs: number, phase: DayPha
     }
 }
 
+// ── R3c-HB S1: the SUPERVISOR beat — the coordinator's office as a beat type ──
+// Singleton-by-roster (exactly-one; jim's native beat per FI #155). The worker's cycle
+// grammar carried whole: telemetry rows CONTINUE the supervisor_cycles sequence (Jim's
+// D2 — his diary's spine; the boundary row lands at S4's flip); the state snapshot is
+// the context-provider special treatment (lib/supervisor-context); board maintenance is
+// singleton-scoped pre-work (lib/coordination-pre-work — cannot race itself, the caller
+// is exactly-one by law). S127 TRAVELS (Jim's F1): this beat OBSERVES conversations
+// (they arrive inside the snapshot) and never replies — no reply path exists in this
+// body, and the S4 acceptance pins it. The action block stays in lib/jim-prompts for
+// this slice (the beat is jim-singleton by roster; the rename to coordinator-prompts
+// rides S5's literal sweep, named not smuggled).
+// Knowingly NOT carried, each named for the audit: the parent-process WS broadcast
+// (real-time admin push; the tab still reads rows via the API poll), logCycleToSession
+// (SDK-era session-log mirror — the claude-logged transcript is provenance now, DEC-091),
+// and recordRuminationTopic (S2's rumination-guard port, not this slice).
+async function supervisorBeat(phase: DayPhase): Promise<void> {
+    const cleaned = cleanupPhantomGoals(console.log);
+    const cycleId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 11);
+    const cycleNumber = (supervisorStmts.getNextCycleNumber.get() as any)?.next || 1;
+    supervisorStmts.insertCycle.run(cycleId, new Date().toISOString(), cycleNumber, 'supervisor');
+    console.log(`[${SLUG}-heartbeat] supervisor beat — cycle #${cycleNumber} (${phase}${cleaned ? `; pre-work cleaned ${cleaned}` : ''})`);
+
+    // The coordinator acts via its OWN server's API — the port from the allocation,
+    // never a literal and never env (the driver unit carries no PORT; the 3847/3848
+    // owner lessons). No allocation → fail loud + record, never guess.
+    const port = allocationFor(SLUG)?.port;
+    if (!port) {
+        const msg = `no port allocation for '${SLUG}' — the coordinator beat cannot build its action block`;
+        console.error(`[${SLUG}-heartbeat] ${msg}`);
+        supervisorStmts.failCycle.run(new Date().toISOString(), msg, cycleId);
+        return;
+    }
+    let ntfyTopic: string | undefined;
+    try { ntfyTopic = JSON.parse(fs.readFileSync(path.join(HAN_DIR, 'config.json'), 'utf8')).ntfy_topic; } catch { /* optional */ }
+
+    const ctx: Record<string, unknown> = { phase, stateSnapshot: buildStateSnapshot(SLUG) };
+    const cap = await dispatchTxn(SLUG, SURFACE, 'supervisor-cycle-txn', ctx, jimSupervisorCycleActionBlock(`https://localhost:${port}`, ntfyTopic), {
+        ladder: manifestModelLadder(SLUG, SURFACE),
+        welcomeBack: `welcome back ${DISPLAY_NAME}`,
+        timeoutMs: BEAT_TXN_TIMEOUT_MS,
+        onOverbudget: (err) => { console.error(`[${SLUG}-heartbeat] supervisor beat overbudget:`, err.message); writeHealthSignal(`overbudget: ${err.message}`); },
+        onDispatchFail: (err) => { console.error(`[${SLUG}-heartbeat] supervisor beat dispatch failed:`, err.message); writeHealthSignal(`dispatch: ${err.message}`); },
+        onCtxClearFail: (err) => { console.error(`[${SLUG}-heartbeat] ctx-clear failed (capture safe):`, err.message); },
+    });
+
+    if (!cap) {
+        // Overbudget-skip or dispatch failure (surfaced via callbacks). Record cleanly +
+        // retry next cadence — no token black hole (S74).
+        supervisorStmts.failCycle.run(new Date().toISOString(), 'dispatch skipped (over budget or dispatch failure)', cycleId);
+        writeHealthSignal(null);
+        return;
+    }
+    const stoodDown = cap.mode === 'stand-down';
+    const wmFull = cap.args.working_memory_full || '';
+    const wmCompressed = cap.args.working_memory_compressed || '';
+    // Telemetry mirrors the worker's shape: cost 0 (subscription-metered warm seat),
+    // actions '[]' (the seat acts directly via the API; the curated record narrates).
+    const observations = stoodDown
+        ? [`supervisor beat — stood down (${cap.reason || 'nothing required'})`]
+        : [wmCompressed.slice(0, 500) || 'supervisor beat completed'];
+    supervisorStmts.completeCycle.run(new Date().toISOString(), 0, 0, 0, 0, '[]', JSON.stringify(observations), wmCompressed.slice(0, 1000), cycleId);
+    if (stoodDown) {
+        console.log(`[${SLUG}-heartbeat] supervisor beat #${cycleNumber}: stand-down — ${(cap.reason ?? '').slice(0, 160)}`);
+        writeHealthSignal(null); // never paired-write a stand-down (DEC-093)
+        return;
+    }
+    if (wmFull.trim() && wmCompressed.trim()) {
+        // The CYCLE header form (D2 — the record's continuity), paired atomically (#49).
+        const model = observedOrUnobservedModel(SLUG, SURFACE);
+        const modelTag = model ? ` [model: ${model}]` : '';
+        const inputDelta = cap.args.input_quotes;
+        const fullBody = inputDelta ? `[INPUT]\n${inputDelta}\n\n[BODY]\n${wmFull}` : wmFull;
+        const header = `\n### Cycle #${cycleNumber} — supervisor (agnostic driver) (${localStampSeconds()})${modelTag}`;
+        await appendPairedMemory(SLUG, `${header}\n${fullBody}\n`, `${header}\n${wmCompressed}\n`, { source: `agent-heartbeat@${SLUG}` });
+        console.log(`[${SLUG}-heartbeat] supervisor beat #${cycleNumber} complete — paired write (${wmCompressed.length}c c1, ${fullBody.length}c c0)`);
+    } else {
+        console.warn(`[${SLUG}-heartbeat] supervisor beat #${cycleNumber}: capture carried an asymmetric/empty record (full=${wmFull.length}c, comp=${wmCompressed.length}c) — telemetry recorded, no paired write`);
+    }
+    writeHealthSignal(null);
+}
+
 /** S0 (R3c-HB): deterministic weighted round-robin over the roster — counter is 1-based,
  *  slots 0-based; each type occupies `weight` consecutive slots in declaration order.
  *  Pure, exported-adjacent shape kept trivial on purpose (parity is provable by hand). */
@@ -484,10 +568,16 @@ async function beat(): Promise<void> {
             console.log(`[${SLUG}-heartbeat] beat #${beatCounter} (${phase}/philosophy — roster draw)`);
             const drawn = await philosophyBeat(phase);
             if (drawn) return; // no address (no peer edge) falls through to a personal beat
+        } else if (drawnType === 'supervisor') {
+            // S1 (R3c-HB): the coordinator's office. Reachable only by the roster's
+            // singleton holder — unreachable until S4 (the guard refuses jim above).
+            console.log(`[${SLUG}-heartbeat] beat #${beatCounter} (${phase}/supervisor — roster draw, singleton)`);
+            await supervisorBeat(phase);
+            return;
         } else if (drawnType !== 'personal') {
-            // S1 implements the supervisor beat; any type drawn without an implementation
-            // falls through to a personal beat LOUDLY (never a silent no-op beat).
-            console.warn(`[${SLUG}-heartbeat] roster drew '${drawnType}' but no implementation exists yet (S1 pending) — personal beat instead`);
+            // A drawn type without an implementation falls through to a personal beat
+            // LOUDLY (never a silent no-op beat).
+            console.warn(`[${SLUG}-heartbeat] roster drew '${drawnType}' but no implementation exists — personal beat instead`);
         }
     }
     const beatType = isDream ? 'dream' : 'personal';
