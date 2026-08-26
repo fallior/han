@@ -55,7 +55,7 @@ export function hearthPulseMinutesFor(slug: string, surface: string): number {
  *  stored on the session object — never fetched at fire time (§2.8's blast-radius law). */
 export function hearthStandingMessageFor(slug: string, surface: string): string {
     return (spokeLifecycleFor(slug, surface) as any).hearthStandingMessage
-        ?? 'Hearth pulse: go get a job from the jobs board. If the board is empty, a dream or wander beat is honest work — the covenant prices identity-work as work. Never snooze to save tokens.';
+        ?? 'Hearth pulse: go get a job from the jobs board. If the board is empty, surface the oldest unattended row from the backburner (~/.han/memory/shared/backburner.md — check the WHO column first; a row waiting on a named person is theirs to nudge, not yours to work). If that too is quiet, a dream or wander beat is honest work — the covenant prices identity-work as work. Never snooze to save tokens.';
 }
 export function senescenceEnabledFor(slug: string, surface: string): boolean {
     return (spokeLifecycleFor(slug, surface) as any).senescenceEnabled === true;

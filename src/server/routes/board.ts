@@ -73,6 +73,16 @@ function readTickPlans(): { file: string; headings: string[] }[] {
     } catch { return []; }
 }
 
+/** Backburner (FI #156 Part 4, P1): the deriver's JSON sidecar — machine artefact read
+ *  directly (K0's one-parser doctrine: no markdown-table parsing downstream; the md view
+ *  is for humans, this file is for the wall). Absent file = register not derived yet. */
+function readBackburner(): unknown {
+    try {
+        const p = path.join(os.homedir(), '.han', 'memory', 'shared', 'backburner.json');
+        return JSON.parse(fs.readFileSync(p, 'utf-8'));
+    } catch { return null; }
+}
+
 router.get('/api/board', (_req: Request, res: Response) => {
     try {
         const board = parseBoard();
@@ -104,6 +114,7 @@ router.get('/api/board', (_req: Request, res: Response) => {
                 sessionPools: readSessionPools(), // K1-M1: all agents, slug-keyed (DEC-081)
                 tickPlans: readTickPlans(),
             },
+            backburner: readBackburner(), // FI #156 Part 4 P1 — null until first derivation
         });
     } catch (err) {
         res.status(500).json({ success: false, error: (err as Error).message });

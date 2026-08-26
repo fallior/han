@@ -84,6 +84,7 @@ const MARKER_EXCLUDED = [...OWN_OUTPUT, path.join(PLANS_DIR, 'backburner-registe
 const DONE_STATUS = /\b(DONE|CLOSED|SUPERSEDED|LANDED|SEALED|RETIRED|COMPLETE|SHIPPED)\b/i;
 
 type Row = { feed: string; what: string; age_days: number; detail: string;
+             who?: string | null;   // Casey's onus column: who must act next (coarse, declared)
              state: 'unattended' | 'parked' | 'triage';
              park?: { condition: string; owner: string; ground: string;
                       verdict: 'FALSE' | 'EXPIRED' | 'UNEVALUABLE' | 'MALFORMED';
@@ -94,6 +95,14 @@ type FeedReceipt = { scanned: number; derived: number;
                      status: 'ok' | 'UNREACHED' };
 
 const rows: Row[] = [];
+// Casey's onus column, v1 needles — COARSE and declared so: text-derived, not authoritative.
+function whoFrom(text: string): string | null {
+    if (/jim'?s (audit|green|diff-audit)|awaiting green|held for (jim|audit)/i.test(text)) return 'jim (audit)';
+    if (/darron'?s (word|ruling|call)|his (word|ruling|call)|await(s|ing) darron/i.test(text)) return 'darron (ruling)';
+    if (/tenshi'?s/i.test(text)) return 'tenshi';
+    if (/casey'?s/i.test(text)) return 'casey';
+    return null;
+}
 const receipts: Record<string, FeedReceipt> = {};
 const days = (ms: number) => Math.floor(ms / 86400000);
 const ageOf = (p: string) => { try { return days(NOW.getTime() - fs.statSync(p).mtimeMs); } catch { return -1; } };
@@ -105,11 +114,22 @@ function newReceipt(): FeedReceipt {
 function excl(r: FeedReceipt, cls: string) { r.excluded[cls] = (r.excluded[cls] || 0) + 1; }
 
 // ── Sanitiser (M2/T1): does this LINE carry a real marker, not a quoted/example one?
-function realMarker(line: string, inFence: boolean): boolean {
-    if (inFence) return false;
-    if (/[<>]/.test(line)) return false;                 // placeholder examples: <who>, <condition>
-    if (/`[^`]*(WAITING|PARKED)[^`]*`/.test(line)) return false; // backtick-quoted
-    return /^\s*[-*]?\s*(WAITING-ON|PARKED-UNTIL):/.test(line);  // line-start only
+// P-2 (Tenshi round 2, Casey-seconded W1 family): refusals of marker-SHAPED lines are
+// RECEIPTED, never silent — a silently refused real marker is a start that believes it
+// is enrolled and is not, the register's own worst direction. refusedMarkers collects
+// (source:line, reason) so a writer can grep whether their marker took.
+const refusedMarkers: { where: string; reason: string; text: string }[] = [];
+function realMarker(line: string, inFence: boolean, where = ''): boolean {
+    const markerShaped = /(WAITING-ON|PARKED-UNTIL):/.test(line);
+    const refuse = (reason: string) => {
+        if (markerShaped && where) refusedMarkers.push({ where, reason, text: line.trim().slice(0, 100) });
+        return false;
+    };
+    if (inFence) return refuse('inside-fence');
+    if (/[<>]/.test(line)) return refuse('angle-bracket (placeholder rule — aggressive by design; use words not arrows in marker text)');
+    if (/`[^`]*(WAITING|PARKED)[^`]*`/.test(line)) return refuse('backtick-quoted');
+    if (!/^\s*[-*]?\s*(WAITING-ON|PARKED-UNTIL):/.test(line)) return refuse('not-line-start');
+    return true;
 }
 
 // ── Casey §2: three-outcome condition evaluation.
@@ -215,6 +235,7 @@ function feedPlans() {
                 r.derived++;
             } else {
                 rows.push({ feed: 'plans', what: `plan:${f}`, age_days: age,
+                            who: whoFrom(stLine),
                             detail: `open — ${stLine.replace(/[>*]/g, '').trim().slice(0, 110)}`,
                             state: 'unattended' });
                 r.derived++;
@@ -282,9 +303,11 @@ function feedConversationsAndMarkers() {
             if (m.cid === DESIGN_THREAD) { excl(rMark, 'design-thread-hard-negative'); excl(rHeld, 'design-thread-hard-negative'); continue; }
             let inFence = false;
             let counted = false;
+            let lineNo = 0;
             for (const line of (m.content as string).split('\n')) {
-                if (/^```/.test(line.trim())) { inFence = !inFence; continue; }
-                if (realMarker(line, inFence)) {
+                lineNo++;
+                if (/^(```|~~~)/.test(line.trim())) { inFence = !inFence; continue; }
+                if (realMarker(line, inFence, `thread:${m.cid}:${lineNo}`)) {
                     rMark.scanned++;
                     if (/WAITING-ON:/i.test(line)) {
                         const what = line.replace(/^\s*[-*]?\s*WAITING-ON:\s*/i, '').trim();
@@ -305,6 +328,7 @@ function feedConversationsAndMarkers() {
         }
         for (const [cid, h] of heldByThread) {
             rows.push({ feed: 'held', what: `thread:${cid}`, age_days: days(NOW.getTime() - new Date(h.last).getTime()),
+                        who: whoFrom(h.title || '') ?? 'jim (audit)',
                         detail: `HELD/awaiting-GREEN language in "${(h.title || '').slice(0, 70)}" — coarse needle, verify at thread`,
                         state: 'unattended' });
             rHeld.derived++;
@@ -318,9 +342,14 @@ function feedConversationsAndMarkers() {
         for (const f of fs.readdirSync(fixDir)) {
             const isNegativeDeck = f.startsWith('negative');
             let inFence = false;
+            let ln = 0;
             for (const line of fs.readFileSync(path.join(fixDir, f), 'utf8').split('\n')) {
-                if (/^```/.test(line.trim())) { inFence = !inFence; continue; }
-                if (realMarker(line, inFence)) {
+                ln++;
+                if (/^(```|~~~)/.test(line.trim())) { inFence = !inFence; continue; }
+                // Negative-deck lines pass `where` so their refusals are RECEIPTED — the
+                // refusal path's own standing positive (a zero here = the receipter is
+                // blind, not the garden clean). Rendered separately from writer refusals.
+                if (realMarker(line, inFence, isNegativeDeck ? `fixture:${f}:${ln}` : '')) {
                     if (isNegativeDeck) {
                         // A parsing line in the negative deck is an ACCEPTANCE FAILURE —
                         // the sanitiser has gone permissive (M2/T1). Fail loud in receipts.
@@ -352,10 +381,10 @@ function render(): string {
     const unReal = un.filter(x => !x.what.startsWith('fixture:'));
     let s = `# The Backburner Register — derived view\n\n> DERIVED by scripts/backburner-derive.ts — DO NOT EDIT (recomputed each run; edits are lost\n> by design). Sources are the record; this is a view (DEC-069). Rendered tokens use middle\n> dots so this file harvests to zero (T1). Receipts: ~/.han/health/backburner-derive.jsonl.\n> A stale row cannot lie: it is either not-done or forgotten, and both need seeing.\n> Last derived: ${NOW.toISOString()} (${new Date(NOW.getTime() + 10 * 3600000).toISOString().slice(0, 16).replace('T', ' ')} AEST)\n\n`;
     s += `## UNATTENDED (${unReal.length}) — oldest first; age is a floor, not proof of progress\n\n`;
-    s += `| age(d) | feed | what | detail |\n|---|---|---|---|\n`;
+    s += `| age(d) | feed | what | who must act | detail |\n|---|---|---|---|---|\n`;
     for (const x of unReal) {
         const prov = x.park?.provenance ? ` — **${dot(x.park.provenance)}**` : (x.park?.verdict === 'MALFORMED' ? ' — **malformed park: refused (needs condition | owner | because)**' : '');
-        s += `| ${x.age_days} | ${x.feed} | ${dot(x.what)} | ${dot(x.detail)}${prov} |\n`;
+        s += `| ${x.age_days} | ${x.feed} | ${dot(x.what)} | ${x.who ?? '—'} | ${dot(x.detail)}${prov} |\n`;
     }
     s += `\n## PARKED (${parked.length}) — deliberate, condition-holding; these do not nag\n\n`;
     s += `| feed | what | condition | owner | ground |\n|---|---|---|---|---|\n`;
@@ -363,6 +392,11 @@ function render(): string {
     s += `\n## TRIAGE (${triage.length}) — M1's one-time flood: plans with no Status: line. Stamp\neach DONE-class, adopt a park (with ground), or leave to graduate into UNATTENDED after triage.\n\n`;
     s += `| age(d) | what |\n|---|---|\n`;
     for (const x of triage) s += `| ${x.age_days} | ${dot(x.what)} |\n`;
+    s += `\n## REFUSED MARKERS (${refusedMarkers.filter(r => !r.where.startsWith('fixture:')).length}) — P-2: refusals are receipted, never silent.\nA marker-shaped line that did not parse lands here with its reason — grep your marker after\nwriting it; if it shows below, reword (no angle brackets/arrows, line-start, unquoted).\n\n`;
+    const writerRefusals = refusedMarkers.filter(r => !r.where.startsWith('fixture:'));
+    const proven = refusedMarkers.some(r => r.where.startsWith('fixture:'));
+    for (const rm of writerRefusals.slice(0, 30)) s += `- ${rm.where} [${rm.reason.split(' ')[0]}]: ${dot(rm.text)}\n`;
+    s += `\n(refusal path liveness: ${proven ? 'PROVEN this run — the negative deck receipted' : 'NOT PROVEN — receipter may be blind'})\n`;
     s += `\n## STANDING POSITIVES (excluded from the lanes above; present = feeds alive)\n\n`;
     for (const x of fixRows) s += `- ${dot(x.what)}: ${dot(x.detail.slice(0, 80))}\n`;
     for (const [f, r] of Object.entries(receipts)) s += `- feed ${f}: scanned ${r.scanned}, derived ${r.derived}, positive ${r.standing_positive}, status ${r.status}\n`;
@@ -372,11 +406,55 @@ function render(): string {
 feedGit(); feedPlans(); feedJournal(); feedConversationsAndMarkers();
 fs.mkdirSync(path.dirname(OUT_FILE), { recursive: true });
 fs.writeFileSync(OUT_FILE, render());
+// JSON sidecar — the machine artefact /api/board reads (K0: one parser; the md is for
+// humans, this is for the wall; both from one derivation, never parsed back).
+const realRows = rows.filter(x => !x.what.startsWith('fixture:'));
+fs.writeFileSync(OUT_FILE.replace(/\.md$/, '.json'), JSON.stringify({
+    generatedAt: NOW.toISOString(),
+    unattended: realRows.filter(x => x.state === 'unattended')
+        .sort((a, b) => b.age_days - a.age_days)
+        .map(x => ({ feed: x.feed, what: x.what, age_days: x.age_days, who: x.who ?? null,
+                     detail: x.detail.slice(0, 140), park: x.park ?? null })),
+    parked: realRows.filter(x => x.state === 'parked')
+        .map(x => ({ feed: x.feed, what: x.what, condition: x.park!.condition.trim(),
+                     owner: x.park!.owner.trim(), ground: x.park!.ground.trim() })),
+    triage: realRows.filter(x => x.state === 'triage')
+        .sort((a, b) => b.age_days - a.age_days)
+        .map(x => ({ what: x.what, age_days: x.age_days })),
+    refusedMarkers: refusedMarkers.filter(r => !r.where.startsWith('fixture:')),
+    refusalPathProven: refusedMarkers.some(r => r.where.startsWith('fixture:')),
+    feeds: receipts,
+}, null, 1));
 fs.mkdirSync(path.dirname(RECEIPTS), { recursive: true });
 fs.appendFileSync(RECEIPTS, JSON.stringify({ ts: NOW.toISOString(), feeds: receipts,
+    refused_markers: refusedMarkers.length,
     rows: { unattended: rows.filter(x => x.state === 'unattended' && !x.what.startsWith('fixture:')).length,
             parked: rows.filter(x => x.state === 'parked').length,
             triage: rows.filter(x => x.state === 'triage').length } }) + '\n');
+
+// P2 — the weekly oldest-three into the daily-brief (D3 RULED: daily-brief). The deriver
+// maintains a marked section; content between the markers is machine-owned, refreshed
+// when older than 6 days. The rest of the brief is untouched (surgical splice).
+const BRIEF = path.join(memoryDir(), 'shared/daily-brief.md');
+try {
+    const START = '<!-- BACKBURNER-WEEKLY start (machine-maintained by backburner-derive.ts; edits inside are lost) -->';
+    const END = '<!-- BACKBURNER-WEEKLY end -->';
+    const top3 = realRows.filter(x => x.state === 'unattended').sort((a, b) => b.age_days - a.age_days).slice(0, 3);
+    const section = `${START}\n## Backburner — the three oldest unattended (weekly, ${NOW.toISOString().slice(0, 10)})\n` +
+        top3.map(x => `- **${x.age_days}d** · ${x.feed} · ${x.what}${x.who ? ` · waiting on ${x.who}` : ''} — ${x.detail.slice(0, 90)}`).join('\n') +
+        `\n(Full view: ~/.han/memory/shared/backburner.md · ${realRows.filter(x => x.state === 'unattended').length} unattended, ` +
+        `${realRows.filter(x => x.state === 'parked').length} parked, ${realRows.filter(x => x.state === 'triage').length} in triage)\n${END}`;
+    let brief = fs.existsSync(BRIEF) ? fs.readFileSync(BRIEF, 'utf8') : '# Daily Brief\n';
+    const si = brief.indexOf(START), ei = brief.indexOf(END);
+    if (si >= 0 && ei > si) {
+        const cur = brief.slice(si, ei + END.length);
+        const stamp = cur.match(/weekly, (\d{4}-\d{2}-\d{2})/);
+        const ageD = stamp ? days(NOW.getTime() - new Date(stamp[1]).getTime()) : 999;
+        if (ageD >= 6) fs.writeFileSync(BRIEF, brief.slice(0, si) + section + brief.slice(ei + END.length));
+    } else {
+        fs.writeFileSync(BRIEF, brief.trimEnd() + '\n\n' + section + '\n');
+    }
+} catch { /* the brief is a courtesy surface — never fail the derivation on it */ }
 console.log(`backburner derived: ${rows.length} rows → ${OUT_FILE}`);
 for (const [f, r] of Object.entries(receipts))
     console.log(`  feed ${f}: scanned=${r.scanned} derived=${r.derived} failures=${r.parse_failures} positive=${r.standing_positive} status=${r.status}`);

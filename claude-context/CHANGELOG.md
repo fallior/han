@@ -7,6 +7,25 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-26 — Leo (session) — Backburner Register P1+P2 + deriver v1.1 (round-2 chair folds; Jim lit P1, D3 ruled)
+
+### Added
+- **The wall's Backburner section** (`routes/board.ts` + `KanbanPage.tsx`): /api/board now
+  carries the deriver's JSON sidecar (K0 one-parser doctrine — no markdown parsed back);
+  the Kanban page renders unattended rows (age, feed, WHO-must-act) + parked/triage counts
+  + the refusal-path liveness flag. Null until first derivation, absent-tolerant.
+- **The hearth covenant line** (`spoke-organelle.ts`): the standing message now routes an
+  empty board to the backburner's oldest unattended row (WHO column honoured — a row
+  waiting on a named person is theirs to nudge). Darron's v4 sentence kept intact; BAKED
+  at spawn, so live for newly-warmed seats only.
+- **Deriver v1.1** (`scripts/backburner-derive.ts`): P-1 tilde fences tracked; P-2 refusals
+  RECEIPTED never silent (marker-shaped lines that fail the sanitiser land in the view +
+  JSON with file:line and reason — the writer's check-my-marker-took path), with the
+  negative deck doubling as the refusal path's standing positive (refusalPathProven per
+  run); Casey's WHO-must-act onus column (coarse text-derivation, declared); JSON sidecar
+  for the wall; P2's weekly oldest-three maintained as a machine-owned marked section in
+  the daily-brief (D3 ruled: daily-brief), refreshed when >6 days old.
+
 ## 2026-08-26 — Leo (session) — compression wake-gate + orientation announcer: the two remaining provenance commits (record repair; both LIVE since 25 Aug)
 
 ### Added

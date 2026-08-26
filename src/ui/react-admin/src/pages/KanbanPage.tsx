@@ -35,6 +35,14 @@ interface BoardFeed {
     entries: BoardCard[];
     unparseable: { line: number; headerText: string }[];
     backlinks: Record<string, string[]>;
+    backburner?: {
+        generatedAt: string;
+        unattended: { feed: string; what: string; age_days: number; who: string | null; detail: string }[];
+        parked: { feed: string; what: string; condition: string; owner: string; ground: string }[];
+        triage: { what: string; age_days: number }[];
+        refusedMarkers: { where: string; reason: string; text: string }[];
+        refusalPathProven: boolean;
+    } | null;
     hearth: {
         counters: { ts: string; kind: string; slug?: string; surface?: string; requested?: string; observed?: string; verdict?: string }[];
         // K1-M1 (Jim's audit): all agents' session pools, slug-keyed — never one hardcoded slug (DEC-081).
@@ -184,6 +192,33 @@ export default function KanbanPage() {
                     </div>
                 )}
             </div>
+
+            {feed.backburner && (
+                <div className="kb-hearth">
+                    <h2>🍲 The backburner — started work that lost its driver (derived, never filed)</h2>
+                    <div className="kb-lane-note">
+                        a stale row cannot lie: it is either not-done or forgotten · {feed.backburner.unattended.length} unattended
+                        · {feed.backburner.parked.length} parked · {feed.backburner.triage.length} in triage
+                        · refusal path {feed.backburner.refusalPathProven ? 'proven' : 'NOT PROVEN'}
+                        · derived {new Date(feed.backburner.generatedAt).toLocaleString()}
+                    </div>
+                    <div className="kb-lane-cards">
+                        {feed.backburner.unattended.slice(0, 15).map((b, i) => (
+                            <div key={i} className="kb-card">
+                                <div className="kb-title"><span className="kb-chip">{b.feed}</span> {b.what}</div>
+                                <div className="kb-meta">
+                                    <span className="kb-age">{b.age_days}d untouched</span>
+                                    {b.who && <span className="kb-chip">waiting on {b.who}</span>}
+                                </div>
+                                <div className="kb-provenance">{b.detail}</div>
+                            </div>
+                        ))}
+                        {feed.backburner.unattended.length > 15 && (
+                            <div className="kb-empty">… {feed.backburner.unattended.length - 15} more in ~/.han/memory/shared/backburner.md</div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             <div className="kb-hearth">
                 <h2>🔥 The hearth</h2>
