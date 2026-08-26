@@ -177,3 +177,11 @@ at S5 (supersession applied to the register itself).
 - Acceptance run as a leaf (no driver import): singletons `["supervisor"]`, holders
   exactly `[jim]`, leo parity EXACT, jim draw = supervisor,personal,personal…, enumerator
   derives NO jim unit. tsc 11 baseline / 0 touched.
+
+**S1 STARTED (2026-08-26 ~20:50, hearth pulse):** the context-provider extracted —
+`lib/supervisor-context.ts` (buildStateSnapshot slug-parameterised; the worker's three
+TODO-Phase-3 markers discharged; the `(UTC+10)` literal cured per DEC-105; shared db
+statements; PROJECTS_DIR through hanHome()). ADDITIVE, zero callers — the worker keeps its
+copy until the flip; the driver wires it when S1 completes (beat body + telemetry +
+singleton pre-work), then the whole slice takes Jim's blocking audit. Leaf smoke: 10
+sections, 5.5K chars against the live DB, imports nothing that runs.
