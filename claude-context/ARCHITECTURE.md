@@ -3,6 +3,7 @@
 > System design and technical reference
 >
 > ⚠ **STATUS 2026-06-26 (living-docs sweep, Batch C): partially stale — `last-verified: 2026-06-07`.**
+> **Re-checked 2026-08-27 (Jim, docs sweep at Darron's order): still NOT content-re-verified — this remains the pre-#66 narrative floor. The two months it does not cover (the pool/seat warm-checkout model, the hop to new hardware, the R3b/R3c agnostic-driver collapse, no-kill/FI #149, DEC-104→108, Mike's Garden immigration) are current in `claude-context/CURRENT_STATUS.md` + `CHANGELOG.md` — read those for anything after mid-June.**
 > Much of this doc describes the **pre-#66 Agent-SDK era** (autonomous cognition via `query()`/the
 > Anthropic API, "Opus via Agent SDK"). Since the #66 migration (DEC-094/095), **agent cognition runs
 > on warm tmux `claude` sessions** dispatched by `lib/tmux-dispatcher.ts` — zero `agentQuery`-cognition;

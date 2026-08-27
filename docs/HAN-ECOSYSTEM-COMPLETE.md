@@ -1,6 +1,7 @@
 # HAN Ecosystem — Complete Technical Reference
 
 > ⚠ **STATUS: referencing narrative / onboarding overview — NOT a canonical authority**
+> **Re-checked 2026-08-27 (Jim, docs sweep at Darron's order): still NOT content-re-verified; for the current state (the hop to new hardware, R3b/R3c agnostic-driver collapse, the pool/seat model, no-kill/FI #149, DEC-104→108, Mike's Garden immigration) see `claude-context/CURRENT_STATUS.md` + `CHANGELOG.md`.**
 > (living-docs sweep, Batch B, 2026-06-26). **`last-verified: 2026-05-31`** (a later 2026-06-25 commit
 > was a mechanical `leo-human→human-responder` rename, not a content re-verification) — this document is
 > **~1 month stale** (predates the #66 tmux close and DEC-092→098); treat its operational detail as
