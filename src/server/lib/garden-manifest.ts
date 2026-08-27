@@ -151,6 +151,12 @@ export interface SpokeLifecycle {
      *  consumed by the compression-lifecycle tick (startCompressionLifecycleTick). DEC-104: a
      *  visible leaf, never a code literal. */
     spokeIdleRetireMinutes?: number;
+    /** Change 1 (compressor-activation, 2026-08-27): the pending-pair count a COLD compression spoke
+     *  must EXCEED before it is worth a cold fable wake (Darron's ">2" ruling). Default 3. Compared
+     *  with "<" (defer while pending < this), never "==", so a double-tap past the value still fires.
+     *  Applies to the cold-wake decision only — a warm spoke drains anything (the >0 opportunistic
+     *  path). DEC-104: a visible leaf, never a code literal. */
+    compressionColdWakeMinPairs?: number;
     /** DEC-101 persist-as-spoke: when true, a pooled checkout BINDS the stem to its conversation as a
      *  spoke that serves the thread across turns (no per-dispatch return) and is reaped at
      *  ctxReapThresholdPct/thread-resolve. Default OFF (the legacy per-dispatch checkout→return). */

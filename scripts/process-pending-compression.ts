@@ -319,8 +319,13 @@ async function main() {
                 OR claimed_at < datetime('now', '-${STALE_CLAIM_MINUTES} minutes'))
     `).get(agent!) as { n: number }).n;
     const spokeWarm = paneClassForSession(`compression-${agent!}`) !== 'session-gone';
-    if (!spokeWarm && pendingOutstanding > 0 && pendingOutstanding < 2) {
-        log(`wake-gate: pending=${pendingOutstanding} < 2 and compression spoke is cold — deferring (the row rides the next rotation's wake)`);
+    // Change 1 (2026-08-27, Jim GREEN mtbcio99): cold-wake only when pending pairs EXCEED the
+    // threshold (Darron's ">2" ruling). A manifest leaf (default 3), compared with "<" — never an
+    // equality — so a double-tap that jumps the count to 4 still fires (DEC-104: a visible number).
+    // Applies to the COLD-wake decision only; a WARM spoke still drains anything (the >0 path).
+    const coldWakeMinPairs = spokeLifecycleFor(agent!, 'compression').compressionColdWakeMinPairs ?? 3;
+    if (!spokeWarm && pendingOutstanding > 0 && pendingOutstanding < coldWakeMinPairs) {
+        log(`wake-gate: pending=${pendingOutstanding} < ${coldWakeMinPairs} and compression spoke is cold — deferring (the row rides the next rotation's wake)`);
         try {
             const hdir = `${process.env.HOME}/.han/health`;
             fs.mkdirSync(hdir, { recursive: true });
