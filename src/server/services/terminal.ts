@@ -103,20 +103,67 @@ export function listActiveSessions(): string[] {
     }
 }
 
+/** The tmux server-alive keeper (han-tmux.service): a bare shell with no agent — never mirror it. */
+const KEEPER_SESSION = '__han_keeper';
+
+/** Is a tmux session currently attached by ≥1 client? (The seat a human is actually looking at.) */
+function isSessionAttached(session: string): boolean {
+    try {
+        const out = execFileSync('tmux', ['display-message', '-p', '-t', session, '#{session_attached}'],
+            { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+        return parseInt(out, 10) > 0;
+    } catch { return false; }
+}
+
 /**
- * Pick the tmux session this server mirrors.
+ * The LEASED session-surface stem for this agent, from its pool register — "the lease is the
+ * register" (Darron 2026-08-20). Most-recent lease first, so a stale-but-lingering orphan never
+ * wins over the current seat. Null if the pool file is absent/unreadable or nothing is leased.
+ */
+function leasedSessionStem(slug: string): string | null {
+    try {
+        const pool = JSON.parse(fs.readFileSync(path.join(HAN_DIR, 'pool', `pool-${slug}-session.json`), 'utf8'));
+        const leased = (pool.stems ?? [])
+            .filter((s: { state?: string; tmux_session?: string }) => s.state === 'leased' && s.tmux_session)
+            .sort((a: { leased_at?: string }, b: { leased_at?: string }) =>
+                String(b.leased_at ?? '').localeCompare(String(a.leased_at ?? '')));
+        return leased.length ? leased[0].tmux_session : null;
+    } catch { return null; }
+}
+
+/**
+ * Pick the tmux session THIS server mirrors — resolved to the server's OWN agent seat, so
+ * :3847/48/49/50 land on leo/jim/tenshi/casey respectively (Darron's ask, 2026-08-27).
  *
- * HAN_SESSION is our construct — set by agent-server-watchdog when an
- * agent-server (hanjim, hanleo, etc.) is launched, so each agent-server
- * is pinned to its own tmux. We honour it directly instead of guessing
- * by name prefix. If HAN_SESSION isn't set (e.g. systemd-managed
- * han-server), fall back to the first session tmux returns.
+ * The prior logic returned `sessions[0]` when `HAN_SESSION` was unset — and it is unset on the
+ * systemd/watchdog-managed server process (HAN_SESSION is set on the interactive SEAT, not the
+ * server). `sessions[0]` is `__han_keeper` (the underscore sorts first), so every agent server
+ * mirrored a bare keeper shell (Jim's Aug-23 diagnosis; the "linux CLI not my han session" bug).
+ *
+ * Resolution, keeper always excluded:
+ *   1. HAN_SESSION if genuinely present (honoured, for launch modes that do carry it).
+ *   2. This agent's own interactive session — a pooled `stem-<slug>-session-*` or a classic
+ *      `<slug>-N` (--cold) — preferring the ATTACHED one (the seat someone is looking at).
+ *   3. Else the LEASED seat from the pool register (the lease is the register).
+ *   4. Last resort: any non-keeper session, else null.
+ * Agnostic by construction (uses `agentSlug()`), so all four servers get it — DEC-081.
  */
 export function getActiveSession(): string | null {
-    const sessions = listActiveSessions();
+    const sessions = listActiveSessions().filter(s => s !== KEEPER_SESSION);
     const pinned = process.env.HAN_SESSION;
-    if (pinned && sessions.includes(pinned)) {
-        return pinned;
+    if (pinned && sessions.includes(pinned)) return pinned;
+
+    const slug = agentSlug();
+    if (slug) {
+        const slugSession = new RegExp(`^${slug}-\\d+$`); // classic --cold seat: e.g. "leo-7"
+        const mine = sessions.filter(s => s.startsWith(`stem-${slug}-session-`) || slugSession.test(s));
+        if (mine.length) {
+            const attached = mine.filter(isSessionAttached);
+            if (attached.length) return attached[0];
+            const leased = leasedSessionStem(slug);
+            if (leased && sessions.includes(leased)) return leased;
+            return mine[0];
+        }
     }
     return sessions.length > 0 ? sessions[0] : null;
 }

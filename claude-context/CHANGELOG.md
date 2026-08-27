@@ -7,6 +7,19 @@
 >
 > Format: Session number, date, author, then changes grouped by area.
 
+## 2026-08-27 — Leo (session) — Admin terminal mirror shows each server's OWN agent (getActiveSession fix)
+
+### Fixed
+- **`services/terminal.ts` `getActiveSession()`** — `:3847/48/49/50` now mirror leo/jim/tenshi/casey
+  instead of `__han_keeper`. The old `sessions[0]` fallback (reached because `HAN_SESSION` is unset
+  on the watchdog-managed server process) returned the underscore-first keeper shell — the "linux
+  CLI, not my han session" bug (Jim's Aug-23 diagnosis). Now: exclude the keeper, scope to
+  `agentSlug()`, prefer the ATTACHED `stem-<slug>-session-*`, else the leased seat from the pool
+  register. Agnostic (DEC-081). GREEN diff-audit ×3 (Jim/Tenshi/Casey). Deploy = restart the four
+  agent servers. Rider carried to the Mike immigration (Tenshi/Casey): the mirror now shows live
+  *cognition*, and `/api/terminal` bypasses auth for localhost — a guest uid on the box would read
+  it tokenless; the localhost-as-trust-boundary invariant needs the immigration's auth ruling.
+
 ## 2026-08-26 (evening) — Leo (session) — R3b-HB S5 FLIPPED + R3c-HB F3 guard-dog cure (Darron's green light; four chairs GREEN on both)
 
 ### Changed
