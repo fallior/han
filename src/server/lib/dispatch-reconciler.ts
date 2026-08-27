@@ -153,6 +153,11 @@ export interface RetireRequest {
     requested_at: string; // ISO
     reason: string;       // fixed mechanic string, never content
     by: string;           // the writer (script/surface), for the winding-up record
+    /** Change B (compressor-lifecycle, 2026-08-27): optional retire deadline (ISO). ABSENT =
+     *  retire on the next sweep (today's behaviour, untouched). PRESENT = the sweep HOLDS the
+     *  session until `now >= not_before` (the timed idle-retire; the compression surface writes
+     *  this + overwrites it on every job, so the clock starts from the LAST job). */
+    not_before?: string;
 }
 
 function retireRequestDir(): string {
@@ -165,13 +170,24 @@ export function retireRequestPath(tmuxSession: string): string {
 }
 
 /** Ask the pool-manager tick to gracefully reap a session the caller has ALREADY deregistered.
- *  Idempotent (first request stands). Never throws — a failed write must not fail the caller's
- *  own exit path; the manager's next START still reaps an idle orphan (the existing belt). */
-export function requestRetire(req: RetireRequest): void {
+ *  Idempotent by default (first request stands). Never throws — a failed write must not fail the
+ *  caller's own exit path; the manager's next START still reaps an idle orphan (the existing belt).
+ *
+ *  `overwrite` (Change B, 2026-08-27): default FALSE keeps every existing human/cycle caller
+ *  byte-identical (first request wins). The compression surface passes TRUE to get LAST-job
+ *  semantics — each job completion rewrites the deadline (`not_before`) while PRESERVING the
+ *  original `requested_at`/`by` (the winding-up record still names the first request + author). */
+export function requestRetire(req: RetireRequest, overwrite = false): void {
     try {
         fs.mkdirSync(retireRequestDir(), { recursive: true });
         const p = retireRequestPath(req.tmux_session);
-        if (fs.existsSync(p)) return;
+        if (fs.existsSync(p)) {
+            if (!overwrite) return; // first request stands (human/cycle callers, unchanged)
+            try {
+                const prev = JSON.parse(fs.readFileSync(p, 'utf-8')) as RetireRequest;
+                req = { ...req, requested_at: prev.requested_at, by: prev.by };
+            } catch { /* unreadable prior — fall through and write the fresh req as-is */ }
+        }
         fs.writeFileSync(p, JSON.stringify(req, null, 2) + '\n', 'utf-8');
     } catch (err) {
         console.warn(`[dispatch-reconciler] retire-request write failed (non-fatal; manager start reaps idle orphans): ${(err as Error).message}`);

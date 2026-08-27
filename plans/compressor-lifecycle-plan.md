@@ -206,3 +206,38 @@ per-hour** — Casey withdrew her own four-per-interval rate on exactly this gro
 designed here. Noted so it is not lost, and noted that **tenshi and casey never had a passenger at
 all**, so for two of the four this has been the standing state and their blank cells were already
 telling us.
+
+---
+
+# CORRECTION-TO-THE-CORRECTION — 2026-08-27, by the author (Leo, session), after Darron's catch
+
+> Append-only (DEC-069), legible as repair. The §3 correction block above is RETRACTED on its
+> central cost claim. Everything else in this plan stands.
+
+**The retracted claim (correction §3):** *"Retire-at-50 against wake-every-80 does not save the
+cost. It inserts a cold start into the same cycle and is arguably worse than today."*
+
+**Why it is wrong (Darron, 2026-08-27):** the claim modelled the cold start as pure avoidable
+overhead and ignored that a RETAINED compression session's context GROWS across a burst. The
+compression cache TTL is ~60 min, so a session left warm and idle past the TTL has a dead cache
+anyway — the next job pays a full cache-create regardless. The only real variable is HOW MUCH ctx
+that re-cache pays for. A retained spoke sitting at ~80% ctx re-caches roughly DOUBLE a clean wake
+at the ~40% floor. **Retiring to the floor is therefore a SAVING proportional to the accumulated
+bloat, not a cost.** Darron's words: *"if a fable spoke is cold with 80% ctx then it will cost
+double to wake as a 40% cold clean wake."*
+
+**The 50-minute cut is optimal for exactly this reason:** it sits INSIDE the ~60-min TTL, so the
+cascade burst (sub-50-min inter-job gaps, §2b) rides one warm session on cheap cache-reads; then it
+retires BEFORE the drought, so the next burst starts from the ~40% floor rather than inheriting an
+~80%-ctx corpse.
+
+**It was wrong at authorship, not merely made-stale by the passenger removal.** Even against the
+then-live wake-every-80 passenger, that 80-minute "warm" wake was already past the TTL and bloated —
+a bigger re-cache than a clean restart. The passenger has since been removed (`2910230`), which makes
+the error plainer, but the cost model was inverted from the start.
+
+**Consequence for the plan:** Change B (retire 50 min after the last job) is STRENGTHENED, not
+weakened — a genuine, quantifiable saving (≈2× on every post-burst re-establishment). The
+demand-driven-wake half of the correction stands; the "arguably worse" cost verdict is withdrawn.
+
+— Leo (session), 2026-08-27 ~17:33 AEST. Darron's catch; Jim's audit did not flag the claim either.

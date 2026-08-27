@@ -50,9 +50,10 @@ import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
 import { gradientConfigForAgent } from '../src/server/lib/agent-registry';
 import { enqueueCascadeForDisplacedAt } from '../src/server/lib/memory-gradient';
-import { manifestModelHead } from '../src/server/lib/garden-manifest';
+import { manifestModelHead, spokeLifecycleFor } from '../src/server/lib/garden-manifest';
 import { buildPrompt } from '../src/server/lib/prompt-builder';
 import { dispatchToSpoke, observeActiveModel, paneClassForSession } from '../src/server/lib/tmux-dispatcher';
+import { requestRetire } from '../src/server/lib/dispatch-reconciler';
 import { surfaceEnabledFor, manifestModelLadder } from '../src/server/lib/garden-manifest';
 import { gradientConfigForAgent as agentCfg } from '../src/server/lib/agent-registry';
 
@@ -245,6 +246,35 @@ function completeClaim(db: Database.Database, id: string): void {
         SET completed_at = datetime('now')
         WHERE id = ?
     `).run(id);
+    scheduleCompressionRetire(); // Change B: (re)arm the idle-retire deadline off THIS completion
+}
+
+// Change B (compressor-lifecycle, 2026-08-27): after EVERY completed job, (re)write the retire
+// marker with not_before = now + spokeIdleRetireMinutes. Overwrite semantics (preserving the
+// original requested_at/by) make the deadline track the LAST job — the cascade burst rides one
+// warm session, then the long-lived server's compression-lifecycle tick reaps it that many
+// minutes after the last completion. UNSET leaf = no marker written = no timed retire (the safe
+// default; every non-compression surface is untouched, and an unmeasured number never enters the
+// metal — DEC-104). Cross-process by the marker file: this short-lived child writes, the tick
+// consumes (the requestRetire design's whole purpose).
+function scheduleCompressionRetire(): void {
+    if (!agent) return;
+    const retireMin = spokeLifecycleFor(agent, 'compression').spokeIdleRetireMinutes;
+    if (typeof retireMin !== 'number' || retireMin <= 0) return;
+    const sess = `compression-${agent}`;
+    const now = new Date();
+    const notBefore = new Date(now.getTime() + retireMin * 60_000).toISOString();
+    requestRetire({
+        slug: agent,
+        surface: 'compression',
+        stem_id: sess,
+        tmux_session: sess,
+        requested_at: now.toISOString(),
+        reason: `compression idle-retire (${retireMin}m after last job)`,
+        by: 'process-pending-compression',
+        not_before: notBefore,
+    }, /* overwrite */ true);
+    log(`retire scheduled: ${sess} not_before=${notBefore} (${retireMin}m after this job)`);
 }
 
 // ── runSDK: RETIRED (P3 of the compressor migration, 2026-07-04, S216) ──────────

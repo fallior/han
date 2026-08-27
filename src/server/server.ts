@@ -34,7 +34,7 @@ import { checkWeeklyReportSchedule } from './services/reports';
 import { advancePipeline, setCreateGoalFn, setBroadcastFn as setProductsBroadcastFn, setLoadConfigFn } from './services/products';
 import { initSupervisor, scheduleSupervisorCycle, stopSupervisor, setSupervisorBroadcastFn } from './services/supervisor';
 import { runsSupervisorCycle, runsOrchestrator, poolSizeFor } from './lib/garden-manifest';
-import { startPoolManager } from './lib/tmux-dispatcher';
+import { startPoolManager, startCompressionLifecycleTick } from './lib/tmux-dispatcher';
 import { startSessionHearth } from './lib/session-hearth';
 
 // Route modules
@@ -379,6 +379,17 @@ if (runsSupervisorCycle(process.env.AGENT_SLUG)) {
     } else if (slug) {
         console.log(`[session-pool] Not started — (${slug}, session) has poolSize 0 in the manifest (warm-checkout P0 not enabled).`);
     }
+}
+
+// ── Compression-lifecycle tick (Change B, 2026-08-27) ─────────────────────────────
+// The compression surface is NON-pooled (poolSize 0), so the session/human-response pool
+// managers above never sweep its retire markers. This server, slug-scoped by launch, hosts a
+// dedicated ~5-min tick that reaps a compression session `spokeIdleRetireMinutes` after its last
+// job (marker written by process-pending-compression.ts, honoured here). Inert unless the
+// manifest sets spokeIdleRetireMinutes on (slug,'compression'); a 4th agent's server gets it free.
+{
+    const slug = process.env.AGENT_SLUG;
+    if (slug) startCompressionLifecycleTick(slug);
 }
 
 // ── Start server ─────────────────────────────────────────

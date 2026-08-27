@@ -2505,6 +2505,16 @@ function sweepDeadRegisteredStems(slug: string, surface: string): void {
 function sweepRetireRequests(slug: string, surface: string): void {
     for (const req of readRetireRequests(slug, surface)) {
         const sess = req.tmux_session;
+        // Change B (2026-08-27): honour a retire deadline. A request carrying `not_before` is HELD
+        // until the wall-clock reaches it — the timed idle-retire (compression). Absent = reap now
+        // (today's behaviour). Fail-direction is KEEP: an unparseable/future deadline HOLDS the
+        // session (marker left for the next tick) rather than risk reaping a live compressor
+        // (stuck-over-wrong, DEC-103) — the deliberate inverse of resumableExpired, which fails
+        // toward cleanup.
+        if (req.not_before !== undefined) {
+            const due = Date.parse(req.not_before);
+            if (Number.isNaN(due) || Date.now() < due) continue;
+        }
         try {
             if (!tmuxSessionExists(sess)) {
                 clearRetireRequest(sess); // already gone — nothing to reap; the request is stale residue
@@ -2528,6 +2538,31 @@ function sweepRetireRequests(slug: string, surface: string): void {
             console.warn(`[pool-manager] ${slug}/${surface}: retire request for ${sess} failed (retry next tick): ${(err as Error).message}`);
         }
     }
+}
+
+// Change B (compressor-lifecycle, 2026-08-27): the dedicated periodic tick for a NON-pooled
+// surface (compression). startPoolManager's interval never spins for a poolSize-0 surface, so a
+// retire marker written at job-end would sit unconsumed between rotations (hours). This tick
+// sweeps `${slug}/compression` retire requests every ~5 min and runs the graceful two-stage kill
+// for any whose `not_before` has passed. One interval, one responsibility (Jim's endorsed option
+// (i), 2026-08-27) — it never bends the pool-shaped loop around a pool-less surface. Idempotent
+// per slug; a pure no-op when no marker exists. Started once per agent server for its own slug.
+const compressionTicksStarted = new Set<string>();
+const COMPRESSION_TICK_MS = 5 * 60_000;
+export function startCompressionLifecycleTick(slug: string): void {
+    if (compressionTicksStarted.has(slug)) return;
+    compressionTicksStarted.add(slug);
+    console.log(`[compression-lifecycle] ${slug}: retire-sweep tick started (every ${COMPRESSION_TICK_MS / 60_000}m)`);
+    const tick = () => {
+        try {
+            sweepRetireRequests(slug, 'compression'); // honour not_before; queue due kills
+            sweepRetiredStems();                       // execute the graceful two-stage /exit→kill
+        } catch (err) {
+            console.warn(`[compression-lifecycle] ${slug} tick failed: ${(err as Error).message}`);
+        }
+    };
+    tick();                                 // an initial sweep — a marker may predate this boot
+    setInterval(tick, COMPRESSION_TICK_MS);
 }
 
 export function startPoolManager(slug: string, surface: string): void {

@@ -143,6 +143,14 @@ export interface SpokeLifecycle {
      *  reload (the deep-gradient/identity staleness no WM-freshen touches; freshness plan §3c —
      *  identity-load-bearing, DO-NOT-optimise-away). Optional; the pool-manager defaults 24. */
     stemReloadHours?: number;
+    /** Change B (compressor-lifecycle, 2026-08-27): minutes of idleness after the LAST completed
+     *  job before a NON-pooled session (the compression surface) is gracefully reaped. UNSET =
+     *  no timed retire (every non-compression surface is untouched; the session lives until server
+     *  restart / the existing sweeps). Minutes not hours — 50 min = 0.83 h, and the hours knobs
+     *  round for their receipts. Written+overwritten per job by process-pending-compression.ts;
+     *  consumed by the compression-lifecycle tick (startCompressionLifecycleTick). DEC-104: a
+     *  visible leaf, never a code literal. */
+    spokeIdleRetireMinutes?: number;
     /** DEC-101 persist-as-spoke: when true, a pooled checkout BINDS the stem to its conversation as a
      *  spoke that serves the thread across turns (no per-dispatch return) and is reaped at
      *  ctxReapThresholdPct/thread-resolve. Default OFF (the legacy per-dispatch checkout→return). */
